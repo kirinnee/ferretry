@@ -12,4 +12,5 @@ export * from './reconciliation.ts';
 export * from './session-id.ts';
 export * from './state-home.ts';
 export * from './storage-types.ts';
+export * from './task-boards/index.ts';
 export * from './version.ts';
