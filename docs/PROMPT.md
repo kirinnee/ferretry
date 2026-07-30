@@ -34,10 +34,10 @@ Full architecture, pairing protocol, and security model: `docs/design/split-prop
    keep it current as decisions are made.
 2. **Replicate kteam (full migration)** — port `~/.config/home-manager/modules/kteam-ts` (daemon,
    CLI, UI) and `~/.config/home-manager/modules/kfleet-ts` into `packages/{daemon,cli,pwa,fleet}`
-   with `packages/protocol` extracted (zod schemas shared by cli + pwa). Behavior-preserving
-   first: same features, new names (`kteam`→`fy`, `kteamd`→`fyd`, `~/.kteam`→`~/.ferretry`,
-   `KTEAM_*` env → `FY_*` with back-compat reads). Decouple from kfleet internals via the fleet
-   manifest. kloge and loctl are OUT of scope — keep them external.
+   with `packages/protocol` extracted (zod schemas shared by cli + pwa). Port the **capabilities**
+   under new names (`kteam`→`fy`, `kteamd`→`fyd`, `~/.kteam`→`~/.ferretry`, `KTEAM_*`→`FY_*`).
+   Decouple from kfleet internals via the fleet manifest. kloge and loctl are OUT of scope —
+   keep them external.
 3. **New features** — `handover.md` at the repo root is the imported backlog (stable item
    numbers; import every row as Todo). The new remote-access architecture (pairing, device
    tokens, ws tickets, CORS, link adapters) is part of this phase and is specified in the
@@ -53,6 +53,21 @@ Full architecture, pairing protocol, and security model: `docs/design/split-prop
 | Feature backlog               | `handover.md` (root)                                                                        |
 | Engineering doctrine          | `docs/standards/` + `.claude/skills/cli-authoring/SKILL.md`                                 |
 | Repo conventions' origin      | diene.all `bun-cli` branch (`git -C ~/Workspace/atomi/diene/diene.all show bun-cli:<path>`) |
+
+## Migration decisions (2026-07-30, from Kirin — these override the design docs)
+
+- **Do not reproduce kteam faithfully.** It has plenty of bugs. Port the capability, fix what
+  is broken, and conform to `docs/standards/`. Never port a bug for bug-compatibility, and
+  never write a test that pins broken behavior. Source tests are evidence of intent, not a
+  contract.
+- **No backward compatibility.** `FY_*` env only (no `KTEAM_*` reads), no `kteam`/`kteamd`/
+  `kfleet` shim wrappers, no reads from or migration out of `~/.kteam`. `~/.ferretry` is the
+  only state home and its layout may be redesigned where kteam's was poor.
+- **Parallelize with worktrees and PRs, and merging is allowed.** Each port unit gets its own
+  worktree and branch, ends in a PR, and is merged once CI is green. A small foundation spine
+  lands serially first; wide waves rebase onto it.
+- Safety is unchanged and non-negotiable: never touch the live `~/.kteam`, `kteamd`, its ports,
+  or its tmux sessions.
 
 ## Rules
 
