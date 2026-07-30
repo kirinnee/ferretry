@@ -44,6 +44,8 @@ nfpms:
     bindir: /usr/bin
 
 release:
+  # replace: CD reruns must be idempotent — a rerun re-uploads the same tag's assets
+  mode: replace
   github:
     owner: kirinnee
     name: ferretry
