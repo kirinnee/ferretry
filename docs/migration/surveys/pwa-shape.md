@@ -1,0 +1,300 @@
+# Survey D — PWA (`ui/`) structure
+
+Scope: `/home/kirin/.config/home-manager/modules/kteam-ts/ui`. UI-relative references below start at that directory; daemon references start at `modules/kteam-ts/src`. This is a read-only source survey. Counts include production files, tests, CSS, and declarations; no build or install was run.
+
+## 1. Stack and build
+
+### Application stack
+
+`package.json` declares the private ESM package `kteam-ui@0.1.0` (`package.json:2-5`). The application is React 19 (`react ^19.0.0`, `react-dom ^19.0.0`) rendered with the React 19 root API (`src/main.tsx:1-14`). It uses Vite 5 with `@vitejs/plugin-react`; routing and global state are in-tree rather than React Router, Redux, or Zustand.
+
+Exact manifest dependency specifiers (`package.json:16-42`):
+
+- Runtime: `@shadcn/react ^0.2.1`; `@xterm/addon-fit ^0.11.0`; `@xterm/xterm ^6.0.0`; `clsx ^2.1.1`; `date-fns ^4.1.0`; `highlight.js ^11.10.0`; `lucide-react ^0.468.0`; `onnxruntime-web 1.24.1`; `parakeet.js 1.4.4`; `react ^19.0.0`; `react-dom ^19.0.0`; `react-markdown ^9.0.1`; `rehype-highlight ^7.0.1`; `remark-gfm ^4.0.0`.
+- Development: `@types/bun latest`; `@types/react ^19.0.0`; `@types/react-dom ^19.0.0`; `@vitejs/plugin-react ^4.3.4`; `autoprefixer ^10.4.20`; `postcss ^8.4.49`; `sharp 0.35.3`; `tailwindcss ^3.4.16`; `typescript ^5.7.2`; `vite ^5.4.11`.
+
+Manifest commands (`package.json:6-14`) are `vite` for development, `bun scripts/build-pwa.ts` for production, `vite preview`, two `tsc -b` checks, the contrast audit, and icon generation/verification.
+
+### Vite, TypeScript, and styling
+
+- Vite targets ES2022, emits no sourcemaps, empties and writes the sibling `../ui-dist`, and temporarily emits `.vite/manifest.json` for PWA post-processing (`vite.config.ts:57-78`). The dev server is port 5173. `/stt-models` and `/v1` both proxy to `http://127.0.0.1:7337`; `/v1` also proxies WebSocket upgrades (`vite.config.ts:79-96`).
+- The root TypeScript project references the application, Node/build scripts, service worker, and worker tests (`tsconfig.json:10-14`). The application uses strict, no-emit ES2022/DOM settings, ESNext modules with bundler resolution, and React JSX (`tsconfig.app.json:2-23`). Build scripts use strict ES2022/ES2023 settings (`tsconfig.node.json:2-17`). The worker has an isolated ES2022/WebWorker project with no ambient types, plus a separate Bun test project (`sw/tsconfig.json:20-38`, `sw/tsconfig.test.json:21-46`).
+- Tailwind 3 runs through PostCSS and Autoprefixer (`postcss.config.js:1-5`). It scans `index.html` and `src/**/*.{ts,tsx}`, treats `[data-theme$="-dark"]` as dark mode, and maps layout, color, type, density, spacing, shadow, border, focus, radius, and prose tokens to CSS variables; it has no plugins (`tailwind.config.ts:18-24,95-214`). `src/index.css` is the Tailwind/global-layout entry and imports `src/themes.css`, which owns the literal seven-family light/dark token sets (`src/index.css:1-23`, `src/themes.css:1-33`).
+
+### Production build and PWA
+
+`bun run build` delegates to `scripts/build-pwa.ts` (`package.json:8`). The orchestrator rejects dirty served build inputs, derives one 12-hex release ID from Git HEAD, generates themed manifests and an offline page, runs `tsc -b`, runs Vite, generates the complete precache closure, and bundles the worker (`scripts/build-pwa.ts:185-256`).
+
+The generated PWA has 14 manifests (seven families × light/dark), one release-fingerprinted offline document, and one release-fingerprinted classic-IIFE worker. Postbuild walks Vite's recursive static/dynamic chunk graph, includes icons and offline assets, writes `sw/precache.gen.ts`, typechecks and bundles the worker, syntax-checks it, then removes `.vite/` (`scripts/gen-pwa.ts:225-257`, `scripts/postbuild-pwa.ts:203-265`).
+
+`sw/sw.ts` owns install, activate, fetch, update, push, and notification-click events (`sw/sw.ts:32-133`). `sw/policy.ts` precaches only the app-shell closure, never caches `/v1`, uses network-first navigation with an offline fallback, uses cache-first immutable subresources, and retains three release generations (`sw/policy.ts:45-76,109-134,327-385`). The application registers `/sw.<release>.js` with `/` scope and exposes waiting updates through a user-triggered UI (`src/hooks/useServiceWorkerUpdate.ts:18-40,239-266`).
+
+### `ui/scripts`
+
+| File                    | Role                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------- |
+| `build-pwa.ts`          | One release/build transaction and its clean-source guard.                        |
+| `build-pwa.test.ts`     | Release, guard, artifact, precache, manifest/offline/theme/icon contract tests.  |
+| `contrast-audit.ts`     | Resolves the theme-token cascade and audits WCAG foreground/background pairs.    |
+| `gen-icons.ts`          | Sharp-based generation of committed fingerprinted app icons and provenance JSON. |
+| `gen-pwa.ts`            | Generates themed manifests and the self-contained offline document.              |
+| `hash.ts`               | Shared SHA-256, filename fingerprint, and Git blob hashing.                      |
+| `png.ts`                | Minimal PNG/ICO decoder used by icon verification.                               |
+| `postbuild-pwa.ts`      | Precache closure, worker typecheck/bundle/validation, and Vite-manifest cleanup. |
+| `postbuild-pwa.test.ts` | Worker argv, classic-script syntax gate, and real bundle tests.                  |
+| `release.ts`            | Release validation, family/mode constants, output directory, and artifact names. |
+| `theme-tokens.ts`       | Build-time CSS import/cascade reader for theme tokens.                           |
+| `verify-icons.ts`       | Verifies icon bytes, sizes, safe zone, provenance, ICO parity, and references.   |
+
+### Daemon consumption
+
+The daemon resolves the sibling bundle as `modules/kteam-ts/ui-dist` (`modules/kteam-ts/src/api-server.ts:58-60`). Runtime PWA manifests/icons get first refusal. Existing hashed assets are immutable; `index.html` and SPA routes are read fresh, the loopback-only token placeholder is replaced, per-daemon HTML branding is overlaid, and the response is `no-store`. If `ui-dist/index.html` is absent, the daemon falls back to its legacy `renderShell` (`modules/kteam-ts/src/api-server.ts:497-533`).
+
+## 2. Directory map
+
+These are direct-membership counts so every source file is counted exactly once; the seven rows sum to 336 files and 98,690 LOC. `src/lib/stt` is separated from its `src/lib` parent.
+
+| Directory                   | Files |    LOC | Role                                                                                                                           |
+| --------------------------- | ----: | -----: | ------------------------------------------------------------------------------------------------------------------------------ |
+| `src/` root                 |     7 |  5,278 | React boot, shell, global types/declarations, highlight/global CSS, and theme tokens.                                          |
+| `src/components/`           |   150 | 51,847 | Reusable controls and feature surfaces, with colocated tests, CSS, models, and small feature clients.                          |
+| `src/hooks/`                |    30 |  6,132 | Browser/UI lifecycle hooks for viewport, layout, theme, notifications, attention, pins, dictation, and service-worker updates. |
+| `src/lib/` excluding `stt/` |   101 | 20,251 | API/WS clients, store, router, persistence, parsing, tasks, transcript projections, references, and shared domain logic.       |
+| `src/lib/stt/`              |    32 |  9,664 | Audio capture, daemon/local transcription, Parakeet/ORT assets, segmentation, enhancement, settings, shortcuts, and tests.     |
+| `src/pages/`                |    14 |  5,354 | Route-level sessions, session chat, new session, settings, analytics, learning, and warden screens plus tests.                 |
+| `src/worklets/`             |     2 |    164 | PCM16 AudioWorklet processor and its test.                                                                                     |
+
+## 3. The 25 largest files
+
+| Rank |   LOC | Path                                        | Role                                                                                                                |
+| ---: | ----: | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+|    1 | 2,337 | `src/themes.css`                            | Complete seven-family light/dark theme tokens and swatches.                                                         |
+|    2 | 1,811 | `src/components/SessionDetails.tsx`         | Session-details sheet: identity, lineage, runtime model/effort, progress, and budget.                               |
+|    3 | 1,809 | `src/pages/SessionChatPage.tsx`             | Chat-page orchestration: history/live state, transcript, composer, questions, attachments, terminal, and side pane. |
+|    4 | 1,716 | `src/components/AgentSidebar.tsx`           | Fleet navigation, grouping/filtering, drawer/rail layouts, row actions, and bulk stop.                              |
+|    5 | 1,618 | `src/index.css`                             | Tailwind entry and global shell/layout/component styling.                                                           |
+|    6 | 1,496 | `src/components/SidePane.tsx`               | Responsive browser/files/tasks/pins/terminals/skills/lineage/analytics/attention workspace.                         |
+|    7 | 1,355 | `src/components/Transcript.tsx`             | Transcript scroller, follow/detach, prepend anchoring, jumps, selection, and row rendering.                         |
+|    8 | 1,244 | `src/components/Composer.tsx`               | Input, send/queue safety, drafts, autocomplete, Markdown, dictation, and attachments.                               |
+|    9 | 1,092 | `src/components/QuestionForm.tsx`           | Structured daemon-question form, paging, validation, dedupe ID, and answer submission.                              |
+|   10 | 1,080 | `src/pages/SessionsListPage.tsx`            | Project-grouped fleet dashboard with table/card density views and shared-store filters.                             |
+|   11 | 1,080 | `src/components/RemoteBrowserPane.test.tsx` | Remote-browser error/race, frame, stream, input, page, history, and control tests.                                  |
+|   12 | 1,059 | `src/components/FilesTab.tsx`               | Read-only file tree/browser, source and Markdown rendering, diff view, and reference jumps.                         |
+|   13 | 1,056 | `src/components/FilesTab.test.tsx`          | File listing, refusal, diff, rendering, persistence, tree, and reference-jump tests.                                |
+|   14 | 1,050 | `src/lib/transcript.ts`                     | Converts chat/events/send-ledger records into stable grouped transcript blocks.                                     |
+|   15 | 1,003 | `src/components/AttentionPanel.tsx`         | Durable attention ledger, ask/context/resolution presentation, responses, pane, and sheet.                          |
+|   16 |   991 | `src/lib/transcript.test.ts`                | Transcript boundary, ledger merge, queue provenance, tool grouping, and image tests.                                |
+|   17 |   971 | `src/components/PinSheet.tsx`               | Daemon-backed note/message pins, provenance, edit/delete, and exact transcript jumps.                               |
+|   18 |   944 | `src/components/TranscriptRow.tsx`          | Memoized user/peer/assistant/thinking/tool/turn/notice block renderer and row pin actions.                          |
+|   19 |   931 | `src/components/MigrateSheet.tsx`           | Migration target/model workflow, in-flight safety, downgrade gates, and handoff.                                    |
+|   20 |   928 | `src/lib/store.tsx`                         | Shared fleet store, one event socket, targeted refresh, buffers, usage, search, and UI controls.                    |
+|   21 |   917 | `src/lib/stt/enhancement.ts`                | Deterministic whole-word dictionary/fuzzy repair for speech transcripts.                                            |
+|   22 |   874 | `src/components/RemoteBrowserPane.tsx`      | Remote-browser canvas/viewer, lifecycle, frames, page tabs, navigation, and input.                                  |
+|   23 |   814 | `src/lib/stt/local-engine.ts`               | Parakeet/ONNX browser model preparation/cache, loading, transcription, and unload lifecycle.                        |
+|   24 |   806 | `src/lib/sends.test.ts`                     | Durable-send parsing, folding, reconciliation, retirement, aging, badges, and promotion tests.                      |
+|   25 |   798 | `src/components/SessionHeader.tsx`          | Responsive session identity/status/tabs/actions/details header.                                                     |
+
+## 4. Routing and destinations
+
+Routing is a custom History API router, not React Router. `parseRoute` resolves paths, `useRoute` listens to `popstate`, and `Link`/`navigate` use `history.pushState` plus a synthetic `PopStateEvent` (`src/lib/router.tsx:1-79`). Page retention, lazy session/analytics chunks, responsive Settings behavior, and rendering are owned by `src/App.tsx:275-462`.
+
+### Top-level routes
+
+| Destination        | Owner                             | Behavior                                                                                                                                    |
+| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                | `SessionsListPage`                | Fleet dashboard (`src/App.tsx:381-397`).                                                                                                    |
+| `/new`             | `NewSessionPage`                  | New-session form (`src/lib/router.tsx:21`, `src/App.tsx:416-420`).                                                                          |
+| `/session/:id`     | lazy `SessionChatPage`            | URI-decoded session ID; up to the recent-session limit stays mounted in an LRU (`src/lib/router.tsx:30-36`, `src/App.tsx:275-282,403-415`). |
+| `/analytics`       | lazy `GlobalAnalyticsPage`        | Fleet analytics (`src/lib/router.tsx:24`, `src/App.tsx:431-437`).                                                                           |
+| `/settings`        | `SettingsPage` or `SettingsSheet` | Full page on wider layouts; drawer layouts keep the dashboard mounted under a sheet (`src/App.tsx:182-197,384-397,421-425,445-458`).        |
+| `/warden`          | `WardenPage`                      | Warden status, attention, verdicts, and configuration (`src/lib/router.tsx:23`, `src/App.tsx:426-430`).                                     |
+| `/learning`        | `LearningPage`                    | Learning proposals and evidence (`src/lib/router.tsx:29`, `src/App.tsx:438-442`).                                                           |
+| `/tasks`           | none                              | Compatibility route replaced with `/` (`src/lib/router.tsx:25-28,45-51`).                                                                   |
+| any other pathname | `SessionsListPage`                | Parses as `/`; the browser URL itself is not normalized (`src/lib/router.tsx:37`).                                                          |
+
+App-level destinations are cataloged for Analytics, Warden, Learning, and Settings in `src/components/AppBar.tsx:65-75`; the command palette adds Sessions, New session, settings anchors, dynamic sessions, and browser login (`src/lib/palette-destinations.ts:42-60,88-123`, `src/components/CommandPalette.tsx:110-163,258-373`). `AgentSidebar` owns dynamic session/New navigation and rail/drawer Warden and Settings entries (`src/components/AgentSidebar.tsx:864-924,1123-1152,1190-1212,1302-1309`). Notification, learning evidence, Warden attention, task/DAG assignee, lineage, and Markdown agent-reference links deep-link to `/session/:id`.
+
+### URL-addressable subdestinations
+
+- `/?project=<path>` selects dashboard project scope; it is parsed/synchronized outside the router (`src/hooks/useProjectScope.ts:69-197`).
+- `/?q=<prefix>` is emitted by “more direct children”; the in-app click also writes the prefix to the store (`src/components/SessionDetails.tsx:1566-1578,1628-1635`).
+- Settings hashes are `#text-size`, `#density`, `#chat-width`, `#composer-markdown`, `#theme`, `#dictation`, and `#notifications` (`src/lib/settings.ts:5-126`, `src/pages/SettingsPage.tsx:260-291,390-416`).
+- `/warden#config` targets the Warden configuration card (`src/lib/settings.ts:148-156`, `src/pages/WardenPage.tsx:12-19`).
+- `#kteam-reference?...` and legacy `#kteam-agent-mention` are internal reference-delivery envelopes, not router screens (`src/lib/references.ts:103-105,259-324`, `src/lib/agent-mentions.ts:19,33-60`).
+
+### Session-local destinations
+
+- Center views: Chat and Terminal (`src/pages/SessionChatPage.tsx:252-257,1291-1332`).
+- Details tabs: Identity, Runtime, Progress, and Budget; Identity contains Lineage (`src/components/SessionDetails.tsx:431-478,520-605`).
+- Side-pane catalog: Browser, Files, Tasks, Pins, Terminals, Skills, Lineage, Analytics, Attention, and unavailable MCP (`src/lib/side-pane-tab-model.ts:163-254`, `src/components/SidePane.tsx:614-824`). The default strip is Pins, Tasks, Skills, Lineage, MCP, Attention, Analytics. Browser/file/terminal instance IDs are also modeled (`src/lib/side-pane-tab-model.ts:54-114,477-555`).
+- Tasks: List, Kanban, DAG, and task detail (`src/components/SessionTasks.tsx:57,88-238,332-587`).
+- Browser: iframe Preview and persistent remote Chrome, with independent histories and remote page tabs (`src/components/UnifiedBrowserSurface.tsx:37-57,208-694`).
+- Files: tree/list, internal open-file tabs, and normal/raw/diff modes (`src/components/FilesTab.tsx:612-654,683-817,842-979`).
+- Desktop uses a persistent side-pane tab strip; drawer layouts use a switcher and bottom sheet (`src/components/SidePaneTabs.tsx:226-467`).
+
+## 5. Server communication
+
+### API layer
+
+The primary client is `src/lib/api.ts`. The daemon substitutes one token into `window.__KTEAM_TOKEN__` in the served `index.html`; `TOKEN` and `HAS_TOKEN` capture it once at module evaluation (`index.html:52-60`, `src/lib/api.ts:27-37`, `modules/kteam-ts/src/api-server.ts:503-529`). `request` and `requestBlob` accept root-relative paths, so the browser's current origin is the implicit base. They attach `Authorization: Bearer <TOKEN>` when present; JSON mutations also receive content type and an idempotency request ID (`src/lib/api.ts:83-128`). The exported `api` namespace covers tasks, sessions/chat/events/sends, attachments, lifecycle actions, Warden, search, usage, PWA config, analytics, wrappers, projects, and new sessions (`src/lib/api.ts:136-297`). Several features have smaller parallel wrappers enumerated below.
+
+### WebSocket and event dispatch
+
+`openEventStream` derives `ws:`/`wss:` from `location.protocol`, uses `location.host`, appends the token as a query parameter, defaults to a fleet tail of 200 events, parses JSON, and reconnects with capped exponential jitter (`src/lib/ws.ts:42-139`). The module `FleetStore` starts one fleet stream (`src/lib/store.tsx:363-373`). Each frame flows `WebSocket.onmessage` → `onEvent` → `FleetStore.handleEvent`, where journaled sequences are deduplicated per session, fleet and session subscribers are fanned out, a replay buffer is updated, and state deltas or targeted refreshes are applied (`src/lib/ws.ts:75-80`, `src/lib/store.tsx:649-720`). Reconnect status triggers reconciliation (`src/lib/store.tsx:492-506`). Remote browser and interactive terminals use separate per-surface WebSockets.
+
+### Single-daemon assumptions — 56 logical sites
+
+Counting rule: one row is one implicit backend binding, singleton/server-store site, or backend/session-keyed global cache. Related endpoint literals behind one wrapper and related maps inside one store are grouped; individual calls through the primary `api` namespace are not counted again. Rows 1–2 are development configuration; the other 54 are runtime UI sites.
+
+No production runtime client hardcodes a daemon host or port: runtime coupling is current-origin, one injected token, and session-only identity. The only hardcoded daemon origin is the two-entry Vite development proxy.
+
+|   # | Assumption site                                                                                                                                                                                   |
+| --: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|   1 | Vite's `/stt-models` dev proxy hardcodes the sole target `http://127.0.0.1:7337` (`vite.config.ts:83-88`).                                                                                        |
+|   2 | Vite's `/v1` HTTP/WS dev proxy independently hardcodes the same sole target (`vite.config.ts:90-96`).                                                                                             |
+|   3 | One daemon substitutes one global `window.__KTEAM_TOKEN__` (`index.html:52-60`, `modules/kteam-ts/src/api-server.ts:503-529`).                                                                    |
+|   4 | `TOKEN`/`HAS_TOKEN` capture that global once when `lib/api` evaluates; there is no token lookup keyed by backend (`src/lib/api.ts:27-37`).                                                        |
+|   5 | Primary `request` accepts only a path and resolves `fetch(path)` against the current origin (`src/lib/api.ts:83-105`).                                                                            |
+|   6 | `requestBlob` is a second current-origin path-only fetch (`src/lib/api.ts:125-128`).                                                                                                              |
+|   7 | One exported `api` namespace exposes no daemon/base argument (`src/lib/api.ts:136-297`).                                                                                                          |
+|   8 | The fleet event WS has no backend argument; it derives one URL from `location.protocol`/`location.host` and the one token (`src/lib/ws.ts:42-64`).                                                |
+|   9 | Attention transport uses a relative session path and the global token (`src/lib/attention.ts:281-291`).                                                                                           |
+|  10 | One module `attentionStore` holds status and inflight maps keyed only by session ID (`src/lib/attention.ts:306-311,435`).                                                                         |
+|  11 | Pins transport uses a relative session path and the global token (`src/lib/pins.ts:339-352`).                                                                                                     |
+|  12 | One module `pinsStore` holds the server snapshot, status, and inflight maps keyed only by session ID (`src/lib/pins.ts:392-398,616`).                                                             |
+|  13 | Push transport uses relative paths and the global token (`src/lib/push-api.ts:21-33`).                                                                                                            |
+|  14 | One module `pushApi` namespace exposes no daemon/base argument (`src/lib/push-api.ts:67-82`).                                                                                                     |
+|  15 | Learning transport uses relative paths and the global token (`src/lib/learning-api.ts:11-19`).                                                                                                    |
+|  16 | One module `learningApi` namespace exposes no daemon/base argument (`src/lib/learning-api.ts:34-49`).                                                                                             |
+|  17 | Daemon-global browser-login transport always fetches the current origin (`src/lib/browser-login.ts:28-33`).                                                                                       |
+|  18 | One module `browserLoginApi` namespace has no daemon/base argument (`src/lib/browser-login.ts:41-48`).                                                                                            |
+|  19 | Browser login has one module-level listener/snapshot/timer/generation/inflight polling store (`src/lib/browser-login.ts:50-56,135-161`).                                                          |
+|  20 | Files transport uses current-origin paths whose only identity input is session ID (`src/components/files-api.ts:94-107`).                                                                         |
+|  21 | One module `fsApi` namespace has no daemon/base argument (`src/components/files-api.ts:128-135`).                                                                                                 |
+|  22 | The module inflight listing cache is keyed by `[sessionId,directory]`, without daemon identity (`src/components/files-api.ts:159-170`).                                                           |
+|  23 | The module filesystem probe/change cache is keyed only by session ID (`src/components/files-api.ts:300-307`).                                                                                     |
+|  24 | Skills autocomplete directly fetches a relative `/v1/sessions/:id/skills` path with the global token (`src/components/composer-autocomplete-providers.ts:139-142`).                               |
+|  25 | Runtime-model catalog directly fetches a relative session path with the global token (`src/lib/runtime-models.ts:101-107`).                                                                       |
+|  26 | Remote-browser HTTP directly fetches a relative session path with the global token (`src/lib/remote-browser.ts:144-149`).                                                                         |
+|  27 | One module `remoteBrowserApi` namespace has no daemon/base argument (`src/lib/remote-browser.ts:160-177`).                                                                                        |
+|  28 | Remote-browser stream URL defaults to `window.location`, deriving host/protocol and adding the global token (`src/lib/remote-browser.ts:179-183`).                                                |
+|  29 | Web-terminal HTTP directly fetches relative session paths with the global token (`src/lib/web-terminals.ts:28-38`).                                                                               |
+|  30 | One module `webTerminalApi` namespace has no daemon/base argument (`src/lib/web-terminals.ts:46-62`).                                                                                             |
+|  31 | Terminal stream URLs default to `window.location`, deriving host/protocol and adding the global token (`src/lib/web-terminals.ts:64-74`).                                                         |
+|  32 | Daemon STT paths, default fetch, and `pageAuth` bind status/install/transcribe to the current origin and one captured token (`src/lib/stt/daemon-engine.ts:20-30,145-186,317-325,363-387`).       |
+|  33 | Browser STT model bytes use current-origin `/stt-models/...` URLs through the default fetch (`src/lib/stt/local-engine.ts:64-70,211-240`).                                                        |
+|  34 | Remote STT enhancement uses a relative endpoint and the one captured token (`src/lib/stt/remote-enhancement.ts:11,69-70,93-136`).                                                                 |
+|  35 | Each `FleetStore` owns exactly one socket plus one `started`/connection state and opens one fleet stream (`src/lib/store.tsx:322-329,363-383`).                                                   |
+|  36 | One module `FleetStore` instance is the default Context and the only provider-started store (`src/lib/store.tsx:841-853`).                                                                        |
+|  37 | Fleet snapshots and event/refresh maps identify data only by session ID: `byId`, sequence, buffers, subscribers, timers, and inflight work (`src/lib/store.tsx:132-140,311-359`).                 |
+|  38 | One app task-reference provider holds one fleet-wide server task snapshot refreshed from the one fleet stream (`src/lib/task-reference-context.tsx:22-48`).                                       |
+|  39 | One notification watch/ledger sees one fleet and keys status, cooldowns, and groups only by session ID; it mounts once in the shell (`src/lib/notify.ts:179-228,396-417`, `src/App.tsx:204-208`). |
+|  40 | The current origin's single `PushManager` subscription is registered against the singleton push API/VAPID daemon (`src/hooks/useNotifications.ts:200-223`).                                       |
+|  41 | One localStorage push-device ID has no daemon namespace (`src/hooks/useNotifications.ts:165-178`).                                                                                                |
+|  42 | Notification event keys, OS tags, and deep links contain only session/fleet identity, not daemon identity (`src/lib/notify.ts:276-300,317-339`).                                                  |
+|  43 | Notification click handling chooses the first same-origin app client; its own comment describes the app as effectively single-window (`sw/notify.ts:195-207`).                                    |
+|  44 | Router identity is `/session/:id`; route state carries only the session ID (`src/lib/router.tsx:8-18,30-35`).                                                                                     |
+|  45 | `SessionConfig` and `KTeamEvent` wire identities carry session ID but no daemon identity (`src/types.ts:60-68,429-436`).                                                                          |
+|  46 | One localStorage draft map is keyed only by session ID (`src/lib/drafts.ts:26,41-43,100-107,150-167`).                                                                                            |
+|  47 | Legacy pin and migration localStorage records identify migrated data only by session ID (`src/lib/pins.ts:35-39,289-323`).                                                                        |
+|  48 | One controls localStorage record includes the daemon-derived `projectScope` path without a daemon namespace (`src/lib/store.tsx:80,111-129,217-230`).                                             |
+|  49 | The retained-chat LRU and React keys use only session ID, preserving the mounted pane/tree for the same ID (`src/App.tsx:275-281,403-410`).                                                       |
+|  50 | Module `sessionFileTabs` memory is keyed only by session ID (`src/components/FilesTab.tsx:118-135`).                                                                                              |
+|  51 | Module `browserSessions` memory is keyed only by session ID (`src/components/UnifiedBrowserSurface.tsx:39-63`).                                                                                   |
+|  52 | Module side-pane tab/instance state is keyed only by session ID (`src/lib/side-pane-tab-model.ts:331-351,380-387`).                                                                               |
+|  53 | Module last-details-tab LRU is keyed only by session ID (`src/hooks/useDetailsTab.ts:25-30,79-95`).                                                                                               |
+|  54 | One module foreground-session/jump-controller registry carries only session ID (`src/lib/pin-bridge.ts:42-50,58-79`).                                                                             |
+|  55 | Retained-page attachment blob caches key data as `sessionId/attachmentId`, with no daemon identity (`src/components/AttachmentImage.tsx:35-41,105-134,216-220,248-303`).                          |
+|  56 | One fixed root-scope service worker and current-origin cache/API policy controls the origin (`src/hooks/useServiceWorkerUpdate.ts:29-40,239-265`, `sw/policy.ts:109-133`, `sw/sw.ts:65-75`).      |
+
+## 6. State management
+
+There is no external state library. `FleetStore` is a mutable TypeScript class exposed through React Context and subscribed with `useSyncExternalStore`; the module singleton lives for the document (`src/lib/store.tsx:307-383,841-883`). It hydrates from REST, owns the one fleet event socket, folds deltas, coalesces refreshes, and maintains immutable snapshot identities for React consumers.
+
+Server-derived stores/state holders are:
+
+| Holder                     | Server-derived contents                                                                                                             | Location                                                                     |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `FleetStore`               | Sessions/by-ID, projects, connection status, usage feed/index, server transcript-search result; event buffers and sequence cursors. | `src/lib/store.tsx:311-359,363-383`                                          |
+| `attentionStore`           | Per-session attention items, resolved history, counts, load status, and inflight reads.                                             | `src/lib/attention.ts:306-435`                                               |
+| `pinsStore`                | Per-session authoritative daemon pin snapshots, load status, and inflight operations.                                               | `src/lib/pins.ts:392-616`                                                    |
+| Browser-login module store | Daemon-global browser-login status/credentials, generation, inflight request, and polling timer.                                    | `src/lib/browser-login.ts:50-161`                                            |
+| Files module store         | Per-session capability/change probes plus coalesced directory-listing requests.                                                     | `src/components/files-api.ts:159-170,300-394`                                |
+| Task-reference provider    | Fleet task snapshot read initially over REST and refreshed from store events.                                                       | `src/lib/task-reference-context.tsx:22-48`                                   |
+| Notification watch         | In-memory status/cooldown/group ledger derived from fleet snapshots; push-device list is hook-local server state.                   | `src/lib/notify.ts:179-228,396-417`, `src/hooks/useNotifications.ts:200-300` |
+
+Route pages and feature surfaces also use ordinary React state/effects for bounded views such as transcript history, task boards, analytics queries, Warden/learning reads, browser frames, and terminal sessions. Persisted browser-owned preferences live in small modules (`kteam-theme`, UI controls, drafts, notification/STT/Markdown/side-pane preferences); session content is otherwise daemon-derived.
+
+## 7. Theming and per-daemon branding
+
+### Theme system
+
+The seven families are Studio, Mission Control, Neo-Brutalism, Ember, High Contrast, Notebook, and Geist (`src/hooks/useTheme.ts:20-56`). Each resolves to light or dark; the stored mode preference may also be `system`. `{family, mode, textScale}` is stored under localStorage key `kteam-theme`, resolved to `<html data-theme="<family>-<light|dark>">`, and applied with text scale (`src/hooks/useTheme.ts:1-18,58-108,203-267`). A storage listener follows changes from other tabs. `src/themes.css` is the literal token source.
+
+An inline bootstrap duplicates the accepted values and resolution before first paint, sets the root attributes, and swaps the one manifest link to the resolved family/mode (`index.html:61-131`). After React mounts, `useTheme` keeps the root attribute, manifest href, and live `theme-color` meta in sync (`src/hooks/useTheme.ts:146-175,203-267`). Build constants also enumerate the same seven families and two resolved modes, producing 14 manifests (`scripts/release.ts:43-44`, `scripts/gen-pwa.ts:225-257`).
+
+### Per-daemon PWA identity
+
+Settings reads and patches `/v1/pwa/config` through the primary API (`src/lib/api.ts:259-261`, `src/pages/SettingsPage.tsx:124-258`). The daemon persists `{version,name?,icon?}` into its daemon config, updates the live runtime after the atomic write, and broadcasts the change (`modules/kteam-ts/src/session-manager.ts:9072-9089`, `modules/kteam-ts/src/daemon-entry.ts:83-96`).
+
+`PwaRuntime` resolves name from explicit config or hostname, derives/validates a one- or two-character monogram, deterministically derives color and a 12-hex brand version, and rewrites each generated manifest's name/short name/icons (`modules/kteam-ts/src/pwa.ts:15-163,296-345`). It also rewrites the served document title, iOS title, and Apple touch icon, and lazily generates brand-versioned immutable PNGs in memory (`modules/kteam-ts/src/pwa.ts:296-345,361-449`). The daemon routes branded manifests/icons through this runtime before static serving and applies the HTML overlay on every shell response (`modules/kteam-ts/src/api-server.ts:497-529`). Theme selection stays browser-local; the name/icon overlay is daemon-local.
+
+## 8. Features present in the UI
+
+| User-visible feature                                                                                                            | Primary owner(s)                                                                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Fleet dashboard, grouping, density, filtering, search, and project scope                                                        | `src/pages/SessionsListPage.tsx`; `src/components/AgentSidebar.tsx`; `src/lib/grouping.ts`; `src/hooks/useProjectScope.ts`                                         |
+| New session and wrapper/project selection                                                                                       | `src/pages/NewSessionPage.tsx`                                                                                                                                     |
+| Session interrupt, stop, resume, rename, migrate, runtime model/effort, and bulk stop                                           | `src/pages/SessionChatPage.tsx`; `src/components/SessionHeader.tsx`, `SessionDetails.tsx`, `RenameSheet.tsx`, `MigrateSheet.tsx`, `AgentSidebar.tsx`               |
+| Transcript pagination/follow/search, Markdown/code/tool rows, quoting, and context menus                                        | `src/components/Transcript*.tsx`, `Markdown.tsx`, `CodeBlock.tsx`, `ToolGroup.tsx`, `ContextMenu.tsx`; `src/lib/transcript.ts`                                     |
+| Composer, drafts, autocomplete, Markdown preview, agent/file/task/attention references                                          | `src/components/Composer*.tsx`; `src/lib/drafts.ts`, `references.ts`; autocomplete provider/context modules                                                        |
+| Attachments, image gallery, downloads, and PDF unlock                                                                           | `src/components/AttachmentImage.tsx`, `AttachmentUnlockPrompt.tsx`; `src/lib/attachments.ts`                                                                       |
+| Structured daemon questions                                                                                                     | `src/components/QuestionForm.tsx`                                                                                                                                  |
+| Durable send ledger, queue state, resend/reconciliation                                                                         | `src/components/LedgerMessage.tsx`; `src/lib/sends.ts`; `src/pages/SessionChatPage.tsx`                                                                            |
+| Dictation/STT, waveform, keyboard shortcuts, local/daemon engines, and enhancement                                              | `src/components/Dictation*.tsx`, `InputWaveform.tsx`; `src/lib/stt/`; `src/worklets/`                                                                              |
+| Center terminal snapshot                                                                                                        | `src/components/TerminalView.tsx`                                                                                                                                  |
+| Interactive shell terminals                                                                                                     | `src/components/WebTerminals.tsx`; `src/lib/web-terminals.ts`                                                                                                      |
+| Files tree/list, raw/Markdown/source rendering, diff, change markers, and code references                                       | `src/components/FilesTab.tsx`, `FileTree.tsx`, `files-api.ts`, `files-model.ts`                                                                                    |
+| Tasks: list, Kanban, DAG, detail, dependencies, status, and file conflicts                                                      | `src/components/SessionTasks.tsx`, `TaskPresentation.tsx`, `TaskDagGraph.tsx`, `TaskStatusFilter.tsx`; `src/lib/tasks.ts`, `task-views.ts`                         |
+| Attention ledger, response, context, and resolution                                                                             | `src/components/AttentionPanel.tsx`; `src/lib/attention.ts`                                                                                                        |
+| Pins: notes, message pins, provenance, PR-link presentation, and transcript jumps                                               | `src/components/PinSheet.tsx`; `src/hooks/usePins.ts`; `src/lib/pins.ts`                                                                                           |
+| Skills catalog and composer insertion                                                                                           | `src/components/SkillsSurface.tsx`; `src/components/composer-autocomplete-providers.ts`                                                                            |
+| Session lineage and cost rollups                                                                                                | `src/components/LineageSurface.tsx`, `SessionDetails.tsx`, `AgentSidebar.tsx`; `src/lib/lineage*.ts`                                                               |
+| Per-session and fleet analytics, query autocomplete, tables, and time series                                                    | `src/components/Analytics*.tsx`; `src/pages/GlobalAnalyticsPage.tsx`                                                                                               |
+| Browser preview, remote Chrome/pages/input, and daemon-global browser login                                                     | `src/components/UnifiedBrowserSurface.tsx`, `RemoteBrowserPane.tsx`, `InAppBrowser.tsx`, `BrowserLoginBanner.tsx`; `src/lib/remote-browser.ts`, `browser-login.ts` |
+| Warden attention, sweeps, failover configuration, verdicts, and reports                                                         | `src/pages/WardenPage.tsx`; `src/components/Warden*.tsx`                                                                                                           |
+| Learning proposals/evidence, accept/edit/reject, runs, and manual apply                                                         | `src/pages/LearningPage.tsx`; `src/lib/learning-api.ts`, `learning-evidence.ts`                                                                                    |
+| Settings for text size, density, chat width, composer Markdown, themes, dictation, notifications, PWA identity, and Warden link | `src/pages/SettingsPage.tsx`; `src/lib/settings.ts`                                                                                                                |
+| Theme selection and 14 resolved theme variants                                                                                  | `src/components/ThemeToggle.tsx`; `src/hooks/useTheme.ts`; `src/themes.css`                                                                                        |
+| Command palette and cross-app navigation                                                                                        | `src/components/CommandPalette.tsx`; `src/lib/palette-destinations.ts`                                                                                             |
+| PWA install/update recovery, offline shell, local notifications, and Web Push                                                   | `src/components/AppBar.tsx`; `src/hooks/useServiceWorkerUpdate.ts`, `useNotifications.ts`; `sw/`                                                                   |
+| Remote-control, quota, session status/mode/activity badges                                                                      | `src/components/RcBadge.tsx`, `QuotaBadge.tsx`, `ComposerQuota.tsx`, `StatusMark.tsx`, `ModeBadge.tsx`                                                             |
+
+## 9. Factual defects and inconsistencies
+
+- Theme-count comments still describe five families or ten themes/manifests although executable constants generate seven families and 14 variants: `scripts/gen-pwa.ts:2,12-18,56`; `scripts/contrast-audit.ts:8,15,369`; `index.html:41-44`; `src/hooks/useTheme.ts:146-152,251-254`; `src/index.css:6`; `src/components/files.css:9`; additional “all ten themes” comments appear in `src/components/Primitives.tsx:85`, `task-views.css:10,40`, `attention-views.css:19,40`, `AgentSidebar.tsx:762-763`, `WardenVerdicts.tsx:37`, and `src/pages/NewSessionPage.tsx:177`.
+- `ViewTabs.iconOnly` is declared but never read. `SessionChatPage` passes it and states that compact mode drops labels, but `ViewTabs` always renders each label (`src/components/ViewTabs.tsx:22-24,34-55`; `src/pages/SessionChatPage.tsx:1291-1308`).
+- The router's introductory “Used in place of react-router” sentence is duplicated (`src/lib/router.tsx:1-4`).
+- A malformed percent escape below `/session/` throws from uncaught `decodeURIComponent` (`src/lib/router.tsx:30-34`).
+- `useRoute` returns a push callback, but production `App` consumes only the route value (`src/lib/router.tsx:40-56`, `src/App.tsx:163-164`).
+- `SessionHeader.showTheme` is declared and passed but is not destructured or read (`src/components/SessionHeader.tsx:195-214`, `src/pages/SessionChatPage.tsx:1289`).
+- The `src/lib/side-pane-tab-model.ts` header says “Three halves, one file” (`src/lib/side-pane-tab-model.ts:1-6`).
+- `--user-rail` is declared in all 14 theme blocks and mapped by Tailwind, but has no production source consumer; the audit itself labels it dead (`src/themes.css:200-2156`, `tailwind.config.ts:48`, `scripts/contrast-audit.ts:369`).
+- `@shadcn/react` is declared in `package.json` but has no source import; its only source occurrence is a historical comment (`package.json:17`, `src/components/Transcript.tsx:4`).
+- `sessionFileTabs` is described as bounded page memory, but its production writes have no cap or eviction (`src/components/FilesTab.tsx:118-134`).
+- Warden's `#config` scroll effect runs only on mount, so a hash change while `WardenPage` remains mounted does not retrigger it (`src/pages/WardenPage.tsx:12-19`).
+- Settings definitions describe themselves as the settings source, but PWA Identity is rendered outside the catalog and has no catalog hash/palette entry (`src/lib/settings.ts:1-3,22-126`; `src/pages/SettingsPage.tsx:357-374`).
+- Project-scope comments say the `projectScope` field has not landed and retain a widening cast, although `UiControls.projectScope` exists (`src/hooks/useProjectScope.ts:40-62`; `src/lib/store.tsx:94-129`).
+- Dashboard renders legacy `WardenStrip` and `WardenVerdicts` calls that return `null` when no `page` prop is supplied (`src/pages/SessionsListPage.tsx:297-298`; `src/components/WardenStrip.tsx:25-32`, `WardenVerdicts.tsx:87-91`).
+- There are no production callers for `registerSidePaneTab`, `registerSidePaneInstanceBody`, or `openSidePaneTerminalTab`; the exported registration/terminal-instance seam is unwired (`src/lib/side-pane-tab-model.ts:262-327,536-555`).
+- Files maintain an internal tab system while transcript/code-reference opens create outer `file:<path>` side-pane instances; comments say the Files tree opens outer instances (`src/components/FilesTab.tsx:612-654,730-753,963-979`; `src/components/SidePane.tsx:352-355,1194-1219`; `src/lib/side-pane-tab-model.ts:25-29`).
+- Terminals maintain an internal tablist while the exported outer `terminal:<id>` opening API has no production caller (`src/components/WebTerminals.tsx:379-412,513-527`; `src/lib/side-pane-tab-model.ts:536-555`).
+- MCP is default-open/selectable in the strip but disabled in the bento (`src/lib/side-pane-tab-model.ts:244-253`; `src/components/SidePaneTabs.tsx:91-96`; `src/components/SidePane.tsx:909-923,1005-1007`).
+- Bento selection compares exact singleton IDs, so active `browser:*`, `file:*`, and `terminal:*` instances do not select their catalog tile (`src/components/SidePane.tsx:912`; `src/lib/side-pane-tab-model.ts:88-100`).
+- `InAppBrowserWorkspace` has no production caller (`src/components/InAppBrowser.tsx:302-359`).
+- Unknown routes render the dashboard without replacing the unknown pathname (`src/lib/router.tsx:37`).
+- Nothing parses `?q=` on initial dashboard load; only the in-app lineage action mirrors that query into store state, while URL boot parsing handles `project` only (`src/components/SessionDetails.tsx:1566-1578,1628-1635`; `src/hooks/useProjectScope.ts:69-197`).
+
+## Survey limits
+
+All requested structure was determinable from source. Build artifact behavior and runtime interactions were inferred from implementation and tests because the task prohibited builds and live-daemon access; no build/install/runtime validation was performed.

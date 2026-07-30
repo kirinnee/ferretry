@@ -1,0 +1,133 @@
+file	loc	exports	imports_internal	io_fs	io_proc	io_net	io_sqlite	io_env	singleton_state
+actor-context.ts	103	13	types	n	n	n	n	n	y
+analytics-cli.ts	149	1	analytics-types,model-cost	n	n	n	n	n	n
+analytics-index.ts	2061	6	analytics-query,analytics-types,model-cost	y	n	n	y	n	n
+analytics-query.ts	215	8	analytics-types	n	n	n	n	n	n
+analytics-types.ts	174	16		n	n	n	n	n	n
+api-client.ts	508	5	analytics-types,daemon-config,names,paths,service,task-boards-api,types,version	y	n	y	n	y	y
+api-server.ts	1460	4	actor-context,analytics-query,analytics-types,attachments,attention-api,browser-api,browser-stream,browser-types,fs,git,learning-types,learning,pins-api,push-api,pwa,runtime-models-api,service,skills,stt-service,task-boards-api,task-boards-types,tasks-api,tasks-contract,terminal-api,terminal-stream,terminal-types,types,ui,version,warden-detect	y	n	y	n	n	n
+attachment-unlock.ts	228	9	document-extract,memory-locator	n	n	n	n	n	n
+attachments.ts	1308	27	attachment-unlock,document-extract,pdf-decrypt	y	n	n	n	n	n
+attention-api.ts	399	16	attention-notifier,attention-service,attention-store,attention-types,types	n	n	n	n	n	n
+attention-cli.ts	361	9	attention-types,tasks-cli	n	n	n	n	n	n
+attention-notifier.ts	173	9	attention-types,core,notification-policy,push-types,service,types	n	n	n	n	n	n
+attention-service.ts	574	3	attention-store,attention-types,io,paths,types	n	n	n	n	n	n
+attention-sources.ts	619	3	attention-service,attention-types,service,session-tasks-store,tasks-types,types,warden-detect,warden-verdicts	n	n	n	n	n	n
+attention-store.ts	597	17	attention-types,io,paths,tasks-store	y	n	n	n	n	n
+attention-types.ts	333	37		n	n	n	n	n	n
+attention.ts	56	87	attention-api,attention-cli,attention-notifier,attention-service,attention-sources,attention-store,attention-types,notification-policy	n	n	n	n	n	n
+browser-api.ts	422	19	actor-context,browser-runtime,browser-service,browser-stream,browser-types,pins-store,types	n	n	n	n	n	n
+browser-cli.ts	372	9	browser-api,browser-types	n	n	n	n	n	n
+browser-display.ts	250	6	browser-types	y	y	n	n	y	n
+browser-login.ts	1039	25	browser-display,browser-profile,browser-runtime,browser-types,paths	y	y	y	n	y	n
+browser-playwright-client.ts	461	3	browser-types	y	y	n	n	y	n
+browser-profile.ts	495	10	browser-types,paths	y	n	n	n	n	n
+browser-runtime.ts	476	15	browser-playwright-client,browser-types,io	y	y	y	n	y	n
+browser-service.ts	882	10	browser-display,browser-profile,browser-runtime,browser-types,paths,pins-store	n	n	n	n	n	n
+browser-stream.ts	329	6	browser-service,browser-types	n	n	y	n	n	n
+browser-types.ts	234	31		n	n	n	n	n	n
+cgroups.ts	345	12	io	y	y	n	n	n	n
+claude-transcript.ts	1044	17	observed-human-input	y	n	n	n	n	n
+codex-runtime.ts	649	24	io	n	y	n	n	y	y
+codex-transcript.ts	970	10	claude-transcript,observed-human-input	y	n	n	n	n	n
+core.ts	1011	32	types,usage	y	n	n	n	n	n
+daemon-boot.ts	69	5		n	n	y	n	n	n
+daemon-config.ts	291	17	cgroups,io,learning-types,paths,pwa	y	n	n	n	y	n
+daemon-entry.ts	333	0	analytics-index,api-server,attention-notifier,attention,browser-api,browser-display,browser-login,browser-profile,browser-service,daemon-boot,daemon-config,daemon-secrets,daemon-service,learning,paths,pins,push-service,pwa,runtime-models-api,session-manager,stt-service,task-boards-api,tasks-api,tasks,terminal-api,terminal-service,warden-attention	y	n	n	n	n	y
+daemon-secrets.ts	114	4		y	y	n	n	y	y
+daemon-service.ts	306	2	io,paths	y	y	n	n	y	n
+daemon-wait.ts	71	6		n	n	n	n	n	n
+document-extract.ts	400	10		n	n	n	n	n	n
+failover.ts	56	3	core,types	n	n	n	n	n	n
+fixtures/encrypted-pdf.ts	21	4		n	n	n	n	n	n
+fleet-inventory.ts	179	6	core,types	y	n	n	n	n	n
+fs.ts	1166	25	git	y	y	n	n	n	n
+git.ts	692	22		y	y	n	n	y	n
+harness.ts	116	7	types	y	n	n	n	y	n
+index.ts	1636	0	analytics-cli,api-client,attention-cli,attention-types,browser-cli,browser-types,core,daemon-service,daemon-wait,harness,io,migrate-graph,migrate-preflight,paths,pins-cli,pins-types,service,start-timeout,stop-cli,task-boards-api,task-boards-cli,task-boards-types,tasks-cli,tasks,types,usage,version	y	y	n	n	y	y
+io.ts	35	5		y	y	n	n	n	n
+learning-aggregate.ts	211	6	learning-extract,learning-store,learning-types	n	n	n	n	n	n
+learning-extract.ts	149	5		n	n	n	n	n	n
+learning-store.ts	251	12	io,learning-types,paths	y	n	n	n	n	n
+learning-types.ts	208	16		n	n	n	n	n	n
+learning.ts	631	5	io,learning-aggregate,learning-extract,learning-store,learning-types,paths,service,types	y	y	n	n	n	n
+liveness.ts	198	10		n	n	n	n	n	n
+memory-locator.ts	273	4		y	n	n	n	y	n
+migrate-graph.ts	289	13	types	n	n	n	n	n	n
+migrate-preflight.ts	1036	29	io,tmux-controller,types	n	y	n	n	n	n
+model-cost.ts	373	17		n	n	n	n	n	n
+names-pool.ts	1023	1		n	n	n	n	n	n
+names.ts	67	6	names-pool	n	n	n	n	n	n
+notification-policy.ts	41	3	attention-types,push-types	n	n	n	n	n	n
+observed-human-input.ts	60	4		n	n	n	n	n	n
+paths.ts	101	11		n	n	n	n	y	n
+pdf-decrypt-worker.ts	159	3		?	n	n	n	n	y
+pdf-decrypt.ts	129	7	pdf-decrypt-worker	n	?	n	n	n	n
+pins-api.ts	338	12	pins-service,pins-store,pins-types,types	n	n	n	n	n	n
+pins-cli.ts	124	8	pins-types,tasks-cli	n	n	n	n	n	n
+pins-service.ts	295	3	io,paths,pins-store,pins-types,types	n	n	n	n	n	n
+pins-store.ts	300	14	io,paths,pins-types,tasks-store	y	n	n	n	n	n
+pins-types.ts	131	17		n	n	n	n	n	n
+pins.ts	47	50	pins-api,pins-cli,pins-service,pins-store,pins-types	n	n	n	n	n	n
+provider-outage.ts	346	17	types,warden-detect	n	n	n	n	n	n
+push-api.ts	69	6	push-types	n	n	n	n	n	n
+push-notifier.ts	282	11	core,push-sender,push-types,service,types	n	n	n	n	n	n
+push-sender.ts	110	8	push-types	n	n	y	n	n	n
+push-service.ts	49	1	paths,push-api,push-notifier,push-sender,push-subscriptions,push-types,push-vapid,service,types	n	n	n	n	n	n
+push-subscriptions.ts	142	3	push-types,storage	y	n	n	n	n	n
+push-types.ts	217	19	types	n	n	n	n	n	n
+push-vapid.ts	88	3	push-types,storage	y	n	n	n	n	n
+pwa.ts	450	15		y	n	n	n	n	n
+runtime-models-api.ts	95	7	actor-context,codex-runtime,pins-store,types	n	n	n	n	n	n
+scratch-gc.ts	226	12		y	n	n	n	n	n
+send-ledger.ts	357	20	observed-human-input,types	y	n	n	n	n	n
+service.ts	330	24	cgroups,codex-runtime,daemon-config,fleet-inventory,fs,git,pwa,session-manager,types,warden-attention,warden-detect,warden-verdicts	n	n	n	n	n	n
+session-manager.ts	9201	17	actor-context,attachments,cgroups,claude-transcript,codex-runtime,codex-transcript,core,daemon-config,failover,fleet-inventory,fs,harness,io,liveness,names,observed-human-input,paths,provider-outage,pwa,scratch-gc,send-ledger,service,storage,task-boards-store,tmux-controller,transcript-search,types,usage,version,warden-bless,warden-concurrency,warden-detect,warden-failover,warden-provenance,warden-reports,warden-verdicts	y	y	n	n	y	n
+session-tasks-store.ts	631	20	io,paths,tasks-store,tasks-types	y	n	n	n	n	n
+skills.ts	347	7		y	n	n	n	n	n
+start-timeout.ts	41	4		n	n	n	n	n	n
+stop-cli.ts	512	22	service	n	n	n	n	y	n
+storage.ts	1792	18		y	n	n	y	y	n
+stt-audio.ts	219	8	stt-types	n	n	n	n	n	n
+stt-enhancement.ts	407	16		n	n	y	n	y	n
+stt-model.ts	667	13	io,stt-paths,stt-types	y	y	y	n	n	n
+stt-paths.ts	30	4	paths	n	n	n	n	n	n
+stt-service.ts	563	6	paths,stt-audio,stt-enhancement,stt-model,stt-paths,stt-types,stt-worker-client,version	y	n	n	n	n	n
+stt-types.ts	194	29		n	n	n	n	n	n
+stt-worker-client.ts	916	14	stt-types	y	y	n	n	y	n
+stt-worker.ts	229	0	stt-types	y	n	n	n	n	y
+task-boards-api.ts	583	14	io,paths,task-boards-store,task-boards-types,task-boards,tasks-api,tasks-types	y	n	n	n	n	n
+task-boards-cli.ts	379	10	paths,task-boards-api,task-boards-types	y	n	n	n	y	n
+task-boards-store.ts	1019	16	io,paths,session-tasks-store,task-boards-types,tasks-store,tasks-types	y	n	n	n	n	n
+task-boards-types.ts	339	25	session-tasks-store,tasks-types	n	n	n	n	n	n
+task-boards.ts	2863	21	io,paths,session-tasks-store,task-boards-store,task-boards-types,tasks-store,tasks-types	n	n	n	n	n	n
+task-title.ts	16	4		n	n	n	n	n	n
+tasks-api.ts	397	10	tasks-contract,tasks-types,types	n	n	n	n	n	n
+tasks-cli.ts	625	13	task-title,tasks-contract,tasks-store,tasks-types,tasks-workflow	n	n	n	n	n	n
+tasks-contract.ts	595	16	session-tasks-store,task-title,tasks-store,tasks-types,tasks-workflow	n	n	n	n	n	n
+tasks-live.ts	231	8	paths,tasks-types	y	n	n	n	n	n
+tasks-migration.ts	203	7	io,paths,session-tasks-store,tasks-live,tasks-store,tasks-types	y	n	n	n	n	n
+tasks-store.ts	960	37	io,paths,task-title,tasks-types,tasks-workflow	y	n	n	n	n	n
+tasks-types.ts	556	62		n	n	n	n	n	n
+tasks-workflow.ts	338	17	tasks-types	n	n	n	n	n	n
+tasks.ts	1706	144	io,paths,session-tasks-store,task-boards-store,task-boards-types,task-boards,tasks-contract,tasks-live,tasks-migration,tasks-store,tasks-types,tasks-workflow,types	n	n	n	n	n	n
+terminal-api.ts	140	7	actor-context,pins-store,terminal-service,terminal-stream,terminal-types,types	n	n	n	n	n	n
+terminal-runtime.ts	414	4	io,paths,pins-store,terminal-types	y	y	n	n	n	n
+terminal-service.ts	595	7	paths,pins-store,terminal-runtime,terminal-types	n	n	n	n	n	n
+terminal-stream.ts	194	3	terminal-service	n	n	y	n	n	n
+terminal-types.ts	108	21		n	n	n	n	n	n
+tmux-controller.ts	2371	59	cgroups,core,daemon-secrets,io,paths,types,warden-detect	y	y	n	n	y	n
+transcript-search.ts	65	2		n	n	n	n	n	n
+types.ts	545	22		n	n	n	n	n	n
+ui.ts	345	2		n	n	?	n	n	n
+usage.ts	275	13	core,types	n	y	y	n	y	n
+version.ts	15	1		n	n	n	n	n	n
+warden-attention.ts	689	16	attention-store,attention-types,io,paths,warden-detect,warden-verdicts	y	n	n	n	n	n
+warden-bless.ts	166	7	types,warden-detect	n	n	n	n	n	n
+warden-concurrency.ts	125	5		n	n	n	n	n	n
+warden-detect.ts	339	11	liveness,types	n	n	n	n	n	n
+warden-failover.ts	305	14	core,daemon-config	n	n	n	n	n	n
+warden-provenance.ts	128	8	core,daemon-config,types	n	n	n	n	n	n
+warden-reports.ts	92	4	paths,warden-provenance,warden-verdicts	y	n	n	n	n	n
+warden-verdicts.ts	319	12	warden-detect,warden-provenance	n	n	n	n	n	n
+worktrees.ts	774	23	git	y	y	n	n	n	n

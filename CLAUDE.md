@@ -69,3 +69,10 @@ Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cl
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security
 design: [docs/design/split-proposal.md](docs/design/split-proposal.md). Feature backlog:
 [handover.md](handover.md).
+
+## Migration state
+
+Resuming or continuing the kteam→Ferretry migration (including on a new machine):
+[docs/migration/HANDOFF.md](docs/migration/HANDOFF.md) — current state, the `port/*` branch map,
+the restart sequence, and the kickoff prompt. Unit briefs live in `docs/migration/units/`, source
+surveys in `docs/migration/surveys/`.
