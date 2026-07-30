@@ -44,6 +44,9 @@
     "packages/fleet": {
       "name": "@ferretry/fleet",
       "version": "0.0.0",
+      "dependencies": {
+        "zod": "4.4.3",
+      },
     },
     "packages/protocol": {
       "name": "@ferretry/protocol",

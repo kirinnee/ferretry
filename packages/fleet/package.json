@@ -5,7 +5,11 @@
   "description": "Fleet provisioning library and CLI domain",
   "type": "module",
   "exports": {
-    ".": "./src/lib/index.ts"
+    ".": "./src/lib/index.ts",
+    "./adapters": "./src/adapters/index.ts"
   },
-  "types": "./src/lib/index.ts"
+  "types": "./src/lib/index.ts",
+  "dependencies": {
+    "zod": "4.4.3"
+  }
 }
