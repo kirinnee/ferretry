@@ -1,5 +1,6 @@
 [test]
-root = "packages/cli/tests/sit"
+root = "packages"
+pathIgnorePatterns = ["**/tests/unit/**", "**/tests/integration/**"]
 timeout = 120000
 # Coverage engages only with --coverage (in-process driver); full-system tier, so the ledger only ignores tests/**.
 coverageReporter = ["text", "lcov"]

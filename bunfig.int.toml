@@ -1,5 +1,6 @@
 [test]
-root = "packages/cli/tests/integration"
+root = "packages"
+pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**"]
 timeout = 120000
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage/int"
