@@ -10,8 +10,8 @@
       "project": ["src/**/*.ts", "bin/**/*.ts"]
     },
     "packages/daemon": {
-      "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": ["bin/*.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.ts"]
     },
     "packages/fleet": {
       "entry": ["src/lib/index.ts"],

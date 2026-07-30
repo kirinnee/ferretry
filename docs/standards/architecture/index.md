@@ -56,6 +56,5 @@ Ferretry is one product, not a template fleet.
 - `scripts/local/` — multi-step local logic invoked from Taskfiles.
 - `scripts/release/` — compile, GoReleaser shim, publish, smoke, installer, bump.
 - `scripts/validate/` — repo invariants run by pre-commit ([Contracts](../contracts/README.md)).
-- `probes/` — gate/smoke/presence self-verification definitions.
 - `Casks/` — the Homebrew cask, committed into this repo by GoReleaser on release; there is
   no separate tap repository.

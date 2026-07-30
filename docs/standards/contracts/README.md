@@ -67,9 +67,10 @@ policy in [CI/CD](../ci-cd/index.md).
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```
 
-`probes/` holds self-verification definitions that exercise several of these invariants
-end-to-end; `./scripts/release/publish.sh --snapshot` is the offline acceptance test for the
-release-facing ones ([Semantic Release](../semantic-release/index.md)).
+`./scripts/release/publish.sh --snapshot` is the offline acceptance test for the release-facing
+invariants ([Semantic Release](../semantic-release/index.md)). A contract proves itself the same way
+any other code does: verify it **fires** on a deliberately planted violation, not merely that it
+passes on a clean tree — a gate that never fails is indistinguishable from one that does nothing.
 
 ## Adding a contract
 

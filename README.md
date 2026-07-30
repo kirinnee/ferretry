@@ -21,7 +21,6 @@ from the diene `bun-cli` conventions.
 | `packages/pwa`      | Placeholder — the web app (P1)                                |
 | `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump     |
 | `scripts/validate`  | Repo invariants run by pre-commit                             |
-| `probes/`           | Self-verification probe definitions (gate/smoke/presence)     |
 | `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release     |
 
 ## Development

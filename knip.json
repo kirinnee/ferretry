@@ -1,17 +1,13 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
-    ".": {
-      "entry": ["probes/*.ts"],
-      "project": ["probes/**/*.ts"]
-    },
     "packages/cli": {
       "entry": ["bin/*.ts", "tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },
     "packages/daemon": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },
     "packages/fleet": {
       "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
