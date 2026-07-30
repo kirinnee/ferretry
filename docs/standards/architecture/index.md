@@ -38,17 +38,17 @@ invariant from pre-commit. See [Contracts](../contracts/README.md).
 ```
 packages/
 ├── cli/        the fy binary — commander composition root, three-layer dirs (real today)
-├── protocol/   placeholder — zod schemas + typed client SDK shared by cli & pwa
-├── daemon/     placeholder — the per-host daemon (fyd)
-├── fleet/      placeholder — fleet provisioning library + subcommands
-└── pwa/        placeholder — the installable web app
+├── protocol/   zod schemas + typed client SDK shared by cli & pwa
+├── daemon/     the per-host daemon (fyd)
+├── fleet/      fleet provisioning library + subcommands
+└── pwa/        the installable web app
 ```
 
-Only `packages/cli` contains code today; the others are reserved for the migration described
-in `docs/design/split-proposal.md`. Every package follows the same internal conventions
-(three layers, test tiers, lint gates) — the monorepo is a deliberate deviation from the
-upstream diene template's one-repo-per-package rule, because Ferretry is one product, not a
-template fleet.
+Every directory is a real workspace member. The non-CLI packages begin with a minimal public
+entry and grow through the migration described in `docs/design/migration-plan.md`. Every package
+follows the same internal conventions (three layers, test tiers, lint gates) — the monorepo is a
+deliberate deviation from the upstream diene template's one-repo-per-package rule, because
+Ferretry is one product, not a template fleet.
 
 ## Repo-wide machinery
 

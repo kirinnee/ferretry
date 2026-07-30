@@ -23,7 +23,8 @@ coverage_dir="coverage/${mode}"
 coverage_file="${coverage_dir}/lcov.info"
 scope="src/lib/"
 [[ ${mode} == "int" ]] && scope="src/adapters/"
-scope_dir="packages/cli/${scope}"
+mapfile -t scope_dirs < <(find packages -mindepth 3 -maxdepth 3 -type d -path "packages/*/${scope%/}" | sort)
+[[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
 source_list="$(mktemp)"
 coverage_list="$(mktemp)"
 trap 'rm -f "${source_list}" "${coverage_list}"' EXIT
@@ -68,19 +69,19 @@ awk -v scope="${scope}" '
   }
 ' "${coverage_file}"
 
-rg -l --glob '*.ts' '^(export )?(async )?(function|class|const|let|var|enum)\b|^[[:space:]]*(const|let|var)\b' "${scope_dir%/}" | sort -u >"${source_list}"
+rg -l --glob '*.{ts,tsx,mts,cts}' '^(export )?(async )?(function|class|const|let|var|enum)\b|^[[:space:]]*(const|let|var)\b' "${scope_dirs[@]}" | sort -u >"${source_list}"
 awk -v scope="${scope}" '
   /^SF:/ {
     path = substr($0, 4)
     gsub(/\\\\/, "/", path)
-    sub(/^.*\/src\//, "packages/cli/src/", path)
-    sub(/^src\//, "packages/cli/src/", path)
+    if (path ~ /\/packages\//) sub(/^.*\/packages\//, "packages/", path)
+    else if (path !~ /^packages\// && path ~ /^[^/]+\/src\//) path = "packages/" path
     print path
   }
 ' "${coverage_file}" | sort -u >"${coverage_list}"
 missing="$(comm -23 "${source_list}" "${coverage_list}" | head -n 1)"
 [[ -n ${missing} ]] && echo "❌ source file missing from coverage ledger: ${missing}" >&2 && exit 1
 
-echo "✅ Coverage artifact is scoped to ${scope_dir}: ${coverage_file}"
+echo "✅ Coverage artifact is scoped to packages/*/${scope}: ${coverage_file}"
 [[ ${test_status} -ne 0 ]] && echo "❌ ${mode} tests failed (exit ${test_status})" >&2 && exit "${test_status}"
 echo "✅ ${mode} tests passed"

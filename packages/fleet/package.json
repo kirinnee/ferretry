@@ -1,0 +1,11 @@
+{
+  "name": "@ferretry/fleet",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fleet provisioning library and CLI domain",
+  "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts"
+  },
+  "types": "./src/lib/index.ts"
+}

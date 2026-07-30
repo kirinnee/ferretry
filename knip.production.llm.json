@@ -8,6 +8,22 @@
     "packages/cli": {
       "entry": ["bin/*.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts"]
+    },
+    "packages/daemon": {
+      "entry": ["src/lib/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/fleet": {
+      "entry": ["src/lib/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/protocol": {
+      "entry": ["src/lib/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/pwa": {
+      "entry": ["src/lib/index.ts"],
+      "project": ["src/**/*.ts"]
     }
   },
   "bun": false,

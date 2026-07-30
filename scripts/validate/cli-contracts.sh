@@ -4,14 +4,19 @@ set -euo pipefail
 contract="${1:-}"
 [ -z "${contract}" ] && echo "❌ usage: $0 <contract|all>" >&2 && exit 2
 
+root_dir="$(git rev-parse --show-toplevel)"
+cd "${root_dir}"
+
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
 product="$(jq -r '.name' package.json)"
 [ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
+mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | sort)
+[ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity; do
+  for each in arch workspace-package-scopes name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity; do
     "$0" "${each}"
   done
   exit 0
@@ -20,10 +25,50 @@ fi
 case "${contract}" in
 arch)
   entry="$(jq -r '.bin | to_entries[0].value' "${cli_pkg}/package.json")"
-  test -f "${cli_pkg}/${entry}"
-  test -f "${cli_pkg}/src/adapters/terminal/console-io.ts"
-  rg -q 'console\.|process\.(stdin|stdout|stderr|exitCode)|from .(chalk|ora|cli-progress|inquirer).' "${cli_pkg}/src/lib" && echo '❌ terminal/shell IO leaked into src/lib' >&2 && exit 1
-  rg -q "from ['\"](\\.\\./)+adapters(?:/|['\"])" "${cli_pkg}/src/lib" && echo '❌ src/lib imports an adapter (forbidden upward dependency)' >&2 && exit 1
+  [ ! -f "${cli_pkg}/${entry}" ] && echo "❌ CLI entry is missing: ${cli_pkg}/${entry}" >&2 && exit 1
+  [ ! -f "${cli_pkg}/src/adapters/terminal/console-io.ts" ] && echo "❌ CLI terminal adapter is missing" >&2 && exit 1
+
+  for package_dir in "${workspace_packages[@]}"; do
+    lib_dir="${package_dir}/src/lib"
+    [ ! -d "${lib_dir}" ] && continue
+
+    # Enumerate through git rather than letting rg walk the directory: rg skips hidden
+    # descendants by default, so a committed src/lib/.probe.ts would bypass this gate.
+    lib_files=()
+    while IFS= read -r -d '' lib_file; do
+      [ -f "${lib_file}" ] && lib_files+=("${lib_file}")
+    done < <(git ls-files -z -co --exclude-standard -- "${lib_dir}")
+    [ "${#lib_files[@]}" -eq 0 ] && continue
+
+    set +e
+    violations="$(rg -n \
+      -e 'console\.|process\.' \
+      -e "(from|import|require)[^\"']*[\"'](chalk|ora|cli-progress|inquirer)(/[^\"']*)?[\"']" \
+      -e "(from|import|require)[^\"']*[\"'](\.[^\"']*/)?adapters(/[^\"']*)?[\"']" \
+      -- "${lib_files[@]}")"
+    scan_status=$?
+    set -e
+
+    if [ "${scan_status}" -eq 0 ]; then
+      echo "❌ ${lib_dir} contains forbidden IO, terminal dependencies, or adapter imports:" >&2
+      printf '%s\n' "${violations}" >&2
+      exit 1
+    fi
+    [ "${scan_status}" -gt 1 ] && echo "❌ failed to scan ${lib_dir}" >&2 && exit "${scan_status}"
+  done
+  ;;
+workspace-package-scopes)
+  for package_dir in "${workspace_packages[@]}"; do
+    actual="$(jq -r '.name' "${package_dir}/package.json")"
+    if [ "${package_dir}" = "${cli_pkg}" ]; then
+      [ "${actual}" != "${name}" ] && echo "❌ ${cli_pkg}/package.json name must match its bin key '${name}', got '${actual}'" >&2 && exit 1
+      continue
+    fi
+
+    package_name="$(basename "${package_dir}")"
+    expected="@${product}/${package_name}"
+    [ "${actual}" != "${expected}" ] && echo "❌ ${package_dir}/package.json name must be '${expected}', got '${actual}'" >&2 && exit 1
+  done
   ;;
 name-single-source)
   # Derivation rule: scripts and Taskfiles must read the binary name from the bin key, never hardcode it.
@@ -110,4 +155,4 @@ installation-parity)
   ;;
 esac
 
-echo "✅ CLI contract passed: ${contract}"
+echo "✅ Contract passed: ${contract}"

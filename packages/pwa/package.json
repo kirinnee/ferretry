@@ -1,0 +1,11 @@
+{
+  "name": "@ferretry/pwa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Installable multi-daemon browser application",
+  "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts"
+  },
+  "types": "./src/lib/index.ts"
+}

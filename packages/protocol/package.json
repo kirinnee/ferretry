@@ -1,0 +1,11 @@
+{
+  "name": "@ferretry/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Wire schemas and typed client SDK shared by the CLI and PWA",
+  "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts"
+  },
+  "types": "./src/lib/index.ts"
+}

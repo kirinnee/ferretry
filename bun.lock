@@ -21,7 +21,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.0.0",
+      "version": "0.2.1",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -33,6 +33,22 @@
         "ora": "9.4.1",
         "zod": "4.4.3",
       },
+    },
+    "packages/daemon": {
+      "name": "@ferretry/daemon",
+      "version": "0.0.0",
+    },
+    "packages/fleet": {
+      "name": "@ferretry/fleet",
+      "version": "0.0.0",
+    },
+    "packages/protocol": {
+      "name": "@ferretry/protocol",
+      "version": "0.0.0",
+    },
+    "packages/pwa": {
+      "name": "@ferretry/pwa",
+      "version": "0.0.0",
     },
   },
   "packages": {
@@ -75,6 +91,14 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.11.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA=="],
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA=="],
+
+    "@ferretry/daemon": ["@ferretry/daemon@workspace:packages/daemon"],
+
+    "@ferretry/fleet": ["@ferretry/fleet@workspace:packages/fleet"],
+
+    "@ferretry/protocol": ["@ferretry/protocol@workspace:packages/protocol"],
+
+    "@ferretry/pwa": ["@ferretry/pwa@workspace:packages/pwa"],
 
     "@inquirer/ansi": ["@inquirer/ansi@2.0.7", "", {}, "sha512-3eTuUO1vH2cZm2ZKHeQxnOqlTi9EfZDGgIe3BL3I4u+rJHocr9Fz86M4fjYABPvFnQG/gGK551HqDiIcETwU6Q=="],
 

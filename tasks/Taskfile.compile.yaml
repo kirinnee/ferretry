@@ -1,8 +1,14 @@
 version: '3'
 tasks:
   default:
-    desc: 'Cross-compile every standalone CLI binary into dist/bin/'
+    desc: 'Cross-compile every standalone binary into dist/bin/'
     cmds:
+      - task: cli
+  cli:
+    internal: true
+    desc: 'Cross-compile the CLI binary targets'
+    cmds:
+      # Add a sibling daemon lane once packages/daemon owns a binary entry; the PWA is never a binary lane.
       - ./scripts/release/compile.sh
   smoke:
     desc: 'Smoke-test a compiled binary (task compile:smoke -- dist/bin/<binary>)'

@@ -1,5 +1,6 @@
 [test]
-root = "packages/cli/tests/unit"
+root = "packages"
+pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true

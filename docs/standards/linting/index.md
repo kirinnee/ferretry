@@ -33,6 +33,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
 | `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                     |
 | `a-action-pins-non-trusted` | everything else pins a 40-char SHA plus its tag in a comment               |
 | `a-cli-contracts`           | the release/architecture invariants in [Contracts](../contracts/README.md) |
+| `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers             |
 | `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                           |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
