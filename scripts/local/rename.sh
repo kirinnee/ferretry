@@ -73,6 +73,11 @@ if [ -n "${new_product}" ] && [ "${new_product}" != "${old_product}" ]; then
     mv "${package_manifest}.tmp" "${package_manifest}"
   done
   git mv "Casks/${old_product}.rb" "Casks/${new_product}.rb"
+  # Scoped workspace references (`@<product>/<pkg>` in dependency maps, imports, and configs)
+  # carry the product name too, so they must move with it or a rename leaves stale specifiers.
+  while IFS= read -r -d '' scoped_file; do
+    [ -f "${scoped_file}" ] && sed -i "s|@${old_product}/|@${new_product}/|g" "${scoped_file}"
+  done < <(git grep -lz --fixed-strings "@${old_product}/" -- . 2>/dev/null || true)
   rewrite "${old_product}" "${new_product}"
 fi
 

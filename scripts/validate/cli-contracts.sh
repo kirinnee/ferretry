@@ -32,12 +32,20 @@ arch)
     lib_dir="${package_dir}/src/lib"
     [ ! -d "${lib_dir}" ] && continue
 
+    # Enumerate through git rather than letting rg walk the directory: rg skips hidden
+    # descendants by default, so a committed src/lib/.probe.ts would bypass this gate.
+    lib_files=()
+    while IFS= read -r -d '' lib_file; do
+      [ -f "${lib_file}" ] && lib_files+=("${lib_file}")
+    done < <(git ls-files -z -co --exclude-standard -- "${lib_dir}")
+    [ "${#lib_files[@]}" -eq 0 ] && continue
+
     set +e
     violations="$(rg -n \
       -e 'console\.|process\.' \
       -e "(from|import|require)[^\"']*[\"'](chalk|ora|cli-progress|inquirer)(/[^\"']*)?[\"']" \
-      -e "(from|import|require)[^\"']*[\"']([^\"']*/)?adapters(/[^\"']*)?[\"']" \
-      "${lib_dir}")"
+      -e "(from|import|require)[^\"']*[\"'](\.[^\"']*/)?adapters(/[^\"']*)?[\"']" \
+      -- "${lib_files[@]}")"
     scan_status=$?
     set -e
 
