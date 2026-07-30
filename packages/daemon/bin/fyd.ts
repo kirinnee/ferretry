@@ -35,6 +35,7 @@ import {
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
+import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
@@ -72,6 +73,10 @@ import {
   type DaemonConfig,
   type DaemonReadinessPorts,
   type UsageFeedPort,
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  type DaemonReadinessPorts,
+  type TranscriptSource,
 } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -133,6 +138,9 @@ export interface DaemonWorld {
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
+  /** One follower per harness. The daemon never branches on harness: it picks the source whose
+   *  `harness` matches the session and reads through the common port. */
+  readonly transcriptSources: readonly TranscriptSource[];
 }
 
 /**
@@ -244,6 +252,10 @@ export function buildWorld(): DaemonWorld {
       namePrefix: DAEMON_NAME,
       remoteControlPrefix: DAEMON_NAME,
     }),
+    transcriptSources: [
+      new NodeTranscriptSource(new ClaudeTranscriptParser()),
+      new NodeTranscriptSource(new CodexTranscriptParser()),
+    ],
   };
 }
 

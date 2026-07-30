@@ -247,6 +247,7 @@ export interface TranscriptFollowOptions extends TranscriptReadOptions {
 
 /** IO boundary implemented by transcript adapters. */
 export interface TranscriptSource {
+  readonly harness: TranscriptHarness;
   read(file: string, options?: TranscriptReadOptions): Promise<TranscriptBatch>;
   follow(file: string, options?: TranscriptFollowOptions): AsyncIterable<TranscriptBatch>;
 }
