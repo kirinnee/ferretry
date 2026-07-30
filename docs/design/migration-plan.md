@@ -189,12 +189,69 @@ Small on purpose. Everything else rebases onto it.
 S1 is deliberately alone: it touches root-level config that every other unit would conflict on.
 S2 and F3 are independent of each other and may run concurrently once S1 merges.
 
-**Fleet manifest** (unblocks the de-kfleeting everywhere): `fy fleet apply` writes
-`~/.ferretry/fleet/manifest.json` with, per account, `{wrapper, kind, mode, home, model,
-models[]}`. This replaces kteam's grepping of generated wrapper shell scripts, the hardcoded
-account/model allowlist, and the hardcoded default warden account (which becomes daemon config).
-Its schema lands in S2; its writer in the fleet unit; every consumer reads the manifest and
-never a shell script.
+### 7.1 The fleet manifest — now specified against measured facts
+
+Survey C located **40 production coupling sites**. The important discoveries change the shape of
+this work:
+
+**The wrapper-text grepping is tiny.** There are exactly **two** readers — `harness.ts:18-27`
+(regexes `export CLAUDE_CONFIG_DIR=` / `export CODEX_HOME=`) and `harness.ts:29-35` (regexes
+`export KTEAM_MODEL=`) — with exactly **four** call sites, all in `session-manager.ts`
+(2193, 2215, 4070, 4075). Replacing shell-text parsing with a manifest read is therefore a
+surgical change, not a sweep. This is the single cheapest high-value decoupling in the migration.
+
+**The same knowledge is hardcoded in four places.** `fleet-inventory.ts:35-71` (runtime model
+allowlist), `core.ts:23-55` (wrapper→served-model aliases), `core.ts:334-405` (recommendation
+doctrine allowlist + bans), `ui.ts:120-122` (a third wrapper→model regex table). Four tables that
+must agree and have no mechanism forcing them to. The manifest is the single source; all four are
+deleted.
+
+**A live bug proves why.** `kfleet/config.yaml:66-70` declares Fable down on the loge pool (every
+credential returning HTTP 429; the alias was removed and the default fell back to Opus 5). But
+`fleet-inventory.ts:42-47,67` still offers `claude-fable-5[1m]` for that account and
+`core.ts:361-369` still ranks it the **first/default** recommendation. Config says unavailable;
+two hardcoded tables say available, and the recommender confidently routes work to a model that
+cannot serve. Exactly this defect misrouted the first planner in this migration. The manifest
+design must make that state unrepresentable.
+
+**The deep coupling is the primary key, not the parsing.** Wrapper _filenames_ are the join key
+across five subsystems — usage feed rows, installed wrappers, warden config, model tables, and
+session config are all matched by byte-identical basename (C19, C26). Account names may contain
+arbitrary strings, so hyphens are ambiguous, and aliases replace the kind prefix
+(`auto-atomi` → `crc-auto-atomi`, not `crc-claude-auto-atomi`), which is why kteam's inventory
+silently skips aliased wrappers. **Ruling: the manifest gives every account a stable opaque `id`
+and that id is the only join key. The wrapper path, resolved name, and display name become
+attributes.** Name grammar (`^(claude|codex)-auto-`) stops being load-bearing.
+
+Manifest at `~/.ferretry/fleet/manifest.json`, written by `fy fleet apply`; per account:
+`{id, kind, mode, wrapper, home, displayName, defaultModel, models[], available, unavailableReason}`.
+Availability is **declared in the manifest**, so a model that config says is down cannot be
+offered or recommended.
+
+### 7.2 The usage collector must serve two contracts
+
+`kfleet serve` on `:47318` has four production consumers, two of them **external tools that stay
+behind**:
+
+| Consumer                  | Endpoint   | Notes                                                           |
+| ------------------------- | ---------- | --------------------------------------------------------------- |
+| kteam daemon              | `/usage`   | cached, falls back to spawning `kfleet usage --json`            |
+| `kteam recommend`         | `/usage`   | independent feed, same fallback                                 |
+| **kloop**                 | `/usage`   | only when `requireUsageLeft:true`; hard-gates, fails open       |
+| **khost**-generated Alloy | `/metrics` | Prometheus scrape of `host.docker.internal:47318`, job `kfleet` |
+
+So the daemon-internal collector must expose **both** `/usage` (JSON `{at, accounts[]}`) and
+`/metrics` (Prometheus text, ~17 series labelled by binary/kind/provider/account), plus
+`/healthz`. The two internal consumers collapse into one in-process feed; the two external ones
+need a stable HTTP surface. Ferretry serves these on its own port and the external tools are
+re-pointed at cutover — no shim, per §1.3.
+
+Note for operations: at survey time **nothing was listening on `:47318`**, so kloop's usage gate
+is currently failing open and khost's `kfleet` scrape job is down. That is a pre-existing
+condition of the live system, not something this migration caused.
+
+Schemas land in S2; the writer and collector in the fleet units; **no consumer may read a shell
+script or a hardcoded table.**
 
 ## 8. Wave units
 
@@ -286,9 +343,9 @@ Notes that change the backlog:
 ## 12. Open questions for Kirin
 
 1. **PWA hosting** — central origin and domain (affects the pairing URL and CORS allowlist).
-2. **Does anything besides Kirin consume kteam's usage feed on `:47318`?** `kloop` and `khost`
-   are named in the split proposal; if either must keep working during the transition, the
-   daemon-internal collector needs to serve that shape from day one.
+2. ~~Does anything besides Kirin consume the `:47318` usage feed?~~ **Answered by Survey C**: yes
+   — kloop (`/usage`, gated) and khost's Alloy (`/metrics`, Prometheus). Both stay external and
+   are re-pointed at cutover; the collector serves both contracts (§7.2). No decision needed.
 3. **How much of kteam's history matters?** This plan drops `LegacyTaskScope` and
    `migrate-preflight.ts` entirely, meaning existing kteam sessions, tasks, and boards do **not**
    carry over. Ferretry starts empty. Confirm that is intended.
