@@ -255,22 +255,84 @@ script or a hardcoded table.**
 
 ## 8. Wave units
 
-Derived from the surveys; the tables below are populated as each survey lands. The decomposition
-method is fixed now so the tables are mechanical to produce:
+Survey A measured the 132 non-test source files. Two facts make this tractable:
 
-1. Take Survey A's import edge list; the leaves are foundation, the hubs are early units.
-2. Cut units at module clusters that share a concern, sized so one teammate can land one PR.
-3. For each unit: source files read → destination files written (exclusive), dependency edges,
-   which of the 128 source tests come along and in which tier, known bugs / intended
-   improvements, and a definition of done.
-4. `session-manager.ts` is **not** one unit. It is split by concern — session lifecycle, resume
-   and revive policy, wedge and health detection, warden provenance, tmux picker quirks — with
-   the buried tuning constants lifted into injected configuration.
-5. The CLI is split by command group (daemon, task, task-board, pin, attention, browser, start,
-   ps/status/send/reply/answer, name, analytics, stop) — one unit each, one controller class per
-   command, all reaching `packages/protocol`.
-6. The PWA is split per Survey D's directory map, with the single-daemon assumption sites
-   collected into one dedicated unit that lands before the feature units.
+- **Only two import cycles exist** — `core.ts ↔ usage.ts` and `service.ts ↔ session-manager.ts` —
+  and in both the back-edge is **type-only**. Both dissolve by moving types into
+  `packages/protocol`. A 132-file graph with two trivially-breakable cycles is unusually clean and
+  means units can be ordered without untangling knots.
+- **The whole type layer is leaf-only.** The eleven `*-types.ts` files plus `types.ts` — 3,039
+  lines, 295 exports, **zero IO and zero module state in every one** — import nothing internal
+  while being the graph's biggest hubs (`types.ts` in-degree 34). They are `packages/protocol`,
+  and they can be ported first with no dependency risk.
+
+Hub ranking (in-degree): `types.ts` 34 · `paths.ts` 32 · `io.ts` 25 · `tasks-types.ts` 14 ·
+`browser-types.ts` 11 · `attention-types.ts` 10 · `core.ts` 10 · `service.ts` 10.
+
+### 8.1 Concern families, measured
+
+kteam's file naming is concern-prefixed, so the families _are_ the natural unit boundaries:
+
+| Family                               | Files |    LOC | Wave        |
+| ------------------------------------ | ----: | -----: | ----------- |
+| `session-*` (manager + store)        |     2 |  9,832 | 4           |
+| foundation/core                      |    12 |  7,637 | spine + 4   |
+| `tasks-*` + `task-*`                 |    15 | 10,810 | 2           |
+| `browser-*`                          |    10 |  4,960 | 3           |
+| `stt-*`                              |     8 |  3,225 | 3           |
+| `attention-*`                        |     8 |  3,112 | 2           |
+| `analytics-*`                        |     4 |  2,599 | 2           |
+| `tmux-controller`                    |     1 |  2,371 | 3           |
+| `warden-*`                           |     8 |  2,163 | 4           |
+| `api-*` (server + client)            |     2 |  1,968 | spine + 4   |
+| `codex-*` + `claude-*` transcript    |     3 |  2,663 | 3           |
+| `terminal-*`                         |     5 |  1,451 | 3           |
+| `learning-*`                         |     5 |  1,450 | 2           |
+| `attachments` + `document` + `pdf-*` |     4 |  1,996 | 3           |
+| `pins-*`                             |     6 |  1,235 | 2           |
+| `daemon-*`                           |     6 |  1,184 | 4           |
+| `names-*`                            |     2 |  1,090 | 2           |
+| `push-*` + `notification`            |     8 |    998 | 2           |
+| `worktrees`                          |     1 |    774 | 2           |
+| `migrate-*`                          |     2 |  1,325 | **dropped** |
+| long tail (singles)                  |   ~20 | ~4,000 | 2–4         |
+
+`migrate-*` is dropped per §1.3 — 1,325 lines we do not port.
+
+### 8.2 The spine, now sized
+
+| ID  | Unit                | Source → destination                                                        |    LOC |
+| --- | ------------------- | --------------------------------------------------------------------------- | -----: |
+| S1  | Workspace + gates   | no ported code; repo config + two gates                                     |      — |
+| S2  | `packages/protocol` | the 11 `*-types.ts` + `types.ts` → zod schemas; `api-client.ts` → typed SDK | ~3,550 |
+| F3  | Daemon foundation   | `paths.ts` 101 + `io.ts` 35 + `version.ts` 15 + `storage.ts` 1,792          | ~1,943 |
+
+The spine is small on purpose and it really is small: `paths.ts` is 101 lines and `io.ts` is 35.
+Only `storage.ts` (1,792, fs + SQLite + env) carries weight, and it is where the
+files-authoritative / index-disposable split gets re-established.
+
+### 8.3 Decomposition rules for the wide waves
+
+1. One family = one unit, unless it exceeds ~2,500 lines, in which case split by sub-concern.
+   `tasks-*`/`task-*` (10,810) splits into tasks-core, tasks store, task-boards, and the
+   parse/render pair. `browser-*` (4,960) splits into control and transport.
+2. **`session-manager.ts` is not a unit.** 9,832 lines across two files split by concern:
+   session lifecycle · resume/revive policy · wedge and health detection · warden provenance ·
+   harness-quirk handling (the Codex picker). The ~20 buried tuning constants
+   (`WEDGE_GAP_MS`, `INCOHERENT_RESTART_THRESHOLD`, `SELF_RESTART_COOLDOWN_MS`, …) lift into
+   injected configuration — which _is_ handover item 47, so the port and the feature are one job.
+3. **The CLI is split by command group** — daemon, task, task-board, pin, attention, browser,
+   start, ps/status/send/reply/answer, name, analytics, stop — one unit each, one controller class
+   per command, everything reaching `packages/protocol` only (§4).
+4. **The PWA** splits per Survey D's directory map, with the **56 single-daemon assumption sites**
+   (2 Vite proxy bindings + 54 runtime bindings/stores/caches) collected into one dedicated unit
+   that lands _before_ any PWA feature unit.
+5. Each unit's brief carries its exact file list, derived from `daemon-deps.tsv` at authoring
+   time, so ownership stays exclusive across open PRs. The unit must verify that list against the
+   source before writing anything.
+6. Tests: the 128 source test files travel with their subject. Pure logic lands in the unit tier,
+   adapters in the integration tier, per §9. Source tests asserting buggy behavior are deleted and
+   their intent re-expressed (§1.1).
 
 ## 9. Verification without touching the live fleet
 
