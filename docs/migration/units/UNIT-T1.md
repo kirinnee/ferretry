@@ -13,7 +13,7 @@ foundation, transcripts, names/worktrees, and the shared board — do not create
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`: `tasks.ts` (1,706),
+`${KTEAM_SRC}/src`: `tasks.ts` (1,706),
 `tasks-store.ts`, `session-tasks-store.ts`, `task-title.ts`, and their `*.test.ts` siblings.
 Verify line counts against source; trust the source. `tasks-types.ts` is **already ported** into
 `@ferretry/protocol` by another unit — import the schemas from there rather than redefining them,

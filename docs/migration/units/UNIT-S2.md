@@ -6,7 +6,7 @@ both depend on what you build, so its shape matters more than its size.
 ## Where you work
 
 **Worktree:** `<your-worktree>`, branch `port/s2-protocol`, already
-created. Work ONLY there. Never touch `/home/kirin/Workspace/personal/ferretry` (the lead's) or the
+created. Work ONLY there. Never touch `${FY_REPO}` (the lead's) or the
 other worktrees. Use `direnv exec . <cmd>` for everything.
 
 ## Read first
@@ -27,7 +27,7 @@ other worktrees. Use `direnv exec . <cmd>` for everything.
 
 ## Source → destination
 
-Read-only source: `/home/kirin/.config/home-manager/modules/kteam-ts/src`. Your **exclusive**
+Read-only source: `${KTEAM_SRC}/src`. Your **exclusive**
 ownership is everything under `packages/protocol/`. Do not create or edit files in any other
 package.
 

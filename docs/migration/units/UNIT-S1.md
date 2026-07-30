@@ -7,7 +7,7 @@ spine. Every other unit rebases onto your work, so correctness and minimalism bo
 
 **Worktree:** `<your-worktree>` — already created for you on branch
 `port/s1-workspace-gates`. Work ONLY there. Do not touch the primary checkout at
-`/home/kirin/Workspace/personal/ferretry` (that is the lead's, for review and merge).
+`${FY_REPO}` (that is the lead's, for review and merge).
 
 First command in the worktree: `direnv allow .` (already run, but re-run if the env complains),
 then use `direnv exec . <cmd>` for everything so the nix devshell is loaded.

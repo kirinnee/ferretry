@@ -12,7 +12,7 @@ needs it. Say so in your PR.
 
 ## Source
 
-Read-only: `/home/kirin/.config/home-manager/modules/kfleet-ts` — 45 files, ~6.9k lines. Also
+Read-only: `${KFLEET_SRC}` — 45 files, ~6.9k lines. Also
 read-only for reference: `~/.kfleet/` and the `kfleet/` asset tree in the home-manager repo
 (`config.yaml`, `CLAUDE*.md`, `templates/`, skills, statusline).
 

@@ -206,84 +206,9 @@ git rebase --onto main port/s2-protocol       # inside that unit's worktree
 
 ## 10. The prompt to restart the work
 
-Paste this into a fresh agent session opened at the repository root on the new machine. It is
-written to be self-sufficient.
-
----
-
-> You are the migration lead for **Ferretry** (`github.com/kirinnee/ferretry`), continuing work that
-> was stopped mid-flight on another machine. You are resuming, not starting over.
->
-> **Read these in order before doing anything:**
->
-> 1. `docs/migration/HANDOFF.md` — the state of the work, the ten unit branches, and the operational
->    knowledge that cost real time to learn. Sections 4 and 5 will save you from repeating known
->    mistakes.
-> 2. `docs/design/migration-plan.md` — the binding execution contract.
-> 3. `docs/PROMPT.md` — the mission and the locked-in decisions.
-> 4. `CLAUDE.md`, `docs/standards/architecture/index.md`, `.claude/skills/cli-authoring/SKILL.md`.
-> 5. `handover.md` at the repo root — the 48-item product backlog for phase 3. Item numbers are
->    stable; never renumber them.
->
-> **What this work is:** a migrate **plus full refactor** of kteam (609 files, 219k lines) and kfleet
-> (45 files, 6.9k lines) into `packages/{protocol,daemon,fleet,cli,pwa}`. Port the _capability_, not
-> the code: kteam has plenty of bugs, so fix them rather than reproducing them, conform to
-> `docs/standards/` (three-layer, stateless OOP with DI, tiered tests), and write tests that assert
-> **correct** behaviour. There is **no backward compatibility** — `FY_*` env only, no `~/.kteam`
-> reads, no shims — and **Ferretry starts empty**, so there is no import tool and exactly one on-disk
-> format.
->
-> **Non-negotiable safety:** if this machine runs a live `kteamd`, never write under `~/.kteam`, never
-> start it, never kill tmux sessions you did not create, never bind its ports. Tests always use a
-> temporary `FY_HOME`. `kloge` and `loctl` stay external.
->
-> **The merge gate**, all three green, always: `pre-commit run --all-files`, `task test`, and
-> `nix develop .#releaser -c ./scripts/release/publish.sh --snapshot`. **Never weaken a gate to make
-> something pass** — no blanket knip ignores, no `|| true`, no `@ts-ignore`, no loosened tsconfig. The
-> gates are the only oracle this refactor has.
->
-> **Do this, in order:**
->
-> 1. Verify prerequisites (§8) and confirm the three gates are green on a clean `main`.
-> 2. Fetch the ten `port/*` branches (§9) and read `git log origin/main..origin/port/<x>` for each so
->    you know what already exists. Do not re-do work that is already on a branch.
-> 3. **Merge `port/s2-protocol` first.** It is the critical path — T1, T2, A1 and AN1 all import
->    `@ferretry/protocol`. It was verified green before the stop.
-> 4. Then land `port/f3-foundation`.
-> 5. Then work the remaining branches. Six carry an un-gated `wip(...)` preservation commit: review it
->    before trusting it, and expect to finish tests, wire adapters into `packages/daemon/bin/fyd.ts`,
->    and open the PR.
-> 6. Then continue the queue in `docs/design/migration-plan.md` §8: tmux controller, terminal,
->    browser, stt, learning + skills, pins + push, attachments + pdf, warden, the five
->    `session-manager` sub-units, `api-server`, the CLI command groups, and the PWA (including its 56
->    single-daemon assumption sites).
-> 7. Only after the migration is complete, start phase 3 from `handover.md`, honouring each item's
->    hard dependencies.
->
-> **How to run the work:** one unit = one git worktree = one branch = one PR, merged when CI is green
-> (you are permitted to merge). Run **wide** — 12–16 concurrent units is the target, not 6. Brief each
-> unit with `docs/migration/units/UNIT-CONTEXT.md` plus its `UNIT-<id>.md`, and review each PR with
-> `docs/migration/units/REVIEWER.md`. Write new unit briefs in the same shape: short and specific, with
-> the shared context carrying the common rules.
->
-> **Failure modes you will hit — they are documented in HANDOFF.md §4, and they are not hypothetical:**
-> agents drift into writing analysis instead of code when they read too much source first (context
-> exhaustion); units stop at "committed locally" without opening the PR; a dependency added without
-> its first use fails the dead-code gate. Detect drift in flight by sampling per-worktree
-> `git status --porcelain | wc -l` and the agent's context-% while it is still on its first turn —
-> waiting for a terminal state wastes the whole unit.
->
-> **Never end a turn with a pending action that has no watcher.** Arm a monitor on both agent state
-> and open-PR CI status so a green PR wakes you to merge it. On the previous machine a PR sat green
-> and unmerged for six and a half hours because nothing was watching, and a human had to intervene.
->
-> **Report honestly.** State progress as a measured percentage, not a feeling; say when a gate fails;
-> say when a unit produced nothing. Verify your own claims against the source before they enter a
-> plan — three plan errors were caught that way and each would have silently degraded the result.
->
-> Begin by reading the documents above, then report the state you find and your first three actions.
-
----
+The entry point is [`START-HERE.md`](START-HERE.md), which carries the full lead mandate, the
+bootstrap steps, the work order, and the cleanup instructions. The prompt handed to a fresh agent
+is deliberately two lines — see that file. Do not duplicate the mandate here; it drifts.
 
 ## 11. Surveys and briefs included in this repository
 

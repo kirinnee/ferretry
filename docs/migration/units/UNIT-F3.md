@@ -7,7 +7,7 @@ one.
 ## Where you work
 
 **Worktree:** `<your-worktree>`, branch `port/f3-foundation`,
-already created. Work ONLY there. Never touch `/home/kirin/Workspace/personal/ferretry` (the
+already created. Work ONLY there. Never touch `${FY_REPO}` (the
 lead's) or the other worktrees. Use `direnv exec . <cmd>` for everything.
 
 ## Read first
@@ -31,7 +31,7 @@ lead's) or the other worktrees. Use `direnv exec . <cmd>` for everything.
 
 ## Source → destination
 
-Read-only source: `/home/kirin/.config/home-manager/modules/kteam-ts/src`. Your **exclusive**
+Read-only source: `${KTEAM_SRC}/src`. Your **exclusive**
 ownership is everything under `packages/daemon/` _except_ nothing — you are the first daemon unit,
 so the whole package is yours for now. Do not create or edit files in other packages.
 

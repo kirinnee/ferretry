@@ -14,7 +14,7 @@ the state-home/storage foundation right now, and a third owns names/worktrees. D
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`:
+`${KTEAM_SRC}/src`:
 
 | File                   |   LOC | What                                        |
 | ---------------------- | ----: | ------------------------------------------- |

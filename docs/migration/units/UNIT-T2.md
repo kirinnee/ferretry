@@ -12,7 +12,7 @@ create files there, and do not create `paths`, `io`, `storage`, or `fs`.
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`: `task-boards.ts` (2,863) and its
+`${KTEAM_SRC}/src`: `task-boards.ts` (2,863) and its
 `*.test.ts` sibling. `task-boards-types.ts` (339) is **already ported** into `@ferretry/protocol`
 by another unit — import from there rather than redefining.
 

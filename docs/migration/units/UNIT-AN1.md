@@ -12,7 +12,7 @@ task-boards, attention, transcripts, names/worktrees.
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`: the `analytics-*` family (4 files, ~2,599
+`${KTEAM_SRC}/src`: the `analytics-*` family (4 files, ~2,599
 lines) — chiefly `analytics-index.ts` (2,061) — plus `model-cost.ts` (373). `analytics-types.ts`
 (174) is **already ported** into `@ferretry/protocol` — import from there.
 

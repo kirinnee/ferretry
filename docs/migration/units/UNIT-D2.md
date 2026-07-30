@@ -15,7 +15,7 @@ the dependency in your PR.
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`:
+`${KTEAM_SRC}/src`:
 
 | File            |   LOC | Character                                  |
 | --------------- | ----: | ------------------------------------------ |

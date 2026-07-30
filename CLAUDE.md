@@ -73,6 +73,6 @@ design: [docs/design/split-proposal.md](docs/design/split-proposal.md). Feature 
 ## Migration state
 
 Resuming or continuing the kteam→Ferretry migration (including on a new machine):
-[docs/migration/HANDOFF.md](docs/migration/HANDOFF.md) — current state, the `port/*` branch map,
-the restart sequence, and the kickoff prompt. Unit briefs live in `docs/migration/units/`, source
+[docs/migration/START-HERE.md](docs/migration/START-HERE.md) — the single entry point: bootstrap,
+work order, and cleanup. State and the `port/*` branch map are in `docs/migration/HANDOFF.md`; unit briefs in `docs/migration/units/`, source
 surveys in `docs/migration/surveys/`.

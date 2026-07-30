@@ -73,7 +73,7 @@ Read `docs/design/migration-plan.md` — it is binding. The essentials:
 ## Worktree discipline
 
 Your brief names your worktree; it is already created on its own branch. Work **only** there.
-Never touch `/home/kirin/Workspace/personal/ferretry` (the lead's checkout) or another unit's
+Never touch `${FY_REPO}` (the lead's checkout) or another unit's
 worktree. First run `direnv allow .`, then use `direnv exec . <cmd>` for everything.
 
 **File ownership is exclusive across open PRs.** Write only files your brief assigns you. If you

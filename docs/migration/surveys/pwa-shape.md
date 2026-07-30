@@ -1,6 +1,6 @@
 # Survey D — PWA (`ui/`) structure
 
-Scope: `/home/kirin/.config/home-manager/modules/kteam-ts/ui`. UI-relative references below start at that directory; daemon references start at `modules/kteam-ts/src`. This is a read-only source survey. Counts include production files, tests, CSS, and declarations; no build or install was run.
+Scope: `${KTEAM_SRC}/ui`. UI-relative references below start at that directory; daemon references start at `modules/kteam-ts/src`. This is a read-only source survey. Counts include production files, tests, CSS, and declarations; no build or install was run.
 
 ## 1. Stack and build
 

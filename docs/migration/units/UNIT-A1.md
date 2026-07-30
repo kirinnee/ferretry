@@ -12,7 +12,7 @@ task-boards, transcripts, names/worktrees.
 
 ## Source (read-only)
 
-`/home/kirin/.config/home-manager/modules/kteam-ts/src`: the `attention-*` family (8 files,
+`${KTEAM_SRC}/src`: the `attention-*` family (8 files,
 ~3,112 lines including tests) minus its types and CLI. `attention-types.ts` (333) is **already
 ported** into `@ferretry/protocol` — import from there.
 

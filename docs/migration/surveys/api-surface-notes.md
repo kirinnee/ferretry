@@ -1,6 +1,6 @@
 # Survey B — shared types, auth, and version skew
 
-Completed a read-only source survey of `/home/kirin/.config/home-manager/modules/kteam-ts/src` and `ui/src` covering shared wire types, runtime validation, authorization/capability headers, version-skew behavior, and factual server/UI inconsistencies.
+Completed a read-only source survey of `${KTEAM_SRC}/src` and `ui/src` covering shared wire types, runtime validation, authorization/capability headers, version-skew behavior, and factual server/UI inconsistencies.
 
 Delivered citation-ready findings directly to `/root` and `/root/http_routes` in four batches:
 
