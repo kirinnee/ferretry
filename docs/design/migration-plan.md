@@ -281,9 +281,21 @@ script or a hardcoded table.**
 Survey A measured the 132 non-test source files. Two facts make this tractable:
 
 - **Only two import cycles exist** — `core.ts ↔ usage.ts` and `service.ts ↔ session-manager.ts` —
-  and in both the back-edge is **type-only**. Both dissolve by moving types into
-  `packages/protocol`. A 132-file graph with two trivially-breakable cycles is unusually clean and
-  means units can be ordered without untangling knots.
+  and in both the back-edge is **type-only** (`usage.ts:1` imports `type { AgentUsage }`;
+  `service.ts:17` imports `type { ScratchPlan }`). A 132-file graph with two trivially-breakable
+  cycles is unusually clean and means units can be ordered without untangling knots.
+
+  **Correction (verified):** an earlier draft said both cycles dissolve "by moving types into
+  `packages/protocol`". That does **not** happen for free. Both cycle-breaking types are declared
+  in the _implementation_ modules, not in the type-only files S2 ports —
+  `ScratchPlan` at `session-manager.ts:334` and `AgentUsage` at `core.ts:87`. Neither appears in
+  `types.ts` or `analytics-types.ts`, so S2's port does not touch them. (S2 does define a
+  `ScratchPlanView` wire schema, but that is the API view, not the internal type on the cycle.)
+  The units porting `core.ts` and `session-manager.ts` must therefore **extract these two
+  declarations deliberately** — into `packages/protocol` if they are genuinely wire types, or into
+  a shared internal types module inside `packages/daemon` if they are not. Each unit's definition
+  of done must name this explicitly; otherwise the cycle is reproduced in the new tree.
+
 - **The whole type layer is leaf-only.** The eleven `*-types.ts` files plus `types.ts` — 3,039
   lines, 295 exports, **zero IO and zero module state in every one** — import nothing internal
   while being the graph's biggest hubs (`types.ts` in-degree 34). They are `packages/protocol`,
