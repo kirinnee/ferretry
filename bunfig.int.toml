@@ -1,0 +1,8 @@
+[test]
+root = "packages/cli/tests/integration"
+timeout = 120000
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage/int"
+coverageSkipTestFiles = true
+# Int ledger = the adapters tier only; the domain is the unit ledger, the glue is not an adapter, tests/** never counts.
+coveragePathIgnorePatterns = ["packages/*/bin/**", "packages/*/src/lib/**", "packages/*/tests/**"]

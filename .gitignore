@@ -1,0 +1,30 @@
+### nix + direnv
+.direnv/
+.pre-commit-config.yaml
+result
+result-*
+
+### workspace
+.env
+.env.*
+!.env.example
+*.log
+*.swo
+*.swp
+*~
+.DS_Store
+._*
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+
+### bun
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+### cli release
+prebuilt/
+IncrementalChangelog.md

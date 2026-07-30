@@ -1,0 +1,21 @@
+version: '3'
+vars:
+  MODE: '{{.MODE | default "unit"}}'
+  CONFIG: '{{.CONFIG | default "bunfig.unit.toml"}}'
+tasks:
+  # Internal building blocks — parameterized by MODE/CONFIG and reached only via the test:* root tasks.
+  default:
+    internal: true
+    desc: 'Run {{.MODE}} tests'
+    cmds:
+      - bun test --config={{.CONFIG}}
+  coverage:
+    internal: true
+    desc: 'Run {{.MODE}} tests with coverage (lcov + text artifacts)'
+    cmds:
+      - bun test --config={{.CONFIG}} --coverage
+  watch:
+    internal: true
+    desc: 'Run {{.MODE}} tests in watch mode'
+    cmds:
+      - bun test --config={{.CONFIG}} --watch

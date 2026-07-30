@@ -1,0 +1,118 @@
+version: '3'
+
+vars:
+  # The CLI package's bin key is the ONLY place the product name is written; everything derives it.
+  CLI_PKG: packages/cli
+  ARTIFACT_PREFIX:
+    sh: jq -r '.bin | to_entries[0].key' {{.CLI_PKG}}/package.json
+  ARTIFACT: '{{.ARTIFACT_PREFIX}}-{{OS}}-{{if eq ARCH "arm64"}}arm64{{else}}x64-baseline{{end}}'
+  ENTRY:
+    sh: echo "{{.CLI_PKG}}/$(jq -r '.bin | to_entries[0].value' {{.CLI_PKG}}/package.json)"
+
+includes:
+  compile: tasks/Taskfile.compile.yaml
+  unit:
+    taskfile: tasks/Taskfile.test.yaml
+    vars:
+      MODE: unit
+      CONFIG: bunfig.unit.toml
+  int:
+    taskfile: tasks/Taskfile.test.yaml
+    vars:
+      MODE: int
+      CONFIG: bunfig.int.toml
+
+tasks:
+  setup:
+    desc: Install locked workspace dependencies
+    cmds:
+      - ./scripts/local/setup.sh
+
+  lint:
+    desc: Run all repository gates
+    cmds:
+      - pre-commit run --all-files
+
+  check:
+    desc: Typecheck the workspace
+    cmds:
+      - ./node_modules/.bin/tsc --noEmit
+
+  clean:
+    desc: Remove Bun build, dependency, and coverage artifacts
+    cmds:
+      - rm -rf dist prebuilt coverage
+      - '[ -d node_modules ] && find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true'
+
+  build:
+    desc: Build the Bun bundle to dist/
+    cmds:
+      - ./scripts/local/build.sh
+
+  deadcode:
+    desc: Review strict and LLM-assisted dead-code findings
+    cmds:
+      - ./scripts/local/deadcode.sh
+
+  test:
+    desc: Run unit, integration, and SIT suites without coverage
+    cmds:
+      - task: unit:default
+      - task: int:default
+      - task: test:sit
+
+  test:unit:
+    desc: Run the unit suite without coverage
+    cmds:
+      - task: unit:default
+
+  test:int:
+    desc: Run the integration suite without coverage
+    cmds:
+      - task: int:default
+
+  test:sit:
+    desc: Run black-box journeys through the freshly compiled binary
+    deps: [compile]
+    cmds:
+      - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} bun test --config=bunfig.sit.toml
+
+  test:coverage:
+    desc: Run every coverage-capable suite with coverage
+    cmds:
+      - task: unit:coverage
+      - task: int:coverage
+      - task: test:sit:coverage
+
+  test:unit:coverage:
+    desc: Run the unit suite with coverage
+    cmds:
+      - task: unit:coverage
+
+  test:int:coverage:
+    desc: Run the integration suite with coverage
+    cmds:
+      - task: int:coverage
+
+  test:sit:coverage:
+    desc: Run SIT journeys in-process and emit the full-system ledger
+    cmds:
+      - rm -rf coverage/sit
+      - SIT_DRIVER=inprocess bun test --config=bunfig.sit.toml --coverage
+      - test -f coverage/sit/lcov.info
+
+  test:watch:
+    desc: Watch the fast unit suite
+    cmds:
+      - task: unit:watch
+
+  run:
+    desc: Run the CLI source entry point
+    cmds:
+      - bun run {{.ENTRY}} -- {{.CLI_ARGS}}
+
+  preview:
+    desc: Run this host's compiled standalone binary
+    deps: [compile]
+    cmds:
+      - ./dist/bin/{{.ARTIFACT}} {{.CLI_ARGS}}

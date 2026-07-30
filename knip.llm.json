@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["probes/*.ts"],
+      "project": ["probes/**/*.ts"]
+    },
+    "packages/cli": {
+      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+    }
+  },
+  "includeEntryExports": true
+}

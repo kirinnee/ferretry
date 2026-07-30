@@ -1,0 +1,7 @@
+[test]
+root = "packages/cli/tests/unit"
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage/unit"
+coverageSkipTestFiles = true
+# Unit ledger = the domain tier only (src/lib, 100% goal); adapters/glue belong to other tiers, tests/** never counts.
+coveragePathIgnorePatterns = ["packages/*/bin/**", "packages/*/src/adapters/**", "packages/*/tests/**"]

@@ -1,0 +1,10 @@
+version: '3'
+tasks:
+  default:
+    desc: 'Cross-compile every standalone CLI binary into dist/bin/'
+    cmds:
+      - ./scripts/release/compile.sh
+  smoke:
+    desc: 'Smoke-test a compiled binary (task compile:smoke -- dist/bin/<binary>)'
+    cmds:
+      - ./scripts/release/smoke.sh {{.CLI_ARGS}}

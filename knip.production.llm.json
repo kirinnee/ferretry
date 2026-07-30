@@ -1,0 +1,19 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "packages/cli": {
+      "entry": ["bin/*.ts"],
+      "project": ["src/**/*.ts", "bin/**/*.ts"]
+    }
+  },
+  "bun": false,
+  "github-actions": false,
+  "node": false,
+  "taskfile": false,
+  "typescript": false,
+  "includeEntryExports": true
+}

@@ -1,0 +1,8 @@
+[test]
+root = "packages/cli/tests/sit"
+timeout = 120000
+# Coverage engages only with --coverage (in-process driver); full-system tier, so the ledger only ignores tests/**.
+coverageReporter = ["text", "lcov"]
+coverageDir = "coverage/sit"
+coverageSkipTestFiles = true
+coveragePathIgnorePatterns = ["packages/*/tests/**"]
