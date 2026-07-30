@@ -8,6 +8,22 @@
     "packages/cli": {
       "entry": ["bin/*.ts", "tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/daemon": {
+      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/fleet": {
+      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/protocol": {
+      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
+    "packages/pwa": {
+      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
     }
   },
   "rules": {

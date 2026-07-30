@@ -65,6 +65,13 @@ if [ -n "${new_product}" ] && [ "${new_product}" != "${old_product}" ]; then
   echo "🔁 product: '${old_product}' -> '${new_product}'"
   jq --arg new "${new_product}" '.name = $new' package.json >package.json.tmp
   mv package.json.tmp package.json
+  for package_manifest in packages/*/package.json; do
+    [ "${package_manifest}" = "packages/cli/package.json" ] && continue
+    package_dir="$(basename "$(dirname "${package_manifest}")")"
+    scoped_name="@${new_product}/${package_dir}"
+    jq --arg new "${scoped_name}" '.name = $new' "${package_manifest}" >"${package_manifest}.tmp"
+    mv "${package_manifest}.tmp" "${package_manifest}"
+  done
   git mv "Casks/${old_product}.rb" "Casks/${new_product}.rb"
   rewrite "${old_product}" "${new_product}"
 fi
@@ -82,8 +89,9 @@ if [ -n "${new_bin}" ] && [ "${new_bin}" != "${old_bin}" ]; then
   rewrite "${old_bin}" "${new_bin}"
 fi
 
-# Refresh the lockfile so the workspace package names match.
-bun install
+# Refresh the lockfile so the workspace package names match. Run from a package directory so Bun
+# resolves the intended monorepo rather than treating an enclosing checkout as the package root.
+bun install --cwd packages/cli --lockfile-only
 
 echo ""
 for old in "${old_product}" "${old_bin}"; do

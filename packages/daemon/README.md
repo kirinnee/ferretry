@@ -1,4 +1,5 @@
-# daemon (placeholder)
+# daemon
 
 The per-host agent daemon (sessions, tmux, transcripts, tasks, attention, fleet subsystem),
-exposing the versioned REST + WebSocket API. Arrives in P1 (lift & rename); nothing lives here at P0.
+exposing the versioned REST + WebSocket API. The workspace boundary is live; later migration units
+add the runtime.
