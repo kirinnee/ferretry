@@ -7,6 +7,7 @@ export * from './analytics/query.ts';
 export * from './analytics/results.ts';
 export * from './analytics/session-record.ts';
 export * from './attachments/index.ts';
+export * from './attention/index.ts';
 export * from './instant.ts';
 export * from './journal.ts';
 export * from './json.ts';
