@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "steps": [
+    { "type": "say", "text": "agent says hello" },
+    { "type": "ask", "text": "continue?", "expect": "yes" },
+    { "type": "write", "stream": "stderr", "text": "scripted diagnostic\n" },
+    { "type": "exit", "code": 0 }
+  ]
+}
