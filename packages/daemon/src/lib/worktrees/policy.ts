@@ -17,6 +17,12 @@ export function isPathInside(parent: string, child: string): boolean {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+export function defaultManagedWorktreeRoot(stateHome: string): string | null {
+  const resolved = path.resolve(stateHome);
+  const base = path.basename(resolved);
+  return base.length === 0 ? null : path.join(path.dirname(resolved), `${base}-worktrees`);
+}
+
 export function isCurrentCheckout(target: string, currentWorkingDirectory: string | undefined): boolean {
   return currentWorkingDirectory !== undefined && isPathInside(target, currentWorkingDirectory);
 }
@@ -106,6 +112,7 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
     if (
       !checkout.repo ||
       checkout.kind !== 'linked_worktree' ||
+      (resolvedPath !== undefined && checkout.worktreeRoot !== resolvedPath) ||
       checkout.repositoryRoot !== evidence.expectedRepositoryRoot ||
       checkout.commonDir !== evidence.expectedCommonDir ||
       checkout.gitDir !== evidence.expectedGitDir

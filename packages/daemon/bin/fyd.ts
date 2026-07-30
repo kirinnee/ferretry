@@ -10,6 +10,14 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../src/adapters/index.ts';
+import { BunGitRunner } from '../src/adapters/git/index.ts';
+import {
+  GitWorktreeGateway,
+  ManagedWorktreeAdapter,
+  NodeWorktreeFileSystem,
+  SystemWorktreeClock,
+  WorktreeOperationQueue,
+} from '../src/adapters/worktrees/index.ts';
 import { packageRole } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -27,11 +35,15 @@ const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
 export interface DaemonWorld {
   readonly role: typeof packageRole;
   readonly storage: DaemonStorageFactory;
+  readonly worktrees: ManagedWorktreeAdapter;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as their adapters land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
+  const worktreeClock = new SystemWorktreeClock();
+  const files = new NodeWorktreeFileSystem();
+  const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -43,6 +55,7 @@ export function buildWorld(): DaemonWorld {
       clock,
       () => new KeyedSerialExecutor(),
     ),
+    worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
   };
 }
 
