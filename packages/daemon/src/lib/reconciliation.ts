@@ -5,9 +5,13 @@ export const CURRENT_INDEX_SCHEMA_VERSION = 1 as const;
 
 export type IndexSchemaDecision = 'create' | 'use' | 'drop-and-rebuild';
 
-export function decideIndexSchema(foundVersion: number, hasTables: boolean): IndexSchemaDecision {
+export function decideIndexSchema(
+  foundVersion: number,
+  hasTables: boolean,
+  hasExpectedShape = true,
+): IndexSchemaDecision {
   if (!hasTables) return 'create';
-  return foundVersion === CURRENT_INDEX_SCHEMA_VERSION ? 'use' : 'drop-and-rebuild';
+  return foundVersion === CURRENT_INDEX_SCHEMA_VERSION && hasExpectedShape ? 'use' : 'drop-and-rebuild';
 }
 
 export interface DiskSessionObservation {

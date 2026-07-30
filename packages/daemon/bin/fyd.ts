@@ -1,5 +1,15 @@
 #!/usr/bin/env bun
 import pkg from '../package.json' with { type: 'json' };
+import {
+  BunSqliteIndexFactory,
+  DaemonStorageFactory,
+  KeyedSerialExecutor,
+  RuntimeEnvironment,
+  SqliteHomeLockFactory,
+  StateFileSystemFactory,
+  StateHomeLayout,
+  SystemClock,
+} from '../src/adapters/index.ts';
 import { packageRole } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -16,11 +26,24 @@ const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
  */
 export interface DaemonWorld {
   readonly role: typeof packageRole;
+  readonly storage: DaemonStorageFactory;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as their adapters land. */
 export function buildWorld(): DaemonWorld {
-  return { role: packageRole };
+  const clock = new SystemClock();
+  return {
+    role: packageRole,
+    storage: new DaemonStorageFactory(
+      new RuntimeEnvironment(),
+      new StateFileSystemFactory(),
+      new StateHomeLayout(),
+      new SqliteHomeLockFactory(),
+      new BunSqliteIndexFactory(),
+      clock,
+      () => new KeyedSerialExecutor(),
+    ),
+  };
 }
 
 /** Boots the daemon from an already-built world, so tests can inject their own. */

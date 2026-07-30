@@ -21,6 +21,7 @@ interface SessionRow {
   readonly created_at: string | null;
   readonly updated_at: string | null;
   readonly last_sequence: number;
+  readonly journal_line: number;
   readonly journal_device: string | null;
   readonly journal_inode: string | null;
   readonly journal_size: number | null;
@@ -60,6 +61,7 @@ function sessionFromRow(row: SessionRow): IndexedSession {
     createdAt: row.created_at ?? undefined,
     updatedAt: row.updated_at ?? undefined,
     lastSequence: row.last_sequence,
+    journalLine: row.journal_line,
     journal: journalFromRow(row),
   };
 }
@@ -75,8 +77,48 @@ function eventFromRow(row: EventRow): EventPointer {
   };
 }
 
-const SESSION_COLUMNS = `id, status, created_at, updated_at, last_sequence,
+const SESSION_COLUMNS = `id, status, created_at, updated_at, last_sequence, journal_line,
   journal_device, journal_inode, journal_size, journal_mtime_ms`;
+
+const EXPECTED_INDEX_TABLES = ['events', 'sessions'] as const;
+const EXPECTED_SESSION_COLUMNS = [
+  'id',
+  'status',
+  'created_at',
+  'updated_at',
+  'last_sequence',
+  'journal_line',
+  'journal_device',
+  'journal_inode',
+  'journal_size',
+  'journal_mtime_ms',
+] as const;
+const EXPECTED_EVENT_COLUMNS = ['session_id', 'sequence', 'time', 'type', 'byte_offset', 'byte_length'] as const;
+
+function sameNames(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((name, index) => name === expected[index]);
+}
+
+function indexSchemaShape(database: Database): { readonly hasTables: boolean; readonly expected: boolean } {
+  const tables = database
+    .query<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .all()
+    .map(row => row.name);
+  const columns = (table: 'sessions' | 'events'): readonly string[] =>
+    database
+      .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+      .all()
+      .map(row => row.name);
+  return {
+    hasTables: tables.length > 0,
+    expected:
+      sameNames(tables, EXPECTED_INDEX_TABLES) &&
+      sameNames(columns('sessions'), EXPECTED_SESSION_COLUMNS) &&
+      sameNames(columns('events'), EXPECTED_EVENT_COLUMNS),
+  };
+}
 
 export class BunSqliteIndex implements SessionIndex {
   constructor(private readonly database: Database) {}
@@ -84,12 +126,13 @@ export class BunSqliteIndex implements SessionIndex {
   private insertSession(session: IndexedSession): void {
     this.database
       .query(
-        `INSERT INTO sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            status = excluded.status,
            created_at = excluded.created_at,
            updated_at = excluded.updated_at,
            last_sequence = excluded.last_sequence,
+           journal_line = excluded.journal_line,
            journal_device = excluded.journal_device,
            journal_inode = excluded.journal_inode,
            journal_size = excluded.journal_size,
@@ -101,6 +144,7 @@ export class BunSqliteIndex implements SessionIndex {
         session.createdAt ?? null,
         session.updatedAt ?? null,
         session.lastSequence,
+        session.journalLine,
         session.journal?.device ?? null,
         session.journal?.inode ?? null,
         session.journal?.size ?? null,
@@ -217,6 +261,7 @@ function configure(database: Database): void {
       created_at TEXT,
       updated_at TEXT,
       last_sequence INTEGER NOT NULL CHECK (last_sequence >= 0),
+      journal_line INTEGER NOT NULL CHECK (journal_line >= 1),
       journal_device TEXT,
       journal_inode TEXT,
       journal_size INTEGER CHECK (journal_size IS NULL OR journal_size >= 0),
@@ -259,14 +304,8 @@ export class BunSqliteIndexFactory implements SessionIndexFactory {
     try {
       database = await openDatabase(paths, fileSystem);
       const version = database.query<{ user_version: number }, []>('PRAGMA user_version').get()?.user_version ?? 0;
-      const hasTables =
-        database
-          .query<
-            { name: string },
-            []
-          >("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' LIMIT 1")
-          .get() !== null;
-      if (decideIndexSchema(version, hasTables) === 'drop-and-rebuild') {
+      const shape = indexSchemaShape(database);
+      if (decideIndexSchema(version, shape.hasTables, shape.expected) === 'drop-and-rebuild') {
         const obsolete = database;
         database = undefined;
         obsolete.close();

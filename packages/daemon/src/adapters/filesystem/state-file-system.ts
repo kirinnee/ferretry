@@ -30,8 +30,16 @@ export class StateFileSystem implements FileSystemPort {
   private async checked(path: string): Promise<string> {
     const target = this.contained(path);
     const fromHome = relative(this.paths.home, target);
-    if (fromHome.length === 0) return target;
     let current: string = this.paths.home;
+    try {
+      const information = await lstat(current);
+      if (information.isSymbolicLink())
+        throw new Error(`symbolic links are not allowed inside the state home: ${current}`);
+    } catch (error) {
+      if (isMissing(error)) return target;
+      throw error;
+    }
+    if (fromHome.length === 0) return target;
     for (const component of fromHome.split(sep)) {
       current = join(current, component);
       try {

@@ -37,6 +37,9 @@
     "packages/daemon": {
       "name": "@ferretry/daemon",
       "version": "0.0.0",
+      "dependencies": {
+        "zod": "4.4.3",
+      },
     },
     "packages/fleet": {
       "name": "@ferretry/fleet",
