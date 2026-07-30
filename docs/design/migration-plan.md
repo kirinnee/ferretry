@@ -62,8 +62,23 @@ in the same PR that creates it, never later.
 - No read path, migration path, or dual-format reader for `~/.kteam`.
 - `~/.ferretry`'s on-disk layout is **redesigned** where kteam's was poor (§5).
 - kteam's `LegacyTaskScope` is dropped; central scope only.
-- `migrate-preflight.ts` (1,036 lines) is presumed kteam-history migration and is **not ported**
-  unless Survey C shows it does something else.
+
+**Correction (verified by reading the source):** an earlier draft assumed `migrate-preflight.ts`
+(1,036 lines) plus `migrate-graph.ts` (289) were kteam-history migration and could be dropped.
+**They are not, and they must be ported.** `migrate-preflight.ts` is a _safety gate for
+cross-account session migration_: `migrate` relaunches a session by killing the pane process tree
+**before** attempting the relaunch, so a migrate that later fails has already destroyed in-flight
+work. The module inventories what is in flight (open harness tools joined to command text, the
+pane-pid process tree, the Codex background-terminal count), classifies each item as
+`safe_to_kill | re_armable | destructive_to_interrupt | unknown`, and **refuses by default** on
+`unknown` — degrading to refuse, never to "probably fine".
+
+Two consequences: dropping it would delete a real safety guarantee, and it is the foundation of
+handover **item 48** (harden cross-harness migration). It is also already written for this repo's
+doctrine — its logic is pure and dependency-injected by design — so it ports cleanly.
+
+"No backward compatibility" means dropping _compatibility with kteam's past_, not dropping
+safety features. Every candidate for deletion must be read before it is dropped.
 
 This is enforced mechanically, not by vigilance: unit S1 adds
 `scripts/validate/no-legacy-state.sh` to pre-commit, failing on any occurrence of `KTEAM_`,
@@ -101,10 +116,13 @@ Three structural facts established by direct reading, which shape the plan:
    configuration is both the doctrine-conforming move and a prerequisite for handover item 47
    (configurable warden recovery policy).
 
-Surveys in flight fill in the rest: **A** daemon dependency graph and per-file IO/state
-classification; **B** the complete HTTP/WS API surface; **C** kfleet and every coupling point;
-**D** the PWA structure and its single-daemon assumptions. Unit tables in §6–§8 are derived from
-those and are marked as pending until they land.
+Four surveys have completed and their findings are folded in below: **A** the daemon dependency
+graph and per-file IO/state classification (132 non-test files); **B** the HTTP/WS API surface;
+**C** kfleet and its 40 coupling sites (§7); **D** the PWA structure and its 56 single-daemon
+assumption sites (§8.3). Raw survey output lives outside the repo; the load-bearing facts are
+quoted here so this document stands alone.
+
+Note: Survey C counted **45** files in `kfleet-ts` (the 41 above counts `.ts` only).
 
 ## 3. Target topology
 
@@ -273,31 +291,33 @@ Hub ranking (in-degree): `types.ts` 34 · `paths.ts` 32 · `io.ts` 25 · `tasks-
 
 kteam's file naming is concern-prefixed, so the families _are_ the natural unit boundaries:
 
-| Family                               | Files |    LOC | Wave        |
-| ------------------------------------ | ----: | -----: | ----------- |
-| `session-*` (manager + store)        |     2 |  9,832 | 4           |
-| foundation/core                      |    12 |  7,637 | spine + 4   |
-| `tasks-*` + `task-*`                 |    15 | 10,810 | 2           |
-| `browser-*`                          |    10 |  4,960 | 3           |
-| `stt-*`                              |     8 |  3,225 | 3           |
-| `attention-*`                        |     8 |  3,112 | 2           |
-| `analytics-*`                        |     4 |  2,599 | 2           |
-| `tmux-controller`                    |     1 |  2,371 | 3           |
-| `warden-*`                           |     8 |  2,163 | 4           |
-| `api-*` (server + client)            |     2 |  1,968 | spine + 4   |
-| `codex-*` + `claude-*` transcript    |     3 |  2,663 | 3           |
-| `terminal-*`                         |     5 |  1,451 | 3           |
-| `learning-*`                         |     5 |  1,450 | 2           |
-| `attachments` + `document` + `pdf-*` |     4 |  1,996 | 3           |
-| `pins-*`                             |     6 |  1,235 | 2           |
-| `daemon-*`                           |     6 |  1,184 | 4           |
-| `names-*`                            |     2 |  1,090 | 2           |
-| `push-*` + `notification`            |     8 |    998 | 2           |
-| `worktrees`                          |     1 |    774 | 2           |
-| `migrate-*`                          |     2 |  1,325 | **dropped** |
-| long tail (singles)                  |   ~20 | ~4,000 | 2–4         |
+| Family                               | Files |    LOC | Wave      |
+| ------------------------------------ | ----: | -----: | --------- |
+| `session-*` (manager + store)        |     2 |  9,832 | 4         |
+| foundation/core                      |    12 |  7,637 | spine + 4 |
+| `tasks-*` + `task-*`                 |    15 | 10,810 | 2         |
+| `browser-*`                          |    10 |  4,960 | 3         |
+| `stt-*`                              |     8 |  3,225 | 3         |
+| `attention-*`                        |     8 |  3,112 | 2         |
+| `analytics-*`                        |     4 |  2,599 | 2         |
+| `tmux-controller`                    |     1 |  2,371 | 3         |
+| `warden-*`                           |     8 |  2,163 | 4         |
+| `api-*` (server + client)            |     2 |  1,968 | spine + 4 |
+| `codex-*` + `claude-*` transcript    |     3 |  2,663 | 3         |
+| `terminal-*`                         |     5 |  1,451 | 3         |
+| `learning-*`                         |     5 |  1,450 | 2         |
+| `attachments` + `document` + `pdf-*` |     4 |  1,996 | 3         |
+| `pins-*`                             |     6 |  1,235 | 2         |
+| `daemon-*`                           |     6 |  1,184 | 4         |
+| `names-*`                            |     2 |  1,090 | 2         |
+| `push-*` + `notification`            |     8 |    998 | 2         |
+| `worktrees`                          |     1 |    774 | 2         |
+| `migrate-*` (safe-migration gate)    |     2 |  1,325 | 4         |
+| long tail (singles)                  |   ~20 | ~4,000 | 2–4       |
 
-`migrate-*` is dropped per §1.3 — 1,325 lines we do not port.
+`migrate-*` is **ported**, not dropped — see the correction in §1.3. It is the safety gate for
+cross-account migration and the foundation of handover item 48. Nothing in the daemon `src/` tree
+is dropped for compatibility reasons; only kteam's legacy task scope goes.
 
 ### 8.2 The spine, now sized
 
@@ -408,6 +428,9 @@ Notes that change the backlog:
 2. ~~Does anything besides Kirin consume the `:47318` usage feed?~~ **Answered by Survey C**: yes
    — kloop (`/usage`, gated) and khost's Alloy (`/metrics`, Prometheus). Both stay external and
    are re-pointed at cutover; the collector serves both contracts (§7.2). No decision needed.
-3. **How much of kteam's history matters?** This plan drops `LegacyTaskScope` and
-   `migrate-preflight.ts` entirely, meaning existing kteam sessions, tasks, and boards do **not**
-   carry over. Ferretry starts empty. Confirm that is intended.
+3. **Does Ferretry start empty?** This plan drops `LegacyTaskScope` and provides no reader for
+   `~/.kteam`, so existing kteam sessions, tasks, and boards do **not** carry over — Ferretry
+   starts with an empty state home. That follows from "no backward compatibility", but it is the
+   one consequence that is expensive to reverse later, so please confirm it is intended.
+   (Note: this is about _data_, not features — the safe-migration gate and every other capability
+   are ported. See the §1.3 correction.)
