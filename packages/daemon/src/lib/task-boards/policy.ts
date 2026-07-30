@@ -106,7 +106,9 @@ export function isGrantWithinActiveMembershipTree(
   sessions: readonly TaskBoardSession[],
 ): boolean {
   if (!isActiveMembershipRoot(board, grant.membershipRootSessionId)) return false;
-  if (grant.sessionId === grant.membershipRootSessionId) return true;
+  const session = sessionById(sessions, grant.sessionId);
+  if (session === null || session.parentSessionId !== grant.parentSessionId) return false;
+  if (grant.sessionId === grant.membershipRootSessionId) return grant.parentSessionId === null;
   const lineage = sessionLineage(sessions, grant.sessionId);
   return lineage?.slice(1).includes(grant.membershipRootSessionId) ?? false;
 }
@@ -204,9 +206,8 @@ export function isInvitationProofBoundToSession(input: {
   readonly session: TaskBoardSession;
   readonly sessionCapabilityHash: string;
   readonly invitationCapabilityHash: string;
-  readonly now: string;
 }): boolean {
-  const { proof, invitation, session, sessionCapabilityHash, invitationCapabilityHash, now } = input;
+  const { proof, invitation, session, sessionCapabilityHash, invitationCapabilityHash } = input;
   return (
     invitation.status === 'approved' &&
     invitation.targetSessionId === session.id &&
@@ -219,9 +220,12 @@ export function isInvitationProofBoundToSession(input: {
     proof.targetRuntimeGeneration === session.runtimeGeneration &&
     proof.sessionCapabilityHash === session.sessionCapabilityHash &&
     proof.sessionCapabilityHash === sessionCapabilityHash &&
-    proof.invitationCapabilityHash === invitationCapabilityHash &&
-    Date.parse(now) < Date.parse(proof.expiresAt)
+    proof.invitationCapabilityHash === invitationCapabilityHash
   );
+}
+
+export function isInvitationProofUnexpired(proof: TaskBoardInvitationProof, now: string): boolean {
+  return Date.parse(now) < Date.parse(proof.expiresAt);
 }
 
 export function canWorkerPerformAssignedMutation(

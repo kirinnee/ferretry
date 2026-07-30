@@ -60,6 +60,7 @@ export interface TaskBoardBinding {
 export interface TaskBoardChildGrantIntent {
   readonly requestId: string;
   readonly fingerprint: string;
+  readonly boardEpoch: number;
   readonly sourceGrantId: string;
   readonly sourceSessionId: string;
   readonly sourceSessionIncarnation: string;
@@ -72,6 +73,10 @@ export interface TaskBoardChildGrantIntent {
   readonly requestedRole: ChildTaskBoardRole;
   readonly allowedActions: readonly TaskBoardAction[];
   readonly coordinatorGrantId: string;
+  readonly coordinatorSessionId: string;
+  readonly coordinatorSessionIncarnation: string;
+  readonly coordinatorRuntimeGeneration: number;
+  readonly coordinatorLineage: readonly string[];
   readonly coordinatorEpoch: number;
   readonly createdAt: string;
   readonly expiresAt: string;
@@ -85,6 +90,7 @@ export interface TaskBoardChildGrantIntent {
 export interface TaskBoardInvitation {
   readonly requestId: string;
   readonly fingerprint: string;
+  readonly boardEpoch: number;
   readonly sourceGrantId: string;
   readonly sourceSessionId: string;
   readonly sourceSessionIncarnation: string;
@@ -93,6 +99,10 @@ export interface TaskBoardInvitation {
   readonly targetSessionIncarnation: string;
   readonly targetRuntimeGeneration: number;
   readonly coordinatorGrantId: string;
+  readonly coordinatorSessionId: string;
+  readonly coordinatorSessionIncarnation: string;
+  readonly coordinatorRuntimeGeneration: number;
+  readonly coordinatorLineage: readonly string[];
   readonly coordinatorEpoch: number;
   readonly createdAt: string;
   readonly expiresAt: string;

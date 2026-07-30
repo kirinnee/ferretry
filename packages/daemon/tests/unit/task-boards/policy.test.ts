@@ -137,6 +137,7 @@ describe('tree-scoped membership predicates', () => {
     const invitation: TaskBoardInvitation = {
       requestId: 'invite-1',
       fingerprint: 'invite-fingerprint',
+      boardEpoch: 1,
       sourceGrantId: 'grant-root',
       sourceSessionId: 'root',
       sourceSessionIncarnation: 'root-incarnation',
@@ -145,6 +146,10 @@ describe('tree-scoped membership predicates', () => {
       targetSessionIncarnation: 'external-incarnation',
       targetRuntimeGeneration: 1,
       coordinatorGrantId: 'grant-coordinator',
+      coordinatorSessionId: 'coordinator',
+      coordinatorSessionIncarnation: 'coordinator-incarnation',
+      coordinatorRuntimeGeneration: 1,
+      coordinatorLineage: ['coordinator', 'root'],
       coordinatorEpoch: 1,
       createdAt: at,
       expiresAt: '2026-07-31T12:00:00.000Z',
@@ -167,6 +172,7 @@ describe('tree-scoped membership predicates', () => {
     const invitation: TaskBoardInvitation = {
       requestId: 'invite-1',
       fingerprint: 'invite-fingerprint',
+      boardEpoch: 1,
       sourceGrantId: 'grant-root',
       sourceSessionId: 'root',
       sourceSessionIncarnation: 'root-incarnation',
@@ -175,6 +181,10 @@ describe('tree-scoped membership predicates', () => {
       targetSessionIncarnation: 'external-incarnation',
       targetRuntimeGeneration: 1,
       coordinatorGrantId: 'grant-coordinator',
+      coordinatorSessionId: 'coordinator',
+      coordinatorSessionIncarnation: 'coordinator-incarnation',
+      coordinatorRuntimeGeneration: 1,
+      coordinatorLineage: ['coordinator', 'root'],
       coordinatorEpoch: 1,
       createdAt: at,
       expiresAt: '2026-07-31T12:00:00.000Z',
@@ -293,6 +303,7 @@ describe('capability predicates', () => {
     const invitation: TaskBoardInvitation = {
       requestId: 'invite-1',
       fingerprint: 'invite-fingerprint',
+      boardEpoch: 1,
       sourceGrantId: 'grant-root',
       sourceSessionId: 'root',
       sourceSessionIncarnation: 'root-incarnation',
@@ -301,6 +312,10 @@ describe('capability predicates', () => {
       targetSessionIncarnation: identity.incarnation,
       targetRuntimeGeneration: 1,
       coordinatorGrantId: 'grant-coordinator',
+      coordinatorSessionId: 'coordinator',
+      coordinatorSessionIncarnation: 'coordinator-incarnation',
+      coordinatorRuntimeGeneration: 1,
+      coordinatorLineage: ['coordinator', 'root'],
       coordinatorEpoch: 1,
       createdAt: at,
       expiresAt: '2026-07-31T12:00:00.000Z',
@@ -328,7 +343,6 @@ describe('capability predicates', () => {
       session: identity,
       sessionCapabilityHash: 'wrong-session-hash',
       invitationCapabilityHash: 'invitation-hash',
-      now: at,
     });
 
     // Assert
@@ -341,6 +355,7 @@ describe('capability predicates', () => {
     const invitation: TaskBoardInvitation = {
       requestId: 'invite-1',
       fingerprint: 'invite-fingerprint',
+      boardEpoch: 1,
       sourceGrantId: 'grant-root',
       sourceSessionId: 'root',
       sourceSessionIncarnation: 'root-incarnation',
@@ -349,6 +364,10 @@ describe('capability predicates', () => {
       targetSessionIncarnation: identity.incarnation,
       targetRuntimeGeneration: 1,
       coordinatorGrantId: 'grant-coordinator',
+      coordinatorSessionId: 'coordinator',
+      coordinatorSessionIncarnation: 'coordinator-incarnation',
+      coordinatorRuntimeGeneration: 1,
+      coordinatorLineage: ['coordinator', 'root'],
       coordinatorEpoch: 1,
       createdAt: at,
       expiresAt: '2026-07-31T12:00:00.000Z',
@@ -376,7 +395,6 @@ describe('capability predicates', () => {
       session: identity,
       sessionCapabilityHash: identity.sessionCapabilityHash,
       invitationCapabilityHash: 'invitation-hash',
-      now: at,
     });
 
     // Assert

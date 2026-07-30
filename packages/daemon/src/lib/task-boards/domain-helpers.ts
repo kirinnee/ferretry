@@ -6,6 +6,7 @@ import type {
   TaskBoardAuditEvent,
   TaskBoardBinding,
   TaskBoardGrant,
+  TaskBoardRepositoryState,
   TaskBoardSession,
 } from './types.ts';
 
@@ -78,4 +79,25 @@ export function appendTaskBoardAudit(
     detail: input.detail ?? {},
   };
   return { ...board, audit: [...board.audit, audit], updatedAt: input.at };
+}
+
+export function replaceTaskBoard(
+  state: TaskBoardRepositoryState,
+  board: TaskBoard,
+  extra: Partial<Pick<TaskBoardRepositoryState, 'bindings' | 'invitationProofs' | 'creations'>> = {},
+): TaskBoardRepositoryState {
+  return {
+    ...state,
+    ...extra,
+    revision: state.revision + 1,
+    boards: state.boards.map(candidate => (candidate.id === board.id ? board : candidate)),
+  };
+}
+
+export function taskBoardIntentExpiry(at: string): string {
+  return new Date(Date.parse(at) + 24 * 60 * 60 * 1_000).toISOString();
+}
+
+export function sameTaskBoardStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
