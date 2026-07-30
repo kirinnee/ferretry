@@ -1,0 +1,11 @@
+{"timestamp":"2026-01-02T03:04:05.000Z","type":"response_item","payload":{"type":"message","id":"message-user","role":"user","content":[{"type":"input_text","text":"Please inspect the Codex fixture."},{"type":"input_image","image_url":"fixture://image-1","name":"fixture.png"}]}}
+{"timestamp":"2026-01-02T03:04:06.000Z","type":"response_item","payload":{"type":"message","id":"message-assistant","role":"assistant","content":[{"type":"output_text","text":"I will inspect it."}]}}
+{"timestamp":"2026-01-02T03:04:06.500Z","type":"response_item","payload":{"type":"reasoning","id":"reasoning-1","summary":[{"type":"summary_text","text":"Inspect the bounded fixture."}]}}
+{"timestamp":"2026-01-02T03:04:07.000Z","type":"response_item","payload":{"type":"function_call","call_id":"call-question","name":"request_user_input","arguments":"{\"questions\":[{\"header\":\"Choice\",\"question\":\"Which synthetic option?\",\"options\":[{\"label\":\"Alpha\",\"description\":\"Use alpha.\"}],\"multi_select\":false}]}"}}
+{"timestamp":"2026-01-02T03:04:08.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-question","output":"Alpha selected.","status":"completed"}}
+{"timestamp":"2026-01-02T03:04:09.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"cached_input_tokens":10,"output_tokens":5,"reasoning_output_tokens":2},"model_context_window":128000}}}
+{"timestamp":"2026-01-02T03:04:10.000Z","type":"event_msg","payload":{"type":"thread_settings_applied","thread_settings":{"model":"gpt-synthetic","reasoning_effort":"high"}}}
+{"timestamp":"2026-01-02T03:04:11.000Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+{"timestamp":"2026-01-02T03:04:12.000Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}
+{"timestamp":"2026-01-02T03:04:13.000Z","type":"compacted","payload":{"message":"Synthetic context summary."}}
+{"timestamp":"2026-01-02T03:04:14.000Z","type":"event_msg","payload":{"type":"stream_error","code":"fixture_error","message":"Synthetic recoverable error."}}
