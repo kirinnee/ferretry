@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  precommit:
+    name: Pre-Commit
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Run pre-commit
+        run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
+
+  test:
+    name: ${{ matrix.mode == 'int' && 'Integration Tests' || 'Unit Tests' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [unit, int]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Run ${{ matrix.mode }} tests
+        env:
+          TEST_MODE: ${{ matrix.mode }}
+        run: nix develop .#ci -c ./scripts/ci/test.sh "$TEST_MODE"
+      - name: Upload ${{ matrix.mode }} coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.mode }}
+          path: coverage/${{ matrix.mode }}
+          if-no-files-found: warn
+
+  compile:
+    name: Compile Binaries
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Cross-compile standalone binaries
+        run: nix develop .#ci -c ./scripts/release/compile.sh
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin/
+          if-no-files-found: error
+
+  sit:
+    name: SIT
+    needs: compile
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Download compiled binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin
+      - name: Run SIT
+        run: nix develop .#ci -c ./scripts/ci/test.sh sit
+
+  smoke:
+    name: Smoke ${{ matrix.target }}
+    needs: compile
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64-baseline
+            runs_on: ubuntu-latest
+          - target: linux-arm64
+            runs_on: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runs_on: macos-14
+    runs-on: ${{ matrix.runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Download compiled binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin
+      # download-artifact drops the exec bit; smoke.sh restores it. The binary name is derived
+      # from the CLI package's bin key so the matrix stays rename-proof.
+      - name: Smoke
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          prefix="$(jq -r '.bin | to_entries[0].key' packages/cli/package.json)"
+          ./scripts/release/smoke.sh "dist/bin/${prefix}-${TARGET}"

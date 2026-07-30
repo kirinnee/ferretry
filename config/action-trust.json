@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "actions": {
+    "actions/checkout": "trusted",
+    "actions/download-artifact": "trusted",
+    "actions/upload-artifact": "trusted",
+    "cachix/install-nix-action": "trusted"
+  }
+}
