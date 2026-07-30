@@ -194,8 +194,21 @@ persists; F3's PR must include the tree as documentation.
 - **The lead merges.** Kirin has waived the usual "never merge yourself" rule for this program.
   Merge requires: CI green, the three gates green, ownership respected, and the PR description
   listing bugs fixed and behavior deliberately changed.
-- **Concurrency ceiling: 6 open PRs.** Not a resource limit — a review-bandwidth and
-  rebase-thrash limit. The spine (§7) runs at 1.
+- **Concurrency: run wide — 12–16 open PRs, not 6.** An earlier draft capped this at 6 for
+  "review bandwidth", which made the lead the bottleneck and produced a wildly pessimistic
+  schedule. The original kteam was built in ~3 days with an agent fleet; a port that already knows
+  its own design should not take longer than the greenfield build. Worktrees make file collisions
+  impossible and CI jobs run under a minute, so the real limits are CI capacity and review
+  throughput — and review is parallelizable (below). The spine (§7) is the only part that runs at 1.
+- **Review is delegated first-pass, architectural second-pass.** Every PR gets a sol reviewer
+  agent that checks the definition of done mechanically — tests present and meaningful, gates run,
+  no weakened gate, ownership respected, E2E journey included where a capability landed. The lead
+  then reviews architecture and correctness only. This is what keeps the lead from serializing the
+  whole program, and it is why the ceiling can be high.
+- **The gates are the floor and they do not care how many agents run.** `pre-commit`, `task test`,
+  the snapshot publish, and the E2E tier (§9.1) pass or they do not. Going wide multiplies output,
+  not permission to skip them — the S2 first pass, which produced 2,733 lines of schemas with zero
+  tests, is exactly what volume without a floor looks like.
 - A unit reports done by opening the PR and reporting its number. Claims of completion without a
   green PR are not completion.
 
@@ -387,8 +400,49 @@ This is load-bearing. A port is proven by:
 - **Tier discipline** per `docs/standards/testing`: pure policy in `src/lib` → unit tier with a
   full ledger; adapters → integration tier against fakes and temp dirs; whole-CLI journeys →
   SIT through the compiled binary.
-- The daemon is never started against the real state home in CI. Where an end-to-end check is
-  genuinely needed, it runs against a temp `FY_HOME` on a port drawn from an ephemeral range.
+
+### 9.1 The E2E tier — Ferretry builds its own, and it is not optional
+
+A refactor-while-porting has **no oracle**: unlike a faithful port, the result cannot be diffed
+against the original. Unit and integration tests prove the pieces; only end-to-end proves the
+product still does its job. So Ferretry grows its own E2E tier rather than inheriting kteam's
+tests, and it is built **early** — if E2E arrives late, nothing gets E2E'd.
+
+E2E means the real thing: boot `fyd`, drive it with the compiled `fy`, run an agent in a real tmux
+pane, and observe events over the WebSocket. Done naively that would spend real API quota, spawn
+real agents, and touch the live tmux server. Four isolation mechanisms make it safe, and all four
+are mandatory:
+
+1. **A dedicated tmux server.** Every E2E run uses its own socket (`tmux -L fy-e2e-<run>` /
+   `-S <tmpdir>/tmux.sock`). Ferretry's panes are then invisible to — and cannot touch — the live
+   tmux server running Kirin's fleet. This is the difference between the integration tier's _fake_
+   tmux (assert the commands issued) and E2E's _real but isolated_ tmux (assert real pane
+   behavior). Both exist; neither replaces the other.
+2. **A fake harness binary.** A stub on `PATH` that impersonates a Claude/Codex wrapper and emits
+   scripted transcript output, so "start a session", "send a message", "the agent answered" are
+   all exercised with **zero API spend and no real agent**. It is the harness analogue of the fake
+   tmux, and it is what makes session-lifecycle E2E affordable enough to run in CI.
+3. **Temp `FY_HOME` + ephemeral ports.** Never the real state home, never a fixed port. A test
+   that resolves the real home or binds a known port is a broken test.
+4. **A no-live-state assertion.** The run fails if any path resolves under `~/.kteam` or the real
+   `~/.ferretry`. Belt and braces with the `no-legacy-state` gate, which catches literals but not
+   runtime resolution.
+
+Journeys the tier must eventually cover, each added by the unit that lands the capability:
+daemon boot and shutdown · session start/send/interrupt/stop · transcript capture · task and
+shared-board mutations with ACL enforcement · attention raise and resolve · terminal
+attach/reap · file read/write · fleet manifest apply and consumption · the WebSocket event stream
+including reconnect · version-skew rejection. The PWA gets browser-level journeys via Playwright
+(already in the stack — kteam ships `browser-playwright-client.ts`).
+
+**Sequencing:** the E2E harness (isolation, fake tmux socket, fake harness binary, fixture helpers,
+task + config wiring) is its own unit, landing right after the spine. From then on, **a unit that
+lands a user-visible capability adds its E2E journey in the same PR** — that is part of its
+definition of done, not a follow-up.
+
+CI placement: E2E is its own job, not folded into the unit/int matrix, because it is slower and has
+different isolation needs. It must still gate merges — a green unit suite on a broken product is
+precisely the failure mode a no-oracle refactor invites.
 
 ## 10. Phase 3 — mapping the handover backlog
 
