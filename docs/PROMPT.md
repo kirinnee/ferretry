@@ -10,7 +10,7 @@ home-manager repo into a standalone daemon + PWA + CLI product.
 ## What we are building
 
 - **`fy`** — the CLI (humans _and_ agents inside panes use it). Binary name is `fy`; the product
-  name is `ferretry`. Two-name model — see `docs/standards/architecture.md`.
+  name is `ferretry`. Two-name model — see `docs/standards/architecture/index.md`.
 - **`fyd`** — the per-host daemon: owns detached agent sessions (tmux), transcripts, tasks,
   attention, warden, terminals, remote browser, fleet provisioning. HTTP + WebSocket API.
   State home: `~/.ferretry` (files authoritative, SQLite = disposable index).
