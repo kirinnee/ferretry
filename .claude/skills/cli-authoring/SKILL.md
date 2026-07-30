@@ -9,18 +9,21 @@ Adapted from the diene `bun-cli` baseline. The CLI is a compiled Bun binary wire
 explicit dependency injection. These rules are load-bearing; deviations break tests, gates,
 or the release pipeline.
 
-## Identity is derived, never written
+## Identity is derived, never written (two-name model)
 
-The `bin` key in `packages/cli/package.json` is the single source of the product name and the
-entry path. Everything else derives it:
+The PRODUCT name (repo, goreleaser `project_name`, cask, tap) is the root `package.json`
+`name` field. The BINARY name and entry path are the `bin` key in
+`packages/cli/package.json`. Everything else derives them:
 
 ```bash
+jq -r '.name' package.json                                    # product name
 jq -r '.bin | to_entries[0].key' packages/cli/package.json    # binary name
 jq -r '.bin | to_entries[0].value' packages/cli/package.json  # entry file
 ```
 
-Never hardcode the name in scripts, Taskfiles, tests, or code. The few static files that must
-carry it (GoReleaser config, cask, installer, docs) are rewritten by `scripts/local/rename.sh`.
+Never hardcode either name in scripts, Taskfiles, tests, or code. The few static files that
+must carry them (GoReleaser config, cask, installer, docs) are rewritten by
+`scripts/local/rename.sh --product <name>` / `--bin <name>`.
 
 ## Composition root (`packages/cli/bin/<name>.ts`)
 

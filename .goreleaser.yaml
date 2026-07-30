@@ -1,14 +1,15 @@
 # A Go stub is built per target and the shim swaps the prebuilt Bun binary in (prebuilt builder
 # is Pro-only); GoReleaser owns archives, checksums, the cask, and the GitHub release.
-# Name-bearing fields below are rewritten by scripts/local/rename.sh.
+# Two-name model: project_name is the PRODUCT (matches root package.json name), binary/archive
+# names are the BINARY (matches the CLI package's bin key). scripts/local/rename.sh rewrites both.
 version: 2
 
-project_name: pitwall
+project_name: ferretry
 
 builds:
   - id: bun
     main: ./goreleaser.go
-    binary: pitwall
+    binary: fy
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     # Only darwin arm64 ships (no intel mac).
@@ -23,7 +24,7 @@ archives:
   - id: archive
     ids: [bun]
     formats: [tar.gz]
-    name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
+    name_template: 'fy_{{ .Os }}_{{ .Arch }}'
 
 checksum:
   name_template: 'checksums.txt'
@@ -31,27 +32,27 @@ checksum:
 release:
   github:
     owner: kirinnee
-    name: pitwall
+    name: ferretry
   # install.sh is served from the GitHub release (see INSTALLATION.md's one-line installer).
   extra_files:
     - glob: scripts/release/install.sh
 
 # The cask is committed INTO THIS REPO under Casks/ (no separate homebrew-tap repo):
-#   brew tap kirinnee/pitwall https://github.com/kirinnee/pitwall && brew install --cask pitwall
+#   brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry && brew install --cask ferretry
 homebrew_casks:
-  - name: pitwall
+  - name: ferretry
     ids: [archive]
-    binaries: [pitwall]
+    binaries: [fy]
     repository:
       owner: kirinnee
-      name: pitwall
+      name: ferretry
     directory: Casks
-    homepage: https://github.com/kirinnee/pitwall
+    homepage: https://github.com/kirinnee/ferretry
     description: Command-line client for the per-host agent daemon
     # The Bun binary ships unsigned; strip the macOS quarantine attribute on install.
     hooks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pitwall"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy"]
           end

@@ -2,10 +2,11 @@
 set -euo pipefail
 
 # One-line installer served from the GitHub release:
-#   curl -fsSL https://github.com/kirinnee/pitwall/releases/latest/download/install.sh | bash
-# REPO/BINARY are rewritten by scripts/local/rename.sh when the product is renamed.
-REPO="kirinnee/pitwall"
-BINARY="pitwall"
+#   curl -fsSL https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
+# REPO carries the product name, BINARY the CLI binary name — both rewritten by
+# scripts/local/rename.sh when either changes.
+REPO="kirinnee/ferretry"
+BINARY="fy"
 
 VERSION="${VERSION:-latest}"
 BIN_DIR="${BIN_DIR:-${HOME}/.local/bin}"

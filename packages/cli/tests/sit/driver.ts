@@ -1,5 +1,5 @@
 import { CommanderError } from 'commander';
-import { createProgram, registerDomain } from '../../bin/pitwall';
+import { createProgram, registerDomain } from '../../bin/fy';
 import { BunShell } from '../../src/adapters/system/shell';
 import type { ICliIo } from '../../src/adapters/terminal/console-io';
 import type { IProgressBar } from '../../src/adapters/terminal/progress';

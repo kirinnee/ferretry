@@ -1,12 +1,14 @@
-# pitwall (working name)
+# ferretry
 
-Personal agent-orchestration product: a per-host daemon, one PWA, and a single CLI binary.
-This repo is a Bun-workspaces monorepo scaffolded from the diene `bun-cli` conventions.
+Personal agent-orchestration product: a per-host daemon, one PWA, and a single CLI binary
+(**`fy`**; the daemon will be `fyd` later). This repo is a Bun-workspaces monorepo scaffolded
+from the diene `bun-cli` conventions.
 
-> **The name is a placeholder.** The `bin` key in `packages/cli/package.json` is the ONLY
-> source of the product name — Taskfile vars, compile, goreleaser shim, and smoke scripts all
-> derive it with `jq -r '.bin | to_entries[0].key'`. To rename the product, run
-> `scripts/local/rename.sh <new-name>` and rename the repo; nothing else hardcodes it.
+> **Two-name model.** The PRODUCT name (`ferretry`) lives in the root `package.json` `name`
+> field; the BINARY name (`fy`) lives in the `bin` key of `packages/cli/package.json`. Taskfile
+> vars, compile, goreleaser shim, and smoke scripts all derive the binary name with
+> `jq -r '.bin | to_entries[0].key'`. To change either, run
+> `scripts/local/rename.sh --product <name>` and/or `--bin <name>`; nothing else hardcodes them.
 
 ## Layout
 

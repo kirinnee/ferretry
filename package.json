@@ -1,8 +1,8 @@
 {
-  "name": "workspace-root",
+  "name": "ferretry",
   "private": true,
   "version": "0.0.0",
-  "description": "Bun workspaces monorepo — the CLI package's bin key is the single source of the product name",
+  "description": "Bun workspaces monorepo — this name field is the product name; the CLI package's bin key is the binary name",
   "type": "module",
   "workspaces": [
     "packages/*"

@@ -5,9 +5,11 @@ This file is a pure index — the linked documents own their subjects.
 
 ## Non-negotiable invariants
 
-- **Name single-sourcing**: the `bin` key in `packages/cli/package.json` is the only place the
-  product name is written. Scripts, Taskfiles, and tests derive it (`jq -r '.bin | to_entries[0].key'`).
-  Renames go through `scripts/local/rename.sh <new-name>` — never hand-sprinkle the name.
+- **Name single-sourcing (two-name model)**: the PRODUCT name (`ferretry`) is the root
+  `package.json` `name`; the BINARY name (`fy`) is the `bin` key in `packages/cli/package.json`.
+  Scripts, Taskfiles, and tests derive the binary name (`jq -r '.bin | to_entries[0].key'`).
+  Renames go through `scripts/local/rename.sh --product <name> | --bin <name>` — never
+  hand-sprinkle either name.
 - **No `@semantic-release/github`**: GoReleaser owns the GitHub release (`cd.yaml` on the `v*.*.*` tag).
 - **The Homebrew cask is committed into this repo** under `Casks/` — there is no separate tap repo.
 
