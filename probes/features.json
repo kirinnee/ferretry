@@ -1,0 +1,27 @@
+[
+  {
+    "template": "cli",
+    "name": "direnv",
+    "class": "smoke"
+  },
+  {
+    "template": "cli",
+    "name": "bun-typecheck",
+    "class": "gate"
+  },
+  {
+    "template": "cli",
+    "name": "cli-goreleaser-snapshot",
+    "class": "smoke"
+  },
+  {
+    "template": "cli",
+    "name": "cli-homebrew-cask",
+    "class": "gate"
+  },
+  {
+    "template": "cli",
+    "name": "release-artifacts-present",
+    "class": "presence"
+  }
+]
