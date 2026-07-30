@@ -13,7 +13,7 @@ if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
   [[ -n ${CLI_BIN:-} ]] && chmod +x "${CLI_BIN}"
   echo "🧪 Running sit tests..."
-  bun test --config=bunfig.sit.toml
+  SIT_DRIVER=binary bun test --config=bunfig.sit.toml
   echo "✅ sit tests passed"
   exit 0
 fi
