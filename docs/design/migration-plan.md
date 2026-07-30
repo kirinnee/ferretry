@@ -62,6 +62,11 @@ in the same PR that creates it, never later.
 - No read path, migration path, or dual-format reader for `~/.kteam`.
 - `~/.ferretry`'s on-disk layout is **redesigned** where kteam's was poor (§5).
 - kteam's `LegacyTaskScope` is dropped; central scope only.
+- **Ferretry starts empty** (confirmed by Kirin, 2026-07-30). Existing kteam sessions, tasks,
+  boards, transcripts, and analytics do **not** carry over. There is no import tool and none is
+  planned. Consequences, all simplifying: F3 designs the state-home layout with a free hand and
+  only one format to support; no unit writes a converter; and the first `fyd` boot creates a
+  fresh home rather than detecting or upgrading anything.
 
 **Correction (verified by reading the source):** an earlier draft assumed `migrate-preflight.ts`
 (1,036 lines) plus `migrate-graph.ts` (289) were kteam-history migration and could be dropped.
@@ -434,3 +439,6 @@ Notes that change the backlog:
    one consequence that is expensive to reverse later, so please confirm it is intended.
    (Note: this is about _data_, not features — the safe-migration gate and every other capability
    are ported. See the §1.3 correction.)
+
+   **Answered by Kirin, 2026-07-30: yes — start empty.** No import tool, one on-disk format, a
+   fresh home on first boot. Folded into §1.3; no decision pending.
