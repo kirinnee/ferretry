@@ -7,6 +7,8 @@ contract="${1:-}"
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
+product="$(jq -r '.name' package.json)"
+[ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
   for each in arch name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity; do
@@ -24,7 +26,7 @@ arch)
   rg -q "from ['\"](\\.\\./)+adapters(?:/|['\"])" "${cli_pkg}/src/lib" && echo '❌ src/lib imports an adapter (forbidden upward dependency)' >&2 && exit 1
   ;;
 name-single-source)
-  # Derivation rule: scripts and Taskfiles must read the name from the bin key, never hardcode it.
+  # Derivation rule: scripts and Taskfiles must read the binary name from the bin key, never hardcode it.
   rg -qF ".bin | to_entries[0].key" Taskfile.yaml
   for script in scripts/release/compile.sh scripts/release/goreleaser-shim.sh scripts/release/smoke.sh; do
     rg -qF ".bin | to_entries[0].key" "${script}" || {
@@ -32,9 +34,14 @@ name-single-source)
       exit 1
     }
   done
-  # The static name-bearing files must all agree with the bin key (rename.sh keeps them in sync).
-  rg -qF "project_name: ${name}" .goreleaser.yaml
-  test -f "Casks/${name}.rb"
+  # Two-name model: static PRODUCT-bearing files agree with the root package.json name, and
+  # static BINARY-bearing files agree with the bin key (rename.sh keeps both in sync).
+  rg -qF "project_name: ${product}" .goreleaser.yaml
+  test -f "Casks/${product}.rb"
+  rg -qF "module ${product}" go.mod
+  rg -qF "REPO=\"kirinnee/${product}\"" scripts/release/install.sh
+  rg -qF "binary: ${name}" .goreleaser.yaml
+  rg -qF "binary \"${name}\"" "Casks/${product}.rb"
   rg -qF "BINARY=\"${name}\"" scripts/release/install.sh
   ;;
 release-backup-order)
@@ -56,10 +63,12 @@ release-artifacts)
     ([.release.extra_files[].glob] | index("scripts/release/install.sh") != null)' >/dev/null
   ;;
 homebrew-cask)
-  # The cask must live in THIS repo (owner repo == project) under Casks/, with the quarantine hook.
-  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" '
+  # The cask is named after the PRODUCT, installs the BINARY, lives in THIS repo (owner repo ==
+  # project) under Casks/, and strips the quarantine attribute post-install.
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --arg product "${product}" '
     (.homebrew_casks | length) > 0 and
-    (.homebrew_casks[0].name == $name) and
+    (.homebrew_casks[0].name == $product) and
+    (.homebrew_casks[0].binaries == [$name]) and
     (.homebrew_casks[0].repository.name == .project_name) and
     (.homebrew_casks[0].directory == "Casks") and
     ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine"))' >/dev/null
@@ -75,8 +84,9 @@ installer-timeouts)
   [ -n "${bad_lines}" ] && printf '❌ curl missing timeout guard:\n%s\n' "${bad_lines}" >&2 && exit 1
   ;;
 installation-parity)
+  # Archives are named after the BINARY (the archive template, installer, and docs must agree).
   rg -qF 'scripts/release/install.sh' .goreleaser.yaml
-  rg -qF "name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'" .goreleaser.yaml
+  rg -qF "name_template: '${name}_{{ .Os }}_{{ .Arch }}'" .goreleaser.yaml
   rg -qF 'checksums.txt' .goreleaser.yaml
   rg -qF "${name}_<os>_<arch>.tar.gz" INSTALLATION.md
   ;;
