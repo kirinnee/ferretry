@@ -62,9 +62,18 @@ pre-commit-lib.run {
 
     a-cli-contracts = {
       enable = true;
-      name = "CLI release contracts";
+      name = "Workspace and CLI release contracts";
       entry = validator "scripts/validate/cli-contracts.sh all";
-      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|packages/cli/.*|scripts/release/.*)$";
+      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|go\\.mod|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    a-no-legacy-state = {
+      enable = true;
+      name = "No legacy package state";
+      entry = validator "scripts/validate/no-legacy-state.sh";
+      files = "^(packages/.*|scripts/validate/no-legacy-state\\.sh)$";
       pass_filenames = false;
       language = "system";
     };
@@ -109,7 +118,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Knip repository dead code";
       entry = bun-tool "knip --config knip.json";
-      files = "(^package\\.json$|^tsconfig\\.json$|^knip\\.json$|\\.(ts|tsx)$)";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.json$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };
@@ -118,7 +127,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Knip production dead code";
       entry = bun-tool "knip --config knip.production.json";
-      files = "(^package\\.json$|^tsconfig\\.json$|^knip\\.production\\.json$|\\.(ts|tsx)$)";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.production\\.json$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };
@@ -127,7 +136,7 @@ pre-commit-lib.run {
       enable = true;
       name = "TypeScript typecheck";
       entry = bun-tool "tsc --noEmit";
-      files = "(^package\\.json$|^tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
       pass_filenames = false;
       language = "system";
     };

@@ -15,32 +15,34 @@ invariant fits in one file, a type or a test is the better home for it.
 
 ## Validators
 
-| Script                 | Runs as                                  | Enforces                             |
-| ---------------------- | ---------------------------------------- | ------------------------------------ |
-| `cli-contracts.sh`     | `a-cli-contracts`                        | the nine CLI/release contracts below |
-| `action-pins.sh`       | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy         |
-| `commit-msg.sh`        | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects         |
-| `executable-shells.sh` | `a-enforce-exec`                         | every tracked `*.sh` is executable   |
+| Script                 | Runs as                                  | Enforces                                                |
+| ---------------------- | ---------------------------------------- | ------------------------------------------------------- |
+| `cli-contracts.sh`     | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below           |
+| `action-pins.sh`       | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                            |
+| `commit-msg.sh`        | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                            |
+| `executable-shells.sh` | `a-enforce-exec`                         | every tracked `*.sh` is executable                      |
+| `no-legacy-state.sh`   | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 
-## CLI and release contracts
+## Workspace, CLI, and release contracts
 
 `scripts/validate/cli-contracts.sh <name>` runs one contract; `all` runs every one. Each derives
 the PRODUCT name from the root `package.json` and the BINARY name from the CLI package's `bin`
 key first, so the checks survive a rename ([Architecture](../architecture/index.md)).
 
-| Contract               | What it guarantees                                                                                                                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `arch`                 | the entry file named by `bin` exists, the terminal adapter exists, and `src/lib/` contains no terminal IO (`console.*`, `process.std*`, chalk/ora/cli-progress/inquirer) and no imports from `adapters/`    |
-| `name-single-source`   | the Taskfile and the compile/shim/smoke scripts derive the binary name from `bin`, and every static file that must spell a name out (GoReleaser, cask, `go.mod`, installer) agrees with its source of truth |
-| `release-backup-order` | the first `@semantic-release/exec` step is the changelog backup, and `@semantic-release/github` is absent                                                                                                   |
-| `changelog-asset`      | `Changelog.old.md` is committed by the release commit and `publish.sh` passes `--release-notes ./IncrementalChangelog.md`                                                                                   |
-| `release-artifacts`    | GoReleaser produces archives and a checksum file, and ships `install.sh` as a release extra file                                                                                                            |
-| `homebrew-cask`        | the cask is named after the product, installs the binary, targets `Casks/` in this repository, and strips the macOS quarantine attribute post-install                                                       |
-| `installer-checksum`   | `install.sh` downloads `checksums.txt` and verifies it (`sha256sum -c` / `shasum -a 256`) before installing                                                                                                 |
-| `installer-timeouts`   | every `curl` in `scripts/release/` carries `--connect-timeout` and `--max-time`                                                                                                                             |
-| `installation-parity`  | the archive naming, the installer, and `INSTALLATION.md` describe the same artifacts — docs cannot drift from what is published                                                                             |
+| Contract                   | What it guarantees                                                                                                                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `arch`                     | the CLI entry and terminal adapter exist, and every package's `src/lib/` contains no terminal IO (`console.*`, `process.*`, chalk/ora/cli-progress/inquirer) and no imports from `adapters/`                |
+| `workspace-package-scopes` | every non-CLI workspace package is named `@<PRODUCT>/<directory>`; the load-bearing CLI name remains equal to its `bin` key                                                                                 |
+| `name-single-source`       | the Taskfile and the compile/shim/smoke scripts derive the binary name from `bin`, and every static file that must spell a name out (GoReleaser, cask, `go.mod`, installer) agrees with its source of truth |
+| `release-backup-order`     | the first `@semantic-release/exec` step is the changelog backup, and `@semantic-release/github` is absent                                                                                                   |
+| `changelog-asset`          | `Changelog.old.md` is committed by the release commit and `publish.sh` passes `--release-notes ./IncrementalChangelog.md`                                                                                   |
+| `release-artifacts`        | GoReleaser produces archives and a checksum file, and ships `install.sh` as a release extra file                                                                                                            |
+| `homebrew-cask`            | the cask is named after the product, installs the binary, targets `Casks/` in this repository, and strips the macOS quarantine attribute post-install                                                       |
+| `installer-checksum`       | `install.sh` downloads `checksums.txt` and verifies it (`sha256sum -c` / `shasum -a 256`) before installing                                                                                                 |
+| `installer-timeouts`       | every `curl` in `scripts/release/` carries `--connect-timeout` and `--max-time`                                                                                                                             |
+| `installation-parity`      | the archive naming, the installer, and `INSTALLATION.md` describe the same artifacts — docs cannot drift from what is published                                                                             |
 
 Why these and not others: each one has a failure mode that is invisible locally and expensive
 remotely. A missing checksum verification ships a silently corruptible installer; a renamed
@@ -58,8 +60,9 @@ policy in [CI/CD](../ci-cd/index.md).
 ## Running them
 
 ```bash
-./scripts/validate/cli-contracts.sh all          # every CLI contract
+./scripts/validate/cli-contracts.sh all          # every workspace/CLI/release contract
 ./scripts/validate/cli-contracts.sh homebrew-cask # one, while iterating
+./scripts/validate/no-legacy-state.sh             # package migration boundary
 ./scripts/validate/action-pins.sh trusted
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```

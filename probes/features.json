@@ -11,6 +11,16 @@
   },
   {
     "template": "cli",
+    "name": "no-legacy-state",
+    "class": "gate"
+  },
+  {
+    "template": "cli",
+    "name": "workspace-package-scopes",
+    "class": "gate"
+  },
+  {
+    "template": "cli",
     "name": "cli-goreleaser-snapshot",
     "class": "smoke"
   },
