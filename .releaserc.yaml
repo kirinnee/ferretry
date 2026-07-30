@@ -1,0 +1,29 @@
+# Plain semantic-release with the conventional-commits preset.
+# @semantic-release/github is deliberately absent: GoReleaser owns the GitHub release
+# (cd.yaml fires on the v*.*.* tag this pipeline pushes).
+branches:
+  - main
+tagFormat: v${version}
+plugins:
+  - - '@semantic-release/commit-analyzer'
+    - preset: conventionalcommits
+  - - '@semantic-release/release-notes-generator'
+    - preset: conventionalcommits
+  # Backup must run before the changelog plugin rewrites Changelog.md, so publish.sh can diff
+  # this version's section into the release notes.
+  - - '@semantic-release/exec'
+    - prepareCmd: ./scripts/release/backup-changelog.sh
+  - - '@semantic-release/changelog'
+    - changelogFile: Changelog.md
+  - - '@semantic-release/exec'
+    - prepareCmd: './scripts/release/bump.sh ${nextRelease.version}'
+  - - '@semantic-release/git'
+    - message: |-
+        release: ${nextRelease.version}
+
+        ${nextRelease.notes}
+      assets:
+        - Changelog.md
+        - Changelog.old.md
+        - packages/cli/package.json
+        - VERSION

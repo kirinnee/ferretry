@@ -1,0 +1,57 @@
+# A Go stub is built per target and the shim swaps the prebuilt Bun binary in (prebuilt builder
+# is Pro-only); GoReleaser owns archives, checksums, the cask, and the GitHub release.
+# Name-bearing fields below are rewritten by scripts/local/rename.sh.
+version: 2
+
+project_name: pitwall
+
+builds:
+  - id: bun
+    main: ./goreleaser.go
+    binary: pitwall
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    # Only darwin arm64 ships (no intel mac).
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    hooks:
+      post:
+        - cmd: ./scripts/release/goreleaser-shim.sh "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}"
+
+archives:
+  - id: archive
+    ids: [bun]
+    formats: [tar.gz]
+    name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
+
+checksum:
+  name_template: 'checksums.txt'
+
+release:
+  github:
+    owner: kirinnee
+    name: pitwall
+  # install.sh is served from the GitHub release (see INSTALLATION.md's one-line installer).
+  extra_files:
+    - glob: scripts/release/install.sh
+
+# The cask is committed INTO THIS REPO under Casks/ (no separate homebrew-tap repo):
+#   brew tap kirinnee/pitwall https://github.com/kirinnee/pitwall && brew install --cask pitwall
+homebrew_casks:
+  - name: pitwall
+    ids: [archive]
+    binaries: [pitwall]
+    repository:
+      owner: kirinnee
+      name: pitwall
+    directory: Casks
+    homepage: https://github.com/kirinnee/pitwall
+    description: Command-line client for the per-host agent daemon
+    # The Bun binary ships unsigned; strip the macOS quarantine attribute on install.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/pitwall"]
+          end
