@@ -1,13 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { packageRole } from '../../src/lib/index.ts';
+import { FY_VERSION_HEADER, SessionViewSchema } from '../../src/lib/index.ts';
 
 describe('protocol package entry', () => {
-  it('should expose its workspace role', () => {
+  it('should expose the deliberate schema and client-port surface', () => {
     // Act
-    const actual = packageRole;
+    const actual = { header: FY_VERSION_HEADER, schema: SessionViewSchema };
 
     // Assert
-    should(actual).equal('protocol');
+    should(actual.header).equal('x-fy-version');
+    should(actual.schema.safeParse).be.a.Function();
   });
 });

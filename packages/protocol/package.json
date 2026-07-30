@@ -5,7 +5,11 @@
   "description": "Wire schemas and typed client SDK shared by the CLI and PWA",
   "type": "module",
   "exports": {
-    ".": "./src/lib/index.ts"
+    ".": "./src/lib/index.ts",
+    "./client": "./src/adapters/fy-api-client.ts"
   },
-  "types": "./src/lib/index.ts"
+  "types": "./src/lib/index.ts",
+  "dependencies": {
+    "zod": "4.4.3"
+  }
 }

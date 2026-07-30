@@ -1,0 +1,92 @@
+import type { z } from 'zod';
+import type { AnalyticsResponse } from './analytics.ts';
+import type {
+  AttachmentView,
+  CgroupConfigPatch,
+  CgroupConfigView,
+  HealthView,
+  PwaConfigPatch,
+  PwaConfigView,
+  ScratchPlanView,
+  ScratchSweepView,
+  UsageFeedView,
+  WardenConfigPatch,
+  WardenConfigView,
+  WardenRunView,
+  WardenStatusView,
+} from './service.ts';
+import type {
+  FyEvent,
+  SendRequest,
+  SendResult,
+  SessionView,
+  SignalKind,
+  SignalOptions,
+  StartSessionRequestInput,
+} from './session.ts';
+import type { VersionSkew } from './version-skew.ts';
+
+export const FY_VERSION_HEADER = 'x-fy-version';
+export const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
+export const FY_BOARD_CAPABILITY_HEADER = 'x-fy-board-capability';
+
+export interface IFyHttpTransport {
+  send(url: string, init: RequestInit): Promise<Response>;
+}
+
+export interface IFyEventTransport {
+  stream(input: { url: string; token: string; onMessage(value: unknown): void }): Promise<void>;
+}
+
+export interface IFyFileLoader {
+  load(path: string): Promise<{ blob: Blob; filename: string }>;
+}
+
+export interface FyClientOptions {
+  baseUrl: string;
+  token: string;
+  version: string;
+  headers?: RequestInit['headers'];
+  transport?: IFyHttpTransport;
+  eventTransport?: IFyEventTransport;
+  fileLoader?: IFyFileLoader;
+  requestId?: () => string;
+  sleep?: (milliseconds: number) => Promise<void>;
+  onVersionSkew?: (skew: VersionSkew) => void;
+}
+
+export interface IFyApiClient {
+  request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T>;
+  health(): Promise<HealthView>;
+  wardenStatus(): Promise<WardenStatusView>;
+  wardenRun(spawn?: boolean): Promise<WardenRunView>;
+  wardenConfig(): Promise<WardenConfigView>;
+  updateWardenConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
+  cgroupConfig(): Promise<CgroupConfigView>;
+  updateCgroupConfig(patch: CgroupConfigPatch): Promise<CgroupConfigView>;
+  pwaConfig(): Promise<PwaConfigView>;
+  updatePwaConfig(patch: PwaConfigPatch): Promise<PwaConfigView>;
+  usage(): Promise<UsageFeedView>;
+  analytics(query?: string): Promise<AnalyticsResponse>;
+  scratchPlan(limit?: number): Promise<ScratchPlanView[]>;
+  scratchSweep(force?: boolean): Promise<ScratchSweepView>;
+  list(): Promise<SessionView[]>;
+  suggestNames(count?: number): Promise<string[]>;
+  get(id: string): Promise<SessionView>;
+  start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
+  send(id: string, input: SendRequest): Promise<SendResult>;
+  answer(id: string, toolUseId: string, labels: string[], other?: string, responses?: string[]): Promise<SessionView>;
+  interrupt(id: string): Promise<SessionView>;
+  stop(id: string, reason?: string): Promise<SessionView>;
+  resume(id: string, message?: string): Promise<SessionView>;
+  migrate(id: string, agent: string, model?: string, allowContextDowngrade?: boolean): Promise<SessionView>;
+  rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
+  signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
+  remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
+  snapshot(id: string): Promise<string>;
+  logs(id: string, turn?: number): Promise<string>;
+  events(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
+  history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
+  upload(id: string, file: string | Blob, filename?: string): Promise<AttachmentView>;
+  stream(sessionId: string | undefined, after: number, onEvent: (event: FyEvent) => void): Promise<void>;
+}
