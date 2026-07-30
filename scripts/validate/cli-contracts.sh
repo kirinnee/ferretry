@@ -41,6 +41,7 @@ name-single-source)
   rg -qF "module ${product}" go.mod
   rg -qF "REPO=\"kirinnee/${product}\"" scripts/release/install.sh
   rg -qF "binary: ${name}" .goreleaser.yaml
+  rg -qF "package_name: ${name}" .goreleaser.yaml
   rg -qF "binary \"${name}\"" "Casks/${product}.rb"
   rg -qF "BINARY=\"${name}\"" scripts/release/install.sh
   ;;
@@ -89,6 +90,19 @@ installation-parity)
   rg -qF "name_template: '${name}_{{ .Os }}_{{ .Arch }}'" .goreleaser.yaml
   rg -qF 'checksums.txt' .goreleaser.yaml
   rg -qF "${name}_<os>_<arch>.tar.gz" INSTALLATION.md
+  # Linux packages: nfpms builds deb+rpm named after the BINARY, the fury pusher and the
+  # documented apt/yum repositories point at the same Gemfury account.
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" '
+    (.nfpms | length) > 0 and
+    (.nfpms[0].package_name == $name) and
+    (.nfpms[0].file_name_template == "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}") and
+    ((.nfpms[0].formats | sort) == ["deb", "rpm"])' >/dev/null
+  rg -qF 'endpoint="push.fury.io/kirinnee"' scripts/release/fury.sh
+  rg -qF './scripts/release/fury.sh' scripts/release/publish.sh
+  rg -qF 'deb [trusted=yes] https://apt.fury.io/kirinnee/ /' INSTALLATION.md
+  rg -qF 'https://yum.fury.io/kirinnee/' INSTALLATION.md
+  rg -qF "apt install ${name}" INSTALLATION.md
+  rg -qF "dnf install ${name}" INSTALLATION.md
   ;;
 *)
   echo "❌ unknown CLI contract: ${contract}" >&2

@@ -14,7 +14,14 @@ COMPILE_OUTDIR="prebuilt" ./scripts/release/compile.sh
 if [ "${SNAPSHOT}" -eq 1 ]; then
   echo "📦 GoReleaser snapshot (no publish) ..."
   goreleaser release --snapshot --clean --skip=publish
-  echo "✅ Snapshot complete — artifacts in dist/, nothing was published."
+  # The Linux package channel must stay buildable offline: assert the deb/rpm artifacts exist.
+  for format in deb rpm; do
+    ls dist/*."${format}" >/dev/null 2>&1 || {
+      echo "❌ snapshot produced no .${format} package in dist/" >&2
+      exit 1
+    }
+  done
+  echo "✅ Snapshot complete — artifacts in dist/ (tar.gz + deb/rpm), nothing was published."
   exit 0
 fi
 
@@ -34,5 +41,12 @@ fi
 
 echo "📦 GoReleaser release (creates the GitHub release, commits the in-repo cask) ..."
 goreleaser release --clean --release-notes ./IncrementalChangelog.md
+
+if [ -n "${FURY_PUSH_TOKEN:-}" ]; then
+  echo "📤 Pushing Linux packages (deb/rpm) to Gemfury ..."
+  ./scripts/release/fury.sh
+else
+  echo "⏭️ Skipping Gemfury push — 'FURY_PUSH_TOKEN' not set."
+fi
 
 echo "✅ Release complete."

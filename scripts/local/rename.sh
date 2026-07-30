@@ -48,6 +48,7 @@ static_files=(
   ".goreleaser.yaml"
   "go.mod"
   "scripts/release/install.sh"
+  "scripts/release/fury.sh"
   "INSTALLATION.md"
   "README.md"
   "CLAUDE.md"

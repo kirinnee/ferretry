@@ -12,6 +12,31 @@ The product is **ferretry**; the CLI binary is **`fy`**. It ships as a standalon
 > xattr -d com.apple.quarantine "$(command -v fy)"
 > ```
 
+## Debian / Ubuntu (apt)
+
+Releases push `.deb` packages to the `kirinnee` Gemfury repository:
+
+```bash
+echo "deb [trusted=yes] https://apt.fury.io/kirinnee/ /" | sudo tee /etc/apt/sources.list.d/fury.list
+sudo apt update
+sudo apt install fy
+```
+
+## Fedora / RHEL / CentOS (yum)
+
+The same releases push `.rpm` packages to the matching Yum repository:
+
+```bash
+sudo tee /etc/yum.repos.d/fury.repo <<'EOF'
+[fury]
+name=Gemfury kirinnee
+baseurl=https://yum.fury.io/kirinnee/
+enabled=1
+gpgcheck=0
+EOF
+sudo dnf install fy
+```
+
 ## Homebrew (macOS)
 
 The cask lives in this repo (no separate tap repository); the `ferretry` cask installs the `fy`

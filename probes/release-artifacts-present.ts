@@ -1,7 +1,14 @@
 import { definePresence } from './lib/definition.ts';
 
 // The static release surface the pipeline depends on must exist in the tree.
-const required = ['.goreleaser.yaml', '.releaserc.yaml', 'Casks/*.rb', 'scripts/release/install.sh', 'VERSION'];
+const required = [
+  '.goreleaser.yaml',
+  '.releaserc.yaml',
+  'Casks/*.rb',
+  'scripts/release/install.sh',
+  'scripts/release/fury.sh',
+  'VERSION',
+];
 
 export default definePresence({
   sandbox: { snapshot: 'git', preserve: ['.direnv'] },

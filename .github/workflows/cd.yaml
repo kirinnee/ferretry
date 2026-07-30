@@ -20,4 +20,5 @@ jobs:
       - name: Compile, package, and publish all channels
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FURY_PUSH_TOKEN: ${{ secrets.FURY_PUSH_TOKEN }}
         run: nix develop .#releaser -c ./scripts/release/publish.sh

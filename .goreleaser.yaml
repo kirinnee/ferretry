@@ -29,6 +29,20 @@ archives:
 checksum:
   name_template: 'checksums.txt'
 
+# Linux packages are named after the BINARY and pushed to Gemfury (apt.fury.io/yum.fury.io,
+# account kirinnee) by scripts/release/fury.sh — see INSTALLATION.md.
+nfpms:
+  - id: packages
+    ids: [bun]
+    package_name: fy
+    # Derives from package_name so rename.sh --bin only has to rewrite the line above.
+    file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    formats: [deb, rpm]
+    maintainer: kirinnee <kirinnee97@gmail.com>
+    homepage: https://github.com/kirinnee/ferretry
+    description: Command-line client for the per-host agent daemon
+    bindir: /usr/bin
+
 release:
   github:
     owner: kirinnee
