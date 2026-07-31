@@ -10,7 +10,14 @@
 
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
-import type { SessionView, TaskLive, TaskStatus, TaskSummary, WardenStatusView } from '@ferretry/protocol';
+import type {
+  BrowserStatus,
+  SessionView,
+  TaskLive,
+  TaskStatus,
+  TaskSummary,
+  WardenStatusView,
+} from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
@@ -22,6 +29,7 @@ import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
+import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
@@ -207,6 +215,57 @@ const BROWSER_LOGIN: BrowserLoginView = {
   },
 };
 
+const REMOTE_BROWSER: BrowserStatus = {
+  sessionId: 'harness-session',
+  state: 'running',
+  pages: [{ id: 'harness-page', url: 'https://example.test', title: 'Example' }],
+  activePageId: 'harness-page',
+  url: 'https://example.test',
+  title: 'Example',
+  canGoBack: false,
+  canGoForward: false,
+  pageState: 'ready',
+  viewport: { width: 640, height: 480 },
+  viewers: 1,
+  persistentProfile: true,
+  idleTimeoutSeconds: 60,
+  capacity: { running: 1, maximum: 3 },
+};
+
+class HarnessBrowserSocket implements RemoteBrowserSocket {
+  readyState = 0;
+  binaryType: BinaryType = 'blob';
+  private readonly listeners = new Map<string, ((event: Event) => void)[]>();
+
+  constructor() {
+    window.setTimeout(() => {
+      this.readyState = 1;
+      this.emit('open', new Event('open'));
+      const id = new TextEncoder().encode('harness-page');
+      const frame = new Uint8Array(7 + id.length + 1);
+      frame.set([0x4b, 0x42, 0x52, 0x46, 1, 0, id.length]);
+      frame.set(id, 7);
+      frame[frame.length - 1] = 0;
+      this.emit('message', new MessageEvent('message', { data: frame.buffer }));
+    }, 0);
+  }
+
+  addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
+  }
+
+  close(): void {
+    this.readyState = 3;
+  }
+
+  private emit(type: string, event: Event): void {
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+const harnessFrame =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"%3E%3Crect width="640" height="480" fill="%23111827"/%3E%3Crect x="32" y="32" width="576" height="54" rx="8" fill="%231f2937"/%3E%3Ccircle cx="58" cy="59" r="8" fill="%23ef4444"/%3E%3Ccircle cx="82" cy="59" r="8" fill="%23f59e0b"/%3E%3Ccircle cx="106" cy="59" r="8" fill="%2310b981"/%3E%3Crect x="140" y="46" width="390" height="26" rx="5" fill="%23374151"/%3E%3Ctext x="158" y="64" fill="%23d1d5db" font-family="system-ui" font-size="14"%3Ehttps://example.test%3C/text%3E%3Ctext x="320" y="250" text-anchor="middle" fill="%23f9fafb" font-family="system-ui" font-size="30"%3ERemote browser%3C/text%3E%3Ctext x="320" y="286" text-anchor="middle" fill="%239ca3af" font-family="system-ui" font-size="16"%3ELive daemon-scoped frame%3C/text%3E%3C/svg%3E';
+
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
@@ -361,6 +420,16 @@ function Shell() {
             onClose={async () => ({ state: 'closed', profilePrimed: false })}
           />
         </Card>
+
+        <RemoteBrowserViewer
+          daemon={daemon}
+          scope={scope}
+          status={REMOTE_BROWSER}
+          streamTicket="harness-ticket"
+          socketFactory={() => new HarnessBrowserSocket()}
+          createObjectUrl={() => harnessFrame}
+          revokeObjectUrl={() => undefined}
+        />
 
         <Card className="overflow-hidden">
           <PanelHeader>

@@ -93,8 +93,11 @@ try {
       await page.goto(server.url.toString());
       const target = join(outDir, `${viewport.name}.png`);
       await page.screenshot({ path: target });
+      const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
+      await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
       await context.close();
       process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+      process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
     }
   } finally {
     await browser.close();

@@ -43,6 +43,7 @@ export * from './pages/warden-page.tsx';
 export * from './pairing.ts';
 export * from './pin-store.ts';
 export * from './remote-browser.ts';
+export * from '../features/browser/remote-browser-viewer.tsx';
 export * from './runtime-models.ts';
 export * from './session-screens.ts';
 export * from './side-pane-preferences.ts';
