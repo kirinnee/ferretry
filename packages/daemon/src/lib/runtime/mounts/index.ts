@@ -10,6 +10,7 @@ import { attentionRoutes } from './attention.ts';
 import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
+import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
 
@@ -34,6 +35,9 @@ import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './
 export interface MountedSubsystems {
   readonly attention: AttentionService;
   readonly pins: PinService;
+  /** The session read: what the fleet holds, and one session in full. Reading only — a start, a
+   *  send and a stop belong to the unit that mounts the session lifecycle. */
+  readonly sessions: SessionDirectorySubsystem;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
   /** The fleet-wide analytics read over every finished session's durable record. */
@@ -56,6 +60,10 @@ export interface MountedSubsystems {
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
   return [
     ...daemonApiRoutes(base),
+    // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
+    // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
+    // deeper per-session routes that follow.
+    ...sessionRoutes(subsystems.sessions),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),

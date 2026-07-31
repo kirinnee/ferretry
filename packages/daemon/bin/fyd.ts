@@ -4,6 +4,7 @@ import {
   type LearningConfig,
   SessionConfigSchema,
   SessionStateSchema,
+  type SessionView,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
@@ -113,6 +114,8 @@ import {
   SelfRestartCoordinator,
   SessionHealthService,
   SessionLifecycleConfigSchema,
+  SessionReadError,
+  type SessionDirectorySubsystem,
   TaskError,
   tryParseSessionId,
   type AnalyticsSubsystem,
@@ -371,6 +374,45 @@ function createTaskSubsystem(
       return id === undefined || storage.findSession(id) === undefined ? undefined : await observed(id);
     },
     now: () => clock.now(),
+  };
+}
+
+/**
+ * The session read, over the authoritative index and the documents in the state home.
+ *
+ * BOTH DOCUMENTS ARE PARSED, and a session whose pair does not parse is left out of the list rather
+ * than reported with holes: a view assembled from a config the protocol schema rejected is a view
+ * whose fields nobody can vouch for. The single read refuses that same session instead of omitting
+ * it, so the gap in the list is answerable rather than silent.
+ *
+ * The DIRECTORY is derived from the layout, never from the request: `createSessionPaths` takes a
+ * parsed id, so a path-unsafe reference is refused in the reader's own taxonomy before it can become
+ * a filesystem path.
+ */
+function createSessionDirectorySubsystem(paths: FoundationPaths, storage: DaemonStorage): SessionDirectorySubsystem {
+  /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
+  const view = async (id: SessionId): Promise<SessionView | undefined> => {
+    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const config = SessionConfigSchema.safeParse(rawConfig);
+    const state = SessionStateSchema.safeParse(rawState);
+    if (!config.success || !state.success) return undefined;
+    return { config: config.data, state: state.data, directory: createSessionPaths(paths, id).directory };
+  };
+  return {
+    list: async () => {
+      const views = await Promise.all(storage.listSessions().map(async session => await view(session.id)));
+      return views.filter((session): session is SessionView => session !== undefined);
+    },
+    get: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (storage.findSession(id) === undefined) return undefined;
+      const found = await view(id);
+      if (found === undefined)
+        throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
+      return found;
+    },
   };
 }
 
@@ -798,6 +840,7 @@ export function buildWorld(): DaemonWorld {
         // next process would restart.
         { next: () => crypto.randomUUID() },
       ),
+      sessions: createSessionDirectorySubsystem(paths, storage),
       tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
       analytics: createAnalyticsSubsystem(storage),
       terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
