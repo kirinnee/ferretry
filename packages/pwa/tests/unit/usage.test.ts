@@ -2,7 +2,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { DaemonUsageIndex, hasReadout, type Quota } from '../../src/lib/usage.ts';
+import { DaemonUsageIndex, hasReadout, type ResolvedQuota } from '../../src/lib/usage.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
@@ -65,7 +65,7 @@ describe('DaemonUsageIndex', () => {
       weeklyResetAt: 1_760_600_000,
       atLimit: true,
       authOk: true,
-    } satisfies Quota);
+    } satisfies ResolvedQuota);
   });
 
   it('treats any single stamped field as state, but reset instants alone as unstamped', () => {
@@ -98,7 +98,7 @@ describe('DaemonUsageIndex', () => {
       weeklyResetAt: undefined,
       atLimit: undefined,
       authOk: true,
-    } satisfies Quota);
+    } satisfies ResolvedQuota);
   });
 
   it('returns null rather than zero when neither source knows the wrapper', () => {
@@ -176,6 +176,6 @@ describe('DaemonUsageIndex', () => {
       weeklyResetAt: undefined,
       atLimit: undefined,
       authOk: undefined,
-    } satisfies Quota);
+    } satisfies ResolvedQuota);
   });
 });

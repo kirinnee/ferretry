@@ -58,7 +58,8 @@ export const RETRY_DAEMON_SCOPES = 5;
 export type ModeFilter = 'all' | InteractionMode;
 export type DashboardView = 'cards' | 'table';
 export type Density = 'full' | 'compact' | 'minimal';
-export type ChatWidth = 'full' | 'balanced' | 'readable';
+/** The persisted form of the shell's conversation-width choice. */
+export type ChatWidthPreference = 'full' | 'balanced' | 'readable';
 
 /**
  * Controls that belong to the reader's device and are shared by every paired
@@ -76,7 +77,7 @@ export interface DeviceControls {
   /** null = use the first-load device default without persisting it. */
   readonly density: Density | null;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
-  readonly chatWidth: ChatWidth;
+  readonly chatWidth: ChatWidthPreference;
   readonly sidebarCollapsed: boolean;
 }
 

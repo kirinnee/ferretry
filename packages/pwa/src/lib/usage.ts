@@ -32,7 +32,7 @@ import { UsageFeedViewSchema, type SessionState, type SessionView, type UsageFee
 import type { DaemonId } from './daemon-connection.ts';
 
 /** One session's quota, normalized from whichever source supplied it. */
-export interface Quota {
+export interface ResolvedQuota {
   readonly fiveHourPercent?: number;
   readonly weeklyPercent?: number;
   readonly fiveHourResetAt?: number;
@@ -48,7 +48,7 @@ export interface Quota {
  */
 const STATE_READOUT_FIELDS = ['usageAuthOk', 'usage5hPercent', 'usageWeeklyPercent', 'usageAtLimit'] as const;
 
-const stateQuota = (state: SessionState): Quota | null => {
+const stateQuota = (state: SessionState): ResolvedQuota | null => {
   if (!STATE_READOUT_FIELDS.some(field => state[field] !== undefined)) return null;
   return {
     fiveHourPercent: state.usage5hPercent,
@@ -65,7 +65,7 @@ const stateQuota = (state: SessionState): Quota | null => {
  * about but reports no usable numbers for is not a readout, and must not
  * occupy a badge that would then imply zero usage.
  */
-export const hasReadout = (quota: Quota | null): quota is Quota => {
+export const hasReadout = (quota: ResolvedQuota | null): quota is ResolvedQuota => {
   if (quota === null) return false;
   return (
     quota.authOk === false ||
@@ -84,7 +84,7 @@ export const hasReadout = (quota: Quota | null): quota is Quota => {
  */
 export class DaemonUsageIndex {
   readonly #feeds = new Map<DaemonId, UsageFeedView>();
-  readonly #accounts = new Map<DaemonId, ReadonlyMap<string, Quota>>();
+  readonly #accounts = new Map<DaemonId, ReadonlyMap<string, ResolvedQuota>>();
 
   /**
    * Stores one daemon's feed, rejecting a malformed response whole. A partial
@@ -95,7 +95,7 @@ export class DaemonUsageIndex {
   apply(daemonId: DaemonId, value: unknown): boolean {
     const parsed = UsageFeedViewSchema.safeParse(value);
     if (!parsed.success) return false;
-    const accounts = new Map<string, Quota>();
+    const accounts = new Map<string, ResolvedQuota>();
     for (const account of parsed.data.accounts) {
       accounts.set(account.agent, {
         fiveHourPercent: account.fiveHourPercent,
@@ -121,7 +121,7 @@ export class DaemonUsageIndex {
    * is known about its wrapper. Callers MUST treat `null` as "no data" rather
    * than as zero.
    */
-  quotaFor(daemonId: DaemonId, view: SessionView): Quota | null {
+  quotaFor(daemonId: DaemonId, view: SessionView): ResolvedQuota | null {
     return stateQuota(view.state) ?? this.#accounts.get(daemonId)?.get(view.config.agent) ?? null;
   }
 
