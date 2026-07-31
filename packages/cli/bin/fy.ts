@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { AnalyticsResponse, IFyApiClient } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -10,6 +10,8 @@ import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/prog
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { PinController } from '../src/lib/pins/controller';
+import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
+import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { assertSemver } from '../src/lib/version';
@@ -77,22 +79,28 @@ function daemonConnection(environment: Record<string, string | undefined>): {
  * Deferring the connection is what keeps `--help`, `--version` and a mistyped command working on a
  * host with no daemon and no token: nothing reaches the network until a command actually asks.
  */
-function lazyDaemonClient(environment: Record<string, string | undefined>): IFyApiClient['request'] {
+function lazyDaemonClient(
+  environment: Record<string, string | undefined>,
+): Pick<IFyApiClient, 'request' | 'analytics'> {
   let connected: Promise<FyApiClient> | undefined;
   const client = (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
-  return async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
-    const ready = await client();
-    return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
+  return {
+    request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
+      const ready = await client();
+      return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
+    },
+    analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
   };
 }
 
 /** Route the product domain onto the program — one controller per command group. */
 export function registerDomain(program: Command, world: CliWorld): void {
   const environment = process.env;
-  const request = lazyDaemonClient(environment);
+  const client = lazyDaemonClient(environment);
   const ownSessionId = environment.FY_SESSION_ID;
 
-  registerPinCommands(program, new PinController(new ProtocolPinGateway({ request }), world.io, ownSessionId));
+  registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId));
+  registerAnalyticsCommands(program, new AnalyticsController(client, world.io));
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────
 
