@@ -42,6 +42,8 @@ import {
   SessionControlError,
   type SessionControlSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
+import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import {
   TeamAdvisor,
   type AccountInventoryPort,
@@ -827,3 +829,36 @@ export const emptyFeed: UsageFeedPort = {
   snapshotAt: () => undefined,
   hasSnapshot: () => false,
 };
+
+/**
+ * A reviver that records instead of replacing a pane.
+ *
+ * The ACTOR is what this fake exists to capture. The whole reason the resume mount reads the actor
+ * from the authorization boundary rather than the body is that an operator and an automated reviver
+ * get different privileges, and the only way to prove the mount passes the right one through is to
+ * record what the subsystem was handed.
+ *
+ * Its refusals are the four the domain raises, each drivable by the session it is asked about, so
+ * every HTTP answer the mount can give is reachable without a real service behind it.
+ */
+export class FakeSessionResume implements SessionResumeSubsystem {
+  /** Every revive that reached the subsystem, as the session, the actor and the message. */
+  readonly resumes: Array<readonly [string, ResumeActor, string | undefined]> = [];
+
+  constructor(
+    /** Sessions that exist, so a revive has something to revive. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionResumeError>> = {},
+  ) {}
+
+  async resume(sessionId: string, actor: ResumeActor, message: string | undefined): Promise<SessionView> {
+    this.resumes.push([sessionId, actor, message]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionResumeError('not_found', `no session ${sessionId}`);
+    // Turn two, because a revive that handed the agent a new turn moved the counter: a view still
+    // reporting turn one would not distinguish a revive from a read.
+    return sessionView(sessionId, {}, { status: 'running', turn: 2 });
+  }
+}

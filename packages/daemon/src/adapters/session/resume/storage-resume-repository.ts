@@ -1,3 +1,4 @@
+import { jsonObject, type JsonValue } from '../../../lib/json.ts';
 import { tryParseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
   ResumableSessionStatusSchema,
@@ -9,6 +10,12 @@ import type { DaemonStorage } from '../../storage/session-storage.ts';
 
 function record(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** The same narrowing, in the storage layer's own JSON vocabulary, so a document this repository
+ *  rewrites stays a value the store can serialize rather than becoming `unknown`. */
+function jsonRecord(value: JsonValue): Record<string, JsonValue> {
+  return { ...(jsonObject(value) ?? {}) };
 }
 
 function text(value: unknown): string | undefined {
@@ -45,15 +52,30 @@ export class StorageResumeRepository implements ResumeRepository {
   }
 
   async transition(id: SessionId, change: ResumeTransition): Promise<ResumeTarget> {
-    const updated = await this.storage.updateState(id, current => ({
-      ...record(current),
-      ...(change.status === undefined ? {} : { status: change.status }),
-      ...(change.turn === undefined ? {} : { turn: change.turn }),
-      ...(change.retryAttempt === undefined ? {} : { retryAttempt: change.retryAttempt }),
-      ...(change.reason === undefined ? {} : { reason: change.reason }),
-      ...(change.clearPendingQuestion ? { pendingQuestion: null } : {}),
-      ...(change.clearNeedsHuman ? { needsHumanKind: null } : {}),
-    }));
+    const updated = await this.storage.updateState(id, current => {
+      const next: Record<string, JsonValue> = {
+        ...jsonRecord(current),
+        ...(change.status === undefined ? {} : { status: change.status }),
+        ...(change.turn === undefined ? {} : { turn: change.turn }),
+        ...(change.retryAttempt === undefined ? {} : { retryAttempt: change.retryAttempt }),
+        ...(change.reason === undefined ? {} : { reason: change.reason }),
+      };
+      // CLEARED MEANS ABSENT, NOT `null`, and the difference is not cosmetic. This repository writes
+      // the same state document `SessionStateSchema` governs, and that schema declares
+      // `needsHumanKind` as an optional STRING — so a `null` makes the document stop satisfying the
+      // protocol, and every surface that parses it before serving (the session read, the fleet list,
+      // analytics) then drops the session rather than reporting one it cannot vouch for. An
+      // operator's own revive would have made the session it revived disappear.
+      if (change.clearPendingQuestion) delete next.pendingQuestion;
+      // BOTH halves of the quarantine. `needsHuman` is the reason a person was asked for and
+      // `needsHumanKind` is which kind of attention it was; clearing only the kind would leave the
+      // session displayed as still waiting for somebody who has already answered.
+      if (change.clearNeedsHuman) {
+        delete next.needsHuman;
+        delete next.needsHumanKind;
+      }
+      return next;
+    });
     // Appended after the state is durable, so a journal entry can never describe a change that was
     // not written — the reverse leaves a record claiming a transition the session never made.
     await this.storage.append(id, change.event, {
