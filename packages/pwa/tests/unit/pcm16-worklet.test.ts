@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'bun:test';
-import { PCM16_WORKLET_NAME, PCM16_WORKLET_SOURCE, WORKLET_BATCH_FRAMES } from '../../src/worklets/pcm16-worklet.ts';
+import { afterEach, describe, expect, it } from 'bun:test';
+import {
+  createPcm16WorkletUrl,
+  PCM16_WORKLET_NAME,
+  PCM16_WORKLET_SOURCE,
+  WORKLET_BATCH_FRAMES,
+} from '../../src/worklets/pcm16-worklet.ts';
+
+const originalCreateObjectUrl = URL.createObjectURL;
+
+afterEach(() => {
+  URL.createObjectURL = originalCreateObjectUrl;
+});
 
 describe('PCM16 AudioWorklet', () => {
   it('should ship a syntactically valid classic JavaScript program', () => {
@@ -36,5 +47,17 @@ describe('PCM16 AudioWorklet', () => {
 
   it('should interpolate only the compile-time batch size and processor name', () => {
     expect(PCM16_WORKLET_SOURCE).not.toMatch(/\$\{/u);
+  });
+
+  it('should mint a JavaScript blob URL for the AudioWorklet module', async () => {
+    let received: Blob | undefined;
+    URL.createObjectURL = (blob: Blob) => {
+      received = blob;
+      return 'blob:pcm16-worklet' as `blob:${string}`;
+    };
+
+    expect(createPcm16WorkletUrl()).toBe('blob:pcm16-worklet');
+    expect(received?.type).toContain('javascript');
+    expect(await received?.text()).toBe(PCM16_WORKLET_SOURCE);
   });
 });

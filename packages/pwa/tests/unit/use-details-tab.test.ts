@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { createElement } from 'react';
+import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import {
   type DetailsTab,
   readDetailsTab,
   resetDetailsTabMemory,
   touchDetailsTab,
+  useDetailsTab,
   writeDetailsTab,
 } from '../../src/hooks/use-details-tab.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -11,6 +14,8 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b-token' });
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('details-tab memory', () => {
   beforeEach(() => resetDetailsTabMemory());
@@ -47,5 +52,33 @@ describe('details-tab memory', () => {
 
     expect(readDetailsTab(memory, first)).toBe('runtime');
     expect(readDetailsTab(memory, second)).toBe('identity');
+  });
+
+  it('keeps hook state scoped to the active daemon and session', () => {
+    let setTab: ((tab: DetailsTab) => void) | undefined;
+    let tab: DetailsTab | undefined;
+    let renderer: ReactTestRenderer | undefined;
+
+    const Probe = ({ daemon, sessionId, open }: { daemon: typeof daemonA; sessionId: string; open: boolean }) => {
+      const [currentTab, setCurrentTab] = useDetailsTab(daemon, sessionId, open);
+      tab = currentTab;
+      setTab = setCurrentTab;
+      return null;
+    };
+
+    act(() => {
+      renderer = create(createElement(Probe, { daemon: daemonA, sessionId: 'same-session', open: true }));
+    });
+    expect(tab).toBe('identity');
+
+    act(() => setTab?.('budget'));
+    expect(tab).toBe('budget');
+
+    act(() => {
+      renderer?.update(createElement(Probe, { daemon: daemonB, sessionId: 'same-session', open: true }));
+    });
+    expect(tab).toBe('identity');
+
+    act(() => renderer?.unmount());
   });
 });
