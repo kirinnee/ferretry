@@ -28,6 +28,7 @@ export * from './state-home.ts';
 export * from './storage-types.ts';
 export * from './task-boards/index.ts';
 export * from './tasks/index.ts';
+export * from './terminal/index.ts';
 export * from './tmux/index.ts';
 export * from './version.ts';
 export * from './warden/index.ts';
