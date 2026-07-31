@@ -33,18 +33,16 @@ import {
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
-<<<<<<< HEAD
 import {
+  BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
   createFoundationPaths,
   createWardenPaths,
   packageRole,
   resolveStateHome,
+  type BrowserViewerHost,
   type DaemonReadinessPorts,
 } from '../src/lib/index.ts';
-=======
-import { BrowserViewerStream, type BrowserViewerHost, createWardenPaths, packageRole } from '../src/lib/index.ts';
->>>>>>> 39218e5 (feat(daemon): add the browser worker client and viewer socket adapters)
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;

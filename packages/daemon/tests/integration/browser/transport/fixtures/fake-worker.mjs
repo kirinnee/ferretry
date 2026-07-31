@@ -6,6 +6,15 @@
 
 const endpoint = process.argv[2] ?? 'ready';
 
+if (endpoint === 'stubborn-close') {
+  // A real browser worker traps SIGTERM to close Chrome cleanly. This one never finishes, which is
+  // what makes SIGKILL escalation the only way out.
+  process.on('SIGTERM', () => {});
+  // stdin ending must not end the process either, or the escalation path is never reached.
+  process.stdin.on('end', () => {});
+  setInterval(() => {}, 1_000);
+}
+
 function emit(record) {
   process.stdout.write(`${JSON.stringify(record)}\n`);
 }
@@ -29,8 +38,19 @@ function snapshot(method, params) {
   };
 }
 
+let nextAckId = 1;
+const acknowledged = [];
+
 function frame(overrides = {}) {
-  return { type: 'screencast-frame', dataBase64: 'AAAA', width: 800, height: 600, pageId: 'p1', ...overrides };
+  return {
+    type: 'screencast-frame',
+    dataBase64: 'AAAA',
+    width: 800,
+    height: 600,
+    pageId: 'p1',
+    ackId: nextAckId++,
+    ...overrides,
+  };
 }
 
 if (endpoint === 'exit-during-launch') process.exit(7);
@@ -80,11 +100,31 @@ function handle({ id, method, params }) {
     case 'overflows':
       process.stdout.write('x'.repeat(4_096));
       return;
+    case 'environment':
+      // Reported through the snapshot params, so the test reads it back over the real protocol.
+      reply(
+        id,
+        true,
+        snapshot(
+          method,
+          Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, key === 'PATH' ? 'set' : value])),
+        ),
+      );
+      return;
     case 'crashes':
       process.exit(3);
       return;
     case 'startScreencast':
-      reply(id, true, {});
+      // A real worker refuses a viewport it cannot capture.
+      if (!params?.width || !params?.height) reply(id, false, 'invalid screencast viewport');
+      else reply(id, true, {});
+      return;
+    case 'ackFrame':
+      acknowledged.push(params.ackId);
+      reply(id, endpoint !== 'refuses-acks', endpoint === 'refuses-acks' ? 'window closed' : {});
+      return;
+    case 'acknowledged':
+      reply(id, true, snapshot(method, { acks: acknowledged }));
       return;
     case 'emit-frames':
       emit(frame());

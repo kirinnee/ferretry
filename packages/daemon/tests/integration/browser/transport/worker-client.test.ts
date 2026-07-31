@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { join } from 'node:path';
 import should from 'should';
 import type { BrowserScreencastFrame } from '@ferretry/protocol';
+import type { FrameClock } from '../../../../src/lib/index.ts';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../../../../src/adapters/browser/transport/index.ts';
 
 const WORKER_ENTRY = join(import.meta.dir, 'fixtures', 'fake-worker.mjs');
@@ -17,11 +18,30 @@ async function connect(overrides: Partial<WorkerClientOptions> = {}): Promise<Br
     readyTimeoutMs: 5_000,
     requestTimeoutMs: 5_000,
     shutdownTimeoutMs: 500,
+    frameIntervalMs: 0,
     environment: { PATH: process.env.PATH, HOME: process.env.HOME, FY_SECRET: 'must-not-be-forwarded' },
     ...overrides,
   });
   started.push(client);
   return client;
+}
+
+const clientPid = (client: BrowserWorkerClient): number => client.pid;
+
+/** Whether the process still exists; signal 0 only probes, it delivers nothing. */
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Waits briefly for a reaped child to leave the process table before judging it alive. */
+async function settledDead(pid: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 50 && alive(pid); attempt += 1) await Bun.sleep(10);
+  return !alive(pid);
 }
 
 /** Reads the params the worker actually received back out of the snapshot it reported. */
@@ -123,15 +143,33 @@ describe('browser worker client — lifecycle', () => {
     should((await rejection(client.location())).code).equal('not_running');
   });
 
-  it('should terminate a worker that acknowledges close but never exits', async () => {
-    // Arrange
-    const client = await connect({ endpoint: 'stubborn-close', shutdownTimeoutMs: 100 });
+  it('should escalate to SIGKILL for a worker that traps SIGTERM and ignores a closed stdin', async () => {
+    // Arrange: the fixture traps SIGTERM and keeps a timer alive, like a worker closing Chrome.
+    const client = await connect({ endpoint: 'stubborn-close', shutdownTimeoutMs: 150 });
+    const pid = clientPid(client);
 
     // Act
     await client.close();
 
-    // Assert: the client falls back to a signal rather than waiting on the child forever.
-    should(client).be.ok();
+    // Assert: close() only reports success once the child is genuinely gone, not merely signalled.
+    should(await settledDead(pid)).be.true();
+  });
+
+  it('should bound the whole shutdown by the shutdown timeout, not the request timeout', async () => {
+    // Arrange: a worker that never answers 'close', with a request budget far larger than shutdown.
+    const client = await connect({
+      endpoint: 'stubborn-close',
+      requestTimeoutMs: 30_000,
+      shutdownTimeoutMs: 150,
+    });
+    const started = Bun.nanoseconds();
+
+    // Act
+    await client.close();
+
+    // Assert: charging the request timeout first would hold up daemon shutdown for 30s per session.
+    const elapsedMs = (Bun.nanoseconds() - started) / 1_000_000;
+    should(elapsedMs).be.below(3_000);
   });
 });
 
@@ -191,6 +229,32 @@ describe('browser worker client — requests', () => {
     should(reportedParams(read.url)).deepEqual({ selector: '#article' });
     should(reportedParams(readWithoutSelector.url)).deepEqual({});
     should(shot.screenshotBase64).equal('AAAA');
+  });
+
+  it('should grant the worker only the allowlisted environment, plus a forced loopback proxy bypass', async () => {
+    // Arrange
+    const client = await connect({
+      environment: {
+        PATH: process.env.PATH,
+        HOME: '/home/example',
+        LANG: 'en_US.UTF-8',
+        FY_SECRET: 'must-not-be-forwarded',
+        HTTP_PROXY: 'http://proxy.invalid:3128',
+        NO_PROXY: 'nothing',
+      },
+    });
+
+    // Act
+    const granted = reportedParams((await client.navigate('environment')).url) as Record<string, string>;
+
+    // Assert: nothing outside the allowlist reaches the browser, and loopback never goes via a proxy.
+    should(granted['PATH']).equal('set');
+    should(granted['HOME']).equal('/home/example');
+    should(granted['LANG']).equal('en_US.UTF-8');
+    should(granted).not.have.property('FY_SECRET');
+    should(granted).not.have.property('HTTP_PROXY');
+    should(granted['NO_PROXY']).equal('127.0.0.1,localhost,::1');
+    should(granted['no_proxy']).equal('127.0.0.1,localhost,::1');
   });
 
   it('should dispatch human input to the worker', async () => {
@@ -306,6 +370,98 @@ describe('browser worker client — screencast', () => {
     // The listener was forgotten, so a screencast that never started needs no stop request.
     await client.stopScreencast();
     should((await client.location()).activePageId).equal('p1');
+  });
+
+  it('should fail every viewer waiting on a start that never landed', async () => {
+    // Arrange: B joins while A's request is still in flight.
+    const client = await connect({ endpoint: 'no-screencast', requestTimeoutMs: 150 });
+    const frames: BrowserScreencastFrame[] = [];
+
+    // Act
+    const first = rejection(client.startScreencast(VIEWPORT, () => undefined));
+    const second = rejection(client.startScreencast(VIEWPORT, frame => void frames.push(frame)));
+
+    // Assert: reporting success to B would hand it a permanently black viewport and no error.
+    should((await first).code).equal('upstream_failed');
+    should((await second).code).equal('upstream_failed');
+    should(frames).be.empty();
+  });
+
+  it('should let a later viewer start a fresh screencast after an earlier attempt failed', async () => {
+    // Arrange
+    const client = await connect({ requestTimeoutMs: 150, endpoint: 'ready' });
+
+    // Act: the first attempt is refused by the worker, the second is a genuine start.
+    const refused = await rejection(client.startScreencast({ width: 0, height: 0 }, () => undefined));
+    const frames: BrowserScreencastFrame[] = [];
+    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
+    await client.navigate('emit-frames');
+
+    // Assert
+    should(refused.code).equal('upstream_failed');
+    should(frames).have.length(2);
+  });
+
+  it('should pace frames through the governor, delivering only the newest within one interval', async () => {
+    // Arrange: a controllable clock, so pacing is proved rather than timed.
+    let now = 0;
+    const timers: Array<{ at: number; run: () => void }> = [];
+    const clock: FrameClock = {
+      now: () => now,
+      schedule: (callback, delayMs) => {
+        const timer = { at: now + delayMs, run: callback };
+        timers.push(timer);
+        return {
+          cancel: () => {
+            const index = timers.indexOf(timer);
+            if (index >= 0) timers.splice(index, 1);
+          },
+        };
+      },
+    };
+    const client = await connect({ clock, frameIntervalMs: 1_000 });
+    const frames: BrowserScreencastFrame[] = [];
+    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
+
+    // Act: the worker emits two frames well inside one interval.
+    await client.navigate('emit-frames');
+
+    // Assert: the first is painted, the second is held as the newest rather than queued.
+    should(frames.map(frame => frame.dataBase64)).deepEqual(['AAAA']);
+
+    // Act: time reaches the next slot.
+    now += 1_000;
+    for (const timer of timers.splice(0).filter(timer => timer.at <= now)) timer.run();
+
+    // Assert
+    should(frames.map(frame => frame.dataBase64)).deepEqual(['AAAA', 'BBBB']);
+  });
+
+  it('should acknowledge each delivered frame so the browser may capture the next one', async () => {
+    // Arrange
+    const client = await connect();
+    await client.startScreencast(VIEWPORT, () => undefined);
+
+    // Act
+    await client.navigate('emit-frames');
+    const acks = reportedParams((await client.navigate('acknowledged')).url) as { acks: number[] };
+
+    // Assert: only the frames that actually reached a viewer are acknowledged.
+    should(acks.acks).have.length(2);
+  });
+
+  it('should rebind the capture window when the worker refuses an acknowledgement', async () => {
+    // Arrange
+    const client = await connect({ endpoint: 'refuses-acks' });
+    const frames: BrowserScreencastFrame[] = [];
+    await client.startScreencast(VIEWPORT, frame => void frames.push(frame));
+
+    // Act: a refused acknowledgement must not wedge the stream behind a dead window.
+    await client.navigate('emit-frames');
+    await client.navigate('emit-frames');
+
+    // Assert
+    should(frames.length).be.aboveOrEqual(2);
   });
 
   it('should stop the screencast once and ignore a redundant stop', async () => {

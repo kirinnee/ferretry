@@ -8,7 +8,9 @@ import type {
 } from '@ferretry/protocol';
 import {
   type BrowserAutomation,
+  BrowserFrameGovernor,
   BrowserTransportError,
+  type FrameClock,
   WorkerLineAssembler,
   type WorkerSnapshotResult,
   boundedReadText,
@@ -18,6 +20,7 @@ import {
   normalizeWorkerSnapshot,
   parseWorkerLine,
 } from '../../../lib/index.ts';
+import { SystemFrameClock } from './system-frame-clock.ts';
 
 export const READY_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 60_000;
@@ -40,6 +43,10 @@ export interface WorkerClientOptions {
   readonly shutdownTimeoutMs?: number;
   /** Ceiling on one newline-free worker record; the default sizes a full screenshot reply. */
   readonly maxProtocolLineChars?: number;
+  /** Time source for frame pacing; the real timer wheel unless a test injects its own. */
+  readonly clock?: FrameClock;
+  /** Floor on the interval between frames handed to viewers. */
+  readonly frameIntervalMs?: number;
 }
 
 interface Pending {
@@ -85,6 +92,10 @@ function workerEnvironment(source: Readonly<Record<string, string | undefined>>)
   return environment;
 }
 
+function shutdownExpired(): BrowserTransportError {
+  return new BrowserTransportError('upstream_failed', 'browser worker did not exit', 504);
+}
+
 function unwrap<TSnapshot>(result: WorkerSnapshotResult<TSnapshot>): TSnapshot {
   if (!result.ok) throw new BrowserTransportError('upstream_failed', result.message, 502);
   return result.value;
@@ -101,6 +112,10 @@ export class BrowserWorkerClient implements BrowserAutomation {
   private readonly ready = deferred<void>();
   private readonly exit = deferred<number>();
   private readonly frameListeners = new Set<(frame: BrowserScreencastFrame) => void>();
+  private readonly governor: BrowserFrameGovernor<BrowserScreencastFrame>;
+  private screencastStart?: Promise<void>;
+  private screencastToken = '';
+  private screencastSessions = 0;
   private readyState: 'pending' | 'ready' | 'failed' = 'pending';
   private closed = false;
   private closing = false;
@@ -116,8 +131,29 @@ export class BrowserWorkerClient implements BrowserAutomation {
     this.assembler = new WorkerLineAssembler(options.maxProtocolLineChars);
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS;
+    // Frames reach viewers through the governor, so the pace the browser captures at follows the real
+    // end-to-end path: a frame is acknowledged only once it has actually been handed to every viewer.
+    this.governor = new BrowserFrameGovernor<BrowserScreencastFrame>(
+      options.clock ?? new SystemFrameClock(),
+      {
+        write: frame => {
+          this.deliverFrame(frame);
+          // Listeners are synchronous, so the sink is never congested; pacing is the whole job here.
+          return true;
+        },
+      },
+      {
+        ...(options.frameIntervalMs === undefined ? {} : { minIntervalMs: options.frameIntervalMs }),
+        onAcknowledgementRejected: session => this.recoverScreencast(session),
+      },
+    );
     void this.readOutput().catch(() => undefined);
     void this.child.exited.then(code => this.onExit(code));
+  }
+
+  /** The child process id, so an operator (or a test) can confirm the worker is really gone. */
+  get pid(): number {
+    return this.child.pid;
   }
 
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
@@ -139,7 +175,9 @@ export class BrowserWorkerClient implements BrowserAutomation {
       return client;
     } catch (error) {
       client.closed = true;
-      client.child.kill('SIGTERM');
+      // A worker that failed to announce itself may already have a browser running: escalate rather
+      // than firing one signal and hoping.
+      await client.terminate(options.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS).catch(() => undefined);
       throw error;
     }
   }
@@ -198,14 +236,30 @@ export class BrowserWorkerClient implements BrowserAutomation {
     return this.action('resize', { width: viewport.width, height: viewport.height });
   }
 
+  /**
+   * Joins the screencast. Viewers that arrive while the start is still in flight await the SAME
+   * request: reporting success off the back of an attempt that has not landed yet hands the second
+   * viewer a permanently black viewport and no error to explain it.
+   */
   async startScreencast(viewport: BrowserViewport, listener: (frame: BrowserScreencastFrame) => void): Promise<void> {
-    const first = this.frameListeners.size === 0;
     this.frameListeners.add(listener);
-    if (!first) return;
+    if (this.screencastStart === undefined) {
+      this.governor.bind(this.newScreencastSession());
+      this.screencastStart = this.request('startScreencast', {
+        width: viewport.width,
+        height: viewport.height,
+      }).then(() => undefined);
+    }
+    const start = this.screencastStart;
     try {
-      await this.request('startScreencast', { width: viewport.width, height: viewport.height });
+      await start;
     } catch (error) {
       this.frameListeners.delete(listener);
+      // Every viewer waiting on this attempt fails together, and the next join starts a fresh one.
+      if (this.screencastStart === start) {
+        this.screencastStart = undefined;
+        this.governor.stop();
+      }
       throw error;
     }
   }
@@ -213,6 +267,8 @@ export class BrowserWorkerClient implements BrowserAutomation {
   async stopScreencast(): Promise<void> {
     if (this.frameListeners.size === 0) return;
     this.frameListeners.clear();
+    this.screencastStart = undefined;
+    this.governor.stop();
     await this.request('stopScreencast', {});
   }
 
@@ -220,25 +276,60 @@ export class BrowserWorkerClient implements BrowserAutomation {
     await this.request('dispatchInput', { input });
   }
 
-  /** Asks the worker to shut down, then makes sure it actually did. */
+  /**
+   * Asks the worker to shut down and makes sure it is actually gone.
+   *
+   * The whole shutdown — the polite request AND the exit wait — is bounded by `shutdownTimeoutMs`.
+   * Charging the request timeout first would let one wedged worker hold up daemon shutdown for a
+   * minute per session, which is exactly what the knob exists to prevent.
+   */
   async close(): Promise<void> {
     if (this.closed) return;
     this.closing = true;
-    try {
-      await this.request('close', {});
-    } catch {
-      // The browser may drop its control socket before the worker can reply; termination below is
-      // the bounded source of truth either way.
-    }
+    const deadline = this.shutdownTimeoutMs;
+    await withTimeout(this.request('close', {}), deadline, () => shutdownExpired()).catch(() => undefined);
     this.closed = true;
     this.frameListeners.clear();
+    this.governor.dispose();
     this.child.stdin.end();
-    const exited = await withTimeout(
+    await this.terminate(deadline);
+  }
+
+  /**
+   * Escalates until the child is really gone. A browser worker routinely traps SIGTERM so it can shut
+   * Chrome down cleanly, so a signal is a request, not an outcome — and reporting success while the
+   * process (and the browser tree it owns) is still alive is how orphans accumulate.
+   */
+  private async terminate(deadline: number): Promise<void> {
+    if (await this.exitedWithin(deadline)) return;
+    this.signal('SIGTERM');
+    if (await this.exitedWithin(deadline)) return;
+    this.signal('SIGKILL');
+    if (await this.exitedWithin(deadline)) return;
+    throw new BrowserTransportError('upstream_failed', 'browser worker could not be terminated', 504);
+  }
+
+  private async exitedWithin(deadline: number): Promise<boolean> {
+    return withTimeout(
       this.child.exited.then(() => true),
-      this.shutdownTimeoutMs,
-      () => new BrowserTransportError('upstream_failed', 'browser worker did not exit', 504),
+      deadline,
+      () => shutdownExpired(),
     ).catch(() => false);
-    if (!exited) this.child.kill('SIGTERM');
+  }
+
+  private signal(signal: 'SIGTERM' | 'SIGKILL'): void {
+    try {
+      // The negative pid targets the child's whole process group, so the browser it spawned dies with
+      // it rather than being reparented and left holding a profile lock.
+      process.kill(-this.child.pid, signal);
+    } catch {
+      // No process group (or already reaped): fall back to the child itself.
+      try {
+        this.child.kill(signal);
+      } catch {
+        // Already gone, which is the outcome we wanted.
+      }
+    }
   }
 
   private async action(method: string, params: Readonly<Record<string, unknown>>): Promise<BrowserPageActionSnapshot> {
@@ -294,7 +385,9 @@ export class BrowserWorkerClient implements BrowserAutomation {
         this.ready.reject(new BrowserTransportError('launch_failed', `browser worker failed: ${event.message}`, 503));
         return;
       case 'frame':
-        this.publishFrame(event.frame);
+        // Frames outside a bound screencast are discarded by the governor rather than published: a
+        // frame nobody asked for still costs every viewer a repaint.
+        this.governor.capture(this.screencastToken, event.frame, () => this.acknowledgeFrame(event.ackId));
         return;
       case 'result':
         this.pending.get(event.id)?.resolve(event.result);
@@ -311,7 +404,30 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  private publishFrame(frame: BrowserScreencastFrame): void {
+  /** Tells the worker this frame is done with, so the browser may capture the next one. */
+  private async acknowledgeFrame(ackId: number | undefined): Promise<void> {
+    // A worker that acknowledges its own frames sends no ack id; pacing still applies to both.
+    if (ackId === undefined) return;
+    await this.request('ackFrame', { ackId });
+  }
+
+  private newScreencastSession(): string {
+    this.screencastSessions += 1;
+    this.screencastToken = `screencast-${this.screencastSessions}`;
+    return this.screencastToken;
+  }
+
+  /**
+   * An acknowledgement the worker refused means this capture window is unusable. Rebinding discards
+   * the stale window so later frames flow, instead of wedging behind acknowledgements nobody will
+   * ever take.
+   */
+  private recoverScreencast(session: string): void {
+    if (session !== this.screencastToken || this.closed) return;
+    this.governor.bind(this.newScreencastSession());
+  }
+
+  private deliverFrame(frame: BrowserScreencastFrame): void {
     for (const listener of [...this.frameListeners]) {
       try {
         listener(frame);
