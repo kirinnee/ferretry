@@ -14,6 +14,8 @@ import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
+import { BunAudioFileReader } from '../src/adapters/stt/audio-file';
+import { TimerDelay } from '../src/adapters/stt/delay';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
@@ -40,6 +42,9 @@ import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
+import { registerSttCommands } from '../src/lib/stt/commands';
+import { SttController } from '../src/lib/stt/controller';
+import { ProtocolSttGateway } from '../src/lib/stt/gateway';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import {
@@ -291,6 +296,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, client }) =>
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
+  ({ program, world, client }) =>
+    registerSttCommands(
+      program,
+      new SttController(new ProtocolSttGateway(client), world.io, new BunAudioFileReader(), new TimerDelay()),
+    ),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
