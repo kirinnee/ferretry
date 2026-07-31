@@ -378,7 +378,7 @@ async function reconcileFollow(
       ]);
     } catch (error) {
       if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
-      const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
+      const next = { ...state, initialized: true, availability: 'error' as const };
       return {
         state: next,
         batch: batchOf(
@@ -396,7 +396,7 @@ async function reconcileFollow(
       afterInfo = await runtime.info(file);
     } catch {
       if (state.availability === 'error') return { state };
-      const next = { ...state, initialized: true, availability: 'error' as const };
+      const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
       return {
         state: next,
         batch: batchOf(
@@ -412,7 +412,7 @@ async function reconcileFollow(
     if (afterInfo === undefined) return missingResult(parser, file, state);
     if (afterInfo.identity !== info.identity || afterInfo.size < info.size) {
       if (state.availability === 'error') return { state };
-      const next = { ...state, initialized: true, availability: 'error' as const };
+      const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
       return {
         state: next,
         batch: batchOf(

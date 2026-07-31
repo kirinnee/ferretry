@@ -402,6 +402,64 @@ describe('NodeTranscriptSource follow', () => {
     }
   });
 
+  it('should read a replacement from byte zero when it changes while establishing an end cursor', async () => {
+    for (const change of ['identity', 'truncation'] as const) {
+      // Arrange
+      const bytes = Buffer.from(jsonl(userRecord(`${change} replacement during end cursor setup`)));
+      const initialSize = change === 'truncation' ? bytes.byteLength + 64 : bytes.byteLength;
+      let infoCalls = 0;
+      const runtime: TranscriptFileRuntime = {
+        async info() {
+          infoCalls += 1;
+          const initial = infoCalls === 1;
+          return {
+            identity: initial && change === 'identity' ? 'old-identity' : 'new-identity',
+            size: initial ? initialSize : bytes.byteLength,
+            modifiedMs: infoCalls,
+            isFile: true,
+          };
+        },
+        async readAll() {
+          return bytes;
+        },
+        async countNewlines() {
+          return 1;
+        },
+        async readTrailingLine() {
+          return new Uint8Array();
+        },
+        async readRange(_file, byteOffset, byteLength) {
+          return bytes.subarray(byteOffset, byteOffset + byteLength);
+        },
+        async readFrom(_file, byteOffset) {
+          return bytes.subarray(byteOffset);
+        },
+        watch() {
+          return { close() {} };
+        },
+      };
+      const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+      const iterator = subject
+        .follow('/synthetic/transcript.jsonl', { startAt: 'end', pollIntervalMs: 10 })
+        [Symbol.asyncIterator]();
+
+      try {
+        // Act
+        const changed = await nextBatch(iterator, `${change} during end cursor setup`);
+        const recovered = await nextBatch(iterator, `${change} replacement recovery`);
+
+        // Assert
+        should(changed.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+        should(recovered.events).containDeep([
+          { kind: 'message', text: `${change} replacement during end cursor setup` },
+        ]);
+        should(recovered.cursor.byteOffset).equal(bytes.byteLength);
+      } finally {
+        await iterator.return?.(undefined);
+      }
+    }
+  });
+
   it('should treat records created after an end-follow subscription as new', async () => {
     // Arrange
     const temporary = await temporaryDirectory();
