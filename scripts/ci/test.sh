@@ -24,6 +24,13 @@ coverage_file="${coverage_dir}/lcov.info"
 scope="src/lib/"
 [[ ${mode} == "int" ]] && scope="src/adapters/"
 mapfile -t scope_dirs < <(find packages -mindepth 3 -maxdepth 3 -type d -path "packages/*/${scope%/}" | sort)
+if [[ ${mode} == "unit" ]]; then
+  # The PWA is browser glue, so its hooks and AudioWorklets deliberately live
+  # outside the domain-tier src/lib directory. They are production code just as
+  # much as lib modules are, and must remain in the 100% unit ledger.
+  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name hooks -o -name worklets \) | sort)
+  scope_dirs+=("${pwa_dirs[@]}")
+fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
 source_list="$(mktemp)"
 coverage_list="$(mktemp)"
@@ -39,13 +46,15 @@ set -e
 
 [[ ! -f ${coverage_file} ]] && echo "❌ No coverage artifact found at ${coverage_file}" >&2 && exit 1
 
-awk -v scope="${scope}" '
+awk -v scope="${scope}" -v mode="${mode}" '
   BEGIN { files = 0; lines_found = 0; lines_hit = 0; bad = 0 }
   /^SF:/ {
     path = substr($0, 4)
     gsub(/\\\\/, "/", path)
     files++
-    if (path !~ "(^|/)" scope) {
+    allowed = path ~ "(^|/)" scope
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(hooks|worklets)/") allowed = 1
+    if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
       bad = 1
     }
@@ -82,6 +91,6 @@ awk -v scope="${scope}" '
 missing="$(comm -23 "${source_list}" "${coverage_list}" | head -n 1)"
 [[ -n ${missing} ]] && echo "❌ source file missing from coverage ledger: ${missing}" >&2 && exit 1
 
-echo "✅ Coverage artifact is scoped to packages/*/${scope}: ${coverage_file}"
+echo "✅ Coverage artifact matches the complete ${mode} production ledger: ${coverage_file}"
 [[ ${test_status} -ne 0 ]] && echo "❌ ${mode} tests failed (exit ${test_status})" >&2 && exit "${test_status}"
 echo "✅ ${mode} tests passed"
