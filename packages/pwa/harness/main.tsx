@@ -30,6 +30,8 @@ import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
+import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
+import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
@@ -232,6 +234,36 @@ const REMOTE_BROWSER: BrowserStatus = {
   capacity: { running: 1, maximum: 3 },
 };
 
+/** A daemon response fixture: the unpriced row is deliberate and must stay
+ * visible rather than being treated as a zero-cost result. */
+const ANALYTICS = {
+  kind: 'aggregate',
+  aggregation: 'sum',
+  query: 'sum by (model)',
+  results: [
+    {
+      labels: { model: 'gpt-5.6-sol' },
+      sessions: 4,
+      tokens: { value: 1_204_320, known: 4, total: 4 },
+      inputTokens: { value: 902_100, known: 4, total: 4 },
+      outputTokens: { value: 302_220, known: 4, total: 4 },
+      cachedInputTokens: { value: 122_000, known: 4, total: 4 },
+      cacheWriteInputTokens: { value: 20_000, known: 4, total: 4 },
+      equivalentApiCostUsdMicros: { value: 3_450_000, known: 4, total: 4 },
+    },
+    {
+      labels: { model: 'unpriced' },
+      sessions: 1,
+      tokens: { value: 80_120, known: 1, total: 1 },
+      inputTokens: { value: 67_000, known: 1, total: 1 },
+      outputTokens: { value: 13_120, known: 1, total: 1 },
+      cachedInputTokens: { value: 0, known: 1, total: 1 },
+      cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
+      equivalentApiCostUsdMicros: { value: null, known: 0, total: 1 },
+    },
+  ],
+} as unknown as AnalyticsAggregateResponse;
+
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
   binaryType: BinaryType = 'blob';
@@ -430,6 +462,15 @@ function Shell() {
           createObjectUrl={() => harnessFrame}
           revokeObjectUrl={() => undefined}
         />
+
+        <Card aria-label="Analytics cost ledger" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — cost ledger</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
+          </PanelBody>
+        </Card>
 
         <Card className="overflow-hidden">
           <PanelHeader>

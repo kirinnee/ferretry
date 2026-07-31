@@ -95,9 +95,12 @@ try {
       await page.screenshot({ path: target });
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
+      const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
+      await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
       await context.close();
       process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
       process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
+      process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
     }
   } finally {
     await browser.close();
