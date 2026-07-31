@@ -13,7 +13,9 @@ import {
   attentionService,
   CREDENTIALS,
   emptyFeed,
+  FakeSessionControl,
   FakeTerminals,
+  healthSubsystem,
   human,
   learningSubsystem,
   nameSubsystem,
@@ -34,9 +36,11 @@ import {
 const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
 
 const subsystems = (): MountedSubsystems => ({
+  health: healthSubsystem(),
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
+  sessionControl: new FakeSessionControl(),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
@@ -53,12 +57,14 @@ describe('the mounted daemon surface', () => {
     // Assert
     should(routes).deepEqual([
       'GET /healthz',
-      'GET /v1/health',
       'GET /usage',
       'GET /v1/usage',
       'GET /metrics',
+      'GET /v1/health',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
+      'POST /v1/sessions',
+      'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
@@ -105,6 +111,7 @@ describe('the mounted daemon surface', () => {
 
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
+    const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
@@ -114,9 +121,17 @@ describe('the mounted daemon surface', () => {
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
     const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
+    // The write half of the session surface, over the same dispatcher: a stop of a session the
+    // fixture holds, which an unmounted route would answer as `unknown_route`.
+    const stopped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/stop', headers: human, body: '{}' }),
+    );
 
     // Assert
     should(health.status).equal(200);
+    // The liveness probe and the scoped report are two different answers under one subject, and both
+    // are reached: the daemon's own health is a mounted subsystem now, not a hardcoded literal.
+    should(report.status).equal(200);
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.
     should(session.status).equal(200);
@@ -128,6 +143,7 @@ describe('the mounted daemon surface', () => {
     should(analytics.status).equal(200);
     should(terminals.status).equal(200);
     should(learning.status).equal(200);
+    should(stopped.status).equal(200);
   });
 
   it('should serve every protocol-switching route from one table too', () => {

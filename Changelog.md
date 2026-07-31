@@ -1,3 +1,17 @@
+## [0.38.0](https://github.com/kirinnee/ferretry/compare/v0.37.0...v0.38.0) (2026-07-31)
+
+## [0.37.0](https://github.com/kirinnee/ferretry/compare/v0.36.0...v0.37.0) (2026-07-31)
+
+## [0.36.0](https://github.com/kirinnee/ferretry/compare/v0.35.0...v0.36.0) (2026-07-31)
+
+## [0.35.0](https://github.com/kirinnee/ferretry/compare/v0.34.0...v0.35.0) (2026-07-31)
+
+## [0.34.0](https://github.com/kirinnee/ferretry/compare/v0.33.0...v0.34.0) (2026-07-31)
+
+## [0.33.0](https://github.com/kirinnee/ferretry/compare/v0.32.0...v0.33.0) (2026-07-31)
+
+## [0.32.0](https://github.com/kirinnee/ferretry/compare/v0.31.0...v0.32.0) (2026-07-31)
+
 ## [0.31.0](https://github.com/kirinnee/ferretry/compare/v0.30.0...v0.31.0) (2026-07-31)
 
 ## [0.30.0](https://github.com/kirinnee/ferretry/compare/v0.29.0...v0.30.0) (2026-07-31)

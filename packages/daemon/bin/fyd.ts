@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   type LearningConfig,
   SessionConfigSchema,
+  type StartSessionRequest,
   SessionStateSchema,
   type SessionView,
   TERMINAL_MAX_GLOBAL,
@@ -47,6 +48,7 @@ import {
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
+import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
@@ -60,10 +62,12 @@ import {
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
 import {
   FileSessionTaskStore,
+  lifecycleConfigDocument,
   NodeWorkingDirectoryResolver,
   StorageSessionLifecycleRepository,
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
+  type SessionProtocolEnvelope,
 } from '../src/adapters/session/lifecycle/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
@@ -117,27 +121,41 @@ import {
   RecommendError,
   type RecommendSubsystem,
   type RoutingCatalogPort,
+  SessionControlError,
+  type SessionControlFailure,
+  type SessionControlSubsystem,
   SessionReadError,
+  type AccountInventoryPort,
+  type CoreAccount,
   type SessionDirectorySubsystem,
+  type SessionIdFactory,
+  type SessionLifecycleLauncher,
   TaskError,
   tryParseSessionId,
   type AnalyticsSubsystem,
   type AssigneeObservation,
+  type DaemonHealthSubsystem,
   type FinishedAnalyticsSession,
   type FoundationPaths,
   type LearningSubsystem,
+  type ScratchReclamation,
   type TaskSubsystem,
   TerminalMountError,
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
+  NameAllocator,
+  type NameAllocationErrorCode,
+  type NameAllocationRequest,
+  type NameAllocationResult,
   type NameClaim,
   type NameSubsystem,
   normalizeCallsign,
   CALLSIGN_WINDOW_MS,
   SessionLifecycleService,
   SessionResumeService,
-  defaultSessionHealthSettings,
+  sessionHealthSettingsAt,
+  type SessionHealthSettings,
   defaultSessionResumeSettings,
   CodexPickerCleanup,
   HarnessQuirkService,
@@ -212,10 +230,32 @@ export interface DaemonWorld {
    *  rather than an instance. */
   readonly wardenReports: (stateDirectory: string) => WardenReportReader;
   readonly browserTransport: BrowserTransportWorld;
-  /** Session lifecycle: create, launch, deliver turn one, stop. The authoritative store is only
-   *  open once storage has resolved and locked the state home, so the service is built per opened
-   *  storage rather than at process start. */
-  readonly createSessionLifecycle: (storage: DaemonStorage) => SessionLifecycleService;
+  /**
+   * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
+   *
+   * It is a world FIELD for the same reason `terminalRuntime` is — it is the one adapter in the
+   * lifecycle whose real behaviour cannot be driven from a test without spawning an agent process on
+   * the host. A test substitutes this and keeps the service, the reconciled documents, the routes and
+   * the real state home exactly as production builds them.
+   */
+  readonly sessionLauncher: SessionLifecycleLauncher;
+  /**
+   * Session lifecycle: create, launch, deliver turn one, stop. The authoritative store is only
+   * open once storage has resolved and locked the state home, so the service is built per opened
+   * storage rather than at process start.
+   *
+   * ONE SERVICE PER START, because two of its ports are per-request. The `envelope` carries the
+   * protocol fields that start decided, and `id` is minted by the caller rather than inside `create`
+   * so the session's shape can be planned — its model, its remote-control arguments — against the
+   * very id the record will carry. The launcher is passed IN rather than captured so overriding
+   * `sessionLauncher` on a world actually changes what starts.
+   */
+  readonly createSessionLifecycle: (
+    storage: DaemonStorage,
+    launcher: SessionLifecycleLauncher,
+    envelope?: SessionProtocolEnvelope,
+    id?: SessionId,
+  ) => SessionLifecycleService;
   /**
    * The daemon's own self-check: it measures how late its tick was, reconciles the session index
    * against the authoritative session directories, and escalates an index that will not heal. Built
@@ -225,8 +265,17 @@ export interface DaemonWorld {
    * today — no per-session monitor subsystem and no warden sweep timer are mounted yet — so the
    * self-check measures and reconciles without planning repairs it could not carry out. The units
    * landing those subsystems flip the flags and replace `UnmountedSupervisionRepair`.
+   *
+   * ONE instance serves both callers: `start` ticks it on a timer, and `GET /v1/health` reports the
+   * ledgers those ticks fill. A second instance for the route would report a ledger nothing had ever
+   * ticked — permanently zero self-checks beside a daemon that was self-checking every minute.
+   *
+   * `settings` is passed IN rather than defaulted here, because the cadence is the operator's
+   * (`healthIntervalSeconds`) and it is only known once configuration has loaded. The service, its
+   * consistency pass and the timer must all read the same object — a detector measuring lateness
+   * against a period the timer does not fire on is a detector measuring nothing.
    */
-  readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
+  readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
   /**
    * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
    * agent its next turn, and refuse the revives that would destroy work rather than recover it.
@@ -290,6 +339,17 @@ export interface DaemonWorld {
      * feed serves rather than probing the providers a second time.
      */
     usage: UsageFeedPort,
+    /**
+     * The self-check, passed IN for the same reason: `start` owns its tick timer, and the health
+     * route must report the ledgers THAT service filled rather than a second one's empty ones.
+     */
+    health: SessionHealthService,
+    /**
+     * The agent launcher, passed IN for the same reason the terminal runtime is: session control
+     * builds a lifecycle service per start, and a factory that closed over the field would keep the
+     * production tmux launcher no matter what a test substituted.
+     */
+    launcher: SessionLifecycleLauncher,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -424,6 +484,282 @@ function createSessionDirectorySubsystem(paths: FoundationPaths, storage: Daemon
       if (found === undefined)
         throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
       return found;
+    },
+  };
+}
+
+/**
+ * The operator knobs a start records when the caller names none.
+ *
+ * They are DECLARED here, at the composition root, because they are this deployment's answers rather
+ * than the protocol's: `SessionConfigSchema` demands every one of them and defaults none, so a
+ * session document cannot exist without a number for each. Zero means "no such deadline" throughout —
+ * a nudge, a kill and a hard timeout are supervision this daemon does not mount, and a non-zero
+ * deadline nothing enforces would be a promise the product does not keep.
+ */
+const SESSION_START_DEFAULTS = {
+  intervalSeconds: 30,
+  timeoutSeconds: 0,
+  nudgeAfterSeconds: 0,
+  killAfterSeconds: 0,
+  directSendMaxChars: 4_096,
+  resumeMenuChoice: 'full',
+  maxSnapshots: 10,
+  // No retry is attempted because no supervisor exists to attempt one; a policy claiming otherwise
+  // would be read as a guarantee by every surface that displays it.
+  retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+} as const;
+
+/**
+ * Turning a published wrapper name into something this host can execute.
+ *
+ * A PORT rather than a `Bun.which` call at the point of use, because it is the one step in a start
+ * that depends on the machine the daemon happens to be running on: a test proves the refusal a fleet
+ * naming an uninstalled wrapper deserves without needing that wrapper installed to do it.
+ */
+interface ExecutableResolverPort {
+  /** The absolute executable, or `undefined` when this host has no such program. */
+  resolve(name: string): string | undefined;
+}
+
+/**
+ * Callsign claiming, as a START needs it: take a name, and give one back when the start it was taken
+ * for never happened.
+ *
+ * The two halves come from different objects — the allocator decides, the ledger persists — and this
+ * is the pair the composition root hands over, so the mount's own dependency is the capability rather
+ * than two collaborators it would have to know how to assemble.
+ */
+interface CallsignClaims {
+  allocate(request: NameAllocationRequest): Promise<NameAllocationResult>;
+  release(callsign: string, ownerId: string): Promise<void>;
+}
+
+/** The account this start names, or a refusal that says which half of the resolution failed. */
+async function resolveStartAccount(
+  accounts: AccountInventoryPort,
+  requested: string,
+  executables: ExecutableResolverPort,
+): Promise<{ readonly account: CoreAccount; readonly executable: string }> {
+  const published = await accounts.accounts();
+  // The wrapper NAME first, then the opaque id: `fy start claude-auto-loge` names the wrapper a human
+  // types, and the recommender answers with account ids, so both must resolve.
+  const account = published.find(row => row.agent === requested) ?? published.find(row => row.id === requested);
+  if (account === undefined)
+    throw new SessionControlError(
+      'unknown_agent',
+      `no account in the fleet manifest is published as ${JSON.stringify(requested)}`,
+    );
+  if (!account.available)
+    throw new SessionControlError(
+      'unavailable',
+      `account ${account.agent} cannot serve a session: ${account.unavailableReason ?? 'the manifest reports it unavailable'}`,
+    );
+  // The manifest publishes an executable NAME; the lifecycle demands an absolute path, because the
+  // wrapper authorization is what stops this daemon launching anything else. Resolving it against
+  // this host's PATH is the only step that can tell a fleet the daemon cannot actually run.
+  const executable = executables.resolve(account.agent);
+  if (executable === undefined)
+    throw new SessionControlError(
+      'unavailable',
+      `the fleet publishes ${account.agent} but this host has no such executable on its PATH`,
+    );
+  return { account, executable };
+}
+
+/** How each allocation refusal is answered. A taken callsign is a conflict a human can resolve by
+ *  choosing another name; an exhausted pool is the daemon having nothing left to offer. */
+const CALLSIGN_REFUSALS: Readonly<Record<NameAllocationErrorCode, SessionControlFailure>> = {
+  invalid_callsign: 'invalid',
+  callsign_taken: 'callsign_taken',
+  pool_exhausted: 'unavailable',
+  claim_store_failed: 'failed',
+  random_source_failed: 'failed',
+};
+
+/**
+ * The callsign this session will answer to, CLAIMED rather than recorded.
+ *
+ * A start that merely wrote down the requested name would let two sessions answer to one callsign,
+ * and a bare callsign then resolves to both — which is the whole reason `NameAllocator` exists. The
+ * claim is taken before the session document is written, because the document is what everything else
+ * derives ownership from and it does not exist yet.
+ *
+ * A start that names NO callsign gets none. Allocating automatically would burn a pool name on every
+ * session nobody addresses by name, and `teammate` is optional on the wire precisely because a session
+ * need not be a teammate.
+ */
+async function claimCallsign(
+  callsigns: CallsignClaims,
+  owner: SessionId,
+  request: StartSessionRequest,
+): Promise<string | undefined> {
+  if (request.teammate === undefined) return undefined;
+  const allocated = await callsigns.allocate({
+    ownerId: owner,
+    nowMs: Date.now(),
+    requested: request.teammate,
+    // The caller decides whether a taken name is a refusal or a fallback; the daemon does not guess.
+    ...(request.teammateFallback === true ? { fallback: true } : {}),
+  });
+  if (!allocated.ok) throw new SessionControlError(CALLSIGN_REFUSALS[allocated.error.code], allocated.error.message);
+  return allocated.claim.callsign;
+}
+
+/**
+ * Starting and stopping a session, over the lifecycle service that was built for exactly this and
+ * never called.
+ *
+ * WHAT THIS FACTORY HAS TO RECONCILE, because the two halves of the daemon were ported by different
+ * units and describe a session differently:
+ *
+ *   * THE AGENT IS TWO VALUES. The protocol's `agent` is the wrapper name an account is published
+ *     under; the lifecycle's is the absolute executable its authorization checks. This resolves one
+ *     into the other through the fleet manifest and this host's PATH, and refuses when either half
+ *     has no answer — a fleet naming a wrapper the host cannot run is a configuration fault, not a
+ *     session that fails at launch.
+ *   * THE DOCUMENT IS ONE FILE. `StorageSessionLifecycleRepository` writes the protocol's fields
+ *     alongside the lifecycle's from the envelope built here, so a session this start creates is
+ *     visible to the session list, task-board enrichment, analytics and the callsign pool rather
+ *     than dropped by every one of them.
+ *   * THE ID IS MINTED BEFORE THE PLAN. `SessionPlanner` decides the model and the remote-control
+ *     arguments FROM the session id, so the id is minted here and handed to the lifecycle.
+ *
+ * IDEMPOTENCY IS IN MEMORY, and that is the honest scope for it. The hazard is the protocol client's
+ * own automatic retry seconds after a transport error: without a ledger that retry opens a second
+ * pane and a second agent against the same task. A restart between the two attempts loses the ledger,
+ * but it also loses the connection the retry would have travelled on, so the client sees a transport
+ * failure rather than a duplicate session.
+ */
+function createSessionControlSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  createLifecycle: DaemonWorld['createSessionLifecycle'],
+  planner: SessionPlanner,
+  launcher: SessionLifecycleLauncher,
+  accounts: AccountInventoryPort,
+  executables: ExecutableResolverPort,
+  ids: SessionIdFactory,
+  callsigns: CallsignClaims,
+): SessionControlSubsystem {
+  /** Request id to the session it started, plus the payload it started, for this process's lifetime. */
+  const spent = new Map<string, { readonly sessionId: SessionId; readonly payload: string }>();
+
+  /** The view of a session this mount just wrote. A document it cannot read back is a wiring fault. */
+  const view = async (id: SessionId): Promise<SessionView> => {
+    const found = await sessions.get(id).catch(() => undefined);
+    if (found === undefined)
+      throw new SessionControlError(
+        'failed',
+        `session ${id} was written but its documents do not satisfy the protocol`,
+      );
+    return found;
+  };
+
+  return {
+    start: async (request, requestId) => {
+      const payload = JSON.stringify(request);
+      const already = spent.get(requestId);
+      if (already !== undefined) {
+        if (already.payload !== payload)
+          throw new SessionControlError(
+            'conflict',
+            `request id ${JSON.stringify(requestId)} already started session ${already.sessionId} from a different request`,
+          );
+        return await view(already.sessionId);
+      }
+      // A start with no working directory would run the agent wherever the DAEMON happens to be,
+      // which is never what a caller meant; the resolver refuses a relative one for the same reason.
+      if (request.cwd === undefined)
+        throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
+      const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
+      const id = ids.next();
+      // BEFORE the plan, because the callsign is what the harness's own remote-control session is
+      // named after: a plan built on the requested name and a document recording the fallback would
+      // disagree about who this session is.
+      const teammate = await claimCallsign(callsigns, id, request);
+      const plan = planner.plan({
+        id,
+        account,
+        mode: request.mode,
+        ...(teammate === undefined ? {} : { teammate }),
+        ...(request.name === undefined ? {} : { name: request.name }),
+        ...(request.model === undefined ? {} : { requestedModel: request.model }),
+        ...(request.parent === undefined ? {} : { parent: request.parent }),
+      });
+      // The remote-control arguments are added only when the caller asked for the surface, because
+      // they are what makes the harness publish one — adding them anyway would open a control channel
+      // for a session whose own document records that it has none.
+      const command = [
+        executable,
+        ...(request.remoteControl === true ? plan.extraArgs : []),
+        ...(request.harnessFlags ?? []),
+      ];
+      const envelope: SessionProtocolEnvelope = {
+        agent: account.agent,
+        harness: account.kind,
+        // An incarnation names one RUN of a session: this is its first, and a revive is what mints
+        // the next. The generation is the daemon-side counter of those relaunches.
+        incarnation: `${id}-1`,
+        runtimeGeneration: 1,
+        boardAccess: 'none',
+        // What the caller asked for, kept beside the model that was actually resolved for it: the
+        // hint is evidence about the request and the model is the decision.
+        modelHint: request.model ?? account.defaultModel ?? '',
+        model: plan.model,
+        remoteControl: request.remoteControl === true,
+        harnessFlags: [...(request.harnessFlags ?? [])],
+        // Turn zero: the first turn is delivered by the launch below, and nothing has answered it.
+        turn: 0,
+        ...(teammate === undefined ? {} : { teammate }),
+        ...(request.label === undefined ? {} : { label: request.label }),
+        ...SESSION_START_DEFAULTS,
+        ...(request.intervalSeconds === undefined ? {} : { intervalSeconds: request.intervalSeconds }),
+        ...(request.timeoutSeconds === undefined ? {} : { timeoutSeconds: request.timeoutSeconds }),
+        ...(request.nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds: request.nudgeAfterSeconds }),
+        ...(request.killAfterSeconds === undefined ? {} : { killAfterSeconds: request.killAfterSeconds }),
+        ...(request.directSendMaxChars === undefined ? {} : { directSendMaxChars: request.directSendMaxChars }),
+        ...(request.resumeMenuChoice === undefined ? {} : { resumeMenuChoice: request.resumeMenuChoice }),
+        ...(request.maxSnapshots === undefined ? {} : { maxSnapshots: request.maxSnapshots }),
+      };
+      const lifecycle = createLifecycle(storage, launcher, envelope, id);
+      try {
+        await lifecycle.createAndStart({
+          agent: executable,
+          command,
+          cwd: request.cwd,
+          mode: request.mode,
+          ...(request.name === undefined ? {} : { name: request.name }),
+          ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(request.parent === undefined ? {} : { parent: request.parent }),
+        });
+      } catch (error) {
+        // The record survives a failed launch with the reason in it, so the failure is answered with
+        // the session that holds the evidence rather than an error the caller cannot follow up.
+        const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);
+        if (failed !== undefined) return failed;
+        // Nothing was recorded, so nothing holds this callsign: releasing the reservation is what
+        // stops a start that never happened from parking a name for the whole resolution window.
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
+        throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
+      }
+      spent.set(requestId, { sessionId: id, payload });
+      return await view(id);
+    },
+    stop: async (reference, reason) => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionControlError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (storage.findSession(id) === undefined) throw new SessionControlError('not_found', `no session ${reference}`);
+      // No envelope: this session's protocol half is already in its document, and the repository
+      // merges the transition over it rather than replacing it.
+      const lifecycle = createLifecycle(storage, launcher);
+      try {
+        await lifecycle.stop(id, reason);
+      } catch (error) {
+        throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
+      }
+      return await view(id);
     },
   };
 }
@@ -581,21 +917,59 @@ function createTerminalSubsystem(
  * The claim window is the pool policy's own, so a callsign frees up exactly when a bare reference to
  * it stops naming that session.
  */
+/**
+ * The callsigns the live fleet is using, derived from each session's own configuration document.
+ *
+ * This is the DURABLE half of "what is taken": a session's `teammate` is what a bare callsign
+ * resolves through, so a name a live session answers to is not free however the reservation ledger
+ * looks. Shared by the suggestion route and the allocator's claim store so the two cannot disagree
+ * about who owns a name.
+ */
+async function liveCallsigns(storage: DaemonStorage): Promise<readonly NameClaim[]> {
+  const sessions = await Promise.all(
+    storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
+      if (!config.success || config.data.teammate === undefined) return undefined;
+      const callsign = normalizeCallsign(config.data.teammate);
+      const claimedAtMs = Date.parse(config.data.createdAt);
+      if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
+      return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+    }),
+  );
+  return sessions.filter((claim): claim is NameClaim => claim !== undefined);
+}
+
+/**
+ * Callsign claiming for a start: the real allocator over the reservation ledger and the live fleet.
+ *
+ * The randomness is the same rotation the suggestion route uses, and for the same reason — two starts
+ * racing for the pool must not both begin at its first entry — and the ledger's executor is passed in
+ * so every claim in the process serializes on the one file.
+ */
+function createCallsignClaims(
+  storage: DaemonStorage,
+  files: StateFileSystem,
+  paths: FoundationPaths,
+  executor: KeyedSerialExecutor,
+): CallsignClaims {
+  const store = new FileNameClaimStore(
+    join(paths.state, 'callsigns.json'),
+    files,
+    executor,
+    async () => await liveCallsigns(storage),
+  );
+  const allocator = new NameAllocator(store, {
+    nextIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
+  });
+  return {
+    allocate: async request => await allocator.allocate(request),
+    release: async (callsign, ownerId) => await store.release(callsign, ownerId),
+  };
+}
+
 function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
   return {
-    claims: async () => {
-      const sessions = await Promise.all(
-        storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
-          const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
-          if (!config.success || config.data.teammate === undefined) return undefined;
-          const callsign = normalizeCallsign(config.data.teammate);
-          const claimedAtMs = Date.parse(config.data.createdAt);
-          if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
-          return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
-        }),
-      );
-      return sessions.filter((claim): claim is NameClaim => claim !== undefined);
-    },
+    claims: async () => await liveCallsigns(storage),
     now: () => Date.now(),
     // Rotating the start so two humans asking at the same moment are not both offered the same
     // first name and then made to collide when they start their sessions.
@@ -645,6 +1019,36 @@ function createLearningSubsystem(
     transaction: async work => await serial.run('learning', work),
     config: () => LEARNING_CONFIG,
     now: () => clock.now(),
+  };
+}
+
+/**
+ * Scratch reclamation this daemon does not perform.
+ *
+ * `enabled` is FALSE and is not configurable, for the same reason `LEARNING_CONFIG.enabled` is: it
+ * is a fact about this build rather than a setting. No scratch garbage collector is mounted — the
+ * `/v1/gc` route the CLI speaks is not served — so the two counters beside it are zero because
+ * nothing reclaims, not because a reclaimer found nothing. The unit that mounts the collector
+ * replaces this with the collector's own totals.
+ */
+const SCRATCH_UNMOUNTED: ScratchReclamation = {
+  enabled: false,
+  reclaimedSessions: 0,
+  reclaimedBytes: 0,
+};
+
+/**
+ * The daemon's own health, over the self-check `start` ticks.
+ *
+ * The process id is read HERE rather than in the route, because `src/lib` may not touch `process`:
+ * a domain that read its own pid could not be driven from a test, and the whole point of the field
+ * is that an operator can signal the process that is actually serving.
+ */
+function createHealthSubsystem(health: SessionHealthService): DaemonHealthSubsystem {
+  return {
+    report: async () => await health.report(),
+    pid: process.pid,
+    scratch: SCRATCH_UNMOUNTED,
   };
 }
 
@@ -700,6 +1104,13 @@ export function buildWorld(): DaemonWorld {
   // Its own executor: a learning verdict must not queue behind a task board's transaction, and the
   // two snapshots share no file.
   const learningBoard = new TaskBoardSerialExecutor();
+  // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
+  // the read-modify-write of that one file must never interleave with another start's.
+  const callsignClaims = new KeyedSerialExecutor();
+  // ONE executor for every session mutation in the process, shared by every lifecycle service built
+  // per request. Session work gets its own rather than borrowing storage's: a start holding a
+  // half-launched pane must not make every unrelated document write wait behind it.
+  const sessionMutations = new KeyedSerialExecutor();
   /**
    * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
    *
@@ -719,10 +1130,52 @@ export function buildWorld(): DaemonWorld {
       }
     },
   };
+  /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
+   *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
+  const accounts = new ManifestAccountInventory(stateFiles, paths.fleetManifest);
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
-  const advisorOver = (usage: UsageFeedPort): TeamAdvisor =>
-    new TeamAdvisor(new ManifestAccountInventory(stateFiles, paths.fleetManifest), routing, usage);
+  const advisorOver = (usage: UsageFeedPort): TeamAdvisor => new TeamAdvisor(accounts, routing, usage);
+  /** Session ids, minted before the plan that shapes the session they name. */
+  const sessionIds = new TimeSessionIdFactory();
+  /** The shape of one session. ONE planner for the process: the model a start records and the window
+   *  a later read reports must come from the same decision. */
+  const planner = new SessionPlanner({
+    startWait: defaultStartWaitPolicy,
+    contextWindowOverrides: {},
+    namePrefix: DAEMON_NAME,
+    remoteControlPrefix: DAEMON_NAME,
+  });
+  /**
+   * This host's PATH, which is the only thing that can turn a published wrapper into a program.
+   *
+   * `PATH` is read at the point of the lookup rather than left to the default, which is resolved once
+   * per process: a daemon whose environment gains the fleet's bin directory after it booted must find
+   * the wrapper the fleet publishes, not the one its startup environment happened to hold.
+   */
+  const executables: ExecutableResolverPort = {
+    resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
+  };
+  /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
+   *  publishes rather than a second construction that could drift from it. */
+  const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
+    new SessionLifecycleService(
+      {
+        repository: new StorageSessionLifecycleRepository(storage, envelope),
+        launcher,
+        tasks: new FileSessionTaskStore(taskId => createSessionPaths(paths, taskId).directory),
+        directories: new NodeWorkingDirectoryResolver(),
+        // A caller that has already minted the id hands it over, so the plan and the record cannot
+        // disagree about which session they describe.
+        ids: id === undefined ? sessionIds : { next: () => id },
+        clock,
+        // ONE queue for every service this process builds: a per-service executor would let a stop
+        // and a retried start of the SAME session interleave, and the loser's write would overwrite a
+        // live session's record. The service is per request; the serialization is not.
+        serial: sessionMutations,
+      },
+      defaultSessionLifecycleSettings,
+    );
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -768,26 +1221,14 @@ export function buildWorld(): DaemonWorld {
       openViewerStream: (host, sessionId, socket) =>
         BrowserViewerStream.connect(host, sessionId, new SocketViewerDownstream(socket), new SystemFrameClock()),
     },
-    createSessionLifecycle: storage =>
-      new SessionLifecycleService(
-        {
-          repository: new StorageSessionLifecycleRepository(storage),
-          launcher: new TmuxSessionLifecycleLauncher(
-            // A private absolute socket inside the state home is what keeps managed panes off any
-            // tmux server the host already runs.
-            new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
-            milliseconds => Bun.sleep(milliseconds),
-          ),
-          tasks: new FileSessionTaskStore(id => createSessionPaths(paths, id).directory),
-          directories: new NodeWorkingDirectoryResolver(),
-          ids: new TimeSessionIdFactory(),
-          clock,
-          // Its own queue: session mutations must not serialize behind storage-wide work.
-          serial: new KeyedSerialExecutor(),
-        },
-        defaultSessionLifecycleSettings,
-      ),
-    createSessionHealth: storage =>
+    sessionLauncher: new TmuxSessionLifecycleLauncher(
+      // A private absolute socket inside the state home is what keeps managed panes off any
+      // tmux server the host already runs.
+      new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+      milliseconds => Bun.sleep(milliseconds),
+    ),
+    createSessionLifecycle,
+    createSessionHealth: (storage, settings) =>
       new SessionHealthService(
         {
           inventory: new StorageSessionHealthInventory(storage, {
@@ -801,7 +1242,7 @@ export function buildWorld(): DaemonWorld {
             bootstrapFinished: () => true,
             bootstrapErrors: () => [],
           }),
-          consistency: new StorageConsistencyPass(storage, stateFiles, paths, defaultSessionHealthSettings),
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
           repair: new UnmountedSupervisionRepair(),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
           clock,
@@ -812,11 +1253,11 @@ export function buildWorld(): DaemonWorld {
             // Nothing supervises this process yet, so the honest answer is "no restart happened":
             // the coordinator then un-latches and tells the operator to restart it themselves.
             { restart: async () => false },
-            defaultSessionHealthSettings,
+            settings,
           ),
           version: pkg.version,
         },
-        defaultSessionHealthSettings,
+        settings,
       ),
     createSessionResume: storage =>
       new SessionResumeService(
@@ -827,7 +1268,10 @@ export function buildWorld(): DaemonWorld {
             // Parsed, not asserted: a revive addresses a real terminal and runs a real command, so
             // a config that no longer validates must refuse rather than launch something else.
             async id => {
-              const config = SessionLifecycleConfigSchema.parse(await storage.readConfig(id));
+              // Through the same document mapping the lifecycle repository writes: the executable is
+              // recovered from the argv, because the document records the wrapper NAME every other
+              // surface joins on.
+              const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id)));
               return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
             },
             milliseconds => Bun.sleep(milliseconds),
@@ -855,12 +1299,7 @@ export function buildWorld(): DaemonWorld {
       );
     },
     createTeamAdvisor: advisorOver,
-    sessions: new SessionPlanner({
-      startWait: defaultStartWaitPolicy,
-      contextWindowOverrides: {},
-      namePrefix: DAEMON_NAME,
-      remoteControlPrefix: DAEMON_NAME,
-    }),
+    sessions: planner,
     provenance: new SessionProvenanceStamper(clock),
     harness: new HarnessQuirkService(
       new CodexPickerCleanup(
@@ -888,30 +1327,48 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals, usage) => ({
-      attention: new AttentionService(
-        // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
-        // than asserted: an id the layout would not accept must never become a directory path.
-        new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
-        clock,
-      ),
-      pins: new PinService(
-        new FilePinSessionDirectory(paths, stateFiles),
-        // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
-        new FilePinRepository(paths, stateFiles, new KeyedSerialExecutor(), clock),
-        clock,
-        // A pin id is a protocol UUID, so it is minted as one rather than derived from a counter the
-        // next process would restart.
-        { next: () => crypto.randomUUID() },
-      ),
-      sessions: createSessionDirectorySubsystem(paths, storage),
-      tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
-      analytics: createAnalyticsSubsystem(storage),
-      terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
-      names: createNameSubsystem(storage),
-      learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
-      recommend: createRecommendSubsystem(advisorOver, usage),
-    }),
+    createSubsystems: (storage, terminals, usage, health, launcher) => {
+      // ONE reader for both halves of the session surface: what a start answers with must be the same
+      // view the list and the single read serve, parsed by the same schemas from the same documents.
+      const sessions = createSessionDirectorySubsystem(paths, storage);
+      return {
+        health: createHealthSubsystem(health),
+        attention: new AttentionService(
+          // The ledger repository is handed raw ids from the transport, so the id is parsed here
+          // rather than asserted: an id the layout would not accept must never become a directory
+          // path.
+          new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+          clock,
+        ),
+        pins: new PinService(
+          new FilePinSessionDirectory(paths, stateFiles),
+          // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
+          new FilePinRepository(paths, stateFiles, new KeyedSerialExecutor(), clock),
+          clock,
+          // A pin id is a protocol UUID, so it is minted as one rather than derived from a counter the
+          // next process would restart.
+          { next: () => crypto.randomUUID() },
+        ),
+        sessions,
+        sessionControl: createSessionControlSubsystem(
+          storage,
+          sessions,
+          createSessionLifecycle,
+          planner,
+          launcher,
+          accounts,
+          executables,
+          sessionIds,
+          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+        ),
+        tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+        analytics: createAnalyticsSubsystem(storage),
+        terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+        names: createNameSubsystem(storage),
+        learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
+        recommend: createRecommendSubsystem(advisorOver, usage),
+      };
+    },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
@@ -958,7 +1415,29 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
-  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime, usage);
+  // `healthIntervalSeconds` was declared in `config/daemon.json` and read by nothing, because no
+  // self-check ran to have a cadence. It is the operator's number now — and the wedge threshold moves
+  // WITH it, because "the event loop stopped running" means three missed ticks rather than a fixed
+  // three minutes. One settings object serves the service, its consistency pass and the timer below,
+  // so the period the daemon fires on cannot drift from the period the detector measures against.
+  const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
+  const health = world.createSessionHealth(opened.storage, healthSettings);
+  const subsystems = world.createSubsystems(
+    opened.storage,
+    world.terminalRuntime,
+    usage,
+    health,
+    world.sessionLauncher,
+  );
+  // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
+  // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
+  // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also
+  // the boot-time index reconciliation: `classifySelfCheckTick` forces the deep consistency pass on
+  // the first tick precisely because boot is when the index is least likely to match the session
+  // directories. A failure is swallowed for the same reason the ticks below swallow theirs — a
+  // self-check that could not run is reported by the next one's freshness, and refusing to serve
+  // because the daemon could not measure itself is strictly worse than serving and saying so.
+  await health.selfCheck().catch(() => undefined);
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
@@ -981,6 +1460,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // stream is over while the socket it writes to still exists.
   cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
+  // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
+  // the wedge detector measures lateness against, so it comes from the same settings object the
+  // service reasons with rather than a constant here — a timer that fired on a different period
+  // would make every on-time tick look late.
+  //
+  // Errors are swallowed rather than propagated: an unhandled rejection from a background timer
+  // takes down a daemon whose fleet is fine, and the failure is already visible as the next tick's
+  // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
+  // daemon does not leave a timer firing at closed storage.
+  const ticks = setInterval(() => {
+    void health.selfCheck().catch(() => undefined);
+  }, healthSettings.selfCheckIntervalMs);
+  cleanups.push(() => clearInterval(ticks));
   await world.untilShutdown();
   return 0;
 }

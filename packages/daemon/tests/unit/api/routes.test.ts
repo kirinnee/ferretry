@@ -47,19 +47,38 @@ const dispatch = (feed: UsageFeedPort, path: string) =>
   ).dispatch(request({ path }));
 
 describe('health routes', () => {
-  for (const path of ['/healthz', '/v1/health']) {
-    it(`should answer ${path} without a token`, async () => {
-      // Arrange
-      const feed = new StubFeed([], NOW);
+  it('should answer /healthz without a token', async () => {
+    // Arrange
+    const feed = new StubFeed([], NOW);
 
-      // Act
-      const response = await dispatch(feed, path);
+    // Act
+    const response = await dispatch(feed, '/healthz');
 
-      // Assert
-      should(response.status).equal(200);
-      should(jsonBody(response)).deepEqual({ status: 'ok', version: daemonVersion, uptimeSeconds: 90 });
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ status: 'ok', version: daemonVersion, uptimeSeconds: 90 });
+  });
+
+  it('should leave /v1/health to the mount that can answer it', async () => {
+    // The protocol declares `/v1/health` as the full `HealthView`, which this table cannot build:
+    // it has no session index and no self-check. Answering it here with the liveness body is what
+    // made the CLI's schema-parsing probe report a serving daemon as unreachable.
+    // Authenticated, because an unknown route is only reported as one to a caller who has already
+    // proved itself — an anonymous probe cannot map the surface by watching 404 turn into 405.
+    // Arrange
+    const dispatcher = new ApiDispatcher(new ApiRouter([...healthRoutes(fixedClock(NOW), NOW - 90_000)]), {
+      admin: 'admin-secret',
+      warden: 'warden-secret',
     });
-  }
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({ path: '/v1/health', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    // Assert
+    should(response.status).equal(404);
+  });
 
   it('should not let liveness be cached', async () => {
     // Arrange / Act
@@ -235,7 +254,7 @@ describe('the assembled daemon surface', () => {
     const paths = daemonApiRoutes(dependencies).map(route => `${route.method} ${route.path}`);
 
     // Assert
-    should(paths).deepEqual(['GET /healthz', 'GET /v1/health', 'GET /usage', 'GET /v1/usage', 'GET /metrics']);
+    should(paths).deepEqual(['GET /healthz', 'GET /usage', 'GET /v1/usage', 'GET /metrics']);
   });
 
   it('should build a dispatcher that serves them', async () => {

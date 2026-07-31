@@ -42,7 +42,7 @@ import {
 } from '../lib/pages/routes.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { BottomSheet } from './bottom-sheet.tsx';
-import { Link } from './link.tsx';
+import { RouteLink } from './route-link.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 
 /** Why the reload chip is offered. */
@@ -184,17 +184,20 @@ function DestinationLink({
   destination,
   daemon,
   active,
+  onNavigate,
   onSelect,
 }: {
   destination: AppBarDestination;
   daemon: DaemonId;
   active: boolean;
+  onNavigate?: (to: string) => void;
   onSelect?: () => void;
 }) {
   const { Icon } = destination;
   return (
-    <Link
+    <RouteLink
       to={destination.path(daemon)}
+      {...(onNavigate ? { onNavigate } : {})}
       aria-current={active ? 'page' : undefined}
       aria-label={destination.label}
       title={destination.title}
@@ -203,7 +206,7 @@ function DestinationLink({
     >
       <Icon size={14} aria-hidden="true" />
       <span className="text-meta font-medium">{destination.label}</span>
-    </Link>
+    </RouteLink>
   );
 }
 
@@ -227,6 +230,8 @@ export interface AppBarProps {
   readonly updateReady?: UpdateReason | null;
   readonly onApplyUpdate?: () => void;
   readonly active?: AppBarDestinationId | null;
+  /** How the host commits an in-app navigation. */
+  readonly onNavigate?: (to: string) => void;
   /** The theme control, on layouts wide enough for it. */
   readonly themeToggle?: ReactNode;
 }
@@ -241,6 +246,7 @@ export function AppBar({
   updateReady = null,
   onApplyUpdate,
   active = null,
+  onNavigate,
   themeToggle,
 }: AppBarProps) {
   const layout = useLayoutMode();
@@ -267,9 +273,9 @@ export function AppBar({
               // path can repeat a label, so only the accumulated path is unique.
               <span key={trail} className="flex min-w-0 items-center gap-sm">
                 {crumb.href ? (
-                  <Link to={crumb.href} className="truncate hover:text-fg">
+                  <RouteLink to={crumb.href} {...(onNavigate ? { onNavigate } : {})} className="truncate hover:text-fg">
                     {crumb.label}
-                  </Link>
+                  </RouteLink>
                 ) : (
                   <span className="truncate text-fg font-semibold">{crumb.label}</span>
                 )}
@@ -283,6 +289,7 @@ export function AppBar({
                 key={destination.id}
                 destination={destination}
                 daemon={daemon}
+                {...(onNavigate ? { onNavigate } : {})}
                 active={active === destination.id}
               />
             ))}
@@ -380,6 +387,7 @@ export function AppBar({
                 key={destination.id}
                 destination={destination}
                 daemon={daemon}
+                {...(onNavigate ? { onNavigate } : {})}
                 active={active === destination.id}
                 onSelect={selectMobileDestination}
               />

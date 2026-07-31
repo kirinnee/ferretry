@@ -19,7 +19,7 @@ _state_ of the work and the operational knowledge that is expensive to rediscove
 | Daemon composition root                             | `packages/daemon/bin/fyd.ts`           |
 | Probes removed (Kirin's decision)                   | —                                      |
 
-### Updated 2026-07-31 — 24 units merged, all ten original branches landed
+### Updated 2026-07-31 — 57 units merged, all ten original branches landed
 
 The table above is the state at the stop-work order. Since resuming, **24 PRs have merged** and
 every one of the ten branches in §2 is landed and deleted. Also on `main` now:
@@ -38,9 +38,13 @@ every one of the ten branches in §2 is landed and deleted. Also on `main` now:
 | **`task test:gate`** — reproduces CI's 100% coverage gate     | `Taskfile.yaml`, `scripts/ci/test.sh`          |
 | **composition-reachability gate** + enumerated allowlist      | `scripts/validate/composition-reachability.sh` |
 
-**Honest progress: roughly half the source is ported (~35k of ~68k lines), but the product is less
-complete than that implies** — see the allowlist note below. Remaining: `session-manager` sub-units
-2–5, `api-server`, ~12 CLI command groups, and the PWA with its 56 single-daemon sites.
+**Honest progress: ~62k of ~167k lines (~37%).** The denominator matters: the daemon+CLI source is
+67,861 lines but the kteam UI is a further 98,956, so any percentage quoted against the daemon alone
+is wrong. The daemon and CLI are substantially complete — the daemon binds, serves an authenticated
+API with /usage and /metrics, supervises sessions with a warden, and the CLI drives all of it.
+
+Remaining: the PWA (~4.8k of ~99k ported — the dominant cost from here), the ~30 unwired modules
+below, and the STT unit (see §12).
 
 **Four gates now, not three:** `pre-commit run --all-files`, `task test`, **`task test:gate`**, and
 the snapshot publish. `task test` and `task test:coverage` both exit 0 while coverage is short —
@@ -142,6 +146,42 @@ delegates to the same script CI runs. Never trust a green `task test` alone.
 **Never remove a merged unit's worktree without checking for a live agent in it.** An agent whose
 cwd disappears mid-turn dies. A running session's cwd is in `~/.kteam/<id>/config.json`.
 
+**Composition roots conflict on EVERY merge, and mechanical union resolution corrupts them.** Every
+unit appends to `bin/fyd.ts` or `bin/fy.ts`, so both conflict constantly. Stripping conflict markers
+to "keep both sides" is right for barrels (append-only export lists) and WRONG for structured code —
+it silently duplicated a declaration and resurrected a deliberately-deleted import, twice. Two fixes
+that worked: resolve those files by hand and run `biome lint` on the file BEFORE continuing the
+rebase; and restructure the CLI root into a `DOMAIN_REGISTRARS` list so adding a group is a one-line
+append that merges like a barrel. Do the same for `fyd.ts` if it keeps costing round-trips.
+
+**Hand a semantic conflict back to the unit that wrote the code.** When two units both rewrote
+`registerDomain`, deciding how one group obtains its client is a judgement about intent, not a
+merge. Aborting and relaunching the unit with the specific decision spelled out worked every time;
+resolving it myself corrupted the file three times.
+
+**Sweep worktrees for uncommitted work — but check for a live agent first.** Four times a unit died
+mid-turn (context exhaustion, hard quota limit) with 6–10 uncommitted files, and a `git status`
+sweep saved the work as a labelled `--no-verify` preservation commit. Once the agent was still
+running in that worktree, so committing under it would have corrupted its state: map a session to
+its cwd via `~/.kteam/<id>/config.json` before touching anything.
+
+**Never run gate checks and `gh pr merge` in the same command block.** The merge executes regardless
+of what the checks printed. That is exactly how nine unwired modules landed on `main` and turned it
+red, and it nearly happened twice more.
+
+**A green PR can still break `main`, through ordering.** One PR widened biome and the arch gate to
+`.tsx`; another landed the first `.tsx` files with CI green from _before_ that widening. Each was
+fine alone; together they put four error-severity findings on `main`. After merging anything that
+widens a gate's scope, re-verify `main` itself.
+
+**Probe results are a snapshot, not a fact.** `kfleet`/`kteam` reported an account as
+"credentials rejected — run kfleet login"; it was a transient probe failure and the account was
+usable minutes later. Re-probe before escalating anything account-related to the human.
+
+**Obeying a linter can break a feature.** Biome flagged a transcript auto-scroll effect's deps as
+"unnecessary" because the body reads only refs — but those deps are the TRIGGER, and removing them
+stops the viewport following new entries. The fix was a narrow suppression with the reason written
+down, not a code change. Read what an effect is FOR before satisfying a rule about it.
 **A `kteam send` cannot re-task an agent.** Teammates correctly refuse role changes from a peer
 session. To change what an agent is _for_, stop it and start a fresh one whose prompt states the new
 role. `send` is only for steering within an assignment.

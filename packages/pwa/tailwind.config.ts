@@ -19,7 +19,7 @@ const config: Config = {
   // The resolved attribute is `<family>-<mode>`, so the old exact-match
   // `[data-theme="dark"]` no longer selects anything. Suffix-match instead.
   darkMode: ['class', '[data-theme$="-dark"]'],
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: ['./index.html', './src/**/*.{ts,tsx}', './harness/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {

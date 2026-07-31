@@ -79,3 +79,28 @@ export const defaultSessionHealthSettings: SessionHealthSettings = {
 export function parseSessionHealthSettings(value: unknown): SessionHealthSettings {
   return SessionHealthSettingsSchema.parse(value);
 }
+
+/**
+ * How many missed ticks make a gap unambiguous. The default pair above is exactly this ratio, and
+ * naming it is what keeps the two numbers from drifting when the cadence is configured.
+ */
+export const WEDGE_TICK_ALLOWANCE = 3;
+
+/**
+ * The settings for an operator-configured self-check cadence.
+ *
+ * The cadence cannot move alone. `wedgeGapMs` is a MULTIPLE of it — "the event loop stopped running"
+ * means three missed ticks, not a fixed three minutes — so a daemon configured to check every ten
+ * seconds would otherwise need eighteen missed ticks before it admitted it was wedged, and one
+ * configured to check every five minutes would declare itself wedged while perfectly on time.
+ *
+ * Parsed rather than assembled, so the schema's own refusal — a wedge threshold at or below the
+ * cadence, which makes every on-time tick read as a wedge — still applies to a derived pair.
+ */
+export function sessionHealthSettingsAt(selfCheckIntervalMs: number): SessionHealthSettings {
+  return parseSessionHealthSettings({
+    ...defaultSessionHealthSettings,
+    selfCheckIntervalMs,
+    wedgeGapMs: selfCheckIntervalMs * WEDGE_TICK_ALLOWANCE,
+  });
+}
