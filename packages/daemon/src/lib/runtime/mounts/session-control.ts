@@ -23,16 +23,19 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * it only after both its POST attempts failed in transport. See `recover` below for why the payload
  * digest is mandatory.
  *
- * WHAT THIS MOUNT REFUSES, AND WHY EACH REFUSAL IS BETTER THAN A GUESS. `StartSessionRequest`
- * carries two options this daemon cannot honour yet, and each is answered with `501` and a code
- * naming the missing unit rather than accepted and dropped:
+ * WHAT THIS MOUNT REFUSES, AND WHY THE REFUSAL IS BETTER THAN A GUESS. `StartSessionRequest` carries
+ * one option this daemon cannot honour yet, answered with `501` and a code naming the missing unit
+ * rather than accepted and dropped:
  *
  *   * `boardAccess` other than `none` — a board grant is keyed on a per-session capability this
  *     daemon mints nowhere. Accepting the field would hand back a session whose caller believes it
  *     may write a board it cannot reach.
- *   * `initialAttachments` — nothing in the daemon stores an attachment blob, and an attachment
- *     silently discarded is worse than one refused: the agent would start without the file its task
- *     refers to.
+ *
+ * `initialAttachments` USED TO BE THE SECOND, and it is served now. It is not the multipart upload
+ * route and never needed one: the bytes travel INLINE as base64 in this very body, and the only
+ * place they are spent is the turn-one document this start writes. The composition root stores each
+ * file in the session's own directory, extracts a DOCX into text beside it, and names both in the
+ * opening message — so `fy start -f report.docx` hands the agent the file its task refers to.
  *
  * `detach` is accepted and needs no unit: it decides whether the CLIENT keeps its own terminal
  * attached after the start, and the daemon never had a terminal to attach. `teammate` and
@@ -167,12 +170,6 @@ function parseStart(text: string): StartSessionRequest {
       501,
       'task board access is not mounted: a board grant needs a per-session capability this daemon does not mint yet',
       'board_access_not_mounted',
-    );
-  if (start.initialAttachments !== undefined && start.initialAttachments.length > 0)
-    throw new ApiError(
-      501,
-      'attachments are not mounted: this daemon stores no attachment blob, so an agent would start without the file',
-      'attachments_not_mounted',
     );
   return start;
 }

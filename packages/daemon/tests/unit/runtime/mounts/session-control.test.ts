@@ -107,24 +107,36 @@ describe('the session control mount', () => {
     should(control.starts).be.empty();
   });
 
-  it('should name the missing unit for each option it cannot honour', async () => {
-    // Every one of these is accepted by the protocol schema and cannot be served, so each is refused
-    // with the unit that would serve it rather than accepted and silently dropped.
+  it('should name the missing unit for the one option it cannot honour', async () => {
+    // Accepted by the protocol schema and unservable, so it is refused with the unit that would serve
+    // it rather than accepted and silently dropped.
     // Arrange
     const control = new FakeSessionControl();
     const subject = dispatcher(control);
 
     // Act
     const board = await subject.dispatch(startRequest(startBody({ boardAccess: 'worker', parent: 's1' })));
-    const attachments = await subject.dispatch(
-      startRequest(startBody({ initialAttachments: [{ filename: 'brief.docx', base64: 'AAAA' }] })),
-    );
 
     // Assert
-    should([board.status, attachments.status]).deepEqual([501, 501]);
+    should(board.status).equal(501);
     should(jsonBody(board)).have.property('code', 'board_access_not_mounted');
-    should(jsonBody(attachments)).have.property('code', 'attachments_not_mounted');
     should(control.starts).be.empty();
+  });
+
+  it('should carry an inline attachment through to the subsystem instead of refusing it', async () => {
+    // The bytes are in the body already: no multipart, no byte reader, no attachment id. Dropping
+    // them here would start an agent whose opening message names a file it was never handed.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+    const initialAttachments = [{ filename: 'brief.docx', base64: 'AAAA' }];
+
+    // Act
+    const response = await subject.dispatch(startRequest(startBody({ initialAttachments })));
+
+    // Assert
+    should(response.status).equal(201);
+    should(control.attached).deepEqual([initialAttachments]);
   });
 
   it('should pass a requested callsign and its fallback through to the allocator', async () => {
