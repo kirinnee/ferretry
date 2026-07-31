@@ -63,6 +63,9 @@ import {
 } from '../src/lib/session/index.ts';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { assertSemver } from '../src/lib/version';
+import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
+import { WorktreeController } from '../src/lib/worktrees/controller';
+import { ProtocolWorktreeGateway } from '../src/lib/worktrees/gateway';
 
 // Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
 const BINARY_NAME = Object.keys(pkg.bin)[0] ?? pkg.name;
@@ -300,6 +303,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerSttCommands(
       program,
       new SttController(new ProtocolSttGateway(client), world.io, new BunAudioFileReader(), new TimerDelay()),
+    ),
+  ({ program, world, client }) =>
+    registerWorktreeCommands(
+      program,
+      new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive),
     ),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
