@@ -39,6 +39,7 @@ export * from '../shell/chunk-error-boundary.tsx';
 export * from '../shell/context-menu.tsx';
 export * from '../shell/marker.tsx';
 export * from '../shell/mode-badge.tsx';
+export * from '../shell/palette-destinations.ts';
 export * from '../shell/palette-ranking.ts';
 export * from '../shell/palette-shortcut.ts';
 export * from '../shell/primitives.tsx';
