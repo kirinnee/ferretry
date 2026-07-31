@@ -21,11 +21,12 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.13.0",
+      "version": "0.22.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
       "dependencies": {
+        "@ferretry/fleet": "workspace:*",
         "@ferretry/protocol": "workspace:*",
         "chalk": "5.6.2",
         "cli-progress": "3.12.0",
