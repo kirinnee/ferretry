@@ -185,6 +185,21 @@ try {
       await page.screenshot({ path: paletteTarget });
       process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
 
+      // The bulk-stop confirmation is a fixed overlay like the menu and the
+      // palette, and its two states are different screens: what will die, and
+      // what did.
+      for (const [fragment, name] of [
+        ['#stop', 'stop-confirm'],
+        ['#stop-results', 'stop-results'],
+      ] as const) {
+        const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
+        await page.goto(`${server.url}${fragment}`);
+        await page.reload();
+        await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
+        await page.screenshot({ path: stopTarget });
+        process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
+      }
+
       await context.close();
     }
   } finally {

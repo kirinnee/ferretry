@@ -45,6 +45,7 @@ export * from '../hooks/use-warden-status.ts';
 export * from '../shell/agent-sidebar-model.ts';
 export * from '../shell/app-bar.tsx';
 export * from '../shell/bottom-sheet.tsx';
+export * from '../shell/bulk-stop-confirmation.tsx';
 export * from '../shell/chat-width-control.tsx';
 export * from '../shell/chunk-error-boundary.tsx';
 export * from '../shell/command-palette.tsx';
