@@ -273,15 +273,20 @@ function Shell() {
       </Card>
 
       <Card className="overflow-hidden">
-        <PanelHeader className="flex flex-col gap-sm">
+        <PanelHeader>
           <Label>Tasks</Label>
+        </PanelHeader>
+        {/* Outside the header on purpose: `.kt-panel__header` is declared after
+            `@tailwind utilities`, so its own flex rules beat any utility a
+            caller adds and the filter would be centred. */}
+        <div className="px-panel pb-panel">
           <TaskStatusFilter
             counts={taskStatusCounts(TASKS)}
             selected={statuses}
             onSelect={status => setStatuses(toggleTaskStatusFilter(statuses, status))}
             onShowAll={() => setStatuses(null)}
           />
-        </PanelHeader>
+        </div>
         <div className="flex flex-col divide-y divide-border-soft">
           {TASKS.filter(entry => statuses === null || statuses.has(entry.status)).map(entry => (
             <TaskRow daemonId={daemon.daemonId} key={entry.id} onOpen={() => {}} task={entry} />
