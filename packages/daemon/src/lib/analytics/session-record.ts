@@ -32,6 +32,11 @@ export interface FinishedAnalyticsSession {
   readonly usage?: Omit<AnalyticsTokenUsage, 'createdAt'> | null;
 }
 
+/** Durable session records are authoritative; an analytics index is never a source of truth. */
+export interface FinishedAnalyticsSessionSource {
+  listFinishedAnalyticsSessions(): readonly FinishedAnalyticsSession[];
+}
+
 /** Adapter-facing stored form. Extra evidence never leaks into the wire row. */
 export interface AnalyticsSessionIndexRecord {
   readonly raw: AnalyticsRawSession;
@@ -195,4 +200,17 @@ export function deriveAnalyticsSessionRecord(
     displayModelIdentity,
     pricing,
   };
+}
+
+/** Recreate the disposable analytics materialization from durable finished-session records. */
+export function rebuildAnalyticsSessionIndex(
+  source: FinishedAnalyticsSessionSource,
+  pricingCatalog: readonly AnalyticsPricingRate[],
+): AnalyticsSessionIndexRecord[] {
+  const records = new Map<string, AnalyticsSessionIndexRecord>();
+  for (const session of source.listFinishedAnalyticsSessions()) {
+    const record = deriveAnalyticsSessionRecord(session, pricingCatalog);
+    records.set(record.raw.id, record);
+  }
+  return [...records.values()];
 }
