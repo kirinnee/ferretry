@@ -466,7 +466,7 @@ export class SttModelStore {
  * the deadline passes — first politely, then outright — so no extraction can
  * outlive its install and the install always settles.
  */
-export class BunCommandRunner implements SttCommandRunner {
+export class BunSttCommandRunner implements SttCommandRunner {
   constructor(private readonly killGraceMs = 2_000) {}
 
   async run(argv: readonly string[], timeoutMs: number): Promise<SttCommandResult> {

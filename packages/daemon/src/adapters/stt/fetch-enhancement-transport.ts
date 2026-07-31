@@ -2,7 +2,7 @@ import type {
   EnhancementHttpRequest,
   EnhancementOutcome,
   EnhancementTransport,
-  MonotonicClockPort,
+  SttMonotonicClockPort,
   SttSecretReader,
 } from '../../lib/index.ts';
 
@@ -116,7 +116,9 @@ export class FetchEnhancementTransport implements EnhancementTransport {
 
 async function release(reader: ChunkReader): Promise<void> {
   try {
-    await reader.cancel();
+    // Cancellation is a best-effort resource release. A hostile stream may
+    // never settle its cancel promise, so it must not hold the request open.
+    void reader.cancel().catch(() => undefined);
   } catch {
     // A reader that cannot be cancelled is already released.
   }
@@ -124,7 +126,8 @@ async function release(reader: ChunkReader): Promise<void> {
 
 async function discard(response: Response): Promise<void> {
   try {
-    await response.body?.cancel();
+    // As above, start disposal but never wait on an untrusted body's promise.
+    void response.body?.cancel().catch(() => undefined);
   } catch {
     // A body that cannot be cancelled is already released; nothing to recover.
   }
@@ -146,7 +149,7 @@ export class ProcessSecretReader implements SttSecretReader {
 }
 
 /** Monotonic milliseconds from the host's high-resolution timer. */
-export class PerformanceStopwatch implements MonotonicClockPort {
+export class PerformanceStopwatch implements SttMonotonicClockPort {
   constructor(private readonly source: () => number = () => performance.now()) {}
 
   monotonicMs(): number {

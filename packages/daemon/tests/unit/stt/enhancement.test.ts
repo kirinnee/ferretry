@@ -12,7 +12,7 @@ import {
   type EnhancementTransport,
   enhancementErrorStatus,
   enhancementErrorView,
-  type MonotonicClockPort,
+  type SttMonotonicClockPort,
   parseChatCompletion,
   parseEnhancementRequest,
   type SttEnhancementError,
@@ -42,7 +42,7 @@ class FakeSecrets implements SttSecretReader {
   }
 }
 
-class FakeClock implements MonotonicClockPort {
+class FakeClock implements SttMonotonicClockPort {
   private readonly readings: number[];
 
   constructor(readings: readonly number[] = [1_000, 1_125]) {
@@ -64,7 +64,7 @@ function service(
   overrides: {
     readonly secrets?: SttSecretReader;
     readonly providers?: EnhancementProviderTable;
-    readonly clock?: MonotonicClockPort;
+    readonly clock?: SttMonotonicClockPort;
   } = {},
 ) {
   const transport = new FakeTransport(outcome);

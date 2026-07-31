@@ -25,6 +25,6 @@ export interface SttSecretReader {
 }
 
 /** Monotonic milliseconds, used for latency only — never for wall-clock stamps. */
-export interface MonotonicClockPort {
+export interface SttMonotonicClockPort {
   monotonicMs(): number;
 }

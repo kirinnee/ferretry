@@ -15,6 +15,8 @@ import {
   BunApiServer,
   BunProcessProbe,
   BunCommandRunner,
+  BunSttCommandRunner,
+  BunSttWorkerSpawner,
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CommandUsageSource,
@@ -23,6 +25,7 @@ import {
   DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
+  FetchEnhancementTransport,
   StateHomeLockedError,
   type OpenedDaemonStorage,
   BunSecretShell,
@@ -32,6 +35,8 @@ import {
   HttpUsageSource,
   KeyedSerialExecutor,
   ManifestAccountInventory,
+  PerformanceStopwatch,
+  ProcessSecretReader,
   RuntimeEnvironment,
   SocketViewerDownstream,
   PaneProcessInventory,
@@ -41,6 +46,9 @@ import {
   StateFileSystemFactory,
   StateHomeLayout,
   StateFileSystem,
+  SttModelStore,
+  SttService,
+  SttWorkerClient,
   SystemClock,
   SystemFrameClock,
   type ViewerSocket,
@@ -106,9 +114,11 @@ import {
   createMountedSocketDispatcher,
   PinService,
   SessionPlanner,
+  SttEnhancementService,
   TeamAdvisor,
   createFoundationPaths,
   createSessionPaths,
+  createSttPaths,
   createWardenPaths,
   defaultSessionLifecycleSettings,
   defaultStartWaitPolicy,
@@ -356,6 +366,8 @@ export interface DaemonWorld {
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
    *  the uptime and freshness the API reports are drivable from a test. */
   readonly clock: MillisecondClockPort;
+  /** The speech-to-text surface and its on-demand worker supervisor. */
+  readonly stt: SttService;
   /** Resolves when the process should shut down. Injected so a test can drive a
    *  full boot without the daemon running forever. */
   readonly untilShutdown: () => Promise<void>;
@@ -1097,6 +1109,18 @@ export function buildWorld(): DaemonWorld {
   const wardenFiles = new NodeWardenReportFileSystem();
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
+  const sttModels = new SttModelStore({
+    paths: createSttPaths(paths),
+    fetch: async url => await fetch(url),
+    runner: new BunSttCommandRunner(),
+    now: () => clock.now(),
+    uniqueId: () => crypto.randomUUID(),
+  });
+  const sttWorker = new SttWorkerClient({
+    model: async () => await sttModels.resolveDaemonModel(),
+    spawner: new BunSttWorkerSpawner(),
+    clock: { nowIso: () => clock.now() },
+  });
   // ONE executor for every task board in the process. The file store keys its transactions on the
   // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
   // would let two concurrent requests to the same board interleave read-modify-write and lose one.
@@ -1371,6 +1395,15 @@ export function buildWorld(): DaemonWorld {
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
+    stt: new SttService({
+      models: sttModels,
+      worker: sttWorker,
+      enhancer: new SttEnhancementService(
+        new FetchEnhancementTransport(),
+        new ProcessSecretReader(),
+        new PerformanceStopwatch(),
+      ),
+    }),
     untilShutdown: untilTerminated,
   };
 }

@@ -12,7 +12,7 @@ import {
   parseEnhancementRequest,
   requireEnhancementSecret,
 } from './enhancement.ts';
-import type { EnhancementTransport, MonotonicClockPort, SttSecretReader } from './ports.ts';
+import type { EnhancementTransport, SttMonotonicClockPort, SttSecretReader } from './ports.ts';
 
 export interface SttEnhancementServiceOptions {
   readonly providers?: EnhancementProviderTable;
@@ -31,7 +31,7 @@ export class SttEnhancementService {
   constructor(
     private readonly transport: EnhancementTransport,
     private readonly secrets: SttSecretReader,
-    private readonly clock: MonotonicClockPort,
+    private readonly clock: SttMonotonicClockPort,
     options: SttEnhancementServiceOptions = {},
   ) {
     this.providers = options.providers ?? DEFAULT_ENHANCEMENT_PROVIDERS;

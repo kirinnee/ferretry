@@ -5,11 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  BunCommandRunner,
+  BunSttCommandRunner,
   type SttCommandResult,
   type SttCommandRunner,
   SttModelStore,
   type SttModelStoreOptions,
+  writeAll,
 } from '../../../src/adapters/index.ts';
 import {
   createFoundationPaths,
@@ -120,7 +121,7 @@ function bodyOf(bytes: Uint8Array, headers: Record<string, string> = {}): Respon
 class RecordingRunner implements SttCommandRunner {
   readonly argv: string[][] = [];
 
-  constructor(private readonly delegate: SttCommandRunner = new BunCommandRunner()) {}
+  constructor(private readonly delegate: SttCommandRunner = new BunSttCommandRunner()) {}
 
   async run(argv: readonly string[], timeoutMs: number): Promise<SttCommandResult> {
     this.argv.push([...argv]);
@@ -152,7 +153,7 @@ function store(
     paths,
     catalog: new SttModelCatalog(definitions),
     fetch: async () => new Response(null, { status: 404 }),
-    runner: new BunCommandRunner(),
+    runner: new BunSttCommandRunner(),
     now: () => new Date(Date.UTC(2026, 6, 31, 0, 0, clockTicks++)).toISOString(),
     uniqueId: () => {
       uniqueCounter += 1;
@@ -173,7 +174,7 @@ async function buildArchive(): Promise<Uint8Array> {
     await writeFile(join(root, 'joiner.int8.onnx'), JOINER);
     await writeFile(join(root, 'tokens.txt'), TOKENS);
     const archive = join(scratch, 'model.tar.bz2');
-    const built = await new BunCommandRunner().run(['tar', '-cjf', archive, '-C', scratch, 'model-root'], 30_000);
+    const built = await new BunSttCommandRunner().run(['tar', '-cjf', archive, '-C', scratch, 'model-root'], 30_000);
     should(built.code).equal(0);
     return new Uint8Array(await readFile(archive));
   } finally {
@@ -413,6 +414,65 @@ describe('model store failure handling', () => {
     should((await subject.startInstall(browser.id)).started).be.true();
   });
 
+  it('should abandon an extraction that never returns, and let the install be retried', async () => {
+    // Arrange
+    const bytes = await buildArchive();
+    const archived = daemonFixture(bytes.byteLength, sha256(bytes));
+    const subject = store([browser, archived], {
+      fetch: async () => bodyOf(bytes),
+      extractTimeoutMs: 100,
+      runner: new BunSttCommandRunner(50),
+    });
+
+    // Act — a real child that ignores the archive and never exits on its own
+    const hanging = store([browser, archived], {
+      fetch: async () => bodyOf(bytes),
+      extractTimeoutMs: 150,
+      runner: {
+        run: async (_argv, timeoutMs) => await new BunSttCommandRunner(50).run(['sleep', '30'], timeoutMs),
+      },
+    });
+    const actual = await Promise.race([
+      failureOf(() => hanging.install(archived.id)),
+      Bun.sleep(5_000).then(() => 'still pending'),
+    ]);
+
+    // Assert
+    should(actual).deepEqual({ code: 'install_failed', message: 'model extraction timed out' });
+    should((await hanging.modelStatus(archived.id)).state).equal('error');
+    should((await hanging.startInstall(archived.id)).started).be.true();
+    should(subject.installStatus(archived.id).phase).equal('idle');
+  });
+
+  it('should kill a command that outlives its deadline', async () => {
+    // Act
+    const actual = await new BunSttCommandRunner(50).run(['sleep', '30'], 100);
+
+    // Assert
+    should(actual.timedOut).be.true();
+    should(actual.code === 0).be.false();
+  });
+
+  it('should refuse a write that makes no progress rather than truncating the file', async () => {
+    // Arrange — a handle that always reports zero bytes written
+    const stuck = { write: async () => ({ bytesWritten: 0 }) };
+    const partial = {
+      writes: 0,
+      write: async (_chunk: Uint8Array, _offset: number, length: number) => {
+        partial.writes += 1;
+        return { bytesWritten: Math.min(2, length) };
+      },
+    };
+
+    // Act
+    const refusal = await failureOf(() => writeAll(stuck, encode('hello')));
+    await writeAll(partial, encode('hello'));
+
+    // Assert
+    should(refusal).deepEqual({ code: 'install_failed', message: 'model download write made no progress' });
+    should(partial.writes).equal(3);
+  });
+
   it('should fail the install when extraction fails or the archive has another layout', async () => {
     // Arrange
     const bytes = await buildArchive();
@@ -439,14 +499,14 @@ describe('model store failure handling', () => {
     const archived = daemonFixture(bytes.byteLength, sha256(bytes));
     const truncating: SttCommandRunner = {
       run: async (argv, timeoutMs) => {
-        const result = await new BunCommandRunner().run(argv, timeoutMs);
+        const result = await new BunSttCommandRunner().run(argv, timeoutMs);
         await writeFile(join(String(argv[4]), 'model-root', 'tokens.txt'), encode('x'.repeat(TOKENS.byteLength)));
         return result;
       },
     };
     const removing: SttCommandRunner = {
       run: async (argv, timeoutMs) => {
-        const result = await new BunCommandRunner().run(argv, timeoutMs);
+        const result = await new BunSttCommandRunner().run(argv, timeoutMs);
         await rm(join(String(argv[4]), 'model-root', 'tokens.txt'));
         return result;
       },
@@ -610,7 +670,7 @@ describe('model store inspection', () => {
 describe('bun command runner', () => {
   it('should report the exit code, stdout, and stderr of a real command', async () => {
     // Act
-    const actual = await new BunCommandRunner().run(['sh', '-c', 'echo out; echo err >&2; exit 3'], 30_000);
+    const actual = await new BunSttCommandRunner().run(['sh', '-c', 'echo out; echo err >&2; exit 3'], 30_000);
 
     // Assert
     should(actual.code).equal(3);

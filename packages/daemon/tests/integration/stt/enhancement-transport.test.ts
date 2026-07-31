@@ -143,6 +143,74 @@ describe('fetch enhancement transport', () => {
     );
   });
 
+  it('should refuse a reply that declares more bytes than the cap allows', async () => {
+    // Arrange
+    let bodyWasRead = false;
+    const transport = new FetchEnhancementTransport(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers({ 'content-type': 'application/json', 'content-length': '268435456' }),
+          body: {
+            getReader: () => ({
+              read: async () => {
+                bodyWasRead = true;
+                return { done: true };
+              },
+              cancel: async () => undefined,
+            }),
+            cancel: async () => undefined,
+          },
+        }) as unknown as Response,
+    );
+
+    // Act
+    const actual = await transport.send(request);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'oversized' });
+    should(bodyWasRead).be.false();
+  });
+
+  it('should stop reading a hostile reply at the cap instead of buffering it', async () => {
+    // Arrange — an endless reply with no declared length, the OOM shape
+    let sent = 0;
+    const transport = new FetchEnhancementTransport(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              sent += 64 * 1_024;
+              controller.enqueue(new Uint8Array(64 * 1_024));
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    );
+
+    // Act
+    const actual = await transport.send({ ...request, maxResponseBytes: 4_096, timeoutMs: 10_000 });
+
+    // Assert
+    should(actual).deepEqual({ kind: 'oversized' });
+    // The daemon never holds more than a bounded multiple of the cap
+    should(sent).be.below(8 * 1_024 * 1_024);
+  });
+
+  it('should report an unreadable body when the reply has no body at all', async () => {
+    // Arrange
+    const transport = new FetchEnhancementTransport(
+      async () => ({ ok: true, status: 200, headers: new Headers(), body: null }) as unknown as Response,
+    );
+
+    // Act
+    const actual = await transport.send(request);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'unreadable' });
+  });
+
   it('should report an unreachable provider when the connection fails', async () => {
     // Arrange
     const transport = new FetchEnhancementTransport();
