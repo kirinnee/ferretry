@@ -644,6 +644,8 @@ export class FakeSessionControl implements SessionControlSubsystem {
   readonly starts: Array<readonly [string, string]> = [];
   /** Every stop that reached it, as the session and the reason given. */
   readonly stops: Array<readonly [string, string | undefined]> = [];
+  /** Every callsign a start asked for, with whether a taken one could be substituted. */
+  readonly requested: Array<readonly [string, boolean]> = [];
   private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
   private minted = 0;
 
@@ -656,6 +658,7 @@ export class FakeSessionControl implements SessionControlSubsystem {
 
   async start(request: StartSessionRequest, requestId: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
+    if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {
       if (already.payload !== JSON.stringify(request))

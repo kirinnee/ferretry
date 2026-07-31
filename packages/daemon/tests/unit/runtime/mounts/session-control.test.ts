@@ -108,14 +108,27 @@ describe('the session control mount', () => {
     const attachments = await subject.dispatch(
       startRequest(startBody({ initialAttachments: [{ filename: 'brief.docx', base64: 'AAAA' }] })),
     );
-    const fallback = await subject.dispatch(startRequest(startBody({ teammate: 'atlas', teammateFallback: true })));
 
     // Assert
-    should([board.status, attachments.status, fallback.status]).deepEqual([501, 501, 501]);
+    should([board.status, attachments.status]).deepEqual([501, 501]);
     should(jsonBody(board)).have.property('code', 'board_access_not_mounted');
     should(jsonBody(attachments)).have.property('code', 'attachments_not_mounted');
-    should(jsonBody(fallback)).have.property('code', 'callsign_fallback_not_mounted');
     should(control.starts).be.empty();
+  });
+
+  it('should pass a requested callsign and its fallback through to the allocator', async () => {
+    // The claim is the subsystem's to take; what this mount must not do is drop the fields that say
+    // which name was asked for and whether a taken one may be substituted.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const response = await subject.dispatch(startRequest(startBody({ teammate: 'atlas', teammateFallback: true })));
+
+    // Assert
+    should(response.status).equal(201);
+    should(control.requested).deepEqual([['atlas', true]]);
   });
 
   it('should refuse a body the protocol schema rejects without echoing it back', async () => {

@@ -6,6 +6,7 @@ export * from './core/index.ts';
 export * from './filesystem/state-file-system.ts';
 export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';
+export * from './names/index.ts';
 export * from './pins/index.ts';
 export * from './runtime/index.ts';
 export * from './session/harness/index.ts';

@@ -539,6 +539,8 @@ describe('daemon boot lifecycle', () => {
     // The retry the protocol client performs itself after a transport error.
     const retried = await startCall('req-boot-1');
     const retriedBody = SessionViewSchema.parse(await retried.json());
+    // Counted here rather than at the end: two more starts follow, and both are meant to launch.
+    const launchesAfterRetry = launcher.launched.length;
     const listed = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
     const names = NameSuggestionsSchema.parse(
       await (await fetch(`http://127.0.0.1:${port}/v1/names?count=8`, { headers })).json(),
@@ -559,6 +561,24 @@ describe('daemon boot lifecycle', () => {
       headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'req-boot-2' },
       body: JSON.stringify({ agent: 'claude-auto-absent', mode: 'auto', prompt: 'nobody can serve this', cwd: home }),
     });
+    // A second session asking for the callsign the first one claimed, then the same start allowing a
+    // fallback. The claim is what makes the first a refusal rather than a duplicate name.
+    const contested = async (requestId: string, fallback: boolean): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId },
+        body: JSON.stringify({
+          agent: WRAPPER,
+          mode: 'auto',
+          prompt: 'contest the callsign',
+          teammate: SEEDED_CALLSIGN,
+          teammateFallback: fallback,
+          cwd: home,
+        }),
+      });
+    const taken = await contested('req-boot-3', false);
+    const fellBack = await contested('req-boot-4', true);
+    const fellBackBody = SessionViewSchema.parse(await fellBack.json());
     release();
     const code = await exit;
     await runCleanups(cleanups);
@@ -576,14 +596,13 @@ describe('daemon boot lifecycle', () => {
     should(startedBody.state.status).equal('running');
     // The agent that was launched is the ABSOLUTE executable this host resolved, in the caller's
     // directory — not a bare name the lifecycle would have refused.
-    should(launcher.launched).deepEqual([{ command: [executable], cwd: home }]);
+    should(launcher.launched[0]).deepEqual({ command: [executable], cwd: home });
     // The assignment was handed over by pointing the agent at a file, and the file is really there.
-    should(launcher.delivered).have.length(1);
     should(launcher.delivered[0]).containEql('turns/turn-001.md');
     should(turnOne).containEql('wire the session lifecycle');
     // The retry answered with the SAME session and launched nothing further: one request id, one agent.
     should(retriedBody.config.id).equal(startedBody.config.id);
-    should(launcher.launched).have.length(1);
+    should(launchesAfterRetry).equal(1);
     // Visible to the fleet read, which only a document satisfying BOTH schemas can be.
     should(listed.map(session => session.config.id)).deepEqual([startedBody.config.id]);
     // And visible to the callsign pool: the name this session took is no longer offered.
@@ -599,6 +618,15 @@ describe('daemon boot lifecycle', () => {
     // A fleet that publishes no such account is the caller's mistake, named as one.
     should(unknownAgent.status).equal(404);
     should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');
+    // The callsign was CLAIMED, not merely recorded: a second session cannot answer to it, because a
+    // bare callsign that resolved to two sessions would name neither.
+    should(startedBody.config.teammate).equal(SEEDED_CALLSIGN);
+    should(taken.status).equal(409);
+    should((await taken.json()) as { code: string }).have.property('code', 'callsign_taken');
+    // A caller who allows a substitute gets a real free pool name instead of a refusal.
+    should(fellBack.status).equal(201);
+    should(fellBackBody.config.teammate).not.equal(SEEDED_CALLSIGN);
+    should(DEFAULT_CALLSIGN_POOL).containEql(fellBackBody.config.teammate);
   });
 
   /**

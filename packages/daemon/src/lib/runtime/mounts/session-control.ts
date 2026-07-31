@@ -19,8 +19,8 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * adapters were built and tested for exactly this and never called.
  *
  * WHAT THIS MOUNT REFUSES, AND WHY EACH REFUSAL IS BETTER THAN A GUESS. `StartSessionRequest`
- * carries three options this daemon cannot honour yet, and each one is answered with `501` and a
- * code naming the missing unit rather than accepted and dropped:
+ * carries two options this daemon cannot honour yet, and each is answered with `501` and a code
+ * naming the missing unit rather than accepted and dropped:
  *
  *   * `boardAccess` other than `none` — a board grant is keyed on a per-session capability this
  *     daemon mints nowhere. Accepting the field would hand back a session whose caller believes it
@@ -28,11 +28,12 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  *   * `initialAttachments` — nothing in the daemon stores an attachment blob, and an attachment
  *     silently discarded is worse than one refused: the agent would start without the file its task
  *     refers to.
- *   * `teammateFallback` — the fallback belongs to a callsign CLAIM, and this mount records the
- *     requested callsign rather than claiming one, so it cannot report which name it fell back to.
  *
  * `detach` is accepted and needs no unit: it decides whether the CLIENT keeps its own terminal
- * attached after the start, and the daemon never had a terminal to attach.
+ * attached after the start, and the daemon never had a terminal to attach. `teammate` and
+ * `teammateFallback` are honoured by the allocator behind this mount, which CLAIMS the callsign
+ * before the session document exists — a taken name is a `409` unless the caller asked for a
+ * fallback, rather than a second session answering to a name that already resolves elsewhere.
  *
  * WHY THE REQUEST ID IS MANDATORY. The protocol client RETRIES this POST on a transport error and
  * then asks a recovery route which session that id produced. A start is the one request in the
@@ -52,6 +53,8 @@ export type SessionControlFailure =
   | 'not_found'
   /** The same request id was already spent on a different start. */
   | 'conflict'
+  /** Another session already answers to the callsign this start asked for. */
+  | 'callsign_taken'
   /** The launch itself failed, and the session records why. */
   | 'failed';
 
@@ -85,6 +88,7 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   unavailable: { status: 503, code: 'agent_unavailable' },
   not_found: { status: 404, code: 'not-found' },
   conflict: { status: 409, code: 'request_id_reused' },
+  callsign_taken: { status: 409, code: 'callsign_taken' },
   failed: { status: 500, code: 'session_launch_failed' },
 };
 
@@ -146,12 +150,6 @@ async function parseStart(request: ApiRequest): Promise<StartSessionRequest> {
       501,
       'attachments are not mounted: this daemon stores no attachment blob, so an agent would start without the file',
       'attachments_not_mounted',
-    );
-  if (start.teammateFallback === true)
-    throw new ApiError(
-      501,
-      'callsign fallback is not mounted: this daemon records the requested callsign and claims none, so it cannot report a fallback',
-      'callsign_fallback_not_mounted',
     );
   return start;
 }
