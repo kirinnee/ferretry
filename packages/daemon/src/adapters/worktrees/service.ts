@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { assessWorktreeRemoval, hasDirtyWorktree, isPathInside } from '../../lib/worktrees/policy.ts';
+import { assessWorktreeRemoval, hasDirtyWorktree, isWithinDirectory } from '../../lib/worktrees/policy.ts';
 import type { WorktreeFileSystem, WorktreeClock } from '../../lib/worktrees/ports.ts';
 import type {
   CheckManagedWorktreeRemovalInput,
@@ -136,7 +136,7 @@ async function resolveCreationPlan(
   }
 
   const sourceCwd = await fileSystem.realPath(input.sourceCwd);
-  if (!isPathInside(source.worktreeRoot, sourceCwd)) {
+  if (!isWithinDirectory(source.worktreeRoot, sourceCwd)) {
     throw new WorktreeAdapterError('not_git_repository', 'source cwd is outside its detected checkout root');
   }
   const relativeCwd = path.relative(source.worktreeRoot, sourceCwd);

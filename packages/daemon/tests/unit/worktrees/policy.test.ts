@@ -7,7 +7,7 @@ import {
   hasDirtyWorktree,
   isCheckoutLocked,
   isCurrentCheckout,
-  isPathInside,
+  isWithinDirectory,
   requiredRemovalOverride,
   sharingSessionIds,
   type WorktreeRemovalEvidence,
@@ -63,7 +63,7 @@ describe('worktree safety predicates', () => {
     { parent: '/managed', child: '/managed/../outside', expected: false },
   ])('should decide path containment for $child', ({ parent, child, expected }) => {
     // Act
-    const actual = isPathInside(parent, child);
+    const actual = isWithinDirectory(parent, child);
 
     // Assert
     should(actual).equal(expected);

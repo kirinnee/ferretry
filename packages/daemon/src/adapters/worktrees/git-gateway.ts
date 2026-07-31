@@ -46,12 +46,7 @@ export class GitWorktreeGateway {
   ) {}
 
   async list(cwd: string): Promise<readonly WorktreeListEntry[]> {
-    const execution = await runGit(
-      this.runner,
-      cwd,
-      ['worktree', 'list', '--porcelain', '-z'],
-      'git worktree list',
-    );
+    const execution = await runGit(this.runner, cwd, ['worktree', 'list', '--porcelain', '-z'], 'git worktree list');
     if (execution.stdoutTruncated) {
       throw new WorktreeAdapterError('verification_failed', 'git worktree list output was truncated');
     }
@@ -174,14 +169,7 @@ export class GitWorktreeGateway {
   async assertCheckoutFiltersSafe(cwd: string): Promise<void> {
     const execution = await this.runner.run({
       cwd,
-      args: [
-        'config',
-        '--local',
-        '--no-includes',
-        '--name-only',
-        '--get-regexp',
-        '^filter\\..*\\.(smudge|process)$',
-      ],
+      args: ['config', '--local', '--no-includes', '--name-only', '--get-regexp', '^filter\\..*\\.(smudge|process)$'],
     });
     if (!execution.timedOut && execution.exitCode === 1) return;
     requireGitExit('git filter inspection', execution);
@@ -217,14 +205,7 @@ export class GitWorktreeGateway {
     const execution = await runGit(
       this.runner,
       cwd,
-      [
-        'status',
-        '--porcelain=v2',
-        '-z',
-        '--untracked-files=all',
-        '--ignored=matching',
-        '--ignore-submodules=none',
-      ],
+      ['status', '--porcelain=v2', '-z', '--untracked-files=all', '--ignored=matching', '--ignore-submodules=none'],
       'git status',
     );
     return parseWorktreeStatus(decodeGitOutput(execution), execution.stdoutTruncated);

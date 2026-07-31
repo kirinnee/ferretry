@@ -12,7 +12,7 @@ import type {
   WorktreeStatusSummary,
 } from './types.ts';
 
-export function isPathInside(parent: string, child: string): boolean {
+export function isWithinDirectory(parent: string, child: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(child));
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
@@ -24,14 +24,14 @@ export function defaultManagedWorktreeRoot(stateHome: string): string | null {
 }
 
 export function isCurrentCheckout(target: string, currentWorkingDirectory: string | undefined): boolean {
-  return currentWorkingDirectory !== undefined && isPathInside(target, currentWorkingDirectory);
+  return currentWorkingDirectory !== undefined && isWithinDirectory(target, currentWorkingDirectory);
 }
 
 export function sharingSessionIds(
   target: string,
   sessions: readonly { readonly id: string; readonly cwd: string }[],
 ): readonly string[] {
-  return sessions.filter(session => isPathInside(target, session.cwd)).map(session => session.id);
+  return sessions.filter(session => isWithinDirectory(target, session.cwd)).map(session => session.id);
 }
 
 export function isCheckoutLocked(locked: string | undefined): boolean {
@@ -77,13 +77,13 @@ export function assessWorktreeRemoval(evidence: WorktreeRemovalEvidence): Worktr
   const resolvedPath = evidence.resolvedPath === undefined ? undefined : path.resolve(evidence.resolvedPath);
 
   if (evidence.ownerActive) blockers.push(blocker('active_session', 'the owning session is still active'));
-  if (!isPathInside(resolvedRoot, recordedPath)) {
+  if (!isWithinDirectory(resolvedRoot, recordedPath)) {
     blockers.push(blocker('outside_managed_root', 'the recorded checkout is outside the managed root'));
   }
   if (resolvedPath === undefined) {
     blockers.push(blocker('missing_worktree', 'the recorded checkout no longer exists'));
   } else {
-    if (!isPathInside(resolvedRoot, resolvedPath)) {
+    if (!isWithinDirectory(resolvedRoot, resolvedPath)) {
       blockers.push(blocker('outside_managed_root', 'the checkout resolves outside the managed root'));
     }
     if (resolvedPath !== recordedPath) {
