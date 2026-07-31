@@ -35,12 +35,17 @@ export function TaskStatusFilter({ counts, selected, onSelect, onShowAll }: Task
   return (
     // kteam wrote this as `<div role="group">`. A native <fieldset> carries the
     // same implicit role and satisfies the repo's a11y gate without an explicit
-    // role attribute; Tailwind's preflight zeroes fieldset margin, padding and
-    // border, so the rendered box is unchanged. Same substitution the ported
-    // ViewTabs made, for the same reason.
+    // role attribute — the substitution the ported ViewTabs already made.
+    //
+    // `min-w-0` is NOT decoration. A fieldset's UA style is
+    // `min-inline-size: min-content`, which preflight does not reset, so a
+    // fieldset scroll track refuses to shrink: measured at a 200px viewport it
+    // grew to 332px and pushed the whole document into horizontal overflow
+    // instead of scrolling its own chips. Deleting this class reintroduces that
+    // bug at phone widths.
     <fieldset
       data-task-status-filter
-      className="flex gap-xs overflow-x-auto overscroll-x-contain pb-1 scroll-thin"
+      className="flex min-w-0 gap-xs overflow-x-auto overscroll-x-contain pb-1 scroll-thin"
       aria-label="Filter tasks by status"
     >
       <button

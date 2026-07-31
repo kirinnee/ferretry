@@ -4,16 +4,22 @@
  * browser, at a phone width and a desktop width, with the real design-system
  * stylesheet applied.
  *
- * It renders the shell chrome only. Feature screens belong to a sibling unit.
+ * It renders the shell chrome plus every feature surface ported so far, so a
+ * reviewer can compare the phone and desktop renders against the original.
  */
 
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView, TaskLive, TaskStatus, TaskSummary, WardenStatusView } from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
+import { TaskRow } from '../src/features/tasks/task-row.tsx';
+import { TaskQuickSummary } from '../src/features/tasks/task-row.tsx';
+import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
+import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
@@ -67,10 +73,125 @@ openSidePaneFileTab(scope, 'README.md');
 /** Phone below this width, exactly as the app decides its presentation. */
 const PHONE_MAX = 768;
 
+const task = (overrides: Partial<Omit<TaskSummary, 'live'>> & { live?: Partial<TaskLive> }): TaskSummary => ({
+  v: 1,
+  id: 'F12',
+  kind: 'feature',
+  title: 'Port the remaining PWA feature components',
+  workflow: 'quick',
+  phase: 'todo',
+  dependsOn: [],
+  status: 'todo',
+  statusReason: null,
+  assignee: null,
+  repo: null,
+  files: [],
+  links: { prs: [], branch: null, commits: [], docs: [] },
+  order: null,
+  createdAt: '2026-07-30T09:00:00.000Z',
+  createdBy: null,
+  updatedAt: '2026-07-31T09:00:00.000Z',
+  descriptionChars: 0,
+  askChars: 40,
+  askSource: 'slack',
+  clarificationCount: 0,
+  blocked: false,
+  blockedReason: null,
+  blockedSince: null,
+  blockedBy: [],
+  ...overrides,
+  live: {
+    assigneeSessionId: null,
+    assigneeName: null,
+    assigneeStatus: null,
+    assigneeHealth: null,
+    assigneeDoneMarker: false,
+    assigneeLastActivityAt: null,
+    staleness: null,
+    ...overrides.live,
+  },
+});
+
+const TASKS: readonly TaskSummary[] = [
+  task({
+    id: 'F12',
+    phase: 'build',
+    status: 'in_progress',
+    assignee: 'hayden',
+    files: ['packages/pwa/src/features/tasks/task-row.tsx'],
+    links: { prs: ['https://github.com/kirinnee/ferretry/pull/49'], branch: null, commits: [], docs: [] },
+    live: { assigneeSessionId: 'harness-session', assigneeName: 'Hayden', assigneeHealth: 'active' },
+  }),
+  task({
+    id: 'B7',
+    kind: 'bug',
+    title: 'Transcript detaches on prepend',
+    phase: 'build',
+    status: 'blocked',
+    blocked: true,
+    statusReason: 'waiting on the scroller port',
+    blockedReason: 'Blocked by the scroller port',
+    blockedBy: ['F12'],
+    askChars: 40,
+    askSource: 'agent: warden',
+    live: { staleness: 'quiet', assigneeHealth: 'unknown' },
+  }),
+  task({
+    id: 'C3',
+    kind: 'chore',
+    title: 'Retire the legacy state path',
+    phase: 'done',
+    status: 'done',
+    dependsOn: ['F12'],
+  }),
+];
+
+const WARDEN: WardenStatusView = {
+  config: {
+    enabled: true,
+    accounts: [{ agent: 'claude-auto-loge' }],
+    failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
+    providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 40 },
+    intervalMinutes: 5,
+    unattendedMinutes: 20,
+    minSpawnGapMinutes: 10,
+    susThinkingSeconds: 600,
+    susSubprocessSeconds: 900,
+    maxAssignedWardens: 2,
+    assignedCooldownMinutes: 15,
+    blessMinutes: 30,
+  },
+  lastSweepAt: '2026-07-31T11:57:00.000Z',
+  anomalies: [
+    { kind: 'sus_thinking', sessionId: 'sess-1', status: 'thinking', detail: 'thinking for 14m', teammate: 'ms-98' },
+  ],
+  fingerprint: 'harness',
+  liveWarden: 'sess-9',
+  failover: {
+    policy: 'fallback',
+    failureThreshold: 3,
+    cooldownMinutes: 30,
+    accounts: [
+      { agent: 'claude-auto-loge', eligible: true },
+      { agent: 'codex-auto-terra', eligible: false, reason: 'at limit' },
+    ],
+    lastSelection: {
+      agent: 'claude-auto-loge',
+      policy: 'fallback',
+      at: '2026-07-31T11:00:00.000Z',
+      reason: 'first eligible',
+    },
+  },
+};
+
+/** Frozen so the screenshots of two runs are byte-identical. */
+const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
+
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [statuses, setStatuses] = useState<ReadonlySet<TaskStatus> | null>(null);
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
@@ -139,6 +260,35 @@ function Shell() {
         />
         <PanelBody className="min-h-[180px] text-ui text-muted">
           The active surface body renders here. Feature surfaces are a sibling unit.
+        </PanelBody>
+      </Card>
+
+      <Card>
+        <PanelHeader className="flex items-center justify-between">
+          <Label>Warden — fleet checks</Label>
+        </PanelHeader>
+        <PanelBody>
+          <WardenStrip status={WARDEN} now={HARNESS_NOW} />
+        </PanelBody>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <PanelHeader className="flex flex-col gap-sm">
+          <Label>Tasks</Label>
+          <TaskStatusFilter
+            counts={taskStatusCounts(TASKS)}
+            selected={statuses}
+            onSelect={status => setStatuses(toggleTaskStatusFilter(statuses, status))}
+            onShowAll={() => setStatuses(null)}
+          />
+        </PanelHeader>
+        <div className="flex flex-col divide-y divide-border-soft">
+          {TASKS.filter(entry => statuses === null || statuses.has(entry.status)).map(entry => (
+            <TaskRow daemonId={daemon.daemonId} key={entry.id} onOpen={() => {}} task={entry} />
+          ))}
+        </div>
+        <PanelBody>
+          <TaskQuickSummary task={TASKS[1] as TaskSummary} />
         </PanelBody>
       </Card>
 

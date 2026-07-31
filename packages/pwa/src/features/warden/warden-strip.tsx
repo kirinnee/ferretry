@@ -90,17 +90,19 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
               box is unchanged. */}
           <ul className="inline-flex flex-wrap items-center gap-1" aria-label="Warden accounts">
             {accounts.map(account => (
-              <li key={account.agent}>
-                <span
-                  title={wardenAccountTitle(account)}
-                  className={cn(
-                    'mono rounded-control px-1.5 py-0.5',
-                    account.eligible ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn',
-                  )}
-                >
-                  {wardenAccountLabel(account)}
-                  {account.agent === status.failover?.lastSelection?.agent ? ' ●' : ''}
-                </span>
+              // The chip classes sit on the <li> itself, not on a nested span:
+              // the original chips were direct flex children, and wrapping them
+              // would turn the padded box inline and change its height.
+              <li
+                key={account.agent}
+                title={wardenAccountTitle(account)}
+                className={cn(
+                  'mono rounded-control px-1.5 py-0.5',
+                  account.eligible ? 'bg-ok/10 text-ok' : 'bg-warn/10 text-warn',
+                )}
+              >
+                {wardenAccountLabel(account)}
+                {account.agent === status.failover?.lastSelection?.agent ? ' ●' : ''}
               </li>
             ))}
           </ul>

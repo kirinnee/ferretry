@@ -76,7 +76,7 @@ describe('WardenStrip', () => {
     });
     const { container } = await mount(<WardenStrip status={wardenStatus({ failover })} now={NOW} />);
     const group = container.querySelector('[aria-label="Warden accounts"]') as HTMLElement;
-    const chips = [...group.querySelectorAll('span')];
+    const chips = [...group.querySelectorAll('li')];
 
     expect(chips.map(chip => chip.textContent)).toEqual(['loge ●', 'terra']);
     expect(chips[0]?.className).toContain('text-ok');
