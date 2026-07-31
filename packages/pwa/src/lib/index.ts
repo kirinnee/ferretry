@@ -8,6 +8,7 @@ export * from '../components/session-header.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/attention/attention-api.ts';
 export * from '../features/attention/attention-board.tsx';
+export * from '../features/browser/remote-browser-chrome.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/analytics/analytics-result-table.tsx';
 export * from '../features/analytics/analytics-response-view.tsx';
