@@ -123,9 +123,11 @@ import {
   tryParseSessionId,
   type AnalyticsSubsystem,
   type AssigneeObservation,
+  type DaemonHealthSubsystem,
   type FinishedAnalyticsSession,
   type FoundationPaths,
   type LearningSubsystem,
+  type ScratchReclamation,
   type TaskSubsystem,
   TerminalMountError,
   type TerminalRuntimePort,
@@ -225,6 +227,10 @@ export interface DaemonWorld {
    * today — no per-session monitor subsystem and no warden sweep timer are mounted yet — so the
    * self-check measures and reconciles without planning repairs it could not carry out. The units
    * landing those subsystems flip the flags and replace `UnmountedSupervisionRepair`.
+   *
+   * ONE instance serves both callers: `start` ticks it on a timer, and `GET /v1/health` reports the
+   * ledgers those ticks fill. A second instance for the route would report a ledger nothing had ever
+   * ticked — permanently zero self-checks beside a daemon that was self-checking every minute.
    */
   readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
   /**
@@ -290,6 +296,11 @@ export interface DaemonWorld {
      * feed serves rather than probing the providers a second time.
      */
     usage: UsageFeedPort,
+    /**
+     * The self-check, passed IN for the same reason: `start` owns its tick timer, and the health
+     * route must report the ledgers THAT service filled rather than a second one's empty ones.
+     */
+    health: SessionHealthService,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -649,6 +660,36 @@ function createLearningSubsystem(
 }
 
 /**
+ * Scratch reclamation this daemon does not perform.
+ *
+ * `enabled` is FALSE and is not configurable, for the same reason `LEARNING_CONFIG.enabled` is: it
+ * is a fact about this build rather than a setting. No scratch garbage collector is mounted — the
+ * `/v1/gc` route the CLI speaks is not served — so the two counters beside it are zero because
+ * nothing reclaims, not because a reclaimer found nothing. The unit that mounts the collector
+ * replaces this with the collector's own totals.
+ */
+const SCRATCH_UNMOUNTED: ScratchReclamation = {
+  enabled: false,
+  reclaimedSessions: 0,
+  reclaimedBytes: 0,
+};
+
+/**
+ * The daemon's own health, over the self-check `start` ticks.
+ *
+ * The process id is read HERE rather than in the route, because `src/lib` may not touch `process`:
+ * a domain that read its own pid could not be driven from a test, and the whole point of the field
+ * is that an operator can signal the process that is actually serving.
+ */
+function createHealthSubsystem(health: SessionHealthService): DaemonHealthSubsystem {
+  return {
+    report: async () => await health.report(),
+    pid: process.pid,
+    scratch: SCRATCH_UNMOUNTED,
+  };
+}
+
+/**
  * Quota deliberately UNREAD, for the caller who asked for no probe.
  *
  * It is not a stub standing in for a feed that should be here: `hasSnapshot` is false and the account
@@ -888,7 +929,8 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals, usage) => ({
+    createSubsystems: (storage, terminals, usage, health) => ({
+      health: createHealthSubsystem(health),
       attention: new AttentionService(
         // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
         // than asserted: an id the layout would not accept must never become a directory path.
@@ -958,7 +1000,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
-  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime, usage);
+  const health = world.createSessionHealth(opened.storage);
+  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime, usage, health);
+  // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
+  // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
+  // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also
+  // the boot-time index reconciliation: `classifySelfCheckTick` forces the deep consistency pass on
+  // the first tick precisely because boot is when the index is least likely to match the session
+  // directories. A failure is swallowed for the same reason the ticks below swallow theirs — a
+  // self-check that could not run is reported by the next one's freshness, and refusing to serve
+  // because the daemon could not measure itself is strictly worse than serving and saying so.
+  await health.selfCheck().catch(() => undefined);
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
@@ -981,6 +1033,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // stream is over while the socket it writes to still exists.
   cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
+  // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
+  // the wedge detector measures lateness against, so it comes from the same settings object the
+  // service reasons with rather than a constant here — a timer that fired on a different period
+  // would make every on-time tick look late.
+  //
+  // Errors are swallowed rather than propagated: an unhandled rejection from a background timer
+  // takes down a daemon whose fleet is fine, and the failure is already visible as the next tick's
+  // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
+  // daemon does not leave a timer firing at closed storage.
+  const ticks = setInterval(() => {
+    void health.selfCheck().catch(() => undefined);
+  }, defaultSessionHealthSettings.selfCheckIntervalMs);
+  cleanups.push(() => clearInterval(ticks));
   await world.untilShutdown();
   return 0;
 }
