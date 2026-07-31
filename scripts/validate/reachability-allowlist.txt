@@ -263,6 +263,21 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is rea
 # harness wrote its transcript nor is there an inbox; `applyMinerOutput` wants the result of a miner
 # run, and no session start is mounted to launch one. POST /v1/learning/run therefore refuses with a
 # stated reason rather than answering with a manifest that scanned nothing.
+#
+# RE-CHECKED by the unit that mounted attachments, which went looking for the same kind of WRONG DOOR
+# it found under PR #12 — a second entry point the recorded blocker never considered. There is one,
+# and it is not enough, which is worth stating so nobody spends the investigation again. `extractSession`
+# takes `turnTexts` as well as `records` and `inbox`, and turn documents are the one input this daemon
+# genuinely owns: the start writes `turns/turn-001.md` and every revive writes the next. So a digest
+# COULD be assembled today from briefs alone.
+#
+# It must not be. `corpus` is the evidence a proposal's quotes are verified against, and its whole
+# point is stated in `extract.ts`: assistant output is deliberately excluded so a match proves
+# HUMAN-side evidence. A corpus of turn documents is the daemon quoting instructions back to itself —
+# every follow-up message, every steer and every interrupt that makes a session worth learning from
+# lives in the transcript and the inbox, and both are absent. Worse, `hasSignal` would answer true for
+# any interactive session on the strength of `interactive session (human at the wheel)` alone, so the
+# miner would report signal it had not measured. The blocker is the transcript, exactly as recorded.
 packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; no mounted session start can produce a miner run
 packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcript and inbox the daemon does not assemble
 
