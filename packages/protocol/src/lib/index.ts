@@ -1,2 +1,15 @@
-/** Stable role exposed by this workspace package's initial public surface. */
-export const packageRole = 'protocol' as const;
+export * from './analytics.ts';
+export * from './attention.ts';
+export * from './browser.ts';
+export * from './client.ts';
+export * from './common.ts';
+export * from './learning.ts';
+export * from './pins.ts';
+export * from './push.ts';
+export * from './service.ts';
+export * from './session.ts';
+export * from './stt.ts';
+export * from './task-boards.ts';
+export * from './tasks.ts';
+export * from './terminal.ts';
+export * from './version-skew.ts';
