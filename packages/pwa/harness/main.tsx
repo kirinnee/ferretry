@@ -16,6 +16,7 @@ import type {
   TaskLive,
   TaskStatus,
   TaskSummary,
+  WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
@@ -28,6 +29,7 @@ import { TaskQuickSummary } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
+import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
@@ -200,6 +202,12 @@ const WARDEN: WardenStatusView = {
       reason: 'first eligible',
     },
   },
+};
+
+const WARDEN_CONFIG: WardenConfigView = {
+  config: WARDEN.config,
+  accounts: WARDEN.config.accounts,
+  warnings: ['Account order takes effect on the next sweep.'],
 };
 
 /** Frozen so the screenshots of two runs are byte-identical. */
@@ -471,6 +479,13 @@ function Shell() {
             <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
           </PanelBody>
         </Card>
+        <WardenConfigCard
+          connection={daemon}
+          view={WARDEN_CONFIG}
+          failover={WARDEN.failover}
+          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+          onSave={() => {}}
+        />
 
         <Card className="overflow-hidden">
           <PanelHeader>

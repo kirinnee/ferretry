@@ -12,6 +12,7 @@
     "./components/transcript": "./src/components/transcript.tsx",
     "./features/analytics-result-table": "./src/features/analytics/analytics-result-table.tsx",
     "./features/browser-login-banner": "./src/features/browser/browser-login-banner.tsx",
+    "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
     "./session-screens.css": "./src/components/session-screens.css"
   },
   "types": "./src/lib/index.ts",
