@@ -30,6 +30,7 @@ import { SessionCommandControls } from '../src/components/session-command-contro
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
+import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
@@ -734,6 +735,27 @@ function Shell() {
           </div>
           <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
         </section>
+      ),
+    },
+    {
+      label: 'Session task board',
+      render: () => (
+        <SessionTaskKanban
+          compact={phone}
+          daemonId={daemon.daemonId}
+          onOpen={() => {}}
+          tasks={[
+            { ...TASKS[0]!, phase: 'build', status: 'in_progress' },
+            {
+              ...TASKS[1]!,
+              blocked: true,
+              blockedReason: 'Waiting on the review queue',
+              phase: 'build',
+              status: 'blocked',
+            },
+            { ...TASKS[2]!, phase: 'done', status: 'done' },
+          ]}
+        />
       ),
     },
     {
