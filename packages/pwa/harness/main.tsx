@@ -73,6 +73,8 @@ import {
   type SidePaneTabDefinition,
 } from '../src/shell/side-pane-tab-model.ts';
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
+import { CommandPalette } from '../src/shell/command-palette.tsx';
+import { paletteSessionEntries } from '../src/shell/palette-model.ts';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 
@@ -330,6 +332,46 @@ const LEARNING_PROPOSALS: readonly ProposalView[] = [
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
+/** One daemon's fleet, as the palette ranks and renders it. */
+const PALETTE_SESSIONS = paletteSessionEntries([
+  harnessSession,
+  {
+    ...harnessSession,
+    config: {
+      ...harnessSession.config,
+      id: 'ms9hi4ts-b22751c4',
+      teammate: 'jessica',
+      name: '[Jessica] Port the command palette',
+    },
+  },
+  {
+    ...harnessSession,
+    config: {
+      ...harnessSession.config,
+      id: 'kq21ffds-90ab12cd',
+      teammate: 'ms-98',
+      name: 'Wire the daemon picker',
+      cwd: '/work/kteam',
+    },
+    state: { ...harnessSession.state, status: 'completed' },
+  },
+] as SessionView[]);
+
+const PALETTE_COMMANDS = [
+  {
+    id: 'browser-login',
+    label: 'Open browser login window',
+    description: 'Sign in to shared Chrome through the private browser-login window',
+    searchTerms: 'browser login sign in shared chrome',
+    run: () => {},
+  },
+];
+
+const PALETTE_SETTINGS = [
+  { id: 'setting-density', label: 'Density', description: 'How tightly rows pack', settingId: 'density' },
+  { id: 'setting-theme', label: 'Theme', description: 'Pick a colour family and mode', settingId: 'theme' },
+];
+
 const BROWSER_LOGIN: BrowserLoginView = {
   state: 'open',
   profilePrimed: false,
@@ -519,6 +561,7 @@ function Shell() {
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
   const menuOpen = window.location.hash === '#menu';
+  const paletteOpen = window.location.hash === '#palette';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
   // The headless browser sizes its window after the first paint, so a viewport
@@ -1041,6 +1084,20 @@ function Shell() {
           ]}
           onClose={() => {}}
           touch={phone}
+        />
+
+        {/* Only under `#palette`, for the same reason as the menu: the palette
+            is a fixed overlay and a full-page stitch cannot capture it. */}
+        <CommandPalette
+          open={paletteOpen}
+          focusSignal={0}
+          onClose={() => {}}
+          daemon={daemon.daemonId}
+          sessions={PALETTE_SESSIONS}
+          onNavigate={() => {}}
+          commands={PALETTE_COMMANDS}
+          settings={PALETTE_SETTINGS}
+          touchAffected={phone}
         />
 
         <BottomSheet

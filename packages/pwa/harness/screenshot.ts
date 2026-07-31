@@ -155,6 +155,13 @@ try {
       await page.screenshot({ path: menuTarget });
       process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
 
+      const paletteTarget = join(outDir, `${viewport.name}-palette.png`);
+      await page.goto(`${server.url}#palette`);
+      await page.reload();
+      await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
+      await page.screenshot({ path: paletteTarget });
+      process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
+
       await context.close();
     }
   } finally {

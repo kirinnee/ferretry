@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  displayCallsign,
   wardenAccountLabel,
   wardenAccountTitle,
   wardenAnomalyCountLabel,
@@ -8,21 +7,6 @@ import {
   wardenExhaustionLabel,
 } from '../../../src/features/warden/warden-status-model.ts';
 import { wardenAccount, wardenAnomaly, wardenFailover } from '../../support/warden.ts';
-
-describe('displayCallsign', () => {
-  it('title-cases every hyphen-separated segment', () => {
-    expect(displayCallsign('ms-98-uuot')).toBe('Ms-98-Uuot');
-  });
-
-  it('answers with an empty string rather than a placeholder when there is no callsign', () => {
-    expect(displayCallsign(undefined)).toBe('');
-    expect(displayCallsign('   ')).toBe('');
-  });
-
-  it('survives a slug with empty segments', () => {
-    expect(displayCallsign('a--b')).toBe('A--B');
-  });
-});
 
 describe('wardenExhaustionLabel', () => {
   it('says nothing at all while failover is healthy', () => {
