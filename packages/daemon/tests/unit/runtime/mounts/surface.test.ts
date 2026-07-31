@@ -18,6 +18,7 @@ import {
   learningSubsystem,
   nameSubsystem,
   pinService,
+  recommendSubsystem,
   sessionDirectory,
   sessionView,
   taskSubsystem,
@@ -41,6 +42,7 @@ const subsystems = (): MountedSubsystems => ({
   terminals: new FakeTerminals(),
   names: nameSubsystem(),
   learning: learningSubsystem(),
+  recommend: recommendSubsystem(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -79,6 +81,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/learning/proposals/:id',
       'GET /v1/learning/proposals/:id/patch',
       'POST /v1/learning/run',
+      'POST /v1/recommend',
     ]);
   });
 

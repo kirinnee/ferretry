@@ -6,6 +6,7 @@ export * from './mounts/index.ts';
 export * from './mounts/learning.ts';
 export * from './mounts/names.ts';
 export * from './mounts/pins.ts';
+export * from './mounts/recommend.ts';
 export * from './mounts/sessions.ts';
 export * from './mounts/tasks.ts';
 export * from './mounts/terminals.ts';

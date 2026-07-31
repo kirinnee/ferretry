@@ -10,6 +10,7 @@ import { attentionRoutes } from './attention.ts';
 import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
+import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
@@ -49,6 +50,8 @@ export interface MountedSubsystems {
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
    *  it proposes. Mining itself is not mounted — see the mount's own header. */
   readonly learning: LearningSubsystem;
+  /** The team recommender over the published fleet manifest and the operator's routing catalog. */
+  readonly recommend: RecommendSubsystem;
 }
 
 /**
@@ -71,6 +74,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...terminalRoutes(subsystems.terminals),
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
+    ...recommendRoutes(subsystems.recommend),
   ];
 }
 
