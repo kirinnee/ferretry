@@ -12,6 +12,25 @@
 #   * an entry that has become reachable is a hard failure — delete it in the PR that wires it.
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
+# THIS FILE IS NOT THE WHOLE DEFECT, AND THE FOURTH WIRING UNIT SHIPPED NOTHING FROM IT
+#
+# The gate can only see one shape of "built but not in the product": a module NO importer reaches. It
+# is blind to the other shape — a service the composition root imports, constructs a factory for, and
+# then never calls. `SessionResumeService` was that for four units: `createSessionResume` was a world
+# field nothing invoked, so `POST /v1/sessions/:id/resume` answered `unknown_route` while the module
+# sat happily off this list at 100% coverage. `GET /v1/sessions/by-request/:id` was the same.
+#
+# Both are mounted now, and mounting them turned up three defects that no unit test had reached: an
+# explicit revive wrote `needsHumanKind: null` into a document the protocol says holds a STRING, so
+# every surface that parses before serving dropped the session it had just revived; a start recorded
+# `turn: 0` for a session it had already handed `turns/turn-001.md`, so the first revive overwrote the
+# session's own assignment; and the start's retry contract had no recoverable third step at all.
+#
+# THE LESSON FOR WHOEVER PICKS THIS UP: when a group here is genuinely blocked, look for an uncalled
+# factory in `bin/fyd.ts` before concluding there is nothing to wire. `world.wardenReports` is still
+# one.
+#
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
 # THE UNIT FOUR OF THESE GROUPS WERE WAITING ON HAS LANDED: SESSION START AND STOP ARE MOUNTED
 #
 # `POST /v1/sessions` and `POST /v1/sessions/:id/stop` are served. The three gaps the third wiring
@@ -41,6 +60,16 @@
 #     `TranscriptSource.read` takes the transcript FILE. `SessionConfigSchema` has no transcript field
 #     at all, which is the same wall `lib/learning/extract.ts` is behind: the harness writes it, this
 #     daemon does not yet learn where, and both surfaces unblock together when it does.
+#   * THERE IS NO WAY TO HAND A SESSION A SECRET, which is the fourth wiring unit's finding and the
+#     one hard blocker in front of the biggest group left. The CLI reads every board capability from
+#     its ENVIRONMENT (`FY_SESSION_BOARD_CAPABILITY`, `FY_BOARD_CAPABILITY`, see
+#     `packages/cli/src/lib/task-boards/board-credentials.ts`), and nothing in the launch path can set
+#     an environment variable: `TmuxLaunch` has no env field, `newSessionArguments` never passes `-e`,
+#     `SessionLifecycleConfig` records none, and `SessionLifecycleLauncher` takes none. So the
+#     per-session credential PR #5 needs cannot be DELIVERED even once something mints it, and a board
+#     mounted without it would serve a surface no session can authenticate as a peer on — a board whose
+#     coordinator cannot act. The seam is the cheapest single unblock available: tmux `-e` through the
+#     process port, the controller, the launcher, the lifecycle document and the start.
 #   * PR #9's WORKTREE barrel needs the managed-worktree REGISTRY, not the start: a start does not
 #     create a worktree, and `ManagedWorktree` carries an ownership token, a creation instant and
 #     whether the branch pre-existed — none of it derivable from Git.
@@ -61,6 +90,12 @@
 # an ATTRIBUTION, not a secret only that session holds. Mounting boards therefore means first minting
 # a per-session credential at session start — which is not mounted — and every grant, invitation proof
 # and child grant hangs off it. That is the security boundary, and it cannot be invented here.
+#
+# RE-CHECKED by the fourth wiring unit now that session start IS mounted, and the blocker moved rather
+# than fell: minting the credential is no longer the binding constraint, DELIVERING it is. The CLI
+# reads it from the environment and the launch path cannot set one — see "THERE IS NO WAY TO HAND A
+# SESSION A SECRET" in the header above. Until that seam exists, every peer-scoped board command in
+# `fy task-board` refuses before it sends, so the whole surface would be operator-only.
 packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
@@ -99,6 +134,12 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 # cheapest route, the removal CHECK at `/v1/worktrees/removal`, takes a `CheckManagedWorktreeRemovalInput`
 # whose first field is the persisted `ManagedWorktree` itself — so there is no subset of this surface
 # that the registry does not gate.
+#
+# RE-CHECKED AGAIN by the fourth wiring unit, because "awaits a session start" is no longer a blocker
+# on its own. The start is mounted and it still cannot write this registry: `StartSessionRequest` has
+# NO worktree or branch field of any kind, and neither does the CLI's own start. So there is nothing a
+# start could persist, and giving it something means DESIGNING a wire contract rather than wiring an
+# existing one — which is why this line is still here after the start landed.
 packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is reachable; the barrel awaits a mount, which awaits a managed-worktree registry
 
 # PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
@@ -119,6 +160,12 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is rea
 # Second, and decisively, an attachment id is only useful to `POST /v1/sessions/:id/send`, which takes
 # `attachmentIds` — and no session send is mounted. Mounting upload alone would hand the CLI an id it
 # has nowhere to spend.
+#
+# RE-CHECKED by the fourth wiring unit: both halves still hold verbatim. `src/lib/api/body.ts` grew
+# `parseBody`, `parseOptionalBody` and `parseQuery`, and all three read `request.text()` — there is
+# still no byte reader anywhere on `ApiRequest`. The REVIVE now mounted at
+# `POST /v1/sessions/:id/resume` is not the missing send: it hands a live pane a message, and its
+# domain has no notion of an attachment id.
 packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/attachments/raw-deflate.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
