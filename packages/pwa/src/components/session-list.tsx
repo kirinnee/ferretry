@@ -28,41 +28,42 @@ export function SessionList({ daemonId, sessions, now = Date.now(), onOpenSessio
           <p className="fy-eyebrow">Current daemon</p>
           <h1 id="sessions-heading">Sessions</h1>
         </div>
-        <span aria-label={`${sessions.length} sessions`} className="fy-count">
+        <span aria-label={`${sessions.length} sessions`} className="fy-count" role="status">
           {sessions.length}
         </span>
       </div>
       {sessions.length === 0 ? (
         <p className="fy-empty">No sessions on this daemon yet.</p>
       ) : (
-        <div className="fy-session-rows" role="list">
+        <ul className="fy-session-rows">
           {sessions.map(session => {
             const { config, state } = session;
             const activityAt = state.lastActivityAt ?? config.updatedAt;
             return (
-              <button
-                className="fy-session-row"
-                key={`${daemonId}:${config.id}`}
-                onClick={() => onOpenSession(...sessionNavigation(daemonId, config.id))}
-                type="button"
-              >
-                <span className="fy-session-identity">
-                  <strong>{config.name}</strong>
-                  <small title={config.id}>{config.teammate ?? config.id}</small>
-                </span>
-                <span className="fy-session-task">{config.label ?? config.cwd}</span>
-                <span className="fy-status" style={{ color: statusTone(state.status) }}>
-                  <i aria-hidden="true" />
-                  {sessionStatusLabel(state.status)}
-                </span>
-                <span className="fy-session-meta">{config.model ?? config.agent}</span>
-                <time className="fy-session-age" dateTime={new Date(activityAt).toISOString()}>
-                  {relativeTime(activityAt, now)}
-                </time>
-              </button>
+              <li className="fy-session-row-item" key={`${daemonId}:${config.id}`}>
+                <button
+                  className="fy-session-row"
+                  onClick={() => onOpenSession(...sessionNavigation(daemonId, config.id))}
+                  type="button"
+                >
+                  <span className="fy-session-identity">
+                    <strong>{config.name}</strong>
+                    <small title={config.id}>{config.teammate ?? config.id}</small>
+                  </span>
+                  <span className="fy-session-task">{config.label ?? config.cwd}</span>
+                  <span className="fy-status" style={{ color: statusTone(state.status) }}>
+                    <i aria-hidden="true" />
+                    {sessionStatusLabel(state.status)}
+                  </span>
+                  <span className="fy-session-meta">{config.model ?? config.agent}</span>
+                  <time className="fy-session-age" dateTime={new Date(activityAt).toISOString()}>
+                    {relativeTime(activityAt, now)}
+                  </time>
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </section>
   );

@@ -40,10 +40,12 @@ export function Composer({
   const submitLock = useRef(false);
   const hintId = useId();
 
+  // `scope` already carries the daemon identity, so it changes whenever the daemon does; listing
+  // daemon.daemonId as well only re-ran this redundantly.
   useEffect(() => {
     setDraft(draftStore.load(scope));
     setError(null);
-  }, [daemon.daemonId, draftStore, scope]);
+  }, [draftStore, scope]);
 
   useEffect(() => {
     const timer = setTimeout(() => draftStore.save(scope, draft), 400);

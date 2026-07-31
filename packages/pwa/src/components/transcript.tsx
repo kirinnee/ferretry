@@ -22,6 +22,11 @@ export function Transcript({ daemonId, sessionId, entries, busy = false, label =
   const [newCount, setNewCount] = useState(0);
   const previousLength = useRef(entries.length);
 
+  // These deps are the TRIGGER, not inputs. The body reads only refs, so the rule sees them as
+  // unnecessary — but dropping them stops the viewport following new entries, which is the entire
+  // purpose of the effect. Re-running on a daemon or session change also resets the scroll for the
+  // newly shown transcript.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: trigger deps, see comment above
   useEffect(() => {
     const element = viewport.current;
     if (!element || !following.current) return;
