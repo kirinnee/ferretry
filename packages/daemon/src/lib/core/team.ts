@@ -3,8 +3,7 @@
  * for every role in it. It never launches anything.
  */
 import type { AccountUsage } from '@ferretry/protocol';
-import { authFailureRemedy } from '../usage/index.ts';
-import { spentPercent, unusableAccountReason } from './account-health.ts';
+import { authFailureRemedy, spentPercent, unusableAccountReason } from '../usage/index.ts';
 import {
   baseRoleScore,
   indexCatalog,

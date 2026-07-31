@@ -1,6 +1,7 @@
 export * from './attachments/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/transport/index.ts';
+export * from './core/index.ts';
 export * from './filesystem/state-file-system.ts';
 export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';

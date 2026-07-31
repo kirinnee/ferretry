@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { confirmedUsableAccount, usableAccount } from '../../../src/lib/usage/index.ts';
 import {
   classifyWardenFailure,
-  confirmedUsableAccount,
   DEFAULT_WARDEN_FAILOVER,
   effectiveFailoverConfig,
   ineligibilityReason,
@@ -12,7 +12,6 @@ import {
   recordWardenFailure,
   recordWardenSuccess,
   selectWardenAccount,
-  usableAccount,
   type WardenFailoverState,
   type WardenSelectionInput,
 } from '../../../src/lib/warden/index.ts';

@@ -2,12 +2,13 @@ import type { AccountUsage } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  accountHealthProblem,
   confirmedUsableAccount,
   spentPercent,
   unusableAccountReason,
+  usableAccount,
   usageForAgent,
-} from '../../../src/lib/core/index.ts';
-import { usableAccount } from '../../../src/lib/core/account-health.ts';
+} from '../../../src/lib/usage/index.ts';
 
 const usage = (overrides: Partial<AccountUsage> = {}): AccountUsage => ({ agent: 'agent-primary', ...overrides });
 
@@ -35,6 +36,32 @@ describe('spentPercent', () => {
   it('should say nothing when the probe itself failed', () => {
     // Arrange / Act / Assert
     should(spentPercent(usage({ ok: false, fiveHourPercent: 20 }))).be.undefined();
+  });
+});
+
+describe('accountHealthProblem', () => {
+  it.each([
+    { label: 'nothing is known', row: undefined, expected: undefined },
+    { label: 'the row is healthy', row: usage({ atLimit: false, authOk: true }), expected: undefined },
+    { label: 'credentials were rejected', row: usage({ authOk: false }), expected: 'auth' },
+    { label: 'the provider is down', row: usage({ unavailable: true }), expected: 'unavailable' },
+    { label: 'the account is spent', row: usage({ atLimit: true }), expected: 'at-limit' },
+  ])('should classify $label as $expected', ({ row, expected }) => {
+    // Arrange / Act / Assert
+    should(accountHealthProblem(row)).equal(expected);
+  });
+
+  it('should rank rejected credentials above every other problem', () => {
+    // Arrange — an account that is unauthenticated AND down AND spent: only the first is actionable
+    const row = usage({ authOk: false, unavailable: true, atLimit: true });
+
+    // Act / Assert
+    should(accountHealthProblem(row)).equal('auth');
+  });
+
+  it('should rank an unavailable provider above a spent account', () => {
+    // Arrange / Act / Assert
+    should(accountHealthProblem(usage({ unavailable: true, atLimit: true }))).equal('unavailable');
   });
 });
 

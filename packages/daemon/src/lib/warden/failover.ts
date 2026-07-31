@@ -16,6 +16,7 @@
  * Pure: no IO, no clock reads, no globals.
  */
 
+import { accountHealthProblem, confirmedUsableAccount, usableAccount } from '../usage/account-health.ts';
 import type { WardenFailoverPolicy, WardenSelectionReason } from './provenance.ts';
 import { instantMs, isoFromMs } from './time.ts';
 
@@ -133,19 +134,6 @@ export function isDemoted(state: WardenFailoverState, agent: string, nowMs: numb
   return until !== undefined && until > nowMs;
 }
 
-/** Loose usability: unknown counts as usable, so a feed outage can neither
- *  demote nor un-demote anyone. */
-export function usableAccount(health: WardenAccountHealth | undefined): boolean {
-  if (health === undefined) return true;
-  return health.authOk !== false && health.atLimit !== true && health.unavailable !== true;
-}
-
-/** Positively confirmed usability: the feed actually scored this account and
- *  said it is fine, as opposed to simply not knowing. */
-export function confirmedUsableAccount(health: WardenAccountHealth | undefined): boolean {
-  return health !== undefined && health.atLimit === false && health.authOk !== false && health.unavailable !== true;
-}
-
 /**
  * Why an account is ineligible right now, or `undefined` when it is eligible.
  *
@@ -164,14 +152,22 @@ export function ineligibilityReason(
   if (input.installedAgents.length > 0 && !input.installedAgents.includes(account.agent)) {
     return 'not installed on this host';
   }
+  // The classification is the usage module's — one table, so a condition it learns to recognise can
+  // never be one the warden silently keeps accepting. Only the wording is warden's own.
   const health = input.usage.find(item => item.agent === account.agent);
-  if (health?.authOk === false) return 'credentials rejected (usage feed)';
-  if (health?.unavailable === true) {
-    const cause = health.unavailableReason?.replaceAll('_', ' ') ?? 'provider';
-    const retry = health.retryAt === undefined ? '' : `; retry after ${isoFromMs(health.retryAt)}`;
-    return `provider unavailable: ${cause}${retry} (usage feed)`;
+  switch (accountHealthProblem(health)) {
+    case 'auth':
+      return 'credentials rejected (usage feed)';
+    case 'unavailable': {
+      const cause = health?.unavailableReason?.replaceAll('_', ' ') ?? 'provider';
+      const retry = health?.retryAt === undefined ? '' : `; retry after ${isoFromMs(health.retryAt)}`;
+      return `provider unavailable: ${cause}${retry} (usage feed)`;
+    }
+    case 'at-limit':
+      return 'at its usage limit (usage feed)';
+    default:
+      break;
   }
-  if (health?.atLimit === true) return 'at its usage limit (usage feed)';
   const demotedUntil = input.state.demotedUntil?.[account.agent];
   if (isDemoted(input.state, account.agent, input.nowMs)) return `demoted until ${demotedUntil}`;
   return undefined;
