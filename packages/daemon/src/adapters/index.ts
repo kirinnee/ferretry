@@ -7,3 +7,4 @@ export * from './storage/storage-factory.ts';
 export * from './system/keyed-serial-executor.ts';
 export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
+export * from './tmux/index.ts';
