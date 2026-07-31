@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { mapWithConcurrency } from './concurrent.ts';
 import type { WardenFileInfo, WardenReportFileSystem } from '../../lib/warden/index.ts';
 
 const isMissing = (error: unknown): boolean => (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
@@ -16,21 +17,22 @@ export class NodeWardenReportFileSystem implements WardenReportFileSystem {
       throw error;
     }
 
-    const entries = await Promise.all(
-      names.map(async name => {
-        const path = join(directory, name);
-        try {
-          const details = await stat(path);
-          // A nested directory is not a report, and stat-ing it must not make
-          // it look like one.
-          return details.isFile() ? { path, mtimeMs: details.mtimeMs } : undefined;
-        } catch (error) {
-          // The sweep that wrote the listing races the one that prunes it.
-          if (isMissing(error)) return undefined;
-          throw error;
-        }
-      }),
-    );
+    const entries = await mapWithConcurrency(names, async name => {
+      const path = join(directory, name);
+      try {
+        const details = await stat(path);
+        // A nested directory is not a report, and stat-ing it must not make it
+        // look like one.
+        return details.isFile() ? { path, mtimeMs: details.mtimeMs } : undefined;
+      } catch {
+        // Skip, never throw. The entry may have been pruned by a concurrent
+        // sweep, or the host may be out of descriptors — and an entry we cannot
+        // stat is one we could not have read either. Failing the whole listing
+        // over one of them would blank the verdict list, which is precisely the
+        // surface a struggling host needs to keep showing.
+        return undefined;
+      }
+    });
     return entries.filter((entry): entry is WardenFileInfo => entry !== undefined);
   }
 

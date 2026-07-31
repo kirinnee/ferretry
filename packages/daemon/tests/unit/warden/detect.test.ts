@@ -123,6 +123,35 @@ describe('fleet anomaly detection', () => {
     should(result.fingerprint).eql('');
   });
 
+  it('should never flag a session stamped as warden lineage, even with no parent to walk', () => {
+    // Arrange — the spawning warden has been pruned entirely; only the stamp
+    // records that this session descends from one.
+    const orphan = view(
+      'c1',
+      { status: 'thinking' },
+      { parent: 'gone-warden', wardenLineage: true },
+      { hasLiveMonitor: false },
+    );
+
+    // Act
+    const result = detectAnomalies([orphan], NOW, options);
+
+    // Assert
+    should(result.anomalies).be.empty();
+  });
+
+  it('should still supervise a session whose unrelated parent has been pruned', () => {
+    // Arrange — an unresolvable parent leaves ancestry unknown, and unknown
+    // must not shield the whole fleet from supervision.
+    const orphan = view('c1', { status: 'thinking' }, { parent: 'gone-session' }, { hasLiveMonitor: false });
+
+    // Act
+    const result = detectAnomalies([orphan], NOW, options);
+
+    // Assert
+    should(kinds(result.anomalies)).eql(['dead_monitor']);
+  });
+
   it('should never flag a descendant of a warden that is only in the full fleet index', () => {
     // Arrange — the warden itself already finished, so the live sweep slice
     // holds only its child.
@@ -204,7 +233,7 @@ describe('fleet anomaly detection', () => {
 
   it('should still flag a question with no timestamps at all', () => {
     // Arrange
-    const sessions = [view('s1', { status: 'awaiting_question' }, { createdAt: undefined })];
+    const sessions = [view('s1', { status: 'awaiting_question' }, { createdAt: undefined, updatedAt: undefined })];
 
     // Act
     const result = detectAnomalies(sessions, NOW, options);
@@ -214,6 +243,30 @@ describe('fleet anomaly detection', () => {
     should(result.anomalies[0]?.idleMinutes).be.undefined();
     should(result.anomalies[0]?.since).be.undefined();
     should(result.anomalies[0]?.detail).containEql('the whole session');
+  });
+
+  it('should fall back to the config write time when a session carries no activity timestamp', () => {
+    // Arrange — nothing but a fresh config write is known about this session.
+    const sessions = [view('s1', { status: 'awaiting_user' }, { createdAt: undefined, updatedAt: ago(2) })];
+
+    // Act
+    const result = detectAnomalies(sessions, NOW, options);
+
+    // Assert
+    should(result.anomalies).be.empty();
+  });
+
+  it('should not let a config write reset the idle clock on a real unanswered question', () => {
+    // Arrange — the teammate last did something 40m ago; the config was
+    // rewritten a minute ago for an unrelated reason.
+    const sessions = [view('s1', { status: 'awaiting_question', lastActivityAt: ago(40) }, { updatedAt: ago(1) })];
+
+    // Act
+    const result = detectAnomalies(sessions, NOW, options);
+
+    // Assert
+    should(kinds(result.anomalies)).eql(['unattended_question']);
+    should(result.anomalies[0]?.idleMinutes).eql(40);
   });
 
   it('should treat a declared wait as deliberate rather than unattended', () => {
@@ -350,6 +403,18 @@ describe('fleet anomaly detection', () => {
     should(result.anomalies[0]?.detail).eql('stalled within the sweep window and never resumed or stopped');
   });
 
+  it('should ignore wreckage whose finish time is in the future', () => {
+    // Arrange — clock skew, or a timestamp the agent wrote itself. A negative
+    // age satisfies the upper bound trivially and would be re-flagged forever.
+    const sessions = [view('s1', { status: 'failed', finishedAt: ago(-525_600) })];
+
+    // Act
+    const result = detectAnomalies(sessions, NOW, options);
+
+    // Assert
+    should(result.anomalies).be.empty();
+  });
+
   it('should ignore wreckage older than the sweep window', () => {
     // Arrange
     const sessions = [view('s1', { status: 'failed', finishedAt: ago(600) })];
@@ -425,6 +490,35 @@ describe('fleet anomaly detection', () => {
     should(result.anomalies[0]?.ledger?.lastTranscriptAt).eql(ago(30));
   });
 
+  it('should anchor a sus anomaly on when the weirdness started', () => {
+    // Arrange
+    const sessions = [
+      view('s1', {
+        status: 'thinking',
+        startedAt: ago(120),
+        lastCounterAdvanceAt: ago(0.1),
+        lastTranscriptAt: ago(30),
+      }),
+    ];
+
+    // Act
+    const result = detectAnomalies(sessions, NOW, options);
+
+    // Assert — an unanchored anomaly lets any stale clearance read as current.
+    should(result.anomalies[0]?.since).eql(ago(30));
+  });
+
+  it('should anchor a sus anomaly on the turn start when the signal was never seen', () => {
+    // Arrange
+    const sessions = [view('s1', { status: 'thinking', startedAt: ago(45), lastCounterAdvanceAt: ago(0.1) })];
+
+    // Act
+    const result = detectAnomalies(sessions, NOW, options);
+
+    // Assert
+    should(result.anomalies[0]?.since).eql(ago(45));
+  });
+
   it('should report no idle minutes for a sus think whose transcript never grew', () => {
     // Arrange
     const sessions = [view('s1', { status: 'thinking', lastCounterAdvanceAt: ago(0.1) })];
@@ -490,6 +584,7 @@ describe('fleet anomaly detection', () => {
   it.each([
     { label: 'a reset still in the future', quota: { resetAt: NOW + 60_000 } },
     { label: 'a non-finite reset', quota: { resetAt: Number.NaN } },
+    { label: 'an unset reset serialised as zero', quota: { resetAt: 0 } },
     { label: 'no quota record', quota: undefined },
   ])('should leave a rate-limited session with $label alone', ({ quota }) => {
     // Arrange

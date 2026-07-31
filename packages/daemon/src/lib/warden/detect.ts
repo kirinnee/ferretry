@@ -103,19 +103,31 @@ const ACTIVE_MONITORED: readonly WardenSessionStatus[] = ['running', 'thinking',
 const WAITING_IDLE: readonly WardenSessionStatus[] = ['awaiting_question', 'awaiting_user', 'waiting'];
 
 /**
- * True when the view is a warden or descends from one.
+ * True when the view is a warden or descends from one, so it must never be
+ * flagged — a warden escalating against its own offspring loops forever.
  *
- * The walk resolves parents against the FULL fleet index, not the (possibly
- * live-only) sweep slice: a warden that has already finished still shields the
- * children it spawned, and looking it up in the slice alone would silently
- * expose them to escalation.
+ * Three mechanisms, in decreasing reliability:
+ *
+ * 1. The session carries the warden label itself.
+ * 2. `config.wardenLineage`, stamped at spawn. This is the one that HOLDS: a
+ *    warden is ephemeral and is pruned while its children are still running, so
+ *    descent has to be recorded when it is known rather than rediscovered.
+ * 3. Walking `config.parent` through the fleet index. A backstop only — it
+ *    reaches the truth exactly while every ancestor is still present, which for
+ *    a finished warden is precisely when it no longer is.
+ *
+ * The walk resolves against the FULL fleet index rather than a live-only sweep
+ * slice, which widens what (3) can still catch, but does not make it complete.
+ * A parent that resolves nowhere leaves ancestry unknown, and unknown is not
+ * treated as warden descent: doing so would shield every session whose parent
+ * has been pruned and quietly disable supervision for them.
  */
 function inWardenLineage(view: WardenSessionView, fleet: ReadonlyMap<string, WardenSessionView>): boolean {
   const seen = new Set<string>();
   let current: WardenSessionView | undefined = view;
   while (current !== undefined && !seen.has(current.config.id)) {
     seen.add(current.config.id);
-    if (current.config.label === WARDEN_LABEL) return true;
+    if (current.config.label === WARDEN_LABEL || current.config.wardenLineage === true) return true;
     current = current.config.parent === undefined ? undefined : fleet.get(current.config.parent);
   }
   return false;
@@ -224,9 +236,15 @@ export function detectAnomalies(
     }
 
     if (declaredWait === undefined && WAITING_IDLE.includes(state.status)) {
+      // Activity signals decide idleness. `updatedAt` is a config-write time,
+      // not activity, so it must never join the max — a routine config write
+      // would reset the idle clock and mask a genuinely unanswered question.
+      // It does belong in the FALLBACK, though: a session carrying no activity
+      // timestamp at all is not thereby idle since the dawn of time, and
+      // reading it that way flags a freshly created session immediately.
       const anchor =
         latestInstantMs(state.lastActivityAt, state.lastTranscriptAt, state.lastPaneAt, state.startedAt) ??
-        instantMs(config.createdAt);
+        latestInstantMs(config.createdAt, config.updatedAt);
       const idleMs = anchor === undefined ? Number.POSITIVE_INFINITY : nowMs - anchor;
       if (idleMs >= options.unattendedMs) {
         const idleMinutes = Number.isFinite(idleMs) ? Math.floor(idleMs / 60_000) : undefined;
@@ -249,7 +267,11 @@ export function detectAnomalies(
       // must not make ancient wreckage look like it failed moments ago and so
       // keep it inside the sweep window forever.
       const finishedMs = firstInstantMs(state.finishedAt, state.lastActivityAt, config.updatedAt);
-      if (finishedMs !== undefined && nowMs - finishedMs <= options.terminalWindowMs) {
+      // The window is bounded at BOTH ends. Without a lower bound a finish time
+      // in the future — clock skew, or an agent-written timestamp — produces a
+      // negative age that trivially satisfies the upper bound, so the session is
+      // re-flagged as fresh wreckage every sweep until real time catches up.
+      if (finishedMs !== undefined && nowMs - finishedMs >= 0 && nowMs - finishedMs <= options.terminalWindowMs) {
         anomalies.push({
           ...base,
           kind: 'abandoned_wreckage',
@@ -271,10 +293,19 @@ export function detectAnomalies(
         tickSeconds: config.intervalSeconds,
         anchorMs: instantMs(state.startedAt),
       })) {
+        // ANCHOR EVERY SUS ANOMALY. `since` is what downstream consumers use to
+        // tell "this verdict judged the situation in front of me" from "this
+        // verdict judged an earlier one". An unanchored anomaly lets any old
+        // clearance in the window read as current, which silently hides a
+        // session that is wedged right now. The episode start is known — it is
+        // exactly `forSeconds` ago — so there is never a reason to omit it.
+        const since =
+          finding.forSeconds === undefined ? state.startedAt : isoFromMs(nowMs - finding.forSeconds * 1_000);
         anomalies.push({
           ...base,
           kind: finding.kind,
           detail: `${finding.detail} — assign a warden to investigate`,
+          ...(since === undefined ? {} : { since }),
           idleMinutes: finding.forSeconds === undefined ? undefined : Math.floor(finding.forSeconds / 60),
           assignedWarden: true,
           ledger,
@@ -284,7 +315,13 @@ export function detectAnomalies(
 
     if (state.status === 'rate_limited') {
       const resetAt = state.quota?.resetAt;
-      if (typeof resetAt === 'number' && Number.isFinite(resetAt) && resetAt <= nowMs) {
+      // `resetAt` must be a real instant, not merely a number that compares as
+      // past. Zero — an unset field serialised as a default — satisfies
+      // "already elapsed" forever, so the session is re-flagged with a
+      // 1970 anchor on every sweep and nothing ever damps it: resuming it just
+      // hits the same limit again, and a blessing only follows an explicit
+      // clearance. No reset time is not evidence that a reset has happened.
+      if (typeof resetAt === 'number' && Number.isFinite(resetAt) && resetAt > 0 && resetAt <= nowMs) {
         anomalies.push({
           ...base,
           kind: 'quota_reset_passed',

@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { mkdir, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../../../src/adapters/warden/index.ts';
@@ -86,6 +86,25 @@ describe('NodeWardenReportFileSystem', () => {
     const files = await subject.listFiles(reports);
 
     // Assert
+    should(files.map(file => path.basename(file.path))).eql(['a.md']);
+  });
+
+  it('should keep listing the reports it can stat when one entry is unreadable', async () => {
+    // Arrange — a directory with no execute permission cannot be stat-ed
+    // through, standing in for any per-entry failure the host throws.
+    const { reports } = await reportsHome('warden-unstattable');
+    await writeReport(reports, 'a.md', 'Verdict: LEAVE');
+    const blocked = path.join(reports, 'blocked');
+    await mkdir(blocked);
+    await writeFile(path.join(blocked, 'b.md'), 'Verdict: KILL', 'utf8');
+    await chmod(blocked, 0o000);
+    const subject = new NodeWardenReportFileSystem();
+
+    // Act
+    const files = await subject.listFiles(reports);
+
+    // Assert
+    await chmod(blocked, 0o700);
     should(files.map(file => path.basename(file.path))).eql(['a.md']);
   });
 

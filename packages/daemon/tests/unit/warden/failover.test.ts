@@ -497,7 +497,7 @@ describe('demotion reconciliation', () => {
     should(result.restored).eql([{ agent: 'first', how: 'cooldown' }]);
   });
 
-  it('should keep strikes when a demotion merely expired', () => {
+  it('should clear the strikes a served cooldown has already paid for', () => {
     // Arrange
     const state: WardenFailoverState = {
       demotedUntil: { first: at(-1) },
@@ -508,7 +508,35 @@ describe('demotion reconciliation', () => {
     const result = reconcileDemotions(state, [], NOW);
 
     // Assert
-    should(result.state.strikes?.first?.count).eql(3);
+    should(result.state.strikes?.first).be.undefined();
+  });
+
+  it('should give a restored account its full threshold again rather than one strike', () => {
+    // Arrange — three strikes demoted it; the cooldown has now elapsed.
+    const failover = { failureThreshold: 3, cooldownMinutes: 30 };
+    const demoted = recordWardenFailure(
+      recordWardenFailure(
+        recordWardenFailure({}, 'first', 'generic', 'x', NOW, failover).state,
+        'first',
+        'generic',
+        'x',
+        NOW,
+        failover,
+      ).state,
+      'first',
+      'generic',
+      'x',
+      NOW,
+      failover,
+    );
+    const restored = reconcileDemotions(demoted.state, [], NOW + 31 * 60_000);
+
+    // Act — one more generic failure after the cooldown was served.
+    const next = recordWardenFailure(restored.state, 'first', 'generic', 'x', NOW + 32 * 60_000, failover);
+
+    // Assert
+    should(next.strikes).eql(1);
+    should(next.demoted).be.false();
   });
 
   it('should leave a live demotion the feed does not contradict alone', () => {

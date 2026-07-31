@@ -336,6 +336,12 @@ export function reconcileDemotions(
     const expiry = instantMs(until);
     if (expiry === undefined || expiry <= nowMs) {
       delete demotedUntil[agent];
+      // The strike count goes with the demotion it produced. `failureThreshold`
+      // means "consecutive failures before a demotion", and a served cooldown
+      // IS the punishment — leaving the count at the threshold would put the
+      // account one failure from re-demotion forever, quietly turning every
+      // threshold above one into a one-strike rule after the first offence.
+      delete strikes[agent];
       restored.push({ agent, how: 'cooldown' });
     }
   }

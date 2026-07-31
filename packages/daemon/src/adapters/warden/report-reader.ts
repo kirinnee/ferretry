@@ -12,6 +12,7 @@ import {
   type WardenVerdict,
   type WardenVerdictSpawn,
 } from '../../lib/warden/index.ts';
+import { mapWithConcurrency } from './concurrent.ts';
 
 /**
  * Reads warden reports and their provenance sidecars off disk and hands the
@@ -31,7 +32,7 @@ export class WardenReportReader {
 
   /** The provenance recorded for one report, if any survives validation. */
   async readProvenance(reportPath: string): Promise<WardenSpawnProvenance | undefined> {
-    const raw = await this.files.readText(provenancePath(reportPath));
+    const raw = await this.files.readText(provenancePath(reportPath)).catch(() => undefined);
     if (raw === undefined) return undefined;
     return parseWardenSpawnProvenance(safeJson(raw));
   }
@@ -50,24 +51,21 @@ export class WardenReportReader {
   ): Promise<readonly (WardenVerdict & { readonly spawn?: WardenVerdictSpawn })[]> {
     const candidates = reportsWorthReading(await this.files.listFiles(this.reportsDirectory), limit);
 
-    const loaded = await Promise.all(
-      candidates.map(async candidate => {
-        const content = await this.files.readText(candidate.path);
-        // An empty report carries no verdict and would only occupy a row.
-        return content === undefined || content.trim() === ''
-          ? undefined
-          : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile);
-      }),
-    );
+    const loaded = await mapWithConcurrency(candidates, async candidate => {
+      const content = await this.files.readText(candidate.path).catch(() => undefined);
+      // An empty or unreadable report carries no verdict and would only occupy
+      // a row. One bad file must not blank the list.
+      return content === undefined || content.trim() === ''
+        ? undefined
+        : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile);
+    });
     const reports = loaded.filter((file): file is WardenReportFile => file !== undefined);
 
     const provenance = new Map<string, WardenSpawnProvenance>();
-    await Promise.all(
-      reports.map(async report => {
-        const spawn = await this.readProvenance(report.path);
-        if (spawn !== undefined) provenance.set(report.path, spawn);
-      }),
-    );
+    await mapWithConcurrency(reports, async report => {
+      const spawn = await this.readProvenance(report.path);
+      if (spawn !== undefined) provenance.set(report.path, spawn);
+    });
 
     return attachSpawnProvenance(parseWardenReports(reports, limit), provenance);
   }

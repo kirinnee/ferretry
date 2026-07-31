@@ -517,6 +517,55 @@ describe('anomalies with no board row', () => {
     should(result.items).be.empty();
   });
 
+  it('should never report a currently-wedged session as a clean sweep', () => {
+    // Arrange — s1 is wedged RIGHT NOW, and the only verdict in the window
+    // cleared the same anomaly class six hours ago.
+    const live = anomaly({ since: at(-30) });
+    const verdicts: JudgedVerdict[] = [
+      { at: at(-360), targetSession: 's1', verdict: 'cleared', anomalyKind: 'sus_thinking', reportPath: '/r/a.md' },
+    ];
+
+    // Act
+    const result = view({ anomalies: [live], verdicts });
+
+    // Assert
+    should(result.outcome).eql('items');
+    should(result.items.map(item => item.sessionId)).eql(['s1']);
+    should(result.items[0]?.judgement.stale).be.true();
+  });
+
+  it('should surface an unanchored anomaly rather than let an old clearance cover it', () => {
+    // Arrange — no `since` at all, so currency cannot be established.
+    const unanchored = anomaly({ since: undefined });
+    const verdicts: JudgedVerdict[] = [
+      { at: at(-1), targetSession: 's1', verdict: 'cleared', anomalyKind: 'sus_thinking', reportPath: '/r/a.md' },
+    ];
+
+    // Act
+    const result = view({ anomalies: [unanchored], verdicts });
+
+    // Assert — "cannot be shown current" resolves to stale, never to fresh.
+    should(result.outcome).eql('items');
+    should(result.items[0]?.judgement.stale).be.true();
+  });
+
+  it('should still name the session when a stale clearance coincides with exhaustion', () => {
+    // Arrange
+    const verdicts: JudgedVerdict[] = [
+      { at: at(-360), targetSession: 's1', verdict: 'cleared', anomalyKind: 'sus_thinking', reportPath: '/r/a.md' },
+    ];
+
+    // Act
+    const result = view({
+      anomalies: [anomaly({ since: at(-30) })],
+      verdicts,
+      wardenState: { lastSweepAt: at(-1), exhaustedSince: at(-20) },
+    });
+
+    // Assert
+    should(result.items.map(item => item.sessionId)).eql(['s1']);
+  });
+
   it('should surface an anomaly whose only verdict judged an earlier situation', () => {
     // Arrange
     const verdicts: JudgedVerdict[] = [

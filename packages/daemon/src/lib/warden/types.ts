@@ -77,6 +77,17 @@ export interface WardenSessionConfig {
   readonly teammate?: string;
   readonly label?: string;
   readonly parent?: string;
+  /**
+   * Stamped at spawn on a warden and on everything a warden spawns.
+   *
+   * Lineage CANNOT be reconstructed reliably by walking `parent`: the walk only
+   * works while every ancestor is still present, and a warden is ephemeral — it
+   * finishes and is pruned long before its children do. Recording descent when
+   * it is known is the only mechanism that survives that, so this flag is
+   * authoritative and the parent walk is a backstop for sessions that predate
+   * it.
+   */
+  readonly wardenLineage?: boolean;
   readonly agent?: string;
   readonly model?: string;
   readonly intervalSeconds?: number;

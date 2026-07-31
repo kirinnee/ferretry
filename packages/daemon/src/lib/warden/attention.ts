@@ -217,11 +217,13 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   provider_unavailable: 'Provider is unavailable',
 };
 
-const SEPARATOR = ' ';
-const anomalyKey = (sessionId: string, kind: WardenAnomalyKind): string => `${sessionId}${SEPARATOR}${kind}`;
-const reportKey = (sessionId: string, reportPath: string): string => `${sessionId}${SEPARATOR}${reportPath}`;
+/** Composite map keys. JSON-encoding the parts makes the key unambiguous by
+ *  construction: a report path may contain any character a filesystem allows,
+ *  so no single-character separator is safe to concatenate on. */
+const anomalyKey = (sessionId: string, kind: WardenAnomalyKind): string => JSON.stringify([sessionId, kind]);
+const reportKey = (sessionId: string, reportPath: string): string => JSON.stringify([sessionId, reportPath]);
 const reportBlockKey = (sessionId: string, reportPath: string, kind: WardenAnomalyKind): string =>
-  `${sessionId}${SEPARATOR}${reportPath}${SEPARATOR}${kind}`;
+  JSON.stringify([sessionId, reportPath, kind]);
 
 /** Epoch milliseconds for sorting and comparison; unset and unreadable both
  *  sort as the beginning of time, which is where an unknown wait belongs. */
@@ -407,14 +409,19 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
           reason: verdict.reason ?? 'The warden report could not be classified.',
         };
       }
-      // A row created by one exact report is judged by that report, whatever the
-      // millisecond ordering of the two writes. Only a kind match uses time,
-      // where a later flag really is a new recurrence of the same class.
+      // A row created by one exact report is judged by that report, whatever
+      // the millisecond ordering of the two writes. Only a kind match uses
+      // time, where a later flag really is a new recurrence of the same class.
+      //
+      // A kind match with NO anchor cannot be shown to be current, and
+      // "cannot be shown to be current" must resolve to stale, not to fresh.
+      // The other way round, any clearance still inside the verdict window
+      // silently covers a situation that is happening right now — which is how
+      // a wedged agent comes to be reported as an all-clear.
       const stale =
         match?.anomalyKind !== undefined &&
         match.reportPath === undefined &&
-        waitingSince !== undefined &&
-        sortableMs(verdict.at) < sortableMs(waitingSince);
+        (waitingSince === undefined || sortableMs(verdict.at) < sortableMs(waitingSince));
       return { ...shared, state: 'judged', verdict: verdict.verdict, ...(stale ? { stale: true } : {}) };
     }
 
