@@ -176,6 +176,78 @@
 .fy-session-context .fy-session-context-notice {
   color: var(--ok, #027a48);
 }
+.fy-remote-browser {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  color: var(--fy-fg);
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+}
+.fy-remote-browser-header,
+.fy-remote-browser-error {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+.fy-remote-browser-header {
+  border-bottom: 1px solid var(--fy-border);
+}
+.fy-remote-browser-header output {
+  color: var(--fy-muted);
+  font-size: 12px;
+}
+.fy-remote-browser-canvas {
+  align-items: center;
+  background: #111827;
+  display: grid;
+  justify-items: center;
+  min-height: 240px;
+  position: relative;
+}
+.fy-remote-browser-canvas > img {
+  display: block;
+  height: auto;
+  max-height: 100%;
+  max-width: 100%;
+  width: auto;
+}
+.fy-remote-browser-canvas > p {
+  color: #d0d5dd;
+  margin: 24px;
+  text-align: center;
+}
+.fy-remote-browser-canvas .fy-remote-browser-stalled {
+  background: #111827d9;
+  bottom: 0;
+  left: 0;
+  margin: 0;
+  padding: 8px 12px;
+  position: absolute;
+  right: 0;
+}
+.fy-remote-browser-error {
+  background: var(--err-bg, #fef3f2);
+  border-top: 1px solid var(--err-border, #fecdca);
+  color: var(--err, #b42318);
+  flex-wrap: wrap;
+}
+.fy-remote-browser-error button {
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  color: inherit;
+  cursor: pointer;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+.fy-remote-browser-error button:focus-visible {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
 @media (max-width: 700px) {
   .fy-session-context button {
     align-items: flex-start;
