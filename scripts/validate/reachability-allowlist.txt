@@ -56,21 +56,16 @@ packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded
 packages/daemon/src/lib/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 
 # PR #13 — add learning evidence pipeline
-# THE STORE IS READY; THE PIPELINE AROUND IT IS NOT. FileLearningStore needs only paths, a filesystem
-# and a clock, all of which the root already has. What is missing is everything that gives it work:
-# `extract` wants raw transcript and inbox input the daemon does not assemble, `applyMinerOutput`
-# wants a miner run the daemon cannot spawn, and LearningStatus requires an enabled flag and an
-# interval from a LearningConfig with no configuration source. Accepting a proposal also WRITES a
-# patch into the operator's own guidance file, outside the state home; mounting that from a guess at
-# the apply semantics would edit a human's files wrongly.
-packages/daemon/src/adapters/learning/file-store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/aggregate.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/extract.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/policy.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/types.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+# THE REVIEW SURFACE IS MOUNTED; MINING IS NOT. bin/fyd.ts builds a FileLearningStore over the state
+# home and `src/lib/runtime/mounts/learning.ts` serves the routes `fy learning` already speaks:
+# status, config, the proposal board, a human's accept/reject/edit verdict, and the rendered patch.
+# The two modules below are the MINER's half of the subsystem, and nothing can hand them work:
+# `extract` wants a finished session's transcript and inbox, and no session document records where a
+# harness wrote its transcript nor is there an inbox; `applyMinerOutput` wants the result of a miner
+# run, and no session start is mounted to launch one. POST /v1/learning/run therefore refuses with a
+# stated reason rather than answering with a manifest that scanned nothing.
+packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; no mounted session start can produce a miner run
+packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcript and inbox the daemon does not assemble
 
 
 # PR #15 — add browser session control

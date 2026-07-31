@@ -7,6 +7,7 @@ import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
+import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
@@ -41,6 +42,9 @@ export interface MountedSubsystems {
   readonly terminals: TerminalSubsystem;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
+  /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
+   *  it proposes. Mining itself is not mounted — see the mount's own header. */
+  readonly learning: LearningSubsystem;
 }
 
 /**
@@ -58,6 +62,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...analyticsRoutes(subsystems.analytics),
     ...terminalRoutes(subsystems.terminals),
     ...nameRoutes(subsystems.names),
+    ...learningRoutes(subsystems.learning),
   ];
 }
 

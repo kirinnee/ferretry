@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { join } from 'node:path';
 import {
+  type LearningConfig,
   SessionConfigSchema,
   SessionStateSchema,
   TERMINAL_MAX_GLOBAL,
@@ -44,6 +45,7 @@ import {
   type WorkerClientOptions,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileLearningStore } from '../src/adapters/learning/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
@@ -117,6 +119,7 @@ import {
   type AssigneeObservation,
   type FinishedAnalyticsSession,
   type FoundationPaths,
+  type LearningSubsystem,
   type TaskSubsystem,
   TerminalMountError,
   type TerminalRuntimePort,
@@ -550,6 +553,47 @@ function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
  *  stated here so the number the API reports is the number the daemon enforces. */
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 
+/**
+ * The learning schedule this daemon reports.
+ *
+ * `enabled` is FALSE and is not configurable, because it is a fact about this build rather than a
+ * setting: the daemon mounts the review surface and no miner, so there is nothing an operator could
+ * switch on. Offering the flag in `config/daemon.json` would invite them to turn on a subsystem that
+ * cannot come on, and `GET /v1/learning/status` would then report `enabled: true` beside a
+ * `lastRunAt` that never moves. The remaining fields describe the cadence the miner will use when the
+ * unit that mounts it lands, and become configuration in that same unit.
+ */
+const LEARNING_CONFIG = {
+  enabled: false,
+  agent: 'claude',
+  intervalMinutes: 60,
+  batchSize: 20,
+  maxMinersPerRun: 2,
+  maxSessionsPerRun: 40,
+  minSpawnGapMinutes: 30,
+} as const satisfies LearningConfig;
+
+/**
+ * The learning review board, over the state home's own `learning/` directory.
+ *
+ * ONE executor for the whole process, keyed on the board: a verdict is a read-decide-rewrite of a
+ * single JSON snapshot, so two landing together would otherwise lose one. The key is a constant
+ * because there is exactly one board per state home — unlike the task boards, which are per session.
+ */
+function createLearningSubsystem(
+  paths: FoundationPaths,
+  files: StateFileSystem,
+  clock: SystemClock,
+  serial: TaskBoardSerialExecutor,
+): LearningSubsystem {
+  return {
+    store: new FileLearningStore(paths, files, clock),
+    transaction: async work => await serial.run('learning', work),
+    config: () => LEARNING_CONFIG,
+    now: () => clock.now(),
+  };
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -565,6 +609,9 @@ export function buildWorld(): DaemonWorld {
   // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
   // would let two concurrent requests to the same board interleave read-modify-write and lose one.
   const taskBoards = new TaskBoardSerialExecutor();
+  // Its own executor: a learning verdict must not queue behind a task board's transaction, and the
+  // two snapshots share no file.
+  const learningBoard = new TaskBoardSerialExecutor();
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -755,6 +802,7 @@ export function buildWorld(): DaemonWorld {
       analytics: createAnalyticsSubsystem(storage),
       terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
       names: createNameSubsystem(storage),
+      learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
     }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
