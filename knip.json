@@ -1,6 +1,10 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
+    ".": {
+      "entry": ["tests/e2e/**/*.test.ts", "scripts/test/*.ts"],
+      "project": ["tests/e2e/**/*.ts", "scripts/test/*.ts"]
+    },
     "packages/cli": {
       "entry": ["bin/*.ts", "tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
@@ -10,15 +14,15 @@
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },
     "packages/fleet": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "entry": ["tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/protocol": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "entry": ["tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/pwa": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
+      "entry": ["tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     }
   },

@@ -12,7 +12,7 @@ export interface CommandResult {
   readonly err: string;
 }
 
-export type FakeHarnessStep =
+type FakeHarnessStep =
   | { readonly type: 'say'; readonly text: string }
   | { readonly type: 'ask'; readonly text: string; readonly expect: string }
   | { readonly type: 'write'; readonly stream: 'stdout' | 'stderr'; readonly text: string }
