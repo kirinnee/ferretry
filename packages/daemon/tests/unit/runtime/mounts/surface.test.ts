@@ -2,7 +2,9 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   createMountedDispatcher,
+  createMountedSocketDispatcher,
   mountedDaemonRoutes,
+  mountedSocketRoutes,
   type MountedSubsystems,
 } from '../../../../src/lib/runtime/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
@@ -103,5 +105,34 @@ describe('the mounted daemon surface', () => {
     should(fleet.status).equal(200);
     should(analytics.status).equal(200);
     should(terminals.status).equal(200);
+  });
+
+  it('should serve every protocol-switching route from one table too', () => {
+    // The same "is it mounted" assertion as above, for the surface that answers with a socket rather
+    // than a body. A stream missing from here is a capability the product does not have, however
+    // completely `TerminalStreamBridge` is built and tested.
+    // Arrange / Act
+    const routes = mountedSocketRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
+
+    // Assert
+    should(routes).deepEqual(['GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
+  });
+
+  it('should authorize a protocol switch over the same credentials as the HTTP surface', async () => {
+    // Two dispatchers, one credential set. A socket dispatcher built from different credentials would
+    // be a second, quieter authorization boundary, and the two would drift.
+    // Arrange
+    const dispatcher = createMountedSocketDispatcher(base, subsystems());
+    const path = '/v1/sessions/s1/terminals/0123456789ab/stream';
+
+    // Act
+    const anonymous = await dispatcher.upgrade(request({ path }));
+    const authorized = await dispatcher.upgrade(request({ path, headers: human }));
+
+    // Assert
+    should(anonymous.outcome === 'refused' ? anonymous.response.status : 0).equal(401);
+    // The terminal does not exist in this fixture, which still proves the route is mounted, reached,
+    // and that existence is decided BEFORE any protocol switch.
+    should(authorized.outcome === 'refused' ? authorized.response.status : 0).equal(404);
   });
 });

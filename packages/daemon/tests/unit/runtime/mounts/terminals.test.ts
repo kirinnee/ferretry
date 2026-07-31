@@ -8,7 +8,12 @@ import {
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { terminalRoutes, TerminalMountError } from '../../../../src/lib/runtime/mounts/terminals.ts';
+import { ApiSocketDispatcher, type SocketDownstream } from '../../../../src/lib/api/socket.ts';
+import {
+  terminalRoutes,
+  terminalSocketRoutes,
+  TerminalMountError,
+} from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, FakeTerminals, human } from './support.ts';
 
@@ -272,6 +277,9 @@ describe('the terminal mount', () => {
             close: async () => {
               throw new Error('unreachable');
             },
+            stream: async () => {
+              throw new Error('unreachable');
+            },
           }),
         ),
         CREDENTIALS,
@@ -305,6 +313,9 @@ describe('the terminal mount', () => {
             close: async () => {
               throw new Error('unreachable');
             },
+            stream: async () => {
+              throw new Error('unreachable');
+            },
           }),
         ),
         CREDENTIALS,
@@ -329,5 +340,106 @@ describe('the terminal mount', () => {
       // Assert
       should(listed.status).equal(403);
     });
+  });
+});
+
+/**
+ * The terminal STREAM's surface — a protocol switch rather than a response.
+ *
+ * These cases exist to prove the one property that cannot be retrofitted: everything a client could
+ * be told with a status is settled BEFORE the socket exists. A stream that upgraded and then closed
+ * could not tell a viewer "there is no such terminal" from "the daemon broke", and would let an
+ * unauthorized peer map which terminals exist by watching how fast each socket died.
+ */
+describe('the mounted terminal stream', () => {
+  function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
+    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS);
+  }
+
+  /** A downstream that records, standing in for the socket the transport would supply. */
+  function downstream(): { readonly sent: string[]; readonly port: SocketDownstream } {
+    const sent: string[] = [];
+    return {
+      sent,
+      port: {
+        send: bytes => sent.push(new TextDecoder().decode(bytes)),
+        close: () => undefined,
+        bufferedBytes: () => 0,
+      },
+    };
+  }
+
+  it('should attach a viewer to a terminal that exists', async () => {
+    // Arrange
+    const terminals = new FakeTerminals();
+    const { terminal } = await withTerminal(terminals);
+    const viewer = downstream();
+
+    // Act
+    const decision = await sockets(terminals).upgrade(
+      request({ path: `/v1/sessions/s1/terminals/${terminal.id}/stream`, headers: human }),
+    );
+    if (decision.outcome === 'accepted') await (await decision.attach(viewer.port)).open();
+
+    // Assert
+    should(decision.outcome).equal('accepted');
+    should(terminals.streamed).deepEqual([`s1/${terminal.id}`]);
+    should(viewer.sent).deepEqual([`open:s1/${terminal.id}`]);
+  });
+
+  it('should refuse a stream for a terminal that was never opened, before switching protocols', async () => {
+    // Arrange / Act
+    const decision = await sockets().upgrade(
+      request({ path: '/v1/sessions/s1/terminals/0123456789ab/stream', headers: human }),
+    );
+
+    // Assert
+    should(decision.outcome).equal('refused');
+    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(404);
+    should(decision.outcome === 'refused' ? jsonBody(decision.response) : {}).have.property('code', 'not_found');
+  });
+
+  it('should refuse a stream for a session this daemon does not hold', async () => {
+    // Arrange / Act
+    const decision = await sockets().upgrade(
+      request({ path: '/v1/sessions/nope/terminals/0123456789ab/stream', headers: human }),
+    );
+
+    // Assert
+    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(404);
+  });
+
+  it('should refuse a terminal id that could not name a terminal this daemon minted', async () => {
+    // Parsed against the protocol's own shape rather than looked up, so a crafted id is a bad request
+    // instead of a 404 a viewer would read as "it was closed".
+    // Arrange / Act
+    const decision = await sockets().upgrade(
+      request({ path: '/v1/sessions/s1/terminals/not-a-terminal/stream', headers: human }),
+    );
+
+    // Assert
+    should(decision.outcome === 'refused' ? decision.response.status : 0).equal(400);
+    should(decision.outcome === 'refused' ? jsonBody(decision.response) : {}).have.property('code', 'bad_request');
+  });
+
+  it('should refuse an unauthenticated viewer, and a warden-scoped one', async () => {
+    // A terminal socket carries keystrokes into an unsupervised shell — strictly more authority than
+    // opening one — so the scope answer must match the lifecycle's.
+    // Arrange
+    const terminals = new FakeTerminals();
+    const { terminal } = await withTerminal(terminals);
+    const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
+
+    // Act
+    const anonymous = await sockets(terminals).upgrade(request({ path }));
+    const warden = await sockets(terminals).upgrade(
+      request({ path, headers: { authorization: `Bearer ${CREDENTIALS.warden}` } }),
+    );
+
+    // Assert
+    should(anonymous.outcome === 'refused' ? anonymous.response.status : 0).equal(401);
+    should(warden.outcome === 'refused' ? warden.response.status : 0).equal(403);
+    // Nothing was attached: an unauthorized peer never reaches a terminal.
+    should(terminals.streamed).be.empty();
   });
 });

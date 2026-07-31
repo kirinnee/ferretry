@@ -80,7 +80,9 @@ import {
   ManagedTerminalService,
   TerminalRuntimeError,
   TerminalServiceError,
+  TerminalStreamBridge,
   TmuxTerminalRuntime,
+  type TerminalStreamScheduler,
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import {
@@ -94,6 +96,7 @@ import {
   BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
   createMountedDispatcher,
+  createMountedSocketDispatcher,
   PinService,
   SessionPlanner,
   TeamAdvisor,
@@ -429,6 +432,20 @@ function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
 }
 
 /**
+ * Real one-shot timers for the terminal redraw poll.
+ *
+ * The bridge asks for a cancellable timer rather than accepting a runtime handle, so the only place
+ * in the daemon that ever touches `setTimeout` for a stream is here. A handle typed `unknown` and
+ * cast back at the cancel site would be the same thing with a cast in it.
+ */
+const terminalScheduler: TerminalStreamScheduler = {
+  schedule: (callback, milliseconds) => {
+    const handle = setTimeout(callback, milliseconds);
+    return { cancel: () => clearTimeout(handle) };
+  },
+};
+
+/**
  * Independent shell terminals, over the session's own working directory.
  *
  * THE ERROR TRANSLATION IS THE POINT OF THIS FUNCTION. `ManagedTerminalService` and the tmux runtime
@@ -482,6 +499,17 @@ function createTerminalSubsystem(
     get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
     rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
     close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
+    /**
+     * One viewer socket, over the SAME lifecycle service the routes use.
+     *
+     * That sharing is the point: the bridge writes and captures through the service, so a keystroke
+     * bumps the same activity instant the idle policy reads and a stream cannot keep a pane alive
+     * that the lifecycle believes it closed. The bridge itself refuses an oversized or malformed
+     * frame, bounds unwritten input, and drops output for a viewer that has stopped reading — the
+     * mount hands it a socket and nothing more.
+     */
+    stream: async (sessionId, terminalId, downstream) =>
+      new TerminalStreamBridge(service, sessionId, terminalId, downstream, terminalScheduler),
   };
 }
 
@@ -773,20 +801,29 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
+  const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
+  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime);
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
   // window routinely and reported a permanent failure for a condition that clears in a second.
+  //
+  // BOTH halves of the surface are served by the one host, from the one credential set: the
+  // request/response routes and the protocol switches that carry terminal streams.
   const server: ApiServerHandle = await world.boot.binder.bind(
     async () =>
       await world.api.listen(
-        createMountedDispatcher(
-          { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
-          world.createSubsystems(opened.storage, world.terminalRuntime),
-        ),
+        {
+          http: createMountedDispatcher(base, subsystems),
+          sockets: createMountedSocketDispatcher(base, subsystems),
+        },
         { host: config.host, port: config.port },
       ),
   );
+  // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
+  // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
+  // stream is over while the socket it writes to still exists.
+  cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
   await world.untilShutdown();
   return 0;

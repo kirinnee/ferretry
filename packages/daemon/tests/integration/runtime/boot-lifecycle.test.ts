@@ -155,10 +155,17 @@ class RecordingTerminalRuntime implements TerminalRuntimePort {
     this.records.set(record.id, { ...record, ...size });
   }
 
-  async write(): Promise<void> {}
+  /** Bytes a viewer typed, decoded, so a case can assert what actually reached the pane. */
+  readonly written: string[] = [];
+  /** What the pane would draw. Non-empty so a real socket frame carries something assertable. */
+  screen = 'ready $ ';
+
+  async write(_record: TerminalRecord, bytes: Uint8Array): Promise<void> {
+    this.written.push(new TextDecoder().decode(bytes));
+  }
 
   async capture(): Promise<Uint8Array> {
-    return new Uint8Array();
+    return new TextEncoder().encode(this.screen);
   }
 
   async kill(record: TerminalRecord): Promise<void> {
@@ -452,6 +459,101 @@ describe('daemon boot lifecycle', () => {
     should(await closed.json()).deepEqual({ closed: true, id: opened.id });
     should(afterClose.terminals).be.empty();
     should(runtime.killed).deepEqual([opened.id]);
+  });
+
+  /**
+   * The terminal STREAM, driven through the production composition root over a real WebSocket.
+   *
+   * This is the case the unit tier cannot be. Everything between the client and tmux is production:
+   * the bound host switches the protocol, `ApiSocketDispatcher` authenticates the upgrade off the
+   * loopback query-parameter token a browser is limited to, the mount proves the terminal exists
+   * BEFORE the switch, and `TerminalStreamBridge` polls the pane and writes the viewer's keystrokes
+   * through the SAME lifecycle service the HTTP routes use. Only the tmux pane is substituted.
+   */
+  it('should carry pane bytes out and keystrokes in over a real terminal socket', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-terminal-stream');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const runtime = new RecordingTerminalRuntime();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      terminalRuntime: runtime,
+    };
+    await seedSession(home, '2026-07-31T09:00:00.000Z');
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals`;
+    const opened = TerminalViewSchema.parse(
+      await (
+        await fetch(base, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' } })
+      ).json(),
+    );
+
+    // Act
+    // A socket aimed at a terminal nobody opened is refused on the HANDSHAKE, so the client sees a
+    // failed upgrade rather than a socket that dies for reasons it cannot name.
+    const absent = await fetch(`${base}/0123456789ab/stream?token=${token}`, {
+      headers: {
+        upgrade: 'websocket',
+        connection: 'upgrade',
+        'sec-websocket-version': '13',
+        'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
+      },
+    }).catch(() => undefined);
+    const viewer = new WebSocket(
+      `ws://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals/${opened.id}/stream?token=${token}`,
+    );
+    viewer.binaryType = 'arraybuffer';
+    const frames: string[] = [];
+    const closes: number[] = [];
+    viewer.addEventListener('message', event => {
+      frames.push(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data));
+    });
+    viewer.addEventListener('close', event => closes.push(event.code));
+    await new Promise<void>((resolve, reject) => {
+      viewer.addEventListener('open', () => resolve());
+      viewer.addEventListener('error', () => reject(new Error('the terminal socket never opened')));
+    });
+    for (let attempt = 0; attempt < 200 && frames.length === 0; attempt += 1) await Bun.sleep(10);
+    viewer.send(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
+    viewer.send(new TextEncoder().encode('echo hi\r'));
+    for (let attempt = 0; attempt < 200 && runtime.written.length === 0; attempt += 1) await Bun.sleep(10);
+    const resized = TerminalViewSchema.parse(
+      await (
+        await fetch(`${base}/${opened.id}`, {
+          headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+        })
+      ).json(),
+    );
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+    for (let attempt = 0; attempt < 200 && closes.length === 0; attempt += 1) await Bun.sleep(10);
+
+    // Assert
+    should(code).equal(0);
+    // The upgrade was authenticated by the query-parameter token alone, which is all a browser
+    // `WebSocket` can carry, and the first frame is the pane as tmux would draw it.
+    should(frames[0]).equal('ready $ ');
+    // The keystrokes reached the real pane through the lifecycle service.
+    should(runtime.written).deepEqual(['echo hi\r']);
+    // The resize control frame was parsed with the protocol's own schema and applied to the pane, so
+    // a later HTTP read of the same terminal reports the new geometry.
+    should([resized.cols, resized.rows]).deepEqual([100, 30]);
+    // A stream aimed at a terminal that does not exist never becomes a socket.
+    should(absent?.status).equal(404);
+    // Shutdown ended the stream rather than leaving a redraw timer firing at a dead socket.
+    should(closes).deepEqual([1000]);
   });
 
   /**

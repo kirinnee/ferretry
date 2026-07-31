@@ -2,6 +2,7 @@ import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
 import { ApiDispatcher } from './dispatcher.ts';
 import type { ApiRoute } from './route.ts';
+import type { ApiSocketDispatcher } from './socket.ts';
 import type { MillisecondClockPort } from '../runtime/readiness.ts';
 import { healthRoutes } from './routes/health.ts';
 import { usageRoutes } from './routes/usage.ts';
@@ -18,17 +19,37 @@ export interface ApiBindOptions {
   readonly port: number;
 }
 
-/** A listening HTTP host. The adapter owns the socket; nothing in the domain does. */
+/** A listening host. The adapter owns the sockets; nothing in the domain does. */
 export interface ApiServerHandle {
   /** The address actually bound, which is the only way to learn an ephemeral port. */
   readonly url: string;
   readonly port: number;
+  /**
+   * Ends every live socket, telling each handler to release what it holds.
+   *
+   * Separate from `stop` and registered ahead of it at the composition root: a terminal stream owns
+   * a redraw timer armed against its socket, and pulling the host out from under it would leave the
+   * timer firing at a peer that no longer exists.
+   */
+  closeSockets(): void;
   stop(): Promise<void>;
 }
 
-/** The transport seam. Implemented by an adapter around whatever HTTP server the runtime offers. */
+/**
+ * Both halves of the surface one adapter serves: request/response routes and protocol switches.
+ *
+ * They travel together because they share credentials and a peer. A socket dispatcher built from
+ * different credentials than the HTTP one is a second, quieter authorization boundary, and the two
+ * would drift.
+ */
+export interface ApiSurface {
+  readonly http: ApiDispatcher;
+  readonly sockets: ApiSocketDispatcher;
+}
+
+/** The transport seam. Implemented by an adapter around whatever server the runtime offers. */
 export interface ApiServerPort {
-  listen(dispatcher: ApiDispatcher, options: ApiBindOptions): Promise<ApiServerHandle>;
+  listen(surface: ApiSurface, options: ApiBindOptions): Promise<ApiServerHandle>;
 }
 
 /** Everything the daemon's API surface is built from. Subsystem units add their own ports here as

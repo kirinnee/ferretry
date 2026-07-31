@@ -2,6 +2,7 @@ import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
+import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
@@ -9,7 +10,7 @@ import { attentionRoutes } from './attention.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
-import { terminalRoutes, type TerminalSubsystem } from './terminals.ts';
+import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -63,4 +64,24 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
 /** The dispatcher the transport adapter serves, over the full mounted surface. */
 export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
   return new ApiDispatcher(new ApiRouter(mountedDaemonRoutes(base, subsystems)), base.credentials);
+}
+
+/**
+ * Every route that answers a protocol switch rather than a response.
+ *
+ * A SECOND table, not a flag on the first, because the two answer different questions: an `ApiRoute`
+ * returns a body, a `SocketRoute` returns something that keeps talking. Terminal streaming is the
+ * only one today; the browser viewer transport is built and waits on the unit that mounts browser
+ * sessions.
+ */
+export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
+  return [...terminalSocketRoutes(subsystems.terminals)];
+}
+
+/** The socket dispatcher the transport adapter serves, over the same credentials as the HTTP one. */
+export function createMountedSocketDispatcher(
+  base: DaemonApiDependencies,
+  subsystems: MountedSubsystems,
+): ApiSocketDispatcher {
+  return new ApiSocketDispatcher(new ApiRouter(mountedSocketRoutes(subsystems)), base.credentials);
 }

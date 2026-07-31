@@ -8,6 +8,7 @@ export * from './metrics.ts';
 export * from './responses.ts';
 export * from './route.ts';
 export * from './router.ts';
+export * from './socket.ts';
 export * from './routes/health.ts';
 export * from './routes/usage.ts';
 export * from './server.ts';

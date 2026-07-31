@@ -13,6 +13,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
 
 /**
@@ -23,13 +24,10 @@ import { TerminalPolicyError } from '../../terminal/policy.ts';
  * terminal at all. This mounts the LIFECYCLE — open one, list them, retitle one, close one — over
  * the routes the protocol's terminal contracts describe.
  *
- * WHAT IS DELIBERATELY NOT SERVED HERE. Terminal INPUT and OUTPUT are websocket business: the
- * protocol says so in as many words, giving raw bytes their own frame type and reserving JSON for
- * the resize control frame. The daemon's API surface is request/response only — `ApiResponse` is a
- * string body, and there is no socket seam a route could hand a peer to — so `TerminalStreamBridge`
- * stays unmounted rather than being reached through an HTTP endpoint the protocol never described.
- * Inventing `POST …/input` here would put a second, slower, lossier input path into the product and
- * call the streaming subsystem wired.
+ * INPUT AND OUTPUT ARE A SOCKET, and now that the API has a socket seam they are served here too —
+ * see `terminalSocketRoutes`. They are NOT an HTTP endpoint: the protocol gives raw bytes their own
+ * frame type and reserves JSON for the resize control frame, so a `POST …/input` route would have
+ * been a second, slower, lossier input path that the protocol never described.
  *
  * SIZE AND TITLE ARE THE SERVICE'S TO DECIDE. The schemas below refuse a body outside the protocol's
  * bounds, and the service then normalises what survives — clamping a size, defaulting a title — so a
@@ -49,6 +47,15 @@ export interface TerminalSubsystem {
   get(sessionId: string, terminalId: string): Promise<TerminalView>;
   rename(sessionId: string, terminalId: string, title: string): Promise<TerminalView>;
   close(sessionId: string, terminalId: string): Promise<void>;
+  /**
+   * Attaches one viewer socket to a terminal the caller has ALREADY been authorized for.
+   *
+   * It answers with a handler rather than doing the streaming, for the same reason the rest of this
+   * interface is declared here: what drives a socket is `TerminalStreamBridge`, an adapter, and a
+   * route in `src/lib` may not import one. The mount decides who may stream and which terminal; the
+   * composition root supplies the thing that turns pane bytes into frames.
+   */
+  stream(sessionId: string, terminalId: string, downstream: SocketDownstream): Promise<SocketHandler>;
 }
 
 /**
@@ -204,6 +211,36 @@ export function terminalRoutes(subsystem: TerminalSubsystem): readonly ApiRoute[
       scope: 'admin',
       noStore: true,
       handle: async context => await close(subsystem, context),
+    },
+  ];
+}
+
+/**
+ * Terminal input and output, over the socket transport the protocol always described for them.
+ *
+ * `admin` scope, for the same reason the lifecycle is: this socket carries keystrokes into an
+ * unsupervised shell, which is strictly more authority than opening one. A warden-scoped token
+ * judges sessions and may not type into them.
+ *
+ * AUTHORIZATION AND EXISTENCE ARE BOTH PROVEN BEFORE THE SWITCH. `accept` runs on the authenticated
+ * request, and it reads the terminal through `get` — the same lookup the detail route serves — so an
+ * upgrade aimed at a terminal that was never opened, or at a session this daemon does not hold, is
+ * refused with the 404 a viewer can act on. Switching protocols first and closing afterwards would
+ * hand a client a close code that cannot tell "it is gone" from "the daemon broke", and would let an
+ * unauthenticated peer probe which terminals exist by timing how fast the socket dies.
+ */
+export function terminalSocketRoutes(subsystem: TerminalSubsystem): readonly SocketRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
+      scope: 'admin',
+      accept: async context => {
+        const sessionId = pathSessionId(context);
+        const terminalId = pathTerminalId(context);
+        await subsystem.get(sessionId, terminalId).catch(reraise);
+        return async downstream => await subsystem.stream(sessionId, terminalId, downstream);
+      },
     },
   ];
 }

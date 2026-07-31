@@ -1,8 +1,8 @@
 import type { RouteParameters } from './http.ts';
-import type { ApiRoute } from './route.ts';
+import type { ApiRoute, RoutePattern } from './route.ts';
 
-export type RouteLookup =
-  | { readonly kind: 'matched'; readonly route: ApiRoute; readonly params: RouteParameters }
+export type RouteLookup<TRoute extends RoutePattern = ApiRoute> =
+  | { readonly kind: 'matched'; readonly route: TRoute; readonly params: RouteParameters }
   /** The path exists but not under this verb. `allowed` populates the `Allow` header. */
   | { readonly kind: 'method-not-allowed'; readonly allowed: readonly string[] }
   | { readonly kind: 'not-found' };
@@ -34,8 +34,8 @@ function splitPath(path: string): readonly string[] {
   return segments;
 }
 
-interface CompiledRoute {
-  readonly route: ApiRoute;
+interface CompiledRoute<TRoute extends RoutePattern> {
+  readonly route: TRoute;
   readonly segments: readonly Segment[];
 }
 
@@ -47,19 +47,19 @@ interface CompiledRoute {
  * Routes are tried in registration order, so a literal registered before a parameter wins; that is
  * how `/v1/sessions/summary` can coexist with `/v1/sessions/:id`.
  */
-export class ApiRouter {
-  private readonly compiled: readonly CompiledRoute[];
+export class ApiRouter<TRoute extends RoutePattern = ApiRoute> {
+  private readonly compiled: readonly CompiledRoute<TRoute>[];
 
-  constructor(routes: readonly ApiRoute[]) {
+  constructor(routes: readonly TRoute[]) {
     this.compiled = routes.map(route => ({ route, segments: parsePattern(route.path) }));
   }
 
   /** Every registered route, for callers that need to describe the surface. */
-  get routes(): readonly ApiRoute[] {
+  get routes(): readonly TRoute[] {
     return this.compiled.map(entry => entry.route);
   }
 
-  lookup(method: string, path: string): RouteLookup {
+  lookup(method: string, path: string): RouteLookup<TRoute> {
     const segments = splitPath(path);
     const pathMatches = this.compiled.filter(entry => match(entry.segments, segments) !== undefined);
     if (pathMatches.length === 0) return { kind: 'not-found' };
