@@ -6,6 +6,10 @@
   "type": "module",
   "exports": {
     ".": "./src/lib/index.ts",
+    "./components/composer": "./src/components/composer.tsx",
+    "./components/session-details": "./src/components/session-details.tsx",
+    "./components/session-list": "./src/components/session-list.tsx",
+    "./components/transcript": "./src/components/transcript.tsx",
     "./session-screens.css": "./src/components/session-screens.css"
   },
   "types": "./src/lib/index.ts",
