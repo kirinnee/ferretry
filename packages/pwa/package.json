@@ -17,6 +17,7 @@
     "./features/analytics-response-view": "./src/features/analytics/analytics-response-view.tsx",
     "./features/analytics-time-series": "./src/features/analytics/analytics-time-series.tsx",
     "./features/browser-login-banner": "./src/features/browser/browser-login-banner.tsx",
+    "./features/pins-trigger": "./src/features/pins/pins-trigger.tsx",
     "./features/task-dag-graph": "./src/features/tasks/task-dag-graph.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
     "./session-screens.css": "./src/components/session-screens.css"
