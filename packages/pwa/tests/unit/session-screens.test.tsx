@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import { ModeBadge } from '../../src/components/mode-badge.tsx';
+import { QuotaReadout } from '../../src/components/quota-readout.tsx';
 import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
@@ -87,7 +88,11 @@ describe('session screen components', () => {
       session('failed', 'failed'),
       session('complete', 'completed'),
       session('waiting', 'waiting'),
-      session('running', 'running', { label: undefined, teammate: undefined, model: undefined }),
+      session('running', 'running', {
+        label: undefined,
+        teammate: undefined,
+        model: undefined,
+      }),
     ];
     const list = render(
       <SessionList
@@ -108,8 +113,39 @@ describe('session screen components', () => {
     ]);
     expect(findText(list.root, '/work/running')).toHaveLength(1);
     expect(findText(list.root, 'codex')).toHaveLength(1);
+    expect(findText(list.root, 'quota —')).toHaveLength(4);
     run(() => list.root.findAllByType('button')[0]?.props.onClick());
     expect(opened).toEqual([['daemon-a', 'failed']]);
+  });
+
+  test('renders quota readings without treating unknown, auth trouble, and an exhausted account as the same state', () => {
+    const absent = render(<QuotaReadout showUnknown />);
+    expect(findText(absent.root, 'quota —')).toHaveLength(1);
+
+    const optional = render(<QuotaReadout />);
+    expect(optional.toJSON()).toBeNull();
+
+    const auth = render(<QuotaReadout quota={{ authOk: false }} />);
+    expect(findText(auth.root, 'quota auth!')).toHaveLength(1);
+    expect(auth.root.findByType('span').props.title).toContain('not logged in');
+
+    const empty = render(<QuotaReadout quota={{}} showUnknown />);
+    expect(findText(empty.root, 'quota —')).toHaveLength(1);
+
+    const used = render(<QuotaReadout quota={{ fiveHourPercent: 76, weeklyPercent: 91 }} />);
+    expect(JSON.stringify(used.toJSON())).toContain('5h ');
+    expect(JSON.stringify(used.toJSON())).toContain('76%');
+    expect(JSON.stringify(used.toJSON())).toContain('wk ');
+    expect(JSON.stringify(used.toJSON())).toContain('91%');
+    expect(used.root.findByType('span').props.title).toContain('weekly window 91% used');
+
+    const healthy = render(<QuotaReadout quota={{ fiveHourPercent: 7 }} />);
+    expect(JSON.stringify(healthy.toJSON())).toContain('5h ');
+    expect(JSON.stringify(healthy.toJSON())).toContain('7%');
+
+    const limit = render(<QuotaReadout quota={{ atLimit: true }} />);
+    expect(findText(limit.root, 'at limit')).toHaveLength(1);
+    expect(limit.root.findByType('span').props.title).toContain('work is blocked');
   });
 
   test('renders the original shape vocabulary with text equivalents for active, parked, and finished sessions', () => {
