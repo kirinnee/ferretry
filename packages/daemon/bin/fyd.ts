@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
@@ -34,18 +35,38 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
 import {
+  FileSessionTaskStore,
+  NodeWorkingDirectoryResolver,
+  StorageSessionLifecycleRepository,
+  TimeSessionIdFactory,
+  TmuxSessionLifecycleLauncher,
+} from '../src/adapters/session/lifecycle/index.ts';
+import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
+import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
+import {
   BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
   createFoundationPaths,
+  createSessionPaths,
   createWardenPaths,
+  defaultSessionLifecycleSettings,
   packageRole,
   resolveStateHome,
+  SessionLifecycleService,
+  TmuxController,
   type BrowserViewerHost,
   type DaemonReadinessPorts,
 } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
+
+/** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
+function resolveTmuxExecutable(): string {
+  const executable = Bun.which('tmux');
+  if (executable === null) throw new Error('tmux was not found on PATH; it is required to manage sessions');
+  return executable;
+}
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -75,6 +96,10 @@ export interface DaemonWorld {
    *  rather than an instance. */
   readonly wardenReports: (stateDirectory: string) => WardenReportReader;
   readonly browserTransport: BrowserTransportWorld;
+  /** Session lifecycle: create, launch, deliver turn one, stop. The authoritative store is only
+   *  open once storage has resolved and locked the state home, so the service is built per opened
+   *  storage rather than at process start. */
+  readonly createSessionLifecycle: (storage: DaemonStorage) => SessionLifecycleService;
 }
 
 /**
@@ -136,6 +161,25 @@ export function buildWorld(): DaemonWorld {
       openViewerStream: (host, sessionId, socket) =>
         BrowserViewerStream.connect(host, sessionId, new SocketViewerDownstream(socket), new SystemFrameClock()),
     },
+    createSessionLifecycle: storage =>
+      new SessionLifecycleService(
+        {
+          repository: new StorageSessionLifecycleRepository(storage),
+          launcher: new TmuxSessionLifecycleLauncher(
+            // A private absolute socket inside the state home is what keeps managed panes off any
+            // tmux server the host already runs.
+            new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+            milliseconds => Bun.sleep(milliseconds),
+          ),
+          tasks: new FileSessionTaskStore(id => createSessionPaths(paths, id).directory),
+          directories: new NodeWorkingDirectoryResolver(),
+          ids: new TimeSessionIdFactory(),
+          clock,
+          // Its own queue: session mutations must not serialize behind storage-wide work.
+          serial: new KeyedSerialExecutor(),
+        },
+        defaultSessionLifecycleSettings,
+      ),
   };
 }
 

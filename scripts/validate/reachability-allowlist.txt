@@ -34,23 +34,10 @@ packages/daemon/src/lib/analytics/query.ts # PR #6: add analytics ingestion and 
 packages/daemon/src/lib/analytics/results.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 packages/daemon/src/lib/analytics/session-record.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 
-# PR #7 — port the tmux controller
-packages/daemon/src/adapters/tmux/bun-tmux-process.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tmux/index.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/address.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/commands.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/contracts.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/controller.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/index.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/pane.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tmux/retry.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
-
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
 packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 packages/daemon/src/lib/names/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/policy.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 packages/daemon/src/lib/names/pool.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/types.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 
 # PR #10 — port the task record system and its file store
