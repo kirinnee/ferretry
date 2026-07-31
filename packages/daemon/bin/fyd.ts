@@ -114,6 +114,9 @@ import {
   SelfRestartCoordinator,
   SessionHealthService,
   SessionLifecycleConfigSchema,
+  RecommendError,
+  type RecommendSubsystem,
+  type RoutingCatalogPort,
   SessionReadError,
   type SessionDirectorySubsystem,
   TaskError,
@@ -278,7 +281,16 @@ export interface DaemonWorld {
    * world actually changes what the mounted subsystems get. A factory that closed over the field
    * would silently keep the production one and make the seam a lie.
    */
-  readonly createSubsystems: (storage: DaemonStorage, terminals: TerminalRuntimePort) => MountedSubsystems;
+  readonly createSubsystems: (
+    storage: DaemonStorage,
+    terminals: TerminalRuntimePort,
+    /**
+     * The account-health feed, passed IN for the same reason the terminal runtime is: it is built
+     * from configuration in `start`, and the recommender must read the same snapshot the `/usage`
+     * feed serves rather than probing the providers a second time.
+     */
+    usage: UsageFeedPort,
+  ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -636,6 +648,40 @@ function createLearningSubsystem(
   };
 }
 
+/**
+ * Quota deliberately UNREAD, for the caller who asked for no probe.
+ *
+ * It is not a stub standing in for a feed that should be here: `hasSnapshot` is false and the account
+ * list is empty because nothing was measured, which is exactly what the recommender then reports. The
+ * engine ranks an account it knows nothing about as average rather than as empty, so declining the
+ * probe costs the ordering its quota tie-breaker instead of inverting it.
+ */
+const UNREAD_USAGE: UsageFeedPort = {
+  accounts: async () => [],
+  snapshotAt: () => undefined,
+  hasSnapshot: () => false,
+};
+
+/**
+ * The team recommender, over the fleet manifest and the operator's routing catalog.
+ *
+ * TWO advisors, built from the same inventory and catalog and differing only in their usage feed,
+ * because `usage: false` on the wire means the quota inputs are genuinely unread — and the only seam
+ * that can express that is the feed itself. Branching inside one advisor would mean either probing
+ * anyway and discarding the answer, which costs the caller the provider round trips they declined, or
+ * teaching the domain a flag about its own inputs.
+ */
+function createRecommendSubsystem(
+  advisorOver: (usage: UsageFeedPort) => TeamAdvisor,
+  usage: UsageFeedPort,
+): RecommendSubsystem {
+  const withQuota = advisorOver(usage);
+  const withoutQuota = advisorOver(UNREAD_USAGE);
+  return {
+    recommend: async input => await (input.usage ? withQuota : withoutQuota).recommend({ task: input.task }),
+  };
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -654,6 +700,29 @@ export function buildWorld(): DaemonWorld {
   // Its own executor: a learning verdict must not queue behind a task board's transaction, and the
   // two snapshots share no file.
   const learningBoard = new TaskBoardSerialExecutor();
+  /**
+   * The routing catalog, with its ONE refusal restated in a taxonomy `src/lib` may name.
+   *
+   * `FileRoutingCatalog` deliberately has no default — the catalog IS the routing doctrine — so an
+   * absent or malformed one throws, naming the file to write. Wrapping the PORT rather than the whole
+   * advisor call is what keeps that refusal separable from a genuine defect: only a failure to read
+   * the catalog becomes `unconfigured`, and anything the recommender itself gets wrong still surfaces
+   * as the internal error it is.
+   */
+  const routing: RoutingCatalogPort = {
+    catalog: async () => {
+      const catalog = new FileRoutingCatalog(stateFiles, paths.routingCatalog);
+      try {
+        return await catalog.catalog();
+      } catch (error) {
+        throw new RecommendError('unconfigured', error instanceof Error ? error.message : String(error));
+      }
+    },
+  };
+  /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
+   *  how spent each account is depends on whether the caller asked for a live probe. */
+  const advisorOver = (usage: UsageFeedPort): TeamAdvisor =>
+    new TeamAdvisor(new ManifestAccountInventory(stateFiles, paths.fleetManifest), routing, usage);
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -785,12 +854,7 @@ export function buildWorld(): DaemonWorld {
         { refreshMs: config.usage.refreshSeconds * 1_000 },
       );
     },
-    createTeamAdvisor: usage =>
-      new TeamAdvisor(
-        new ManifestAccountInventory(stateFiles, paths.fleetManifest),
-        new FileRoutingCatalog(stateFiles, paths.routingCatalog),
-        usage,
-      ),
+    createTeamAdvisor: advisorOver,
     sessions: new SessionPlanner({
       startWait: defaultStartWaitPolicy,
       contextWindowOverrides: {},
@@ -824,7 +888,7 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals) => ({
+    createSubsystems: (storage, terminals, usage) => ({
       attention: new AttentionService(
         // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
         // than asserted: an id the layout would not accept must never become a directory path.
@@ -846,6 +910,7 @@ export function buildWorld(): DaemonWorld {
       terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
       names: createNameSubsystem(storage),
       learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
+      recommend: createRecommendSubsystem(advisorOver, usage),
     }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
@@ -893,7 +958,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
-  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime);
+  const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime, usage);
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that

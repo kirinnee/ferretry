@@ -35,7 +35,15 @@ import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/anal
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
+import { RecommendError, type RecommendSubsystem } from '../../../../src/lib/runtime/mounts/recommend.ts';
 import { SessionReadError, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import {
+  TeamAdvisor,
+  type AccountInventoryPort,
+  type CoreAccount,
+  type RoutingCatalogPort,
+} from '../../../../src/lib/core/index.ts';
+import { catalog, inventory } from '../../core/fixtures.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import {
   applyTaskAction,
@@ -605,6 +613,46 @@ export function sessionDirectory(
         throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
       return views.find(view => view.config.id === reference);
     },
+  };
+}
+
+/**
+ * A team recommender over the REAL engine.
+ *
+ * The classification, the ranking, the floors and the exclusion reasons are all production code —
+ * only the manifest and the catalog are the test's — so a case that passes here is asserting the
+ * answer the daemon would actually give. `usage` is honoured the way the composition root honours it:
+ * a caller who declines the probe gets an advisor whose feed measured nothing.
+ */
+export function recommendSubsystem(
+  options: {
+    readonly accounts?: readonly CoreAccount[];
+    /** Set to make the catalog read refuse, standing in for an operator who has written none. */
+    readonly unconfigured?: boolean;
+    /** Recorded per call, so a case can prove which feed the flag selected. */
+    readonly probes?: string[];
+  } = {},
+): RecommendSubsystem {
+  const inventoryPort: AccountInventoryPort = { accounts: async () => options.accounts ?? inventory };
+  const catalogPort: RoutingCatalogPort = {
+    catalog: async () => {
+      if (options.unconfigured === true)
+        throw new RecommendError('unconfigured', 'no routing catalog at /state/config/routing.json');
+      return catalog;
+    },
+  };
+  const feed = (label: string): UsageFeedPort => ({
+    accounts: async () => {
+      options.probes?.push(label);
+      return [];
+    },
+    snapshotAt: () => undefined,
+    hasSnapshot: () => false,
+  });
+  const withQuota = new TeamAdvisor(inventoryPort, catalogPort, feed('probed'));
+  const withoutQuota = new TeamAdvisor(inventoryPort, catalogPort, feed('unread'));
+  return {
+    recommend: async input => await (input.usage ? withQuota : withoutQuota).recommend({ task: input.task }),
   };
 }
 

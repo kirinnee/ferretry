@@ -17,6 +17,15 @@
 # and hashes board capabilities, plus a TaskBoardSessionDirectory. There is no src/adapters/task-boards
 # at all, so mounting this means PORTING the persistence and the credential minting — not wiring —
 # and a capability store built by guesswork is a security boundary built by guesswork.
+#
+# RE-CHECKED by the second wiring unit, and the blocker is narrower and harder than "no adapter": the
+# repository IS a snapshot the file-store pattern here already fits, but every grant in it is keyed on
+# a `sessionCapabilityHash` — "hash of the daemon-owned session credential" — and no such credential
+# exists anywhere in this daemon. `sessionCapabilityHash` appears in no file outside this directory: a
+# session authenticates with the shared admin token plus the `x-ferretry-session-id` header, which is
+# an ATTRIBUTION, not a secret only that session holds. Mounting boards therefore means first minting
+# a per-session credential at session start — which is not mounted — and every grant, invitation proof
+# and child grant hangs off it. That is the security boundary, and it cannot be invented here.
 packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
@@ -46,6 +55,13 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 # token, a creation instant and whether its branch pre-existed — none of it derivable from Git — so it
 # must be PERSISTED when the worktree is created, by a session start that is not mounted either. The
 # barrel is left rather than deleted because it is the import the mount will take, not dead weight.
+#
+# RE-CHECKED by the second wiring unit against the wire shapes the CLI parses, because a READ-ONLY
+# worktree mount looked like a way in. It is not. `ManagedWorktreeView` demands createdAt, initialHead,
+# branchPreexisted, ownerSessionId, ownerActive and sharedWith, and Git knows none of them. Even the
+# cheapest route, the removal CHECK at `/v1/worktrees/removal`, takes a `CheckManagedWorktreeRemovalInput`
+# whose first field is the persisted `ManagedWorktree` itself — so there is no subset of this surface
+# that the registry does not gate.
 packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
 packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is reachable; the barrel awaits a mount, which awaits a managed-worktree registry
 
@@ -60,6 +76,13 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is rea
 # cannot yet perform: POST /v1/sessions/:id/attachments is multipart, and nothing in the daemon
 # parses multipart, stores an attachment blob, or renders an AttachmentView. Extraction lands with
 # whoever mounts attachment upload; on its own it is a pure function with nothing to be handed.
+#
+# RE-CHECKED by the second wiring unit, which names the two missing collaborators exactly. First, the
+# transport seam cannot carry an upload: `ApiRequest` exposes `text()` and nothing else, so multipart
+# bytes cannot reach a route until that seam gains a body reader and the Bun adapter implements it.
+# Second, and decisively, an attachment id is only useful to `POST /v1/sessions/:id/send`, which takes
+# `attachmentIds` — and no session send is mounted. Mounting upload alone would hand the CLI an id it
+# has nowhere to spend.
 packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/attachments/raw-deflate.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
@@ -87,6 +110,13 @@ packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcri
 # browser and a VNC server on whatever machine booted the daemon. The CLI already speaks
 # `/v1/browser/login` and `/v1/sessions/:id/browser`, so this is the largest gap the product has
 # between a shipped command and a mounted capability; it belongs to the unit that ports the runtime.
+#
+# RE-CHECKED by the second wiring unit against the kteam source, which sharpens the estimate in one
+# way that matters: `BrowserLoginRuntime.display()` is not "resolve $DISPLAY". The source deliberately
+# never inherits an ambient display — it owns one, through a 250-line BrowserDisplayService that finds a
+# free X socket, spawns Xvfb, polls it ready and closes it after. Ferretry has no equivalent of that
+# module and no reference to Xvfb anywhere, so this line is TWO adapters deep, not one, and the second
+# of them puts an X server on the host as well as a browser and a VNC listener.
 packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/login-window.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/profile-store.ts # PR #15: add browser session control; not mounted in bin/fyd.ts

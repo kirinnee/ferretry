@@ -397,6 +397,114 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * The recommender, driven through the production composition root over a real socket.
+   *
+   * It proves the mount DOES ITS JOB rather than merely existing: the fleet comes from the manifest
+   * file a provisioner publishes into the state home, the doctrine comes from the operator's routing
+   * catalog, and the team that comes back names an account from that manifest with a model that
+   * catalog declares. Unlike every other mount here it needs no session at all, which is why it is
+   * the one capability this daemon gains that works on a fresh install.
+   *
+   * The two halves are one case on purpose: the catalog is written BETWEEN the two requests, so the
+   * refusal proves the daemon does not invent a doctrine and the answer proves the read is live
+   * rather than cached at boot.
+   */
+  it('should recommend a team from the fleet manifest and the routing catalog', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-recommend');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await mkdir(join(home, 'fleet'), { recursive: true });
+    await writeFile(
+      join(home, 'fleet', 'manifest.json'),
+      JSON.stringify({
+        accounts: [
+          {
+            id: 'account-primary',
+            agent: 'agent-primary',
+            kind: 'claude',
+            mode: 'auto',
+            displayName: 'Primary',
+            defaultModel: 'apex',
+            models: [{ id: 'apex', available: true }],
+            available: true,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const body = JSON.stringify({ task: 'port the remaining command groups and their tests', usage: false });
+    const call = async (): Promise<Response> =>
+      await fetch(`http://127.0.0.1:${port}/v1/recommend`, { method: 'POST', headers, body });
+
+    // Act
+    const unconfigured = await call();
+    // The operator's doctrine, written while the daemon is already serving.
+    await writeFile(
+      join(home, 'config', 'routing.json'),
+      JSON.stringify({
+        models: [
+          {
+            id: 'apex',
+            label: 'Apex',
+            family: 'claude',
+            tier: 'generalist',
+            speed: 'medium',
+            cost: 'high',
+            power: 90,
+            roleScore: { planner: 90, researcher: 85, reviewer: 80 },
+            implementerFit: { mechanical: 70, mid: 85, hard: 80 },
+            note: 'dependable across generic work',
+          },
+        ],
+        accounts: [{ accountId: 'account-primary', options: [{ model: 'apex' }] }],
+        floors: { planner: 50, reviewer: 50, hardAndDemanding: 60, hardOrCritical: 55, mid: 40, qualityFirst: 60 },
+        costPenalty: { balanced: { high: 4 } },
+      }),
+      { mode: 0o600 },
+    );
+    const recommended = await call();
+    const recommendedBody = (await recommended.json()) as {
+      task: string;
+      classification: string;
+      roles: { role: string; primary: { accountId: string; model: string } }[];
+      exclusions: unknown[];
+      warnings: unknown[];
+    };
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // No catalog is the operator's gap, named as one, not a 500 and not an invented doctrine.
+    should(unconfigured.status).equal(503);
+    should((await unconfigured.json()) as { code: string }).have.property('code', 'recommender_unconfigured');
+    should(recommended.status).equal(200);
+    // The pick came from the manifest file and the model from the catalog file — nothing hardcoded.
+    should(recommendedBody.roles.length).be.above(0);
+    should(recommendedBody.roles.map(role => [role.primary.accountId, role.primary.model])).matchEvery(
+      (pair: readonly string[]) => should(pair).deepEqual(['account-primary', 'apex']),
+    );
+    // The domain's own one-liner, so the guide states what it read and the words that produced it.
+    should(recommendedBody.classification).match(/^Read as /u);
+    should(recommendedBody.task).equal('port the remaining command groups and their tests');
+  });
+
+  /**
    * The analytics read, driven through the production composition root over a real socket.
    *
    * It proves the mount DOES ITS JOB rather than merely existing: the index is derived from the real
