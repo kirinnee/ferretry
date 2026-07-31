@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -29,6 +29,11 @@ function userRecord(text: string): Record<string, unknown> {
     timestamp: '2026-01-02T03:04:05.000Z',
     message: { role: 'user', content: text },
   };
+}
+
+/** A record whose serialized length is tunable to the byte, for chunk-boundary cases. */
+function paddedRecord(text: string, padding: number): Record<string, unknown> {
+  return { ...userRecord(text), message: { role: 'user', content: `${text}${'x'.repeat(padding)}` } };
 }
 
 function queueRemoval(text: string, timestamp: string): Record<string, unknown> {
@@ -831,6 +836,61 @@ describe('NodeTranscriptFileRuntime', () => {
     should(actual.truncated).be.false();
   });
 
+  it('should report truncation only when bytes really remain past the limit', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'limits.txt');
+    await writeFile(file, 'abcdef');
+    const subject = new NodeTranscriptFileRuntime();
+
+    // Act
+    const exact = await subject.readFrom(file, 0, 6);
+    const short = await subject.readFrom(file, 0, 5);
+    const spare = await subject.readFrom(file, 0, DEFAULT_MAX_READ_BYTES);
+
+    // Assert
+    should(exact).deepEqual({ bytes: Buffer.from('abcdef'), truncated: false });
+    should(short).deepEqual({ bytes: Buffer.from('abcde'), truncated: true });
+    should(spare.truncated).be.false();
+  });
+
+  it('should read nothing at all rather than open the file for a non-positive limit', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'unreadable.txt');
+    await writeFile(file, 'abcdef');
+    const subject = new NodeTranscriptFileRuntime();
+
+    // Act
+    const noBytes = await subject.readFrom(file, 0, 0);
+    const noTrailing = await subject.readTrailingLine(file, 6, 0);
+
+    // Assert
+    should(noBytes).deepEqual({ bytes: new Uint8Array(), truncated: true });
+    should(noTrailing).deepEqual({ bytes: new Uint8Array(), truncated: true });
+  });
+
+  it('should stop reading a trailing line at its limit and say the line start was never found', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'trailing.txt');
+    const contents = `complete\n${'y'.repeat(300)}`;
+    await writeFile(file, contents);
+    const subject = new NodeTranscriptFileRuntime();
+    const size = Buffer.byteLength(contents);
+
+    // Act
+    const bounded = await subject.readTrailingLine(file, size, 64);
+    const whole = await subject.readTrailingLine(file, size, DEFAULT_MAX_PENDING_BYTES);
+    const empty = await subject.readTrailingLine(file, 0, DEFAULT_MAX_PENDING_BYTES);
+
+    // Assert
+    should(bounded.truncated).be.true();
+    should(bounded.bytes.byteLength).equal(64);
+    should(whole).deepEqual({ bytes: Buffer.from('y'.repeat(300)), truncated: false });
+    should(empty).deepEqual({ bytes: new Uint8Array(), truncated: false });
+  });
+
   it('should map missing metadata to undefined while propagating other runtime faults through the source', async () => {
     // Arrange
     const subject = new NodeTranscriptFileRuntime();
@@ -863,5 +923,216 @@ describe('NodeTranscriptFileRuntime', () => {
     // Assert
     should(actualMissing).be.undefined();
     should(actualFault.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+  });
+});
+
+describe('NodeTranscriptSource bounded reads', () => {
+  it('should stop a one-shot read at the cap, cut back to a record boundary, and say what it skipped', async () => {
+    // Arrange: transcripts grow without limit, so the cap has to hold even when the file does not.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'oversized.jsonl');
+    const records = [0, 1, 2, 3, 4].map(index => jsonl(userRecord(`record ${index}`)));
+    await writeFile(file, records.join(''));
+    const recordBytes = Buffer.byteLength(records[0]!);
+    const totalBytes = Buffer.byteLength(records.join(''));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      // A cap landing inside the third record proves the cut is line-aligned rather than byte-aligned.
+      maxReadBytes: recordBytes * 2 + 10,
+    });
+
+    // Act
+    const actual = await subject.read(file);
+
+    // Assert
+    should(actual.events).containDeep([
+      { kind: 'message', text: 'record 0' },
+      { kind: 'message', text: 'record 1' },
+    ]);
+    should(actual.events).have.length(2);
+    should(actual.issues.map(issue => issue.code)).deepEqual(['source-truncated']);
+    should(actual.issues[0]).containDeep({
+      byteOffset: recordBytes * 2,
+      byteLength: totalBytes - recordBytes * 2,
+      recoverable: true,
+    });
+    should(actual.cursor.byteOffset).equal(recordBytes * 2);
+    should(actual.cursor.pendingBytes).equal(0);
+    should(actual.cursor.nextLine).equal(3);
+  });
+
+  it('should never hold the whole file when following one that exceeds the cap', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'streamed.jsonl');
+    const texts = ['one', 'two', 'three', 'four', 'five', 'six'];
+    await writeFile(file, texts.map(text => jsonl(userRecord(text))).join(''));
+    const recordBytes = Buffer.byteLength(jsonl(userRecord('one')));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      maxReadBytes: recordBytes + 5,
+    });
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const seen: string[] = [];
+      const codes: string[] = [];
+      const widths: number[] = [];
+      let previousOffset = 0;
+      while (seen.length < texts.length) {
+        const batch = await nextBatch(iterator, `bounded batch ${seen.length.toString()}`);
+        for (const event of batch.events) if (event.kind === 'message') seen.push(event.text);
+        for (const issue of batch.issues) codes.push(issue.code);
+        widths.push(batch.cursor.byteOffset - previousOffset);
+        previousOffset = batch.cursor.byteOffset;
+      }
+
+      // Assert
+      should(seen).deepEqual(texts);
+      should(codes).containEql('source-truncated');
+      should(widths.every(width => width <= recordBytes + 5)).be.true();
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should discard an unterminated record that outgrows the pending limit and resume on the next one', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'runaway.jsonl');
+    await writeFile(file, jsonl(userRecord('before the runaway record')));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      maxPendingBytes: 64,
+    });
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      await nextBatch(iterator, 'record before the runaway');
+
+      // Act
+      await appendFile(file, `{"type":"user","content":"${'x'.repeat(200)}`);
+      const overflowed = await nextBatch(iterator, 'runaway record');
+      await appendFile(file, `"}\n${jsonl(userRecord('after the runaway record'))}`);
+      const recovered = await nextBatch(iterator, 'record after the runaway');
+
+      // Assert
+      should(overflowed.events).be.empty();
+      should(overflowed.issues.map(issue => issue.code)).deepEqual(['oversized-record']);
+      should(overflowed.cursor.pendingBytes).equal(0);
+      should(recovered.events).containDeep([{ kind: 'message', text: 'after the runaway record' }]);
+      should(recovered.issues).be.empty();
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should refuse to buffer an oversized trailing record when a cursor starts at the end', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'oversized-tail.jsonl');
+    await writeFile(file, `${jsonl(userRecord('already present'))}{"type":"user","content":"${'x'.repeat(200)}`);
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      maxPendingBytes: 64,
+    });
+    const iterator = subject.follow(file, { startAt: 'end', pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const initial = await nextBatch(iterator, 'end cursor with oversized tail');
+      await appendFile(file, `"}\n${jsonl(userRecord('after the oversized tail'))}`);
+      const recovered = await nextBatch(iterator, 'record after the oversized tail');
+
+      // Assert
+      should(initial.events).be.empty();
+      should(initial.issues.map(issue => issue.code)).deepEqual(['oversized-record']);
+      should(initial.cursor.pendingBytes).equal(0);
+      should(recovered.events).containDeep([{ kind: 'message', text: 'after the oversized tail' }]);
+      should(recovered.issues).be.empty();
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should parse a record that straddles the read chunk boundary as exactly one record', async () => {
+    // Arrange: the terminator lands on the 64 KiB chunk edge, the case chunked IO gets wrong.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'straddling.jsonl');
+    const empty = jsonl(paddedRecord('straddle', 0));
+    const line = jsonl(paddedRecord('straddle', 64 * 1024 - Buffer.byteLength(empty)));
+    await writeFile(file, `${line}${jsonl(userRecord('after the boundary'))}`);
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const actual = await subject.read(file);
+
+    // Assert
+    should(Buffer.byteLength(line)).equal(64 * 1024);
+    should(actual.events).have.length(2);
+    should(actual.events[1]).containDeep({ kind: 'message', text: 'after the boundary' });
+    should(actual.issues).be.empty();
+    should(actual.cursor.nextLine).equal(3);
+  });
+
+  it('should keep the surrounding records when a line carries undecodable bytes', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'undecodable.jsonl');
+    await writeFile(
+      file,
+      Buffer.concat([
+        Buffer.from(jsonl(userRecord('before the undecodable line'))),
+        Buffer.from([0x7b, 0xff, 0xfe, 0x7d, 0x0a]),
+        Buffer.from(jsonl(userRecord('after the undecodable line'))),
+      ]),
+    );
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const actual = await subject.read(file);
+
+    // Assert
+    should(actual.events).containDeep([
+      { kind: 'message', text: 'before the undecodable line' },
+      { kind: 'message', text: 'after the undecodable line' },
+    ]);
+    should(actual.issues.map(issue => issue.code)).deepEqual(['invalid-json']);
+    should(actual.issues[0]?.line).equal(2);
+  });
+});
+
+describe('NodeTranscriptSource path handling', () => {
+  it('should use the caller path verbatim and refuse links that do not reach a regular file', async () => {
+    // Arrange: this source is an exact-path reader. It never joins, resolves or rebases a path, so
+    // confinement is the composition root's contract — what it owns is refusing what it cannot read.
+    const temporary = await temporaryDirectory();
+    const target = join(temporary, 'real.jsonl');
+    await writeFile(target, jsonl(userRecord('reached through a link')));
+    await mkdir(join(temporary, 'nested'));
+    const fileLink = join(temporary, 'file-link.jsonl');
+    const directoryLink = join(temporary, 'directory-link');
+    const danglingLink = join(temporary, 'dangling-link.jsonl');
+    const loopLink = join(temporary, 'loop-a');
+    const traversal = join(temporary, 'nested', '..', 'real.jsonl');
+    await symlink(target, fileLink);
+    await symlink(temporary, directoryLink);
+    await symlink(join(temporary, 'absent.jsonl'), danglingLink);
+    await symlink(loopLink, join(temporary, 'loop-b'));
+    await symlink(join(temporary, 'loop-b'), loopLink);
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    // Act
+    const viaFileLink = await subject.read(fileLink);
+    const viaDirectoryLink = await subject.read(directoryLink);
+    const viaDangling = await subject.read(danglingLink);
+    const viaLoop = await subject.read(loopLink);
+    const viaTraversal = await subject.read(traversal);
+
+    // Assert
+    should(viaFileLink.events).containDeep([{ kind: 'message', text: 'reached through a link' }]);
+    should(viaFileLink.file).equal(fileLink);
+    should(viaDirectoryLink.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+    should(viaDangling.issues.map(issue => issue.code)).deepEqual(['source-missing']);
+    should(viaLoop.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+    should(viaTraversal.events).containDeep([{ kind: 'message', text: 'reached through a link' }]);
+    should(viaTraversal.file).equal(traversal);
   });
 });
