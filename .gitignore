@@ -29,3 +29,6 @@ packages/pwa/.artifacts/
 ### cli release
 prebuilt/
 IncrementalChangelog.md
+
+### pwa visual harness (screenshots are attached to PRs, never committed)
+packages/pwa/harness/out/

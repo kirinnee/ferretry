@@ -57,8 +57,9 @@ export const mount = async (element: ReactElement): Promise<Mounted> => {
   };
 };
 
-/** Runs a callback (a click, a key press) inside `act` and flushes effects. */
-export const interact = async (callback: () => void | Promise<void>): Promise<void> => {
+/** Runs a callback (a click, a key press) inside `act` and flushes effects. Any
+ *  return value is discarded — `dispatchEvent` answers with a boolean. */
+export const interact = async (callback: () => unknown): Promise<void> => {
   await act(async () => {
     await callback();
   });

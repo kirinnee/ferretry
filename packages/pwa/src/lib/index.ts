@@ -4,6 +4,7 @@ export const packageRole = 'pwa' as const;
 export * from '../components/bottom-sheet.tsx';
 export * from '../components/primitives.tsx';
 export * from '../components/side-pane-tab-icons.ts';
+export * from '../components/side-pane-tabs.tsx';
 export * from '../components/side-pane-tab-model.ts';
 export * from '../components/view-tabs.tsx';
 export * from '../hooks/use-details-tab.ts';
