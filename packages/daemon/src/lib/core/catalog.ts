@@ -101,6 +101,17 @@ export const RoutingWeightsSchema = z.strictObject({
   accountDefaultBonus: z.number().finite().default(2),
   /** How hard a spent account is pushed down; the divisor is applied to its spent percentage. */
   spentPercentDivisor: z.number().finite().positive().default(8),
+  /**
+   * What to assume about an account the feed cannot score — one it has never seen, or one whose
+   * probe failed.
+   *
+   * It must not be zero. Zero is the *best* possible reading, so the source's `usageScore(undefined)
+   * === 0` made every unmeasured account outrank every measured one, and a failed collection
+   * promoted the account it failed on. It must not be 100 either, which buries a freshly added
+   * account under an almost-exhausted one. The midpoint says only what is true: nothing is known,
+   * so assume it is ordinary.
+   */
+  unknownSpentPercent: Power.default(50),
   /** Penalty applied to a plan-following implementer when the caller is buying cheap. */
   needsPlanCheapPenalty: z.number().finite().default(25),
   /** Penalty for a below-top-tier researcher on large-scope work. */

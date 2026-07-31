@@ -149,9 +149,11 @@ function candidatesFor(
       let score = base;
       score -= costPenalty[model.cost] ?? 0;
       if (routing.preferredSpend) score += weights.preferredSpendBonus;
-      // Same tier, least-spent account first. An account with no reading at all is left alone
-      // rather than treated as empty, which is how the source made unmeasured accounts win.
-      score -= (spentPercent(usageByAgent.get(account.agent)) ?? 0) / weights.spentPercentDivisor;
+      // Same tier, least-spent account first. An account the feed cannot score is assumed ordinary
+      // rather than empty: scoring unknown as 0% is what made an unmeasured account — and worse, an
+      // account whose probe had just failed — outrank every account with a real reading.
+      const spent = spentPercent(usageByAgent.get(account.agent)) ?? weights.unknownSpentPercent;
+      score -= spent / weights.spentPercentDivisor;
       if (option.modelFlag === undefined) score += weights.accountDefaultBonus;
       if (role === 'implementer') score += kindBonus(model, classification.kind);
       // A plan-following implementer drags a planner onto the team. On a cheap budget that is the
@@ -338,9 +340,18 @@ export function recommendTeam(request: RecommendTeamRequest): TeamRecommendation
 
     const belowFloor = eligible.length === 0;
     if (belowFloor) {
+      // Two different bars can empty the list, and saying the wrong one is worse than saying
+      // nothing: the source only ever named the power floor, so a fleet whose every candidate was
+      // barred from product-facing work — but comfortably above the floor — was told its accounts
+      // were not capable enough. The reader then goes looking for a better model instead of the
+      // account that is actually allowed to ship the change.
+      const capable = ranked.filter(candidate => candidate.model.power >= floor);
       warnings.push(
-        `no available account meets the ${role} floor for ${classification.complexity}/${classification.risk} work; ` +
-          `falling back to ${best.option.modelLabel} — treat its output as provisional`,
+        capable.length > 0
+          ? `every account that meets the ${role} floor is barred from product-facing work; ` +
+              `falling back to ${best.option.modelLabel} — treat its output as provisional`
+          : `no available account meets the ${role} floor for ${classification.complexity}/${classification.risk} work; ` +
+              `falling back to ${best.option.modelLabel} — treat its output as provisional`,
       );
       eligible = [...ranked];
     }

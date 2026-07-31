@@ -373,8 +373,8 @@ describe('recommendTeam', () => {
     should(roleOf(recommendation, 'implementer')?.primary.accountId).equal('account-twin');
   });
 
-  it('should leave an unmeasured account alone rather than treat it as empty', () => {
-    // Arrange — the source scored a missing reading as 0% spent, so unmeasured accounts always won
+  describe('an account the feed cannot score', () => {
+    // Two accounts offering the same model, so the spend adjustment is the only thing between them.
     const twin = account({
       id: 'account-twin',
       agent: 'agent-twin',
@@ -389,16 +389,56 @@ describe('recommendTeam', () => {
         { accountId: 'account-twin', preferredSpend: false, options: [{ model: 'forge' }] },
       ],
     };
+    const implementerFor = (usageRows: readonly AccountUsage[]): string | undefined =>
+      roleOf(
+        recommend('rewrite the protocol layer', {
+          accounts: [...inventory, twin],
+          catalog: catalogWithTwin,
+          usage: usageRows,
+        }),
+        'implementer',
+      )?.primary.accountId;
 
-    // Act
-    const recommendation = recommend('rewrite the protocol layer', {
-      accounts: [...inventory, twin],
-      catalog: catalogWithTwin,
-      usage: [usage('agent-secondary', { fiveHourPercent: 0 })],
+    it('should lose to an account measured with real headroom', () => {
+      // Arrange — the source scored an unknown reading as 0%, the best possible, so unmeasured won
+      // Act / Assert
+      should(implementerFor([usage('agent-secondary', { fiveHourPercent: 0 })])).equal('account-secondary');
     });
 
-    // Assert — measured-at-zero and unmeasured score the same, so the earlier account keeps the slot
-    should(roleOf(recommendation, 'implementer')?.primary.accountId).equal('account-secondary');
+    it('should still beat an account measured as nearly exhausted', () => {
+      // Arrange — unknown is not "fully spent" either; a freshly added account must stay reachable
+      // Act / Assert
+      should(implementerFor([usage('agent-secondary', { fiveHourPercent: 95 })])).equal('account-twin');
+    });
+
+    it('should not be promoted by its own collection failing', () => {
+      // Arrange — a failed probe reports numbers nobody can trust, so quotaFromUsage discards them
+      const rows = [
+        usage('agent-secondary', { fiveHourPercent: 0 }),
+        usage('agent-twin', { ok: false, fiveHourPercent: 99 }),
+      ];
+
+      // Act / Assert — the failure must not hand the twin the zero-penalty best case
+      should(implementerFor(rows)).equal('account-secondary');
+    });
+
+    it('should be penalised by the catalog weight rather than a number in the algorithm', () => {
+      // Arrange — an operator who declares unknown to be pessimistic gets pessimistic ordering
+      const pessimistic: RoutingCatalog = {
+        ...catalogWithTwin,
+        weights: { ...catalogWithTwin.weights, unknownSpentPercent: 100 },
+      };
+
+      // Act
+      const recommendation = recommend('rewrite the protocol layer', {
+        accounts: [...inventory, twin],
+        catalog: pessimistic,
+        usage: [usage('agent-secondary', { fiveHourPercent: 95 })],
+      });
+
+      // Assert
+      should(roleOf(recommendation, 'implementer')?.primary.accountId).equal('account-secondary');
+    });
   });
 
   it('should list one entry per model rather than the same model on every account', () => {
@@ -632,5 +672,131 @@ describe('recommendTeam', () => {
 
     // Assert
     should(recommendation.roles[0]?.primary.model).equal('apex');
+  });
+});
+
+describe('the scoring adjustments the catalog declares', () => {
+  it('should prefer reaching a model through an account default over an override flag', () => {
+    // Arrange — the same model on two accounts, one of which needs --model to get there
+    const twin = account({
+      id: 'account-twin',
+      agent: 'agent-twin',
+      kind: 'codex',
+      displayName: 'Twin',
+      models: [{ id: 'forge', available: true }],
+    });
+    const withTwin: RoutingCatalog = {
+      ...catalog,
+      accounts: [
+        ...catalog.accounts.map(entry =>
+          entry.accountId === 'account-secondary'
+            ? {
+                ...entry,
+                options: [
+                  { model: 'forge', modelFlag: 'forge-1' },
+                  { model: 'swift', modelFlag: 'swift-1' },
+                ],
+              }
+            : entry,
+        ),
+        { accountId: 'account-twin', preferredSpend: false, options: [{ model: 'forge' }] },
+      ],
+    };
+    const request = { accounts: [...inventory, twin], catalog: withTwin, roles: ['implementer'] as const };
+
+    // Act
+    const preferred = recommend('rewrite the protocol layer', request);
+    const indifferent = recommend('rewrite the protocol layer', {
+      ...request,
+      catalog: { ...withTwin, weights: { ...withTwin.weights, accountDefaultBonus: 0 } },
+    });
+
+    // Assert — the bonus decides it; with the bonus removed the tie falls back to listing order
+    should(roleOf(preferred, 'implementer')?.primary.accountId).equal('account-twin');
+    should(roleOf(indifferent, 'implementer')?.primary.accountId).equal('account-secondary');
+  });
+
+  it('should push a plan-following implementer down when the caller is buying cheap', () => {
+    // Arrange — a plan follower drags a planner onto the team, the priciest teammate on a cheap budget
+    const request = { budget: 'cheap' as const, roles: ['implementer'] as const };
+
+    // Act
+    const penalised = recommend('add the field', request);
+    const unpenalised = recommend('add the field', {
+      ...request,
+      catalog: { ...catalog, weights: { ...catalog.weights, needsPlanCheapPenalty: 0 } },
+    });
+
+    // Assert
+    should(roleOf(penalised, 'implementer')?.primary.model).not.equal('swift');
+    should(roleOf(unpenalised, 'implementer')?.primary.model).equal('swift');
+  });
+
+  it('should not push a plan follower down on any other budget', () => {
+    // Arrange / Act
+    const balanced = recommend('add the field', { roles: ['implementer'] });
+    const unpenalised = recommend('add the field', {
+      roles: ['implementer'],
+      catalog: { ...catalog, weights: { ...catalog.weights, needsPlanCheapPenalty: 0 } },
+    });
+
+    // Assert — identical scores, so the penalty is genuinely gated on the cheap budget
+    should(roleOf(balanced, 'implementer')?.primary.score).equal(roleOf(unpenalised, 'implementer')?.primary.score);
+  });
+
+  it('should dock a researcher that cannot reach far enough for large-scope work', () => {
+    // Arrange — only the below-reach account is available, so the penalty is visible in its score
+    const accounts = inventory.filter(entry => entry.id === 'account-primary');
+    const request = { accounts, roles: ['researcher'] as const };
+    const scoreOf = (weights: RoutingCatalog['weights'], task: string): number | undefined =>
+      roleOf(recommend(task, { ...request, catalog: { ...catalog, weights } }), 'researcher')?.alternatives.find(
+        option => option.model === 'steady',
+      )?.score;
+    const unpenalised = { ...catalog.weights, smallResearcherPenalty: 0 };
+
+    // Act — the same account, on a large-scope research task, with and without the penalty
+    const large = 'research and survey every module in the entire monorepo across all packages';
+
+    // Assert
+    should((scoreOf(unpenalised, large) ?? 0) - (scoreOf(catalog.weights, large) ?? 0)).equal(20);
+  });
+
+  it('should leave a short-reach researcher alone on small-scope work', () => {
+    // Arrange
+    const accounts = inventory.filter(entry => entry.id === 'account-primary');
+    const scoreOf = (weights: RoutingCatalog['weights']): number | undefined =>
+      roleOf(
+        recommend('research one flag', { accounts, roles: ['researcher'], catalog: { ...catalog, weights } }),
+        'researcher',
+      )?.alternatives.find(option => option.model === 'steady')?.score;
+
+    // Act / Assert — the penalty is scope-gated, so removing it must change nothing here
+    should(scoreOf({ ...catalog.weights, smallResearcherPenalty: 0 })).equal(scoreOf(catalog.weights));
+  });
+
+  it('should name the product-facing bar, not the power floor, when that is what emptied the menu', () => {
+    // Arrange — the chore tier meets the mid floor (power 40) but is barred from product-facing work
+    const accounts = inventory.filter(entry => entry.id === 'account-chore');
+
+    // Act
+    const recommendation = recommend('restyle the customer landing page', { accounts, roles: ['implementer'] });
+
+    // Assert — the source blamed the floor here, sending the reader after a more capable model
+    should(recommendation.warnings.join(' ')).containEql('barred from product-facing work');
+    should(recommendation.warnings.join(' ')).not.containEql('no available account meets');
+    should(roleOf(recommendation, 'implementer')?.primary.caveat).equal('not-for-product-facing');
+  });
+
+  it('should still blame the floor when nothing is capable enough', () => {
+    // Arrange — a reviewer floor this account cannot reach, and reviewers face no product bar
+    const demanding: RoutingCatalog = { ...catalog, floors: { ...catalog.floors, reviewer: 99 } };
+    const accounts = inventory.filter(entry => entry.id === 'account-secondary');
+
+    // Act
+    const recommendation = recommend('add the field', { accounts, catalog: demanding, roles: ['reviewer'] });
+
+    // Assert
+    should(recommendation.warnings.join(' ')).containEql('no available account meets the reviewer floor');
+    should(recommendation.warnings.join(' ')).not.containEql('barred from product-facing');
   });
 });
