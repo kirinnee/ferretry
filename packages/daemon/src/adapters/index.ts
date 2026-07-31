@@ -17,6 +17,7 @@ export * from './storage/session-storage.ts';
 export * from './storage/sqlite-index.ts';
 export * from './storage/state-home-layout.ts';
 export * from './storage/storage-factory.ts';
+export * from './stt/index.ts';
 export * from './system/keyed-serial-executor.ts';
 export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
