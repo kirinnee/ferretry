@@ -21,6 +21,7 @@ describe('daemon transcript composition', () => {
     should(subject.role).equal('daemon');
     should(subject.storage.open).be.a.Function();
     should(subject.worktrees.create).be.a.Function();
+    should(subject.createAttentionLedgerRepository).be.a.Function();
     should(subject.transcriptSources).have.length(2);
     should(actual.map(batch => batch.harness)).deepEqual(['claude', 'codex']);
     should(actual.every(batch => batch.events.length > 0)).be.true();
