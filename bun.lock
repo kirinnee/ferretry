@@ -21,7 +21,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.2.1",
+      "version": "0.4.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -37,14 +37,21 @@
     "packages/daemon": {
       "name": "@ferretry/daemon",
       "version": "0.0.0",
-      "dependencies": {
-        "@ferretry/protocol": "workspace:*",
-        "zod": "4.4.3",
+      "bin": {
+        "fyd": "bin/fyd.ts",
       },
+        "dependencies": {
+          "@ferretry/protocol": "workspace:*",
+          "zod": "4.4.3",
+        },
     },
     "packages/fleet": {
       "name": "@ferretry/fleet",
       "version": "0.0.0",
+      "dependencies": {
+        "smol-toml": "1.7.1",
+        "zod": "4.4.3",
+      },
     },
     "packages/protocol": {
       "name": "@ferretry/protocol",
