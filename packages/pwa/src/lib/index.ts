@@ -3,6 +3,7 @@ export const packageRole = 'pwa' as const;
 
 export * from '../components/session-command-controls.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
+export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/analytics/analytics-result-table.tsx';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
@@ -48,6 +49,7 @@ export * from './daemon-transport.ts';
 export * from './drafts.ts';
 export * from './event-transport.ts';
 export * from './github-pr.ts';
+export * from './md-compose.ts';
 export * from './pages/new-session.ts';
 export * from './pages/page-host.tsx';
 export * from './pages/routes.ts';

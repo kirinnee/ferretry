@@ -35,6 +35,7 @@ import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/brows
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
+import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
@@ -591,6 +592,15 @@ function Shell() {
           </PanelHeader>
           <PanelBody className="min-w-0">
             <AnalyticsTimeSeries response={ANALYTICS_TIME} />
+          </PanelBody>
+        </Card>
+
+        <Card aria-label="Markdown composer settings">
+          <PanelHeader>
+            <Label>Composer settings</Label>
+          </PanelHeader>
+          <PanelBody>
+            <MarkdownComposerSettings />
           </PanelBody>
         </Card>
 
