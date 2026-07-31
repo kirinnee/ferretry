@@ -30,11 +30,9 @@ if [[ ${mode} == "unit" ]]; then
   # production code just as much as lib modules are, and must remain in the
   # 100% unit ledger.
   #
-  # src/components (the feature screens) is NOT in the ledger yet: its files
-  # currently have source-text assertions rather than executed tests, so adding
-  # the directory would fail rather than measure. The PR that gives those
-  # screens real tests adds `-o -name components` here and to the awk filter.
-  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name hooks -o -name worklets -o -name shell \) | sort)
+  # Feature screens use mounted React tests, so they belong in the same 100%
+  # ledger as browser glue rather than being a source-text-tested exception.
+  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name hooks -o -name worklets -o -name shell \) | sort)
   scope_dirs+=("${pwa_dirs[@]}")
 fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
@@ -59,7 +57,7 @@ awk -v scope="${scope}" -v mode="${mode}" '
     gsub(/\\\\/, "/", path)
     files++
     allowed = path ~ "(^|/)" scope
-    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(hooks|worklets|shell)/") allowed = 1
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|hooks|worklets|shell)/") allowed = 1
     if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
       bad = 1

@@ -9,6 +9,11 @@
 
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
+import type { SessionView } from '@ferretry/protocol';
+import { Composer } from '../src/components/composer.tsx';
+import { SessionDetails } from '../src/components/session-details.tsx';
+import { SessionList } from '../src/components/session-list.tsx';
+import { Transcript } from '../src/components/transcript.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
@@ -30,6 +35,30 @@ const daemon = daemonConnection({
   deviceToken: 'harness-token',
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
+
+const harnessSession = {
+  config: {
+    id: 'harness-session',
+    name: 'Transcript scrolling',
+    teammate: 'Fable',
+    label: 'Port the session screen',
+    model: 'gpt-5.6-sol',
+    modelHint: 'gpt-5.6',
+    agent: 'codex',
+    mode: 'auto',
+    cwd: '/work/ferretry',
+    updatedAt: '1970-01-01T00:00:01.000Z',
+  },
+  state: {
+    id: 'harness-session',
+    status: 'running',
+    turn: 4,
+    lastActivityAt: '1970-01-01T00:00:01.000Z',
+    contextPercent: 54,
+    activity: 'Writing tests',
+  },
+  directory: '/work/ferretry',
+} as unknown as SessionView;
 
 openSidePaneTab(scope, 'pins');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
@@ -69,6 +98,27 @@ function Shell() {
           {viewport.width}×{viewport.height}
         </span>
       </header>
+
+      <section
+        aria-label="Session screen harness"
+        className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
+      >
+        <SessionList daemonId={daemon.daemonId} onOpenSession={() => {}} sessions={[harnessSession]} />
+        <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
+          <Transcript
+            busy
+            daemonId={daemon.daemonId}
+            entries={[
+              { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
+              { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
+              { id: 'notice', kind: 'notice', text: 'Drafts remain scoped to this paired daemon.' },
+            ]}
+            sessionId="harness-session"
+          />
+          <Composer api={{ send: async () => ({}) as never }} daemon={daemon} sessionId="harness-session" />
+        </div>
+        <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
+      </section>
 
       <Card className="flex min-h-0 flex-col overflow-hidden">
         <SidePaneTabs
