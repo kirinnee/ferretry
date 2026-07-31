@@ -8,6 +8,7 @@ export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';
 export * from './pins/index.ts';
 export * from './runtime/index.ts';
+export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/resume/index.ts';
 export * from './storage/home-lock.ts';

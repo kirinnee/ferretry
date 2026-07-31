@@ -56,6 +56,7 @@ import {
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
+import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -94,6 +95,9 @@ import {
   SessionResumeService,
   defaultSessionHealthSettings,
   defaultSessionResumeSettings,
+  CodexPickerCleanup,
+  HarnessQuirkService,
+  SessionProvenanceStamper,
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
@@ -116,6 +120,10 @@ import {
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
+
+/** The CLI a human drives. Named here rather than derived, because the daemon
+ *  package cannot read the CLI package's `bin` without depending on it. */
+const CLIENT_NAME = 'fy';
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
@@ -193,6 +201,15 @@ export interface DaemonWorld {
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
+  /** Warden provenance: which warden a session traces back to, and whether it
+   *  descends from one. Stamped at spawn and re-stamped on every resume, because
+   *  a warden is pruned while its children still run and the detector's shield
+   *  reads the stamp, not the parent chain. */
+  readonly provenance: SessionProvenanceStamper;
+  /** Per-harness workarounds: how each harness changes the model of a live
+   *  session, and how the daemon recovers when driving Codex's modal picker
+   *  fails part-way. */
+  readonly harness: HarnessQuirkService;
   readonly transcripts: TranscriptWorld;
   /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
@@ -395,6 +412,22 @@ export function buildWorld(): DaemonWorld {
       namePrefix: DAEMON_NAME,
       remoteControlPrefix: DAEMON_NAME,
     }),
+    provenance: new SessionProvenanceStamper(clock),
+    harness: new HarnessQuirkService(
+      new CodexPickerCleanup(
+        // The picker pane goes through the same private-socket process port as every
+        // other tmux touch: cleanup sends keys, so reaching the host's default
+        // server would be sending them into somebody else's terminal.
+        new TmuxCodexPickerPane(tmux),
+        { sleep: milliseconds => Bun.sleep(milliseconds) },
+      ),
+      // The instruction a quarantined session shows a human names the CLI they
+      // actually type, not this daemon — `fyd resume` is not a command. The daemon
+      // cannot read the CLI package without depending on it, so the name is a
+      // constant here, as it already is everywhere the daemon quotes a `fy`
+      // command.
+      CLIENT_NAME,
+    ),
     transcripts: {
       sources: [
         new NodeTranscriptSource(new ClaudeTranscriptParser()),
