@@ -1009,6 +1009,20 @@ describe('daemon boot lifecycle', () => {
     const afterMove = await storedConfig();
     const report = await readFile(reportFile, 'utf8');
     const turnTwo = await readFile(join(home, 'state', 'sessions', id, 'turns', 'turn-002.md'), 'utf8');
+    // The replacement runs out of quota too. Seeded the same way and for the same reason: a migrated
+    // session comes back `running`, and an agent mid-turn is not one this gate interrupts.
+    await writeFile(
+      stateFile,
+      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
+      { mode: 0o600 },
+    );
+    // Straight back again, which is the case that used to destroy work: the turn a revive hands over
+    // is recorded on the STATE document, and reading the configuration's frozen copy first made every
+    // second relaunch write `turn-002.md` a second time — over an assignment the agent may not have
+    // read yet.
+    const movedBack = await migrate({ agent: WRAPPER });
+    const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns'))).sort();
+    const secondReport = await readFile(reportFile, 'utf8');
     const unknownAgent = await migrate({ agent: 'claude-auto-nowhere', allowContextDowngrade: true });
     const absent = await fetch(`${sessions}/no-such-session/migrate`, {
       method: 'POST',
@@ -1052,18 +1066,26 @@ describe('daemon boot lifecycle', () => {
     // A new incarnation, because a different program is answering the next turn.
     should(afterMove).have.property('runtimeGeneration', 2);
     should(afterMove).have.property('incarnation', `${id}-2`);
-    // THE LIVE PANE WAS REPLACED, not typed into. Without that the old account would still be
-    // serving the session while its own record named the new one.
-    should(reviver.snapshots).deepEqual([id]);
-    should(reviver.relaunched).deepEqual([id]);
+    // THE LIVE PANE WAS REPLACED, not typed into — for BOTH moves. Without that the old account
+    // would still be serving the session while its own record named the new one.
+    should(reviver.snapshots).deepEqual([id, id]);
+    should(reviver.relaunched).deepEqual([id, id]);
     // The replacement agent is pointed at the report, through the same turn document a revive writes.
-    should(reviver.delivered.at(-1)).containEql('turns/turn-002.md');
+    should(reviver.delivered[0]).containEql('turns/turn-002.md');
     should(turnTwo).containEql('migration-inflight.md');
     // Both halves of the report: the inventory written before the pane died, and the outcome that is
     // the only part allowed to claim the move happened.
     should(report).containEql('# Migration in-flight report');
     should(report).containEql('## Outcome — MIGRATION SUCCEEDED');
     should(report).containEql(`onto \`${TARGET_WRAPPER}\``);
+    // The way back needs no downgrade flag — the origin's window is the larger one — and it writes a
+    // THIRD turn document beside the other two rather than overwriting the second.
+    should(movedBack.status).equal(200);
+    should(turnsAfterSecond).deepEqual(['turn-001.md', 'turn-002.md', 'turn-003.md']);
+    // ONE report per session, replaced rather than appended to: the handoff message can only name one
+    // file, and this one describes the move that just happened.
+    should(secondReport.split('# Migration in-flight report')).have.length(2);
+    should(secondReport).containEql(`onto \`${WRAPPER}\``);
     // An agent the fleet does not publish is a fact about the agent, not about the session.
     should(unknownAgent.status).equal(404);
     should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');
