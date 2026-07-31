@@ -432,6 +432,21 @@
   margin: 24px;
   text-align: center;
 }
+/* The transparent input layer sits exactly over the frame: pointer maths is
+   taken from ITS box, so it must cover the same area and never scroll apart
+   from the image beneath it. `touch-action: none` keeps a drag inside the
+   remote page instead of panning the pane on a phone. */
+.fy-remote-browser-canvas > .fy-remote-browser-input {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  touch-action: none;
+  width: 100%;
+}
+.fy-remote-browser-canvas > .fy-remote-browser-input:focus-visible {
+  outline: 2px solid var(--fy-accent, #7c9cff);
+  outline-offset: -2px;
+}
 .fy-remote-browser-canvas .fy-remote-browser-stalled {
   background: #111827d9;
   bottom: 0;

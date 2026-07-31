@@ -11,6 +11,8 @@
 import type {
   AnalyticsResponse,
   BrowserStatus,
+  LearningStatus,
+  ProposalView,
   SessionView,
   TaskLive,
   TaskStatus,
@@ -23,8 +25,8 @@ import type {
 } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Composer } from '../src/components/composer.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
+import { Composer } from '../src/components/composer.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
@@ -41,11 +43,11 @@ import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/b
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
+import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
+import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
-import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
@@ -568,6 +570,9 @@ class HarnessBrowserSocket implements RemoteBrowserSocket {
   addEventListener(type: 'open' | 'message' | 'close' | 'error', listener: (event: Event) => void): void {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]);
   }
+
+  /** The harness screenshots the display; input has nowhere to go. */
+  send(): void {}
 
   close(): void {
     this.readyState = 3;
