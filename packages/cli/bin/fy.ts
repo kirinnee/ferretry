@@ -4,6 +4,7 @@ import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
+import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
@@ -21,6 +22,7 @@ import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
+import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -181,6 +183,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         interactive: world.interactive,
         ...(ownSessionId === undefined ? {} : { callerId: ownSessionId }),
         binaryName: BINARY_NAME,
+      }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerBrowserCommands(
+      program,
+      new BrowserController(client, world.io, new FileScreenshotWriter(), {
+        ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
 ];
