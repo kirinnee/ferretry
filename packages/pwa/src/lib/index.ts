@@ -19,6 +19,7 @@ export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-warden-status.ts';
 export * from '../shell/app-bar.tsx';
 export * from '../shell/bottom-sheet.tsx';
+export * from '../shell/chat-width-control.tsx';
 export * from '../shell/chunk-error-boundary.tsx';
 export * from '../shell/context-menu.tsx';
 export * from '../shell/marker.tsx';
