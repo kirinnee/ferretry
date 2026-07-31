@@ -38,6 +38,7 @@ import {
   type WorkerClientOptions,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
@@ -59,8 +60,9 @@ import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   BrowserViewerStream,
-  createApiDispatcher,
   EXIT_ALREADY_RUNNING,
+  createMountedDispatcher,
+  PinService,
   SessionPlanner,
   TeamAdvisor,
   createFoundationPaths,
@@ -80,6 +82,7 @@ import {
   type DaemonConfig,
   type DaemonReadinessPorts,
   type MillisecondClockPort,
+  type MountedSubsystems,
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -153,6 +156,9 @@ export interface DaemonWorld {
   /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
   readonly api: ApiServerPort;
+  /** The subsystems mounted onto that surface. Every field here is a capability the running product
+   *  actually has; a subsystem absent from it is one the daemon never constructs. */
+  readonly subsystems: MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -302,6 +308,17 @@ export function buildWorld(): DaemonWorld {
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
+    subsystems: {
+      pins: new PinService(
+        new FilePinSessionDirectory(paths, stateFiles),
+        // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
+        new FilePinRepository(paths, stateFiles, new KeyedSerialExecutor(), clock),
+        clock,
+        // A pin id is a protocol UUID, so it is minted as one rather than derived from a counter the
+        // next process would restart.
+        { next: () => crypto.randomUUID() },
+      ),
+    },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
@@ -354,12 +371,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const server: ApiServerHandle = await world.boot.binder.bind(
     async () =>
       await world.api.listen(
-        createApiDispatcher({
-          credentials: await world.credentials.load(),
-          usage,
-          clock: world.clock,
-          startedAtMs,
-        }),
+        createMountedDispatcher(
+          { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
+          world.subsystems,
+        ),
         { host: config.host, port: config.port },
       ),
   );

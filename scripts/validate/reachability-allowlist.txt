@@ -71,13 +71,6 @@ packages/daemon/src/lib/learning/policy.ts # PR #13: add learning evidence pipel
 packages/daemon/src/lib/learning/store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
 packages/daemon/src/lib/learning/types.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
 
-# PR #14 — add pin domain service
-packages/daemon/src/adapters/pins/file-pin-repository.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/pins/index.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
-packages/daemon/src/lib/pins/index.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
-packages/daemon/src/lib/pins/policy.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
-packages/daemon/src/lib/pins/service.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
-packages/daemon/src/lib/pins/types.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
 
 # PR #15 — add browser session control
 packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
@@ -104,5 +97,3 @@ packages/daemon/src/lib/terminal/policy.ts # PR #21: establish terminal IO polic
 packages/daemon/src/lib/terminal/runtime-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 
-# Unit API — the daemon HTTP API server
-packages/daemon/src/lib/api/body.ts # Unit API: the parse-don't-cast body/query boundary; the three mandated feeds are all GET, so the first unit to mount a POST route wires this and deletes this line
