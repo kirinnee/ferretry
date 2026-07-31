@@ -55,6 +55,26 @@ const frame = (pageId: string): ArrayBuffer => {
 };
 
 describe('RemoteBrowserViewer', () => {
+  it('stays idle while its retained surface is inactive', () => {
+    const sockets: FakeSocket[] = [];
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        streamTicket="ticket"
+        status={running('session-a')}
+        isActive={false}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    expect(sockets).toHaveLength(0);
+    expect(JSON.stringify(renderer.toJSON())).toContain('Display idle');
+  });
+
   it('tears down the old daemon stream when an identical session is re-scoped', () => {
     const sockets: FakeSocket[] = [];
     const socketFactory = () => {
@@ -115,5 +135,29 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('blob:latest-frame');
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 5)));
     expect(JSON.stringify(renderer.toJSON())).toContain('Display stalled');
+  });
+
+  it('shows an actionable transport failure and reconnects after an unexpected close', async () => {
+    const sockets: FakeSocket[] = [];
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        streamTicket="ticket"
+        status={running('session-a')}
+        reconnectAfterMs={1}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    run(() => sockets[0]?.emit('error', new Event('error')));
+    expect(JSON.stringify(renderer.toJSON())).toContain('authenticated remote display connection failed');
+    run(() => sockets[0]?.emit('close', new CloseEvent('close', { code: 1006 })));
+    expect(JSON.stringify(renderer.toJSON())).toContain('Remote display disconnected; reconnecting');
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 5)));
+    expect(sockets).toHaveLength(2);
   });
 });
