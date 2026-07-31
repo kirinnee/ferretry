@@ -4,10 +4,19 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   decodeRemoteBrowserFrame,
   fetchRemoteBrowserStatus,
+  isLocalPasteChord,
+  nextRemoteClickRun,
+  REMOTE_MAX_CLICK_COUNT,
   remoteBrowserStreamUrl,
   remoteCanvasPoint,
+  remoteInputModifiers,
+  remoteKeyInput,
+  remoteKeyRelease,
+  remotePageLabel,
+  remotePointerButton,
   remoteViewportForContainer,
   runRemoteBrowserAction,
+  type RemoteKeyEvent,
 } from '../../src/lib/remote-browser.ts';
 import type { BrowserStatus } from '@ferretry/protocol';
 
@@ -109,5 +118,96 @@ describe('remote browser frame and geometry helpers', () => {
       x: 199,
       y: 0,
     });
+  });
+});
+
+const keyEvent = (overrides: Partial<RemoteKeyEvent> = {}): RemoteKeyEvent => ({
+  key: 'a',
+  code: 'KeyA',
+  keyCode: 65,
+  location: 0,
+  repeat: false,
+  altKey: false,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  ...overrides,
+});
+
+describe('remote browser input translation', () => {
+  it('continues a click run only inside the time and distance window', () => {
+    const first = nextRemoteClickRun(null, { x: 10, y: 10 }, 1_000);
+    expect(first).toEqual({ count: 1, at: 1_000, x: 10, y: 10 });
+    const second = nextRemoteClickRun(first, { x: 14, y: 6 }, 1_400);
+    expect(second.count).toBe(2);
+    const third = nextRemoteClickRun(second, { x: 14, y: 6 }, 1_500);
+    expect(third.count).toBe(3);
+    // The run is capped, so a fourth rapid press stays a triple-click.
+    expect(nextRemoteClickRun(third, { x: 14, y: 6 }, 1_600).count).toBe(REMOTE_MAX_CLICK_COUNT);
+    // Too slow restarts the run; so does drifting past the slop box on either axis.
+    expect(nextRemoteClickRun(third, { x: 14, y: 6 }, 2_500).count).toBe(1);
+    expect(nextRemoteClickRun(third, { x: 40, y: 6 }, 1_650).count).toBe(1);
+    expect(nextRemoteClickRun(third, { x: 14, y: 40 }, 1_650).count).toBe(1);
+  });
+
+  it('recognises only the local paste chord', () => {
+    expect(isLocalPasteChord({ key: 'v', ctrlKey: true, metaKey: false })).toBe(true);
+    expect(isLocalPasteChord({ key: 'V', ctrlKey: false, metaKey: true })).toBe(true);
+    expect(isLocalPasteChord({ key: 'v', ctrlKey: false, metaKey: false })).toBe(false);
+    expect(isLocalPasteChord({ key: 'c', ctrlKey: true, metaKey: false })).toBe(false);
+  });
+
+  it('maps pointer buttons and packs modifier flags', () => {
+    expect([0, 1, 2, 3, 4].map(remotePointerButton)).toEqual(['left', 'middle', 'right', 'back', 'forward']);
+    expect(remotePointerButton(9)).toBe('none');
+    expect(remotePointerButton(-1)).toBe('none');
+    expect(remoteInputModifiers({ altKey: false, ctrlKey: false, metaKey: false, shiftKey: false })).toBe(0);
+    expect(remoteInputModifiers({ altKey: true, ctrlKey: true, metaKey: true, shiftKey: true })).toBe(15);
+    expect(remoteInputModifiers({ altKey: false, ctrlKey: true, metaKey: false, shiftKey: true })).toBe(10);
+  });
+
+  it('attaches text only to an unmodified printable key-down', () => {
+    expect(remoteKeyInput(keyEvent({ shiftKey: true, key: 'A' }), 'keyDown')).toMatchObject({
+      kind: 'key',
+      type: 'keyDown',
+      text: 'A',
+      unmodifiedText: 'A',
+      modifiers: 8,
+    });
+    // A chord must not also insert its character, and a key-up never carries text.
+    expect(remoteKeyInput(keyEvent({ ctrlKey: true }), 'keyDown')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent({ metaKey: true }), 'keyDown')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent({ altKey: true }), 'keyDown')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent({ key: 'Enter', code: 'Enter' }), 'keyDown')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent(), 'keyUp')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent({ location: 3, repeat: true }), 'keyDown')).toMatchObject({
+      isKeypad: true,
+      autoRepeat: true,
+    });
+  });
+
+  it('releases a retained key without its text or stale modifiers', () => {
+    expect(remoteKeyRelease(remoteKeyInput(keyEvent({ shiftKey: true }), 'keyDown'))).toEqual({
+      kind: 'key',
+      type: 'keyUp',
+      key: 'a',
+      code: 'KeyA',
+      windowsVirtualKeyCode: 65,
+      nativeVirtualKeyCode: 65,
+      modifiers: 0,
+      autoRepeat: false,
+      isKeypad: false,
+    });
+    // Only key events are ever retained, so nothing else can be released.
+    expect(remoteKeyRelease({ kind: 'insertText', text: 'hi' })).toBeNull();
+  });
+
+  it('labels a page from the real title, then its host, then its url', () => {
+    expect(remotePageLabel({ id: '1', url: 'https://example.test/a', title: '  Docs  ' })).toBe('Docs');
+    expect(remotePageLabel({ id: '1', url: 'https://example.test/a', title: '' })).toBe('example.test');
+    expect(remotePageLabel({ id: '1', url: 'about:blank', title: '' })).toBe('New tab');
+    expect(remotePageLabel({ id: '1', url: '', title: '' })).toBe('New tab');
+    expect(remotePageLabel({ id: '1', url: 'not a url', title: '' })).toBe('not a url');
+    expect(remotePageLabel({ id: '1', url: 'file:///tmp/x', title: '' })).toBe('file:///tmp/x');
   });
 });
