@@ -7,8 +7,14 @@ import pkg from '../package.json' with { type: 'json' };
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
-import { createFyClient, environmentSessionId } from '../src/adapters/tasks/fy-client-factory';
+import {
+  createFyClient,
+  environmentBoardCredentials,
+  environmentSessionId,
+} from '../src/adapters/tasks/fy-client-factory';
+import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
+import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
@@ -153,6 +159,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       io: world.io,
       files: new BunTextFileReader(),
       environmentSessionId: environmentSessionId(world.environment),
+    }),
+  ({ program, world }) =>
+    registerTaskBoardCommands(program, {
+      gateway: new FyTaskBoardGateway(() => createFyClient(world.environment, assertSemver(pkg.version))),
+      io: world.io,
+      credentials: environmentBoardCredentials(world.environment),
     }),
 ];
 

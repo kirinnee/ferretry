@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { BunTextFileReader } from '../../../src/adapters/tasks/bun-text-file-reader';
-import { createFyClient, environmentSessionId } from '../../../src/adapters/tasks/fy-client-factory';
+import {
+  createFyClient,
+  environmentBoardCredentials,
+  environmentSessionId,
+} from '../../../src/adapters/tasks/fy-client-factory';
 
 const workspace = await mkdtemp(join(tmpdir(), 'fy-task-adapters-'));
 
@@ -56,5 +60,26 @@ describe('resolving the daemon connection', () => {
     should(environmentSessionId({ FY_SESSION_ID: '  session-7  ' })).equal('session-7');
     should(environmentSessionId({ FY_SESSION_ID: '   ' })).be.undefined();
     should(environmentSessionId({})).be.undefined();
+  });
+
+  it('should collect the board proofs the daemon exported', () => {
+    // Act
+    const actual = environmentBoardCredentials({
+      FY_BOARD_CAPABILITY: ' peer ',
+      FY_BOARD_ADMIN_CAPABILITY: 'admin',
+      FY_SESSION_BOARD_CAPABILITY: 'session',
+      FY_BOARD_INVITATION_CAPABILITY: 'invite',
+    });
+
+    // Assert
+    should(actual).eql({ peer: 'peer', admin: 'admin', session: 'session', invitation: 'invite' });
+  });
+
+  it('should report every board proof absent on a host that exported none', () => {
+    // Act — kteam fell back to reading 0600 files under its state home; this CLI deliberately does not.
+    const actual = environmentBoardCredentials({ FY_BOARD_CAPABILITY: '   ' });
+
+    // Assert
+    should(actual).eql({ peer: undefined, admin: undefined, session: undefined, invitation: undefined });
   });
 });
