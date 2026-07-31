@@ -6,6 +6,7 @@ export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/analytics/analytics-result-table.tsx';
 export * from '../features/analytics/analytics-response-view.tsx';
 export * from '../features/analytics/analytics-query-complete.ts';
+export * from '../features/analytics/analytics-query-autocomplete.tsx';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
 export * from '../features/tasks/task-presentation.ts';
