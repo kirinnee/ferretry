@@ -12,6 +12,7 @@
     "./components/transcript": "./src/components/transcript.tsx",
     "./shell/side-pane": "./src/shell/side-pane.tsx",
     "./features/analytics-result-table": "./src/features/analytics/analytics-result-table.tsx",
+    "./features/analytics-response-view": "./src/features/analytics/analytics-response-view.tsx",
     "./features/analytics-time-series": "./src/features/analytics/analytics-time-series.tsx",
     "./features/browser-login-banner": "./src/features/browser/browser-login-banner.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
