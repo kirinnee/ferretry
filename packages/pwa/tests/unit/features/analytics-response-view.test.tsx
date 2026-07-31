@@ -65,6 +65,35 @@ const raw = (overrides: Partial<Extract<AnalyticsResponse, { kind: 'raw' }>> = {
     ...overrides,
   }) as AnalyticsResponse;
 
+const aggregate = (): AnalyticsResponse =>
+  ({
+    kind: 'aggregate',
+    aggregation: 'sum',
+    query: 'sum by (model)',
+    parsed: { aggregation: 'sum', groupBy: ['model'], matchers: [] },
+    scope: { allSessions: true, indexed: 2, matched: 1 },
+    index,
+    results: [
+      {
+        labels: { model: 'gpt-5.6-sol' },
+        sessions: 1,
+        rates: { stall: 0, failure: 0, completion: 100 },
+        tokens: { value: 42, known: 1, total: 1 },
+        inputTokens: { value: 30, known: 1, total: 1 },
+        outputTokens: { value: 12, known: 1, total: 1 },
+        cachedInputTokens: { value: 0, known: 1, total: 1 },
+        cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
+        cacheWrite5mInputTokens: { value: 0, known: 1, total: 1 },
+        cacheWrite1hInputTokens: { value: 0, known: 1, total: 1 },
+        equivalentApiCostUsdMicros: { value: 1_250_000, known: 1, total: 1 },
+        turns: { value: 1, known: 1, total: 1 },
+        durationMs: { value: 1, known: 1, total: 1 },
+        timeToFirstOutputMs: { value: 1, known: 1, total: 1 },
+        contextEndPercent: { value: 1, known: 1, total: 1 },
+      },
+    ],
+  }) as AnalyticsResponse;
+
 describe('AnalyticsResponseView', () => {
   it('renders a raw daemon response without converting unknown cost to zero', () => {
     const renderer = render(<AnalyticsResponseView response={raw()} />);
@@ -80,6 +109,11 @@ describe('AnalyticsResponseView', () => {
     const renderer = render(<AnalyticsResponseView response={raw({ results: [], truncated: true })} />);
     expect(renderer.root.findByProps({ role: 'status' }).children.join('')).toContain('server-capped');
     expect(JSON.stringify(renderer.toJSON())).toContain('No indexed session matched this query.');
+  });
+
+  it('delegates aggregate responses to the daemon-backed sortable ledger', () => {
+    const renderer = render(<AnalyticsResponseView response={aggregate()} />);
+    expect(renderer.root.findByType('caption').children.join('')).toContain('Result for sum by (model)');
   });
 
   it('explains a daemon index catch-up without hiding other errors', () => {
