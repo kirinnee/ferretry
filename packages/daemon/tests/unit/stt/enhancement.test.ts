@@ -5,6 +5,7 @@ import {
   buildEnhancementBody,
   classifyEnhancementOutcome,
   DEFAULT_ENHANCEMENT_PROVIDERS,
+  ENHANCEMENT_LIMITS,
   type EnhancementHttpRequest,
   type EnhancementOutcome,
   type EnhancementProviderTable,
@@ -188,6 +189,34 @@ describe('enhancement request parsing', () => {
     should(actual.notAnObject.code).equal('bad_request');
   });
 
+  it('should keep the daemon transcript cap and the wire schema in agreement', () => {
+    // Act — the cap the daemon documents must be exactly the cap that is enforced
+    const actual = {
+      atCap: parseEnhancementRequest(
+        request({ text: 'a'.repeat(ENHANCEMENT_LIMITS.maxTextChars) }),
+        DEFAULT_ENHANCEMENT_PROVIDERS,
+      ).text.length,
+      overCap: failedParse(request({ text: 'a'.repeat(ENHANCEMENT_LIMITS.maxTextChars + 1) })),
+    };
+
+    // Assert
+    should(actual.atCap).equal(ENHANCEMENT_LIMITS.maxTextChars);
+    should(actual.overCap).deepEqual({ error: 'text exceeds the maximum size', code: 'too_long' });
+  });
+
+  it('should bound each context entry as it is consumed, not after joining them', () => {
+    // Arrange — ten schema-valid entries far larger than the cap
+    const entries = Array.from({ length: 10 }, (_, index) => `${'x'.repeat(50_000)}end-${index}`);
+
+    // Act
+    const actual = parseEnhancementRequest(request({ context: entries }), DEFAULT_ENHANCEMENT_PROVIDERS);
+
+    // Assert — only the cap survives, and it is the most recent context
+    should(actual.context.join('\n').length).be.belowOrEqual(ENHANCEMENT_LIMITS.maxContextChars);
+    should(actual.context.at(-1)?.endsWith('end-9')).be.true();
+    should(actual.context.length).equal(1);
+  });
+
   it('should map every error code to a stable HTTP status and a body-free view', () => {
     // Act
     const failure = failedParse(request({ provider: 'openai' }));
@@ -301,6 +330,7 @@ describe('enhancement outcome classification', () => {
       timeout: classify({ kind: 'timeout' }),
       unreachable: classify({ kind: 'unreachable', cause: new Error('econnrefused') }),
       unreadable: classify({ kind: 'unreadable' }),
+      oversized: classify({ kind: 'oversized' }),
       unauthorized: classify({ kind: 'status', status: 401 }),
       forbidden: classify({ kind: 'status', status: 403 }),
       missingModel: classify({ kind: 'status', status: 404 }),
@@ -316,6 +346,7 @@ describe('enhancement outcome classification', () => {
       timeout: { code: 'timeout', retryAfterMs: undefined },
       unreachable: { code: 'provider_unreachable', retryAfterMs: undefined },
       unreadable: { code: 'malformed_response', retryAfterMs: undefined },
+      oversized: { code: 'malformed_response', retryAfterMs: undefined },
       unauthorized: { code: 'secret_invalid', retryAfterMs: undefined },
       forbidden: { code: 'secret_invalid', retryAfterMs: undefined },
       missingModel: { code: 'bad_model', retryAfterMs: undefined },

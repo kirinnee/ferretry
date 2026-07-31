@@ -1,6 +1,7 @@
 import {
   STT_BITS_PER_SAMPLE,
   STT_CHANNELS,
+  STT_MAX_DURATION_SECONDS,
   STT_SAMPLE_RATE,
   type SttModelStatus,
   type SttStatus,
@@ -11,6 +12,9 @@ import { SttError } from './errors.ts';
 
 /** Headroom for a WAV container's header and any unknown chunks it carries. */
 export const WAV_CONTAINER_OVERHEAD_BYTES = 4_096;
+
+/** The default ceiling on one dictation, in seconds. */
+export const STT_MAX_DURATION_SECONDS_DEFAULT = STT_MAX_DURATION_SECONDS;
 
 export interface SttLimits {
   readonly sampleRate: typeof STT_SAMPLE_RATE;

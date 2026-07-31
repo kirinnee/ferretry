@@ -23,13 +23,21 @@ import { SttEnhancementError } from './errors.ts';
  * - There is no fallback to another provider and none to the raw transcript.
  */
 
-/** Character caps applied before any request body is built. */
+/**
+ * Character caps applied before any request body is built.
+ *
+ * `maxTextChars` restates the transcript cap the wire schema enforces, so the
+ * daemon documents its own limit; a unit test pins the two together and fails if
+ * the schema ever moves without this constant.
+ */
 export const ENHANCEMENT_LIMITS = {
   maxTextChars: 8_000,
   maxContextChars: 2_000,
   maxUserContextChars: 2_000,
   maxDictionaryChars: 4_000,
   maxModelIdChars: 128,
+  /** Hard byte ceiling for a provider reply: the output cap in worst-case UTF-8 plus a JSON envelope. */
+  maxResponseBytes: 16_000 * 4 + 4_096,
   /** Guards against a runaway provider reply; not a promise of shape. */
   maxOutputChars: 16_000,
 } as const;
@@ -131,10 +139,25 @@ function boundedTail(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : value.slice(value.length - maxChars);
 }
 
+/**
+ * Each entry is bounded as it is consumed and the walk stops at the total cap,
+ * so the peak allocation is the cap rather than the sum of what was sent. The
+ * earlier version joined every raw entry first and trimmed afterwards, which
+ * meant ten schema-valid multi-megabyte entries were all materialized to retain
+ * two thousand characters. Entries are taken newest-last, so the most recent
+ * context is the context that survives.
+ */
 function normalizedContext(context: readonly string[] | undefined): readonly string[] {
-  const entries = (context ?? []).map(entry => entry.trim()).filter(entry => entry.length > 0);
-  const joined = boundedTail(entries.join('\n'), ENHANCEMENT_LIMITS.maxContextChars);
-  return joined.length === 0 ? [] : joined.split('\n');
+  const entries: string[] = [];
+  let remaining = ENHANCEMENT_LIMITS.maxContextChars;
+  for (const raw of [...(context ?? [])].reverse()) {
+    if (remaining <= 0) break;
+    const entry = boundedTail(raw.slice(-ENHANCEMENT_LIMITS.maxContextChars).trim(), remaining);
+    if (entry.length === 0) continue;
+    entries.push(entry);
+    remaining -= entry.length + 1;
+  }
+  return entries.reverse();
 }
 
 function normalizedDictionary(dictionary: SttEnhancementRequest['dictionary']): readonly string[] {
@@ -276,6 +299,7 @@ export function requireEnhancementSecret(secret: string | undefined): string {
 /** What the HTTP adapter reports back; the body is only read on success. */
 export type EnhancementOutcome =
   | { readonly kind: 'completion'; readonly payload: unknown }
+  | { readonly kind: 'oversized' }
   | { readonly kind: 'unreadable' }
   | { readonly kind: 'status'; readonly status: number; readonly retryAfterSeconds?: number }
   | { readonly kind: 'timeout' }
@@ -326,6 +350,9 @@ export function classifyEnhancementOutcome(
     throw new SttEnhancementError('provider_unreachable', 'enhancement provider is unreachable', undefined, {
       cause: outcome.cause,
     });
+  }
+  if (outcome.kind === 'oversized') {
+    throw new SttEnhancementError('malformed_response', 'enhancement provider returned an oversized response');
   }
   if (outcome.kind === 'unreadable') {
     throw new SttEnhancementError('malformed_response', 'enhancement provider returned an unreadable response');

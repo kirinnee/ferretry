@@ -8,9 +8,16 @@ import type {
 
 export type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
+/** The narrow slice of a byte stream this transport consumes. */
+interface ChunkReader {
+  read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  cancel(): Promise<void>;
+}
+
 /**
- * The chat-completions transport. It owns the abort budget and the body
- * handling and reports facts only — the domain decides what each fact means.
+ * The chat-completions transport. It owns the abort budget, the reply size
+ * ceiling and the body handling, and reports facts only — the domain decides
+ * what each fact means.
  */
 export class FetchEnhancementTransport implements EnhancementTransport {
   constructor(private readonly fetchImplementation: FetchLike = (input, init) => fetch(input, init)) {}
@@ -41,7 +48,7 @@ export class FetchEnhancementTransport implements EnhancementTransport {
 
     if (!response.ok) {
       // The body could echo the transcript and is not needed to classify the
-      // failure, so it is discarded rather than read — but it must be released,
+      // failure, so it is released rather than read — but it must be released,
       // or the connection leaks for the rest of the process's life.
       await discard(response);
       const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
@@ -50,11 +57,68 @@ export class FetchEnhancementTransport implements EnhancementTransport {
         : { kind: 'status', status: response.status, retryAfterSeconds };
     }
 
+    const text = await this.readBounded(response, request.maxResponseBytes, controller);
+    if (text.kind !== 'text') return text;
     try {
-      return { kind: 'completion', payload: await response.json() };
+      return { kind: 'completion', payload: JSON.parse(text.value) };
     } catch {
-      return controller.signal.aborted ? { kind: 'timeout' } : { kind: 'unreadable' };
+      return { kind: 'unreadable' };
     }
+  }
+
+  /**
+   * Read the reply through a byte counter and stop at the ceiling.
+   *
+   * `response.json()` would materialize the whole body first, so a hostile or
+   * hijacked provider host could exhaust the daemon's memory with one streamed
+   * reply — the output cap was only applied after the bytes were already
+   * resident. A declared length over the ceiling is refused without reading at
+   * all, and an undeclared one is cut off the moment it crosses it.
+   */
+  private async readBounded(
+    response: Response,
+    maxResponseBytes: number,
+    controller: AbortController,
+  ): Promise<{ kind: 'text'; value: string } | EnhancementOutcome> {
+    const declared = Number(response.headers.get('content-length') ?? '');
+    if (Number.isFinite(declared) && declared > maxResponseBytes) {
+      await discard(response);
+      return { kind: 'oversized' };
+    }
+    const body = response.body;
+    if (body === null) return { kind: 'unreadable' };
+    const reader: ChunkReader = body.getReader();
+    const decoder = new TextDecoder();
+    let received = 0;
+    let value = '';
+    for (;;) {
+      let chunk: { done: boolean; value?: Uint8Array };
+      try {
+        chunk = await reader.read();
+      } catch {
+        await release(reader);
+        return controller.signal.aborted ? { kind: 'timeout' } : { kind: 'unreadable' };
+      }
+      if (chunk.done) break;
+      const bytes = chunk.value;
+      if (bytes === undefined) continue;
+      received += bytes.byteLength;
+      if (received > maxResponseBytes) {
+        controller.abort();
+        await release(reader);
+        return { kind: 'oversized' };
+      }
+      value += decoder.decode(bytes, { stream: true });
+    }
+    return { kind: 'text', value: value + decoder.decode() };
+  }
+}
+
+async function release(reader: ChunkReader): Promise<void> {
+  try {
+    await reader.cancel();
+  } catch {
+    // A reader that cannot be cancelled is already released.
   }
 }
 

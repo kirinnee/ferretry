@@ -122,9 +122,9 @@ class RecordingRunner implements SttCommandRunner {
 
   constructor(private readonly delegate: SttCommandRunner = new BunCommandRunner()) {}
 
-  async run(argv: readonly string[]): Promise<SttCommandResult> {
+  async run(argv: readonly string[], timeoutMs: number): Promise<SttCommandResult> {
     this.argv.push([...argv]);
-    return await this.delegate.run(argv);
+    return await this.delegate.run(argv, timeoutMs);
   }
 }
 
@@ -173,7 +173,7 @@ async function buildArchive(): Promise<Uint8Array> {
     await writeFile(join(root, 'joiner.int8.onnx'), JOINER);
     await writeFile(join(root, 'tokens.txt'), TOKENS);
     const archive = join(scratch, 'model.tar.bz2');
-    const built = await new BunCommandRunner().run(['tar', '-cjf', archive, '-C', scratch, 'model-root']);
+    const built = await new BunCommandRunner().run(['tar', '-cjf', archive, '-C', scratch, 'model-root'], 30_000);
     should(built.code).equal(0);
     return new Uint8Array(await readFile(archive));
   } finally {
@@ -383,6 +383,36 @@ describe('model store failure handling', () => {
     should(actual).deepEqual({ code: 'install_failed', message: 'model download stalled' });
   });
 
+  it('should give up on a stream whose cancellation never settles', async () => {
+    // Arrange — pull() and cancel() both hang, the worst case for the reader
+    const subject = store([browser, daemon], {
+      stallTimeoutMs: 25,
+      fetch: async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              controller.enqueue(encode('he'));
+              await Bun.sleep(10_000);
+            },
+            cancel: async () => {
+              await Bun.sleep(10_000);
+            },
+          }),
+        ),
+    });
+
+    // Act — the install must settle on its own, well inside the stream's stall
+    const actual = await Promise.race([
+      failureOf(() => subject.install(browser.id)),
+      Bun.sleep(2_000).then(() => 'still pending'),
+    ]);
+
+    // Assert
+    should(actual).deepEqual({ code: 'install_failed', message: 'model download stalled' });
+    should((await subject.modelStatus(browser.id)).state).equal('error');
+    should((await subject.startInstall(browser.id)).started).be.true();
+  });
+
   it('should fail the install when extraction fails or the archive has another layout', async () => {
     // Arrange
     const bytes = await buildArchive();
@@ -408,15 +438,15 @@ describe('model store failure handling', () => {
     const bytes = await buildArchive();
     const archived = daemonFixture(bytes.byteLength, sha256(bytes));
     const truncating: SttCommandRunner = {
-      run: async argv => {
-        const result = await new BunCommandRunner().run(argv);
+      run: async (argv, timeoutMs) => {
+        const result = await new BunCommandRunner().run(argv, timeoutMs);
         await writeFile(join(String(argv[4]), 'model-root', 'tokens.txt'), encode('x'.repeat(TOKENS.byteLength)));
         return result;
       },
     };
     const removing: SttCommandRunner = {
-      run: async argv => {
-        const result = await new BunCommandRunner().run(argv);
+      run: async (argv, timeoutMs) => {
+        const result = await new BunCommandRunner().run(argv, timeoutMs);
         await rm(join(String(argv[4]), 'model-root', 'tokens.txt'));
         return result;
       },
@@ -580,7 +610,7 @@ describe('model store inspection', () => {
 describe('bun command runner', () => {
   it('should report the exit code, stdout, and stderr of a real command', async () => {
     // Act
-    const actual = await new BunCommandRunner().run(['sh', '-c', 'echo out; echo err >&2; exit 3']);
+    const actual = await new BunCommandRunner().run(['sh', '-c', 'echo out; echo err >&2; exit 3'], 30_000);
 
     // Assert
     should(actual.code).equal(3);

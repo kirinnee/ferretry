@@ -6,12 +6,38 @@ import {
   requiredSttDirectories,
   resolveStateHome,
   type SttError,
+  sttInstallScratchPath,
   sttModelDirectory,
 } from '../../../src/lib/index.ts';
+
+function refusalOf(act: () => unknown): string {
+  try {
+    act();
+    return 'accepted';
+  } catch (error) {
+    return (error as SttError).code;
+  }
+}
 
 const paths = createSttPaths(createFoundationPaths(resolveStateHome({ fyHome: '/tmp/fy-home', homeDirectory: '/' })));
 
 describe('STT paths', () => {
+  it('should validate the model id and the suffix of an install scratch path', () => {
+    // Act
+    const actual = {
+      valid: sttInstallScratchPath(paths, 'parakeet-v3', 'install-abc123'),
+      unsafeId: refusalOf(() => sttInstallScratchPath(paths, 'a/../../victim', 'install-1')),
+      unsafeSuffix: refusalOf(() => sttInstallScratchPath(paths, 'parakeet-v3', '../escape')),
+      emptySuffix: refusalOf(() => sttInstallScratchPath(paths, 'parakeet-v3', '')),
+    };
+
+    // Assert
+    should(actual.valid).equal('/tmp/fy-home/models/.parakeet-v3.install-abc123');
+    should(actual.unsafeId).equal('model_not_found');
+    should(actual.unsafeSuffix).equal('install_failed');
+    should(actual.emptySuffix).equal('install_failed');
+  });
+
   it('should place weights beside the state home and diagnostics under the state tree', () => {
     // Assert
     should(paths).deepEqual({

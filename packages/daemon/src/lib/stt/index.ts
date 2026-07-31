@@ -5,4 +5,6 @@ export * from './errors.ts';
 export * from './models.ts';
 export * from './paths.ts';
 export * from './ports.ts';
+export * from './routes.ts';
 export * from './status.ts';
+export * from './worker-protocol.ts';

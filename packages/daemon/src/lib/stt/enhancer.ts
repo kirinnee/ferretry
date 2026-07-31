@@ -4,6 +4,7 @@ import {
   classifyEnhancementOutcome,
   DEFAULT_ENHANCEMENT_PROVIDERS,
   DEFAULT_ENHANCEMENT_TIMEOUT_MS,
+  ENHANCEMENT_LIMITS,
   type EnhancementProviderTable,
   type EnhancementProviderView,
   enhancementHeaders,
@@ -55,6 +56,7 @@ export class SttEnhancementService {
       headers: enhancementHeaders(secret),
       body: JSON.stringify(buildEnhancementBody(request)),
       timeoutMs: this.timeoutMs,
+      maxResponseBytes: ENHANCEMENT_LIMITS.maxResponseBytes,
     });
 
     return classifyEnhancementOutcome(outcome, request, Math.max(0, this.clock.monotonicMs() - startedAt));

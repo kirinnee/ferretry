@@ -17,6 +17,7 @@ import {
   publicModelFile,
   STT_MODEL_MANIFEST,
   SttError,
+  sttInstallScratchPath,
   SttModelCatalog,
   type SttModelDefinition,
   type SttModelFileDefinition,
@@ -27,16 +28,24 @@ import {
 const DIRECTORY_MODE = 0o700;
 const FILE_MODE = 0o600;
 const MAX_MESSAGE_CHARS = 500;
+const STREAM_RELEASE_BUDGET_MS = 1_000;
+const DEFAULT_EXTRACT_TIMEOUT_MS = 600_000;
 
 export interface SttCommandResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
+  /** True when the runner had to kill the command to get it to stop. */
+  readonly timedOut?: boolean;
 }
 
-/** Runs an external archive tool. The only process this store ever starts. */
+/**
+ * Runs an external archive tool. The only process this store ever starts, and it
+ * must always be bounded: an extraction that never returned used to wedge the
+ * model in the installing state for the lifetime of the daemon.
+ */
 export interface SttCommandRunner {
-  run(argv: readonly string[]): Promise<SttCommandResult>;
+  run(argv: readonly string[], timeoutMs: number): Promise<SttCommandResult>;
 }
 
 export type SttDownloadFetch = (url: string) => Promise<Response>;
@@ -50,6 +59,8 @@ export interface SttModelStoreOptions {
   readonly uniqueId: () => string;
   /** How long a download may make no progress before it is abandoned. */
   readonly stallTimeoutMs?: number;
+  /** How long an archive extraction may run before the child is killed. */
+  readonly extractTimeoutMs?: number;
 }
 
 export interface PublicSttModelFile {
@@ -91,6 +102,45 @@ async function sha256File(target: string): Promise<string> {
   return digest.digest('hex');
 }
 
+/**
+ * Releasing a stream must never become the caller's problem: the cancel() of a
+ * stream whose pull() stopped responding can hang for exactly as long, which
+ * left install() pending forever and the model stuck in `installing`.
+ */
+async function releaseStream(release: () => Promise<void>, budgetMs: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bounded = new Promise<void>(resolve => {
+    timer = setTimeout(resolve, budgetMs);
+  });
+  const attempt = (async () => {
+    await release();
+  })().catch(() => undefined);
+  try {
+    await Promise.race([attempt, bounded]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The narrow slice of a file handle the download writer needs. */
+export interface ChunkWriter {
+  write(chunk: Uint8Array, offset: number, length: number): Promise<{ bytesWritten: number }>;
+}
+
+/**
+ * A single write() may be short. Ignoring the count truncates the file while the
+ * digest — taken over the whole chunk — still matches, so the corruption would
+ * surface only as a checksum failure much later, or not at all.
+ */
+export async function writeAll(handle: ChunkWriter, chunk: Uint8Array): Promise<void> {
+  let written = 0;
+  while (written < chunk.byteLength) {
+    const { bytesWritten } = await handle.write(chunk, written, chunk.byteLength - written);
+    if (bytesWritten <= 0) throw new SttError('install_failed', 'model download write made no progress');
+    written += bytesWritten;
+  }
+}
+
 async function pathExists(target: string): Promise<boolean> {
   const info = await lstat(target).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined;
@@ -109,6 +159,8 @@ export class SttModelStore {
   private readonly catalog: SttModelCatalog;
   private readonly paths: SttPaths;
   private readonly stallTimeoutMs: number;
+  private readonly releaseBudgetMs: number;
+  private readonly extractTimeoutMs: number;
   private readonly installs = new Map<string, SttInstallStatus>();
   private readonly active = new Map<string, Promise<SttModelStatus>>();
   private readonly starting = new Map<string, Promise<{ started: boolean; status: SttModelStatus }>>();
@@ -119,6 +171,8 @@ export class SttModelStore {
     this.catalog = options.catalog ?? new SttModelCatalog();
     this.paths = options.paths;
     this.stallTimeoutMs = options.stallTimeoutMs ?? 60_000;
+    this.releaseBudgetMs = Math.min(this.stallTimeoutMs, STREAM_RELEASE_BUDGET_MS);
+    this.extractTimeoutMs = options.extractTimeoutMs ?? DEFAULT_EXTRACT_TIMEOUT_MS;
   }
 
   definition(modelId: string): SttModelDefinition {
@@ -227,7 +281,7 @@ export class SttModelStore {
   }
 
   private async performInstall(definition: SttModelDefinition): Promise<SttModelStatus> {
-    const temporary = join(this.paths.models, `.${definition.id}.install-${this.options.uniqueId()}`);
+    const temporary = sttInstallScratchPath(this.paths, definition.id, `install-${this.options.uniqueId()}`);
     const staged = join(temporary, 'ready');
     try {
       await mkdir(this.paths.models, { recursive: true, mode: DIRECTORY_MODE });
@@ -260,15 +314,11 @@ export class SttModelStore {
       this.record(definition, { phase: 'extracting', receivedBytes: artifact.bytes });
       const unpack = join(temporary, 'unpack');
       await mkdir(unpack, { mode: DIRECTORY_MODE });
-      const result = await this.options.runner.run([
-        'tar',
-        '-xjf',
-        archive,
-        '-C',
-        unpack,
-        '--no-same-owner',
-        '--no-same-permissions',
-      ]);
+      const result = await this.options.runner.run(
+        ['tar', '-xjf', archive, '-C', unpack, '--no-same-owner', '--no-same-permissions'],
+        this.extractTimeoutMs,
+      );
+      if (result.timedOut === true) throw new SttError('install_failed', 'model extraction timed out');
       if (result.code !== 0) {
         throw new SttError('install_failed', `model extraction failed: ${result.stderr.slice(0, MAX_MESSAGE_CHARS)}`);
       }
@@ -313,7 +363,7 @@ export class SttModelStore {
 
     const destination = modelDirectoryFor(this.paths, definition);
     const quarantine = (await pathExists(destination))
-      ? join(this.paths.models, `.${definition.id}.replaced-${this.options.uniqueId()}`)
+      ? sttInstallScratchPath(this.paths, definition.id, `replaced-${this.options.uniqueId()}`)
       : undefined;
     if (quarantine !== undefined) await rename(destination, quarantine);
     try {
@@ -348,15 +398,16 @@ export class SttModelStore {
         cause: error,
       });
     });
-    if (!response.ok || response.body === null) {
-      await response.body?.cancel().catch(() => undefined);
+    const body = response.body;
+    if (!response.ok || body === null) {
+      if (body !== null) await releaseStream(() => body.cancel(), this.releaseBudgetMs);
       throw new SttError('install_failed', `model download failed with HTTP ${response.status}`);
     }
     if (!declaredSizeMatches(response.headers.get('content-length'), artifact.bytes)) {
-      await response.body.cancel().catch(() => undefined);
+      await releaseStream(() => body.cancel(), this.releaseBudgetMs);
       throw new SttError('install_failed', 'model download size does not match the pinned manifest');
     }
-    await this.streamToFile(definition, artifact, target, response.body);
+    await this.streamToFile(definition, artifact, target, body);
   }
 
   private async streamToFile(
@@ -378,12 +429,12 @@ export class SttModelStore {
           throw new SttError('install_failed', 'model download exceeded its pinned size');
         }
         digest.update(chunk);
-        await handle.write(chunk, 0, chunk.byteLength);
+        await writeAll(handle, chunk);
         this.record(definition, { phase: 'downloading', receivedBytes: artifact.receivedBefore + received });
       }
     } finally {
       await handle.close();
-      await reader.cancel().catch(() => undefined);
+      await releaseStream(() => reader.cancel(), this.releaseBudgetMs);
     }
     if (received !== artifact.bytes) throw new SttError('install_failed', 'model download was incomplete');
     if (digest.digest('hex') !== artifact.sha256) {
@@ -410,15 +461,43 @@ export class SttModelStore {
   }
 }
 
-/** Runs a command with Bun's spawner. Used only for archive extraction. */
+/**
+ * Runs a command with Bun's spawner, under a deadline. The child is killed once
+ * the deadline passes — first politely, then outright — so no extraction can
+ * outlive its install and the install always settles.
+ */
 export class BunCommandRunner implements SttCommandRunner {
-  async run(argv: readonly string[]): Promise<SttCommandResult> {
-    const process_ = Bun.spawn([...argv], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(process_.stdout).text(),
-      new Response(process_.stderr).text(),
-      process_.exited,
-    ]);
-    return { code, stdout, stderr };
+  constructor(private readonly killGraceMs = 2_000) {}
+
+  async run(argv: readonly string[], timeoutMs: number): Promise<SttCommandResult> {
+    const child = Bun.spawn([...argv], { stdout: 'pipe', stderr: 'pipe', stdin: 'ignore' });
+    let timedOut = false;
+    const insist = setTimeout(() => {
+      timedOut = true;
+      signal(child, 'SIGTERM');
+    }, timeoutMs);
+    const escalate = setTimeout(() => {
+      signal(child, 'SIGKILL');
+    }, timeoutMs + this.killGraceMs);
+    try {
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      return { code, stdout, stderr, timedOut };
+    } finally {
+      clearTimeout(insist);
+      clearTimeout(escalate);
+      signal(child, 'SIGKILL');
+    }
+  }
+}
+
+function signal(child: { kill(signal: NodeJS.Signals): void }, name: NodeJS.Signals): void {
+  try {
+    child.kill(name);
+  } catch {
+    // The child is already gone; there is nothing left to signal.
   }
 }

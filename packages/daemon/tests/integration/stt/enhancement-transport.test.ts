@@ -8,6 +8,7 @@ const request: EnhancementHttpRequest = {
   headers: { authorization: 'Bearer sk-test-secret', 'content-type': 'application/json' },
   body: JSON.stringify({ model: 'stub', messages: [] }),
   timeoutMs: 500,
+  maxResponseBytes: 68_096,
 };
 
 /** A real HTTP server on an ephemeral port; never a fixed or known port. */

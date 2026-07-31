@@ -6,6 +6,8 @@ export interface EnhancementHttpRequest {
   readonly headers: Readonly<Record<string, string>>;
   readonly body: string;
   readonly timeoutMs: number;
+  /** Hard ceiling on the reply the transport may buffer before giving up. */
+  readonly maxResponseBytes: number;
 }
 
 /**
