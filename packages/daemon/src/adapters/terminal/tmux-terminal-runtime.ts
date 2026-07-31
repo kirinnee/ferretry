@@ -1,0 +1,204 @@
+import type { TerminalSize } from '@ferretry/protocol';
+import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
+import {
+  hexInputChunks,
+  terminalPaneTarget,
+  terminalSnapshotFrame,
+  terminalTmuxSessionName,
+} from '../../lib/terminal/runtime-policy.ts';
+import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
+
+const OWNER_OPTION = '@fy_terminal_owner';
+const ID_OPTION = '@fy_terminal_id';
+const TITLE_OPTION = '@fy_terminal_title';
+const CREATED_OPTION = '@fy_terminal_created';
+const ROOT_OPTION = '@fy_terminal_root';
+const SEPARATOR = '\t';
+
+export class TerminalRuntimeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TerminalRuntimeError';
+  }
+}
+
+function number(value: string, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function failure(message: string, stderr: string): TerminalRuntimeError {
+  return new TerminalRuntimeError(`${message}: ${stderr.trim() || 'tmux command failed'}`);
+}
+
+function isRecordId(value: string): boolean {
+  return /^[a-f0-9]{12}$/u.test(value);
+}
+
+/** tmux-backed independent shell terminals over the daemon's injected private socket. */
+export class TmuxTerminalRuntime implements TerminalRuntimePort {
+  constructor(
+    private readonly tmux: TmuxCommandPort,
+    private readonly now: () => number = () => Date.now(),
+  ) {}
+
+  async list(): Promise<readonly TerminalRecord[]> {
+    const format = [
+      '#{session_name}',
+      `#{${OWNER_OPTION}}`,
+      `#{${ID_OPTION}}`,
+      `#{${TITLE_OPTION}}`,
+      `#{${CREATED_OPTION}}`,
+      `#{${ROOT_OPTION}}`,
+      '#{session_activity}',
+      '#{window_width}',
+      '#{window_height}',
+    ].join(SEPARATOR);
+    const result = await this.tmux.execute(['list-sessions', '-F', format]);
+    if (result.code !== 0) {
+      if (/no server running|failed to connect|no sessions/i.test(result.stderr)) return [];
+      throw failure('could not list terminal sessions', result.stderr);
+    }
+    const records: TerminalRecord[] = [];
+    for (const line of result.stdout.split('\n')) {
+      if (!line) continue;
+      const [
+        tmuxSession = '',
+        ownerId = '',
+        id = '',
+        title = '',
+        created = '',
+        root = '',
+        activity = '',
+        cols = '',
+        rows = '',
+      ] = line.split(SEPARATOR);
+      const createdAtMs = Date.parse(created);
+      const record: TerminalRecord = {
+        id,
+        ownerId,
+        title,
+        root,
+        tmuxSession,
+        createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : this.now(),
+        lastActivityAtMs: number(activity, this.now() / 1_000) * 1_000,
+        cols: Math.max(1, Math.trunc(number(cols, 100))),
+        rows: Math.max(1, Math.trunc(number(rows, 30))),
+      };
+      if (!tmuxSession.startsWith('fy-webterm-') || !isRecordId(id) || !ownerId || !root.startsWith('/')) continue;
+      records.push(record);
+    }
+    return records;
+  }
+
+  async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
+    const createdAtMs = this.now();
+    const tmuxSession = terminalTmuxSessionName(input.ownerId, input.id);
+    const result = await this.tmux.execute([
+      'new-session',
+      '-d',
+      '-s',
+      tmuxSession,
+      '-c',
+      input.cwd,
+      '-x',
+      String(input.size.cols),
+      '-y',
+      String(input.size.rows),
+      '/bin/sh',
+      '-l',
+      ';',
+      'set-option',
+      '-t',
+      tmuxSession,
+      OWNER_OPTION,
+      input.ownerId,
+      ';',
+      'set-option',
+      '-t',
+      tmuxSession,
+      ID_OPTION,
+      input.id,
+      ';',
+      'set-option',
+      '-t',
+      tmuxSession,
+      TITLE_OPTION,
+      input.title,
+      ';',
+      'set-option',
+      '-t',
+      tmuxSession,
+      CREATED_OPTION,
+      new Date(createdAtMs).toISOString(),
+      ';',
+      'set-option',
+      '-t',
+      tmuxSession,
+      ROOT_OPTION,
+      input.cwd,
+      ';',
+      'set-window-option',
+      '-t',
+      `${tmuxSession}:0`,
+      'history-limit',
+      '5000',
+    ]);
+    if (result.code !== 0) {
+      await this.tmux.execute(['kill-session', '-t', tmuxSession]).catch(() => undefined);
+      throw failure('could not create terminal', result.stderr);
+    }
+    return {
+      id: input.id,
+      ownerId: input.ownerId,
+      title: input.title,
+      root: input.cwd,
+      tmuxSession,
+      createdAtMs,
+      lastActivityAtMs: createdAtMs,
+      ...input.size,
+    };
+  }
+
+  async rename(record: TerminalRecord, title: string): Promise<void> {
+    const result = await this.tmux.execute(['set-option', '-t', record.tmuxSession, TITLE_OPTION, title]);
+    if (result.code !== 0) throw failure('terminal no longer exists', result.stderr);
+  }
+
+  async resize(record: TerminalRecord, size: TerminalSize): Promise<void> {
+    const result = await this.tmux.execute([
+      'resize-window',
+      '-t',
+      record.tmuxSession,
+      '-x',
+      String(size.cols),
+      '-y',
+      String(size.rows),
+    ]);
+    if (result.code !== 0) throw failure('terminal no longer exists', result.stderr);
+  }
+
+  async write(record: TerminalRecord, bytes: Uint8Array): Promise<void> {
+    for (const chunk of hexInputChunks(bytes)) {
+      const result = await this.tmux.execute(['send-keys', '-H', '-t', terminalPaneTarget(record), ...chunk]);
+      if (result.code !== 0) throw failure('terminal no longer exists', result.stderr);
+    }
+  }
+
+  async capture(record: TerminalRecord): Promise<Uint8Array> {
+    const [capture, cursor] = await Promise.all([
+      this.tmux.execute(['capture-pane', '-p', '-e', '-S', '-2000', '-t', terminalPaneTarget(record)]),
+      this.tmux.execute(['display-message', '-p', '-t', terminalPaneTarget(record), '#{cursor_x}\t#{cursor_y}']),
+    ]);
+    if (capture.code !== 0 || cursor.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
+    const [x = '0', y = '0'] = cursor.stdout.trim().split(SEPARATOR);
+    return new TextEncoder().encode(terminalSnapshotFrame(capture.stdout, number(x, 0), number(y, 0)));
+  }
+
+  async kill(record: TerminalRecord): Promise<void> {
+    const result = await this.tmux.execute(['kill-session', '-t', record.tmuxSession]);
+    if (result.code !== 0 && !/can't find session|no server running/i.test(result.stderr)) {
+      throw failure('could not close terminal', result.stderr);
+    }
+  }
+}
