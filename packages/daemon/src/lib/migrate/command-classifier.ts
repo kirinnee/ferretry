@@ -1,39 +1,39 @@
+import {
+  destructiveHeads,
+  destructivePackageCommands,
+  destructiveScripts,
+  findExecActions,
+  findWritingActions,
+  httpHeads,
+  inPlaceFlag,
+  mutatingHttp,
+  packageManagers,
+  prefixes,
+  readingGitConfigFlags,
+  readonlyGitCommands,
+  readonlyTmuxCommands,
+  rearmableHeads,
+  rearmablePackageCommands,
+  rearmableScripts,
+  rearmableToolNames,
+  runCommands,
+  safeHeads,
+  safeToolNames,
+  shellCommandFlags,
+  shellHeads,
+  streamEditors,
+  tmuxValueFlags,
+  writingGitConfigFlags,
+} from './command-tables.ts';
 import { worstVerdict, type InflightVerdict } from './verdict.ts';
-
-const words = (value: string): ReadonlySet<string> => new Set(value.split(' '));
-
-const prefixes = words('sudo doas env time nice ionice nohup setsid command builtin exec stdbuf timeout watch');
-const safeHeads = words(
-  'rg grep egrep fgrep ag ack fd find locate ls ll cat bat head tail jq yq wc echo printf pwd whoami date printenv stat file du df tree which type sort uniq cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime sed awk less more diff cmp md5sum sha256sum seq zsh bash sh fish dash tmux',
-);
-const rearmableHeads = words(
-  'tsc eslint prettier jest vitest mocha ava tap tape pytest phpunit rspec ctest make cmake ninja gradle mvn bazel buck webpack vite rollup esbuild swc tsx biome ruff mypy flake8 black gofmt rustc gcc g++ cc clang clang++ deno tsserver stylelint tflint',
-);
-const destructiveHeads = words(
-  'rm rmdir mv cp dd shred truncate mkfs mkfifo ln chmod chown chgrp install tee hms darwin-rebuild nixos-rebuild home-manager nix nix-env nix-build nix-shell nix-collect-garbage nixos-rebuild-ng tofu terraform terragrunt pulumi ansible ansible-playbook kubectl helm kustomize argocd loctl kubeadm k9s eksctl sops age gpg rsync scp sftp ssh systemctl service mount umount swapon kill pkill killall pkexec reboot shutdown halt poweroff crontab aws gcloud az doctl vagrant packer flyctl fly apt apt-get dpkg yum dnf rpm pacman apk brew port snap flatpak systemd-run usermod useradd passwd',
-);
-const packageManagers = words('npm pnpm yarn bun pip pip3 cargo go gem composer poetry uv bundle');
-const destructivePackageCommands = words(
-  'install add remove uninstall rm ci update upgrade up publish link unlink dedupe prune get sync lock',
-);
-const rearmablePackageCommands = words('test build lint check fmt format clippy vet tsc compile bench doc');
-const runCommands = words('run run-script');
-const rearmableScripts = words(
-  'build test tests lint check checks typecheck tsc compile fmt format coverage unit e2e bench ci verify validate prettier eslint',
-);
-const destructiveScripts = words(
-  'deploy publish release prod push migrate db db:migrate reset clean prepublish postinstall preinstall install',
-);
-const readonlyGitCommands = words(
-  'status diff log show branch remote rev-parse ls-files describe blame shortlog config fetch cat-file reflog rev-list name-rev whatchanged grep ls-tree',
-);
-const httpHeads = words('curl wget http https xh httpie');
-const mutatingHttp =
-  /(^|\s)(-X\s*(post|put|patch|delete)|--request\s+(post|put|patch|delete)|--data\b|--data-\w+|-d\b|--upload-file|-T\b|-F\b|--form\b|--method\s+(post|put|patch|delete))/i;
 
 function basename(word: string): string {
   const parts = word.split('/');
   return parts.at(-1) ?? '';
+}
+
+function unquote(word: string): string {
+  return word.replace(/^['"]|['"]$/g, '');
 }
 
 function splitSegments(command: string): readonly string[] {
@@ -47,33 +47,112 @@ function tokens(segment: string): readonly string[] {
   return segment.split(/\s+/).filter(Boolean);
 }
 
-function commandHead(segment: string): string | undefined {
-  for (const token of tokens(segment)) {
+function commandHead(values: readonly string[]): string | undefined {
+  for (const token of values) {
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue;
-    const word = basename(token.replace(/^['"]|['"]$/g, ''));
+    const word = basename(unquote(token));
     if (!word || prefixes.has(word) || /^\d+[smhd]?$/.test(word) || word.startsWith('-')) continue;
     return word;
   }
   return undefined;
 }
 
-function classifyGit(segment: string): InflightVerdict {
-  const values = tokens(segment);
-  const index = values.findIndex(value => basename(value) === 'git');
+/** Index of the head itself, so subcommand scans start after the wrappers rather than at zero. */
+function headIndex(values: readonly string[], head: string): number {
+  return values.findIndex(value => basename(unquote(value)) === head);
+}
+
+/**
+ * `git config a b` writes the value `b`; `git config a` reads it. Operand counting is the only way
+ * to tell them apart, and an unrecognised shape counts as a write.
+ */
+function classifyGitConfig(values: readonly string[], from: number): InflightVerdict {
+  let operands = 0;
+  for (let position = from; position < values.length; position++) {
+    const value = values[position]!;
+    if (writingGitConfigFlags.has(value)) return 'destructive_to_interrupt';
+    if (readingGitConfigFlags.has(value)) return 'safe_to_kill';
+    if (!value.startsWith('-')) operands++;
+  }
+  return operands > 1 ? 'destructive_to_interrupt' : 'safe_to_kill';
+}
+
+function classifyGit(values: readonly string[]): InflightVerdict {
+  const index = headIndex(values, 'git');
   for (let position = index + 1; position < values.length; position++) {
     const value = values[position]!;
     if (value.startsWith('-')) {
       if (value === '-C' || value === '-c') position++;
       continue;
     }
+    if (value === 'config') return classifyGitConfig(values, position + 1);
     return readonlyGitCommands.has(value) ? 'safe_to_kill' : 'destructive_to_interrupt';
   }
   return 'safe_to_kill';
 }
 
-function classifyPackageManager(head: string, segment: string): InflightVerdict {
-  const values = tokens(segment);
-  const index = values.findIndex(value => basename(value) === head);
+/**
+ * A bare interpreter is the pane's idle login shell. One handed a script file is opaque — the
+ * process table shows the wrapper, never what the script does — so it stays unknown, and one
+ * handed `-c` is classified by the program it was given.
+ */
+function classifyShell(head: string, values: readonly string[]): InflightVerdict {
+  const index = headIndex(values, head);
+  for (let position = index + 1; position < values.length; position++) {
+    const value = values[position]!;
+    if (shellCommandFlags.has(value)) {
+      const program = unquote(
+        values
+          .slice(position + 1)
+          .join(' ')
+          .trim(),
+      );
+      return program ? classifyCommand(program) : 'unknown';
+    }
+    if (!value.startsWith('-')) return 'unknown';
+  }
+  return 'safe_to_kill';
+}
+
+/** `find -exec` runs an arbitrary command per match, so the payload is classified as its own. */
+function classifyFindExec(rest: readonly string[]): InflightVerdict {
+  const terminator = rest.findIndex(value => value === ';' || value === '\\;' || value === '+');
+  const program = (terminator === -1 ? rest : rest.slice(0, terminator))
+    .filter(value => value !== '{}')
+    .join(' ')
+    .trim();
+  return program ? classifyCommand(program) : 'unknown';
+}
+
+function classifyFind(values: readonly string[]): InflightVerdict {
+  for (const [position, value] of values.entries()) {
+    if (findWritingActions.has(value)) return 'destructive_to_interrupt';
+    if (findExecActions.has(value)) return classifyFindExec(values.slice(position + 1));
+  }
+  return 'safe_to_kill';
+}
+
+function classifyTmux(values: readonly string[]): InflightVerdict {
+  const index = headIndex(values, 'tmux');
+  for (let position = index + 1; position < values.length; position++) {
+    const value = values[position]!;
+    if (tmuxValueFlags.has(value)) {
+      position++;
+      continue;
+    }
+    if (value.startsWith('-')) continue;
+    return readonlyTmuxCommands.has(value) ? 'safe_to_kill' : 'destructive_to_interrupt';
+  }
+  return 'safe_to_kill';
+}
+
+/** Without an in-place flag a stream editor only writes to stdout, which the relaunch discards. */
+function classifyStreamEditor(values: readonly string[]): InflightVerdict {
+  return values.some(value => inPlaceFlag.test(value)) ? 'destructive_to_interrupt' : 'safe_to_kill';
+}
+
+function classifyPackageManager(head: string, values: readonly string[]): InflightVerdict {
+  const index = headIndex(values, head);
   for (let position = index + 1; position < values.length; position++) {
     const value = values[position]!;
     if (value.startsWith('-')) continue;
@@ -94,10 +173,15 @@ function classifyPackageManager(head: string, segment: string): InflightVerdict 
 function classifySegment(segment: string): InflightVerdict {
   // Shell expansions and output redirects can hide writes. They cannot be safely classified from argv text.
   if (/[`]|\$\(|[<>]/.test(segment)) return 'unknown';
-  const head = commandHead(segment);
+  const values = tokens(segment);
+  const head = commandHead(values);
   if (!head) return 'unknown';
-  if (head === 'git') return classifyGit(segment);
-  if (packageManagers.has(head)) return classifyPackageManager(head, segment);
+  if (head === 'git') return classifyGit(values);
+  if (shellHeads.has(head)) return classifyShell(head, values);
+  if (head === 'find') return classifyFind(values);
+  if (head === 'tmux') return classifyTmux(values);
+  if (streamEditors.has(head)) return classifyStreamEditor(values);
+  if (packageManagers.has(head)) return classifyPackageManager(head, values);
   if (httpHeads.has(head)) return mutatingHttp.test(segment) ? 'destructive_to_interrupt' : 'safe_to_kill';
   if (destructiveHeads.has(head)) return 'destructive_to_interrupt';
   if (rearmableHeads.has(head)) return 're_armable';
@@ -112,8 +196,6 @@ export function classifyCommand(command: string): InflightVerdict {
 
 /** Classifies non-shell harness tools without assuming unknown tools are harmless. */
 export function classifyToolName(name: string): InflightVerdict {
-  if (words('Read Grep Glob LS NotebookRead WebFetch WebSearch TodoWrite BashOutput KillBash KillShell').has(name))
-    return 'safe_to_kill';
-  if (words('Write Edit MultiEdit NotebookEdit').has(name)) return 're_armable';
-  return 'unknown';
+  if (safeToolNames.has(name)) return 'safe_to_kill';
+  return rearmableToolNames.has(name) ? 're_armable' : 'unknown';
 }
