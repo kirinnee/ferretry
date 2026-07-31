@@ -8,6 +8,7 @@
     "fy": "bin/fy.ts"
   },
   "dependencies": {
+    "@ferretry/fleet": "workspace:*",
     "@ferretry/protocol": "workspace:*",
     "chalk": "5.6.2",
     "cli-progress": "3.12.0",

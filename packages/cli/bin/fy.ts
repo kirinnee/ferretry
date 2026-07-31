@@ -7,7 +7,12 @@ import type { z } from 'zod';
 // The root manifest is the single source for the PRODUCT name; this package's own name is the BINARY.
 import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
+import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
+import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
+import { SystemFleetClock } from '../src/adapters/fleet/clock';
+import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
+import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
@@ -38,6 +43,10 @@ import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerFleetCommands } from '../src/lib/fleet/commands';
+import { FleetController } from '../src/lib/fleet/controller';
+import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
+import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
@@ -309,10 +318,40 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       program,
       new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive),
     ),
+  ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
 ];
+
+/**
+ * Builds the fleet controller.
+ *
+ * Provisioning is local, so this group is wired from `@ferretry/fleet` rather than the daemon — only
+ * `recommend` takes the protocol client. The layout is resolved from the environment here and shared
+ * by every verb, so `apply` and `usage` can never disagree about where the manifest lives.
+ */
+function buildFleetController(world: CliWorld, client: SharedDaemonClient): FleetController {
+  const layout = resolveFleetLayout({
+    stateHome: world.environment.FY_HOME,
+    userHome: homedir(),
+    product: PRODUCT_NAME,
+  });
+  const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
+  return new FleetController({
+    config: new FileFleetConfigSource(configured === '' ? defaultConfigPath(layout) : configured),
+    manifests: new FileFleetManifestSource(layout.manifestPath),
+    planner: {
+      build: (config, generatedAt) => new FleetPlan().build(config, layout, generatedAt),
+    },
+    // Writes are bounded to the fleet directory: nothing outside it is ever created or pruned.
+    applier: new FileFleetProvisioner([layout.fleetDirectory]),
+    usage: new FleetUsageCollector(new UnprovisionedUsageProbe(), new SystemUsageClock()),
+    clock: new SystemFleetClock(),
+    recommendations: new ProtocolRecommendationGateway(client),
+    out: world.io,
+  });
+}
 
 /**
  * The session command group's collaborators.
