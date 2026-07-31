@@ -318,3 +318,37 @@ is deliberately two lines — see that file. Do not duplicate the mandate here; 
 
 `docs/migration/units/` — `UNIT-CONTEXT.md` (the shared rules every unit gets), one `UNIT-*.md` per
 unit, and `REVIEWER.md` (the mechanical PR review checklist).
+
+## 13. Agents die to the OOM killer, and the pane lies about why
+
+**Symptom:** a teammate dies abruptly, `kteam` shows `failed`, and the pane's last line is
+`Pane is dead (signal 15, ...)`. Signal 15 is SIGTERM, which reads like a deliberate external kill.
+
+**Cause:** it is the Linux OOM killer. The authoritative record is the systemd journal, not the pane:
+
+```bash
+journalctl --user --since "2 hours ago" | grep -E "oom-kill|Failed with result"
+# kteam-agent-<id>-<hash>.scope: A process of this unit has been killed by the OOM killer.
+# kteam-agent-<id>-<hash>.scope: Failed with result 'oom-kill'.
+```
+
+**Measured on 2026-07-31: 10 of 88 agent scopes were OOM-killed in a single day (~11%).**
+
+**Why it happens:** the box has 30 GB total and `launch.sh` gives each scope
+`MemoryMax≈27.7 GB` — nearly the whole machine — so the per-session ceiling does not protect
+against several agents at once. Add the PWA visual harness (Chrome per screenshot run) and memory
+goes fast.
+
+**Why it fooled the lead for six attempts:** one unit was retried across four accounts, two models,
+two worktrees and two brief sizes, all dying identically, while a _trivial_ probe in the same
+worktree survived — because a trivial probe barely allocates. That pattern reads as "this worktree
+is cursed" and is really "real work allocates, and memory was contended." Five diagnostic rounds
+were spent before anyone ran `journalctl`.
+
+**Mitigations:**
+
+- Cap concurrent units at ~4 on a 30 GB box; more is not faster if a fraction get reaped.
+- Lower `MemoryMax` per session in the kfleet config so one agent cannot take the whole machine
+  (this is the human's call — it is fleet configuration, not repo configuration).
+- Brief UI units to close the browser and dev server in teardown; a leaked Chrome is a leaked GB.
+- **Check `journalctl` FIRST when an agent dies with no error.** It is usually this.
