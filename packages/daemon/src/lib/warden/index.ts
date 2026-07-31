@@ -1,3 +1,4 @@
+export * from './attention.ts';
 export * from './bless.ts';
 export * from './concurrency.ts';
 export * from './detect.ts';
