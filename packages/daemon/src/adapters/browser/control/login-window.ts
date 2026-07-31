@@ -7,6 +7,7 @@ import {
   vncSupervisorArguments,
   x11vncLaunchArguments,
   type BrowserLoginLifecycle,
+  type BrowserLoginState,
   type BrowserLoginStatus,
   type BrowserLoginWindow,
   type BrowserProfilePort,
@@ -53,37 +54,58 @@ interface ActiveWindow extends BrowserLoginWindow {
   readonly passwordFile: string;
 }
 
-type MutableLoginStatus = { -readonly [Key in keyof BrowserLoginStatus]: BrowserLoginStatus[Key] };
-
 /**
  * Coordinates a direct-child Chrome and a supervised, loopback-only VNC server.
  * Runtime state is deliberately adapter-local: no credential or window record is
  * written to durable state.
  */
 export class BrowserLoginWindowService implements BrowserLoginLifecycle {
-  private state: BrowserLoginStatus['state'] = 'closed';
+  private state: BrowserLoginState = 'closed';
   private active: ActiveWindow | undefined;
   private failure: string | undefined;
   private queue: Promise<void> = Promise.resolve();
 
   constructor(private readonly options: BrowserLoginWindowOptions) {}
 
+  /**
+   * Projects the window's runtime state onto the wire contract one branch at a
+   * time: the status is state-discriminated, so a field is written only in the
+   * states that produce it and absence renders as absence rather than as a
+   * zeroed countdown or a stale endpoint.
+   */
   async status(): Promise<BrowserLoginStatus> {
-    const status: MutableLoginStatus = { state: this.state, profilePrimed: await this.profilePrimed() };
-    if (this.active && (this.state === 'open' || this.state === 'closing')) {
-      const { openedAt, expiresAt, port, password } = this.active;
-      Object.assign(status, { openedAt, expiresAt });
-      if (this.state === 'open') {
-        status.connection = {
+    const profilePrimed = await this.profilePrimed();
+    const active = this.active;
+    if (active !== undefined && this.state === 'open') {
+      const { openedAt, expiresAt, port, password } = active;
+      const { sshUser, hostname } = this.options.runtime;
+      return {
+        state: 'open',
+        profilePrimed,
+        openedAt,
+        expiresAt,
+        connection: {
           host: '127.0.0.1',
           port,
           password,
-          sshTunnel: `ssh -N -L ${port}:127.0.0.1:${port} ${this.options.runtime.sshUser}@${this.options.runtime.hostname}`,
-        };
-      }
+          sshTunnel: `ssh -N -L ${port}:127.0.0.1:${port} ${sshUser}@${hostname}`,
+        },
+      };
     }
-    if (this.state === 'error' && this.failure) status.error = this.failure;
-    return status;
+    if (active !== undefined && this.state === 'closing') {
+      return { state: 'closing', profilePrimed, openedAt: active.openedAt, expiresAt: active.expiresAt };
+    }
+    // A failed open always records its coarse message, but the contract keeps
+    // the text optional, so an errored window without one stays reportable.
+    if (this.state === 'error') {
+      return { state: 'error', profilePrimed, ...(this.failure === undefined ? {} : { error: this.failure }) };
+    }
+    if (this.state === 'opening') return { state: 'opening', profilePrimed };
+    // `open` or `closing` with no window is unreachable — `active` is only ever
+    // cleared in the same synchronous step that leaves those states — and a
+    // window with no processes is closed, so this reports the truth rather than
+    // inventing timestamps for a window that is not there.
+    return { state: 'closed', profilePrimed };
   }
 
   async start(options: { readonly minutes?: number } = {}): Promise<BrowserLoginStatus> {
