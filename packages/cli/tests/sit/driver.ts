@@ -76,16 +76,9 @@ export class InProcessCliDriver implements CliDriver {
     };
 
     const program = createProgram();
-    registerDomain(program, {
-      io,
-      spinner,
-      progress,
-      prompt,
-      shell: new BunShell(),
-      interactive: false,
-      // Hermetic: an in-process journey never inherits the operator's FY_* environment.
-      environment: {},
-    });
+    // Capture and exit-override BEFORE registering: commander copies both to each subcommand at
+    // creation time, so a later call would leave `browser --help` writing to the real stdout and
+    // calling process.exit() out from under the test runner.
     program.configureOutput({
       writeOut: str => {
         out += str;
@@ -95,6 +88,17 @@ export class InProcessCliDriver implements CliDriver {
       },
     });
     program.exitOverride();
+    registerDomain(program, {
+      io,
+      spinner,
+      progress,
+      prompt,
+      shell: new BunShell(),
+      interactive: false,
+      // Hermetic: an in-process journey never inherits the operator's FY_* environment — with no
+      // FY_TOKEN the shared client refuses before it opens a socket, so no journey reaches a daemon.
+      environment: {},
+    });
 
     const previousExitCode = process.exitCode;
     process.exitCode = 0;
