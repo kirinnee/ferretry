@@ -1,4 +1,4 @@
-import type { DaemonConnection } from './daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
 
@@ -122,14 +122,33 @@ export const fetchRuntimeModelCatalog = async (
   return parseRuntimeModelCatalog(await response.json());
 };
 
+interface ConnectionBinding {
+  readonly baseUrl: string;
+  readonly deviceToken: string;
+  readonly generation: number;
+}
+
+interface InFlight {
+  readonly generation: number;
+  readonly promise: Promise<RuntimeModelCatalog>;
+}
+
 /**
  * Session catalog cache. Its public API accepts the full scope, so matching
- * session IDs from different paired daemons can neither share data nor shares
+ * session IDs from different paired daemons can neither share data nor share
  * in-flight work.
+ *
+ * Every continuation is fenced by the concrete paired connection: a slow result
+ * that completes after `clearDaemon`, an unpair, or a same-id re-pair (rotated
+ * base URL or device token) cannot publish into the fresh connection. Each
+ * daemon carries its own generation; a connection whose base URL or token
+ * differs from the recorded one is treated as a re-pair and resets that daemon.
  */
 export class DaemonRuntimeModelCatalogStore {
   readonly #catalogs = new Map<string, RuntimeModelCatalog>();
-  readonly #inFlight = new Map<string, Promise<RuntimeModelCatalog>>();
+  readonly #inFlight = new Map<string, InFlight>();
+  readonly #bindings = new Map<DaemonId, ConnectionBinding>();
+  readonly #generations = new Map<DaemonId, number>();
 
   get(scope: DaemonSessionScope): RuntimeModelCatalog | undefined {
     return this.#catalogs.get(daemonSessionKey(scope));
@@ -141,25 +160,63 @@ export class DaemonRuntimeModelCatalogStore {
     fetcher: DaemonFetch = fetch,
   ): Promise<RuntimeModelCatalog> {
     assertScopeDaemon(daemon, scope);
+    const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const cached = this.#catalogs.get(key);
     if (cached) return cached;
-    const pending = this.#inFlight.get(key);
-    if (pending) return pending;
-    const request = fetchRuntimeModelCatalog(daemon, scope, fetcher)
+    // Coalesce only against work started under the same connection generation,
+    // never against a prior token's still-running request.
+    const existing = this.#inFlight.get(key);
+    if (existing?.generation === generation) return existing.promise;
+
+    const promise = fetchRuntimeModelCatalog(daemon, scope, fetcher)
       .then(catalog => {
-        this.#catalogs.set(key, catalog);
+        if (this.#current(daemon, generation)) this.#catalogs.set(key, catalog);
         return catalog;
       })
-      .finally(() => this.#inFlight.delete(key));
-    this.#inFlight.set(key, request);
-    return request;
+      .finally(() => {
+        if (this.#inFlight.get(key)?.promise === promise) this.#inFlight.delete(key);
+      });
+    this.#inFlight.set(key, { generation, promise });
+    return promise;
   }
 
-  clearDaemon(daemon: DaemonConnection['daemonId']): void {
-    for (const [key] of this.#catalogs) {
+  /** Unpair one daemon without perturbing any other daemon's cache or work. */
+  clearDaemon(daemonId: DaemonId): void {
+    this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);
+    this.#bindings.delete(daemonId);
+    for (const key of this.#catalogs.keys()) {
       const [cachedDaemonId] = JSON.parse(key) as [string, string];
-      if (cachedDaemonId === daemon) this.#catalogs.delete(key);
+      if (cachedDaemonId === daemonId) this.#catalogs.delete(key);
+    }
+    this.#clearInFlight(daemonId);
+  }
+
+  #bind(daemon: DaemonConnection): number {
+    const existing = this.#bindings.get(daemon.daemonId);
+    if (existing && existing.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken)
+      return existing.generation;
+    // A same-id re-pair (rotated URL or token) invalidates the prior generation.
+    if (existing) this.clearDaemon(daemon.daemonId);
+    const generation = this.#generations.get(daemon.daemonId) ?? 0;
+    this.#bindings.set(daemon.daemonId, { baseUrl: daemon.baseUrl, deviceToken: daemon.deviceToken, generation });
+    return generation;
+  }
+
+  #current(daemon: DaemonConnection, generation: number): boolean {
+    const binding = this.#bindings.get(daemon.daemonId);
+    return (
+      binding !== undefined &&
+      binding.generation === generation &&
+      binding.baseUrl === daemon.baseUrl &&
+      binding.deviceToken === daemon.deviceToken
+    );
+  }
+
+  #clearInFlight(daemonId: DaemonId): void {
+    for (const key of this.#inFlight.keys()) {
+      const [cachedDaemonId] = JSON.parse(key) as [string, string];
+      if (cachedDaemonId === daemonId) this.#inFlight.delete(key);
     }
   }
 }

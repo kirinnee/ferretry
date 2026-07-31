@@ -5,7 +5,7 @@ import { daemonEventUrl, daemonRequest, daemonUrl } from '../../src/lib/daemon-t
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
-  baseUrl: 'https://daemon.example.test/base',
+  baseUrl: 'https://daemon.example.test',
   deviceToken: 'device-token',
 });
 

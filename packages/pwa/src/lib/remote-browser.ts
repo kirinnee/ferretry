@@ -1,23 +1,45 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
-  BrowserActionResultSchema,
-  BrowserStatusSchema,
   type BrowserAction,
   type BrowserActionResult,
+  BrowserActionResultSchema,
   type BrowserInputEvent,
   type BrowserPageSummary,
   type BrowserStatus,
+  BrowserStatusSchema,
+  FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
-const FRAME_MAGIC = Uint8Array.of(0x4b, 0x42, 0x52, 0x46); // KBRF
+/**
+ * The daemon's browser frame envelope, v1: magic, version, page-id byte length,
+ * page id, then the JPEG bytes, all in one binary message.
+ *
+ * These four bytes are ASCII `FYBF` and MUST stay byte-identical to the daemon's
+ * `FRAME_ENVELOPE_MAGIC`, because the daemon owns the only encoder and this is a
+ * second, hand-written decoder. The port originally kept the pre-Ferretry magic,
+ * and the mismatch was INVISIBLE: an unrecognized magic used to be handed to the
+ * viewer as an untagged JPEG, so every real frame's own header became "pixels"
+ * and its page id was silently dropped. An unknown magic now fails closed, and
+ * the legacy-wire gate rejects the old constant by name.
+ */
+const FRAME_MAGIC = Uint8Array.of(0x46, 0x59, 0x42, 0x46);
 const FRAME_VERSION = 1;
 const FRAME_HEADER_BYTES = 7;
 const MAX_JPEG_BYTES = 8 * 1024 * 1024;
 
+/**
+ * One decoded frame.
+ *
+ * `decodeRemoteBrowserFrame` only ever returns `tagged`: a message it cannot
+ * attribute to a page is rejected, not downgraded. The `legacy` member is
+ * UNREACHABLE and retained only so existing consumers that still branch on it
+ * keep compiling; it is removed together with the last such branch, and nothing
+ * in this module can construct it.
+ */
 export type RemoteBrowserFrame =
   | { readonly kind: 'tagged'; readonly pageId: string; readonly jpegBytes: ArrayBuffer }
   | { readonly kind: 'legacy'; readonly jpegBytes: ArrayBuffer };
@@ -40,6 +62,25 @@ const responseError = async (response: Response): Promise<DaemonResponseError> =
   );
 };
 
+/**
+ * Browser identity is daemon-issued and read back from the response, so the
+ * server-derived session id is checked against the requested scope before any
+ * caller can act on it — a slow or crossed response must not publish another
+ * session's state.
+ */
+const parseBrowserStatus = (scope: DaemonSessionScope, body: unknown): BrowserStatus => {
+  const status = BrowserStatusSchema.parse(body);
+  if (status.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon returned another session');
+  return status;
+};
+
+const parseBrowserActionResult = (scope: DaemonSessionScope, body: unknown): BrowserActionResult => {
+  const result = BrowserActionResultSchema.parse(body);
+  if (result.status.sessionId !== scope.sessionId)
+    throw new DaemonResponseError(502, 'daemon returned another session');
+  return result;
+};
+
 /** Reads the browser status from exactly the daemon that owns this session. */
 export const fetchRemoteBrowserStatus = async (
   daemon: DaemonConnection,
@@ -50,7 +91,7 @@ export const fetchRemoteBrowserStatus = async (
   const request = daemonRequest(daemon, browserPath(scope));
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
-  return BrowserStatusSchema.parse(await response.json());
+  return parseBrowserStatus(scope, await response.json());
 };
 
 /** Executes one validated browser action through the paired daemon. */
@@ -63,12 +104,12 @@ export const runRemoteBrowserAction = async (
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, browserPath(scope), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-kteam-request-id': crypto.randomUUID() },
+    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
     body: JSON.stringify(action),
   });
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
-  return BrowserActionResultSchema.parse(await response.json());
+  return parseBrowserActionResult(scope, await response.json());
 };
 
 /**
@@ -85,17 +126,21 @@ export const remoteBrowserStreamUrl = (daemon: DaemonConnection, scope: DaemonSe
   return url.toString();
 };
 
-/** Decodes the daemon's atomic page-id/JPEG frame envelope, failing closed. */
+/**
+ * Decodes the daemon's atomic page-id/JPEG frame envelope, failing closed on
+ * everything else.
+ *
+ * A message is rejected unless its magic, version, declared page-id length,
+ * UTF-8 page id, and payload size all agree with the envelope. There is
+ * deliberately no fallback for an unidentified message: bytes the decoder cannot
+ * attribute to a page are bytes the viewer cannot honestly render, and painting
+ * them would show one page's pixels under another page's identity.
+ */
 export const decodeRemoteBrowserFrame = (message: ArrayBuffer): RemoteBrowserFrame | null => {
   const bytes = new Uint8Array(message);
-  if (bytes.byteLength === 0) return null;
-  const compared = Math.min(bytes.byteLength, FRAME_MAGIC.byteLength);
-  const prefix = FRAME_MAGIC.slice(0, compared).every((value, index) => bytes[index] === value);
-  if (prefix && bytes.byteLength < FRAME_MAGIC.byteLength) return null;
-  const tagged =
-    bytes.byteLength >= FRAME_MAGIC.byteLength && FRAME_MAGIC.every((value, index) => bytes[index] === value);
-  if (!tagged) return bytes.byteLength <= MAX_JPEG_BYTES ? { kind: 'legacy', jpegBytes: message } : null;
-  if (bytes.byteLength < FRAME_HEADER_BYTES || bytes[4] !== FRAME_VERSION) return null;
+  if (bytes.byteLength < FRAME_HEADER_BYTES) return null;
+  if (!FRAME_MAGIC.every((value, index) => bytes[index] === value)) return null;
+  if (bytes[4] !== FRAME_VERSION) return null;
   const pageIdBytes = new DataView(message).getUint16(5, false);
   if (pageIdBytes === 0 || pageIdBytes > BROWSER_MAX_PAGE_ID_LENGTH * 4) return null;
   const jpegOffset = FRAME_HEADER_BYTES + pageIdBytes;

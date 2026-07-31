@@ -25,9 +25,11 @@ const requireNonEmpty = (value: string, name: string): string => {
 export const daemonId = (value: string): DaemonId => requireNonEmpty(value, 'daemonId') as DaemonId;
 
 /**
- * Normalizes only a daemon origin/path supplied at runtime.  Credentials,
- * queries, and fragments are deliberately rejected so they cannot become an
- * accidental transport or persistence channel.
+ * Normalizes only a daemon origin supplied at runtime. Credentials, paths,
+ * queries, and fragments are deliberately rejected so every HTTP and
+ * WebSocket adapter resolves the same `/v1` surface. A reverse-proxy prefix
+ * would otherwise be preserved by the typed client and discarded by
+ * origin-relative direct requests.
  */
 export const daemonBaseUrl = (value: string): string => {
   let url: URL;
@@ -42,8 +44,8 @@ export const daemonBaseUrl = (value: string): string => {
   if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '') {
     throw new Error('daemon URL may not include credentials, a query, or a fragment');
   }
-  url.pathname = url.pathname.replace(/\/+$/u, '');
-  return url.toString().replace(/\/$/u, '');
+  if (url.pathname !== '/') throw new Error('daemon URL must be an origin without a path');
+  return url.origin;
 };
 
 /** Constructs an immutable connection from runtime pairing output. */

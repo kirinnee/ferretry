@@ -43,7 +43,7 @@ describe('daemon API client', () => {
   it('should bind typed protocol calls to the paired daemon instead of the public page origin', async () => {
     // Arrange
     const transport = new RecordingTransport();
-    const daemon = paired('daemon-a', 'https://daemon-a.example.test/api', 'token-a');
+    const daemon = paired('daemon-a', 'https://daemon-a.example.test', 'token-a');
     const client = await daemonApiClient(daemon, { transport, requestId: () => 'request-a' });
 
     // Act
@@ -51,7 +51,7 @@ describe('daemon API client', () => {
 
     // Assert
     should(transport.calls).have.length(1);
-    should(transport.calls[0]?.url).equal('https://daemon-a.example.test/api/v1/health');
+    should(transport.calls[0]?.url).equal('https://daemon-a.example.test/v1/health');
     const headers = new Headers(transport.calls[0]?.init.headers);
     should(headers.get('authorization')).equal('Bearer token-a');
     should(headers.get('x-fy-version')).equal(PWA_PROTOCOL_VERSION);

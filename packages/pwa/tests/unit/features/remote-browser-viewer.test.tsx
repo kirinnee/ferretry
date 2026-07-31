@@ -58,7 +58,7 @@ const running = (sessionId: string, pageId = 'page-a') =>
 const frame = (pageId: string): ArrayBuffer => {
   const id = new TextEncoder().encode(pageId);
   const bytes = new Uint8Array(7 + id.length + 2);
-  bytes.set([0x4b, 0x42, 0x52, 0x46, 1, 0, id.length]);
+  bytes.set([0x46, 0x59, 0x42, 0x46, 1, 0, id.length]);
   bytes.set(id, 7);
   bytes.set([1, 2], 7 + id.length);
   return bytes.buffer;

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import type { BrowserStatus } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
@@ -18,7 +20,6 @@ import {
   runRemoteBrowserAction,
   type RemoteKeyEvent,
 } from '../../src/lib/remote-browser.ts';
-import type { BrowserStatus } from '@ferretry/protocol';
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
@@ -73,6 +74,30 @@ describe('remote browser transport', () => {
     ).rejects.toThrow();
   });
 
+  it('stamps the protocol request id on the action mutation only, never the obsolete header', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return response(calls.length === 1 ? status : { status });
+    };
+    await fetchRemoteBrowserStatus(daemon, scope, fetcher);
+    await runRemoteBrowserAction(daemon, scope, { action: 'start' }, fetcher);
+    const headers = (index: number) => new Headers(calls[index]?.init?.headers);
+    expect(headers(0).get(FY_REQUEST_ID_HEADER)).toBeNull();
+    expect(headers(1).get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(headers(1).get('x-kteam-request-id')).toBeNull();
+  });
+
+  it('rejects a server response that describes another session before publication', async () => {
+    const crossed = { ...status, sessionId: 'other/session' };
+    await expect(fetchRemoteBrowserStatus(daemon, scope, async () => response(crossed))).rejects.toThrow(
+      'daemon returned another session',
+    );
+    await expect(
+      runRemoteBrowserAction(daemon, scope, { action: 'start' }, async () => response({ status: crossed })),
+    ).rejects.toThrow('daemon returned another session');
+  });
+
   it('builds a ticket-only browser stream URL on the paired daemon', () => {
     expect(remoteBrowserStreamUrl(daemon, scope, 'one-time')).toBe(
       'wss://daemon.example.test/v1/sessions/same%2Fsession/browser/stream?ticket=one-time',
@@ -88,25 +113,67 @@ describe('remote browser transport', () => {
   });
 });
 
+/**
+ * The daemon's frame envelope, encoded exactly the way the daemon's own codec
+ * does (`packages/daemon/src/lib/browser/transport/envelope.ts`): ASCII `FYBF`,
+ * one version byte, a big-endian uint16 UTF-8 page-id byte length, the page id,
+ * then the JPEG bytes. Written out here rather than imported so this suite stays
+ * inside its own package while still asserting the real wire shape — if the two
+ * ever disagree again, this is the test that says so.
+ */
+const daemonFrameEnvelope = (pageId: string, jpeg: readonly number[]): ArrayBuffer => {
+  const id = new TextEncoder().encode(pageId);
+  const bytes = new Uint8Array(7 + id.length + jpeg.length);
+  bytes.set([0x46, 0x59, 0x42, 0x46, 1]);
+  new DataView(bytes.buffer).setUint16(5, id.length, false);
+  bytes.set(id, 7);
+  bytes.set(jpeg, 7 + id.length);
+  return bytes.buffer;
+};
+
 describe('remote browser frame and geometry helpers', () => {
-  it('decodes tagged frames and refuses malformed envelopes without downgrading them', () => {
-    const id = new TextEncoder().encode('page-a');
-    const frame = new Uint8Array(7 + id.length + 2);
-    frame.set([0x4b, 0x42, 0x52, 0x46, 1, 0, id.length]);
-    frame.set(id, 7);
-    frame.set([1, 2], 7 + id.length);
-    expect(decodeRemoteBrowserFrame(frame.buffer)).toEqual({
+  it('decodes a frame in the daemon wire shape, keeping only the JPEG payload', () => {
+    const message = daemonFrameEnvelope('page-a', [1, 2]);
+    expect(decodeRemoteBrowserFrame(message)).toEqual({
       kind: 'tagged',
       pageId: 'page-a',
-      jpegBytes: frame.buffer.slice(13),
+      jpegBytes: message.slice(13),
     });
-    expect(decodeRemoteBrowserFrame(new Uint8Array([0x4b, 0x42]).buffer)).toBeNull();
-    expect(decodeRemoteBrowserFrame(new Uint8Array([0x4b, 0x42, 0x52, 0x46, 2, 0, 1, 97, 1]).buffer)).toBeNull();
-    expect(decodeRemoteBrowserFrame(new Uint8Array([0x4b, 0x42, 0x52, 0x46, 1, 0, 1, 0xff, 1]).buffer)).toBeNull();
-    expect(decodeRemoteBrowserFrame(new Uint8Array([1, 2]).buffer)).toEqual({
-      kind: 'legacy',
-      jpegBytes: new Uint8Array([1, 2]).buffer,
-    });
+    // A multi-byte page id is measured in BYTES, not code units, on both sides.
+    const wide = daemonFrameEnvelope('päge', [9]);
+    expect(decodeRemoteBrowserFrame(wide)).toEqual({ kind: 'tagged', pageId: 'päge', jpegBytes: wide.slice(12) });
+  });
+
+  it('rejects the pre-Ferretry magic instead of serving its header as pixels', () => {
+    // The port shipped with this magic while the daemon emits `FYBF`. Decoding it
+    // as an untagged JPEG is what made the drift invisible, so it must fail
+    // closed: no frame, no page id, nothing painted.
+    const id = new TextEncoder().encode('page-a');
+    const stale = new Uint8Array(7 + id.length + 2);
+    stale.set([0x4b, 0x42, 0x52, 0x46, 1, 0, id.length]);
+    stale.set(id, 7);
+    stale.set([1, 2], 7 + id.length);
+    expect(decodeRemoteBrowserFrame(stale.buffer)).toBeNull();
+  });
+
+  it('refuses every message it cannot attribute to a page', () => {
+    const magic = [0x46, 0x59, 0x42, 0x46];
+    // No magic at all: a bare JPEG is no longer downgraded to an untagged frame.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]).buffer)).toBeNull();
+    expect(decodeRemoteBrowserFrame(new Uint8Array([]).buffer)).toBeNull();
+    // Truncated: the magic alone is not a header.
+    expect(decodeRemoteBrowserFrame(new Uint8Array(magic).buffer)).toBeNull();
+    // One wrong magic byte.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([0x46, 0x59, 0x42, 0x47, 1, 0, 1, 97, 1]).buffer)).toBeNull();
+    // Unsupported version.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 2, 0, 1, 97, 1]).buffer)).toBeNull();
+    // Zero-length page id, and a length that runs past the message.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 0, 97, 1]).buffer)).toBeNull();
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 0xff, 97, 1]).buffer)).toBeNull();
+    // A declared page id that consumes the whole message leaves no JPEG.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 2, 97, 98]).buffer)).toBeNull();
+    // Invalid UTF-8 in the page id.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 1, 0xff, 1]).buffer)).toBeNull();
   });
 
   it('maps responsive and desktop viewports plus edge canvas points', () => {
