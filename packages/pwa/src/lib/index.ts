@@ -62,5 +62,7 @@ export * from './pin-store.ts';
 export * from './remote-browser.ts';
 export * from '../features/browser/remote-browser-viewer.tsx';
 export * from './runtime-models.ts';
+export * from './send-ledger.ts';
 export * from './session-screens.ts';
 export * from './side-pane-preferences.ts';
+export * from './web-terminals.ts';
