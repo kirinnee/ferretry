@@ -3,6 +3,7 @@ import type { IFyApiClient } from '@ferretry/protocol';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../lib/drafts.ts';
+import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
 
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
@@ -16,13 +17,6 @@ export interface ComposerProps {
 }
 
 const defaultDraftStore = new DaemonDraftStore();
-
-/** Safe desktop detection: ambiguous/touch environments always keep Enter as newline. */
-export const composerUsesEnterToSend = (pointerFine: boolean, canHover: boolean): boolean => pointerFine && canHover;
-
-/** A testable submission predicate shared by click and keyboard paths. */
-export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
-  draft.trim().length > 0 && !disabled && !sending;
 
 /**
  * A single composer surface. Draft persistence is scoped by the supplied paired

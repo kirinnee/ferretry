@@ -1,5 +1,5 @@
 import type { SessionView } from '@ferretry/protocol';
-import { relativeTime, sessionStatusLabel } from './session-screen-types.ts';
+import { relativeTime, sessionStatusLabel } from '../lib/session-screens.ts';
 
 export interface SessionDetailsProps {
   readonly daemonId: string;

@@ -26,3 +26,19 @@ export const relativeTime = (at: number | string | undefined, now = Date.now()):
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
 };
+
+export const sessionNavigation = (daemonId: string, sessionId: string): readonly [string, string] => [
+  daemonId,
+  sessionId,
+];
+
+export const transcriptIsFollowing = (element: {
+  scrollHeight: number;
+  scrollTop: number;
+  clientHeight: number;
+}): boolean => element.scrollHeight - element.clientHeight - element.scrollTop <= 24;
+
+export const composerUsesEnterToSend = (pointerFine: boolean, canHover: boolean): boolean => pointerFine && canHover;
+
+export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>
+  draft.trim().length > 0 && !disabled && !sending;

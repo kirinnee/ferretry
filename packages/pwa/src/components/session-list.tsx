@@ -1,5 +1,5 @@
 import type { SessionView } from '@ferretry/protocol';
-import { relativeTime, sessionStatusLabel } from './session-screen-types.ts';
+import { relativeTime, sessionNavigation, sessionStatusLabel } from '../lib/session-screens.ts';
 
 export interface SessionListProps {
   readonly daemonId: string;
@@ -7,11 +7,6 @@ export interface SessionListProps {
   readonly now?: number;
   readonly onOpenSession: (daemonId: string, sessionId: string) => void;
 }
-
-export const sessionNavigation = (daemonId: string, sessionId: string): readonly [string, string] => [
-  daemonId,
-  sessionId,
-];
 
 const statusTone = (status: SessionView['state']['status']): string => {
   if (status === 'failed' || status === 'stalled' || status === 'kill_failed') return 'var(--err, #b42318)';

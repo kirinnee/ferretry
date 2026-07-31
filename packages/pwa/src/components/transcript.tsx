@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { TranscriptEntry } from './session-screen-types.ts';
+import { transcriptIsFollowing, type TranscriptEntry } from '../lib/session-screens.ts';
 
 export interface TranscriptProps {
   readonly daemonId: string;
@@ -9,12 +9,7 @@ export interface TranscriptProps {
   readonly label?: string;
 }
 
-const FOLLOW_THRESHOLD_PX = 24;
 type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: number };
-
-/** True only at the bottom; readers who scroll away are never pulled back. */
-export const transcriptIsFollowing = (element: ScrollPort): boolean =>
-  element.scrollHeight - element.clientHeight - element.scrollTop <= FOLLOW_THRESHOLD_PX;
 
 /**
  * One scroll controller for transcript content. Its identity includes both
