@@ -13,7 +13,6 @@ export * from '../worklets/pcm16-worklet.ts';
 export * from '../components/composer.tsx';
 export * from '../components/session-details.tsx';
 export * from '../components/session-list.tsx';
-export * from '../components/session-screen-types.ts';
 export * from '../components/transcript.tsx';
 export * from './api-client.ts';
 export * from './class-names.ts';
