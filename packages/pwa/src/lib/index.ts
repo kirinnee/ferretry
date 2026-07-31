@@ -35,6 +35,7 @@ export * from '../shell/side-pane-search.tsx';
 export * from '../shell/side-pane-tab-icons.ts';
 export * from '../shell/side-pane-tab-model.ts';
 export * from '../shell/side-pane-tabs.tsx';
+export * from '../shell/side-pane.tsx';
 export * from '../shell/status-mark.tsx';
 export * from '../shell/view-tabs.tsx';
 export * from '../worklets/pcm16-worklet.ts';
