@@ -23,6 +23,8 @@ import {
   EXIT_ALREADY_RUNNING,
   parseSessionId,
   DEFAULT_CALLSIGN_POOL,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
@@ -182,6 +184,80 @@ class RecordingTerminalRuntime implements TerminalRuntimePort {
   }
 }
 
+/**
+ * An agent launcher that records instead of spawning.
+ *
+ * Substituted at `DaemonWorld.sessionLauncher` so the boot test never starts an agent, never touches
+ * a tmux socket and never binds a pane. It behaves like tmux does in the two ways the lifecycle
+ * depends on: a session is not alive until it has been launched, and it stops being alive when it is
+ * killed — which is what makes a retried start idempotent rather than a second pane.
+ */
+class RecordingSessionLauncher implements SessionLifecycleLauncher {
+  /** Every launch, as the argv and the directory it was launched in. */
+  readonly launched: Array<{ readonly command: readonly string[]; readonly cwd: string }> = [];
+  /** Every instruction typed into a ready pane. */
+  readonly delivered: string[] = [];
+  readonly stopped: string[] = [];
+  private readonly live = new Set<string>();
+
+  async alive(record: SessionLifecycleRecord): Promise<boolean> {
+    return this.live.has(record.config.tmuxSession);
+  }
+
+  async launch(record: SessionLifecycleRecord): Promise<void> {
+    this.launched.push({ command: [...record.config.command], cwd: record.config.cwd });
+    this.live.add(record.config.tmuxSession);
+  }
+
+  async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
+    this.delivered.push(instruction);
+  }
+
+  async stop(record: SessionLifecycleRecord): Promise<void> {
+    this.stopped.push(record.config.tmuxSession);
+    this.live.delete(record.config.tmuxSession);
+  }
+}
+
+/** The wrapper name the seeded fleet publishes. It must match the lifecycle's auto-wrapper rule. */
+const WRAPPER = 'claude-auto-boot';
+
+/**
+ * A fleet whose one account is published under a wrapper this host can actually run.
+ *
+ * The executable is REAL and on `PATH` for the duration of the test, because resolving a published
+ * name into an absolute program is a step the start genuinely performs — the lifecycle's own
+ * authorization refuses anything that is not an absolute fleet wrapper. It is never executed: the
+ * launcher above is what would have run it.
+ */
+async function seedFleet(home: string): Promise<string> {
+  const binary = join(home, 'bin');
+  await mkdir(binary, { recursive: true });
+  const executable = join(binary, WRAPPER);
+  await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await mkdir(join(home, 'fleet'), { recursive: true });
+  await writeFile(
+    join(home, 'fleet', 'manifest.json'),
+    JSON.stringify({
+      accounts: [
+        {
+          id: 'account-boot',
+          agent: WRAPPER,
+          kind: 'claude',
+          mode: 'auto',
+          displayName: 'Boot',
+          defaultModel: 'claude-opus-5',
+          models: [{ id: 'claude-opus-5', available: true }],
+          available: true,
+        },
+      ],
+    }),
+    { mode: 0o600 },
+  );
+  process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
+  return executable;
+}
+
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
 async function worldAt(home: string, port: number, untilShutdown: () => Promise<void>): Promise<DaemonWorld> {
   await seedHome(home, port);
@@ -194,10 +270,13 @@ async function runCleanups(cleanups: ReadonlyArray<() => void | Promise<void>>):
 
 describe('daemon boot lifecycle', () => {
   const previousHome = process.env.FY_HOME;
+  const previousPath = process.env.PATH;
 
   afterEach(async () => {
     if (previousHome === undefined) delete process.env.FY_HOME;
     else process.env.FY_HOME = previousHome;
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
     await cleanupTempDirectories();
   });
 
@@ -395,6 +474,131 @@ describe('daemon boot lifecycle', () => {
     // Omitted from the list, but answerable here: "it does not exist" would be a lie.
     should(unusable.status).equal(500);
     should((await unusable.json()) as { code: string }).have.property('code', 'unusable_session_document');
+  });
+
+  /**
+   * Starting and stopping a session, driven through the production composition root over a real
+   * socket. This is the capability the daemon did not have: every other mount is addressed by a
+   * session id, and nothing could create one.
+   *
+   * Only the agent launcher is substituted, at the seam `DaemonWorld` exposes for exactly this —
+   * spawning an agent is not something a suite may do. EVERYTHING else is production: the fleet
+   * manifest resolves the wrapper, this host's `PATH` resolves the executable, the real planner shapes
+   * the session, the real lifecycle service writes the real state home, and the answer comes back
+   * through the same reader `GET /v1/sessions` serves.
+   *
+   * The assertion that matters most is that the session is VISIBLE afterwards. The lifecycle and the
+   * protocol describe a session with two different documents in one file, and a start that wrote only
+   * the lifecycle's half would answer 201 and then be dropped by every mounted read — the session list,
+   * the task board's enrichment, analytics and the callsign pool all `safeParse` that document.
+   */
+  it('should start, launch, list and stop a session through the mounted lifecycle', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-start');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    // AFTER the layout is established: a home holding files with no version marker is exactly the
+    // foreign state the layout gate refuses.
+    const executable = await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const body = JSON.stringify({
+      agent: WRAPPER,
+      mode: 'auto',
+      prompt: 'wire the session lifecycle',
+      name: 'Wire Session Lifecycle',
+      teammate: SEEDED_CALLSIGN,
+      cwd: home,
+    });
+    const startCall = async (requestId: string): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId },
+        body,
+      });
+
+    // Act
+    const started = await startCall('req-boot-1');
+    const startedBody = SessionViewSchema.parse(await started.json());
+    // The retry the protocol client performs itself after a transport error.
+    const retried = await startCall('req-boot-1');
+    const retriedBody = SessionViewSchema.parse(await retried.json());
+    const listed = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
+    const names = NameSuggestionsSchema.parse(
+      await (await fetch(`http://127.0.0.1:${port}/v1/names?count=8`, { headers })).json(),
+    );
+    // The turn-one document the agent is told to read, inside the session's own private directory.
+    const turnOne = await readFile(
+      join(home, 'state', 'sessions', startedBody.config.id, 'turns', 'turn-001.md'),
+      'utf8',
+    );
+    const stopped = await fetch(`${sessions}/${startedBody.config.id}/stop`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'the task is done' }),
+    });
+    const stoppedBody = SessionViewSchema.parse(await stopped.json());
+    const unknownAgent = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'req-boot-2' },
+      body: JSON.stringify({ agent: 'claude-auto-absent', mode: 'auto', prompt: 'nobody can serve this', cwd: home }),
+    });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(started.status).equal(201);
+    // The document records the wrapper NAME every account is published under, never the absolute
+    // program: the fleet manifest, `fy ps` and the analytics index all join on this value.
+    should(startedBody.config.agent).equal(WRAPPER);
+    should(startedBody.config.harness).equal('claude');
+    // The model came from the manifest's own default through the real planner.
+    should(startedBody.config.model).equal('claude-opus-5');
+    should(startedBody.config.name).equal('Wire Session Lifecycle');
+    should(startedBody.state.status).equal('running');
+    // The agent that was launched is the ABSOLUTE executable this host resolved, in the caller's
+    // directory — not a bare name the lifecycle would have refused.
+    should(launcher.launched).deepEqual([{ command: [executable], cwd: home }]);
+    // The assignment was handed over by pointing the agent at a file, and the file is really there.
+    should(launcher.delivered).have.length(1);
+    should(launcher.delivered[0]).containEql('turns/turn-001.md');
+    should(turnOne).containEql('wire the session lifecycle');
+    // The retry answered with the SAME session and launched nothing further: one request id, one agent.
+    should(retriedBody.config.id).equal(startedBody.config.id);
+    should(launcher.launched).have.length(1);
+    // Visible to the fleet read, which only a document satisfying BOTH schemas can be.
+    should(listed.map(session => session.config.id)).deepEqual([startedBody.config.id]);
+    // And visible to the callsign pool: the name this session took is no longer offered.
+    should(names).not.containEql(SEEDED_CALLSIGN);
+    should(stopped.status).equal(200);
+    should(stoppedBody.state.status).equal('stopped');
+    should(stoppedBody.state.reason).equal('the task is done');
+    // The stop merged over the document rather than replacing it: the protocol half survived a
+    // transition that knows nothing about it.
+    should(stoppedBody.config.agent).equal(WRAPPER);
+    should(stoppedBody.config.model).equal('claude-opus-5');
+    should(launcher.stopped).have.length(1);
+    // A fleet that publishes no such account is the caller's mistake, named as one.
+    should(unknownAgent.status).equal(404);
+    should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');
   });
 
   /**

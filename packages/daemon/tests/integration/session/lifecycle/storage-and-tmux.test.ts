@@ -132,7 +132,14 @@ describe('StorageSessionLifecycleRepository', () => {
 
     // Assert
     should(actual).deepEqual(created.record);
-    should(await opened.storage.readConfig(created.record.config.id)).deepEqual(created.record.config);
+    // The DOCUMENT records the wrapper NAME, because one file serves both this schema and the
+    // protocol's, whose `agent` is the name every account is published under. The absolute executable
+    // the lifecycle authorizes against is `command[0]`, which is where the read above recovered it
+    // from — so the record round-trips while the document stays the one every mounted surface parses.
+    should(await opened.storage.readConfig(created.record.config.id)).deepEqual({
+      ...created.record.config,
+      agent: 'claude-auto-loge',
+    });
     should(await opened.storage.readState(created.record.config.id)).deepEqual(created.record.state);
     should((await readFile(paths.events, 'utf8')).trim()).containEql('"type":"session.created"');
     should(paths.directory).endWith('/state/sessions/stored-session');

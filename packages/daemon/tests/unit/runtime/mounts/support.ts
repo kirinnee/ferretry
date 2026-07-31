@@ -9,6 +9,7 @@ import {
   type Pin,
   type PinSnapshot,
   type SessionView,
+  type StartSessionRequest,
   type TaskActionRequest,
   type TaskCreateRequestInput,
   type TerminalListView,
@@ -37,6 +38,10 @@ import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts'
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import { RecommendError, type RecommendSubsystem } from '../../../../src/lib/runtime/mounts/recommend.ts';
 import { SessionReadError, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import {
+  SessionControlError,
+  type SessionControlSubsystem,
+} from '../../../../src/lib/runtime/mounts/session-control.ts';
 import {
   TeamAdvisor,
   type AccountInventoryPort,
@@ -624,6 +629,52 @@ export function sessionDirectory(
       return views.find(view => view.config.id === reference);
     },
   };
+}
+
+/**
+ * Starting and stopping sessions, in memory.
+ *
+ * The IDEMPOTENCY is real, because it is the contract the mount exists to serve: the same request id
+ * returns the session it already started, and a different payload under a spent id is a conflict. What
+ * is faked is only the launch — spawning an agent is not something a route test may do — and every
+ * refusal is raised in the production taxonomy the mount restates.
+ */
+export class FakeSessionControl implements SessionControlSubsystem {
+  /** Every start that reached the subsystem, as `requestId` and the agent it named. */
+  readonly starts: Array<readonly [string, string]> = [];
+  /** Every stop that reached it, as the session and the reason given. */
+  readonly stops: Array<readonly [string, string | undefined]> = [];
+  private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
+  private minted = 0;
+
+  constructor(
+    /** Sessions that already exist, so a stop has something to stop. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Agents no account is published under, so the unknown-agent refusal is drivable. */
+    private readonly unknownAgents: readonly string[] = [],
+  ) {}
+
+  async start(request: StartSessionRequest, requestId: string): Promise<SessionView> {
+    this.starts.push([requestId, request.agent]);
+    const already = this.spent.get(requestId);
+    if (already !== undefined) {
+      if (already.payload !== JSON.stringify(request))
+        throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
+      return sessionView(already.id, { agent: request.agent }, { status: 'running' });
+    }
+    if (this.unknownAgents.includes(request.agent))
+      throw new SessionControlError('unknown_agent', `no account is published as ${JSON.stringify(request.agent)}`);
+    this.minted += 1;
+    const id = `started-${this.minted}`;
+    this.spent.set(requestId, { id, payload: JSON.stringify(request) });
+    return sessionView(id, { agent: request.agent, mode: request.mode }, { status: 'running' });
+  }
+
+  async stop(sessionId: string, reason: string | undefined): Promise<SessionView> {
+    this.stops.push([sessionId, reason]);
+    if (!this.known.includes(sessionId)) throw new SessionControlError('not_found', `no session ${sessionId}`);
+    return sessionView(sessionId, {}, { status: 'stopped', ...(reason === undefined ? {} : { reason }) });
+  }
 }
 
 /**

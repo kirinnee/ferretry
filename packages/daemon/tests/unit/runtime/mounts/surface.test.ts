@@ -13,6 +13,7 @@ import {
   attentionService,
   CREDENTIALS,
   emptyFeed,
+  FakeSessionControl,
   FakeTerminals,
   healthSubsystem,
   human,
@@ -39,6 +40,7 @@ const subsystems = (): MountedSubsystems => ({
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
+  sessionControl: new FakeSessionControl(),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
@@ -61,6 +63,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/health',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
+      'POST /v1/sessions',
+      'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
@@ -117,6 +121,11 @@ describe('the mounted daemon surface', () => {
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
     const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
+    // The write half of the session surface, over the same dispatcher: a stop of a session the
+    // fixture holds, which an unmounted route would answer as `unknown_route`.
+    const stopped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/stop', headers: human, body: '{}' }),
+    );
 
     // Assert
     should(health.status).equal(200);
@@ -134,6 +143,7 @@ describe('the mounted daemon surface', () => {
     should(analytics.status).equal(200);
     should(terminals.status).equal(200);
     should(learning.status).equal(200);
+    should(stopped.status).equal(200);
   });
 
   it('should serve every protocol-switching route from one table too', () => {
