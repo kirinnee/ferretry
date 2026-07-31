@@ -6,6 +6,7 @@ import { ModeBadge } from '../../src/components/mode-badge.tsx';
 import { QuotaReadout } from '../../src/components/quota-readout.tsx';
 import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../../src/components/session-details.tsx';
+import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
 import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
@@ -246,6 +247,36 @@ describe('session screen components', () => {
     expect(JSON.stringify(text)).toContain('parent-session');
     expect(JSON.stringify(text)).toContain('—');
     expect(minimal.root.findAllByProps({ 'aria-label': 'Close session details' })).toHaveLength(0);
+  });
+
+  test('renders a steering-only header and scopes every navigation control to its daemon', () => {
+    const calls: Array<readonly [string, ...string[]]> = [];
+    const header = render(
+      <SessionHeader
+        daemonId="daemon-b"
+        onBack={daemonId => calls.push([daemonId, 'back'])}
+        onOpenDetails={(daemonId, sessionId) => calls.push([daemonId, 'details', sessionId])}
+        onOpenFleet={daemonId => calls.push([daemonId, 'fleet'])}
+        session={session('header', 'awaiting_user', { label: 'Ship the session header' })}
+      />,
+    );
+    expect(header.root.findByProps({ 'data-daemon-id': 'daemon-b' }).props.className).toBe('fy-session-header');
+    expect(findText(header.root, 'Ship the session header')).toHaveLength(1);
+    expect(findText(header.root, 'awaiting user')).toHaveLength(1);
+    run(() => header.root.findByProps({ 'aria-label': 'Open sessions' }).props.onClick());
+    run(() => header.root.findByProps({ 'aria-label': 'Back to sessions' }).props.onClick());
+    run(() => header.root.findByProps({ 'aria-label': 'Open session details' }).props.onClick());
+    expect(calls).toEqual([
+      ['daemon-b', 'fleet'],
+      ['daemon-b', 'back'],
+      ['daemon-b', 'details', 'header'],
+    ]);
+
+    const quiet = render(
+      <SessionHeader daemonId="daemon-a" session={session('fallback', 'completed', { label: undefined })} />,
+    );
+    expect(findText(quiet.root, 'Session fallback')).toHaveLength(1);
+    expect(quiet.root.findAllByType('button')).toHaveLength(0);
   });
 
   test('renders transcript entries and preserves detached-reader new-message behaviour', () => {

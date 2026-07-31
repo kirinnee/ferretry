@@ -23,6 +23,7 @@ import type {
 import { Composer } from '../src/components/composer.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
+import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { TaskRow } from '../src/features/tasks/task-row.tsx';
@@ -556,9 +557,17 @@ function Shell() {
         <section
           aria-label="Session screen harness"
           className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
+          id="harness-session-screen"
         >
           <SessionList daemonId={daemon.daemonId} onOpenSession={() => {}} sessions={[harnessSession]} />
           <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
+            <SessionHeader
+              daemonId={daemon.daemonId}
+              onBack={() => {}}
+              onOpenDetails={() => {}}
+              onOpenFleet={() => {}}
+              session={harnessSession}
+            />
             <Transcript
               busy
               daemonId={daemon.daemonId}
