@@ -2,6 +2,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { ModeBadge } from '../../src/components/mode-badge.tsx';
 import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
@@ -150,6 +151,25 @@ describe('session screen components', () => {
     expect(
       marks.root.findAllByProps({ className: 'fy-status-mark-glyph fy-status-mark-square fy-status-mark-err' }),
     ).toHaveLength(1);
+  });
+
+  test('renders the original quiet mode badges in compact and full forms', () => {
+    const badges = render(
+      <>
+        <ModeBadge mode="auto" size="sm" />
+        <ModeBadge mode="interactive" />
+      </>,
+    );
+    const rendered = badges.root.findAllByProps({ className: 'kt-badge fy-mode-badge fy-mode-badge-auto' });
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0]?.props['data-tone']).toBe('pend');
+    expect(rendered[0]?.props['aria-label']).toContain('auto — autonomous');
+    expect(rendered[0]?.children).toHaveLength(1);
+
+    const interactive = badges.root.findByProps({ className: 'kt-badge fy-mode-badge ' });
+    expect(interactive.props['data-tone']).toBe('accent');
+    expect(interactive.props.title).toContain('interactive — human-driven');
+    expect(interactive.children).toContain('interactive');
   });
 
   test('renders session detail metadata, optional values, and the close affordance', () => {

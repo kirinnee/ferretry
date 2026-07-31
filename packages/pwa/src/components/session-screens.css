@@ -138,6 +138,15 @@
 .fy-status-mark-live {
   animation: fy-status-breathe 1.8s ease-in-out infinite;
 }
+.fy-mode-badge {
+  align-self: center;
+  flex: 0 0 auto;
+  justify-self: start;
+  width: fit-content;
+}
+.fy-mode-badge-auto {
+  font-weight: 500;
+}
 @keyframes fy-status-breathe {
   50% {
     opacity: 0.55;

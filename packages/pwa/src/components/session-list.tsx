@@ -1,5 +1,6 @@
 import type { SessionView } from '@ferretry/protocol';
 import { relativeTime, sessionNavigation, sessionStatusLabel } from '../lib/session-screens.ts';
+import { ModeBadge } from './mode-badge.tsx';
 import { StatusMark } from './status-mark.tsx';
 
 export interface SessionListProps {
@@ -49,6 +50,7 @@ export function SessionList({ daemonId, sessions, now = Date.now(), onOpenSessio
                     <StatusMark view={session} />
                     {sessionStatusLabel(state.status)}
                   </span>
+                  <ModeBadge mode={config.mode} size="sm" />
                   <span className="fy-session-meta">{config.model ?? config.agent}</span>
                   <time className="fy-session-age" dateTime={new Date(activityAt).toISOString()}>
                     {relativeTime(activityAt, now)}
