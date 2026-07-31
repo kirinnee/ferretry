@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package. */
 export const packageRole = 'daemon' as const;
 
+export * from './tmux/index.ts';
 export * from './instant.ts';
 export * from './journal.ts';
 export * from './json.ts';
