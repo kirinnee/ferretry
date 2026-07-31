@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
+  BunCommandPort,
   BunSqliteIndexFactory,
   DaemonBinder,
   DaemonHealthProbe,
@@ -15,6 +16,7 @@ import {
   KeyedSerialExecutor,
   RuntimeEnvironment,
   SocketViewerDownstream,
+  PaneProcessInventory,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
@@ -56,6 +58,7 @@ import {
   TmuxController,
   type BrowserViewerHost,
   type DaemonReadinessPorts,
+  type ProcessInventoryPort,
 } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -88,6 +91,7 @@ export interface DaemonWorld {
   readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
+  readonly processInventory: ProcessInventoryPort;
   readonly createAttentionLedgerRepository: (
     sessionDirectory: (sessionId: string) => string,
   ) => FileAttentionLedgerRepository;
@@ -154,6 +158,7 @@ export function buildWorld(): DaemonWorld {
       }),
       { set: (key, value) => (process.env[key] = value) },
     ),
+    processInventory: new PaneProcessInventory(new BunCommandPort()),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
     browserTransport: {
