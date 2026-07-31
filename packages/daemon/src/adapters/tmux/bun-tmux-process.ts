@@ -12,6 +12,8 @@ export class BunTmuxProcess implements TmuxCommandPort {
   }
 
   async execute(arguments_: readonly string[]): Promise<TmuxCommandResult> {
+    if (arguments_.length === 0 || arguments_[0]?.startsWith('-'))
+      throw new Error('tmux command must begin with a command name, not a server option');
     const child = Bun.spawn([this.executable, '-S', this.socketPath, ...arguments_], {
       stdout: 'pipe',
       stderr: 'pipe',

@@ -20,16 +20,19 @@ describe('BunTmuxProcess', () => {
 
     try {
       // Act
-      const actual = await subject.execute(['display-message', '-p', '#{pane_id}']);
+      const actual = await subject.execute(['capture-pane', '-p', '-S', '-', '-t', 'work']);
 
       // Assert
       should(actual).deepEqual({ code: 7, stdout: 'out', stderr: 'err' });
       should((await readFile(record, 'utf8')).trimEnd().split('\n')).deepEqual([
         '-S',
         join(root, 'isolated.sock'),
-        'display-message',
+        'capture-pane',
         '-p',
-        '#{pane_id}',
+        '-S',
+        '-',
+        '-t',
+        'work',
       ]);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -40,5 +43,24 @@ describe('BunTmuxProcess', () => {
     // Act + Assert
     should(() => new BunTmuxProcess('tmux', '/tmp/socket')).throw(Error);
     should(() => new BunTmuxProcess('/usr/bin/tmux', 'socket')).throw(Error);
+  });
+
+  it('should refuse empty argv and a leading socket override without spawning', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-tmux-adapter-'));
+    const executable = join(root, 'fake-tmux.sh');
+    const record = join(root, 'arguments.txt');
+    await writeFile(executable, `#!/bin/sh\nprintf invoked > '${record}'\n`);
+    await chmod(executable, 0o700);
+    const subject = new BunTmuxProcess(executable, join(root, 'isolated.sock'));
+
+    try {
+      // Act + Assert
+      await should(subject.execute([])).be.rejectedWith(Error);
+      await should(subject.execute(['-S', '/tmp/evil.sock', 'kill-session', '-t', 'work'])).be.rejectedWith(Error);
+      await should(readFile(record, 'utf8')).be.rejectedWith(Error);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
