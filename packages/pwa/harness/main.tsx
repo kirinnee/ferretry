@@ -21,6 +21,7 @@ import { TaskQuickSummary } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
+import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
@@ -188,6 +189,18 @@ const WARDEN: WardenStatusView = {
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
+const BROWSER_LOGIN: BrowserLoginView = {
+  state: 'open',
+  profilePrimed: false,
+  expiresAt: '2026-07-31T12:02:00.000Z',
+  connection: {
+    host: '127.0.0.1',
+    port: 5951,
+    password: 'temporary-password',
+    sshTunnel: 'ssh -N -L 5951:127.0.0.1:5951 reader@example.test',
+  },
+};
+
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
@@ -281,6 +294,17 @@ function Shell() {
         <PanelBody>
           <WardenStrip status={WARDEN} now={HARNESS_NOW} />
         </PanelBody>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <PanelHeader>
+          <Label>Browser login</Label>
+        </PanelHeader>
+        <BrowserLoginBanner
+          status={BROWSER_LOGIN}
+          now={HARNESS_NOW}
+          onClose={async () => ({ state: 'closed', profilePrimed: false })}
+        />
       </Card>
 
       <Card className="overflow-hidden">

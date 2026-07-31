@@ -8,6 +8,7 @@ export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';
 export * from '../features/warden/warden-status-model.ts';
 export * from '../features/warden/warden-strip.tsx';
+export * from '../features/browser/browser-login-banner.tsx';
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/primitives.tsx';
 export * from '../shell/route-link.tsx';
