@@ -352,3 +352,24 @@ were spent before anyone ran `journalctl`.
   (this is the human's call — it is fleet configuration, not repo configuration).
 - Brief UI units to close the browser and dev server in teardown; a leaked Chrome is a leaked GB.
 - **Check `journalctl` FIRST when an agent dies with no error.** It is usually this.
+
+## 14. The PWA has no application yet — this is deliberate
+
+`packages/pwa` holds components, features, hooks, shell chrome, styles and the data layer, all
+tested and daemon-scoped. It has **no `index.html`, no Vite config, no router mount and no build**,
+so there is nothing to deploy and nothing to visit. The only `index.html` in the package belongs to
+`harness/`, the screenshot rig — a component gallery, not the app.
+
+**Decided by Kirin 2026-07-31: keep porting components; assemble the application later.**
+
+The tradeoff that decision accepts: integration defects — routing, the pairing flow, a real daemon
+connection, service-worker and offline behaviour — cannot be found by component tests and will all
+surface at once when the app is finally assembled, against a much larger surface than if it had been
+assembled early. Budget for that; it is deferred work, not absent work.
+
+Note for whoever assembles it: the harness is easy to mistake for a working app because it renders
+real components at both viewports and screenshots them. It does not exercise routing, data fetching,
+pairing or the daemon connection. Do not treat a green harness as evidence the app works.
+
+Hosting is already settled — Cloudflare Pages, public site — see `docs/design/migration-plan.md`
+§12.1 for the constraints that follow from it.
