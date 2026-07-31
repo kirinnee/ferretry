@@ -1,3 +1,4 @@
+import { stat } from 'node:fs/promises';
 import type { GitExecution, GitInvocation, GitRunner } from '../../lib/worktrees/ports.ts';
 
 export const DEFAULT_GIT_TIMEOUT_MS = 10_000;
@@ -49,11 +50,16 @@ async function readCapped(
   const chunks: Uint8Array[] = [];
   let keptBytes = 0;
   let truncated = false;
+  let abandonedRead = false;
   const reader = stream.getReader();
   try {
     while (true) {
       const result = await Promise.race([reader.read(), abandoned]);
-      if (result === ABANDONED || result.done) break;
+      if (result === ABANDONED) {
+        abandonedRead = true;
+        break;
+      }
+      if (result.done) break;
       const chunk = result.value;
       // `remaining` is never negative, so an empty chunk arriving after the cap keeps `kept` empty
       // and must NOT be reported as a truncation.
@@ -64,6 +70,7 @@ async function readCapped(
       truncated ||= kept.byteLength < chunk.byteLength;
     }
   } finally {
+    if (abandonedRead) await reader.cancel();
     reader.releaseLock();
   }
 
@@ -104,6 +111,16 @@ function gitEnvironment(inherited: Readonly<Record<string, string | undefined>>)
   };
 }
 
+async function checkWorkingDirectory(cwd: string): Promise<void> {
+  try {
+    if (!(await stat(cwd)).isDirectory()) {
+      throw new Error('Git working directory is not a directory');
+    }
+  } catch (error) {
+    throw new GitProcessError('spawn_failed', 'could not start Git', { cause: error });
+  }
+}
+
 export class BunGitRunner implements GitRunner {
   constructor(
     private readonly inheritedEnvironment: () => Readonly<Record<string, string | undefined>> = () => process.env,
@@ -112,6 +129,8 @@ export class BunGitRunner implements GitRunner {
   async run(invocation: GitInvocation): Promise<GitExecution> {
     const timeoutMs = checkedLimit(invocation.timeoutMs, DEFAULT_GIT_TIMEOUT_MS, 'Git timeout');
     const maxStdoutBytes = checkedLimit(invocation.maxStdoutBytes, DEFAULT_GIT_STDOUT_LIMIT, 'Git stdout limit');
+
+    await checkWorkingDirectory(invocation.cwd);
 
     // Git is never given stdin: every command this daemon runs is non-interactive, so an open
     // stdin could only ever hang the daemon on a prompt.
@@ -137,13 +156,13 @@ export class BunGitRunner implements GitRunner {
     }, timeoutMs);
 
     try {
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
+      const [exitResult, stdout, stderr] = await Promise.all([
+        Promise.race([child.exited, abandoned.promise]),
         readCapped(child.stdout, maxStdoutBytes, abandoned.promise),
         readCapped(child.stderr, DEFAULT_GIT_STDERR_LIMIT, abandoned.promise),
       ]);
       return {
-        exitCode,
+        exitCode: exitResult === ABANDONED ? -1 : exitResult,
         stdout: stdout.bytes,
         stderr: new TextDecoder().decode(stderr.bytes),
         stdoutTruncated: stdout.truncated,
