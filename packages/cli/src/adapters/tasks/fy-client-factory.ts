@@ -10,11 +10,11 @@ export function createFyClient(
   environment: Record<string, string | undefined>,
   version: string,
 ): Promise<IFyApiClient> {
-  const baseUrl = environment['FY_URL']?.trim();
+  const baseUrl = environment.FY_URL?.trim();
   if (baseUrl === undefined || baseUrl.length === 0) {
     throw new Error('set FY_URL to the daemon base URL, for example FY_URL=http://127.0.0.1:8420');
   }
-  const token = environment['FY_TOKEN']?.trim();
+  const token = environment.FY_TOKEN?.trim();
   if (token === undefined || token.length === 0) {
     throw new Error('set FY_TOKEN to the daemon API token');
   }
@@ -23,6 +23,6 @@ export function createFyClient(
 
 /** The session a command writes to when `--session` is absent. */
 export function environmentSessionId(environment: Record<string, string | undefined>): string | undefined {
-  const value = environment['FY_SESSION_ID']?.trim();
+  const value = environment.FY_SESSION_ID?.trim();
   return value === undefined || value.length === 0 ? undefined : value;
 }
