@@ -17,3 +17,4 @@ export * from './storage-types.ts';
 export * from './task-boards/index.ts';
 export * from './version.ts';
 export * from './worktrees/index.ts';
+export * from './attachments/index.ts';
