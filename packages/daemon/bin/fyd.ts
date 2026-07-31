@@ -14,6 +14,8 @@ import {
   DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
+  StateHomeLockedError,
+  type OpenedDaemonStorage,
   BunSecretShell,
   daemonSecretSourceProgram,
   FileDaemonConfig,
@@ -77,6 +79,7 @@ import {
   type ApiServerPort,
   type DaemonConfig,
   type DaemonReadinessPorts,
+  type MillisecondClockPort,
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -152,6 +155,9 @@ export interface DaemonWorld {
   readonly api: ApiServerPort;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
+  /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
+   *  the uptime and freshness the API reports are drivable from a test. */
+  readonly clock: MillisecondClockPort;
   /** Resolves when the process should shut down. Injected so a test can drive a
    *  full boot without the daemon running forever. */
   readonly untilShutdown: () => Promise<void>;
@@ -297,27 +303,65 @@ export function buildWorld(): DaemonWorld {
     },
     api: new BunApiServer(),
     credentials: new StateApiCredentials(paths, stateFiles),
+    clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
   };
 }
 
-/** Boots the daemon from an already-built world, so tests can inject their own. */
+/**
+ * Boots the daemon from an already-built world, so tests can inject their own.
+ *
+ * The ORDER is the design, and it is not the order the source used.
+ *
+ * The state home comes FIRST. Opening it takes the lifetime lock, establishes the layout and opens
+ * the session index, and every document the daemon then reads or writes — configuration included —
+ * lives inside it. Loading configuration first, as the source did, writes `config/daemon.json` into
+ * a home that has no layout marker yet, and the layout gate correctly refuses a non-empty unmarked
+ * home as foreign state: a first boot on a fresh home could not get past its own configuration
+ * step. Owning the home before writing into it removes the whole class.
+ *
+ * A held lifetime lock is then the same answer as a responder on the address — another daemon is
+ * already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them surfacing as a
+ * crash about SQLite.
+ *
+ * The socket comes last, and every acquisition registers its release as it is made rather than in
+ * one block at the end, so a failure part-way through unwinds exactly what succeeded.
+ */
 export async function start(world: DaemonWorld, cleanups: Array<() => void | Promise<void>> = []): Promise<number> {
   if (world.role !== 'daemon') return 1;
+
+  // Registered for release immediately: an exception from anything below must not leave the lock
+  // behind, because a stale lock fails the NEXT start for a reason unrelated to what broke.
+  let opened: OpenedDaemonStorage;
+  try {
+    opened = await world.storage.open();
+  } catch (error) {
+    if (error instanceof StateHomeLockedError) return EXIT_ALREADY_RUNNING;
+    throw error;
+  }
+  cleanups.push(() => opened.storage.close());
+
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
   if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
+
   const usage = world.createUsageFeed(config);
+  const startedAtMs = world.clock.now();
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
-  // up fighting whatever else the host already runs on it.
-  const server: ApiServerHandle = await world.api.listen(
-    createApiDispatcher({
-      credentials: await world.credentials.load(),
-      usage,
-      clock: { now: () => Date.now() },
-      startedAtMs: Date.now(),
-    }),
-    { host: config.host, port: config.port },
+  // up fighting whatever else the host already runs on it. The bind is retried because the common
+  // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
+  // window routinely and reported a permanent failure for a condition that clears in a second.
+  const server: ApiServerHandle = await world.boot.binder.bind(
+    async () =>
+      await world.api.listen(
+        createApiDispatcher({
+          credentials: await world.credentials.load(),
+          usage,
+          clock: world.clock,
+          startedAtMs,
+        }),
+        { host: config.host, port: config.port },
+      ),
   );
   cleanups.push(() => server.stop());
   await world.untilShutdown();
