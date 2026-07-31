@@ -24,6 +24,7 @@ import {
   createSessionRecord,
   defaultSessionLifecycleSettings,
   parseSessionId,
+  SessionLifecycleService,
   TmuxController,
   transitionSessionRecord,
   type SessionLifecycleRecord,
@@ -412,6 +413,61 @@ describe('NodeWorkingDirectoryResolver', () => {
   });
 });
 
+describe('the composed session lifecycle', () => {
+  it('should give a started auto session its task through real storage and a real turn file', async () => {
+    // Arrange — every adapter is the production one; only the tmux process boundary is a double.
+    const opened = await openTemporaryStorage();
+    const port = new RecordingTmuxPort();
+    const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
+    homes.add(cwd);
+    const subject = new SessionLifecycleService(
+      {
+        repository: new StorageSessionLifecycleRepository(opened.storage),
+        launcher: launcher(port).instance,
+        tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
+        directories: new NodeWorkingDirectoryResolver(),
+        ids: new TimeSessionIdFactory(
+          () => Date.parse(NOW),
+          () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
+        ),
+        clock: new SystemClock(() => new Date(NOW)),
+        serial: new KeyedSerialExecutor(),
+      },
+      defaultSessionLifecycleSettings,
+    );
+
+    // Act
+    const running = await subject.createAndStart({
+      agent: AGENT,
+      command: [AGENT, '--mode', 'auto'],
+      cwd,
+      mode: 'auto',
+      prompt: 'Finish the lifecycle unit',
+    });
+    const taskFile = join(createSessionPaths(opened.paths, running.config.id).directory, 'turns', 'turn-001.md');
+    const typed = port.calls.find(call => call[0] === 'send-keys' && call[3] === '-l');
+    const stopped = await subject.stop(running.config.id, 'work complete');
+
+    // Assert — the agent was told to read the file that exists and holds its assignment.
+    should(running.config.id).equal('ms8ru4g0-abcdef12');
+    should(running.state.status).equal('running');
+    should(await readFile(taskFile, 'utf8')).equal('# Assigned task\n\nFinish the lifecycle unit\n');
+    should(typed?.at(-1)).equal(
+      `Read the file ${taskFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`,
+    );
+    should(port.commands()).containDeep(['new-session', 'set-option']);
+    should(stopped.state).containDeep({ status: 'stopped', reason: 'work complete' });
+    should(port.commands().at(-1)).equal('kill-session');
+    should(
+      (await readFile(createSessionPaths(opened.paths, running.config.id).events, 'utf8'))
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line).type),
+    ).deepEqual(['session.created', 'session.starting', 'session.running', 'session.stopped']);
+    await opened.storage.close();
+  });
+});
+
 describe('TimeSessionIdFactory', () => {
   it('should mint sortable, path-safe ids the schema accepts', async () => {
     // Arrange
@@ -426,7 +482,7 @@ describe('TimeSessionIdFactory', () => {
     const [first, second] = [production.next(), production.next()];
 
     // Assert
-    should(actual).equal(`${Date.parse('2026-07-31T10:00:00.000Z').toString(36)}-abcdef12`);
+    should(actual).equal('ms8ru4g0-abcdef12');
     should(parseSessionId(actual)).equal(actual);
     should(first).not.equal(second);
     should(parseSessionId(second)).equal(second);
