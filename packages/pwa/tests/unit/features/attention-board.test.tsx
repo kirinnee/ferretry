@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AttentionSnapshot } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, type AttentionSnapshot } from '@ferretry/protocol';
 
 import { actOnAttention, fetchAttention } from '../../../src/features/attention/attention-api.ts';
 import {
@@ -239,6 +239,8 @@ describe('attention helpers and transport', () => {
     ]);
     expect(seen[0]?.headers.get('authorization')).toBe('Bearer token-a');
     expect(seen[1]?.method).toBe('POST');
+    expect(seen[1]?.headers.get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(seen[1]?.headers.get('x-kteam-request-id')).toBeNull();
     expect(await seen[1]?.json()).toEqual({ action: 'dismiss', id: 'A3' });
   });
 

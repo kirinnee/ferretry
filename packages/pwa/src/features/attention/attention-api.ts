@@ -1,4 +1,9 @@
-import { AttentionSnapshotSchema, type AttentionActionRequest, type AttentionSnapshot } from '@ferretry/protocol';
+import {
+  AttentionSnapshotSchema,
+  FY_REQUEST_ID_HEADER,
+  type AttentionActionRequest,
+  type AttentionSnapshot,
+} from '@ferretry/protocol';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
@@ -48,7 +53,7 @@ export const actOnAttention = (
     sessionId,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-kteam-request-id': crypto.randomUUID() },
+      headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
       body: JSON.stringify(action),
     },
     fetcher,
