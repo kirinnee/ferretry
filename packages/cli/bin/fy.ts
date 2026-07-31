@@ -6,6 +6,12 @@ import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
+import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
+import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
+import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
+import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
+import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
+import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
@@ -56,6 +62,8 @@ export interface CliWorld {
   readonly prompt: IPrompt;
   readonly shell: IShellRunner;
   readonly interactive: boolean;
+  /** The process environment, injected so tests never depend on the ambient one. */
+  readonly environment: Record<string, string | undefined>;
 }
 
 /** The real production world: the shipped IO adapters. */
@@ -68,6 +76,7 @@ export function buildWorld(): CliWorld {
     prompt: new InquirerPrompt(),
     shell: new BunShell(),
     interactive: io.interactive(),
+    environment: process.env,
   };
 }
 
@@ -92,16 +101,18 @@ function daemonConnection(environment: Record<string, string | undefined>): {
 }
 
 /**
- * A protocol client that connects on first use.
+ * The one connection to the daemon, opened on first use and shared by every command group.
  *
  * Deferring the connection is what keeps `--help`, `--version` and a mistyped command working on a
  * host with no daemon and no token: nothing reaches the network until a command actually asks.
  */
-function lazyDaemonClient(
-  environment: Record<string, string | undefined>,
-): Pick<IFyApiClient, 'request' | 'analytics'> {
+function lazyDaemonConnection(environment: Record<string, string | undefined>): () => Promise<IFyApiClient> {
   let connected: Promise<FyApiClient> | undefined;
-  const client = (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
+  return (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
+}
+
+/** The deferred connection as the client object every command group is wired with. */
+function lazyDaemonClient(client: () => Promise<IFyApiClient>): Pick<IFyApiClient, 'request' | 'analytics'> {
   return {
     request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
       const ready = await client();
@@ -140,6 +151,19 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
+  ({ program, world, client, ownSessionId }) =>
+    registerTaskCommands(program, {
+      gateway: new FyTaskGateway(client),
+      io: world.io,
+      files: new BunTextFileReader(),
+      environmentSessionId: ownSessionId,
+    }),
+  ({ program, world, client }) =>
+    registerTaskBoardCommands(program, {
+      gateway: new FyTaskBoardGateway(client),
+      io: world.io,
+      credentials: environmentBoardCredentials(world.environment),
+    }),
 ];
 
 /**
@@ -183,12 +207,14 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
 
 /** Route the product domain onto the program — one controller per command group. */
 export function registerDomain(program: Command, world: CliWorld): void {
-  const environment = process.env;
+  // The injected environment, never the ambient one: an in-process journey must not inherit FY_*.
+  const environment = world.environment;
   const wiring: DomainWiring = {
     program,
     world,
-    client: lazyDaemonClient(environment),
-    ownSessionId: environment.FY_SESSION_ID,
+    client: lazyDaemonClient(lazyDaemonConnection(environment)),
+    // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
+    ownSessionId: environmentSessionId(environment),
   };
   for (const register of DOMAIN_REGISTRARS) register(wiring);
 }

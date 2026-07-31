@@ -76,7 +76,16 @@ export class InProcessCliDriver implements CliDriver {
     };
 
     const program = createProgram();
-    registerDomain(program, { io, spinner, progress, prompt, shell: new BunShell(), interactive: false });
+    registerDomain(program, {
+      io,
+      spinner,
+      progress,
+      prompt,
+      shell: new BunShell(),
+      interactive: false,
+      // Hermetic: an in-process journey never inherits the operator's FY_* environment.
+      environment: {},
+    });
     program.configureOutput({
       writeOut: str => {
         out += str;
