@@ -525,7 +525,9 @@ export class FyApiClient implements IFyApiClient {
       resolvedFilename = filename ?? (file instanceof File ? file.name : 'attachment');
     }
     const form = new FormData();
-    form.set('file', blob, NonEmptyValueSchema.parse(resolvedFilename));
+    // A File part carries its own name, and some runtimes let it win over FormData's filename
+    // argument — wrapping makes the resolved filename authoritative everywhere.
+    form.set('file', new File([blob], NonEmptyValueSchema.parse(resolvedFilename), { type: blob.type }));
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/attachments`,
       AttachmentViewSchema,
