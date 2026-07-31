@@ -1,10 +1,18 @@
 #!/usr/bin/env bun
+import { homedir } from 'node:os';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
+// The root manifest is the single source for the PRODUCT name; this package's own name is the BINARY.
+import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
+import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
+import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
+import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
+import { BunDaemonProcess } from '../src/adapters/daemon/process';
+import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
@@ -23,6 +31,11 @@ import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { registerDaemonCommands } from '../src/lib/daemon/commands';
+import { DaemonController } from '../src/lib/daemon/controller';
+import { type DaemonLayout, resolveDaemonLayout } from '../src/lib/daemon/layout';
+import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
+import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -45,6 +58,7 @@ import { assertSemver } from '../src/lib/version';
 
 // Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
 const BINARY_NAME = Object.keys(pkg.bin)[0] ?? pkg.name;
+const PRODUCT_NAME = root.name;
 const DESCRIPTION = 'Command-line client for the per-host agent daemon';
 
 /** Scaffold: the commander program skeleton (identity + `--help`/`--version`), domain-free. */
@@ -135,6 +149,86 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
 }
 
 /**
+ * `/v1/health` is a public route, but the typed client insists on a non-empty bearer token. The daemon
+ * commands must be able to report whether the daemon is up BEFORE a token exists — that is exactly
+ * the state a fresh `daemon install` leaves the host in — so an unauthenticated probe sends this
+ * placeholder and the daemon ignores it.
+ */
+const UNAUTHENTICATED_PROBE_TOKEN = 'unauthenticated';
+
+/** A client for the public health route, which works with or without `FY_TOKEN`. */
+function lazyHealthClient(environment: Record<string, string | undefined>): HealthApiClient {
+  let connected: Promise<FyApiClient> | undefined;
+  const token = environment.FY_TOKEN?.trim() ?? '';
+  const url = environment.FY_URL?.trim() ?? '';
+  const options = {
+    baseUrl: url === '' ? DEFAULT_DAEMON_URL : url,
+    token: token === '' ? UNAUTHENTICATED_PROBE_TOKEN : token,
+    version: assertSemver(pkg.version),
+  };
+  const client = (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(options));
+  return {
+    request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
+      const ready = await client();
+      return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
+    },
+  };
+}
+
+/**
+ * Where the daemon executable lives. `systemd` requires an absolute `ExecStart`, so a bare name on
+ * `PATH` is resolved here rather than written into a unit file that would fail to load with 203/EXEC.
+ */
+function resolveDaemonBinary(environment: Record<string, string | undefined>, daemonName: string): string {
+  const pinned = environment.FY_DAEMON_BIN?.trim() ?? '';
+  if (pinned !== '') return pinned;
+  const found = Bun.which(daemonName, { PATH: environment.PATH ?? '' });
+  if (found === null) {
+    throw new Error(`cannot find ${daemonName} on PATH — install it or point FY_DAEMON_BIN at the executable`);
+  }
+  return found;
+}
+
+/**
+ * Builds the daemon-control controller.
+ *
+ * Constructed lazily, per invocation: resolving the layout can fail (no `fyd` on `PATH`, a nonsensical
+ * `FY_HOME`) and that must surface as an error from `fy daemon …`, never as a CLI that cannot even
+ * print `--help`.
+ */
+function buildDaemonController(environment: Record<string, string | undefined>, out: ICliIo): DaemonController {
+  const daemonName = `${BINARY_NAME}d`;
+  const layout: DaemonLayout = resolveDaemonLayout({
+    platform: process.platform,
+    homeDirectory: homedir(),
+    stateHome: environment.FY_HOME,
+    configHome: environment.XDG_CONFIG_HOME,
+    userId: typeof process.getuid === 'function' ? process.getuid() : 0,
+    daemonBinary: resolveDaemonBinary(environment, daemonName),
+    daemonName,
+    product: PRODUCT_NAME,
+    searchPath: environment.PATH ?? '',
+  });
+  const processes = new BunDaemonProcess();
+  const files = new FileServiceStore();
+  const service: IServiceDefinitionSupervisor | undefined =
+    layout.manager === 'systemd'
+      ? new SystemdSupervisor(layout, processes, files)
+      : layout.manager === 'launchd'
+        ? new LaunchdSupervisor(layout, processes, files)
+        : undefined;
+  return new DaemonController({
+    layout,
+    service,
+    direct: new DirectSupervisor(layout, processes, files),
+    health: new ProtocolDaemonHealth(lazyHealthClient(environment)),
+    logs: new TailDaemonLog(),
+    clock: new SystemMillisecondClock(),
+    out,
+  });
+}
+
+/**
  * What one command group needs to wire itself: the program to hang commands on, plus the
  * collaborators every group shares.
  */
@@ -192,6 +286,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
+  // The daemon group is the one group that does NOT take the shared client: it manages a local
+  // process, and it must answer "is the daemon up?" on a host that has no token yet.
+  ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
 ];
 
 /**
