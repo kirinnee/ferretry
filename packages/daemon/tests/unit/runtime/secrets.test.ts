@@ -20,4 +20,16 @@ describe('daemon secret policy', () => {
     should(status).equal('loaded');
     should(received).deepEqual(['API_TOKEN']);
   });
+
+  it('should fail closed when the source cannot be read', async () => {
+    // Act
+    const status = await loadDaemonSecrets(
+      { source: async () => await Promise.reject(new Error('unreadable')) },
+      { set: () => undefined },
+      '/private/secrets',
+    );
+
+    // Assert
+    should(status).equal('failed');
+  });
 });
