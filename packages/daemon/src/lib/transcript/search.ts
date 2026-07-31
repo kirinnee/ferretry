@@ -21,8 +21,6 @@ const SNIPPET_AFTER = 96;
 
 function attachmentText(attachment: TranscriptAttachment): string | undefined {
   switch (attachment.kind) {
-    case 'queued-command':
-      return attachment.text;
     case 'remote-control':
       return attachment.url;
     case 'document':

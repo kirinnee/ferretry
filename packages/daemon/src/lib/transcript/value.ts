@@ -62,31 +62,42 @@ export function transcriptText(value: unknown): string | undefined {
   return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
-export function transcriptQuestions(input: unknown): readonly TranscriptQuestion[] {
+export interface TranscriptQuestionNormalization {
+  readonly questions: readonly TranscriptQuestion[];
+  readonly invalidEntries: number;
+}
+
+export function normalizeTranscriptQuestions(input: unknown): TranscriptQuestionNormalization {
   const questions = transcriptObject(input)?.questions;
-  if (!Array.isArray(questions)) return [];
+  if (!Array.isArray(questions)) return { questions: [], invalidEntries: questions === undefined ? 0 : 1 };
 
   const normalized: TranscriptQuestion[] = [];
+  let invalidEntries = 0;
   for (const value of questions) {
     const question = transcriptObject(value);
     const text = transcriptString(question?.question);
-    if (text === undefined) continue;
+    if (text === undefined) {
+      invalidEntries += 1;
+      continue;
+    }
 
-    const options = Array.isArray(question?.options)
-      ? question.options.flatMap(value => {
-          const option = transcriptObject(value);
-          const label = transcriptString(option?.label);
-          return label === undefined
-            ? []
-            : [
-                {
-                  label,
-                  description: transcriptString(option?.description),
-                  preview: transcriptString(option?.preview),
-                },
-              ];
-        })
-      : [];
+    const options: TranscriptQuestion['options'][number][] = [];
+    if (question?.options !== undefined && !Array.isArray(question.options)) invalidEntries += 1;
+    if (Array.isArray(question?.options)) {
+      for (const value of question.options) {
+        const option = transcriptObject(value);
+        const label = transcriptString(option?.label);
+        if (label === undefined) {
+          invalidEntries += 1;
+          continue;
+        }
+        options.push({
+          label,
+          description: transcriptString(option?.description),
+          preview: transcriptString(option?.preview),
+        });
+      }
+    }
 
     normalized.push({
       question: text,
@@ -95,7 +106,7 @@ export function transcriptQuestions(input: unknown): readonly TranscriptQuestion
       multiple: question?.multiSelect === true || question?.multi_select === true,
     });
   }
-  return normalized;
+  return { questions: normalized, invalidEntries };
 }
 
 export function transcriptRecordIssue(
@@ -104,6 +115,8 @@ export function transcriptRecordIssue(
   code: TranscriptIssueCode,
   message: string,
   recordType?: string,
+  itemType?: string,
+  blockType?: string,
 ): TranscriptIssue {
   return {
     harness,
@@ -113,5 +126,7 @@ export function transcriptRecordIssue(
     source: context.source,
     line: context.line,
     recordType,
+    itemType,
+    blockType,
   };
 }

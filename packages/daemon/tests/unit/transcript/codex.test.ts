@@ -98,7 +98,9 @@ describe('CodexTranscriptParser', () => {
 
     // Assert
     should(actual.events).have.length(0);
-    should(actual.issues).containDeep([{ code: 'unsupported-record', recordType: 'future_magic_call' }]);
+    should(actual.issues).containDeep([
+      { code: 'unsupported-record', recordType: 'response_item', itemType: 'future_magic_call' },
+    ]);
   });
 
   it('should reject role-incompatible message blocks and suppress window-only usage', () => {
@@ -245,6 +247,73 @@ describe('CodexTranscriptParser', () => {
     ]);
     should(question.events).containDeep([{ kind: 'tool-call', call: { id: 'call-question' } }]);
     should(question.issues).containDeep([{ code: 'invalid-tool-input' }]);
+  });
+
+  it('should reject empty attachments and report malformed question siblings without dropping valid ones', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+    const attachmentTypes = ['input_image', 'input_audio', 'input_file'];
+    const question = {
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        call_id: 'call-question',
+        name: 'request_user_input',
+        arguments: JSON.stringify({
+          questions: [
+            { question: 'Choose?', options: [{ label: 'Alpha' }, { description: 'missing label' }] },
+            { question: 'Malformed options', options: 'not-an-array' },
+            { options: [] },
+          ],
+        }),
+      },
+    };
+
+    // Act
+    const attachments = attachmentTypes.map(type =>
+      subject.parseRecord({
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type, name: 'empty' }] },
+      }),
+    );
+    const questions = subject.parseRecord(question);
+
+    // Assert
+    should(attachments.every(result => result.events.length === 0)).be.true();
+    should(attachments.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
+    should(attachments.every(result => result.issues[0]?.recordType === 'response_item')).be.true();
+    should(attachments.every(result => result.issues[0]?.itemType === 'message')).be.true();
+    should(questions.events).containDeep([
+      {
+        kind: 'tool-call',
+        call: {
+          questions: [
+            { question: 'Choose?', options: [{ label: 'Alpha' }] },
+            { question: 'Malformed options', options: [] },
+          ],
+        },
+      },
+    ]);
+    should(questions.issues).containDeep([
+      { code: 'invalid-tool-input', recordType: 'response_item', itemType: 'function_call' },
+    ]);
+  });
+
+  it('should report an empty generated image without inventing an attachment', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord({
+      type: 'response_item',
+      payload: { type: 'image_generation_call', id: 'image-empty', revised_prompt: 'Synthetic', result: '   ' },
+    });
+
+    // Assert
+    should(actual.events.map(event => event.kind)).deepEqual(['tool-call']);
+    should(actual.issues).containDeep([
+      { code: 'invalid-record', recordType: 'response_item', itemType: 'image_generation_call' },
+    ]);
   });
 
   it('should normalize current search, image, and audio shapes explicitly', () => {

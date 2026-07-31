@@ -16,10 +16,9 @@ import {
   transcriptNullableString,
   transcriptNumber,
   transcriptObject,
-  transcriptQuestions,
+  normalizeTranscriptQuestions,
   transcriptRecordIssue,
   transcriptString,
-  transcriptText,
 } from './value.ts';
 
 function claudeRole(value: unknown): TranscriptRole | undefined {
@@ -69,18 +68,34 @@ function claudeAttachment(block: Record<string, unknown>): TranscriptAttachment 
     transcriptString(source.uri);
   const data = transcriptString(block.data) ?? transcriptString(source.data);
 
-  if (type === 'image') return { kind: 'image', name, mediaType, uri, data };
+  if (type === 'image') return uri?.trim() || data?.trim() ? { kind: 'image', name, mediaType, uri, data } : undefined;
   if (type === 'document') {
+    const text = transcriptString(block.text) ?? transcriptString(source.text);
+    if (!uri?.trim() && !data?.trim() && !text?.trim()) return undefined;
     return {
       kind: 'document',
       name,
       mediaType,
       uri,
       data,
-      text: transcriptString(block.text) ?? transcriptString(source.text),
+      text,
     };
   }
-  return { kind: 'file', name, mediaType, uri, data };
+  return uri?.trim() || data?.trim() ? { kind: 'file', name, mediaType, uri, data } : undefined;
+}
+
+function isClaudeAttachmentType(type: string): boolean {
+  return type === 'image' || type === 'document' || type === 'file' || type === 'attachment';
+}
+
+function claudeToolResultText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!Array.isArray(value)) return undefined;
+  const parts = value.flatMap(item => {
+    const block = transcriptObject(item);
+    return block?.type === 'text' && typeof block.text === 'string' ? [block.text] : [];
+  });
+  return parts.length > 0 ? parts.join('\n') : undefined;
 }
 
 function claudeErrorMessage(value: unknown): { message?: string; code?: string } {
@@ -174,8 +189,9 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       ) {
         events.push({
           ...metadata('user'),
-          kind: 'attachment',
-          attachment: { kind: 'queued-command', text, origin: 'human' },
+          kind: 'message',
+          text,
+          inputSource: 'native-queue',
         });
       }
       return { events, issues, recognized: true };
@@ -261,12 +277,33 @@ export class ClaudeTranscriptParser implements TranscriptParser {
               context,
               'invalid-record',
               'Claude tool call lacks id or name',
+              recordType,
+              undefined,
               blockType,
             ),
           );
           continue;
         }
-        const questions = name === 'AskUserQuestion' ? transcriptQuestions(block.input) : [];
+        const normalizedQuestions =
+          name === 'AskUserQuestion' ? normalizeTranscriptQuestions(block.input) : { questions: [], invalidEntries: 0 };
+        if (
+          name === 'AskUserQuestion' &&
+          (normalizedQuestions.questions.length === 0 || normalizedQuestions.invalidEntries > 0)
+        ) {
+          issues.push(
+            transcriptRecordIssue(
+              this.harness,
+              context,
+              'invalid-tool-input',
+              normalizedQuestions.questions.length === 0
+                ? 'Claude question tool input has no valid questions'
+                : 'Claude question tool input contains malformed questions or options',
+              recordType,
+              undefined,
+              blockType,
+            ),
+          );
+        }
         events.push({
           ...blockMetadata,
           kind: 'tool-call',
@@ -274,7 +311,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
             id,
             name,
             input: transcriptJsonValue(block.input),
-            ...(questions.length > 0 ? { questions } : {}),
+            ...(normalizedQuestions.questions.length > 0 ? { questions: normalizedQuestions.questions } : {}),
           },
         });
         continue;
@@ -288,12 +325,14 @@ export class ClaudeTranscriptParser implements TranscriptParser {
               context,
               'invalid-record',
               'Claude tool result lacks call id',
+              recordType,
+              undefined,
               blockType,
             ),
           );
           continue;
         }
-        const text = transcriptText(block.content);
+        const text = claudeToolResultText(block.content);
         events.push({
           ...metadata('tool', blockIndex),
           kind: 'tool-result',
@@ -312,6 +351,20 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         events.push({ ...blockMetadata, kind: 'attachment', attachment });
         continue;
       }
+      if (isClaudeAttachmentType(blockType)) {
+        issues.push(
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Claude attachment block has no usable content',
+            recordType,
+            undefined,
+            blockType,
+          ),
+        );
+        continue;
+      }
       if (blockType === 'error') {
         const normalized = claudeErrorMessage(block);
         if (normalized.message !== undefined) {
@@ -327,6 +380,8 @@ export class ClaudeTranscriptParser implements TranscriptParser {
               context,
               'invalid-record',
               'Claude error block has no message',
+              recordType,
+              undefined,
               blockType,
             ),
           );
@@ -340,6 +395,8 @@ export class ClaudeTranscriptParser implements TranscriptParser {
           context,
           'unsupported-record',
           'Claude content block type is not supported',
+          recordType,
+          undefined,
           blockType,
         ),
       );

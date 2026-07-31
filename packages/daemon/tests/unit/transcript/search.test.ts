@@ -85,8 +85,9 @@ describe('searchTranscript', () => {
       {
         harness: 'claude',
         role: 'user',
-        kind: 'attachment',
-        attachment: { kind: 'queued-command', text: 'needle queued', origin: 'human' },
+        kind: 'message',
+        text: 'needle queued',
+        inputSource: 'native-queue',
       },
       {
         harness: 'claude',
@@ -128,7 +129,7 @@ describe('searchTranscript', () => {
 
     // Assert
     should(actual.map(match => match.kind)).deepEqual([
-      'attachment',
+      'message',
       'attachment',
       'attachment',
       'attachment',

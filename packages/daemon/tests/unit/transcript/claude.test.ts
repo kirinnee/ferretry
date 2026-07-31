@@ -25,7 +25,7 @@ describe('ClaudeTranscriptParser', () => {
       'tool-result',
       'message',
       'turn',
-      'attachment',
+      'message',
       'attachment',
       'error',
     ]);
@@ -49,7 +49,7 @@ describe('ClaudeTranscriptParser', () => {
       role: 'tool',
       result: { callId: 'tool-question', text: 'Alpha selected.', isError: false },
     });
-    should(actual.events[10]).containDeep({ attachment: { kind: 'queued-command', origin: 'human' } });
+    should(actual.events[10]).containDeep({ kind: 'message', role: 'user', inputSource: 'native-queue' });
     should(actual.events[12]).containDeep({ error: { code: 'fixture_error', recoverable: true } });
   });
 
@@ -76,6 +76,10 @@ describe('ClaudeTranscriptParser', () => {
     should(actual.events[0]).containDeep({ kind: 'message', text: 'still valid' });
     should(actual.issues.map(issue => issue.code)).deepEqual(['invalid-record', 'unsupported-record']);
     should(actual.issues.every(issue => issue.line === 4)).be.true();
+    should(actual.issues).containDeep([
+      { recordType: 'assistant', blockType: 'tool_use' },
+      { recordType: 'assistant', blockType: 'future_block' },
+    ]);
   });
 
   it('should model document, file, and in-band error blocks explicitly', () => {
@@ -182,8 +186,68 @@ describe('ClaudeTranscriptParser', () => {
     should(rejectedQueues.every(result => result.events.length === 0)).be.true();
     should(rejectedBridges.every(result => result.events.length === 0)).be.true();
     should(accepted.events).containDeep([
-      { role: 'user', kind: 'attachment', attachment: { kind: 'queued-command', origin: 'human' } },
+      { role: 'user', kind: 'message', text: 'Synthetic queued prompt.', inputSource: 'native-queue' },
     ]);
     should(remote.events).containDeep([{ role: 'system', kind: 'attachment', attachment: { kind: 'remote-control' } }]);
+  });
+
+  it('should reject empty attachments and diagnose partially malformed questions', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const question = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'tool-question',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [
+                { question: 'Keep this?', options: [{ label: 'Yes' }, { description: 'missing label' }] },
+                { options: [] },
+              ],
+            },
+          },
+          { type: 'image', name: 'empty.png' },
+        ],
+      },
+    };
+
+    // Act
+    const actual = subject.parseRecord(question);
+
+    // Assert
+    should(actual.events).containDeep([
+      { kind: 'tool-call', call: { questions: [{ question: 'Keep this?', options: [{ label: 'Yes' }] }] } },
+    ]);
+    should(actual.issues).containDeep([
+      { code: 'invalid-tool-input', recordType: 'assistant', blockType: 'tool_use' },
+      { code: 'invalid-record', recordType: 'assistant', blockType: 'image' },
+    ]);
+  });
+
+  it('should extract tool-result text only from strings and typed text blocks', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const result = (content: unknown) =>
+      subject.parseRecord({
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content }] },
+      });
+
+    // Act
+    const plain = result('plain output');
+    const mixed = result([
+      { type: 'image', text: 'image metadata is not tool output' },
+      { type: 'text', text: 'typed output' },
+    ]);
+    const object = result({ type: 'text', text: 'object-shaped content is not a text block list' });
+
+    // Assert
+    should(plain.events).containDeep([{ kind: 'tool-result', result: { text: 'plain output' } }]);
+    should(mixed.events).containDeep([{ kind: 'tool-result', result: { text: 'typed output' } }]);
+    should(object.events).containDeep([{ kind: 'tool-result', result: { text: undefined } }]);
   });
 });

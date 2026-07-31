@@ -42,6 +42,7 @@ export interface TranscriptEventMetadata {
   readonly turnId?: string;
   readonly phase?: string;
   readonly stopReason?: string;
+  readonly inputSource?: 'native-queue';
   readonly blockIndex?: number;
 }
 
@@ -77,11 +78,6 @@ export interface TranscriptToolResultEvent extends TranscriptEventMetadata {
 }
 
 export type TranscriptAttachment =
-  | {
-      readonly kind: 'queued-command';
-      readonly text: string;
-      readonly origin: 'human';
-    }
   | {
       readonly kind: 'image';
       readonly name?: string;
@@ -189,6 +185,8 @@ export interface TranscriptIssue {
   readonly source?: string;
   readonly line?: number;
   readonly recordType?: string;
+  readonly itemType?: string;
+  readonly blockType?: string;
   readonly byteOffset?: number;
   readonly byteLength?: number;
 }

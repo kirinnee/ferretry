@@ -15,7 +15,7 @@ import {
   transcriptJsonValue,
   transcriptNumber,
   transcriptObject,
-  transcriptQuestions,
+  normalizeTranscriptQuestions,
   transcriptRecordIssue,
   transcriptString,
   transcriptText,
@@ -190,9 +190,21 @@ function codexAttachment(block: Record<string, unknown>): TranscriptAttachment |
   const mediaType =
     transcriptString(block.media_type) ?? transcriptString(block.mime_type) ?? transcriptString(source.media_type);
   const name = transcriptString(block.name) ?? transcriptString(block.filename);
+  if (!uri?.trim() && !data?.trim()) return undefined;
   if (type === 'input_image' || type === 'image') return { kind: 'image', name, mediaType, uri, data };
   if (type === 'input_audio' || type === 'audio') return { kind: 'audio', name, mediaType, uri, data };
   return { kind: 'file', name, mediaType, uri, data };
+}
+
+function isCodexAttachmentType(type: string | undefined): boolean {
+  return (
+    type === 'input_image' ||
+    type === 'image' ||
+    type === 'input_file' ||
+    type === 'file' ||
+    type === 'input_audio' ||
+    type === 'audio'
+  );
 }
 
 function codexError(payload: Record<string, unknown>): { message?: string; code?: string } {
@@ -263,6 +275,7 @@ export class CodexTranscriptParser implements TranscriptParser {
             'invalid-record',
             'Codex settings record has no settings',
             recordType,
+            itemType,
           ),
         );
       } else {
@@ -303,6 +316,7 @@ export class CodexTranscriptParser implements TranscriptParser {
             context,
             'invalid-record',
             'Codex reasoning record has no text',
+            recordType,
             itemType,
           ),
         );
@@ -386,6 +400,7 @@ export class CodexTranscriptParser implements TranscriptParser {
             'invalid-record',
             'Codex error record has no message',
             recordType,
+            itemType,
           ),
         );
       } else {
@@ -413,7 +428,14 @@ export class CodexTranscriptParser implements TranscriptParser {
       const role = codexRole(payload.role);
       if (role === undefined) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex message has an invalid role', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex message has an invalid role',
+            recordType,
+            itemType,
+          ),
         );
         return { events, issues, recognized: true };
       }
@@ -439,19 +461,42 @@ export class CodexTranscriptParser implements TranscriptParser {
             continue;
           }
         }
+        if (isCodexAttachmentType(blockType)) {
+          issues.push(
+            transcriptRecordIssue(
+              this.harness,
+              context,
+              'invalid-record',
+              'Codex attachment block has no usable content',
+              recordType,
+              itemType,
+              blockType,
+            ),
+          );
+          continue;
+        }
         issues.push(
           transcriptRecordIssue(
             this.harness,
             context,
             block === undefined ? 'invalid-record' : 'unsupported-record',
             block === undefined ? 'Codex message block is not an object' : 'Codex message block type is not supported',
-            blockType ?? itemType,
+            recordType,
+            itemType,
+            blockType,
           ),
         );
       }
       if (events.length === 0 && issues.length === 0) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex message has no content', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex message has no content',
+            recordType,
+            itemType,
+          ),
         );
       }
       return { events, issues, recognized: true };
@@ -463,7 +508,14 @@ export class CodexTranscriptParser implements TranscriptParser {
       const text = transcriptText([...summary, ...content]);
       if (text === undefined) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex reasoning item has no text', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex reasoning item has no text',
+            recordType,
+            itemType,
+          ),
         );
       } else {
         events.push({
@@ -481,7 +533,14 @@ export class CodexTranscriptParser implements TranscriptParser {
       const name = codexToolName(itemType, payload);
       if (id === undefined || id.trim().length === 0 || name === undefined || name.trim().length === 0) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool call lacks id or name', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex tool call lacks id or name',
+            recordType,
+            itemType,
+          ),
         );
         return { events, issues, recognized: true };
       }
@@ -493,19 +552,29 @@ export class CodexTranscriptParser implements TranscriptParser {
             context,
             'invalid-tool-input',
             'Codex tool arguments contain malformed embedded JSON',
+            recordType,
             itemType,
           ),
         );
       }
       const questionTool = /^(request_user_input|askuserquestion)$/iu.test(name);
-      const questions = questionTool ? transcriptQuestions(input.value) : [];
-      if (questionTool && questions.length === 0 && !input.invalidEmbeddedJson) {
+      const normalizedQuestions = questionTool
+        ? normalizeTranscriptQuestions(input.value)
+        : { questions: [], invalidEntries: 0 };
+      if (
+        questionTool &&
+        !input.invalidEmbeddedJson &&
+        (normalizedQuestions.questions.length === 0 || normalizedQuestions.invalidEntries > 0)
+      ) {
         issues.push(
           transcriptRecordIssue(
             this.harness,
             context,
             'invalid-tool-input',
-            'Codex question tool input has no valid questions',
+            normalizedQuestions.questions.length === 0
+              ? 'Codex question tool input has no valid questions'
+              : 'Codex question tool input contains malformed questions or options',
+            recordType,
             itemType,
           ),
         );
@@ -517,16 +586,29 @@ export class CodexTranscriptParser implements TranscriptParser {
           id,
           name,
           input: input.value,
-          ...(questions.length > 0 ? { questions } : {}),
+          ...(normalizedQuestions.questions.length > 0 ? { questions: normalizedQuestions.questions } : {}),
         },
       });
       const generatedImage = itemType === 'image_generation_call' ? transcriptString(payload.result) : undefined;
       if (generatedImage !== undefined) {
-        events.push({
-          ...codexMetadata(record, payload, 'assistant', context),
-          kind: 'attachment',
-          attachment: { kind: 'image', data: generatedImage },
-        });
+        if (generatedImage.trim().length > 0) {
+          events.push({
+            ...codexMetadata(record, payload, 'assistant', context),
+            kind: 'attachment',
+            attachment: { kind: 'image', data: generatedImage },
+          });
+        } else {
+          issues.push(
+            transcriptRecordIssue(
+              this.harness,
+              context,
+              'invalid-record',
+              'Codex generated image has no usable content',
+              recordType,
+              itemType,
+            ),
+          );
+        }
       }
       return { events, issues, recognized: true };
     }
@@ -535,13 +617,27 @@ export class CodexTranscriptParser implements TranscriptParser {
       const callId = transcriptString(payload.call_id) ?? transcriptString(payload.id);
       if (callId === undefined || callId.trim().length === 0) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool result lacks call id', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex tool result lacks call id',
+            recordType,
+            itemType,
+          ),
         );
         return { events, issues, recognized: true };
       }
       if (!('output' in payload || 'result' in payload || 'tools' in payload || 'content' in payload)) {
         issues.push(
-          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool result has no content', itemType),
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-record',
+            'Codex tool result has no content',
+            recordType,
+            itemType,
+          ),
         );
         return { events, issues, recognized: true };
       }
@@ -566,6 +662,7 @@ export class CodexTranscriptParser implements TranscriptParser {
         context,
         'unsupported-record',
         'Codex response item type is not supported',
+        recordType,
         itemType,
       ),
     );
