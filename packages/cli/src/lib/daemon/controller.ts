@@ -1,5 +1,5 @@
 import type { HealthView } from '@ferretry/protocol';
-import { type DaemonLayout, serviceDefinitionPath } from './layout.ts';
+import type { DaemonLayout } from './layout.ts';
 import type {
   DaemonStartHandle,
   IClockPort,
@@ -7,6 +7,7 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonSupervisor,
+  IServiceDefinitionSupervisor,
 } from './ports.ts';
 import { livenessOf } from './probe.ts';
 import {
@@ -53,7 +54,7 @@ export class DaemonShutdownFailedError extends Error {
 export interface DaemonControllerDeps {
   readonly layout: DaemonLayout;
   /** The service manager for this platform, or `undefined` where there is none. */
-  readonly service: IDaemonSupervisor | undefined;
+  readonly service: IServiceDefinitionSupervisor | undefined;
   /** The always-available fallback: the daemon as a detached child. */
   readonly direct: IDaemonSupervisor;
   readonly health: IDaemonHealthPort;
@@ -85,8 +86,7 @@ export class DaemonController {
     const service = this.#service();
     await service.install();
     const health = await this.#awaitReady(service, {});
-    const definition = serviceDefinitionPath(this.deps.layout) ?? this.deps.layout.systemdUnitFile;
-    this.deps.out.success(renderInstalled(this.#name, definition, health.pid));
+    this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
   }
 
   async uninstall(): Promise<void> {
@@ -164,7 +164,7 @@ export class DaemonController {
     return this.deps.direct;
   }
 
-  #service(): IDaemonSupervisor {
+  #service(): IServiceDefinitionSupervisor {
     const service = this.deps.service;
     if (service === undefined) throw new UnsupportedServiceManagerError();
     return service;

@@ -91,7 +91,7 @@ export interface ServiceDefinitionSpec {
 export function renderSystemdUnit(spec: ServiceDefinitionSpec): string {
   const logSpecifier = systemdFileSpecifier(spec.logFile, 'the log path');
   return `[Unit]
-Description=${systemdFileSpecifier(spec.description, 'the description')}
+Description=${systemdQuote(spec.description)}
 After=network.target
 
 [Service]

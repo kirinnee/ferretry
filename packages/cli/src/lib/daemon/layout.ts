@@ -96,13 +96,6 @@ function requireUserId(value: number, field: string): number {
   return value;
 }
 
-/** Where this host's service definition lives, or `undefined` when it has no service manager. */
-export function serviceDefinitionPath(layout: DaemonLayout): string | undefined {
-  if (layout.manager === 'systemd') return layout.systemdUnitFile;
-  if (layout.manager === 'launchd') return layout.launchAgentFile;
-  return undefined;
-}
-
 /** The manager a platform implies. Anything else gets the direct-spawn fallback, never a guess. */
 export function managerForPlatform(platform: string): DaemonManagerKind {
   if (platform === 'linux') return 'systemd';

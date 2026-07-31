@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  InvalidDaemonEnvironmentError,
-  managerForPlatform,
-  resolveDaemonLayout,
-  serviceDefinitionPath,
-} from '../../../src/lib/daemon/layout';
+import { InvalidDaemonEnvironmentError, managerForPlatform, resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import { environment, HOME, layout } from './fixtures';
 
 describe('manager for platform', () => {
@@ -168,24 +163,5 @@ describe('daemon layout refusals', () => {
     // Assert
     should(caught).be.instanceof(InvalidDaemonEnvironmentError);
     should((caught as InvalidDaemonEnvironmentError).field).equal('user id');
-  });
-});
-
-describe('service definition path', () => {
-  it('should point at the systemd unit on Linux', () => {
-    // Act + Assert
-    should(serviceDefinitionPath(layout({ platform: 'linux' }))).equal(`${HOME}/.config/systemd/user/fyd.service`);
-  });
-
-  it('should point at the launch agent on macOS', () => {
-    // Act + Assert
-    should(serviceDefinitionPath(layout({ platform: 'darwin' }))).equal(
-      `${HOME}/Library/LaunchAgents/com.ferretry.fyd.plist`,
-    );
-  });
-
-  it('should have nothing to point at where there is no service manager', () => {
-    // Act + Assert
-    should(serviceDefinitionPath(layout({ platform: 'win32' }))).be.undefined();
   });
 });

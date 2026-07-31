@@ -58,10 +58,13 @@ function startStubDaemon(serving: boolean): Stub {
       paths.push(url.pathname);
       const headers = { 'x-fy-version': request.headers.get('x-fy-version') ?? '0.0.0' };
       if (!serving || url.pathname !== '/v1/health') {
-        return Response.json({ error: 'no such route', code: 'unknown_route', path: url.pathname }, {
-          status: 404,
-          headers,
-        });
+        return Response.json(
+          { error: 'no such route', code: 'unknown_route', path: url.pathname },
+          {
+            status: 404,
+            headers,
+          },
+        );
       }
       return Response.json(health, { headers });
     },

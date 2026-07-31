@@ -86,6 +86,14 @@ describe('systemd supervisor install', () => {
   });
 });
 
+describe('service definition paths', () => {
+  it('should name the file each manager actually reads, so `install` can report it', () => {
+    // Act + Assert — the supervisor owns this, so `install` needs no fallback for a path it cannot have.
+    should(systemd().supervisor.definitionPath).equal(linux.systemdUnitFile);
+    should(launchd().supervisor.definitionPath).equal(mac.launchAgentFile);
+  });
+});
+
 describe('systemd supervisor lifecycle', () => {
   it('should report the unit installed exactly when its file is on disk', async () => {
     // Arrange

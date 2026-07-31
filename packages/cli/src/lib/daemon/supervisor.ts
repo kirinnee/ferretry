@@ -5,6 +5,7 @@ import type {
   DaemonSupervisorReport,
   IDaemonProcessPort,
   IDaemonSupervisor,
+  IServiceDefinitionSupervisor,
   IServiceFilePort,
   StopRequest,
 } from './ports.ts';
@@ -31,7 +32,7 @@ export class ServiceManagerCommandError extends Error {
 const description = (daemonName: string): string => `${daemonName} — per-host agent daemon`;
 
 /** Drives a systemd user unit. */
-export class SystemdSupervisor implements IDaemonSupervisor {
+export class SystemdSupervisor implements IServiceDefinitionSupervisor {
   readonly manager = 'systemd' as const;
 
   constructor(
@@ -40,8 +41,13 @@ export class SystemdSupervisor implements IDaemonSupervisor {
     private readonly files: IServiceFilePort,
   ) {}
 
+  /** Where systemd reads this unit from, so an installer can name the file it wrote. */
+  get definitionPath(): string {
+    return this.layout.systemdUnitFile;
+  }
+
   async installed(): Promise<boolean> {
-    return await this.files.exists(this.layout.systemdUnitFile);
+    return await this.files.exists(this.definitionPath);
   }
 
   async install(): Promise<void> {
@@ -109,7 +115,7 @@ export class SystemdSupervisor implements IDaemonSupervisor {
 }
 
 /** Drives a launchd user agent. */
-export class LaunchdSupervisor implements IDaemonSupervisor {
+export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
   readonly manager = 'launchd' as const;
 
   constructor(
@@ -118,8 +124,13 @@ export class LaunchdSupervisor implements IDaemonSupervisor {
     private readonly files: IServiceFilePort,
   ) {}
 
+  /** Where launchd reads this agent from, so an installer can name the file it wrote. */
+  get definitionPath(): string {
+    return this.layout.launchAgentFile;
+  }
+
   async installed(): Promise<boolean> {
-    return await this.files.exists(this.layout.launchAgentFile);
+    return await this.files.exists(this.definitionPath);
   }
 
   async install(): Promise<void> {

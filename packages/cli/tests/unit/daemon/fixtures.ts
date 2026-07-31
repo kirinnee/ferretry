@@ -11,7 +11,7 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
-  IDaemonSupervisor,
+  IServiceDefinitionSupervisor,
   IServiceFilePort,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
@@ -204,13 +204,14 @@ export class SteppingClock implements IClockPort {
 }
 
 /** A supervisor whose every answer is scripted, for controller tests. */
-export class FakeSupervisor implements IDaemonSupervisor {
+export class FakeSupervisor implements IServiceDefinitionSupervisor {
   readonly calls: string[] = [];
   readonly stops: StopRequest[] = [];
   startHandle: DaemonStartHandle = { pid: 777 };
   installedAnswer = true;
   reports: DaemonSupervisorReport[] = [];
   installError: Error | undefined;
+  definitionPath = '/tmp/fy-home/.config/systemd/user/fyd.service';
 
   constructor(
     readonly manager: 'systemd' | 'launchd' | 'direct',

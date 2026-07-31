@@ -117,3 +117,13 @@ export interface IDaemonSupervisor {
   /** `handle` lets the direct supervisor watch the child it just started. */
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport>;
 }
+
+/**
+ * A supervisor backed by an on-disk service definition.
+ *
+ * Separating this from `IDaemonSupervisor` is what lets `install` name the file it wrote without a
+ * `?? somewhere-else` fallback that no reachable input could ever take.
+ */
+export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
+  readonly definitionPath: string;
+}
