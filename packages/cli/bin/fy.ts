@@ -4,6 +4,7 @@ import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
+import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
@@ -17,6 +18,20 @@ import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
+import {
+  AnswerQuestionController,
+  InterruptSessionController,
+  ListSessionsController,
+  registerSessionCommands,
+  type SessionCommandDeps,
+  ResumeSessionController,
+  SendMessageController,
+  type SessionEnvironment,
+  SessionPresenter,
+  SessionStatusController,
+  StartSessionController,
+  SuggestNamesController,
+} from '../src/lib/session/index.ts';
 import { assertSemver } from '../src/lib/version';
 
 // Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
@@ -124,7 +139,47 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
 ];
+
+/**
+ * The session command group's collaborators.
+ *
+ * It builds its own client rather than taking the shared one because the session commands need the
+ * whole typed surface, not the `request`/`analytics` subset the gateways above use, and because a
+ * session call must identify itself (`x-ferretry-client`) and its pane (`x-ferretry-session-id`) so
+ * the daemon attributes it to the right actor. Still lazy: no token is demanded until a session
+ * command actually runs.
+ */
+function sessionCommands(world: CliWorld, ownSessionId: string | undefined): SessionCommandDeps {
+  const environment: SessionEnvironment = {
+    cwd: process.cwd(),
+    ...(ownSessionId === undefined ? {} : { callerSessionId: ownSessionId }),
+    ...(process.env.FY_BOARD_CAPABILITY === undefined ? {} : { boardCapability: process.env.FY_BOARD_CAPABILITY }),
+  };
+  const api = new FySessionApi(
+    createFyClientConnector({
+      version: assertSemver(pkg.version),
+      ...(process.env.FY_URL === undefined ? {} : { url: process.env.FY_URL }),
+      ...(process.env.FY_TOKEN === undefined ? {} : { token: process.env.FY_TOKEN }),
+      ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
+    }),
+  );
+  const files = new SessionFiles();
+  const presenter = new SessionPresenter(world.io, new SystemClock());
+
+  return {
+    presenter,
+    start: new StartSessionController(api, files, presenter, environment),
+    list: new ListSessionsController(api, presenter),
+    status: new SessionStatusController(api, presenter),
+    send: new SendMessageController(api, files, presenter, environment),
+    answer: new AnswerQuestionController(api, presenter),
+    names: new SuggestNamesController(api, presenter),
+    interrupt: new InterruptSessionController(api, presenter),
+    resume: new ResumeSessionController(api, presenter),
+  };
+}
 
 /** Route the product domain onto the program — one controller per command group. */
 export function registerDomain(program: Command, world: CliWorld): void {
