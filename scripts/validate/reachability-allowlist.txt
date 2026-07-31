@@ -11,9 +11,6 @@
 #   * every entry carries a trailing '# <reason>' naming the PR or unit that must wire it;
 #   * an entry that has become reachable is a hard failure — delete it in the PR that wires it.
 
-# PR #3 — add the state home and storage foundation
-packages/daemon/src/lib/version.ts # PR #3: add the state home and storage foundation; not mounted in bin/fyd.ts
-
 # PR #5 — complete task board membership lifecycle
 packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
@@ -106,3 +103,6 @@ packages/daemon/src/lib/terminal/index.ts # PR #21: establish terminal IO polici
 packages/daemon/src/lib/terminal/policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/lib/terminal/runtime-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+
+# Unit API — the daemon HTTP API server
+packages/daemon/src/lib/api/body.ts # Unit API: the parse-don't-cast body/query boundary; the three mandated feeds are all GET, so the first unit to mount a POST route wires this and deletes this line
