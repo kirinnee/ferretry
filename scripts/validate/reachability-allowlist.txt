@@ -49,19 +49,36 @@
 # as a blind spot rather than as an empty observation, a relaunch that did not happen being reportable
 # as a completed move, and a migration able to launch an argv the start's own authorization refuses.
 #
-# THREE REMAIN, and they are the shape neither gate can resolve without a decision:
+# THREE REMAIN. Each was re-checked against this head, and each blocker below is a FACT ABOUT THIS
+# REPOSITORY that can be verified with one search rather than a judgement about design:
 #
-#   * `browserTransport` — the viewer stream and the worker client are built, and nothing in
-#     production implements `BrowserViewerHost`. It is the browser SESSION runtime that would, and
-#     that is PR #15 below: two adapters deep, ending in an X server on the host.
-#   * `transcripts` — unchanged from the header above. `TranscriptSource.read` takes the transcript
-#     FILE and no session document records one. It is also why the migration preflight joins its open
-#     tool ids against an EMPTY chat tail and classifies them `unknown`, which is the fail-closed
-#     answer: the daemon knows a tool is open and not what it is.
-#   * `wardenReports` — the example this header named, now reported by a gate rather than by prose.
-#     Still blocked for the reason recorded under PR #19: `anomalies` is required by
-#     `WardenStatusView`, `detectAnomalies` needs a live-monitor answer per session, and this daemon
-#     mounts no monitor subsystem.
+#   * `browserTransport` — `connectWorker` spawns a worker PROGRAM, and this repository does not
+#     contain one. `packages/daemon/bin/` ships `stt-worker.ts` and nothing else; the only browser
+#     worker that exists is `tests/integration/browser/transport/fixtures/fake-worker.mjs`, a test
+#     fixture. The other half is missing too: nothing in production implements `BrowserViewerHost` —
+#     the browser SESSION runtime would, and that is PR #15 below, two adapters deep and ending in an
+#     X server on the host. Wiring this means WRITING the worker, not calling it.
+#   * `transcripts` — `TranscriptSource.read` takes the transcript FILE and no document records one.
+#     `SessionConfigSchema` has no transcript field; `state.lastTranscriptAt` is an instant, is read
+#     only by the unmounted warden detector, and is written by nothing. It is also why the migration
+#     preflight joins its open tool ids against an EMPTY chat tail and classifies them `unknown` —
+#     the fail-closed answer: the daemon knows a tool is open and not what it is.
+#   * `wardenReports` — this header named it, and a gate reports it now rather than prose. The
+#     decisive blocker is simpler than the one recorded under PR #19, and it is upstream of it:
+#     NOTHING IN THIS DAEMON WRITES A WARDEN REPORT. `WardenReportFileSystem` declares `listFiles`
+#     and `readText` and no write at all, `warden/reports` is never created, and the sweep that would
+#     spawn a warden to author one is the subsystem PR #19 is blocked on. A route over this reader
+#     would serve an empty list for as long as the daemon runs.
+#
+#     The nearest existing wire makes it worse rather than better. `/v1/warden/status` is the only
+#     shipped contract that touches reports (`lastReport`), and `WardenStatusView` REQUIRES
+#     `anomalies`, which requires a live-monitor answer per session that no mounted subsystem can
+#     give. Answering `[]` is not a neutral default: `packages/pwa/src/features/warden/warden-strip.tsx`
+#     renders a green ShieldCheck for an empty anomaly list, so mounting it would put "fleet healthy"
+#     on the reader's dashboard asserted by nothing. That same component treats a daemon which does
+#     NOT serve the route as "no strip at all" — so not mounting is the honest state, by the PWA's own
+#     design. There is no verdict-list wire to serve instead: the PWA's verdicts surface takes props,
+#     and the protocol declares no verdict schema and no client method.
 #
 # WHY THEY ARE STILL FIELDS. Deleting a blocked field makes its modules unreachable, and the only
 # home this repo has for "ported, correct, and not mountable yet" is an entry on THIS list — which
