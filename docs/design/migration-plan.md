@@ -495,7 +495,20 @@ Notes that change the backlog:
 
 ## 12. Open questions for Kirin
 
-1. **PWA hosting** — central origin and domain (affects the pairing URL and CORS allowlist).
+1. ~~**PWA hosting** — central origin and domain (affects the pairing URL and CORS allowlist).~~
+   **Answered by Kirin 2026-07-31: hosted on Cloudflare Pages, and the site may be public.**
+   Consequences the PWA units must build to:
+   - **Static hosting only.** No server-side rendering, no server-side secrets, no origin backend.
+     Everything the page needs at runtime it fetches from a daemon the user points it at.
+   - **The daemon is not on the page's origin.** A public HTTPS page talks to a daemon on the
+     user's own machine, so the daemon's CORS allowlist must admit the Pages origin, and the
+     pairing flow — not a bundled constant — is what tells the page where its daemon is.
+   - **Nothing that identifies a user or a daemon may be baked into the bundle.** It is a public
+     artifact served to anyone. Tokens and daemon URLs arrive at runtime through pairing.
+   - **Verify the mixed-content path early.** An `https://` page issuing requests to
+     `http://127.0.0.1` relies on browsers treating loopback as potentially trustworthy. That is
+     the current behaviour in Chrome and Firefox, but it is load-bearing for this whole design and
+     cheap to prove now — so prove it in an E2E journey rather than assuming it.
 2. ~~Does anything besides Kirin consume the `:47318` usage feed?~~ **Answered by Survey C**: yes
    — kloop (`/usage`, gated) and khost's Alloy (`/metrics`, Prometheus). Both stay external and
    are re-pointed at cutover; the collector serves both contracts (§7.2). No decision needed.

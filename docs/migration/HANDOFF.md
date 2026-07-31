@@ -162,7 +162,9 @@ Port capabilities not behavior · conform to `docs/standards/` while porting · 
 compatibility** · **Ferretry starts empty**, no import tool · worktree + PR per unit, lead may merge
 · the live `~/.kteam` installation is never touched · `kloge`/`loctl` stay external.
 
-Still open: PWA hosting origin/domain (needed only for phase 3 pairing and CORS).
+Still open: nothing. **PWA hosting was answered 2026-07-31: Cloudflare Pages, public site** — see
+`docs/design/migration-plan.md` §12.1 for the constraints that follow (static-only, pairing-supplied
+daemon URL, no identifying data in the bundle, loopback mixed-content path proven in E2E).
 
 ## 7. The one artifact deliberately not committed
 
