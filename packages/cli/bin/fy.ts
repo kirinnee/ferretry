@@ -6,6 +6,10 @@ import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
+import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
+import { createFyClient, environmentSessionId } from '../src/adapters/tasks/fy-client-factory';
+import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
+import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
@@ -56,6 +60,8 @@ export interface CliWorld {
   readonly prompt: IPrompt;
   readonly shell: IShellRunner;
   readonly interactive: boolean;
+  /** The process environment, injected so tests never depend on the ambient one. */
+  readonly environment: Record<string, string | undefined>;
 }
 
 /** The real production world: the shipped IO adapters. */
@@ -68,6 +74,7 @@ export function buildWorld(): CliWorld {
     prompt: new InquirerPrompt(),
     shell: new BunShell(),
     interactive: io.interactive(),
+    environment: process.env,
   };
 }
 
@@ -140,6 +147,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
+  ({ program, world }) =>
+    registerTaskCommands(program, {
+      gateway: new FyTaskGateway(() => createFyClient(world.environment, assertSemver(pkg.version))),
+      io: world.io,
+      files: new BunTextFileReader(),
+      environmentSessionId: environmentSessionId(world.environment),
+    }),
 ];
 
 /**
@@ -183,7 +197,8 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
 
 /** Route the product domain onto the program — one controller per command group. */
 export function registerDomain(program: Command, world: CliWorld): void {
-  const environment = process.env;
+  // The injected environment, never the ambient one: an in-process journey must not inherit FY_*.
+  const environment = world.environment;
   const wiring: DomainWiring = {
     program,
     world,
