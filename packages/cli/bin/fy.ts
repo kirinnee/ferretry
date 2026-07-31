@@ -36,6 +36,9 @@ import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerLearningCommands } from '../src/lib/learning/commands';
+import { LearningController } from '../src/lib/learning/controller';
+import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -286,6 +289,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
       }),
     ),
+  ({ program, world, client }) =>
+    registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
