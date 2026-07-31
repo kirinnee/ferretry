@@ -104,6 +104,9 @@ try {
       const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
       await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
       process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
+      const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
+      await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
+      process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
 
       // The harness stacks every ported surface down one column, so most of it
       // is below the fold. A full-page stitch cannot prove those: the app bar
