@@ -56,6 +56,19 @@ import {
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
+import {
+  FileResumeTurnStore,
+  FileSelfRestartStampStore,
+  FileSessionHealthEventSink,
+  InMemoryLaunchGate,
+  NoMonitorSupervision,
+  StorageConsistencyPass,
+  StorageResumeRepository,
+  StorageSessionHealthInventory,
+  SystemMonotonicClock,
+  TmuxResumeLauncher,
+  UnmountedSupervisionRepair,
+} from '../src/adapters/session/resume/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
@@ -74,7 +87,13 @@ import {
   packageRole,
   parseSessionId,
   resolveStateHome,
+  SelfRestartCoordinator,
+  SessionHealthService,
+  SessionLifecycleConfigSchema,
   SessionLifecycleService,
+  SessionResumeService,
+  defaultSessionHealthSettings,
+  defaultSessionResumeSettings,
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
@@ -144,6 +163,26 @@ export interface DaemonWorld {
    *  open once storage has resolved and locked the state home, so the service is built per opened
    *  storage rather than at process start. */
   readonly createSessionLifecycle: (storage: DaemonStorage) => SessionLifecycleService;
+  /**
+   * The daemon's own self-check: it measures how late its tick was, reconciles the session index
+   * against the authoritative session directories, and escalates an index that will not heal. Built
+   * per opened storage for the same reason as the lifecycle above.
+   *
+   * `supervision` declares which repairable subsystems this daemon actually runs. Both are false
+   * today — no per-session monitor subsystem and no warden sweep timer are mounted yet — so the
+   * self-check measures and reconciles without planning repairs it could not carry out. The units
+   * landing those subsystems flip the flags and replace `UnmountedSupervisionRepair`.
+   */
+  readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
+  /**
+   * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
+   * agent its next turn, and refuse the revives that would destroy work rather than recover it.
+   *
+   * Its monitor control is `NoMonitorSupervision` for now — this daemon runs no per-session
+   * monitors, so there is genuinely nothing to disarm before a revive or arm after one. The unit
+   * that lands monitoring replaces it.
+   */
+  readonly createSessionResume: (storage: DaemonStorage) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
@@ -276,6 +315,60 @@ export function buildWorld(): DaemonWorld {
           serial: new KeyedSerialExecutor(),
         },
         defaultSessionLifecycleSettings,
+      ),
+    createSessionHealth: storage =>
+      new SessionHealthService(
+        {
+          inventory: new StorageSessionHealthInventory(storage, {
+            monitors: false,
+            warden: false,
+            monitored: () => false,
+            sweepIntervalMs: 0,
+            lastSweepAt: () => undefined,
+            // Boot state is owned by `start`; until it reports otherwise a booted daemon that
+            // reached this point has finished the storage bootstrap it does have.
+            bootstrapFinished: () => true,
+            bootstrapErrors: () => [],
+          }),
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, defaultSessionHealthSettings),
+          repair: new UnmountedSupervisionRepair(),
+          events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
+          clock,
+          wallClock: { nowMs: () => Date.now() },
+          monotonic: new SystemMonotonicClock(),
+          restarts: new SelfRestartCoordinator(
+            new FileSelfRestartStampStore(stateFiles, join(paths.home, 'self-restart.json')),
+            // Nothing supervises this process yet, so the honest answer is "no restart happened":
+            // the coordinator then un-latches and tells the operator to restart it themselves.
+            { restart: async () => false },
+            defaultSessionHealthSettings,
+          ),
+          version: pkg.version,
+        },
+        defaultSessionHealthSettings,
+      ),
+    createSessionResume: storage =>
+      new SessionResumeService(
+        {
+          repository: new StorageResumeRepository(storage),
+          launcher: new TmuxResumeLauncher(
+            new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+            // Parsed, not asserted: a revive addresses a real terminal and runs a real command, so
+            // a config that no longer validates must refuse rather than launch something else.
+            async id => {
+              const config = SessionLifecycleConfigSchema.parse(await storage.readConfig(id));
+              return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
+            },
+            milliseconds => Bun.sleep(milliseconds),
+          ),
+          turns: new FileResumeTurnStore(id => createSessionPaths(paths, id).directory),
+          monitors: new NoMonitorSupervision(),
+          gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
+          // Its own queue: a revive must not serialize behind storage-wide work while it holds a
+          // half-replaced terminal.
+          serial: new KeyedSerialExecutor(),
+        },
+        defaultSessionResumeSettings,
       ),
     createUsageFeed: config => {
       // The collector endpoint first, then the command fallback for hosts where it is not

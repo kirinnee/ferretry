@@ -9,6 +9,7 @@ export * from './migrate/bun-process-inventory.ts';
 export * from './pins/index.ts';
 export * from './runtime/index.ts';
 export * from './session/lifecycle/index.ts';
+export * from './session/resume/index.ts';
 export * from './storage/home-lock.ts';
 export * from './storage/session-storage.ts';
 export * from './storage/sqlite-index.ts';
