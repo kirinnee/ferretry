@@ -324,6 +324,29 @@ describe('FleetPlan', () => {
     should(actual.operations.at(-1)).equal(prune);
   });
 
+  it('should reject two homes written differently that expand to the same directory', () => {
+    // Arrange — the schema compares the declared strings, so only expansion catches this.
+    const input = config({
+      variants: { default: {}, auto: {} },
+      agents: [
+        {
+          name: 'work',
+          kind: 'claude',
+          routes: {
+            default: route({ home: '~/.claude-work' }),
+            auto: route({ id: ID_CODEX, wrapper: 'fy-claude-auto', home: '/home/tester/.claude-work' }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const act = () => subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert
+    should(act).throw(/duplicate home directory/);
+  });
+
   it('should plan nothing but the fleet skeleton for a configuration with no agents', () => {
     // Arrange
     const input = FleetConfigSchema.parse({});
