@@ -1,10 +1,21 @@
 import { afterEach, describe, it } from 'bun:test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AnalyticsResponseSchema, SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
+import {
+  AnalyticsResponseSchema,
+  SessionConfigSchema,
+  SessionStateSchema,
+  TerminalListViewSchema,
+  TerminalViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
-import { EXIT_ALREADY_RUNNING, parseSessionId } from '../../../src/lib/index.ts';
+import {
+  EXIT_ALREADY_RUNNING,
+  parseSessionId,
+  type TerminalRecord,
+  type TerminalRuntimePort,
+} from '../../../src/lib/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -96,6 +107,58 @@ async function seedSession(
     SessionStateSchema.parse({ id: sessionId, status: 'running', turn: 1, lastActivityAt: at, ...state }),
   );
   await opened.storage.close();
+}
+
+/**
+ * A terminal runtime that records instead of spawning.
+ *
+ * Substituted at `DaemonWorld.terminalRuntime` so the boot test never starts a shell or touches a
+ * tmux socket. It behaves like tmux does in the one way the mount depends on: `list` is the
+ * authority, so a rename that did not reach the runtime would not survive the next read.
+ */
+class RecordingTerminalRuntime implements TerminalRuntimePort {
+  readonly opened: TerminalRecord[] = [];
+  readonly killed: string[] = [];
+  private readonly records = new Map<string, TerminalRecord>();
+
+  async list(): Promise<readonly TerminalRecord[]> {
+    return [...this.records.values()];
+  }
+
+  async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
+    const record: TerminalRecord = {
+      id: input.id,
+      ownerId: input.ownerId,
+      title: input.title,
+      root: input.cwd,
+      tmuxSession: `fy-webterm-${input.ownerId}-${input.id}`,
+      createdAtMs: 1_700_000_000_000,
+      lastActivityAtMs: 1_700_000_000_000,
+      ...input.size,
+    };
+    this.records.set(record.id, record);
+    this.opened.push(record);
+    return record;
+  }
+
+  async rename(record: TerminalRecord, title: string): Promise<void> {
+    this.records.set(record.id, { ...record, title });
+  }
+
+  async resize(record: TerminalRecord, size: { readonly cols: number; readonly rows: number }): Promise<void> {
+    this.records.set(record.id, { ...record, ...size });
+  }
+
+  async write(): Promise<void> {}
+
+  async capture(): Promise<Uint8Array> {
+    return new Uint8Array();
+  }
+
+  async kill(record: TerminalRecord): Promise<void> {
+    this.records.delete(record.id);
+    this.killed.push(record.id);
+  }
 }
 
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
@@ -315,6 +378,74 @@ describe('daemon boot lifecycle', () => {
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');
+  });
+
+  /**
+   * The terminal lifecycle, driven through the production composition root over a real socket.
+   *
+   * Only the tmux runtime is substituted, at the seam `DaemonWorld` already exposes for exactly this:
+   * spawning shells on a test machine is not something a suite may do, and the tmux adapter has its
+   * own integration coverage. Everything above it is production — the lifecycle service, the error
+   * translation, the routes, and the session resolver reading the real config document — so the cwd
+   * a terminal opens in is the one the state home actually records for that session.
+   */
+  it('should open, retitle, list and close a terminal through the mounted lifecycle', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-terminals');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const runtime = new RecordingTerminalRuntime();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      terminalRuntime: runtime,
+    };
+    await seedSession(home, '2026-07-31T09:00:00.000Z');
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals`;
+
+    // Act
+    const created = await fetch(base, { method: 'POST', headers });
+    const opened = TerminalViewSchema.parse(await created.json());
+    const renamed = await fetch(`${base}/${opened.id}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Deploy log' }),
+    });
+    const listed = await fetch(base, { headers });
+    const listedBody = TerminalListViewSchema.parse(await listed.json());
+    const absent = await fetch(`http://127.0.0.1:${port}/v1/sessions/nope/terminals`, { headers });
+    const closed = await fetch(`${base}/${opened.id}`, { method: 'DELETE', headers });
+    const afterClose = TerminalListViewSchema.parse(await (await fetch(base, { headers })).json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(created.status).equal(201);
+    // The terminal opened in the SESSION's working directory, read from its real config document.
+    should(runtime.opened.map(record => [record.ownerId, record.root])).deepEqual([[SESSION_ID, home]]);
+    should(renamed.status).equal(200);
+    should(TerminalViewSchema.parse(await renamed.json()).title).equal('Deploy log');
+    // The retitle reached the runtime, so it survives a process that re-reads tmux rather than a map.
+    should(listedBody.terminals.map(row => [row.id, row.title])).deepEqual([[opened.id, 'Deploy log']]);
+    // A session the index does not hold cannot have a terminal opened against it.
+    should(absent.status).equal(404);
+    should(closed.status).equal(200);
+    should(await closed.json()).deepEqual({ closed: true, id: opened.id });
+    should(afterClose.terminals).be.empty();
+    should(runtime.killed).deepEqual([opened.id]);
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

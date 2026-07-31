@@ -11,6 +11,7 @@ import {
   attentionService,
   CREDENTIALS,
   emptyFeed,
+  FakeTerminals,
   human,
   pinService,
   taskSubsystem,
@@ -30,6 +31,7 @@ const subsystems = (): MountedSubsystems => ({
   pins: pinService([]),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
+  terminals: new FakeTerminals(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -54,6 +56,11 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/tasks/:taskId',
       'POST /v1/sessions/:sessionId/tasks/:taskId',
       'GET /v1/analytics',
+      'GET /v1/sessions/:sessionId/terminals',
+      'POST /v1/sessions/:sessionId/terminals',
+      'GET /v1/sessions/:sessionId/terminals/:terminalId',
+      'POST /v1/sessions/:sessionId/terminals/:terminalId',
+      'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
     ]);
   });
 
@@ -82,6 +89,7 @@ describe('the mounted daemon surface', () => {
     const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
     const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
+    const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
 
     // Assert
     should(health.status).equal(200);
@@ -91,5 +99,6 @@ describe('the mounted daemon surface', () => {
     should(tasks.status).equal(200);
     should(fleet.status).equal(200);
     should(analytics.status).equal(200);
+    should(terminals.status).equal(200);
   });
 });

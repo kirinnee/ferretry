@@ -1,9 +1,14 @@
 import {
   PIN_SCHEMA_VERSION,
+  TERMINAL_MAX_GLOBAL,
+  TERMINAL_MAX_PER_SESSION,
+  type CreateTerminalRequest,
   type Pin,
   type PinSnapshot,
   type TaskActionRequest,
   type TaskCreateRequestInput,
+  type TerminalListView,
+  type TerminalView,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
@@ -27,6 +32,13 @@ import {
   type TaskParseIssue,
   type TaskSnapshot,
 } from '../../../../src/lib/tasks/index.ts';
+import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
+import {
+  DEFAULT_TERMINAL_SIZE,
+  nextTerminalTitle,
+  normalizeTerminalSize,
+  normalizeTerminalTitle,
+} from '../../../../src/lib/terminal/policy.ts';
 import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
@@ -224,6 +236,101 @@ export function analyticsSubsystem(
   pricing: readonly AnalyticsPricingRate[] = [],
 ): AnalyticsSubsystem {
   return { finished: async () => sessions, pricing: () => pricing };
+}
+
+/**
+ * An in-memory terminal lifecycle.
+ *
+ * The sizing, titling and idle policies it applies are the REAL ones from `src/lib/terminal`, so a
+ * route test that passes here exercises the same decisions the daemon makes; only the tmux pane is
+ * replaced. Refusals are raised in the mount's own taxonomy, exactly as the composition root
+ * translates the service's.
+ */
+export class FakeTerminals implements TerminalSubsystem {
+  private readonly records = new Map<string, TerminalView>();
+  private minted = 0;
+
+  constructor(
+    /** Session ids that exist. Anything else is `not_found`, as an unresolvable session is. */
+    private readonly known: readonly string[] = ['s1'],
+    private readonly perSession = TERMINAL_MAX_PER_SESSION,
+  ) {}
+
+  async list(sessionId: string): Promise<TerminalListView> {
+    const terminals = this.owned(this.session(sessionId));
+    return {
+      sessionId,
+      terminals,
+      limits: {
+        perSession: this.perSession,
+        global: TERMINAL_MAX_GLOBAL,
+        runningGlobal: this.records.size,
+        idleTimeoutSeconds: 3_600,
+        scrollbackLines: 5_000,
+      },
+    };
+  }
+
+  async create(sessionId: string, input: CreateTerminalRequest): Promise<TerminalView> {
+    const session = this.session(sessionId);
+    const owned = this.owned(session);
+    if (owned.length >= this.perSession)
+      throw new TerminalMountError('capacity', 'terminal capacity reached for this session');
+    this.minted += 1;
+    const size = normalizeTerminalSize(
+      input.cols ?? DEFAULT_TERMINAL_SIZE.cols,
+      input.rows ?? DEFAULT_TERMINAL_SIZE.rows,
+    );
+    const view: TerminalView = {
+      id: `${this.minted}`.padStart(12, '0'),
+      sessionId: session,
+      title:
+        input.title === undefined
+          ? nextTerminalTitle(
+              owned.map(terminal => terminal.title),
+              this.perSession,
+            )
+          : normalizeTerminalTitle(input.title),
+      state: 'running',
+      ...size,
+      viewers: 0,
+      createdAt: AT,
+      lastActivityAt: AT,
+      idleDeadline: '2024-05-01T11:00:00.000Z',
+    };
+    this.records.set(view.id, view);
+    return view;
+  }
+
+  async get(sessionId: string, terminalId: string): Promise<TerminalView> {
+    return this.require(this.session(sessionId), terminalId);
+  }
+
+  async rename(sessionId: string, terminalId: string, title: string): Promise<TerminalView> {
+    const current = this.require(this.session(sessionId), terminalId);
+    const renamed = { ...current, title: normalizeTerminalTitle(title) };
+    this.records.set(renamed.id, renamed);
+    return renamed;
+  }
+
+  async close(sessionId: string, terminalId: string): Promise<void> {
+    this.records.delete(this.require(this.session(sessionId), terminalId).id);
+  }
+
+  private session(sessionId: string): string {
+    if (!this.known.includes(sessionId)) throw new TerminalMountError('not_found', 'terminal session not found');
+    return sessionId;
+  }
+
+  private owned(sessionId: string): TerminalView[] {
+    return [...this.records.values()].filter(terminal => terminal.sessionId === sessionId);
+  }
+
+  private require(sessionId: string, terminalId: string): TerminalView {
+    const found = this.owned(sessionId).find(terminal => terminal.id === terminalId);
+    if (found === undefined) throw new TerminalMountError('not_found', 'terminal not found');
+    return found;
+  }
 }
 
 /** A feed that never collected: enough to build the base surface without a transport. */

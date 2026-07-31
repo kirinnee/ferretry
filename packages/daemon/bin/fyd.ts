@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 import { join } from 'node:path';
-import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
+import {
+  SessionConfigSchema,
+  SessionStateSchema,
+  TERMINAL_MAX_GLOBAL,
+  TERMINAL_MAX_PER_SESSION,
+} from '@ferretry/protocol';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
@@ -71,6 +76,12 @@ import {
   TmuxResumeLauncher,
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
+import {
+  ManagedTerminalService,
+  TerminalRuntimeError,
+  TerminalServiceError,
+  TmuxTerminalRuntime,
+} from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import {
   FileTaskStore,
@@ -104,6 +115,10 @@ import {
   type FinishedAnalyticsSession,
   type FoundationPaths,
   type TaskSubsystem,
+  TerminalMountError,
+  type TerminalRuntimePort,
+  type TerminalSessionResolver,
+  type TerminalSubsystem,
   SessionLifecycleService,
   SessionResumeService,
   defaultSessionHealthSettings,
@@ -229,14 +244,28 @@ export interface DaemonWorld {
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
   readonly api: ApiServerPort;
   /**
+   * Where a terminal actually runs: tmux panes on the daemon's own private socket, never the host's
+   * default one.
+   *
+   * It is a world FIELD rather than a private of the factory below because it is the one adapter in
+   * the terminal subsystem whose real behaviour cannot be driven from a test without spawning
+   * shells. A test substitutes this and keeps everything else — the lifecycle service, the routes,
+   * the session resolver over real storage — exactly as production builds them.
+   */
+  readonly terminalRuntime: TerminalRuntimePort;
+  /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
    *
    * Built per opened storage rather than at process start because a subsystem that reads the
    * authoritative session set — the task boards do, for the fleet-wide read and for the live view —
    * cannot be handed a session index that has not been opened and locked yet.
+   *
+   * The terminal runtime is passed IN rather than captured, so overriding `terminalRuntime` on a
+   * world actually changes what the mounted subsystems get. A factory that closed over the field
+   * would silently keep the production one and make the seam a lie.
    */
-  readonly createSubsystems: (storage: DaemonStorage) => MountedSubsystems;
+  readonly createSubsystems: (storage: DaemonStorage, terminals: TerminalRuntimePort) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -394,6 +423,67 @@ function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
     pricing: () => [],
   };
 }
+
+/**
+ * Independent shell terminals, over the session's own working directory.
+ *
+ * THE ERROR TRANSLATION IS THE POINT OF THIS FUNCTION. `ManagedTerminalService` and the tmux runtime
+ * behind it raise adapter-owned error classes, and a route in `src/lib` may not import them. Naming
+ * them here — in the one place allowed to see both sides — is what lets a full terminal list answer
+ * 409 and a tmux failure answer 502, instead of both surfacing as a 500 about a class nobody outside
+ * `src/adapters` can name.
+ *
+ * The limits come from the PROTOCOL constants rather than the service's own defaults, so the ceiling
+ * the API advertises in `limits` and the ceiling the service enforces cannot drift apart.
+ *
+ * The session resolver reads the authoritative configuration: a terminal opens in the session's own
+ * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
+ * working directory.
+ */
+function createTerminalSubsystem(
+  storage: DaemonStorage,
+  runtime: TerminalRuntimePort,
+  clock: MillisecondClockPort,
+): TerminalSubsystem {
+  const sessions: TerminalSessionResolver = {
+    resolve: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined || storage.findSession(id) === undefined) return undefined;
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(id));
+      return config.success ? { id, cwd: config.data.cwd } : undefined;
+    },
+  };
+  const service = new ManagedTerminalService(
+    runtime,
+    sessions,
+    clock,
+    // A terminal id is twelve hex characters by protocol. Minting it from a UUID's own randomness
+    // beats a counter the next process would restart at one and collide on.
+    { next: () => crypto.randomUUID().replaceAll('-', '').slice(0, 12) },
+    {
+      maximumPerSession: TERMINAL_MAX_PER_SESSION,
+      maximumGlobal: TERMINAL_MAX_GLOBAL,
+      idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
+    },
+  );
+  /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
+  const translate = (error: unknown): never => {
+    if (error instanceof TerminalServiceError) throw new TerminalMountError(error.code, error.message);
+    if (error instanceof TerminalRuntimeError) throw new TerminalMountError('upstream_failed', error.message);
+    throw error;
+  };
+  return {
+    list: async sessionId => await service.list(sessionId).catch(translate),
+    create: async (sessionId, input) => await service.create(sessionId, input).catch(translate),
+    get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
+    rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
+    close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
+  };
+}
+
+/** How long a terminal nobody is watching stays open. One hour, matching the service's own default;
+ *  stated here so the number the API reports is the number the daemon enforces. */
+const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
@@ -577,7 +667,10 @@ export function buildWorld(): DaemonWorld {
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
-    createSubsystems: storage => ({
+    // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
+    // server something else on this machine already runs.
+    terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    createSubsystems: (storage, terminals) => ({
       attention: new AttentionService(
         // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
         // than asserted: an id the layout would not accept must never become a directory path.
@@ -595,6 +688,7 @@ export function buildWorld(): DaemonWorld {
       ),
       tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
       analytics: createAnalyticsSubsystem(storage),
+      terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
     }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
@@ -650,7 +744,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       await world.api.listen(
         createMountedDispatcher(
           { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
-          world.createSubsystems(opened.storage),
+          world.createSubsystems(opened.storage, world.terminalRuntime),
         ),
         { host: config.host, port: config.port },
       ),

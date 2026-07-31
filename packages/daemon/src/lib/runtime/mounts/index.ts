@@ -8,6 +8,7 @@ import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { pinRoutes } from './pins.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
+import { terminalRoutes, type TerminalSubsystem } from './terminals.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -34,6 +35,8 @@ export interface MountedSubsystems {
   readonly tasks: TaskSubsystem;
   /** The fleet-wide analytics read over every finished session's durable record. */
   readonly analytics: AnalyticsSubsystem;
+  /** Independent shell terminals attached to a session's working directory. */
+  readonly terminals: TerminalSubsystem;
 }
 
 /**
@@ -49,6 +52,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
     ...analyticsRoutes(subsystems.analytics),
+    ...terminalRoutes(subsystems.terminals),
   ];
 }
 
