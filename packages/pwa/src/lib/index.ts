@@ -3,6 +3,9 @@ export const packageRole = 'pwa' as const;
 
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/primitives.tsx';
+export * from '../shell/sheet-tabs.tsx';
+export * from '../shell/side-pane-resize-handle.tsx';
+export * from '../shell/side-pane-search.tsx';
 export * from '../shell/side-pane-tab-icons.ts';
 export * from '../shell/side-pane-tabs.tsx';
 export * from '../shell/side-pane-tab-model.ts';
@@ -23,3 +26,4 @@ export * from './pages/routes.ts';
 export * from './pages/warden-page.tsx';
 export * from './pairing.ts';
 export * from './session-screens.ts';
+export * from './side-pane-preferences.ts';
