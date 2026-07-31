@@ -8,6 +8,8 @@ export interface FoundationPaths {
   readonly daemonLock: string;
   readonly config: string;
   readonly daemonConfig: string;
+  /** The operator's routing doctrine: which models exist and which accounts may serve them. */
+  readonly routingCatalog: string;
   readonly fleet: string;
   readonly fleetManifest: string;
   readonly state: string;
@@ -35,6 +37,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     daemonLock: join(home, 'daemon.lock'),
     config,
     daemonConfig: join(config, 'daemon.json'),
+    routingCatalog: join(config, 'routing.json'),
     fleet,
     fleetManifest: join(fleet, 'manifest.json'),
     state,

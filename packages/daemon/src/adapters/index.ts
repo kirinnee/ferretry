@@ -1,6 +1,7 @@
 export * from './attachments/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/transport/index.ts';
+export * from './core/index.ts';
 export * from './filesystem/state-file-system.ts';
 export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';
@@ -17,4 +18,5 @@ export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
+export * from './usage/index.ts';
 export * from './warden/index.ts';

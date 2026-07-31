@@ -4,7 +4,10 @@ import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
   BunProcessProbe,
+  BunCommandRunner,
   BunSqliteIndexFactory,
+  CachedUsageFeed,
+  CommandUsageSource,
   DaemonBinder,
   DaemonHealthProbe,
   DaemonReadinessWaiter,
@@ -13,7 +16,10 @@ import {
   BunSecretShell,
   daemonSecretSourceProgram,
   FileDaemonConfig,
+  FileRoutingCatalog,
+  HttpUsageSource,
   KeyedSerialExecutor,
+  ManifestAccountInventory,
   RuntimeEnvironment,
   SocketViewerDownstream,
   PaneProcessInventory,
@@ -49,17 +55,23 @@ import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
+  SessionPlanner,
+  TeamAdvisor,
   createFoundationPaths,
   createSessionPaths,
   createWardenPaths,
   defaultSessionLifecycleSettings,
+  defaultStartWaitPolicy,
   packageRole,
   resolveStateHome,
   SessionLifecycleService,
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
+  usageProbeCommand,
+  type DaemonConfig,
   type DaemonReadinessPorts,
+  type UsageFeedPort,
 } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -111,6 +123,16 @@ export interface DaemonWorld {
    *  open once storage has resolved and locked the state home, so the service is built per opened
    *  storage rather than at process start. */
   readonly createSessionLifecycle: (storage: DaemonStorage) => SessionLifecycleService;
+  /** The daemon-wide account-health feed: one snapshot shared by every session
+   *  instead of one probe per session. Its sources are configured, so it is
+   *  built once configuration has loaded. */
+  readonly createUsageFeed: (config: DaemonConfig) => UsageFeedPort;
+  /** Team recommendation over the published fleet manifest and the operator's
+   *  routing catalog, reading account headroom from the feed above. */
+  readonly createTeamAdvisor: (usage: UsageFeedPort) => TeamAdvisor;
+  /** The shape of one session: its name, parent, display model, context window
+   *  and launch window. */
+  readonly sessions: SessionPlanner;
 }
 
 /**
@@ -132,6 +154,7 @@ export function buildWorld(): DaemonWorld {
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
   const wardenFiles = new NodeWardenReportFileSystem();
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
+  const stateFiles = new StateFileSystem(paths);
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -149,7 +172,7 @@ export function buildWorld(): DaemonWorld {
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
     },
     createReadinessWaiter: (ports, daemonLog) => new DaemonReadinessWaiter(ports, daemonLog),
-    config: new FileDaemonConfig(paths, new StateFileSystem(paths)),
+    config: new FileDaemonConfig(paths, stateFiles),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -196,6 +219,31 @@ export function buildWorld(): DaemonWorld {
         },
         defaultSessionLifecycleSettings,
       ),
+    createUsageFeed: config => {
+      // The collector endpoint first, then the command fallback for hosts where it is not
+      // listening. Both are optional: a daemon configured with neither serves an empty fleet and
+      // says so, rather than pretending every account is at zero.
+      const command = usageProbeCommand(config.usage.fallbackCommand);
+      return new CachedUsageFeed(
+        [
+          ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
+          ...(command === undefined ? [] : [new CommandUsageSource(new BunCommandRunner(process.env), command)]),
+        ],
+        { refreshMs: config.usage.refreshSeconds * 1_000 },
+      );
+    },
+    createTeamAdvisor: usage =>
+      new TeamAdvisor(
+        new ManifestAccountInventory(stateFiles, paths.fleetManifest),
+        new FileRoutingCatalog(stateFiles, paths.routingCatalog),
+        usage,
+      ),
+    sessions: new SessionPlanner({
+      startWait: defaultStartWaitPolicy,
+      contextWindowOverrides: {},
+      namePrefix: DAEMON_NAME,
+      remoteControlPrefix: DAEMON_NAME,
+    }),
   };
 }
 

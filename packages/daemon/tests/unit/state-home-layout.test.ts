@@ -74,6 +74,7 @@ describe('foundation paths', () => {
       daemonLock: '/tmp/fy-home/daemon.lock',
       config: '/tmp/fy-home/config',
       daemonConfig: '/tmp/fy-home/config/daemon.json',
+      routingCatalog: '/tmp/fy-home/config/routing.json',
       fleet: '/tmp/fy-home/fleet',
       fleetManifest: '/tmp/fy-home/fleet/manifest.json',
       state: '/tmp/fy-home/state',
