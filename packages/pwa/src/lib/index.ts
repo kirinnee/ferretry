@@ -1,8 +1,12 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../features/tasks/task-assignee-link.tsx';
+export * from '../features/tasks/task-presentation.ts';
+export * from '../features/tasks/task-status-filter.tsx';
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/primitives.tsx';
+export * from '../shell/route-link.tsx';
 export * from '../shell/side-pane-tab-icons.ts';
 export * from '../shell/side-pane-tabs.tsx';
 export * from '../shell/side-pane-tab-model.ts';
