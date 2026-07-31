@@ -1,11 +1,17 @@
 #!/usr/bin/env bun
+import type { IFyApiClient } from '@ferretry/protocol';
+import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
+import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
+import { PinController } from '../src/lib/pins/controller';
+import { registerPinCommands } from '../src/lib/pins/commands';
+import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { assertSemver } from '../src/lib/version';
 
 // Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
@@ -45,9 +51,48 @@ export function buildWorld(): CliWorld {
   };
 }
 
-/** Route the product domain onto the program — no commands ship yet; controllers register here. */
-export function registerDomain(_program: Command, _world: CliWorld): void {
-  // Intentionally empty: P0 ships `--version`/`--help` only.
+/** Where `fyd` listens when the environment does not say otherwise. */
+const DEFAULT_DAEMON_URL = 'http://127.0.0.1:7337';
+
+/**
+ * How the CLI finds the daemon: the environment, and nothing else. The CLI never reads `fyd`'s state
+ * home — that is the seam the whole split exists to enforce.
+ */
+function daemonConnection(environment: Record<string, string | undefined>): {
+  baseUrl: string;
+  token: string;
+  version: string;
+} {
+  const token = environment.FY_TOKEN?.trim() ?? '';
+  if (token === '') {
+    throw new Error('FY_TOKEN is not set — export the token fyd issued so the CLI can authenticate');
+  }
+  const url = environment.FY_URL?.trim() ?? '';
+  return { baseUrl: url === '' ? DEFAULT_DAEMON_URL : url, token, version: assertSemver(pkg.version) };
+}
+
+/**
+ * A protocol client that connects on first use.
+ *
+ * Deferring the connection is what keeps `--help`, `--version` and a mistyped command working on a
+ * host with no daemon and no token: nothing reaches the network until a command actually asks.
+ */
+function lazyDaemonClient(environment: Record<string, string | undefined>): IFyApiClient['request'] {
+  let connected: Promise<FyApiClient> | undefined;
+  const client = (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
+  return async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
+    const ready = await client();
+    return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
+  };
+}
+
+/** Route the product domain onto the program — one controller per command group. */
+export function registerDomain(program: Command, world: CliWorld): void {
+  const environment = process.env;
+  const request = lazyDaemonClient(environment);
+  const ownSessionId = environment.FY_SESSION_ID;
+
+  registerPinCommands(program, new PinController(new ProtocolPinGateway({ request }), world.io, ownSessionId));
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────
 
