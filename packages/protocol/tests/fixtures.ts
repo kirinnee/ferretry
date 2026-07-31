@@ -9,6 +9,7 @@ import type {
   ScratchSweepView,
   SendResult,
   SessionView,
+  TaskBoardGrantRequestView,
   UsageFeedView,
   WardenConfig,
   WardenConfigView,
@@ -62,6 +63,15 @@ export const sendResult = {
   ...sessionView,
   disposition: 'delivered',
 } satisfies SendResult;
+
+export const taskBoardGrantRequestView = {
+  requestId: 'grant-1',
+  targetSessionId: 'session-2',
+  requestedRole: 'worker',
+  createdAt: INSTANT,
+  expiresAt: LATER_INSTANT,
+  status: 'pending',
+} satisfies TaskBoardGrantRequestView;
 
 export const fyEvent = {
   sequence: 1,
