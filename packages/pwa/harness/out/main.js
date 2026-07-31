@@ -17116,9 +17116,9 @@ var require_jsx_dev_runtime = __commonJS((exports, module) => {
 
 // harness/main.tsx
 var import_client = __toESM(require_client(), 1);
-var import_react7 = __toESM(require_react(), 1);
+var import_react6 = __toESM(require_react(), 1);
 
-// src/components/bottom-sheet.tsx
+// src/shell/bottom-sheet.tsx
 var import_react2 = __toESM(require_react(), 1);
 
 // src/hooks/use-dialog-focus.ts
@@ -17232,7 +17232,7 @@ function cn(...values) {
   return parts.join(" ");
 }
 
-// src/components/bottom-sheet.tsx
+// src/shell/bottom-sheet.tsx
 var jsx_dev_runtime = __toESM(require_jsx_dev_runtime(), 1);
 var SHEET_TRANSITION_MS = 200;
 var REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
@@ -17425,7 +17425,7 @@ function BottomSheet({
   }, undefined, true, undefined, this);
 }
 
-// src/components/primitives.tsx
+// src/shell/primitives.tsx
 var jsx_dev_runtime2 = __toESM(require_jsx_dev_runtime(), 1);
 function Button({ className, variant = "outline", size = "md", ...rest }) {
   return /* @__PURE__ */ jsx_dev_runtime2.jsxDEV("button", {
@@ -17510,7 +17510,7 @@ class DaemonSessionCache {
   }
 }
 
-// src/components/side-pane-tab-model.ts
+// src/shell/side-pane-tab-model.ts
 function sidePaneInstanceTabId(kind, key) {
   return `${kind}:${key}`;
 }
@@ -17742,30 +17742,19 @@ function openSidePaneBrowserTab(scope, destination = null, options = {}) {
   return id;
 }
 var instanceCloseListeners = new Set;
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/createLucideIcon.mjs
-var import_react5 = __toESM(require_react(), 1);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/createLucideIcon.js
+var import_react4 = __toESM(require_react(), 1);
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils/mergeClasses.mjs
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils.js
+var toKebabCase = (string) => string.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
 var mergeClasses = (...classes) => classes.filter((className, index, array) => {
   return Boolean(className) && className.trim() !== "" && array.indexOf(className) === index;
 }).join(" ").trim();
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils/toKebabCase.mjs
-var toKebabCase = (string) => string.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/Icon.js
+var import_react3 = __toESM(require_react(), 1);
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils/toCamelCase.mjs
-var toCamelCase = (string) => string.replace(/^([A-Z])|[\s-_]+(\w)/g, (match, p1, p2) => p2 ? p2.toUpperCase() : p1.toLowerCase());
-
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils/toPascalCase.mjs
-var toPascalCase = (string) => {
-  const camelCase = toCamelCase(string);
-  return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
-};
-
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/Icon.mjs
-var import_react4 = __toESM(require_react(), 1);
-
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/defaultAttributes.mjs
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/defaultAttributes.js
 var defaultAttributes = {
   xmlns: "http://www.w3.org/2000/svg",
   width: 24,
@@ -17778,70 +17767,52 @@ var defaultAttributes = {
   strokeLinejoin: "round"
 };
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/shared/src/utils/hasA11yProp.mjs
-var hasA11yProp = (props) => {
-  for (const prop in props) {
-    if (prop.startsWith("aria-") || prop === "role" || prop === "title") {
-      return true;
-    }
-  }
-  return false;
-};
-
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/context.mjs
-var import_react3 = __toESM(require_react(), 1);
-"use client";
-var LucideContext = import_react3.createContext({});
-var useLucideContext = () => import_react3.useContext(LucideContext);
-
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/Icon.mjs
-"use client";
-var Icon = import_react4.forwardRef(({ color, size, strokeWidth, absoluteStrokeWidth, className = "", children, iconNode, ...rest }, ref) => {
-  const {
-    size: contextSize = 24,
-    strokeWidth: contextStrokeWidth = 2,
-    absoluteStrokeWidth: contextAbsoluteStrokeWidth = false,
-    color: contextColor = "currentColor",
-    className: contextClass = ""
-  } = useLucideContext() ?? {};
-  const calculatedStrokeWidth = absoluteStrokeWidth ?? contextAbsoluteStrokeWidth ? Number(strokeWidth ?? contextStrokeWidth) * 24 / Number(size ?? contextSize) : strokeWidth ?? contextStrokeWidth;
-  return import_react4.createElement("svg", {
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/Icon.js
+var Icon = import_react3.forwardRef(({
+  color = "currentColor",
+  size = 24,
+  strokeWidth = 2,
+  absoluteStrokeWidth,
+  className = "",
+  children,
+  iconNode,
+  ...rest
+}, ref) => {
+  return import_react3.createElement("svg", {
     ref,
     ...defaultAttributes,
-    width: size ?? contextSize ?? defaultAttributes.width,
-    height: size ?? contextSize ?? defaultAttributes.height,
-    stroke: color ?? contextColor,
-    strokeWidth: calculatedStrokeWidth,
-    className: mergeClasses("lucide", contextClass, className),
-    ...!children && !hasA11yProp(rest) && { "aria-hidden": "true" },
+    width: size,
+    height: size,
+    stroke: color,
+    strokeWidth: absoluteStrokeWidth ? Number(strokeWidth) * 24 / Number(size) : strokeWidth,
+    className: mergeClasses("lucide", className),
     ...rest
   }, [
-    ...iconNode.map(([tag, attrs]) => import_react4.createElement(tag, attrs)),
+    ...iconNode.map(([tag, attrs]) => import_react3.createElement(tag, attrs)),
     ...Array.isArray(children) ? children : [children]
   ]);
 });
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/createLucideIcon.mjs
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/createLucideIcon.js
 var createLucideIcon = (iconName, iconNode) => {
-  const Component = import_react5.forwardRef(({ className, ...props }, ref) => import_react5.createElement(Icon, {
+  const Component = import_react4.forwardRef(({ className, ...props }, ref) => import_react4.createElement(Icon, {
     ref,
     iconNode,
-    className: mergeClasses(`lucide-${toKebabCase(toPascalCase(iconName))}`, `lucide-${iconName}`, className),
+    className: mergeClasses(`lucide-${toKebabCase(iconName)}`, className),
     ...props
   }));
-  Component.displayName = toPascalCase(iconName);
+  Component.displayName = `${iconName}`;
   return Component;
 };
 
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/circle-alert.mjs
-var __iconNode = [
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/circle-alert.js
+var CircleAlert = createLucideIcon("CircleAlert", [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
   ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
   ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
-];
-var CircleAlert = createLucideIcon("circle-alert", __iconNode);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/earth.mjs
-var __iconNode2 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/earth.js
+var Earth = createLucideIcon("Earth", [
   ["path", { d: "M21.54 15H17a2 2 0 0 0-2 2v4.54", key: "1djwo0" }],
   [
     "path",
@@ -17852,85 +17823,72 @@ var __iconNode2 = [
   ],
   ["path", { d: "M11 21.95V18a2 2 0 0 0-2-2a2 2 0 0 1-2-2v-1a2 2 0 0 0-2-2H2.05", key: "14pb5j" }],
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }]
-];
-var Earth = createLucideIcon("earth", __iconNode2);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/file-code-corner.mjs
-var __iconNode3 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/sparkles.js
+var Sparkles = createLucideIcon("Sparkles", [
   [
     "path",
     {
-      d: "M4 12.15V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2h-3.35",
-      key: "1wthlu"
+      d: "M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z",
+      key: "4pj2yx"
     }
   ],
-  ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5", key: "wfsgrz" }],
-  ["path", { d: "m5 16-3 3 3 3", key: "331omg" }],
-  ["path", { d: "m9 22 3-3-3-3", key: "lsp7cz" }]
-];
-var FileCodeCorner = createLucideIcon("file-code-corner", __iconNode3);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/sparkles.mjs
-var __iconNode4 = [
-  [
-    "path",
-    {
-      d: "M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z",
-      key: "1s2grr"
-    }
-  ],
-  ["path", { d: "M20 2v4", key: "1rf3ol" }],
-  ["path", { d: "M22 4h-4", key: "gwowj6" }],
-  ["circle", { cx: "4", cy: "20", r: "2", key: "6kqj1y" }]
-];
-var Sparkles = createLucideIcon("sparkles", __iconNode4);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/square-terminal.mjs
-var __iconNode5 = [
+  ["path", { d: "M20 3v4", key: "1olli1" }],
+  ["path", { d: "M22 5h-4", key: "1gvqau" }],
+  ["path", { d: "M4 17v2", key: "vumght" }],
+  ["path", { d: "M5 18H3", key: "zchphs" }]
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/square-terminal.js
+var SquareTerminal = createLucideIcon("SquareTerminal", [
   ["path", { d: "m7 11 2-2-2-2", key: "1lz0vl" }],
   ["path", { d: "M11 13h4", key: "1p7l4v" }],
   ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }]
-];
-var SquareTerminal = createLucideIcon("square-terminal", __iconNode5);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/cable.mjs
-var __iconNode6 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/cable.js
+var Cable = createLucideIcon("Cable", [
   [
     "path",
-    { d: "M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z", key: "trhst0" }
+    {
+      d: "M17 21v-2a1 1 0 0 1-1-1v-1a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1a1 1 0 0 1-1 1",
+      key: "10bnsj"
+    }
   ],
-  ["path", { d: "M17 21v-2", key: "ds4u3f" }],
-  ["path", { d: "M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10", key: "1mo9zo" }],
-  ["path", { d: "M21 21v-2", key: "eo0ou" }],
-  ["path", { d: "M3 5V3", key: "1k5hjh" }],
+  ["path", { d: "M19 15V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V9", key: "1eqmu1" }],
+  ["path", { d: "M21 21v-2h-4", key: "14zm7j" }],
+  ["path", { d: "M3 5h4V3", key: "z442eg" }],
   [
     "path",
-    { d: "M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z", key: "1dd30t" }
-  ],
-  ["path", { d: "M7 5V3", key: "1t1388" }]
-];
-var Cable = createLucideIcon("cable", __iconNode6);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/chart-no-axes-combined.mjs
-var __iconNode7 = [
+    { d: "M7 5a1 1 0 0 1 1 1v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1V3", key: "ebdjd7" }
+  ]
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/chart-no-axes-combined.js
+var ChartNoAxesCombined = createLucideIcon("ChartNoAxesCombined", [
   ["path", { d: "M12 16v5", key: "zza2cw" }],
-  ["path", { d: "M16 14.639V21", key: "1s85h0" }],
-  ["path", { d: "M20 10.656V21", key: "q45596" }],
+  ["path", { d: "M16 14v7", key: "1g90b9" }],
+  ["path", { d: "M20 10v11", key: "1iqoj0" }],
   [
     "path",
     { d: "m22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15", key: "1fw8x9" }
   ],
-  ["path", { d: "M4 18.463V21", key: "1otddq" }],
-  ["path", { d: "M8 14.656V21", key: "1t2idw" }]
-];
-var ChartNoAxesCombined = createLucideIcon("chart-no-axes-combined", __iconNode7);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/check.mjs
-var __iconNode8 = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-var Check = createLucideIcon("check", __iconNode8);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/chevrons-up-down.mjs
-var __iconNode9 = [
+  ["path", { d: "M4 18v3", key: "1yp0dc" }],
+  ["path", { d: "M8 14v7", key: "n3cwzv" }]
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/check.js
+var Check = createLucideIcon("Check", [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/chevrons-up-down.js
+var ChevronsUpDown = createLucideIcon("ChevronsUpDown", [
   ["path", { d: "m7 15 5 5 5-5", key: "1hf1tw" }],
   ["path", { d: "m7 9 5-5 5 5", key: "sgt6xg" }]
-];
-var ChevronsUpDown = createLucideIcon("chevrons-up-down", __iconNode9);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/folder-git-2.mjs
-var __iconNode10 = [
-  ["path", { d: "M18 19a5 5 0 0 1-5-5v8", key: "sz5oeg" }],
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/file-code-2.js
+var FileCode2 = createLucideIcon("FileCode2", [
+  ["path", { d: "M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4", key: "1pf5j1" }],
+  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
+  ["path", { d: "m5 12-3 3 3 3", key: "oke12k" }],
+  ["path", { d: "m9 18 3-3-3-3", key: "112psh" }]
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/folder-git-2.js
+var FolderGit2 = createLucideIcon("FolderGit2", [
   [
     "path",
     {
@@ -17939,29 +17897,27 @@ var __iconNode10 = [
     }
   ],
   ["circle", { cx: "13", cy: "12", r: "2", key: "1j92g6" }],
+  ["path", { d: "M18 19c-2.8 0-5-2.2-5-5v8", key: "pkpw2h" }],
   ["circle", { cx: "20", cy: "19", r: "2", key: "1obnsp" }]
-];
-var FolderGit2 = createLucideIcon("folder-git-2", __iconNode10);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/git-fork.mjs
-var __iconNode11 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/git-fork.js
+var GitFork = createLucideIcon("GitFork", [
   ["circle", { cx: "12", cy: "18", r: "3", key: "1mpf1b" }],
   ["circle", { cx: "6", cy: "6", r: "3", key: "1lh9wr" }],
   ["circle", { cx: "18", cy: "6", r: "3", key: "1h7g24" }],
   ["path", { d: "M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9", key: "1uq4wg" }],
   ["path", { d: "M12 12v3", key: "158kv8" }]
-];
-var GitFork = createLucideIcon("git-fork", __iconNode11);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/list-todo.mjs
-var __iconNode12 = [
-  ["path", { d: "M13 5h8", key: "a7qcls" }],
-  ["path", { d: "M13 12h8", key: "h98zly" }],
-  ["path", { d: "M13 19h8", key: "c3s6r1" }],
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/list-todo.js
+var ListTodo = createLucideIcon("ListTodo", [
+  ["rect", { x: "3", y: "5", width: "6", height: "6", rx: "1", key: "1defrl" }],
   ["path", { d: "m3 17 2 2 4-4", key: "1jhpwq" }],
-  ["rect", { x: "3", y: "4", width: "6", height: "6", rx: "1", key: "cif1o7" }]
-];
-var ListTodo = createLucideIcon("list-todo", __iconNode12);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/pin.mjs
-var __iconNode13 = [
+  ["path", { d: "M13 6h8", key: "15sg57" }],
+  ["path", { d: "M13 12h8", key: "h98zly" }],
+  ["path", { d: "M13 18h8", key: "oe0vm4" }]
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/pin.js
+var Pin = createLucideIcon("Pin", [
   ["path", { d: "M12 17v5", key: "bb1du9" }],
   [
     "path",
@@ -17970,24 +17926,21 @@ var __iconNode13 = [
       key: "1nkz8b"
     }
   ]
-];
-var Pin = createLucideIcon("pin", __iconNode13);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/plus.mjs
-var __iconNode14 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/plus.js
+var Plus = createLucideIcon("Plus", [
   ["path", { d: "M5 12h14", key: "1ays0h" }],
   ["path", { d: "M12 5v14", key: "s699le" }]
-];
-var Plus = createLucideIcon("plus", __iconNode14);
-// ../../node_modules/.bun/lucide-react@1.28.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/x.mjs
-var __iconNode15 = [
+]);
+// ../../node_modules/.bun/lucide-react@0.468.0+0f58469d5b3bd39f/node_modules/lucide-react/dist/esm/icons/x.js
+var X = createLucideIcon("X", [
   ["path", { d: "M18 6 6 18", key: "1bl5f8" }],
   ["path", { d: "m6 6 12 12", key: "d8bk6v" }]
-];
-var X = createLucideIcon("x", __iconNode15);
-// src/components/side-pane-tabs.tsx
-var import_react6 = __toESM(require_react(), 1);
+]);
+// src/shell/side-pane-tabs.tsx
+var import_react5 = __toESM(require_react(), 1);
 
-// src/components/side-pane-tab-icons.ts
+// src/shell/side-pane-tab-icons.ts
 var SIDE_PANE_TAB_ICONS = {
   pins: Pin,
   tasks: ListTodo,
@@ -17999,11 +17952,11 @@ var SIDE_PANE_TAB_ICONS = {
   browser: Earth,
   files: FolderGit2,
   terminal: SquareTerminal,
-  file: FileCodeCorner
+  file: FileCode2
 };
 var sidePaneTabIcon = (name) => SIDE_PANE_TAB_ICONS[name];
 
-// src/components/side-pane-tabs.tsx
+// src/shell/side-pane-tabs.tsx
 var jsx_dev_runtime3 = __toESM(require_jsx_dev_runtime(), 1);
 function sidePaneTabId(paneId, surface) {
   return `${paneId}-tab-${surface}`;
@@ -18183,15 +18136,15 @@ function SidePaneTabStrip({
   onRemove,
   onNewInstance
 }) {
-  const refs = import_react6.useRef(new Map);
+  const refs = import_react5.useRef(new Map);
   const order = tabs.map((tab) => tab.id);
   const focusStop = order.includes(current) ? current : order[0];
-  const generatedId = import_react6.useId();
+  const generatedId = import_react5.useId();
   const pickerId = `${paneId}-tab-picker-${generatedId}`;
-  const triggerRef = import_react6.useRef(null);
-  const popoverRef = import_react6.useRef(null);
-  const [pickerOpen, setPickerOpen] = import_react6.useState(false);
-  import_react6.useEffect(() => {
+  const triggerRef = import_react5.useRef(null);
+  const popoverRef = import_react5.useRef(null);
+  const [pickerOpen, setPickerOpen] = import_react5.useState(false);
+  import_react5.useEffect(() => {
     if (!pickerOpen)
       return;
     const onPointerDown = (event) => {
@@ -18352,9 +18305,9 @@ function SidePaneTabControl({
   onRemove,
   onNewInstance
 }) {
-  const generatedId = import_react6.useId();
+  const generatedId = import_react5.useId();
   const modalId = `${paneId}-tab-switcher-${generatedId}`;
-  const [open, setOpen] = import_react6.useState(false);
+  const [open, setOpen] = import_react5.useState(false);
   const active = tabs.find((tab) => tab.id === current) ?? all.find((tab) => tab.id === current) ?? null;
   const ActiveIcon = active ? sidePaneTabIcon(active.icon) : null;
   const activeName = active ? active.instance ? active.instance.label : active.label : null;
@@ -18428,7 +18381,7 @@ function SidePaneTabs({ presentation, ...rest }) {
   }, undefined, false, undefined, this);
 }
 
-// src/components/view-tabs.tsx
+// src/shell/view-tabs.tsx
 var jsx_dev_runtime4 = __toESM(require_jsx_dev_runtime(), 1);
 function ViewTabs({
   tabs,
@@ -18491,17 +18444,17 @@ var daemon = daemonConnection({
 });
 var scope = daemonSessionScope(daemon, "harness-session");
 openSidePaneTab(scope, "pins");
-openSidePaneFileTab(scope, "packages/pwa/src/components/side-pane-tabs.tsx");
+openSidePaneFileTab(scope, "packages/p../src/shell/side-pane-tabs.tsx");
 openSidePaneFileTab(scope, "README.md");
 var PHONE_MAX = 768;
 function Shell() {
-  const [version, bump] = import_react7.useState(0);
-  const [view, setView] = import_react7.useState("chat");
-  const [sheetOpen, setSheetOpen] = import_react7.useState(false);
-  const [viewport, setViewport] = import_react7.useState({ width: window.innerWidth, height: window.innerHeight });
+  const [version, bump] = import_react6.useState(0);
+  const [view, setView] = import_react6.useState("chat");
+  const [sheetOpen, setSheetOpen] = import_react6.useState(false);
+  const [viewport, setViewport] = import_react6.useState({ width: window.innerWidth, height: window.innerHeight });
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
-  import_react7.useEffect(() => {
+  import_react6.useEffect(() => {
     const sync = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     window.addEventListener("resize", sync);
     return () => window.removeEventListener("resize", sync);

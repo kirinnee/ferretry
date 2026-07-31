@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { type TabSpec, ViewTabs } from '../../src/components/view-tabs.tsx';
+import { type TabSpec, ViewTabs } from '../../src/shell/view-tabs.tsx';
 import { render, run } from '../support/react.ts';
 
 type View = 'chat' | 'terminal';

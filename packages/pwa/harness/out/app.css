@@ -1,5 +1,5 @@
 /* ============================================================================
-   kteam UI — THEME TOKEN DEFINITIONS.
+   Ferretry UI — THEME TOKEN DEFINITIONS.
 
    Split out of index.css (which now owns base elements, shell/layout, mobile
    density and the component classes) so the theme families can be worked on
@@ -16,10 +16,10 @@
 
    The resolution (stored preference → OS fallback → attribute) is implemented
    twice on purpose: once pre-paint in `index.html` and once in
-   `src/hooks/useTheme.ts`. Both read the SAME `kteam-theme` key and MUST stay
+   `src/hooks/useTheme.ts`. Both read the SAME `fy-theme` key and MUST stay
    in sync; if you change one, change the other.
 
-   Legacy: `kteam-theme` used to hold the bare strings `light` / `dark`. The
+   Legacy: `fy-theme` used to hold the bare strings `light` / `dark`. The
    hook migrates them to studio, and the selectors below also accept
    `data-theme='light'|'dark'` directly so a stale attribute can never strand a
    user on half-resolved tokens.
@@ -2140,7 +2140,7 @@
 }
 
 /* ============================================================================
-   kteam UI design system — base elements, shell/layout and component classes.
+   Ferretry UI design system — base elements, shell/layout and component classes.
 
    THEME TOKENS LIVE IN `themes.css` (imported above): the five families ×
    light/dark, the `[data-swatch]` previews and every literal colour in the
@@ -2153,7 +2153,7 @@
    model, body wash, overlay).
 
    The theme contract (`<html data-theme="<family>-<mode>">`, the pre-paint
-   bootstrap in index.html, and the `kteam-theme` storage key) is documented at
+   bootstrap in index.html, and the `fy-theme` storage key) is documented at
    the top of `themes.css`.
    ============================================================================ */
 
@@ -2745,6 +2745,18 @@ video {
   }
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .pointer-events-none {
   pointer-events: none;
 }
@@ -2815,6 +2827,10 @@ video {
   margin-bottom: 0.5rem;
 }
 
+.mt-0\.5 {
+  margin-top: 0.125rem;
+}
+
 .mt-1 {
   margin-top: 0.25rem;
 }
@@ -2853,6 +2869,14 @@ video {
 
 .h-8 {
   height: 2rem;
+}
+
+.h-full {
+  height: 100%;
+}
+
+.min-h-0 {
+  min-height: 0px;
 }
 
 .min-h-\[44px\] {
@@ -2897,6 +2921,10 @@ video {
 
 .max-w-\[148px\] {
   max-width: 148px;
+}
+
+.max-w-\[980px\] {
+  max-width: 980px;
 }
 
 .max-w-full {
@@ -2977,6 +3005,10 @@ video {
 
 .\!gap-0 {
   gap: 0px !important;
+}
+
+.gap-3 {
+  gap: 0.75rem;
 }
 
 .gap-sm {
@@ -3106,13 +3138,26 @@ video {
   padding-bottom: 0.25rem;
 }
 
+.py-2 {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
 .py-3 {
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
 }
 
+.pb-4 {
+  padding-bottom: 1rem;
+}
+
 .text-left {
   text-align: left;
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 .font-ui {
@@ -3123,8 +3168,16 @@ video {
   font-size: var(--text-2xs);
 }
 
+.text-display {
+  font-size: var(--text-display);
+}
+
 .text-ui {
   font-size: var(--text-base);
+}
+
+.font-bold {
+  font-weight: var(--weight-display);
 }
 
 .font-semibold {
@@ -3137,6 +3190,10 @@ video {
 
 .leading-tight {
   line-height: var(--leading-tight);
+}
+
+.tracking-display {
+  letter-spacing: var(--tracking-display);
 }
 
 .tracking-wide {
@@ -4982,7 +5039,7 @@ body {
 /* Portrait gate — shown only when a phone-sized viewport is turned sideways
    and the platform refused screen.orientation.lock() (see lib/orientation-lock.ts). */
 
-#kteam-portrait-gate {
+#fy-portrait-gate {
   position: fixed;
   inset: 0;
   z-index: 200;
@@ -4995,19 +5052,19 @@ body {
   color: var(--text, #f5f5f5);
 }
 
-.kteam-portrait-gate__icon {
+.fy-portrait-gate__icon {
   font-size: 2.5rem;
   line-height: 1;
   margin-bottom: 0.75rem;
 }
 
-.kteam-portrait-gate__title {
+.fy-portrait-gate__title {
   font-size: 1.05rem;
   font-weight: 600;
   margin: 0 0 0.35rem;
 }
 
-.kteam-portrait-gate__body {
+.fy-portrait-gate__body {
   margin: 0;
   opacity: 0.75;
   font-size: 0.9rem;

@@ -9,17 +9,8 @@
 
 import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
-import { BottomSheet } from '../src/components/bottom-sheet.tsx';
-import {
-  ActionGroup,
-  Badge,
-  Button,
-  Card,
-  Label,
-  PanelBody,
-  PanelHeader,
-  Textarea,
-} from '../src/components/primitives.tsx';
+import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
+import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import {
   getSidePaneTabDefinitions,
   openSidePaneFileTab,
@@ -27,9 +18,9 @@ import {
   readSidePaneTabsState,
   resolveSidePaneTab,
   type SidePaneTabDefinition,
-} from '../src/components/side-pane-tab-model.ts';
-import { SidePaneTabs } from '../src/components/side-pane-tabs.tsx';
-import { ViewTabs } from '../src/components/view-tabs.tsx';
+} from '../src/shell/side-pane-tab-model.ts';
+import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
+import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 
@@ -41,7 +32,7 @@ const daemon = daemonConnection({
 const scope = daemonSessionScope(daemon, 'harness-session');
 
 openSidePaneTab(scope, 'pins');
-openSidePaneFileTab(scope, 'packages/pwa/src/components/side-pane-tabs.tsx');
+openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
 
 /** Phone below this width, exactly as the app decides its presentation. */

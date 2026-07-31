@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { BottomSheet } from '../../src/components/bottom-sheet.tsx';
+import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { interact, mount, pressKey } from '../support/dom.ts';
 
 type MediaListener = () => void;

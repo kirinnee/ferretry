@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { SIDE_PANE_TAB_ICONS, sidePaneTabIcon } from '../../src/components/side-pane-tab-icons.ts';
-import { SIDE_PANE_BUILT_IN_TABS } from '../../src/components/side-pane-tab-model.ts';
+import { SIDE_PANE_TAB_ICONS, sidePaneTabIcon } from '../../src/shell/side-pane-tab-icons.ts';
+import { SIDE_PANE_BUILT_IN_TABS } from '../../src/shell/side-pane-tab-model.ts';
 
 describe('side-pane tab icons', () => {
   it('resolves a glyph for every icon name a built-in tab asks for', () => {

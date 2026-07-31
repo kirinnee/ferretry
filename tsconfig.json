@@ -1,8 +1,6 @@
 {
   "compilerOptions": {
-    "lib": [
-      "ESNext"
-    ],
+    "lib": ["ESNext"],
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
@@ -19,17 +17,8 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "types": [
-      "bun"
-    ]
+    "types": ["bun"]
   },
-  "include": [
-    "packages/*/bin",
-    "packages/*/src",
-    "packages/*/tests",
-    "scripts/validate"
-  ],
-  "exclude": [
-    "packages/pwa"
-  ]
+  "include": ["packages/*/bin", "packages/*/src", "packages/*/tests", "scripts/validate"],
+  "exclude": ["packages/pwa"]
 }

@@ -6,8 +6,8 @@ import {
   SidePaneTabSwitcherList,
   sidePanePanelId,
   sidePaneTabId,
-} from '../../src/components/side-pane-tabs.tsx';
-import type { SidePaneTabDefinition } from '../../src/components/side-pane-tab-model.ts';
+} from '../../src/shell/side-pane-tabs.tsx';
+import type { SidePaneTabDefinition } from '../../src/shell/side-pane-tab-model.ts';
 import { interact, mount, pressKey } from '../support/dom.ts';
 
 const singleton = (id: string, label: string, extra: Partial<SidePaneTabDefinition> = {}): SidePaneTabDefinition => ({

@@ -30,7 +30,7 @@ import {
   subscribeSidePaneTabRegistry,
   subscribeSidePaneTabsState,
   writeSidePaneTabsState,
-} from '../../src/components/side-pane-tab-model.ts';
+} from '../../src/shell/side-pane-tab-model.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 

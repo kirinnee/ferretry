@@ -8,7 +8,7 @@ import {
   PanelBody,
   PanelHeader,
   Textarea,
-} from '../../src/components/primitives.tsx';
+} from '../../src/shell/primitives.tsx';
 import { render } from '../support/react.ts';
 
 describe('Button', () => {
