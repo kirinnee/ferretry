@@ -129,7 +129,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const target = path.join(directory, entry);
       const stats = await lstat(target);
       if (!stats.isFile()) continue;
-      const content = await readFile(target, 'utf8').catch(() => '');
+      // An unreadable file inside a directory the fleet created at 0700 is an anomaly, and
+      // swallowing it would leave a stale wrapper on PATH with nothing said about it.
+      const content = await readFile(target, 'utf8');
       if (!content.includes(marker)) continue;
       await rm(target, { force: true });
       pruned.push(entry);

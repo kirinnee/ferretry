@@ -1,6 +1,13 @@
 import { describe, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import should from 'should';
-import { type FleetLoginSpawn, ProcessFleetLoginPort } from '../../src/adapters/process-login.ts';
+import {
+  type FleetLoginSpawn,
+  ProcessFleetLoginPort,
+  spawnFleetLoginProcess,
+} from '../../src/adapters/process-login.ts';
 import type { FleetManifestAccount } from '../../src/lib/manifest.ts';
 
 const account = (kind: FleetManifestAccount['kind']): FleetManifestAccount => ({
@@ -68,5 +75,38 @@ describe('ProcessFleetLoginPort', () => {
     // Assert
     should(spawned).be.false();
     should(actual).deepEqual({ status: 'not-required' });
+  });
+});
+
+describe('spawnFleetLoginProcess', () => {
+  it('should run the given command and resolve its exit code', async () => {
+    // Arrange — a trivial local shell, never a harness and never a real provider.
+    const command = ['/bin/sh', '-c', 'exit 0'];
+
+    // Act
+    const actual = await spawnFleetLoginProcess(command, { environment: { FY_TEST_TOKEN: 'placeholder' } }).exited;
+
+    // Assert
+    should(actual).equal(0);
+  });
+
+  it('should surface a non-zero exit and honour the working directory', async () => {
+    // Arrange
+    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-login-test-'));
+    const marker = path.join(directory, 'ran-here');
+
+    try {
+      // Act
+      const actual = await spawnFleetLoginProcess(['/bin/sh', '-c', 'touch ran-here; exit 5'], {
+        environment: {},
+        cwd: directory,
+      }).exited;
+
+      // Assert
+      should(actual).equal(5);
+      should(await Bun.file(marker).exists()).be.true();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
