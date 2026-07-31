@@ -96,18 +96,46 @@ function lazyDaemonClient(
   };
 }
 
+/**
+ * What one command group needs to wire itself: the program to hang commands on, plus the
+ * collaborators every group shares.
+ */
+export interface DomainWiring {
+  readonly program: Command;
+  readonly world: CliWorld;
+  readonly client: Pick<IFyApiClient, 'request' | 'analytics'>;
+  readonly ownSessionId: string | undefined;
+}
+
+/**
+ * One line per command group. **Append here; never rewrite another group's line.**
+ *
+ * This is a list rather than a function body for a mechanical reason: when each group appended its
+ * own controller construction to a single `registerDomain`, every group conflicted with every other
+ * group on that one function, and each merge needed a hand-resolved semantic rebase. As a list, a
+ * new group is a one-line append — it merges the way a barrel does, by keeping both sides.
+ */
+const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
+  ({ program, world, client, ownSessionId }) =>
+    registerAttentionCommands(
+      program,
+      new AttentionController(new ProtocolAttentionGateway(client), world.io, ownSessionId),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
+  ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+];
+
 /** Route the product domain onto the program — one controller per command group. */
 export function registerDomain(program: Command, world: CliWorld): void {
   const environment = process.env;
-  const client = lazyDaemonClient(environment);
-  const ownSessionId = environment.FY_SESSION_ID;
-
-  registerAttentionCommands(
+  const wiring: DomainWiring = {
     program,
-    new AttentionController(new ProtocolAttentionGateway(client), world.io, ownSessionId),
-  );
-  registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId));
-  registerAnalyticsCommands(program, new AnalyticsController(client, world.io));
+    world,
+    client: lazyDaemonClient(environment),
+    ownSessionId: environment.FY_SESSION_ID,
+  };
+  for (const register of DOMAIN_REGISTRARS) register(wiring);
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────
 
