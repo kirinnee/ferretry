@@ -4,7 +4,9 @@ import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
   BunCommandPort,
+  BunProcessProbe,
   BunSqliteIndexFactory,
+  BunTmuxProcess,
   DaemonBinder,
   DaemonHealthProbe,
   DaemonReadinessWaiter,
@@ -64,12 +66,19 @@ import {
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
 
+<<<<<<< HEAD
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
   const executable = Bun.which('tmux');
   if (executable === null) throw new Error('tmux was not found on PATH; it is required to manage sessions');
   return executable;
 }
+=======
+/** Fallback when tmux is not on `$PATH`. Absolute by construction: the tmux adapter refuses a bare
+ *  name so no lookup can ever land on the machine's default socket, and an absent binary surfaces
+ *  as a failed inspection, which the migration gate then refuses. */
+const FALLBACK_TMUX = '/usr/bin/tmux';
+>>>>>>> c7e9b63 (fix(daemon): refuse migration when in-flight work is unobservable)
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -158,7 +167,10 @@ export function buildWorld(): DaemonWorld {
       }),
       { set: (key, value) => (process.env[key] = value) },
     ),
-    processInventory: new PaneProcessInventory(new BunCommandPort()),
+    processInventory: new PaneProcessInventory(
+      new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock')),
+      new BunProcessProbe(Bun.which('ps') ?? undefined),
+    ),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
     browserTransport: {

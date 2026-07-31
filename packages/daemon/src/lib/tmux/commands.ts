@@ -22,6 +22,10 @@ export function paneMetadataArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), paneMetadataFormat];
 }
 
+export function panePidArguments(session: string): readonly string[] {
+  return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_pid}'];
+}
+
 export function sendLiteralArguments(session: string, text: string): readonly string[] {
   if (text.length === 0) throw new TmuxAddressError('literal text must not be empty');
   return ['send-keys', '-t', sessionTarget(session), '-l', text];

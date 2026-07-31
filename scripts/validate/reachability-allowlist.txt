@@ -34,6 +34,15 @@ packages/daemon/src/lib/analytics/query.ts # PR #6: add analytics ingestion and 
 packages/daemon/src/lib/analytics/results.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 packages/daemon/src/lib/analytics/session-record.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 
+<<<<<<< HEAD
+=======
+# PR #7 — port the tmux controller
+packages/daemon/src/lib/tmux/controller.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/index.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/pane.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/retry.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+
+>>>>>>> c7e9b63 (fix(daemon): refuse migration when in-flight work is unobservable)
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
 packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 packages/daemon/src/lib/names/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
@@ -96,6 +105,7 @@ packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report
 packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/failover.ts # PR #19: warden supervision; the report reader is mounted but this is not
 
+<<<<<<< HEAD
 # PR #21 — establish terminal IO policies
 packages/daemon/src/adapters/terminal/index.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/terminal/service.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
@@ -106,3 +116,7 @@ packages/daemon/src/lib/terminal/index.ts # PR #21: establish terminal IO polici
 packages/daemon/src/lib/terminal/policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/lib/terminal/runtime-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
 packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+=======
+# PR #20 — port the destructive migration preflight
+packages/daemon/src/lib/migrate/tool-inventory.ts # PR #20: wired by the preflight orchestrator later in this branch
+>>>>>>> 6422997 (fix(daemon): refuse migration when in-flight work is unobservable)
