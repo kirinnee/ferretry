@@ -154,7 +154,10 @@ export class DaemonDraftStore {
     // Quota is monotonic as entries are removed. Probe for the largest
     // newest-first subset that fits, so a one-entry overflow loses only the
     // oldest entry rather than collapsing immediately to a small fixed cap.
-    let lower = 0;
+    // The empty document (retained = 0) is deliberately excluded: if even
+    // the single newest draft overflows, every candidate fails and we leave
+    // the previously persisted store intact instead of erasing it.
+    let lower = 1;
     let upper = Object.keys(store.drafts).length - 1;
     while (lower <= upper) {
       const retained = Math.floor((lower + upper) / 2);

@@ -169,7 +169,7 @@ describe('daemon-scoped drafts', () => {
     new DaemonDraftStore(retrying).save(scopeA, 'retried', 12);
 
     // the full 12-entry document overflows; the search keeps the 11 newest, above the old fixed cap of 10
-    should(attempts).deepEqual([12, 5, 8, 10, 11]);
+    should(attempts).deepEqual([12, 6, 9, 10, 11]);
     should(Object.keys(saved.drafts)).have.length(11);
     should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual([
       'retried',
@@ -186,7 +186,36 @@ describe('daemon-scoped drafts', () => {
     ]);
   });
 
-  it('should not throw when every fallback candidate including the empty document exceeds the quota', () => {
+  it('should preserve a previously persisted draft when the newest draft alone overflows the quota', () => {
+    const persisted = upsertDraft(emptyDraftStore(), scopeA, 'good', 1);
+    const persistedJson = JSON.stringify(persisted);
+    // Quota admits the persisted good store but rejects any document holding the oversized draft;
+    // the oversized text stays within MAX_DRAFT_LEN so upsertDraft keeps rather than drops it.
+    const quota = persistedJson.length + 32;
+    const oversized = 'x'.repeat(quota);
+
+    const attempts: number[] = [];
+    let value = persistedJson;
+    const overflowing: DraftStorage = {
+      getItem: () => value,
+      setItem: (_key, candidate) => {
+        attempts.push(Object.keys(parseDraftStore(candidate).drafts).length);
+        if (candidate.length > quota) throw new Error('quota');
+        value = candidate;
+      },
+    };
+    const drafts = new DaemonDraftStore(overflowing);
+
+    should(() => drafts.save(scopeB, oversized, 2)).not.throw();
+    // the full two-entry document (2) and the lone oversized draft (1) both overflow; the empty
+    // document is never tried, so the previously persisted good draft survives untouched
+    should(attempts).deepEqual([2, 1]);
+    should(attempts).not.containEql(0);
+    should(drafts.load(scopeA)).equal('good');
+    should(overflowing.getItem(DRAFTS_KEY)).equal(persistedJson);
+  });
+
+  it('should never attempt the empty document when every non-empty fallback overflows the quota', () => {
     let seeded = emptyDraftStore();
     for (let index = 1; index <= 11; index += 1)
       seeded = upsertDraft(seeded, daemonSessionScope(daemonB, `old-${index}`), `old-${index}`, index);
@@ -202,7 +231,9 @@ describe('daemon-scoped drafts', () => {
     const drafts = new DaemonDraftStore(alwaysOver);
 
     should(() => drafts.save(scopeA, 'retried', 12)).not.throw();
-    // the full document (12), then the binary-search probes 5, 2, and finally the empty document (0)
-    should(attempts).deepEqual([12, 5, 2, 0]);
+    // the full document (12), then binary-search probes 6, 3, and 1; retained = 0 is never tried,
+    // so a quota that rejects every non-empty candidate cannot erase what is already persisted
+    should(attempts).deepEqual([12, 6, 3, 1]);
+    should(attempts).not.containEql(0);
   });
 });
