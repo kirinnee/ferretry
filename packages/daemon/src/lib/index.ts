@@ -2,6 +2,7 @@
 export const packageRole = 'daemon' as const;
 
 export * from './analytics/model-identity.ts';
+export * from './api/index.ts';
 export * from './analytics/pricing.ts';
 export * from './analytics/query.ts';
 export * from './analytics/results.ts';

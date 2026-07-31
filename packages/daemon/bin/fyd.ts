@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
+  BunApiServer,
   BunProcessProbe,
   BunCommandRunner,
   BunSqliteIndexFactory,
@@ -25,6 +26,7 @@ import {
   PaneProcessInventory,
   TmuxPaneSnapshot,
   SqliteHomeLockFactory,
+  StateApiCredentials,
   StateFileSystemFactory,
   StateHomeLayout,
   StateFileSystem,
@@ -55,6 +57,7 @@ import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   BrowserViewerStream,
+  createApiDispatcher,
   EXIT_ALREADY_RUNNING,
   SessionPlanner,
   TeamAdvisor,
@@ -70,6 +73,8 @@ import {
   type BrowserViewerHost,
   MigrationPreflight,
   usageProbeCommand,
+  type ApiServerHandle,
+  type ApiServerPort,
   type DaemonConfig,
   type DaemonReadinessPorts,
   type UsageFeedPort,
@@ -142,6 +147,14 @@ export interface DaemonWorld {
    *  and launch window. */
   readonly sessions: SessionPlanner;
   readonly transcripts: TranscriptWorld;
+  /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
+   *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
+  readonly api: ApiServerPort;
+  /** The bearer tokens the API accepts, minted into the state home on first boot. */
+  readonly credentials: StateApiCredentials;
+  /** Resolves when the process should shut down. Injected so a test can drive a
+   *  full boot without the daemon running forever. */
+  readonly untilShutdown: () => Promise<void>;
 }
 
 /**
@@ -156,6 +169,14 @@ export interface TranscriptWorld {
     query: string,
     options?: TranscriptSearchOptions,
   ): readonly TranscriptSearchMatch[];
+}
+
+/** Resolves on the first termination signal, so the API server is stopped and its port released
+ *  before the process exits rather than being torn down by the kernel mid-request. */
+function untilTerminated(): Promise<void> {
+  return new Promise<void>(resolve => {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolve());
+  });
 }
 
 /**
@@ -274,22 +295,39 @@ export function buildWorld(): DaemonWorld {
       ],
       search: (events, query, options) => searchTranscript(events, query, options),
     },
+    api: new BunApiServer(),
+    credentials: new StateApiCredentials(paths, stateFiles),
+    untilShutdown: untilTerminated,
   };
 }
 
 /** Boots the daemon from an already-built world, so tests can inject their own. */
-export async function start(world: DaemonWorld): Promise<number> {
+export async function start(world: DaemonWorld, cleanups: Array<() => void | Promise<void>> = []): Promise<number> {
   if (world.role !== 'daemon') return 1;
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
   if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
+  const usage = world.createUsageFeed(config);
+  // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
+  // up fighting whatever else the host already runs on it.
+  const server: ApiServerHandle = await world.api.listen(
+    createApiDispatcher({
+      credentials: await world.credentials.load(),
+      usage,
+      clock: { now: () => Date.now() },
+      startedAtMs: Date.now(),
+    }),
+    { host: config.host, port: config.port },
+  );
+  cleanups.push(() => server.stop());
+  await world.untilShutdown();
   return 0;
 }
 
 async function execute(): Promise<number> {
   const cleanups: Array<() => void | Promise<void>> = [];
   try {
-    return await start(buildWorld());
+    return await start(buildWorld(), cleanups);
   } catch (error) {
     process.stderr.write(`${DAEMON_NAME}: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
