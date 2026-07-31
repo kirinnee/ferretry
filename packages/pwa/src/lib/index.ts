@@ -1,11 +1,13 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../components/bottom-sheet.tsx';
 export * from '../components/primitives.tsx';
 export * from '../components/side-pane-tab-icons.ts';
 export * from '../components/side-pane-tab-model.ts';
 export * from '../components/view-tabs.tsx';
 export * from '../hooks/use-details-tab.ts';
+export * from '../hooks/use-dialog-focus.ts';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
 export * from './class-names.ts';
