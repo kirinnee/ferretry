@@ -1,10 +1,5 @@
 import { open } from 'node:fs/promises';
-import type {
-  CommandOutcome,
-  DaemonStartHandle,
-  DetachedLaunch,
-  IDaemonProcessPort,
-} from '../../lib/daemon/ports.ts';
+import type { CommandOutcome, DaemonStartHandle, DetachedLaunch, IDaemonProcessPort } from '../../lib/daemon/ports.ts';
 
 /**
  * Every process touch the daemon-control commands make.

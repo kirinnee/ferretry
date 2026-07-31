@@ -36,14 +36,22 @@ export function parseSystemdProperties(stdout: string): SystemdUnitProperties {
  * `activating` counts as running: the unit is `Type=simple`, so the process already exists and a
  * readiness wait should keep waiting rather than conclude the daemon is down.
  */
-export function readSystemdReport(properties: SystemdUnitProperties, definitionPresent: boolean): DaemonSupervisorReport {
+export function readSystemdReport(
+  properties: SystemdUnitProperties,
+  definitionPresent: boolean,
+): DaemonSupervisorReport {
   const state = properties.activeState ?? '';
   if (properties.loadState === 'not-found' || (!definitionPresent && state === '')) {
     return { manager: 'systemd', state: 'absent', detail: 'no systemd user unit is installed' };
   }
   const detail = `systemd reports ${state === '' ? 'nothing' : state}`;
   if (state === 'active' || state === 'activating' || state === 'reloading') {
-    return { manager: 'systemd', state: 'running', ...(properties.mainPid === undefined ? {} : { pid: properties.mainPid }), detail };
+    return {
+      manager: 'systemd',
+      state: 'running',
+      ...(properties.mainPid === undefined ? {} : { pid: properties.mainPid }),
+      detail,
+    };
   }
   if (state === 'failed') return { manager: 'systemd', state: 'failed', detail };
   return { manager: 'systemd', state: 'stopped', detail };
@@ -77,14 +85,26 @@ export function parseLaunchdPrint(stdout: string): LaunchdJobProperties {
  * loaded job that is throttled, crashed, or waiting, so a daemon stuck in a crash loop reported as
  * running. The job's own `state` field is the answer.
  */
-export function readLaunchdReport(properties: LaunchdJobProperties, definitionPresent: boolean): DaemonSupervisorReport {
+export function readLaunchdReport(
+  properties: LaunchdJobProperties,
+  definitionPresent: boolean,
+): DaemonSupervisorReport {
   const state = properties.state ?? '';
   const detail = `launchd reports ${state === '' ? 'nothing' : state}`;
   if (state === 'running') {
-    return { manager: 'launchd', state: 'running', ...(properties.pid === undefined ? {} : { pid: properties.pid }), detail };
+    return {
+      manager: 'launchd',
+      state: 'running',
+      ...(properties.pid === undefined ? {} : { pid: properties.pid }),
+      detail,
+    };
   }
   if (properties.lastExitStatus !== undefined && properties.lastExitStatus !== 0) {
-    return { manager: 'launchd', state: 'failed', detail: `${detail}; last exit status ${String(properties.lastExitStatus)}` };
+    return {
+      manager: 'launchd',
+      state: 'failed',
+      detail: `${detail}; last exit status ${String(properties.lastExitStatus)}`,
+    };
   }
   if (state === '' && !definitionPresent) {
     return { manager: 'launchd', state: 'absent', detail: 'no launchd user agent is installed' };

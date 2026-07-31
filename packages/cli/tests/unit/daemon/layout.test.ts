@@ -119,9 +119,7 @@ describe('daemon layout refusals', () => {
 
   it('should refuse the filesystem root as a state home', () => {
     // Act + Assert — an installer that writes under `/` is a mistake we can catch here.
-    should(() => resolveDaemonLayout(environment({ stateHome: '/' }))).throw(
-      /FY_HOME must not be a filesystem root/u,
-    );
+    should(() => resolveDaemonLayout(environment({ stateHome: '/' }))).throw(/FY_HOME must not be a filesystem root/u);
   });
 
   it('should refuse a relative XDG_CONFIG_HOME', () => {
@@ -133,7 +131,9 @@ describe('daemon layout refusals', () => {
 
   it('should refuse a daemon name that would retarget the unit file', () => {
     // Act + Assert
-    should(() => resolveDaemonLayout(environment({ daemonName: '../evil' }))).throw(/daemon name must be a plain name/u);
+    should(() => resolveDaemonLayout(environment({ daemonName: '../evil' }))).throw(
+      /daemon name must be a plain name/u,
+    );
     should(() => resolveDaemonLayout(environment({ daemonName: 'has space' }))).throw(/daemon name must be a plain/u);
     should(() => resolveDaemonLayout(environment({ daemonName: '' }))).throw(/daemon name must be a plain/u);
   });

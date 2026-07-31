@@ -58,7 +58,10 @@ export interface DaemonLayout {
 }
 
 export class InvalidDaemonEnvironmentError extends Error {
-  constructor(readonly field: string, reason: string) {
+  constructor(
+    readonly field: string,
+    reason: string,
+  ) {
     super(`invalid daemon environment: ${field} ${reason}`);
     this.name = 'InvalidDaemonEnvironmentError';
   }
@@ -69,7 +72,8 @@ function requireDirectory(value: string, field: string): string {
   if (value.trim().length === 0) throw new InvalidDaemonEnvironmentError(field, 'must not be empty');
   if (!isAbsolute(value)) throw new InvalidDaemonEnvironmentError(field, 'must be an absolute path');
   const resolved = normalize(value);
-  if (resolved === parse(resolved).root) throw new InvalidDaemonEnvironmentError(field, 'must not be a filesystem root');
+  if (resolved === parse(resolved).root)
+    throw new InvalidDaemonEnvironmentError(field, 'must not be a filesystem root');
   return resolved;
 }
 

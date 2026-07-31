@@ -79,9 +79,7 @@ describe('human status rendering', () => {
 
   it('should omit the pid when the supervisor did not report one', () => {
     // Act
-    const actual = renderDaemonStatus(
-      decideDaemonStatus('fyd', { manager: 'launchd', state: 'running' }, undefined),
-    );
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', { manager: 'launchd', state: 'running' }, undefined));
 
     // Assert
     should(actual).startWith('fyd process exists but its API is unavailable');

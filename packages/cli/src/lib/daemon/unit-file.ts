@@ -6,7 +6,10 @@
 export const EXIT_ALREADY_RUNNING = 78;
 
 export class InvalidUnitValueError extends Error {
-  constructor(readonly field: string, reason: string) {
+  constructor(
+    readonly field: string,
+    reason: string,
+  ) {
     super(`cannot write the service definition: ${field} ${reason}`);
     this.name = 'InvalidUnitValueError';
   }

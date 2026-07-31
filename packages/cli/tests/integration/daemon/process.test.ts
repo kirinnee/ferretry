@@ -115,9 +115,9 @@ describe('bun daemon process', () => {
 
   it('should refuse an empty launch', async () => {
     // Act + Assert
-    await should(
-      subject.spawnDetached({ argv: [], environment: {}, logFile: join(root, 'fyd.log') }),
-    ).be.rejectedWith(/cannot launch an empty command/u);
+    await should(subject.spawnDetached({ argv: [], environment: {}, logFile: join(root, 'fyd.log') })).be.rejectedWith(
+      /cannot launch an empty command/u,
+    );
   });
 
   it('should see its own child alive and then gone after it signals it', async () => {

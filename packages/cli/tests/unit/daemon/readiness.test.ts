@@ -103,7 +103,12 @@ describe('readiness decisions', () => {
     const seen = decideReadiness(beginReadinessWait(0), 'alive', 100, policy);
 
     // Act
-    const actual = decideReadiness(seen.kind === 'continue' ? seen.state : beginReadinessWait(0), 'dead', 95_000, policy);
+    const actual = decideReadiness(
+      seen.kind === 'continue' ? seen.state : beginReadinessWait(0),
+      'dead',
+      95_000,
+      policy,
+    );
 
     // Assert
     should(actual.kind).equal('exited');

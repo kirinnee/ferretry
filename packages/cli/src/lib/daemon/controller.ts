@@ -18,7 +18,13 @@ import {
   type ReadinessPolicy,
   type ShutdownPolicy,
 } from './readiness.ts';
-import { decideDaemonStatus, renderDaemonStatus, renderDaemonStatusJson, renderInstalled, statusExitCode } from './render.ts';
+import {
+  decideDaemonStatus,
+  renderDaemonStatus,
+  renderDaemonStatusJson,
+  renderInstalled,
+  statusExitCode,
+} from './render.ts';
 import { UnsupportedServiceManagerError } from './supervisor.ts';
 
 /** Options the daemon commands accept. */
@@ -164,7 +170,7 @@ export class DaemonController {
     return service;
   }
 
-  /** The daemon reports its own pid, so a supervisor with no unit can still watch the right process. */
+  /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */
   #handleFor(health: HealthView | undefined): DaemonStartHandle | undefined {
     return health === undefined ? undefined : { pid: health.pid };
   }
