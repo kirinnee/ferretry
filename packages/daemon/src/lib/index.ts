@@ -17,6 +17,7 @@ export * from './layout.ts';
 export * from './learning/index.ts';
 export * from './migrate/verdict.ts';
 export * from './migrate/command-classifier.ts';
+export * from './migrate/inflight-report.ts';
 export * from './names/index.ts';
 export * from './paths.ts';
 export * from './pins/index.ts';
