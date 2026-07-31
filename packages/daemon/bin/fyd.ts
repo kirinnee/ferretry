@@ -3,11 +3,15 @@ import pkg from '../package.json' with { type: 'json' };
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
+  DaemonSecretsLoader,
+  BunSecretShell,
+  FileDaemonConfig,
   KeyedSerialExecutor,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
+  StateFileSystem,
   SystemClock,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
@@ -20,7 +24,7 @@ import {
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
-import { createWardenPaths, packageRole } from '../src/lib/index.ts';
+import { createFoundationPaths, createWardenPaths, packageRole, resolveStateHome } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -38,6 +42,8 @@ export interface DaemonWorld {
   readonly role: typeof packageRole;
   readonly storage: DaemonStorageFactory;
   readonly worktrees: ManagedWorktreeAdapter;
+  readonly config: FileDaemonConfig;
+  readonly secrets: DaemonSecretsLoader;
   readonly createAttentionLedgerRepository: (
     sessionDirectory: (sessionId: string) => string,
   ) => FileAttentionLedgerRepository;
@@ -50,6 +56,8 @@ export interface DaemonWorld {
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
+  const environment = new RuntimeEnvironment();
+  const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
   const worktreeClock = new SystemWorktreeClock();
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
@@ -57,7 +65,7 @@ export function buildWorld(): DaemonWorld {
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
-      new RuntimeEnvironment(),
+      environment,
       new StateFileSystemFactory(),
       new StateHomeLayout(),
       new SqliteHomeLockFactory(),
@@ -66,21 +74,25 @@ export function buildWorld(): DaemonWorld {
       () => new KeyedSerialExecutor(),
     ),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
+    config: new FileDaemonConfig(paths, new StateFileSystem(paths)),
+    secrets: new DaemonSecretsLoader(new BunSecretShell(), { set: (key, value) => (process.env[key] = value) }),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
   };
 }
 
 /** Boots the daemon from an already-built world, so tests can inject their own. */
-export function start(world: DaemonWorld): number {
+export async function start(world: DaemonWorld): Promise<number> {
   if (world.role !== 'daemon') return 1;
+  const config = await world.config.load();
+  await world.secrets.load(config.secretsFile);
   return 0;
 }
 
 async function execute(): Promise<number> {
   const cleanups: Array<() => void | Promise<void>> = [];
   try {
-    return start(buildWorld());
+    return await start(buildWorld());
   } catch (error) {
     process.stderr.write(`${DAEMON_NAME}: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;

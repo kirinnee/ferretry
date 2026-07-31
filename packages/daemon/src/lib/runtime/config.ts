@@ -8,6 +8,7 @@ export const DaemonConfigSchema = z
     host: HostSchema.default('127.0.0.1'),
     port: PortSchema.default(7337),
     publicUrl: z.url().optional(),
+    secretsFile: z.string().trim().min(1).optional(),
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),
   })
