@@ -11,6 +11,7 @@ export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
+export * from './attention-store.ts';
 export * from './class-names.ts';
 export * from './daemon-connection.ts';
 export * from './event-transport.ts';
