@@ -1,6 +1,6 @@
 import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
 import type { FrameClock, FrameTimer } from './contracts.ts';
-import { encodeFrameEnvelope } from './envelope.ts';
+import { MAX_FRAME_BYTES, encodeFrameEnvelope } from './envelope.ts';
 import { type BrowserKeyInput, keyIdentity, keyReleaseSequence, normalizeBrowserInput } from './input.ts';
 import {
   type BrowserViewerHost,
@@ -176,13 +176,13 @@ export class BrowserViewerStream {
     // An undecodable or identity-free frame is one bad frame, not a broken viewer: kteam closed the
     // socket here, taking down a healthy view over a single corrupt payload.
     if (bytes === undefined) return;
-    const envelope = encodeFrameEnvelope(frame.pageId, bytes);
-    if (!envelope.ok) {
-      if (envelope.message === 'frame exceeds the byte ceiling') {
-        this.finish(VIEWER_CLOSE_TOO_LARGE, 'browser frame exceeded');
-      }
+    // A frame past the ceiling is a producer that has lost its bounds, not one unlucky payload.
+    if (bytes.byteLength > MAX_FRAME_BYTES) {
+      this.finish(VIEWER_CLOSE_TOO_LARGE, 'browser frame exceeded');
       return;
     }
+    const envelope = encodeFrameEnvelope(frame.pageId, bytes);
+    if (!envelope.ok) return;
     // Replace, never queue: a viewer that fell behind wants the current pixels.
     this.pendingFrame = envelope.value;
     this.flushPendingFrame();
