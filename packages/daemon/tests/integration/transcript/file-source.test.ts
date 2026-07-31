@@ -419,6 +419,65 @@ describe('NodeTranscriptSource follow', () => {
     }
   });
 
+  it('should not let a discarded identity-race read mutate delivery-proof state', async () => {
+    // Arrange
+    const prompt = 'Replacement queue prompt.';
+    const oldBytes = Buffer.from(jsonl(queueRemoval(prompt, '2026-01-02T03:04:10.000Z')));
+    const newBytes = Buffer.from(jsonl(queuedCommand(prompt, '2026-01-02T03:04:08.000Z')));
+    let infoCalls = 0;
+    let readCalls = 0;
+    const runtime: TranscriptFileRuntime = {
+      async info() {
+        infoCalls += 1;
+        const initial = infoCalls === 1;
+        return {
+          identity: initial ? 'old-identity' : 'new-identity',
+          size: initial ? oldBytes.byteLength : newBytes.byteLength,
+          modifiedMs: infoCalls,
+          isFile: true,
+        };
+      },
+      async readAll() {
+        return newBytes;
+      },
+      async countNewlines() {
+        return 1;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange() {
+        return new Uint8Array();
+      },
+      async readFrom(_file, byteOffset) {
+        readCalls += 1;
+        const bytes = readCalls === 1 ? oldBytes : newBytes;
+        return bytes.subarray(byteOffset);
+      },
+      watch() {
+        return { close() {} };
+      },
+    };
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime, {
+      now: () => '2026-01-02T03:04:20.000Z',
+    });
+    const iterator = subject.follow('/synthetic/transcript.jsonl', { pollIntervalMs: 10 })[Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const actual = await nextBatch(iterator, 'replacement delivery proof');
+
+      // Assert
+      should(actual.events).containDeep([{ kind: 'message', text: prompt }]);
+      should(actual.observedInputs).containDeep([
+        { text: prompt, proof: 'native-queue-drain', observedAt: '2026-01-02T03:04:20.000Z' },
+      ]);
+      should(actual.observedInputs[0]?.observedAt).not.equal('2026-01-02T03:04:10.000Z');
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
   it('should follow a file that appears later and wake through the directory watcher', async () => {
     // Arrange
     const temporary = await temporaryDirectory();

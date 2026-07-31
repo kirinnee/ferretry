@@ -535,18 +535,6 @@ async function reconcileFollow(
   const newline = lastNewline(combined);
   const complete = newline >= 0 ? combined.subarray(0, newline + 1) : Buffer.alloc(0);
   const partial = newline >= 0 ? combined.subarray(newline + 1) : combined;
-  const parsed = parser.parse(
-    {
-      text: complete.toString('utf8'),
-      source: file,
-      sessionId: options.sessionId,
-      endOfInput: false,
-      startLine: base.nextLine,
-      startByteOffset: base.byteOffset - base.partial.byteLength,
-      observedAt: clock.now(),
-    },
-    observer,
-  );
   const byteOffset = base.byteOffset + appended.byteLength;
   let afterInfo: TranscriptFileInfo | undefined;
   try {
@@ -570,6 +558,18 @@ async function reconcileFollow(
   if (afterInfo.identity !== info.identity || afterInfo.size < byteOffset) {
     return { state };
   }
+  const parsed = parser.parse(
+    {
+      text: complete.toString('utf8'),
+      source: file,
+      sessionId: options.sessionId,
+      endOfInput: false,
+      startLine: base.nextLine,
+      startByteOffset: base.byteOffset - base.partial.byteLength,
+      observedAt: clock.now(),
+    },
+    observer,
+  );
   const next: FollowState = {
     initialized: true,
     seekToEnd: false,
