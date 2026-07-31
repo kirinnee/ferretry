@@ -7,12 +7,12 @@ describe('daemon connection', () => {
     // Act
     const actual = daemonConnection({
       daemonId: 'daemon-a',
-      baseUrl: 'https://a.example.test/base///',
+      baseUrl: 'https://a.example.test/',
       deviceToken: 'device-a',
     });
 
     // Assert
-    should(actual).deepEqual({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test/base', deviceToken: 'device-a' });
+    should(actual).deepEqual({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'device-a' });
   });
 
   it('should reject empty daemon identities and device tokens', () => {
@@ -33,6 +33,7 @@ describe('daemon connection', () => {
     const credentialed = (): unknown => daemonBaseUrl('https://token@daemon.example.test');
     const queried = (): unknown => daemonBaseUrl('https://daemon.example.test?token=secret');
     const fragmented = (): unknown => daemonBaseUrl('https://daemon.example.test#secret');
+    const pathPrefixed = (): unknown => daemonBaseUrl('https://daemon.example.test/reverse-proxy');
 
     // Assert
     should(malformed).throw('daemon URL must be absolute');
@@ -40,5 +41,6 @@ describe('daemon connection', () => {
     should(credentialed).throw('daemon URL may not include credentials, a query, or a fragment');
     should(queried).throw('daemon URL may not include credentials, a query, or a fragment');
     should(fragmented).throw('daemon URL may not include credentials, a query, or a fragment');
+    should(pathPrefixed).throw('daemon URL must be an origin without a path');
   });
 });
