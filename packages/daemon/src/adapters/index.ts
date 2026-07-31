@@ -1,5 +1,8 @@
+
+export * from './attachments/index.ts';
 export * from './filesystem/state-file-system.ts';
 export * from './learning/index.ts';
+export * from './pins/index.ts';
 export * from './storage/home-lock.ts';
 export * from './storage/session-storage.ts';
 export * from './storage/sqlite-index.ts';
@@ -9,4 +12,3 @@ export * from './system/keyed-serial-executor.ts';
 export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
 export * from './tmux/index.ts';
-export * from './attachments/index.ts';
