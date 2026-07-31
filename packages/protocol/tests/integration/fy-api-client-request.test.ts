@@ -9,33 +9,8 @@ import {
   FyTransportError,
 } from '../../src/adapters/fy-api-client.ts';
 import type { FyClientOptions } from '../../src/lib/client.ts';
-import {
-  captureError,
-  emptyResponse,
-  jsonResponse,
-  QueuedEventTransport,
-  QueuedHttpTransport,
-  textResponse,
-} from './fakes.ts';
-
-const BASE_OPTIONS = {
-  baseUrl: 'http://daemon.test/api///',
-  token: 'secret-token',
-  version: '1.2.3',
-} satisfies Pick<FyClientOptions, 'baseUrl' | 'token' | 'version'>;
-
-const connect = (transport: QueuedHttpTransport, options: Partial<FyClientOptions> = {}): Promise<FyApiClient> =>
-  FyApiClient.connect({
-    ...BASE_OPTIONS,
-    transport,
-    eventTransport: new QueuedEventTransport(),
-    requestId: () => 'request-1',
-    sleep: async () => undefined,
-    ...options,
-  });
-
-const headersOf = (transport: QueuedHttpTransport, index = 0): Headers =>
-  new Headers(transport.calls[index]?.init.headers);
+import { BASE_CLIENT_OPTIONS as BASE_OPTIONS, connectClient as connect, headersOf } from './client-harness.ts';
+import { captureError, emptyResponse, jsonResponse, QueuedHttpTransport, textResponse } from './fakes.ts';
 
 describe('FyApiClient construction and generic requests', () => {
   it('should expose exactly 33 instance methods and connect separately', async () => {

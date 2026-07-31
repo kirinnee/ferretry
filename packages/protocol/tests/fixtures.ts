@@ -7,6 +7,7 @@ import type {
   PwaConfigView,
   ScratchPlanView,
   ScratchSweepView,
+  SendResult,
   SessionView,
   UsageFeedView,
   WardenConfig,
@@ -56,6 +57,11 @@ export const sessionView = {
   },
   directory: '/state/session-1',
 } satisfies SessionView;
+
+export const sendResult = {
+  ...sessionView,
+  disposition: 'delivered',
+} satisfies SendResult;
 
 export const fyEvent = {
   sequence: 1,
