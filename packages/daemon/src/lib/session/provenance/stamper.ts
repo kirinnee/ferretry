@@ -76,6 +76,12 @@ export class SessionProvenanceStamper {
    * create the session and must not rewrite its history. Lineage is MONOTONIC:
    * once recorded, no later resolution can clear it, so a pruned warden ancestor
    * can no longer unshield its offspring.
+   *
+   * `request` must carry the session's CURRENT label and parent, not an empty
+   * shell: the returned label is what the session is stored with, and a resume
+   * that omitted the label would drop the group the session belongs to. Only
+   * lineage is recovered from the stamp — the rest of the request is the caller's
+   * to supply.
    */
   restamp(
     request: SessionSpawnRequest,
