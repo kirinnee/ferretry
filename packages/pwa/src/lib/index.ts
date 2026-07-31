@@ -5,6 +5,7 @@ export * from '../hooks/use-details-tab.ts';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
 export * from './daemon-connection.ts';
+export * from './event-transport.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';
