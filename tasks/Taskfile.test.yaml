@@ -20,3 +20,8 @@ tasks:
     desc: 'Run {{.MODE}} tests in watch mode'
     cmds:
       - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} --watch
+  e2e:
+    internal: true
+    desc: 'Run the isolated E2E harness'
+    cmds:
+      - ./scripts/test/run-e2e.sh

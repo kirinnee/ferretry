@@ -77,6 +77,12 @@ tasks:
     cmds:
       - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} bun test --config=bunfig.sit.toml
 
+  test:e2e:
+    desc: Run isolated end-to-end journeys through the freshly compiled binary
+    deps: [compile]
+    cmds:
+      - task: unit:e2e
+
   test:coverage:
     desc: Run every coverage-capable suite with coverage
     cmds:
