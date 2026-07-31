@@ -87,6 +87,28 @@ describe('WardenConfigCard', () => {
     ).toEqual({ label: 'at limit', tone: 'warn' });
   });
 
+  it('removes an account without leaving a stale entry in the draft', () => {
+    const renderer = render(
+      <WardenConfigCard
+        connection={connection('a')}
+        view={view()}
+        availableAccounts={[{ agent: 'codex-auto-terra' }]}
+        onSave={() => {}}
+      />,
+    );
+
+    run(() =>
+      renderer.root
+        .findByProps({ 'aria-label': 'Add warden account' })
+        .props.onChange({ target: { value: 'codex-auto-terra' } }),
+    );
+    run(() => renderer.root.findByProps({ 'aria-label': 'Add selected warden account' }).props.onClick());
+    run(() => renderer.root.findByProps({ 'aria-label': 'Remove codex-auto-terra' }).props.onClick());
+
+    expect(renderer.root.findByProps({ 'aria-label': 'Warden accounts' }).children).toHaveLength(1);
+    expect(renderer.root.findByProps({ 'aria-label': 'Remove claude-auto-loge' }).props.disabled).toBe(true);
+  });
+
   it("drops a late daemon response instead of showing another daemon's configuration", async () => {
     let releaseA: ((value: WardenConfigView) => void) | undefined;
     const client = (
@@ -114,5 +136,84 @@ describe('WardenConfigCard', () => {
 
     expect(JSON.stringify(renderer.toJSON())).toContain('codex-auto-terra');
     expect(JSON.stringify(renderer.toJSON())).not.toContain('claude-auto-loge');
+  });
+
+  it('loads and saves only through the paired daemon client', async () => {
+    const updateCalls: unknown[] = [];
+    const nextView = view('codex-auto-terra');
+    const client: Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'> = {
+      wardenConfig: async () => view(),
+      wardenStatus: async () => wardenStatus() as WardenStatusView,
+      updateWardenConfig: async patch => {
+        updateCalls.push(patch);
+        return nextView;
+      },
+    };
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client} />);
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    run(() =>
+      renderer.root
+        .findByProps({ 'aria-label': 'Enable LLM escalation' })
+        .props.onChange({ target: { checked: false } }),
+    );
+    const save = renderer.root.findAllByType('button').find(button => button.children.join('') === 'Save');
+    if (!save) throw new Error('Save button is missing');
+    await runAsync(async () => {
+      save.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(updateCalls).toEqual([
+      {
+        enabled: false,
+        accounts: [{ agent: 'claude-auto-loge' }],
+        failover: { policy: 'fallback', failureThreshold: 3, cooldownMinutes: 30 },
+      },
+    ]);
+    expect(JSON.stringify(renderer.toJSON())).toContain('Saved — the next sweep uses this configuration.');
+  });
+
+  it('hides an unavailable editor and reports a save rejection in the rendered card', async () => {
+    const unavailable = render(
+      <WardenConfigSurface
+        connection={connection('a')}
+        createClient={async () => Promise.reject(new Error('older daemon'))}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(unavailable.toJSON()).toBeNull();
+
+    const client: Pick<IFyApiClient, 'wardenConfig' | 'wardenStatus' | 'updateWardenConfig'> = {
+      wardenConfig: async () => view(),
+      wardenStatus: async () => wardenStatus() as WardenStatusView,
+      updateWardenConfig: async () => Promise.reject(new Error('save refused')),
+    };
+    const renderer = render(<WardenConfigSurface connection={connection('a')} createClient={async () => client} />);
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    run(() =>
+      renderer.root
+        .findByProps({ 'aria-label': 'Enable LLM escalation' })
+        .props.onChange({ target: { checked: false } }),
+    );
+    const save = renderer.root.findAllByType('button').find(button => button.children.join('') === 'Save');
+    if (!save) throw new Error('Save button is missing');
+    await runAsync(async () => {
+      save.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(JSON.stringify(renderer.toJSON())).toContain('save refused');
   });
 });
