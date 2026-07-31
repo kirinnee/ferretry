@@ -1,5 +1,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { relativeTime, sessionNavigation, sessionStatusLabel } from '../lib/session-screens.ts';
+import { ModeBadge } from './mode-badge.tsx';
+import { StatusMark } from './status-mark.tsx';
 
 export interface SessionListProps {
   readonly daemonId: string;
@@ -7,13 +9,6 @@ export interface SessionListProps {
   readonly now?: number;
   readonly onOpenSession: (daemonId: string, sessionId: string) => void;
 }
-
-const statusTone = (status: SessionView['state']['status']): string => {
-  if (status === 'failed' || status === 'stalled' || status === 'kill_failed') return 'var(--err, #b42318)';
-  if (status === 'completed' || status === 'stopped') return 'var(--muted, #667085)';
-  if (status === 'waiting' || status === 'awaiting_question') return 'var(--warn, #a15c00)';
-  return 'var(--ok, #027a48)';
-};
 
 /**
  * Fleet rows deliberately receive the daemon id from their host. The same
@@ -51,10 +46,11 @@ export function SessionList({ daemonId, sessions, now = Date.now(), onOpenSessio
                     <small title={config.id}>{config.teammate ?? config.id}</small>
                   </span>
                   <span className="fy-session-task">{config.label ?? config.cwd}</span>
-                  <span className="fy-status" style={{ color: statusTone(state.status) }}>
-                    <i aria-hidden="true" />
+                  <span className="fy-status">
+                    <StatusMark view={session} />
                     {sessionStatusLabel(state.status)}
                   </span>
+                  <ModeBadge mode={config.mode} size="sm" />
                   <span className="fy-session-meta">{config.model ?? config.agent}</span>
                   <time className="fy-session-age" dateTime={new Date(activityAt).toISOString()}>
                     {relativeTime(activityAt, now)}

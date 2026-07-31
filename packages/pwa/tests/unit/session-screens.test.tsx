@@ -2,9 +2,11 @@ import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { ModeBadge } from '../../src/components/mode-badge.tsx';
 import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
+import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -98,16 +100,76 @@ describe('session screen components', () => {
 
     expect(list.root.findByProps({ role: 'status' }).children).toContain('4');
     expect(list.root.findAllByProps({ className: 'fy-session-row-item' })).toHaveLength(4);
-    expect(list.root.findAllByProps({ className: 'fy-status' }).map(row => row.props.style.color)).toEqual([
-      'var(--err, #b42318)',
-      'var(--muted, #667085)',
-      'var(--warn, #a15c00)',
-      'var(--ok, #027a48)',
+    expect(list.root.findAllByProps({ className: 'fy-status-mark' }).map(mark => mark.props['aria-label'])).toEqual([
+      'finished — failed',
+      'finished — completed',
+      'waiting — waiting',
+      'active — running',
     ]);
     expect(findText(list.root, '/work/running')).toHaveLength(1);
     expect(findText(list.root, 'codex')).toHaveLength(1);
     run(() => list.root.findAllByType('button')[0]?.props.onClick());
     expect(opened).toEqual([['daemon-a', 'failed']]);
+  });
+
+  test('renders the original shape vocabulary with text equivalents for active, parked, and finished sessions', () => {
+    const active = session('active', 'running');
+    const parked = {
+      ...session('parked', 'running'),
+      state: { ...session('parked', 'running').state, waiting: { condition: 'CI', peerName: 'Hayden' } },
+    } as SessionView;
+    const finished = session('finished', 'stalled');
+
+    expect(statusMark(active)).toMatchObject({ shape: 'circle', tone: 'warn', live: true });
+    expect(statusMark(parked)).toMatchObject({
+      shape: 'diamond',
+      tone: 'warn',
+      label: 'waiting — parked for Hayden: CI',
+    });
+    expect(statusMark(finished)).toMatchObject({ shape: 'square', tone: 'err', live: false });
+
+    const marks = render(
+      <>
+        <StatusMark view={active} />
+        <StatusMark view={parked} size={10} />
+        <StatusMark view={finished} />
+      </>,
+    );
+    expect(marks.root.findAllByProps({ role: 'img' }).map(mark => mark.props.title)).toEqual([
+      'active — running',
+      'waiting — parked for Hayden: CI',
+      'finished — stalled',
+    ]);
+    expect(
+      marks.root.findAllByProps({
+        className: 'fy-status-mark-glyph fy-status-mark-circle fy-status-mark-warn fy-status-mark-live',
+      }),
+    ).toHaveLength(1);
+    expect(
+      marks.root.findAllByProps({ className: 'fy-status-mark-glyph fy-status-mark-diamond fy-status-mark-warn' }),
+    ).toHaveLength(1);
+    expect(
+      marks.root.findAllByProps({ className: 'fy-status-mark-glyph fy-status-mark-square fy-status-mark-err' }),
+    ).toHaveLength(1);
+  });
+
+  test('renders the original quiet mode badges in compact and full forms', () => {
+    const badges = render(
+      <>
+        <ModeBadge mode="auto" size="sm" />
+        <ModeBadge mode="interactive" />
+      </>,
+    );
+    const rendered = badges.root.findAllByProps({ className: 'kt-badge fy-mode-badge fy-mode-badge-auto' });
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0]?.props['data-tone']).toBe('pend');
+    expect(rendered[0]?.props['aria-label']).toContain('auto — autonomous');
+    expect(rendered[0]?.children).toHaveLength(1);
+
+    const interactive = badges.root.findByProps({ className: 'kt-badge fy-mode-badge ' });
+    expect(interactive.props['data-tone']).toBe('accent');
+    expect(interactive.props.title).toContain('interactive — human-driven');
+    expect(interactive.children).toContain('interactive');
   });
 
   test('renders session detail metadata, optional values, and the close affordance', () => {

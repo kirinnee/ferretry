@@ -97,16 +97,65 @@
 }
 .fy-status {
   display: inline-flex;
+  align-items: center;
   gap: 6px;
   min-width: 128px;
   text-transform: capitalize;
 }
-.fy-status i {
-  background: currentColor;
+.fy-status-mark {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+.fy-status-mark-glyph {
+  background: var(--warn, #a15c00);
+  border: 1px solid var(--warn, #a15c00);
+  display: block;
+}
+.fy-status-mark-circle {
   border-radius: 50%;
-  height: 8px;
-  margin-top: 6px;
-  width: 8px;
+}
+.fy-status-mark-diamond {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+.fy-status-mark-square {
+  border-radius: 1px;
+}
+.fy-status-mark-ok {
+  background: var(--ok, #027a48);
+  border-color: var(--ok, #027a48);
+}
+.fy-status-mark-err {
+  background: var(--err, #b42318);
+  border-color: var(--err, #b42318);
+}
+.fy-status-mark-accent {
+  background: var(--accent, #0b6e99);
+  border-color: var(--accent, #0b6e99);
+}
+.fy-status-mark-live {
+  animation: fy-status-breathe 1.8s ease-in-out infinite;
+}
+.fy-mode-badge {
+  align-self: center;
+  flex: 0 0 auto;
+  justify-self: start;
+  width: fit-content;
+}
+.fy-mode-badge-auto {
+  font-weight: 500;
+}
+@keyframes fy-status-breathe {
+  50% {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-status-mark-live {
+    animation: none;
+  }
 }
 .fy-empty {
   border: 1px dashed var(--fy-border);
