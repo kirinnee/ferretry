@@ -152,9 +152,8 @@ function normalizedDictionary(dictionary: SttEnhancementRequest['dictionary']): 
 
 function normalizedModel(provider: EnhancementProviderDefinition, model: string | undefined): string {
   if (model === undefined) return provider.defaultModel;
-  if (model.length > ENHANCEMENT_LIMITS.maxModelIdChars || !MODEL_ID.test(model)) {
-    throw new SttEnhancementError('bad_model', 'model id is invalid');
-  }
+  const invalid = model.length > ENHANCEMENT_LIMITS.maxModelIdChars || !MODEL_ID.test(model);
+  if (invalid) throw new SttEnhancementError('bad_model', 'model id is invalid');
   return model;
 }
 
