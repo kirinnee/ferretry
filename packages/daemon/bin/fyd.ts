@@ -2,6 +2,9 @@
 import pkg from '../package.json' with { type: 'json' };
 import {
   BunSqliteIndexFactory,
+  DaemonBinder,
+  DaemonHealthProbe,
+  DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
   BunSecretShell,
@@ -25,7 +28,14 @@ import {
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
-import { createFoundationPaths, createWardenPaths, packageRole, resolveStateHome } from '../src/lib/index.ts';
+import {
+  EXIT_ALREADY_RUNNING,
+  createFoundationPaths,
+  createWardenPaths,
+  packageRole,
+  resolveStateHome,
+  type DaemonReadinessPorts,
+} from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -43,6 +53,11 @@ export interface DaemonWorld {
   readonly role: typeof packageRole;
   readonly storage: DaemonStorageFactory;
   readonly worktrees: ManagedWorktreeAdapter;
+  readonly boot: {
+    readonly probe: DaemonHealthProbe;
+    readonly binder: DaemonBinder;
+  };
+  readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
   readonly createAttentionLedgerRepository: (
@@ -75,6 +90,11 @@ export function buildWorld(): DaemonWorld {
       () => new KeyedSerialExecutor(),
     ),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
+    boot: {
+      probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
+      binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
+    },
+    createReadinessWaiter: (ports, daemonLog) => new DaemonReadinessWaiter(ports, daemonLog),
     config: new FileDaemonConfig(paths, new StateFileSystem(paths)),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
@@ -102,6 +122,7 @@ export async function start(world: DaemonWorld): Promise<number> {
   if (world.role !== 'daemon') return 1;
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
+  if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
   return 0;
 }
 
