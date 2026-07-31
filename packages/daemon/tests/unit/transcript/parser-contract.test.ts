@@ -56,6 +56,25 @@ function parserContract(fixture: ParserFixture): void {
       should(actual.parsedRecords).equal(2);
     });
 
+    it('should survive hostile line encodings without discarding the surrounding records', () => {
+      // Arrange: a BOM, CRLF terminators, an embedded NUL and a lone surrogate — everything an
+      // agent-written transcript picks up from an editor, a crash, or a hostile tool result.
+      const valid = JSON.stringify(fixture.record);
+      const withNul = `{"content":"a${'\u0000'}b"}`;
+      const withSurrogate = JSON.stringify({ ...fixture.record, marker: '\ud800' });
+      const input = `\uFEFF${valid}\r\n${withNul}\r\n${withSurrogate}\r\n${valid}\r\n`;
+
+      // Act
+      const actual = fixture.subject.parse({ text: input, source: 'hostile.jsonl' });
+
+      // Assert
+      should(actual.parsedRecords).equal(3);
+      should(actual.events).have.length(3);
+      should(actual.issues.filter(issue => issue.code === 'invalid-json')).have.length(1);
+      should(actual.issues[0]?.line).equal(2);
+      should(actual.remainder).equal('');
+    });
+
     it('should retain any live unterminated line even when it is already valid JSON', () => {
       // Arrange
       const input = JSON.stringify(fixture.record);

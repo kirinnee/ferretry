@@ -174,6 +174,10 @@ export type TranscriptIssueCode =
   | 'unsupported-record'
   | 'source-missing'
   | 'source-read-failed'
+  /** Bytes past the bounded read limit were deliberately not consumed. */
+  | 'source-truncated'
+  /** A single unterminated record outgrew the pending buffer and was discarded. */
+  | 'oversized-record'
   | 'source-watch-failed';
 
 /** A non-throwing note about data the parser or source could not consume. */

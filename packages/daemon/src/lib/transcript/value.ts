@@ -37,7 +37,16 @@ export function transcriptJsonValue(value: unknown, seen: ReadonlySet<object> = 
 
   const normalized: Record<string, TranscriptJsonValue> = {};
   for (const [key, item] of Object.entries(value)) {
-    if (item !== undefined) normalized[key] = transcriptJsonValue(item, nextSeen);
+    if (item === undefined) continue;
+    // `JSON.parse` makes `__proto__` an OWN property, but plain assignment would hand it to the
+    // inherited setter: the key would vanish and the prototype of `normalized` would be replaced.
+    // Defining the property keeps every transcript key as inert own data.
+    Object.defineProperty(normalized, key, {
+      value: transcriptJsonValue(item, nextSeen),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
   }
   return normalized;
 }

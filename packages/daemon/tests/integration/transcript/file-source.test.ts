@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  DEFAULT_MAX_PENDING_BYTES,
+  DEFAULT_MAX_READ_BYTES,
   NodeTranscriptFileRuntime,
   NodeTranscriptSource,
   type TranscriptFileRuntime,
@@ -160,20 +162,17 @@ describe('NodeTranscriptSource read', () => {
           isFile: true,
         };
       },
-      async readAll() {
-        return bytes;
-      },
       async countNewlines() {
         return 1;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange(_file, byteOffset, byteLength) {
         return bytes.subarray(byteOffset, byteOffset + byteLength);
       },
       async readFrom(_file, byteOffset) {
-        return bytes.subarray(byteOffset);
+        return { bytes: bytes.subarray(byteOffset), truncated: false };
       },
       watch() {
         return { close() {} };
@@ -340,11 +339,10 @@ describe('NodeTranscriptSource follow', () => {
         }
         return await nodeRuntime.info(file);
       },
-      readAll: file => nodeRuntime.readAll(file),
       countNewlines: (file, byteLength) => nodeRuntime.countNewlines(file, byteLength),
-      readTrailingLine: (file, byteLength) => nodeRuntime.readTrailingLine(file, byteLength),
+      readTrailingLine: (file, byteLength, byteLimit) => nodeRuntime.readTrailingLine(file, byteLength, byteLimit),
       readRange: (file, byteOffset, byteLength) => nodeRuntime.readRange(file, byteOffset, byteLength),
-      readFrom: (file, byteOffset) => nodeRuntime.readFrom(file, byteOffset),
+      readFrom: (file, byteOffset, byteLimit) => nodeRuntime.readFrom(file, byteOffset, byteLimit),
       watch() {
         return { close() {} };
       },
@@ -384,20 +382,17 @@ describe('NodeTranscriptSource follow', () => {
           isFile: true,
         };
       },
-      async readAll() {
-        return bytes;
-      },
       async countNewlines() {
         return 1;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange(_file, byteOffset, byteLength) {
         return bytes.subarray(byteOffset, byteOffset + byteLength);
       },
       async readFrom(_file, byteOffset) {
-        return bytes.subarray(byteOffset);
+        return { bytes: bytes.subarray(byteOffset), truncated: false };
       },
       watch() {
         return { close() {} };
@@ -437,14 +432,11 @@ describe('NodeTranscriptSource follow', () => {
           isFile: true,
         };
       },
-      async readAll() {
-        return newBytes;
-      },
       async countNewlines() {
         return 1;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange() {
         return new Uint8Array();
@@ -452,7 +444,7 @@ describe('NodeTranscriptSource follow', () => {
       async readFrom(_file, byteOffset) {
         readCalls += 1;
         const bytes = readCalls === 1 ? oldBytes : newBytes;
-        return bytes.subarray(byteOffset);
+        return { bytes: bytes.subarray(byteOffset), truncated: false };
       },
       watch() {
         return { close() {} };
@@ -540,21 +532,18 @@ describe('NodeTranscriptSource follow', () => {
         if (infoCalls === 2) throw new Error('synthetic verification failure');
         return { identity: 'stable', size: bytes.byteLength, modifiedMs: infoCalls, isFile: true };
       },
-      async readAll() {
-        return bytes;
-      },
       async countNewlines() {
         return 1;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange(_file, byteOffset, byteLength) {
         return bytes.subarray(byteOffset, byteOffset + byteLength);
       },
       async readFrom(_file, byteOffset) {
         readFromCalls += 1;
-        return bytes.subarray(byteOffset);
+        return { bytes: bytes.subarray(byteOffset), truncated: false };
       },
       watch() {
         return { close() {} };
@@ -598,20 +587,17 @@ describe('NodeTranscriptSource follow', () => {
             isFile: true,
           };
         },
-        async readAll() {
-          return bytes;
-        },
         async countNewlines() {
           return 1;
         },
         async readTrailingLine() {
-          return new Uint8Array();
+          return { bytes: new Uint8Array(), truncated: false };
         },
         async readRange(_file, byteOffset, byteLength) {
           return bytes.subarray(byteOffset, byteOffset + byteLength);
         },
         async readFrom(_file, byteOffset) {
-          return bytes.subarray(byteOffset);
+          return { bytes: bytes.subarray(byteOffset), truncated: false };
         },
         watch() {
           return { close() {} };
@@ -736,20 +722,17 @@ describe('NodeTranscriptSource follow', () => {
         await infoGate;
         return undefined;
       },
-      async readAll() {
-        return new Uint8Array();
-      },
       async countNewlines() {
         return 0;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange() {
         return new Uint8Array();
       },
       async readFrom() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       watch() {
         return {
@@ -789,11 +772,10 @@ describe('NodeTranscriptSource follow', () => {
     let closeCount = 0;
     const runtime: TranscriptFileRuntime = {
       info: file => nodeRuntime.info(file),
-      readAll: file => nodeRuntime.readAll(file),
       countNewlines: (file, byteLength) => nodeRuntime.countNewlines(file, byteLength),
-      readTrailingLine: (file, byteLength) => nodeRuntime.readTrailingLine(file, byteLength),
+      readTrailingLine: (file, byteLength, byteLimit) => nodeRuntime.readTrailingLine(file, byteLength, byteLimit),
       readRange: (file, byteOffset, byteLength) => nodeRuntime.readRange(file, byteOffset, byteLength),
-      readFrom: (file, byteOffset) => nodeRuntime.readFrom(file, byteOffset),
+      readFrom: (file, byteOffset, byteLimit) => nodeRuntime.readFrom(file, byteOffset, byteLimit),
       watch(_directory, onChange, onError) {
         watchCount += 1;
         notifyWatch = onChange;
@@ -842,10 +824,11 @@ describe('NodeTranscriptFileRuntime', () => {
     const subject = new NodeTranscriptFileRuntime();
 
     // Act
-    const actual = await subject.readFrom(file, Buffer.byteLength('prefix-'));
+    const actual = await subject.readFrom(file, Buffer.byteLength('prefix-'), DEFAULT_MAX_READ_BYTES);
 
     // Assert
-    should(Buffer.from(actual).toString('utf8')).equal('suffix');
+    should(Buffer.from(actual.bytes).toString('utf8')).equal('suffix');
+    should(actual.truncated).be.false();
   });
 
   it('should map missing metadata to undefined while propagating other runtime faults through the source', async () => {
@@ -856,20 +839,17 @@ describe('NodeTranscriptFileRuntime', () => {
       async info() {
         throw new Error('synthetic metadata fault');
       },
-      async readAll() {
-        return new Uint8Array();
-      },
       async countNewlines() {
         return 0;
       },
       async readTrailingLine() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       async readRange() {
         return new Uint8Array();
       },
       async readFrom() {
-        return new Uint8Array();
+        return { bytes: new Uint8Array(), truncated: false };
       },
       watch() {
         return { close() {} };

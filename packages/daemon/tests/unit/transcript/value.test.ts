@@ -29,6 +29,23 @@ describe('transcript value normalization', () => {
     should(actual).deepEqual({ cycle: { finite: 1, invalid: null, self: null }, bigint: null, callback: null });
   });
 
+  it('should keep prototype-shaped keys as inert own data rather than mutating the object', () => {
+    // Arrange: JSON.parse is the only way to obtain an OWN `__proto__` key, which is exactly what a
+    // hostile transcript record carries.
+    const hostile = JSON.parse('{"__proto__":{"polluted":true},"constructor":"c","prototype":"p"}') as unknown;
+
+    // Act
+    const actual = transcriptJsonValue(hostile) as Record<string, unknown>;
+
+    // Assert
+    should(Object.getPrototypeOf(actual)).equal(Object.prototype);
+    should(Object.hasOwn(actual, '__proto__')).be.true();
+    should(Object.getOwnPropertyDescriptor(actual, '__proto__')?.value).deepEqual({ polluted: true });
+    should(actual['constructor']).equal('c');
+    should(actual['prototype']).equal('p');
+    should(({} as Record<string, unknown>)['polluted']).be.undefined();
+  });
+
   it('should count malformed question and option entries while preserving valid siblings', () => {
     // Act
     const absent = normalizeTranscriptQuestions({});

@@ -17,6 +17,16 @@ function utf8Length(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+const BYTE_ORDER_MARK = '\uFEFF';
+
+/** A BOM is legal UTF-8 but illegal JSON whitespace, so leaving one in place would lose the first
+ *  record of any transcript an editor rewrote. */
+function stripByteOrderMark(value: string): string {
+  let text = value;
+  while (text.startsWith(BYTE_ORDER_MARK)) text = text.slice(BYTE_ORDER_MARK.length);
+  return text;
+}
+
 function malformedLineIssue(
   parser: TranscriptRecordParser,
   input: TranscriptParseInput,
@@ -115,7 +125,10 @@ export function parseTranscriptJsonl(
   let byteOffset = Number.isFinite(startByteOffset) ? Math.max(0, Math.floor(startByteOffset)) : 0;
 
   const consume = (rawLine: string, complete: boolean): boolean => {
-    const normalizedLine = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    const withoutReturn = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    // A byte-order mark is legal UTF-8 but illegal JSON whitespace, so an editor-written transcript
+    // would otherwise lose its first record to a syntax error.
+    const normalizedLine = stripByteOrderMark(withoutReturn);
     const byteLength = utf8Length(rawLine);
     if (normalizedLine.trim().length === 0) return true;
 
