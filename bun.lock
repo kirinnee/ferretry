@@ -65,6 +65,9 @@
     "packages/pwa": {
       "name": "@ferretry/pwa",
       "version": "0.0.0",
+      "devDependencies": {
+        "should": "^13.2.3",
+      },
     },
   },
   "packages": {
