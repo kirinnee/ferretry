@@ -26,11 +26,26 @@ export interface RouteContext {
   readonly actor?: ApiActor;
 }
 
-export interface ApiRoute {
+/**
+ * The least a router needs to match a request: a verb and a path pattern.
+ *
+ * Named separately because the daemon has TWO route tables — request/response routes and the
+ * protocol-switching socket routes — and one router matching both is what keeps a socket path from
+ * being matched by rules that disagree with the ones authorization applied.
+ */
+export interface RoutePattern {
   readonly method: string;
   /** A pattern of literal segments, `:name` captures and a trailing `*name` catch-all. */
   readonly path: string;
+}
+
+/** A route whose reachability is decided by the token class that authenticated the request. Shared
+ *  by both tables, so one authorization boundary serves both and neither can drift. */
+export interface ScopedRoute extends RoutePattern {
   readonly scope: RouteScope;
+}
+
+export interface ApiRoute extends ScopedRoute {
   /** Set when the response may carry credentials, working-tree bytes, or a live machine feed whose
    *  entire value is freshness. */
   readonly noStore?: boolean;

@@ -3,11 +3,17 @@ import should from 'should';
 import { BunApiServer, toApiRequest } from '../../../src/adapters/api/index.ts';
 import {
   ApiDispatcher,
+  ApiError,
   ApiRouter,
+  ApiSocketDispatcher,
   jsonResponse,
+  SOCKET_MAX_PENDING_FRAMES,
   textResponse,
   type ApiRoute,
   type ApiServerHandle,
+  type SocketDownstream,
+  type SocketHandler,
+  type SocketRoute,
 } from '../../../src/lib/api/index.ts';
 
 /**
@@ -17,15 +23,27 @@ import {
  */
 const BIND = { host: '127.0.0.1', port: 0 } as const;
 
+const CREDENTIALS = { admin: 'admin-secret' } as const;
+
 const running: ApiServerHandle[] = [];
 
 afterEach(async () => {
-  while (running.length > 0) await running.pop()?.stop();
+  while (running.length > 0) {
+    const handle = running.pop();
+    handle?.closeSockets();
+    await handle?.stop();
+  }
 });
 
+function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = []) {
+  return {
+    http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
+    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS),
+  };
+}
+
 async function serve(...routes: readonly ApiRoute[]): Promise<ApiServerHandle> {
-  const dispatcher = new ApiDispatcher(new ApiRouter(routes), { admin: 'admin-secret' });
-  const handle = await new BunApiServer().listen(dispatcher, BIND);
+  const handle = await new BunApiServer().listen(surfaceOf(routes), BIND);
   running.push(handle);
   return handle;
 }
@@ -191,19 +209,381 @@ describe('BunApiServer', () => {
 describe('BunApiServer against a substituted host', () => {
   /** A host that reports neither address, which is what Bun's types allow for a unix socket. */
   const silentHost = {
-    serve: () => ({ requestIp: () => undefined, stop: () => undefined }),
+    serve: () => ({ requestIp: () => undefined, upgrade: () => true, stop: () => undefined }),
   };
 
   it('should fall back to the requested address when the host reports none', async () => {
-    // Arrange
-    const dispatcher = new ApiDispatcher(new ApiRouter([mirror]), { admin: 'admin-secret' });
-
     // Act
-    const handle = await new BunApiServer(silentHost).listen(dispatcher, { host: '::1', port: 4242 });
+    const handle = await new BunApiServer(silentHost).listen(surfaceOf([mirror]), { host: '::1', port: 4242 });
 
     // Assert: an IPv6 host is bracketed so the URL a client is handed is one it can parse.
     should(handle.port).equal(4242);
     should(handle.url).equal('http://[::1]:4242');
+  });
+
+  it('should answer 400 when the runtime refuses to switch the protocol', async () => {
+    // A client that advertised `Upgrade: websocket` over a connection the runtime cannot switch must
+    // be told so with a status, not left holding one the daemon believes is a socket.
+    // Arrange
+    let served: ((request: Request) => Promise<Response | undefined>) | undefined;
+    const refusingHost = {
+      serve: (options: { readonly fetch: (request: Request) => Promise<Response | undefined> }) => {
+        served = options.fetch;
+        return { requestIp: () => '127.0.0.1', upgrade: () => false, stop: () => undefined };
+      },
+    };
+    await new BunApiServer(refusingHost).listen(surfaceOf([], [recordingSocket()]), BIND);
+
+    // Act
+    const response = await served?.(
+      new Request('http://127.0.0.1/v1/stream', {
+        headers: { upgrade: 'websocket', authorization: `Bearer ${CREDENTIALS.admin}` },
+      }),
+    );
+
+    // Assert
+    should(response?.status).equal(400);
+    should(await answered(response)).have.property('code', 'upgrade_failed');
+  });
+});
+
+/** What a recording socket handler observed, so a case can assert what reached the domain. */
+interface Recorded {
+  readonly frames: string[];
+  opened: number;
+  closed: number;
+}
+
+function recorded(): Recorded {
+  return { frames: [], opened: 0, closed: 0 };
+}
+
+/**
+ * A socket route the TEST fully controls.
+ *
+ * `gate` is awaited inside the attachment, which is the only way to drive the handshake window
+ * deterministically: frames that arrive while a handler is still being attached have to be held, and
+ * racing a real terminal open would make that case flaky rather than proven.
+ */
+function recordingSocket(
+  options: {
+    readonly gate?: Promise<void>;
+    /** Makes the ATTACHMENT fail — after the switch, when no status can be sent. */
+    readonly failAttachment?: boolean;
+    /** Makes `accept` refuse — before the switch, when a status still can be. */
+    readonly refuse?: unknown;
+    readonly record?: Recorded;
+  } = {},
+): SocketRoute {
+  return {
+    method: 'GET',
+    path: '/v1/stream',
+    scope: 'admin',
+    accept: async () => {
+      if (options.refuse !== undefined) throw options.refuse;
+      return async (downstream: SocketDownstream): Promise<SocketHandler> => {
+        await options.gate;
+        if (options.failAttachment === true) throw new Error('the pane went away');
+        const record = options.record ?? recorded();
+        return {
+          open: async () => {
+            record.opened += 1;
+            downstream.send(new TextEncoder().encode('hello'));
+          },
+          fromClient: frame => {
+            record.frames.push(typeof frame === 'string' ? frame : `binary:${frame.byteLength}`);
+          },
+          close: () => {
+            record.closed += 1;
+          },
+        };
+      };
+    },
+  };
+}
+
+/** The body of a handshake answer. Fails loudly when the protocol switched instead, so a case can
+ *  never optional-chain its way into asserting nothing. */
+async function answered(response: Response | undefined): Promise<Record<string, unknown>> {
+  if (response === undefined) throw new Error('the handshake switched protocols instead of answering');
+  return (await response.json()) as Record<string, unknown>;
+}
+
+/** Sends one handshake request; `undefined` means the protocol switched and there is no response. */
+type Handshake = (path: string, headers?: Readonly<Record<string, string>>) => Promise<Response | undefined>;
+
+/**
+ * A host that captures its own `fetch`.
+ *
+ * Upgrade decisions are asserted as STATUS CODES here, which is the whole point of deciding them
+ * before the protocol switches: a real client would only ever see a failed handshake, and could not
+ * tell "no such terminal" from "the daemon broke".
+ */
+async function handshakeHost(
+  sockets: readonly SocketRoute[],
+  routes: readonly ApiRoute[] = [],
+  upgraded = true,
+): Promise<Handshake> {
+  let served: ((request: Request) => Promise<Response | undefined>) | undefined;
+  const host = {
+    serve: (options: { readonly fetch: (request: Request) => Promise<Response | undefined> }) => {
+      served = options.fetch;
+      return { requestIp: () => '127.0.0.1', upgrade: () => upgraded, stop: () => undefined };
+    },
+  };
+  await new BunApiServer(host).listen(surfaceOf(routes, sockets), BIND);
+  const fetchRequest = served;
+  if (fetchRequest === undefined) throw new Error('the fixture host was never handed a request handler');
+  return async (path, headers = { upgrade: 'websocket', authorization: `Bearer ${CREDENTIALS.admin}` }) =>
+    await fetchRequest(new Request(`http://127.0.0.1${path}`, { headers }));
+}
+
+/** One client socket, with its frames and its close code collected. */
+function connect(url: string): {
+  readonly frames: string[];
+  readonly closes: Array<readonly [number, string]>;
+  readonly opened: Promise<void>;
+  send(data: string | Uint8Array): void;
+  close(): void;
+  untilFrames(count: number): Promise<void>;
+  untilClosed(): Promise<void>;
+} {
+  const socket = new WebSocket(url);
+  socket.binaryType = 'arraybuffer';
+  const frames: string[] = [];
+  const closes: Array<readonly [number, string]> = [];
+  const opened = new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve());
+    socket.addEventListener('error', () => reject(new Error(`the viewer socket never opened: ${url}`)));
+  });
+  socket.addEventListener('message', event => {
+    frames.push(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data));
+  });
+  socket.addEventListener('close', event => closes.push([event.code, event.reason]));
+  const settle = async (done: () => boolean): Promise<void> => {
+    for (let attempt = 0; attempt < 200 && !done(); attempt += 1) await Bun.sleep(10);
+  };
+  return {
+    frames,
+    closes,
+    opened,
+    send: data => socket.send(data),
+    close: () => socket.close(),
+    untilFrames: async count => await settle(() => frames.length >= count),
+    untilClosed: async () => await settle(() => closes.length > 0),
+  };
+}
+
+describe('BunApiServer socket upgrades', () => {
+  it('should refuse an unauthenticated upgrade before the protocol switches', async () => {
+    // The socket must never be reachable over credentials the request/response surface would refuse:
+    // an unauthenticated peer has to be turned away on the handshake, not after it holds a socket.
+    // Arrange
+    const request = await handshakeHost([recordingSocket()]);
+
+    // Act
+    const anonymous = await request('/v1/stream', { upgrade: 'websocket' });
+
+    // Assert
+    should(anonymous?.status).equal(401);
+    should(await answered(anonymous)).have.property('code', 'unauthorized');
+  });
+
+  it('should switch the protocol for an authorized upgrade', async () => {
+    // Arrange
+    const request = await handshakeHost([recordingSocket()]);
+
+    // Act
+    const accepted = await request('/v1/stream');
+
+    // Assert: no response at all is what "the protocol switched" looks like.
+    should(accepted).be.undefined();
+  });
+
+  it('should report a refusal raised while accepting with the status the subsystem named', async () => {
+    // Arrange
+    const request = await handshakeHost([
+      recordingSocket({ refuse: new ApiError(404, 'terminal not found', 'not_found') }),
+    ]);
+
+    // Act
+    const missing = await request('/v1/stream');
+
+    // Assert
+    should(missing?.status).equal(404);
+    should(await answered(missing)).have.property('code', 'not_found');
+  });
+
+  it('should report a defect raised while accepting as the daemon‘s fault, not the caller‘s', async () => {
+    // Arrange
+    const request = await handshakeHost([recordingSocket({ refuse: new Error('the session index is closed') })]);
+
+    // Act
+    const broken = await request('/v1/stream');
+
+    // Assert
+    should(broken?.status).equal(500);
+    should(await answered(broken)).have.property('code', 'internal_error');
+  });
+
+  it('should still serve a public route that arrives with a stray upgrade header', async () => {
+    // A proxy adds `Upgrade`, or a client copies a header set. Judging such a request against a
+    // socket table it has nothing to do with would break liveness scraping for no security gain.
+    // Arrange
+    const request = await handshakeHost([recordingSocket()], [mirror]);
+
+    // Act
+    const served = await request('/mirror/x', { upgrade: 'websocket' });
+
+    // Assert
+    should(served?.status).equal(200);
+    should((await answered(served)).id).equal('x');
+  });
+});
+
+describe('BunApiServer over a live socket', () => {
+  async function listen(...sockets: readonly SocketRoute[]): Promise<ApiServerHandle> {
+    const handle = await new BunApiServer().listen(surfaceOf([], sockets), BIND);
+    running.push(handle);
+    return handle;
+  }
+
+  /** The socket URL, carrying the token the way a browser must: a `WebSocket` cannot set headers. */
+  function streamUrl(handle: ApiServerHandle): string {
+    return `${handle.url.replace('http://', 'ws://')}/v1/stream?token=${CREDENTIALS.admin}`;
+  }
+
+  it('should carry the handler‘s bytes out and the client‘s frames in', async () => {
+    // Arrange
+    const record = recorded();
+    const handle = await listen(recordingSocket({ record }));
+    const viewer = connect(streamUrl(handle));
+
+    // Act
+    await viewer.opened;
+    await viewer.untilFrames(1);
+    viewer.send(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
+    viewer.send(Uint8Array.of(13, 10));
+    for (let attempt = 0; attempt < 200 && record.frames.length < 2; attempt += 1) await Bun.sleep(10);
+
+    // Assert: the loopback query-parameter token authenticated it, and both frame kinds arrived
+    // intact and in order.
+    should(record.opened).equal(1);
+    should(viewer.frames).deepEqual(['hello']);
+    should(record.frames).deepEqual([JSON.stringify({ type: 'resize', cols: 100, rows: 30 }), 'binary:2']);
+  });
+
+  it('should hold frames that arrive while the handler is still being attached, then replay them', async () => {
+    // The socket is live from the instant the protocol switches, but resolving a session and a pane
+    // is not instant. Dropping what arrives in that window loses the first keystroke of every stream.
+    // Arrange
+    const record = recorded();
+    let release = (): void => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const handle = await listen(recordingSocket({ record, gate }));
+    const viewer = connect(streamUrl(handle));
+
+    // Act
+    await viewer.opened;
+    viewer.send('first');
+    viewer.send('second');
+    await Bun.sleep(50);
+    const beforeRelease = [...record.frames];
+    release();
+    for (let attempt = 0; attempt < 200 && record.frames.length < 2; attempt += 1) await Bun.sleep(10);
+
+    // Assert
+    should(beforeRelease).be.empty();
+    should(record.frames).deepEqual(['first', 'second']);
+  });
+
+  it('should close a socket that floods the handshake queue', async () => {
+    // Bounded, or a client that floods during the handshake grows the daemon's heap without limit.
+    // Arrange
+    const handle = await listen(recordingSocket({ gate: new Promise<void>(() => {}) }));
+    const viewer = connect(streamUrl(handle));
+
+    // Act
+    await viewer.opened;
+    for (let frame = 0; frame <= SOCKET_MAX_PENDING_FRAMES; frame += 1) viewer.send(`frame-${frame}`);
+    await viewer.untilClosed();
+
+    // Assert
+    should(viewer.closes).deepEqual([[1009, 'socket handshake queue exceeded']]);
+  });
+
+  it('should close a socket whose handler could not be attached', async () => {
+    // Arrange
+    const handle = await listen(recordingSocket({ failAttachment: true }));
+    const viewer = connect(streamUrl(handle));
+
+    // Act
+    await viewer.opened;
+    await viewer.untilClosed();
+
+    // Assert
+    should(viewer.closes).deepEqual([[1011, 'socket handler unavailable']]);
+  });
+
+  it('should discard a handler that finishes attaching after the peer has gone', async () => {
+    // The handler holds a timer and a viewer slot. Installing one against a peer that already left
+    // would leak both, because nothing would ever tell it the stream was over.
+    // Arrange
+    const record = recorded();
+    let release = (): void => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const handle = await listen(recordingSocket({ record, gate }));
+    const viewer = connect(streamUrl(handle));
+
+    // Act
+    await viewer.opened;
+    viewer.close();
+    await viewer.untilClosed();
+    await Bun.sleep(50);
+    release();
+    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+
+    // Assert: closed without ever being opened.
+    should(record.opened).equal(0);
+    should(record.closed).equal(1);
+  });
+
+  it('should end every live socket when the daemon shuts down', async () => {
+    // Arrange
+    const record = recorded();
+    const handle = await listen(recordingSocket({ record }));
+    const viewer = connect(streamUrl(handle));
+    await viewer.opened;
+    await viewer.untilFrames(1);
+
+    // Act
+    handle.closeSockets();
+    await viewer.untilClosed();
+
+    // Assert: the reason carries the intent, because Bun rewrites the `1001` this really is to 1000.
+    should(viewer.closes).deepEqual([[1000, 'daemon shutting down']]);
+    should(record.closed).equal(1);
+  });
+
+  it('should still return from stop after it has closed its own sockets', async () => {
+    // Bun's forceful stop never resolves once the server closed a WebSocket itself, so a shutdown
+    // that runs `closeSockets` and then `stop` would hang the daemon forever.
+    // Arrange
+    const handle = await new BunApiServer().listen(surfaceOf([], [recordingSocket()]), BIND);
+    const viewer = connect(`${handle.url.replace('http://', 'ws://')}/v1/stream?token=${CREDENTIALS.admin}`);
+    await viewer.opened;
+    await viewer.untilFrames(1);
+
+    // Act
+    handle.closeSockets();
+    const stopped = await Promise.race([handle.stop().then(() => 'stopped'), Bun.sleep(2_000).then(() => 'hung')]);
+
+    // Assert
+    should(stopped).equal('stopped');
   });
 });
 

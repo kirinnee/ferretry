@@ -99,14 +99,8 @@ packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report
 packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/failover.ts # PR #19: warden supervision; the report reader is mounted but this is not
 
-# PR #21 — establish terminal IO policies
-# The terminal LIFECYCLE is mounted: bin/fyd.ts builds a ManagedTerminalService over a
-# TmuxTerminalRuntime on the daemon's own private socket, and the routes open, list, retitle and
-# close terminals. What remains is the STREAM, and it is blocked on a seam that does not exist: the
-# protocol gives terminal input and output their own websocket byte frames, while the daemon's API
-# is request/response only — an ApiResponse is a string body and no route can be handed a socket.
-# These two land with whoever brings the websocket transport, NOT with an HTTP endpoint invented to
-# satisfy this gate.
-packages/daemon/src/adapters/terminal/stream-bridge.ts # PR #21: terminal streaming needs the websocket transport seam, which the API does not have
-packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: terminal streaming needs the websocket transport seam, which the API does not have
-
+# PR #21 — establish terminal IO policies: FULLY MOUNTED, nothing to list.
+# The lifecycle landed with the subsystem-wiring unit; the STREAM landed with the WebSocket seam.
+# `src/lib/api/socket.ts` declares a socket route, `BunApiServer` switches the protocol, and
+# GET /v1/sessions/:sessionId/terminals/:terminalId/stream carries pane bytes through
+# TerminalStreamBridge over the same lifecycle service the HTTP routes use.

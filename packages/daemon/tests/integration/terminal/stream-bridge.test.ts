@@ -4,7 +4,9 @@ import {
   TerminalStreamBridge,
   type TerminalStreamScheduler,
   type TerminalStreamService,
+  type TerminalStreamTimer,
 } from '../../../src/adapters/index.ts';
+import { TERMINAL_MAX_BUFFERED_OUTPUT_BYTES } from '../../../src/lib/index.ts';
 
 class FakeService implements TerminalStreamService {
   readonly calls: string[] = [];
@@ -27,12 +29,13 @@ class FakeService implements TerminalStreamService {
 class FakeScheduler implements TerminalStreamScheduler {
   callback?: () => void;
   cleared = false;
-  setTimeout(callback: () => void): unknown {
+  schedule(callback: () => void): TerminalStreamTimer {
     this.callback = callback;
-    return 1;
-  }
-  clearTimeout(): void {
-    this.cleared = true;
+    return {
+      cancel: () => {
+        this.cleared = true;
+      },
+    };
   }
 }
 
@@ -106,5 +109,62 @@ describe('TerminalStreamBridge', () => {
       [1011, 'terminal redraw failed'],
     ]);
     should(scheduler.cleared).be.false();
+  });
+
+  it('should close the stream when an input frame cannot reach the pane', async () => {
+    // A write that fails means the pane is gone, so the viewer must be told rather than left typing
+    // into a socket whose keystrokes are silently discarded.
+    // Arrange
+    const service = new FakeService();
+    const closed: Array<[number, string]> = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: () => undefined, close: (code, reason) => closed.push([code, reason]) },
+      new FakeScheduler(),
+    );
+
+    // Act
+    service.fail = true;
+    bridge.fromClient(Uint8Array.of(13));
+    await Bun.sleep(1);
+
+    // Assert
+    should(closed).deepEqual([[1011, 'terminal operation failed']]);
+  });
+
+  it('should drop a frame for a viewer that has stopped reading, and resume once it drains', async () => {
+    // A slow viewer must never grow an unbounded backlog in the daemon. Because every frame is a
+    // FULL pane redraw, the answer is to skip it — the next poll supersedes it — rather than to queue
+    // it or to end an otherwise healthy stream. The pane is not even captured while behind.
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    let buffered = TERMINAL_MAX_BUFFERED_OUTPUT_BYTES + 1;
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      {
+        send: bytes => sent.push(bytes),
+        close: () => undefined,
+        bufferedBytes: () => buffered,
+      },
+      scheduler,
+    );
+
+    // Act
+    await bridge.open();
+    const whileBehind = [sent.length, service.calls.length] as const;
+    buffered = TERMINAL_MAX_BUFFERED_OUTPUT_BYTES;
+    scheduler.callback?.();
+    await Bun.sleep(1);
+
+    // Assert
+    should(whileBehind).deepEqual([0, 0]);
+    should(sent).deepEqual([Uint8Array.of(27)]);
+    should(service.calls).deepEqual(['capture']);
   });
 });

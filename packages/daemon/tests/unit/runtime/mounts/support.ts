@@ -34,6 +34,7 @@ import {
   type TaskParseIssue,
   type TaskSnapshot,
 } from '../../../../src/lib/tasks/index.ts';
+import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
@@ -318,6 +319,34 @@ export class FakeTerminals implements TerminalSubsystem {
   async close(sessionId: string, terminalId: string): Promise<void> {
     this.records.delete(this.require(this.session(sessionId), terminalId).id);
   }
+
+  /**
+   * A handler that records what the socket was handed, instead of driving a pane.
+   *
+   * The route's whole job is to prove who may stream and which terminal before the switch, so what
+   * a case needs to assert is that the attachment it gets back is bound to the terminal it named —
+   * not that tmux produced bytes, which `TerminalStreamBridge` has its own integration coverage for.
+   */
+  async stream(sessionId: string, terminalId: string, downstream: SocketDownstream): Promise<SocketHandler> {
+    const target = `${this.session(sessionId)}/${this.require(this.session(sessionId), terminalId).id}`;
+    this.streamed.push(target);
+    return {
+      open: async () => {
+        downstream.send(new TextEncoder().encode(`open:${target}`));
+      },
+      fromClient: frame => {
+        this.received.push(typeof frame === 'string' ? frame : 'binary');
+      },
+      close: () => {
+        this.closedStreams.push(target);
+      },
+    };
+  }
+
+  /** Every `session/terminal` a socket was attached to, in order. */
+  readonly streamed: string[] = [];
+  readonly received: string[] = [];
+  readonly closedStreams: string[] = [];
 
   private session(sessionId: string): string {
     if (!this.known.includes(sessionId)) throw new TerminalMountError('not_found', 'terminal session not found');
