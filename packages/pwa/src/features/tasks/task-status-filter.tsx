@@ -26,7 +26,8 @@ export interface TaskStatusFilterProps {
   readonly onShowAll: () => void;
 }
 
-const CHIP = 'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center gap-xs rounded-control border px-2 text-2xs font-semibold';
+const CHIP =
+  'inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center gap-xs rounded-control border px-2 text-2xs font-semibold';
 const CHIP_RESTING = 'border-border-soft bg-surface text-muted hover:border-accent-border hover:text-fg';
 
 export function TaskStatusFilter({ counts, selected, onSelect, onShowAll }: TaskStatusFilterProps) {

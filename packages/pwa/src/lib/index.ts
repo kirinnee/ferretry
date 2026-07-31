@@ -2,7 +2,9 @@
 export const packageRole = 'pwa' as const;
 
 export * from '../features/tasks/task-assignee-link.tsx';
+export * from '../features/tasks/task-board-model.ts';
 export * from '../features/tasks/task-presentation.ts';
+export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/primitives.tsx';
@@ -19,6 +21,7 @@ export * from './attention-store.ts';
 export * from './class-names.ts';
 export * from './daemon-connection.ts';
 export * from './event-transport.ts';
+export * from './github-pr.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';

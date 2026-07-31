@@ -41,7 +41,13 @@ describe('RouteLink', () => {
     );
     const link = container.querySelector('a') as HTMLAnchorElement;
 
-    for (const modifier of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+    for (const modifier of [
+      { metaKey: true },
+      { ctrlKey: true },
+      { shiftKey: true },
+      { altKey: true },
+      { button: 1 },
+    ]) {
       let defaultAllowed = false;
       await interact(() => {
         defaultAllowed = click(link, modifier);

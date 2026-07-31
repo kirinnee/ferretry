@@ -45,13 +45,7 @@ export interface TaskAssigneeLinkProps {
   readonly onNavigate?: (to: string) => void;
 }
 
-export function TaskAssigneeLink({
-  daemonId,
-  task,
-  className,
-  showStatus = true,
-  onNavigate,
-}: TaskAssigneeLinkProps) {
+export function TaskAssigneeLink({ daemonId, task, className, showStatus = true, onNavigate }: TaskAssigneeLinkProps) {
   const identity = taskAssigneePresentation(task);
   const href = identity.sessionId === null ? null : daemonSessionPath(daemonId, identity.sessionId);
   return (
