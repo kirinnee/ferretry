@@ -50,7 +50,7 @@ const firstMessagePreview = (client: DaemonPinClient, scope: typeof scopeA): str
 };
 
 describe('pin transport', () => {
-  it('binds reads and mutations to the paired daemon with bearer auth and idempotency headers', async () => {
+  it('binds reads and mutations to the paired daemon with bearer auth and request-correlation headers', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
       calls.push({ url: String(input), init: init ?? {} });
@@ -275,6 +275,84 @@ describe('DaemonPinClient', () => {
     await request;
     expect(calls).toBe(1);
     expect(client.store.pins(scopeA)?.pins).toHaveLength(20);
+    expect(firstMessagePreview(client, scopeA)).toBe('authoritative');
+  });
+
+  it('deduplicates an optimistic message add by block id so the new pin wins and the request still fires', async () => {
+    const seeded = {
+      ...snapshot('same/session'),
+      pins: [
+        {
+          id: '00000000-0000-4000-8000-000000000001',
+          at: 2,
+          kind: 'message' as const,
+          blockId: 'block-1',
+          blockKind: 'assistant' as const,
+          preview: 'older',
+          by: 'human' as const,
+          createdBy: null,
+          createdByName: null,
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          at: 1,
+          kind: 'note' as const,
+          text: 'keeper',
+          by: 'human' as const,
+          createdBy: null,
+          createdByName: null,
+        },
+      ],
+    };
+    const authoritative = {
+      ...snapshot('same/session', '2026-07-31T01:00:00.000Z'),
+      pins: [
+        {
+          id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+          at: 3,
+          kind: 'message' as const,
+          blockId: 'block-1',
+          blockKind: 'assistant' as const,
+          preview: 'authoritative',
+          by: 'human' as const,
+          createdBy: null,
+          createdByName: null,
+        },
+        {
+          id: '00000000-0000-4000-8000-000000000002',
+          at: 1,
+          kind: 'note' as const,
+          text: 'keeper',
+          by: 'human' as const,
+          createdBy: null,
+          createdByName: null,
+        },
+      ],
+    };
+    let calls = 0;
+    const client = new DaemonPinClient(undefined, async () => {
+      calls += 1;
+      return response(authoritative);
+    });
+    client.store.applySnapshot(scopeA, seeded);
+
+    const request = client.add(daemonA, scopeA, {
+      action: 'add',
+      kind: 'message',
+      blockId: 'block-1',
+      blockKind: 'assistant',
+      preview: 'optimistic',
+    });
+
+    // no synchronous ZodError: the duplicate block id is dropped (new pin wins) and the POST fires
+    expect(request).toBeInstanceOf(Promise);
+    const optimistic = client.store.pins(scopeA)?.pins ?? [];
+    expect(optimistic).toHaveLength(2);
+    expect(optimistic.filter(pin => pin.kind === 'message' && pin.blockId === 'block-1')).toHaveLength(1);
+    expect(firstMessagePreview(client, scopeA)).toBe('optimistic');
+    expect(optimistic[optimistic.length - 1]?.kind).toBe('note');
+    await request;
+    expect(calls).toBe(1);
     expect(firstMessagePreview(client, scopeA)).toBe('authoritative');
   });
 

@@ -218,7 +218,9 @@ export class DaemonPinClient {
                   createdBy: null,
                   createdByName: null,
                 },
-                ...current.pins,
+                // mirror daemon deduplicatePins([pin, ...current]): the new pin wins,
+                // so drop any existing message pinned to the same block id.
+                ...current.pins.filter(pin => !(pin.kind === 'message' && pin.blockId === action.blockId)),
               ].slice(0, MAX_PINS_PER_SESSION);
     return this.store.applyEcho(scope, { ...current, pins });
   }
