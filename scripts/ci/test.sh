@@ -32,7 +32,11 @@ if [[ ${mode} == "unit" ]]; then
   #
   # Feature screens use mounted React tests, so they belong in the same 100%
   # ledger as browser glue rather than being a source-text-tested exception.
-  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name hooks -o -name worklets -o -name shell \) | sort)
+  #
+  # src/features (the surfaces ported from kteam) is in it for the same reason:
+  # every module under it is proved by an executed render or projection test, so
+  # new feature code cannot ship untested behind a green build.
+  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name features -o -name hooks -o -name worklets -o -name shell \) | sort)
   scope_dirs+=("${pwa_dirs[@]}")
 fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
@@ -57,7 +61,7 @@ awk -v scope="${scope}" -v mode="${mode}" '
     gsub(/\\\\/, "/", path)
     files++
     allowed = path ~ "(^|/)" scope
-    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|hooks|worklets|shell)/") allowed = 1
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|features|hooks|worklets|shell)/") allowed = 1
     if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
       bad = 1

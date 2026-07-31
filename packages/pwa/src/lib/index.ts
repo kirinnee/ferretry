@@ -1,20 +1,30 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../features/tasks/task-assignee-link.tsx';
+export * from '../features/tasks/task-board-model.ts';
+export * from '../features/tasks/task-presentation.ts';
+export * from '../features/tasks/task-row.tsx';
+export * from '../features/tasks/task-status-filter.tsx';
+export * from '../features/warden/warden-status-model.ts';
+export * from '../features/warden/warden-strip.tsx';
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/primitives.tsx';
+export * from '../shell/route-link.tsx';
 export * from '../shell/side-pane-tab-icons.ts';
 export * from '../shell/side-pane-tabs.tsx';
 export * from '../shell/side-pane-tab-model.ts';
 export * from '../shell/view-tabs.tsx';
 export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
+export * from '../hooks/use-warden-status.ts';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
 export * from './attention-store.ts';
 export * from './class-names.ts';
 export * from './daemon-connection.ts';
 export * from './event-transport.ts';
+export * from './github-pr.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';
