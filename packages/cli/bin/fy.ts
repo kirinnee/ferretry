@@ -9,13 +9,13 @@ import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
 import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
-import { PinController } from '../src/lib/pins/controller';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
+import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { assertSemver } from '../src/lib/version';
 
