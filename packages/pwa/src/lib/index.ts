@@ -2,6 +2,7 @@
 export const packageRole = 'pwa' as const;
 
 export * from '../components/session-command-controls.tsx';
+export * from '../components/session-header.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/analytics/analytics-result-table.tsx';

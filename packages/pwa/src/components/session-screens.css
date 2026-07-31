@@ -23,6 +23,76 @@
   align-items: center;
   gap: 12px;
 }
+.fy-session-header {
+  align-items: center;
+  background: var(--fy-surface);
+  border-bottom: 1px solid var(--fy-border);
+  color: var(--fy-fg);
+  display: flex;
+  gap: 12px;
+  min-height: 56px;
+  padding: 8px 12px;
+}
+.fy-session-header-mobile-actions {
+  display: flex;
+  gap: 4px;
+}
+.fy-session-header-mobile-actions button,
+.fy-session-header-details {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: inherit;
+  display: inline-flex;
+  font-size: 20px;
+  justify-content: center;
+  min-height: 40px;
+  min-width: 40px;
+}
+.fy-session-header-mobile-actions button:hover,
+.fy-session-header-mobile-actions button:focus-visible,
+.fy-session-header-details:hover,
+.fy-session-header-details:focus-visible {
+  background: var(--fy-surface-2);
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+.fy-session-header-identity {
+  min-width: 0;
+}
+.fy-session-header-identity .fy-eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-session-header-identity h1 {
+  font-size: 16px;
+  line-height: 1.2;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-session-header-id {
+  color: var(--fy-muted);
+  display: block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-session-header-meta {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+.fy-session-header-details {
+  font-size: 14px;
+  letter-spacing: 1px;
+}
 .fy-screen-heading,
 .fy-detail-header {
   justify-content: space-between;
@@ -472,6 +542,24 @@
   width: 1px;
 }
 @media (max-width: 700px) {
+  .fy-session-header {
+    gap: 6px;
+    min-height: 52px;
+    padding: 4px 8px;
+  }
+  .fy-session-header-identity {
+    flex: 1;
+  }
+  .fy-session-header-identity .fy-eyebrow,
+  .fy-session-header-id,
+  .fy-session-header-meta {
+    display: none;
+  }
+  .fy-session-header-mobile-actions button,
+  .fy-session-header-details {
+    min-height: 44px;
+    min-width: 44px;
+  }
   .fy-session-row {
     align-items: flex-start;
     display: grid;
