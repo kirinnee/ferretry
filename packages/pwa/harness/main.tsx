@@ -10,6 +10,7 @@
 
 import type {
   AnalyticsResponse,
+  AttentionSnapshot,
   BrowserStatus,
   LearningStatus,
   ProposalView,
@@ -19,9 +20,6 @@ import type {
   TaskSummary,
   WardenConfigView,
   WardenStatusView,
-  LearningStatus,
-  ProposalView,
-  AttentionSnapshot,
 } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -39,6 +37,13 @@ import { AnalyticsResultTable } from '../src/features/analytics/analytics-result
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
+import {
+  RemoteBrowserControls,
+  RemoteBrowserGovernor,
+  RemoteBrowserNavigation,
+  RemoteBrowserPageTabs,
+  RemoteBrowserStatusBar,
+} from '../src/features/browser/remote-browser-chrome.tsx';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
@@ -417,20 +422,28 @@ const BROWSER_LOGIN: BrowserLoginView = {
   },
 };
 
+/** Three real pages, one of them untitled and one last touched by the agent:
+ * the tab strip's fallback label and its agent marker are both on screen. */
 const REMOTE_BROWSER: BrowserStatus = {
   sessionId: 'harness-session',
   state: 'running',
-  pages: [{ id: 'harness-page', url: 'https://example.test', title: 'Example' }],
+  pages: [
+    { id: 'harness-page', url: 'https://example.test', title: 'Example' },
+    { id: 'docs-page', url: 'https://docs.example.test/getting-started', title: 'Getting started — Docs' },
+    { id: 'blank-page', url: 'https://api.example.test/v1/health', title: '' },
+  ],
   activePageId: 'harness-page',
   url: 'https://example.test',
   title: 'Example',
-  canGoBack: false,
+  canGoBack: true,
   canGoForward: false,
   pageState: 'ready',
   viewport: { width: 640, height: 480 },
   viewers: 1,
   persistentProfile: true,
-  idleTimeoutSeconds: 60,
+  idleTimeoutSeconds: 900,
+  agentPage: { pageId: 'docs-page', kind: 'agent', action: 'read', at: '2026-07-31T11:00:00.000Z' },
+  lastActor: { kind: 'human', at: '2026-07-31T11:02:00.000Z', action: 'click' },
   capacity: { running: 1, maximum: 3 },
 };
 
@@ -779,15 +792,32 @@ function Shell() {
     {
       label: 'Remote browser',
       render: () => (
-        <RemoteBrowserViewer
-          daemon={daemon}
-          scope={scope}
-          status={REMOTE_BROWSER}
-          streamTicket="harness-ticket"
-          socketFactory={() => new HarnessBrowserSocket()}
-          createObjectUrl={() => harnessFrame}
-          revokeObjectUrl={() => undefined}
-        />
+        <Card aria-label="Remote browser" className="min-w-0 overflow-hidden" data-harness="remote-browser">
+          <RemoteBrowserStatusBar status={REMOTE_BROWSER} connection="connected" />
+          <RemoteBrowserPageTabs status={REMOTE_BROWSER} onAction={() => {}} />
+          <RemoteBrowserNavigation status={REMOTE_BROWSER} onAction={() => {}} />
+          <RemoteBrowserControls
+            status={REMOTE_BROWSER}
+            connection="connected"
+            fit
+            viewportMode="responsive"
+            onAction={() => {}}
+            onToggleFit={() => {}}
+            onToggleViewportMode={() => {}}
+            onPasteFromClipboard={() => {}}
+          />
+          <RemoteBrowserViewer
+            daemon={daemon}
+            scope={scope}
+            status={REMOTE_BROWSER}
+            streamTicket="harness-ticket"
+            interactive
+            socketFactory={() => new HarnessBrowserSocket()}
+            createObjectUrl={() => harnessFrame}
+            revokeObjectUrl={() => undefined}
+          />
+          <RemoteBrowserGovernor status={REMOTE_BROWSER} />
+        </Card>
       ),
     },
     {

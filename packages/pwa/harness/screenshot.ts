@@ -101,6 +101,11 @@ try {
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
       process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
+      // The whole pane, not just the display: the tab strip, address bar and
+      // lifecycle controls are the part that has to match the original.
+      const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
+      await page.locator('[data-harness="remote-browser"]').screenshot({ path: browserPaneTarget });
+      process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
       const learningTarget = join(outDir, `learning-${viewport.name}.png`);
       await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
       process.stdout.write(`📸 learning -> ${learningTarget}\n`);
