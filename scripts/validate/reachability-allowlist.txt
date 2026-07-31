@@ -125,6 +125,10 @@
 #     mounted without it would serve a surface no session can authenticate as a peer on — a board whose
 #     coordinator cannot act. The seam is the cheapest single unblock available: tmux `-e` through the
 #     process port, the controller, the launcher, the lifecycle document and the start.
+#
+#     THIS BULLET IS SPENT — the seam was built exactly as described and the credential is minted and
+#     delivered. Read it as the record of a closed gap, not as a live blocker; the current state and
+#     the one question genuinely left are under PR #5 below.
 #   * PR #9's WORKTREE barrel needs the managed-worktree REGISTRY, not the start: a start does not
 #     create a worktree, and `ManagedWorktree` carries an ownership token, a creation instant and
 #     whether the branch pre-existed — none of it derivable from Git.
@@ -151,6 +155,35 @@
 # reads it from the environment and the launch path cannot set one — see "THERE IS NO WAY TO HAND A
 # SESSION A SECRET" in the header above. Until that seam exists, every peer-scoped board command in
 # `fy task-board` refuses before it sends, so the whole surface would be operator-only.
+#
+# THAT SEAM NOW EXISTS, and the "no way to hand a session a secret" blocker above is SPENT — read it
+# as history rather than as the current state. `TmuxLaunch` carries an `env`, `newSessionArguments`
+# emits `-e NAME=VALUE` before the command word, `TmuxSessionLifecycleLauncher` reads the session's
+# environment at every launch, and `SessionLifecycleService.create` mints a 256-bit credential for
+# EVERY session: the SHA-256 goes on the record as `sessionCapabilityHash` — which is the exact field
+# every grant, invitation proof and child grant here is keyed on — and the plaintext goes to one 0600
+# file in the session's directory, delivered to the pane as `FY_SESSION_BOARD_CAPABILITY`. It is
+# deliberately absent from the session document, because that document is projected by the API.
+#
+# WHAT IS ACTUALLY LEFT IS A PORT OF FOUR ADAPTERS AND ONE UNDECIDED SECURITY QUESTION. The four are
+# mechanical and the port interfaces in `types.ts` specify them completely: `TaskBoardRepository`
+# (a snapshot with an atomic `transaction` — the `FileTaskStore` + `KeyedSerialExecutor` pattern in
+# `adapters/tasks` already fits it), `TaskBoardCredentialIssuer` (`id`, `capability`, `hash` — the
+# same shape as `NodeSessionCredentialIssuer`), `TaskBoardClock`, and a `TaskBoardSessionDirectory`
+# over the session index, which can now answer `sessionCapabilityHash` for every session. The route
+# surface is fully known too: `packages/cli/src/adapters/tasks/fy-task-board-gateway.ts` names all
+# eleven paths under `/v1/task-boards`.
+#
+# THE UNDECIDED QUESTION, and the reason this unit stopped rather than mounting: `fy task-board
+# create`, `mark-done`, `coordinator-replace` and `revoke` authenticate with
+# `FY_BOARD_ADMIN_CAPABILITY` — the OPERATOR's capability, which `board-credentials.ts` documents as
+# "deliberately unavailable inside a teammate pane". Nothing in this daemon mints that secret, and
+# nothing gives a human a way to read it: it is not the admin API token, and there is no operator
+# credential file, no `fy` command that prints one, and no design anywhere in the repo for how it
+# reaches the person typing the command. Inventing that distribution mechanism is inventing a
+# security boundary, so it wants a deliberate decision rather than a wiring unit's guess — and
+# without it `create` cannot be called at all, which means no board can come into existence for any
+# of the other ten routes to address.
 packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
