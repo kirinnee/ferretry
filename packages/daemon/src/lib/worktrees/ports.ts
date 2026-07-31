@@ -1,7 +1,6 @@
 export interface GitInvocation {
   readonly args: readonly string[];
   readonly cwd: string;
-  readonly stdin?: Uint8Array;
   readonly timeoutMs?: number;
   readonly maxStdoutBytes?: number;
 }

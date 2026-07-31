@@ -34,22 +34,30 @@ interface CappedRead {
   readonly truncated: boolean;
 }
 
-async function readCapped(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<CappedRead> {
+const ABANDONED = Symbol('abandoned');
+
+/**
+ * Reads at most `maxBytes`, and stops the moment `abandoned` settles. Without that escape a
+ * grandchild process inheriting the pipe would keep the stream open forever, so the daemon would
+ * hang past its own timeout even though the Git process itself was already killed.
+ */
+async function readCapped(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  abandoned: Promise<typeof ABANDONED>,
+): Promise<CappedRead> {
   const chunks: Uint8Array[] = [];
   let keptBytes = 0;
   let truncated = false;
   const reader = stream.getReader();
   try {
     while (true) {
-      const result = await reader.read();
-      if (result.done) break;
+      const result = await Promise.race([reader.read(), abandoned]);
+      if (result === ABANDONED || result.done) break;
       const chunk = result.value;
-      if (chunk.byteLength === 0) continue;
+      // `remaining` is never negative, so an empty chunk arriving after the cap keeps `kept` empty
+      // and must NOT be reported as a truncation.
       const remaining = maxBytes - keptBytes;
-      if (remaining <= 0) {
-        truncated = true;
-        continue;
-      }
       const kept = chunk.byteLength > remaining ? chunk.subarray(0, remaining) : chunk;
       chunks.push(kept);
       keptBytes += kept.byteLength;
@@ -103,18 +111,16 @@ export class BunGitRunner implements GitRunner {
 
   async run(invocation: GitInvocation): Promise<GitExecution> {
     const timeoutMs = checkedLimit(invocation.timeoutMs, DEFAULT_GIT_TIMEOUT_MS, 'Git timeout');
-    const maxStdoutBytes = checkedLimit(
-      invocation.maxStdoutBytes,
-      DEFAULT_GIT_STDOUT_LIMIT,
-      'Git stdout limit',
-    );
+    const maxStdoutBytes = checkedLimit(invocation.maxStdoutBytes, DEFAULT_GIT_STDOUT_LIMIT, 'Git stdout limit');
 
-    let child: ReturnType<typeof Bun.spawn>;
+    // Git is never given stdin: every command this daemon runs is non-interactive, so an open
+    // stdin could only ever hang the daemon on a prompt.
+    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
     try {
       child = Bun.spawn(['git', ...HARDENED_GIT_ARGUMENTS, ...invocation.args], {
         cwd: invocation.cwd,
         env: gitEnvironment(this.inheritedEnvironment()),
-        stdin: invocation.stdin ? new Blob([invocation.stdin as unknown as BlobPart]) : 'ignore',
+        stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -123,16 +129,18 @@ export class BunGitRunner implements GitRunner {
     }
 
     let timedOut = false;
+    const abandoned = Promise.withResolvers<typeof ABANDONED>();
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill('SIGKILL');
+      abandoned.resolve(ABANDONED);
     }, timeoutMs);
 
     try {
       const [exitCode, stdout, stderr] = await Promise.all([
         child.exited,
-        readCapped(child.stdout, maxStdoutBytes),
-        readCapped(child.stderr, DEFAULT_GIT_STDERR_LIMIT),
+        readCapped(child.stdout, maxStdoutBytes, abandoned.promise),
+        readCapped(child.stderr, DEFAULT_GIT_STDERR_LIMIT, abandoned.promise),
       ]);
       return {
         exitCode,

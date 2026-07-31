@@ -3,6 +3,7 @@ import should from 'should';
 import {
   assessBranchDeletion,
   assessWorktreeRemoval,
+  defaultManagedWorktreeRoot,
   hasDirtyWorktree,
   isCheckoutLocked,
   isCurrentCheckout,
@@ -86,6 +87,18 @@ describe('worktree safety predicates', () => {
     should(shared).deepEqual(['inside']);
   });
 
+  it.each([
+    { stateHome: '/home/user/.ferretry', expected: '/home/user/.ferretry-worktrees' },
+    { stateHome: '/home/user/.ferretry/', expected: '/home/user/.ferretry-worktrees' },
+    { stateHome: '/', expected: null },
+  ])('should derive the managed root beside $stateHome', ({ stateHome, expected }) => {
+    // Act
+    const actual = defaultManagedWorktreeRoot(stateHome);
+
+    // Assert
+    should(actual).equal(expected);
+  });
+
   it('should treat a reasonless Git lock as locked', () => {
     // Act + Assert
     should(isCheckoutLocked('')).be.true();
@@ -165,7 +178,13 @@ describe('assessWorktreeRemoval', () => {
 
     // Assert
     should(missing.blockers.map(item => item.code)).deepEqual(['outside_managed_root', 'missing_worktree']);
-    should(replaced.blockers.map(item => item.code)).deepEqual(['outside_managed_root', 'path_identity_mismatch']);
+    // A replaced path also invalidates the Git identity, because the recorded checkout root no
+    // longer resolves to where Git says the worktree lives.
+    should(replaced.blockers.map(item => item.code)).deepEqual([
+      'outside_managed_root',
+      'path_identity_mismatch',
+      'repository_mismatch',
+    ]);
   });
 
   it('should refuse primary, mismatched, detached, and locked Git identities', () => {
