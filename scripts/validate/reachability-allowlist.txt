@@ -26,9 +26,12 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
-packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/pool.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+# The callsign POOL is mounted: bin/fyd.ts derives the held callsigns from each session's own
+# `teammate`, and GET /v1/names suggests free ones. The ALLOCATOR is not, and cannot honestly be:
+# it claims a callsign, and a claim needs a store whose tryClaim is atomic across concurrent daemon
+# requests. No adapter implements one, and the claim belongs to the request that CREATES a session
+# — the unit that mounts session start — not to the one that asks what is free.
+packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
 packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 
 # PR #10 — port the task record system and its file store

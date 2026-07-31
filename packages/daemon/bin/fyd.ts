@@ -119,6 +119,10 @@ import {
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
+  type NameClaim,
+  type NameSubsystem,
+  normalizeCallsign,
+  CALLSIGN_WINDOW_MS,
   SessionLifecycleService,
   SessionResumeService,
   defaultSessionHealthSettings,
@@ -481,6 +485,39 @@ function createTerminalSubsystem(
   };
 }
 
+/**
+ * Which callsigns the fleet is currently using.
+ *
+ * `teammate` is the callsign — it is what `--teammate <callsign>` writes — and `name` is the human
+ * title, so only the former is read here. A session whose configuration is unreadable or whose
+ * teammate is not a well-formed callsign contributes NOTHING rather than a guess: over-reporting a
+ * name as taken quietly shrinks the pool, and the failure is invisible.
+ *
+ * The claim window is the pool policy's own, so a callsign frees up exactly when a bare reference to
+ * it stops naming that session.
+ */
+function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
+  return {
+    claims: async () => {
+      const sessions = await Promise.all(
+        storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
+          const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
+          if (!config.success || config.data.teammate === undefined) return undefined;
+          const callsign = normalizeCallsign(config.data.teammate);
+          const claimedAtMs = Date.parse(config.data.createdAt);
+          if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
+          return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+        }),
+      );
+      return sessions.filter((claim): claim is NameClaim => claim !== undefined);
+    },
+    now: () => Date.now(),
+    // Rotating the start so two humans asking at the same moment are not both offered the same
+    // first name and then made to collide when they start their sessions.
+    startIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
+  };
+}
+
 /** How long a terminal nobody is watching stays open. One hour, matching the service's own default;
  *  stated here so the number the API reports is the number the daemon enforces. */
 const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
@@ -689,6 +726,7 @@ export function buildWorld(): DaemonWorld {
       tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
       analytics: createAnalyticsSubsystem(storage),
       terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+      names: createNameSubsystem(storage),
     }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },

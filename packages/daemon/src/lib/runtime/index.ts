@@ -3,6 +3,7 @@ export * from './config.ts';
 export * from './mounts/analytics.ts';
 export * from './mounts/attention.ts';
 export * from './mounts/index.ts';
+export * from './mounts/names.ts';
 export * from './mounts/pins.ts';
 export * from './mounts/tasks.ts';
 export * from './mounts/terminals.ts';

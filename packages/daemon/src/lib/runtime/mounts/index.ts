@@ -6,6 +6,7 @@ import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
+import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, type TerminalSubsystem } from './terminals.ts';
@@ -37,6 +38,8 @@ export interface MountedSubsystems {
   readonly analytics: AnalyticsSubsystem;
   /** Independent shell terminals attached to a session's working directory. */
   readonly terminals: TerminalSubsystem;
+  /** Free teammate callsigns, for composing a session title before starting one. */
+  readonly names: NameSubsystem;
 }
 
 /**
@@ -53,6 +56,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...taskRoutes(subsystems.tasks),
     ...analyticsRoutes(subsystems.analytics),
     ...terminalRoutes(subsystems.terminals),
+    ...nameRoutes(subsystems.names),
   ];
 }
 

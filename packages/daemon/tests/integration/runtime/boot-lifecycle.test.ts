@@ -5,6 +5,7 @@ import {
   AnalyticsResponseSchema,
   SessionConfigSchema,
   SessionStateSchema,
+  NameSuggestionsSchema,
   TerminalListViewSchema,
   TerminalViewSchema,
 } from '@ferretry/protocol';
@@ -13,6 +14,7 @@ import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
 import {
   EXIT_ALREADY_RUNNING,
   parseSessionId,
+  DEFAULT_CALLSIGN_POOL,
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
@@ -55,6 +57,9 @@ async function seedHome(home: string, port: number): Promise<void> {
 }
 
 const SESSION_ID = 'wire-1';
+/** The callsign the seeded session answers to. Taken from the shipped pool so the suggestion route
+ *  is proved to skip a name it would otherwise have offered. */
+const SEEDED_CALLSIGN = DEFAULT_CALLSIGN_POOL[0]!;
 
 /**
  * A real session in the state home, written through the daemon's own storage.
@@ -81,6 +86,7 @@ async function seedSession(
       incarnation: `${sessionId}-1`,
       runtimeGeneration: 1,
       name: 'Wire Subsystems',
+      teammate: SEEDED_CALLSIGN,
       boardAccess: 'none',
       agent: 'claude-auto',
       harness: 'claude',
@@ -446,6 +452,52 @@ describe('daemon boot lifecycle', () => {
     should(await closed.json()).deepEqual({ closed: true, id: opened.id });
     should(afterClose.terminals).be.empty();
     should(runtime.killed).deepEqual([opened.id]);
+  });
+
+  /**
+   * Callsign suggestions, driven through the production composition root over a real socket.
+   *
+   * The claim set is not a fixture: it is derived from the `teammate` recorded in a real session's
+   * configuration document, which is what makes "this name is taken" a fact rather than a guess.
+   */
+  it('should never suggest a callsign a live session already answers to', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-names');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, new Date().toISOString());
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+
+    // Act
+    const answered = await fetch(`http://127.0.0.1:${port}/v1/names?count=8`, { headers });
+    const names = NameSuggestionsSchema.parse(await answered.json());
+    const refused = await fetch(`http://127.0.0.1:${port}/v1/names?count=0`, { headers });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(answered.status).equal(200);
+    should(names).have.length(8);
+    should(new Set(names).size).equal(8);
+    // The seeded session took this callsign minutes ago, so the pool must not offer it back.
+    should(names).not.containEql(SEEDED_CALLSIGN);
+    // Every suggestion is a real pool entry, not something the route invented.
+    should(names.every(name => DEFAULT_CALLSIGN_POOL.includes(name))).be.true();
+    should(refused.status).equal(400);
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

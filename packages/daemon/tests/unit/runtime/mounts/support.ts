@@ -18,7 +18,9 @@ import {
   type AttentionLedgerRepository,
   type AttentionMutation,
 } from '../../../../src/lib/attention/index.ts';
+import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
+import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import {
@@ -331,6 +333,25 @@ export class FakeTerminals implements TerminalSubsystem {
     if (found === undefined) throw new TerminalMountError('not_found', 'terminal not found');
     return found;
   }
+}
+
+/** Wall-clock milliseconds the name fixtures agree on: `AT`, so a claim window is drivable. */
+export const AT_MS = Date.parse(AT);
+
+/**
+ * A name pool over a fixed set of claims.
+ *
+ * The pool, the window arithmetic and the ordering are the REAL ones; only the fleet is the test's.
+ * The start index is fixed at zero so a case can assert exactly which callsigns come back — the
+ * production root randomises it, which is what stops two humans being handed the same first name.
+ */
+export function nameSubsystem(claims: readonly NameClaim[] = [], nowMs: number = AT_MS): NameSubsystem {
+  return { claims: async () => claims, now: () => nowMs, startIndex: () => 0 };
+}
+
+/** One held callsign, claimed now and expiring at the end of the pool policy's own window. */
+export function nameClaim(callsign: string, ownerId = 's1', claimedAtMs: number = AT_MS): NameClaim {
+  return { callsign, ownerId, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
 }
 
 /** A feed that never collected: enough to build the base surface without a transport. */

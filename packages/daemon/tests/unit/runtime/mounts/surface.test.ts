@@ -13,6 +13,7 @@ import {
   emptyFeed,
   FakeTerminals,
   human,
+  nameSubsystem,
   pinService,
   taskSubsystem,
 } from './support.ts';
@@ -32,6 +33,7 @@ const subsystems = (): MountedSubsystems => ({
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
+  names: nameSubsystem(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -61,6 +63,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
+      'GET /v1/names',
     ]);
   });
 
