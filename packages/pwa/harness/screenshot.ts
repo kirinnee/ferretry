@@ -107,6 +107,9 @@ try {
       const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
       await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
       process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
+      const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
+      await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
+      process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
 
       // The harness stacks every ported surface down one column, so most of it
       // is below the fold. A full-page stitch cannot prove those: the app bar
