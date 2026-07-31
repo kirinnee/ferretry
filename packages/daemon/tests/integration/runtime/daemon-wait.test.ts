@@ -4,8 +4,8 @@ import {
   DaemonExitedError,
   DaemonNotReadyError,
   DaemonReadinessWaiter,
-  type DaemonReadinessPorts,
 } from '../../../src/adapters/runtime/daemon-wait.ts';
+import type { DaemonReadinessPorts } from '../../../src/lib/runtime/readiness.ts';
 
 function portsFor(
   health: () => Promise<Record<string, unknown>>,
@@ -100,6 +100,28 @@ describe('daemon readiness adapter', () => {
           should(error instanceof DaemonNotReadyError).be.true();
           should(error.message).containEql('within 0s');
         },
+      );
+  });
+
+  it('should enforce the deadline even when health never settles', async () => {
+    // Arrange
+    const fixture = portsFor(
+      async () => await new Promise<Record<string, unknown>>(() => undefined),
+      async () => 'alive',
+    );
+
+    // Act + Assert
+    await new DaemonReadinessWaiter(fixture.ports, '/tmp/fyd.log', {
+      deadlineMs: 20,
+      cadenceMs: 10,
+      progressAfterMs: 5,
+    })
+      .wait()
+      .then(
+        () => {
+          throw new Error('expected readiness timeout');
+        },
+        error => should(error instanceof DaemonNotReadyError).be.true(),
       );
   });
 });

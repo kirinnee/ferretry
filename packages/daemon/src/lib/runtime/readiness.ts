@@ -1,5 +1,23 @@
 export type PidLiveness = 'alive' | 'dead' | 'absent';
 
+export interface DaemonFetchPort {
+  fetch(url: string, init: RequestInit): Promise<Response>;
+}
+
+export interface MillisecondClockPort {
+  now(): number;
+}
+
+export interface SleepPort {
+  sleep(milliseconds: number): Promise<void>;
+}
+
+export interface DaemonReadinessPorts extends MillisecondClockPort, SleepPort {
+  health(): Promise<Record<string, unknown>>;
+  pidLiveness(): Promise<PidLiveness>;
+  progress?(elapsedSeconds: number): void;
+}
+
 export interface ReadinessPolicy {
   readonly deadlineMs: number;
   readonly cadenceMs: number;
@@ -36,8 +54,8 @@ export function decideReadiness(
   policy: ReadinessPolicy,
 ): ReadinessDecision {
   const elapsedMs = nowMs - state.startedAtMs;
-  if (elapsedMs >= policy.deadlineMs) return { kind: 'timeout' };
   if (liveness === 'dead' && state.sawAlive) return { kind: 'exited' };
+  if (elapsedMs >= policy.deadlineMs) return { kind: 'timeout' };
 
   const nextState = { ...state, sawAlive: state.sawAlive || liveness === 'alive' };
   if (!nextState.progressNoted && elapsedMs >= policy.progressAfterMs) {

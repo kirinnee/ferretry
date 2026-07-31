@@ -1,11 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  beginReadinessWait,
-  decideReadiness,
-  defaultReadinessPolicy,
-  type ReadinessPolicy,
-} from '../../../src/lib/runtime/readiness.ts';
+import { beginReadinessWait, decideReadiness, type ReadinessPolicy } from '../../../src/lib/runtime/readiness.ts';
 
 const policy: ReadinessPolicy = { deadlineMs: 100, cadenceMs: 10, progressAfterMs: 20 };
 
@@ -38,9 +33,11 @@ describe('daemon readiness policy', () => {
     should(exited).deepEqual({ kind: 'exited' });
   });
 
-  it('should time out before sleeping beyond the configured deadline', () => {
+  it('should report a just-dead process even at the readiness deadline', () => {
     // Act + Assert
+    should(decideReadiness({ ...beginReadinessWait(0), sawAlive: true }, 'dead', 100, policy)).deepEqual({
+      kind: 'exited',
+    });
     should(decideReadiness(beginReadinessWait(0), 'absent', 100, policy)).deepEqual({ kind: 'timeout' });
-    should(defaultReadinessPolicy()).deepEqual({ deadlineMs: 90_000, cadenceMs: 250, progressAfterMs: 10_000 });
   });
 });

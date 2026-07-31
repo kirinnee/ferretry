@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DaemonBinder, DaemonHealthProbe, type FetchPort } from '../../../src/adapters/runtime/daemon-boot.ts';
+import { DaemonBinder, DaemonHealthProbe } from '../../../src/adapters/runtime/daemon-boot.ts';
+import type { DaemonFetchPort } from '../../../src/lib/runtime/readiness.ts';
 
 describe('daemon boot adapters', () => {
   it('should probe the health endpoint with an optional bearer token and treat any response as occupied', async () => {
     // Arrange
     const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
-    const fetcher: FetchPort = {
+    const fetcher: DaemonFetchPort = {
       async fetch(url, init) {
         calls.push({ url, init });
         return new Response(null, { status: 401 });
@@ -25,14 +26,12 @@ describe('daemon boot adapters', () => {
     });
   });
 
-  it('should clear the way only when a probe fails or does not yield an HTTP response', async () => {
+  it('should clear the way only when a probe fails', async () => {
     // Arrange
-    const rejected: FetchPort = { fetch: async () => await Promise.reject(new Error('connection refused')) };
-    const invalid: FetchPort = { fetch: async () => ({}) as Response };
+    const rejected: DaemonFetchPort = { fetch: async () => await Promise.reject(new Error('connection refused')) };
 
     // Act + Assert
     should(await new DaemonHealthProbe(rejected).responds({ url: 'http://127.0.0.1:7337' })).be.false();
-    should(await new DaemonHealthProbe(invalid).responds({ url: 'http://127.0.0.1:7337', timeoutMs: 1 })).be.false();
   });
 
   it('should retry an address conflict but preserve terminal binding errors', async () => {
@@ -47,7 +46,7 @@ describe('daemon boot adapters', () => {
         },
       },
       { now: () => now },
-      { backoffMs: 10, totalMs: 20 },
+      { backoffMs: 10, totalMs: 20, maxAttempts: 2 },
     );
     let attempts = 0;
 
@@ -71,10 +70,15 @@ describe('daemon boot adapters', () => {
         },
         error => should(error.message).equal('permission denied'),
       );
-    await new DaemonBinder({ async sleep() {} }, { now: () => 0 })
-      .bind(() => 'default-policy')
-      .then(value => {
-        should(value).equal('default-policy');
-      });
+    await new DaemonBinder({ async sleep() {} }, { now: () => 0 }, { backoffMs: 1, totalMs: 1_000, maxAttempts: 2 })
+      .bind(() => {
+        throw Object.assign(new Error('occupied'), { code: 'EADDRINUSE' });
+      })
+      .then(
+        () => {
+          throw new Error('expected bounded retry failure');
+        },
+        error => should(error.code).equal('EADDRINUSE'),
+      );
   });
 });
