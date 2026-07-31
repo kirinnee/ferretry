@@ -119,6 +119,9 @@ try {
       const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
       await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
       process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
+      const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
+      await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
+      process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);

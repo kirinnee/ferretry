@@ -19,6 +19,7 @@ import type {
   WardenStatusView,
   LearningStatus,
   ProposalView,
+  AttentionSnapshot,
 } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -35,6 +36,7 @@ import type { AnalyticsAggregateResponse } from '../src/features/analytics/analy
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
+import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
@@ -371,6 +373,35 @@ const PALETTE_SETTINGS = [
   { id: 'setting-density', label: 'Density', description: 'How tightly rows pack', settingId: 'density' },
   { id: 'setting-theme', label: 'Theme', description: 'Pick a colour family and mode', settingId: 'theme' },
 ];
+
+/** Attention fixture exercises a type-specific action and a deliberately long
+ * background, so both the rail treatment and the phone disclosure are visible. */
+const ATTENTION: AttentionSnapshot = {
+  v: 1,
+  sessionId: 'harness-session',
+  count: 1,
+  parseErrors: 0,
+  updatedAt: '2026-07-31T12:00:00.000Z',
+  items: [
+    {
+      id: 'A3',
+      source: 'agent-raised',
+      sourceRef: null,
+      sourceSeq: 1,
+      subject: 'Approve this browser pairing request',
+      why: 'The device needs permission before it can read this daemon’s session ledger.',
+      context:
+        'This paired browser holds no daemon identity in its bundle. Approval is deliberately runtime-scoped, and the detail stays behind a disclosure on a phone so the action remains visible. A daemon switch clears this ledger before the next scoped request lands, so one daemon can never briefly show another daemon’s attention.',
+      waitingSince: '2026-07-31T11:30:00.000Z',
+      howToResolve: 'Approve to grant this browser access to the paired daemon.',
+      ask: { kind: 'permission' },
+      raisedBy: 'agent',
+      raisedBySession: 'harness-session',
+      raisedByName: 'Zoe',
+    },
+  ],
+  resolved: [],
+};
 
 const BROWSER_LOGIN: BrowserLoginView = {
   state: 'open',
@@ -835,6 +866,21 @@ function Shell() {
               status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
             />
           </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Attention ledger',
+      render: () => (
+        <Card className="min-h-[360px] overflow-hidden">
+          <AttentionBoard
+            connection={daemon}
+            snapshot={ATTENTION}
+            loading={false}
+            error={null}
+            now={HARNESS_NOW}
+            onAction={() => {}}
+          />
         </Card>
       ),
     },

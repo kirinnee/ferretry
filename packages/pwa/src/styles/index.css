@@ -1,6 +1,7 @@
 @import './themes.css';
 @import '../components/session-screens.css';
 @import '../features/tasks/task-dag-graph.css';
+@import '../features/attention/attention-board.css';
 
 /* ============================================================================
    Ferretry UI design system — base elements, shell/layout and component classes.
