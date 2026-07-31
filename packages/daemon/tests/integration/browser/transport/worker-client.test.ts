@@ -248,12 +248,12 @@ describe('browser worker client — requests', () => {
     const granted = reportedParams((await client.navigate('environment')).url) as Record<string, string>;
 
     // Assert: nothing outside the allowlist reaches the browser, and loopback never goes via a proxy.
-    should(granted['PATH']).equal('set');
-    should(granted['HOME']).equal('/home/example');
-    should(granted['LANG']).equal('en_US.UTF-8');
+    should(granted.PATH).equal('set');
+    should(granted.HOME).equal('/home/example');
+    should(granted.LANG).equal('en_US.UTF-8');
     should(granted).not.have.property('FY_SECRET');
     should(granted).not.have.property('HTTP_PROXY');
-    should(granted['NO_PROXY']).equal('127.0.0.1,localhost,::1');
+    should(granted.NO_PROXY).equal('127.0.0.1,localhost,::1');
     should(granted['no_proxy']).equal('127.0.0.1,localhost,::1');
   });
 

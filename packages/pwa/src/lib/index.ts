@@ -11,6 +11,8 @@ export * from '../features/analytics/analytics-response-view.tsx';
 export * from '../features/analytics/analytics-query-complete.ts';
 export * from '../features/analytics/analytics-query-autocomplete.tsx';
 export * from '../features/learning/learning-header.tsx';
+export * from '../features/analytics/analytics-api.ts';
+export * from '../features/analytics/global-analytics-page.tsx';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
 export * from '../features/tasks/task-dag-graph.tsx';
