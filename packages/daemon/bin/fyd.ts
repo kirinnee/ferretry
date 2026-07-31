@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { join } from 'node:path';
+import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
@@ -71,6 +72,11 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
+import {
+  FileTaskStore,
+  KeyedSerialExecutor as TaskBoardSerialExecutor,
+  TaskRecordService,
+} from '../src/adapters/tasks/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   AttentionService,
@@ -91,6 +97,11 @@ import {
   SelfRestartCoordinator,
   SessionHealthService,
   SessionLifecycleConfigSchema,
+  TaskError,
+  tryParseSessionId,
+  type AssigneeObservation,
+  type FoundationPaths,
+  type TaskSubsystem,
   SessionLifecycleService,
   SessionResumeService,
   defaultSessionHealthSettings,
@@ -108,6 +119,7 @@ import {
   type DaemonReadinessPorts,
   type MillisecondClockPort,
   type MountedSubsystems,
+  type SessionId,
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -214,9 +226,15 @@ export interface DaemonWorld {
   /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
   readonly api: ApiServerPort;
-  /** The subsystems mounted onto that surface. Every field here is a capability the running product
-   *  actually has; a subsystem absent from it is one the daemon never constructs. */
-  readonly subsystems: MountedSubsystems;
+  /**
+   * The subsystems mounted onto that surface. Every field the result carries is a capability the
+   * running product actually has; a subsystem absent from it is one the daemon never constructs.
+   *
+   * Built per opened storage rather than at process start because a subsystem that reads the
+   * authoritative session set — the task boards do, for the fleet-wide read and for the live view —
+   * cannot be handed a session index that has not been opened and locked yet.
+   */
+  readonly createSubsystems: (storage: DaemonStorage) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -258,6 +276,63 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/**
+ * The task record boards, over the state home and the opened session index.
+ *
+ * The board is ONE JSON snapshot inside the session's own private directory, which is why the path
+ * is derived here and never by the store: layout is the composition root's business, and a store that
+ * derived its own path could not be pointed at a test's temp home.
+ *
+ * The id is PARSED rather than asserted. A path-unsafe session id must never become a directory, so
+ * the refusal is raised in the task protocol's own taxonomy — the mount answers `invalid` with 400
+ * instead of leaking a schema error as a 500.
+ */
+function createTaskSubsystem(
+  paths: FoundationPaths,
+  storage: DaemonStorage,
+  clock: SystemClock,
+  boards: TaskBoardSerialExecutor,
+): TaskSubsystem {
+  /** The document a session's own state directory holds, parsed, or `undefined` when unusable. */
+  const observed = async (id: SessionId): Promise<AssigneeObservation | undefined> => {
+    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const state = SessionStateSchema.safeParse(rawState);
+    if (!state.success) return undefined;
+    const config = SessionConfigSchema.safeParse(rawConfig);
+    return {
+      sessionId: id,
+      // A missing or unreadable configuration costs the display name, not the whole observation: the
+      // state document is what carries the facts the board reports.
+      name: config.success ? config.data.name : null,
+      status: state.data.status,
+      lastActivityAt: state.data.lastActivityAt ?? null,
+    };
+  };
+  return {
+    board: sessionId => {
+      const id = tryParseSessionId(sessionId);
+      if (id === undefined) throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
+      return new TaskRecordService(
+        id,
+        new FileTaskStore(join(createSessionPaths(paths, id).directory, 'tasks.json'), { executor: boards }),
+      );
+    },
+    sessionIds: async () => storage.listSessions().map(session => session.id),
+    /**
+     * An assignee is matched against SESSION IDS only.
+     *
+     * Resolving a teammate NAME would mean reading every session's configuration on every list row,
+     * and the daemon has no fleet directory mounted to index them. An assignee that names something
+     * else is honestly unknown rather than guessed at.
+     */
+    observe: async assignee => {
+      const id = tryParseSessionId(assignee);
+      return id === undefined || storage.findSession(id) === undefined ? undefined : await observed(id);
+    },
+    now: () => clock.now(),
+  };
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -269,6 +344,10 @@ export function buildWorld(): DaemonWorld {
   const wardenFiles = new NodeWardenReportFileSystem();
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
+  // ONE executor for every task board in the process. The file store keys its transactions on the
+  // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
+  // would let two concurrent requests to the same board interleave read-modify-write and lose one.
+  const taskBoards = new TaskBoardSerialExecutor();
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -436,7 +515,7 @@ export function buildWorld(): DaemonWorld {
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
-    subsystems: {
+    createSubsystems: storage => ({
       attention: new AttentionService(
         // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
         // than asserted: an id the layout would not accept must never become a directory path.
@@ -452,7 +531,8 @@ export function buildWorld(): DaemonWorld {
         // next process would restart.
         { next: () => crypto.randomUUID() },
       ),
-    },
+      tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+    }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
@@ -507,7 +587,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       await world.api.listen(
         createMountedDispatcher(
           { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
-          world.subsystems,
+          world.createSubsystems(opened.storage),
         ),
         { host: config.host, port: config.port },
       ),

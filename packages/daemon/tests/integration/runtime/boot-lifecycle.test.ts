@@ -1,9 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
-import { EXIT_ALREADY_RUNNING } from '../../../src/lib/index.ts';
+import { EXIT_ALREADY_RUNNING, parseSessionId } from '../../../src/lib/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -40,6 +41,54 @@ async function seedHome(home: string, port: number): Promise<void> {
   const opened = await buildWorld().storage.open();
   await opened.storage.close();
   await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+}
+
+const SESSION_ID = 'wire-1';
+
+/**
+ * A real session in the state home, written through the daemon's own storage.
+ *
+ * Both documents go through the protocol schemas first, so the fixture cannot drift from what the
+ * daemon will parse back out — a hand-written config that the schema rejects would make the live
+ * view silently empty and the test would still pass.
+ */
+async function seedSession(home: string, at: string): Promise<void> {
+  process.env.FY_HOME = home;
+  const opened = await buildWorld().storage.open();
+  const id = parseSessionId(SESSION_ID);
+  await opened.storage.writeConfig(
+    id,
+    SessionConfigSchema.parse({
+      id: SESSION_ID,
+      incarnation: `${SESSION_ID}-1`,
+      runtimeGeneration: 1,
+      name: 'Wire Subsystems',
+      boardAccess: 'none',
+      agent: 'claude-auto',
+      harness: 'claude',
+      modelHint: 'opus',
+      mode: 'auto',
+      remoteControl: false,
+      harnessFlags: [],
+      cwd: home,
+      createdAt: at,
+      updatedAt: at,
+      turn: 1,
+      intervalSeconds: 30,
+      timeoutSeconds: 0,
+      nudgeAfterSeconds: 0,
+      killAfterSeconds: 0,
+      directSendMaxChars: 4_096,
+      resumeMenuChoice: 'full',
+      maxSnapshots: 10,
+      retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+    }),
+  );
+  await opened.storage.writeState(
+    id,
+    SessionStateSchema.parse({ id: SESSION_ID, status: 'running', turn: 1, lastActivityAt: at }),
+  );
+  await opened.storage.close();
 }
 
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
@@ -106,6 +155,83 @@ describe('daemon boot lifecycle', () => {
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
+  });
+
+  /**
+   * The task board, driven through the production composition root over a real socket.
+   *
+   * This is the test the unit "is it mounted" assertion cannot be: it proves the board DOES ITS JOB —
+   * the record is created by the real reducer, committed by the real file store into the real session
+   * directory inside the state home, read back by a second request, enriched from the real session
+   * index, and visible to the fleet-wide read. Nothing here is faked but the shutdown signal.
+   */
+  it('should create, persist, enrich and re-read a task through the mounted board', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-tasks');
+    const port = await freeLoopbackPort();
+    const at = '2026-07-31T09:00:00.000Z';
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, at);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/tasks`;
+
+    // Act
+    const created = await fetch(base, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'feature',
+        title: 'Mount the task boards',
+        ask: { text: 'the daemon had no boards', source: 'human' },
+      }),
+    });
+    const createdBody = (await created.json()) as { id: string; assignee: string; live: { assigneeName: string } };
+    const advanced = await fetch(`${base}/${createdBody.id}`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'status', status: 'in_progress', reason: 'wiring it' }),
+    });
+    const listed = await fetch(base, { headers });
+    const detail = await fetch(`${base}/${createdBody.id}`, { headers });
+    const fleet = await fetch(`http://127.0.0.1:${port}/v1/tasks`, { headers });
+    const listedBody = (await listed.json()) as { tasks: { id: string; status: string }[]; parseErrors: number };
+    const detailBody = (await detail.json()) as { activity: { type: string }[] };
+    const fleetBody = (await fleet.json()) as { sessionId: null; tasks: { sessionId: string; id: string }[] };
+    // The board is one atomic snapshot inside the session's own private directory.
+    const snapshot = await readFile(join(home, 'state', 'sessions', SESSION_ID, 'tasks.json'), 'utf8');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(created.status).equal(201);
+    should(createdBody.id).equal('F1');
+    // An omitted assignee means the owning session, which the mount must not collapse to `null`.
+    should(createdBody.assignee).equal(SESSION_ID);
+    // Enrichment came from the real session index, not from anything the request carried.
+    should(createdBody.live.assigneeName).equal('Wire Subsystems');
+    should(advanced.status).equal(200);
+    should(listed.status).equal(200);
+    should(listedBody.parseErrors).equal(0);
+    should(listedBody.tasks.map(task => [task.id, task.status])).deepEqual([['F1', 'in_progress']]);
+    // The history survived the second request, which only a durable board can do.
+    should(detailBody.activity.map(event => event.type)).deepEqual(['created', 'status']);
+    should(fleetBody.sessionId).be.null();
+    should(fleetBody.tasks.map(task => [task.sessionId, task.id])).deepEqual([[SESSION_ID, 'F1']]);
+    should(JSON.parse(snapshot) as { tasks: unknown[] }).have.property('tasks').with.length(1);
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

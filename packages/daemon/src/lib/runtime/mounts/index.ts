@@ -6,6 +6,7 @@ import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { attentionRoutes } from './attention.ts';
 import { pinRoutes } from './pins.ts';
+import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -28,6 +29,8 @@ import { pinRoutes } from './pins.ts';
 export interface MountedSubsystems {
   readonly attention: AttentionService;
   readonly pins: PinService;
+  /** The task record boards: one per session, plus the fleet-wide read across all of them. */
+  readonly tasks: TaskSubsystem;
 }
 
 /**
@@ -37,7 +40,12 @@ export interface MountedSubsystems {
  * literal paths (`/healthz`, `/usage`, `/metrics`), so no subsystem pattern can shadow one.
  */
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
-  return [...daemonApiRoutes(base), ...attentionRoutes(subsystems.attention), ...pinRoutes(subsystems.pins)];
+  return [
+    ...daemonApiRoutes(base),
+    ...attentionRoutes(subsystems.attention),
+    ...pinRoutes(subsystems.pins),
+    ...taskRoutes(subsystems.tasks),
+  ];
 }
 
 /** The dispatcher the transport adapter serves, over the full mounted surface. */

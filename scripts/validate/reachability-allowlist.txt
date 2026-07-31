@@ -38,22 +38,12 @@ packages/daemon/src/lib/names/pool.ts # PR #9: add the callsign name pool, manag
 packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 
 # PR #10 — port the task record system and its file store
-packages/daemon/src/adapters/tasks/atomic-file.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/file-operations.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/file-task-store.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/serial-executor.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/task-record-service.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-error.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-graph.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-id.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-order.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-policy.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-reducer.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-snapshot.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-store-port.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-title.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+# The rest of PR #10 is mounted: bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per
+# session and the task routes serve it. This one module has no honest caller left — it duplicates
+# packages/cli/src/lib/tasks/task-title.ts, which the CLI already uses for its own --title guidance,
+# and the API boundary enforces the five-word rule through the protocol's TaskTitleSchema. Importing
+# it from a route to satisfy the gate would be a fake edge; it should be DELETED as a duplicate.
+packages/daemon/src/lib/tasks/task-title.ts # PR #10: dead duplicate of the CLI's task-title; delete it rather than wire it
 
 # PR #12 — add bounded docx extraction
 packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
