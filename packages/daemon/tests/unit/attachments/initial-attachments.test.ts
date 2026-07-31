@@ -107,13 +107,21 @@ describe('decodeInitialAttachment', () => {
   });
 
   it('should refuse a file larger than a start may buffer', () => {
-    // Arrange — one byte over the ceiling, built without holding a second copy of it as base64 text.
-    const oversized = Buffer.alloc(MAX_INITIAL_ATTACHMENT_BYTES + 1, 0x41).toString('base64');
-
+    // The ceiling is injected rather than allocated: proving the refusal against the shipped 32 MiB
+    // would measure how fast this machine can base64-encode, not what the policy decides.
     // Act + Assert
-    should(() => decodeInitialAttachment({ filename: 'huge.bin', base64: oversized })).throw(
-      /over the \d+-byte limit/u,
+    should(() => decodeInitialAttachment({ filename: 'huge.bin', base64: base64('nine byte') }, { maxBytes: 8 })).throw(
+      'attachment huge.bin is 9 bytes, over the 8-byte limit',
     );
+    should(
+      decodeInitialAttachment({ filename: 'huge.bin', base64: base64('exactly8') }, { maxBytes: 8 }).bytes,
+    ).have.property('byteLength', 8);
+  });
+
+  it('should ship a ceiling comfortably above any document a human attaches', () => {
+    // Act + Assert
+    should(MAX_INITIAL_ATTACHMENT_BYTES).equal(32 * 1024 * 1024);
+    should(MAX_INITIAL_ATTACHMENTS).equal(16);
   });
 });
 
@@ -138,6 +146,10 @@ describe('decodeInitialAttachments', () => {
 
     // Act + Assert
     should(() => decodeInitialAttachments(stated)).throw(/at most 16 attachments/u);
+    // The count is a ceiling the caller of the policy owns, like the byte limit beside it.
+    should(() => decodeInitialAttachments(stated.slice(0, 2), { maxAttachments: 1 })).throw(
+      'a start may carry at most 1 attachments; this one carries 2',
+    );
   });
 });
 

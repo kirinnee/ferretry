@@ -53,6 +53,18 @@ export class InitialAttachmentError extends Error {
   }
 }
 
+/**
+ * The ceilings, overridable.
+ *
+ * Injected the same way `extractDocxText` takes `maxCharacters`: the numbers are this deployment's
+ * answer rather than the domain's, and a test that had to allocate 32 MiB to prove the refusal would
+ * be measuring the machine it runs on.
+ */
+export interface InitialAttachmentLimits {
+  readonly maxAttachments?: number;
+  readonly maxBytes?: number;
+}
+
 /** One attachment exactly as the protocol states it. */
 export interface InitialAttachmentRequest {
   readonly filename: string;
@@ -113,16 +125,20 @@ function looksLikeOoxml(bytes: Uint8Array): boolean {
  * document, and reporting "this PNG is not a valid DOCX" beside a file the agent can open perfectly
  * well is noise dressed as a failure.
  */
-export function decodeInitialAttachment(request: InitialAttachmentRequest): DecodedInitialAttachment {
+export function decodeInitialAttachment(
+  request: InitialAttachmentRequest,
+  limits: InitialAttachmentLimits = {},
+): DecodedInitialAttachment {
+  const maxBytes = limits.maxBytes ?? MAX_INITIAL_ATTACHMENT_BYTES;
   const filename = safeAttachmentFilename(request.filename);
   const bytes = decodeBase64(request.base64);
   if (bytes === undefined || bytes.byteLength === 0) {
     throw new InitialAttachmentError('undecodable', `attachment ${filename} is not decodable base64 content`);
   }
-  if (bytes.byteLength > MAX_INITIAL_ATTACHMENT_BYTES) {
+  if (bytes.byteLength > maxBytes) {
     throw new InitialAttachmentError(
       'too_large',
-      `attachment ${filename} is ${bytes.byteLength} bytes, over the ${MAX_INITIAL_ATTACHMENT_BYTES}-byte limit`,
+      `attachment ${filename} is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit`,
     );
   }
   const stated = request.mime?.trim() ?? '';
@@ -139,14 +155,16 @@ export function decodeInitialAttachment(request: InitialAttachmentRequest): Deco
 /** Every stated attachment, decoded, or the first refusal among them. */
 export function decodeInitialAttachments(
   requests: readonly InitialAttachmentRequest[],
+  limits: InitialAttachmentLimits = {},
 ): readonly DecodedInitialAttachment[] {
-  if (requests.length > MAX_INITIAL_ATTACHMENTS) {
+  const maxAttachments = limits.maxAttachments ?? MAX_INITIAL_ATTACHMENTS;
+  if (requests.length > maxAttachments) {
     throw new InitialAttachmentError(
       'too_many',
-      `a start may carry at most ${MAX_INITIAL_ATTACHMENTS} attachments; this one carries ${requests.length}`,
+      `a start may carry at most ${maxAttachments} attachments; this one carries ${requests.length}`,
     );
   }
-  return requests.map(request => decodeInitialAttachment(request));
+  return requests.map(request => decodeInitialAttachment(request, limits));
 }
 
 /** Text lifted out of an attachment, and where it will be written. */
