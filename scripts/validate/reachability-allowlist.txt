@@ -95,3 +95,14 @@ packages/daemon/src/lib/warden/attention.ts # PR #19: warden supervision; the re
 packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/failover.ts # PR #19: warden supervision; the report reader is mounted but this is not
+
+# PR #21 — establish terminal IO policies
+packages/daemon/src/adapters/terminal/index.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/terminal/service.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/terminal/stream-bridge.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/terminal/tmux-terminal-runtime.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/lib/terminal/contracts.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/lib/terminal/index.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/lib/terminal/policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/lib/terminal/runtime-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
