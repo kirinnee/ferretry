@@ -2,6 +2,7 @@
 export const packageRole = 'pwa' as const;
 
 export * from '../components/question-form.tsx';
+export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
@@ -78,6 +79,7 @@ export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/learning/learning-page.tsx';
 export * from './runtime-models.ts';
 export * from './attachment-ids.ts';
+export * from './attachment-unlock.ts';
 export * from './push-subscriptions.ts';
 export * from './send-ledger.ts';
 export * from './send-ledger-join.ts';

@@ -123,6 +123,12 @@ try {
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
 
+      const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
+      await page.goto(`${server.url}?attachment-unlock`);
+      await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });
+      process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
+      await page.goto(server.url.toString());
+
       // The harness stacks every ported surface down one column, so most of it
       // is below the fold. A full-page stitch cannot prove those: the app bar
       // is sticky, and Chrome repaints a fixed layer into every stitched tile.
