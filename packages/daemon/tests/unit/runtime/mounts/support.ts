@@ -1,11 +1,14 @@
 import {
   PIN_SCHEMA_VERSION,
+  SessionConfigSchema,
+  SessionStateSchema,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type CreateTerminalRequest,
   type LearningConfig,
   type Pin,
   type PinSnapshot,
+  type SessionView,
   type TaskActionRequest,
   type TaskCreateRequestInput,
   type TerminalListView,
@@ -32,6 +35,7 @@ import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/anal
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
+import { SessionReadError, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import {
   applyTaskAction,
@@ -535,6 +539,72 @@ export function proposal(overrides: Partial<Proposal> & { readonly id: string })
     identity: 'always-run-the-repo-task-surface',
     history: [{ at: AT, event: 'proposed:run-1', by: 'miner' }],
     ...overrides,
+  };
+}
+
+/**
+ * One session view, with only the fields a case cares about spelled out.
+ *
+ * Every document goes through the PROTOCOL schemas, so a fixture cannot drift from what the wire
+ * demands: a view the schema would reject cannot be handed to a route here and pass.
+ */
+export function sessionView(
+  id: string,
+  config: Readonly<Record<string, unknown>> = {},
+  state: Readonly<Record<string, unknown>> = {},
+): SessionView {
+  return {
+    config: SessionConfigSchema.parse({
+      id,
+      incarnation: `${id}-1`,
+      runtimeGeneration: 1,
+      name: 'Wire Subsystems',
+      boardAccess: 'none',
+      agent: 'claude-auto',
+      harness: 'claude',
+      modelHint: 'opus',
+      mode: 'auto',
+      remoteControl: false,
+      harnessFlags: [],
+      cwd: '/work/ferretry',
+      createdAt: AT,
+      updatedAt: AT,
+      turn: 1,
+      intervalSeconds: 30,
+      timeoutSeconds: 0,
+      nudgeAfterSeconds: 0,
+      killAfterSeconds: 0,
+      directSendMaxChars: 4_096,
+      resumeMenuChoice: 'full',
+      maxSnapshots: 10,
+      retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+      ...config,
+    }),
+    state: SessionStateSchema.parse({ id, status: 'running', turn: 1, lastActivityAt: AT, ...state }),
+    directory: `/state/sessions/${id}`,
+  };
+}
+
+/**
+ * A session read over a fixed set of views.
+ *
+ * The REFUSALS are the part worth faking: an id the layout would reject and a session whose
+ * documents will not parse are both states the production reader raises in its own taxonomy, and the
+ * mount's whole job is restating them as answers a caller can act on.
+ */
+export function sessionDirectory(
+  views: readonly SessionView[] = [],
+  refusals: { readonly invalid?: readonly string[]; readonly unusable?: readonly string[] } = {},
+): SessionDirectorySubsystem {
+  return {
+    list: async () => views,
+    get: async reference => {
+      if ((refusals.invalid ?? []).includes(reference))
+        throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if ((refusals.unusable ?? []).includes(reference))
+        throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
+      return views.find(view => view.config.id === reference);
+    },
   };
 }
 

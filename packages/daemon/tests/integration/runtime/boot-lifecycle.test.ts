@@ -8,7 +8,9 @@ import {
   LearningStatusSchema,
   ProposalViewSchema,
   SessionConfigSchema,
+  SessionListSchema,
   SessionStateSchema,
+  SessionViewSchema,
   NameSuggestionsSchema,
   TerminalListViewSchema,
   TerminalViewSchema,
@@ -322,6 +324,76 @@ describe('daemon boot lifecycle', () => {
     should(JSON.parse(snapshot) as { tasks: unknown[] })
       .have.property('tasks')
       .with.length(1);
+  });
+
+  /**
+   * The session read, driven through the production composition root over a real socket.
+   *
+   * It proves the mount DOES ITS JOB rather than merely existing: the fleet comes from the real
+   * session index, both documents are parsed back out by the same protocol schemas that wrote them,
+   * and the directory each view reports is the one the layout actually put the documents in — which
+   * the case checks by reading a file out of it. A session the index does not hold is absent, and a
+   * session whose documents no longer satisfy the protocol is refused rather than reported missing.
+   */
+  it('should list and read the seeded sessions through the mounted session read', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-sessions');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-one');
+    await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-two', { status: 'completed', turn: 4 });
+    // A session the index holds whose state document the protocol will refuse. Written straight into
+    // the session directory, because the storage writer would not accept it either.
+    await seedSession(home, '2026-07-31T10:00:00.000Z', 'wire-bad');
+    await writeFile(join(home, 'state', 'sessions', 'wire-bad', 'state.json'), JSON.stringify({ id: 'wire-bad' }), {
+      mode: 0o600,
+    });
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+
+    // Act
+    const listed = await fetch(sessions, { headers });
+    const one = await fetch(`${sessions}/wire-one`, { headers });
+    const absent = await fetch(`${sessions}/wire-ghost`, { headers });
+    const unusable = await fetch(`${sessions}/wire-bad`, { headers });
+    const listedBody = SessionListSchema.parse(await listed.json());
+    const oneBody = SessionViewSchema.parse(await one.json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(listed.status).equal(200);
+    // The two usable sessions, in the real index's newest-first order. The third is omitted rather
+    // than half-reported.
+    should(listedBody.map(session => [session.config.id, session.state.status])).deepEqual([
+      ['wire-two', 'completed'],
+      ['wire-one', 'running'],
+    ]);
+    should(one.status).equal(200);
+    should(oneBody.config.name).equal('Wire Subsystems');
+    should(oneBody.config.cwd).equal(home);
+    // The reported directory is the layout's own, proved by reading the marker the storage wrote.
+    should(oneBody.directory).equal(join(home, 'state', 'sessions', 'wire-one'));
+    should(await readFile(join(oneBody.directory, 'session-version'), 'utf8')).not.be.empty();
+    should(absent.status).equal(404);
+    should((await absent.json()) as { code: string }).have.property('code', 'not-found');
+    // Omitted from the list, but answerable here: "it does not exist" would be a lie.
+    should(unusable.status).equal(500);
+    should((await unusable.json()) as { code: string }).have.property('code', 'unusable_session_document');
   });
 
   /**

@@ -18,6 +18,8 @@ import {
   learningSubsystem,
   nameSubsystem,
   pinService,
+  sessionDirectory,
+  sessionView,
   taskSubsystem,
 } from './support.ts';
 
@@ -33,6 +35,7 @@ const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_7
 const subsystems = (): MountedSubsystems => ({
   attention: attentionService(),
   pins: pinService([]),
+  sessions: sessionDirectory([sessionView('s1')]),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
@@ -52,6 +55,8 @@ describe('the mounted daemon surface', () => {
       'GET /usage',
       'GET /v1/usage',
       'GET /metrics',
+      'GET /v1/sessions',
+      'GET /v1/sessions/:sessionId',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
@@ -97,6 +102,8 @@ describe('the mounted daemon surface', () => {
 
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
+    const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
+    const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
     const attention = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
     const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
@@ -107,6 +114,9 @@ describe('the mounted daemon surface', () => {
 
     // Assert
     should(health.status).equal(200);
+    should(sessions.status).equal(200);
+    // The id pattern is reached rather than shadowed by the deeper per-session routes below it.
+    should(session.status).equal(200);
     // The session is unknown to this fixture, which still proves the route is mounted and reached.
     should(pins.status).equal(404);
     should(attention.status).equal(200);
