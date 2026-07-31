@@ -73,7 +73,9 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
 import {
+  FileSessionEnvironmentStore,
   FileSessionTaskStore,
+  NodeSessionCredentialIssuer,
   lifecycleConfigDocument,
   NodeWorkingDirectoryResolver,
   StorageSessionLifecycleRepository,
@@ -1603,6 +1605,15 @@ export function buildWorld(): DaemonWorld {
   const payloadDigests: PayloadDigestPort = {
     hex: payload => createHash('sha256').update(payload, 'utf8').digest('hex'),
   };
+  /**
+   * The per-session credential and the file it is delivered through.
+   *
+   * ONE store instance for the whole process, shared by the lifecycle that writes an environment and
+   * the launcher that reads it back — two stores over the same layout would be two answers to "what
+   * is this session's secret" the moment either one changed.
+   */
+  const sessionCredentials = new NodeSessionCredentialIssuer();
+  const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -1612,6 +1623,12 @@ export function buildWorld(): DaemonWorld {
         launcher,
         tasks: new FileSessionTaskStore(taskId => createSessionPaths(paths, taskId).directory),
         directories: new NodeWorkingDirectoryResolver(),
+        // EVERY session gets a credential, not only one that asked for board access: the board
+        // domain keys `TaskBoardSession` on this hash, so a session minted without one could never
+        // be invited to a board later. Holding a credential is identity; a grant is authority, and
+        // the two are separate records.
+        credentials: sessionCredentials,
+        environment: sessionEnvironments,
         // A caller that has already minted the id hands it over, so the plan and the record cannot
         // disagree about which session they describe.
         ids: id === undefined ? sessionIds : { next: () => id },
@@ -1704,6 +1721,11 @@ export function buildWorld(): DaemonWorld {
       // tmux server the host already runs.
       new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
       milliseconds => Bun.sleep(milliseconds),
+      undefined,
+      // The pane is handed its own credential through `tmux -e`, never through argv: argv is
+      // world-readable on this host through /proc, and the fleet wrappers read the value from their
+      // environment anyway.
+      sessionEnvironments,
     ),
     createSessionLifecycle,
     createSessionHealth: (storage, settings) =>

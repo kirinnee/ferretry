@@ -98,6 +98,7 @@ export function createSessionRecord(
       mode: request.mode,
       ...(prompt ? { prompt } : {}),
       ...(parent ? { parent } : {}),
+      ...(request.sessionCapabilityHash ? { sessionCapabilityHash: request.sessionCapabilityHash } : {}),
       createdAt: context.at,
       updatedAt: context.at,
       tmuxSession: sessionTmuxName(context.id, context.settings),

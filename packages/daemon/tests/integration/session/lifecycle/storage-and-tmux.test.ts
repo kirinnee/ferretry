@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,9 @@ import should from 'should';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
+  FileSessionEnvironmentStore,
   FileSessionTaskStore,
+  NodeSessionCredentialIssuer,
   KeyedSerialExecutor,
   NodeWorkingDirectoryResolver,
   RuntimeEnvironment,
@@ -28,6 +31,7 @@ import {
   TmuxController,
   transitionSessionRecord,
   type SessionLifecycleRecord,
+  type SessionEnvironmentStore,
   type TmuxCommandPort,
 } from '../../../../src/lib/index.ts';
 
@@ -93,7 +97,7 @@ class RecordingTmuxPort implements TmuxCommandPort {
   }
 }
 
-function launcher(port: RecordingTmuxPort, readinessAttempts?: number) {
+function launcher(port: RecordingTmuxPort, readinessAttempts?: number, environment?: SessionEnvironmentStore) {
   const slept: number[] = [];
   const instance = new TmuxSessionLifecycleLauncher(
     new TmuxController(port),
@@ -101,6 +105,7 @@ function launcher(port: RecordingTmuxPort, readinessAttempts?: number) {
       slept.push(milliseconds);
     },
     readinessAttempts,
+    environment,
   );
   return { instance, slept };
 }
@@ -471,6 +476,65 @@ describe('the composed session lifecycle', () => {
         .split('\n')
         .map(line => JSON.parse(line).type),
     ).deepEqual(['session.created', 'session.starting', 'session.running', 'session.stopped']);
+    await opened.storage.close();
+  });
+
+  it('should hand the launched pane its own credential through tmux, keeping the plaintext off the session document', async () => {
+    // Arrange — the real credential issuer, the real environment file, and the real launcher, so the
+    // only fake in the chain is the tmux server itself.
+    const opened = await openTemporaryStorage();
+    const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
+    homes.add(cwd);
+    const port = new RecordingTmuxPort();
+    const environment = new FileSessionEnvironmentStore(id => createSessionPaths(opened.paths, id).directory);
+    const subject = new SessionLifecycleService(
+      {
+        repository: new StorageSessionLifecycleRepository(opened.storage),
+        launcher: launcher(port, undefined, environment).instance,
+        tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
+        directories: new NodeWorkingDirectoryResolver(),
+        ids: new TimeSessionIdFactory(
+          () => Date.parse(NOW),
+          () => 'ABCDEF12-3456-7890-ABCD-EF1234567890',
+        ),
+        clock: new SystemClock(() => new Date(NOW)),
+        serial: new KeyedSerialExecutor(),
+        credentials: new NodeSessionCredentialIssuer(),
+        environment,
+      },
+      defaultSessionLifecycleSettings,
+    );
+
+    // Act
+    const running = await subject.createAndStart({
+      agent: AGENT,
+      command: [AGENT, '--mode', 'auto'],
+      cwd,
+      mode: 'auto',
+      prompt: 'Prove the credential arrives',
+    });
+    const id = running.config.id;
+    const capability = (await environment.read(id)).FY_SESSION_BOARD_CAPABILITY;
+    const newSession = port.calls.find(call => call[0] === 'new-session');
+
+    // Assert — the pane really was launched carrying the secret, under the name the CLI reads.
+    should(capability).be.a.String().and.not.be.empty();
+    should(newSession).containDeep(['-e', `FY_SESSION_BOARD_CAPABILITY=${capability}`]);
+    // `-e` is an option of new-session, so it has to precede the agent word to be an environment
+    // entry at all rather than an argument handed to the agent.
+    should(newSession?.indexOf('-e')).be.below(newSession?.indexOf(AGENT) ?? -1);
+    // The hash is durable on the record — it is what the task-board domain keys grants on — and the
+    // capability itself appears nowhere any reader of the session document can reach.
+    should(running.config.sessionCapabilityHash).equal(
+      createHash('sha256')
+        .update(capability ?? '', 'utf8')
+        .digest('hex'),
+    );
+    const document = await readFile(createSessionPaths(opened.paths, id).config, 'utf8');
+    should(document).not.containEql(capability);
+    should(document).containEql(running.config.sessionCapabilityHash);
+    // Only the owning daemon may read the one copy of the plaintext.
+    should((await stat(environment.file(id))).mode & 0o777).equal(0o600);
     await opened.storage.close();
   });
 });
