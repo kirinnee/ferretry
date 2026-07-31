@@ -191,7 +191,7 @@ const readScopes = (value: unknown): Record<string, DaemonScopeEntry> => {
     const candidate = entry as Record<string, unknown>;
     const projectScope = readProjectScope(candidate.projectScope);
     if (projectScope === null) continue;
-    if (typeof candidate.seq !== 'number' || !Number.isFinite(candidate.seq)) continue;
+    if (typeof candidate.seq !== 'number' || !Number.isSafeInteger(candidate.seq) || candidate.seq < 0) continue;
     scopes[key] = { projectScope, seq: candidate.seq };
   }
   return scopes;
@@ -245,10 +245,21 @@ export const controlsFor = (record: ControlsRecord, daemonId: DaemonId): UiContr
 export const sameControls = (left: UiControls, right: UiControls): boolean =>
   left.projectScope === right.projectScope && DEVICE_KEYS.every(key => left[key] === right[key]);
 
-const nextSeq = (record: ControlsRecord): number => {
+const scopesForNextSeq = (
+  record: ControlsRecord,
+): { readonly scopes: Record<string, DaemonScopeEntry>; readonly seq: number } => {
+  const scopes = cloneScopes(record.scopes);
   let highest = -1;
   for (const entry of Object.values(record.scopes)) highest = Math.max(highest, entry.seq);
-  return highest + 1;
+  if (highest < Number.MAX_SAFE_INTEGER) return { scopes, seq: highest + 1 };
+
+  // A valid but exhausted persisted counter must not make the new entry tie
+  // with its predecessor. Rebase the bounded map while preserving its order.
+  const oldestToNewest = Object.keys(scopes).sort(
+    (left, right) => (scopes[left]?.seq ?? 0) - (scopes[right]?.seq ?? 0),
+  );
+  for (const [seq, key] of oldestToNewest.entries()) scopes[key] = { ...scopes[key]!, seq };
+  return { scopes, seq: oldestToNewest.length };
 };
 
 /**
@@ -287,8 +298,8 @@ export const withDaemonScope = (
   const normalized = readProjectScope(projectScope);
   if (normalized === scopeOf(record, daemonId)) return record;
   if (normalized === null) return withoutDaemonScope(record, daemonId);
-  const scopes = cloneScopes(record.scopes);
-  scopes[daemonId] = { projectScope: normalized, seq: nextSeq(record) };
+  const { scopes, seq } = scopesForNextSeq(record);
+  scopes[daemonId] = { projectScope: normalized, seq };
   return evictDaemonScopes({ ...record, scopes });
 };
 
@@ -360,12 +371,13 @@ export class DaemonControlsStore {
   }
 
   /**
-   * Applies device fields and, when the key is present, this daemon's scope.
-   * A patch that changes nothing writes nothing and notifies nobody.
+   * Applies device fields and this daemon's scope. Omitted or explicitly
+   * `undefined` fields are unchanged; `null` or blank explicitly clears a
+   * scope. A patch that changes nothing writes nothing and notifies nobody.
    */
   setControls(daemonId: DaemonId, patch: Partial<UiControls>): UiControls {
     let next = withDeviceControls(this.snapshot(), patch);
-    if ('projectScope' in patch) next = withDaemonScope(next, daemonId, patch.projectScope ?? null);
+    if (patch.projectScope !== undefined) next = withDaemonScope(next, daemonId, patch.projectScope);
     this.#commit(next);
     return this.controls(daemonId);
   }
@@ -381,7 +393,9 @@ export class DaemonControlsStore {
 
   /** Forgets one unpaired daemon's scope and leaves every other daemon's. */
   clearDaemon(daemonId: DaemonId): boolean {
-    return this.#commit(withoutDaemonScope(this.snapshot(), daemonId));
+    const changed = this.#commit(withoutDaemonScope(this.snapshot(), daemonId));
+    this.#merged.delete(daemonId);
+    return changed;
   }
 
   /**

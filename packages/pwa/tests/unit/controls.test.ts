@@ -188,6 +188,9 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
           'daemon-no-seq': { projectScope: '/x' },
           'daemon-bad-seq': { projectScope: '/x', seq: 'first' },
           'daemon-nan-seq': { projectScope: '/x', seq: Number.NaN },
+          'daemon-fractional-seq': { projectScope: '/x', seq: 1.5 },
+          'daemon-negative-seq': { projectScope: '/x', seq: -1 },
+          'daemon-unsafe-seq': { projectScope: '/x', seq: Number.MAX_VALUE },
         },
       }),
     );
@@ -297,6 +300,20 @@ describe('pure transitions', () => {
     const bounded = scopeRecord([['daemon-x', '/x', 1]]);
     should(evictDaemonScopes(bounded)).be.exactly(bounded);
   });
+
+  it('rebases an exhausted safe sequence before recording the newest scope', () => {
+    const entries = Array.from({ length: MAX_DAEMON_SCOPES }, (_, index) => [
+      `daemon-${index}`,
+      `/project-${index}`,
+      Number.MAX_SAFE_INTEGER - MAX_DAEMON_SCOPES + index + 1,
+    ]) as readonly (readonly [string, string, number])[];
+    const next = withDaemonScope(scopeRecord(entries), daemonId('daemon-newest'), '/project-newest');
+
+    should(Object.keys(next.scopes)).have.length(MAX_DAEMON_SCOPES);
+    should(next.scopes['daemon-0']).be.undefined();
+    should(next.scopes['daemon-newest']).eql({ projectScope: '/project-newest', seq: MAX_DAEMON_SCOPES });
+    should(Object.values(next.scopes).every(entry => Number.isSafeInteger(entry.seq))).be.true();
+  });
 });
 
 describe('DaemonControlsStore', () => {
@@ -383,11 +400,22 @@ describe('DaemonControlsStore', () => {
     should(storage.writes).have.length(2);
   });
 
-  it('treats a present projectScope key of undefined as clearing the scope', () => {
+  it('leaves an explicitly undefined projectScope alone and uses null to clear it', () => {
     const store = new DaemonControlsStore(new MemoryStorage());
     store.setControls(alpha, { projectScope: '/work/alpha' });
+    const scoped = store.controls(alpha);
 
-    should(store.setControls(alpha, { projectScope: undefined }).projectScope).be.null();
+    should(store.setControls(alpha, { projectScope: undefined })).be.exactly(scoped);
+    should(store.controls(alpha).projectScope).equal('/work/alpha');
+    should(store.setControls(alpha, { projectScope: null }).projectScope).be.null();
+  });
+
+  it('releases a daemon cached view on unpair even when it had no persisted scope', () => {
+    const store = new DaemonControlsStore(new MemoryStorage());
+    const before = store.controls(alpha);
+
+    should(store.clearDaemon(alpha)).be.false();
+    should(store.controls(alpha)).not.be.exactly(before);
   });
 
   it('treats a whitespace-only scope as no scope, and stores a valid one unmodified', () => {
