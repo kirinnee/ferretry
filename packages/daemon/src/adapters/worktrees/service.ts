@@ -36,11 +36,13 @@ function message(error: unknown): string {
 }
 
 function assertSafeInput(input: CreateManagedWorktreeInput): void {
+  // Both refusals name what is actually wrong: a caller that cannot tell a bad session id from an
+  // occupied destination cannot recover from either.
   if (!/^[a-zA-Z0-9._-]+$/.test(input.sessionId)) {
-    throw new WorktreeAdapterError('destination_exists', 'session id is unsafe for a managed checkout path');
+    throw new WorktreeAdapterError('invalid_session_id', 'session id is unsafe for a managed checkout path');
   }
   if (!/^[a-zA-Z0-9._-]{8,128}$/.test(input.ownershipToken)) {
-    throw new WorktreeAdapterError('verification_failed', 'ownership token must be an opaque 8-128 character id');
+    throw new WorktreeAdapterError('invalid_ownership_token', 'ownership token must be an opaque 8-128 character id');
   }
 }
 
@@ -64,7 +66,10 @@ function branchConflict(branch: string, entries: readonly { readonly branch?: st
   return entries.find(entry => entry.branch === branch);
 }
 
-function requireSourceCheckout(snapshot: GitCheckoutSnapshot, sourceCwd: string): asserts snapshot is GitCheckoutSnapshot & {
+function requireSourceCheckout(
+  snapshot: GitCheckoutSnapshot,
+  sourceCwd: string,
+): asserts snapshot is GitCheckoutSnapshot & {
   worktreeRoot: string;
   repositoryRoot: string;
   commonDir: string;
@@ -125,10 +130,7 @@ async function resolveCreationPlan(
   const repoName = path.basename(source.repositoryRoot);
   const repoDirectory = path.join(managedRoot, `${pathSlug(repoName, 32)}-${stableHash(source.commonDir, 10)}`);
   await ensurePlainDirectory(fileSystem, repoDirectory);
-  const destination = path.join(
-    repoDirectory,
-    `${pathSlug(branch, 48)}-${stableHash(branch, 8)}-${input.sessionId}`,
-  );
+  const destination = path.join(repoDirectory, `${pathSlug(branch, 48)}-${stableHash(branch, 8)}-${input.sessionId}`);
   if ((await fileSystem.type(destination)) !== 'missing') {
     throw new WorktreeAdapterError('destination_exists', `managed checkout destination exists: ${destination}`);
   }

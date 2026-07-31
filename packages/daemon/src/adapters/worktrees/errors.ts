@@ -2,6 +2,8 @@ import type { WorktreeRemovalBlocker } from '../../lib/worktrees/types.ts';
 
 export type WorktreeAdapterErrorCode =
   | 'not_git_repository'
+  | 'invalid_session_id'
+  | 'invalid_ownership_token'
   | 'invalid_branch'
   | 'branch_in_use'
   | 'ambiguous_remote_branch'
