@@ -19,7 +19,8 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
-import { packageRole } from '../src/lib/index.ts';
+import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
+import { createWardenPaths, packageRole } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -40,6 +41,10 @@ export interface DaemonWorld {
   readonly createAttentionLedgerRepository: (
     sessionDirectory: (sessionId: string) => string,
   ) => FileAttentionLedgerRepository;
+  /** Warden report access. The reports directory hangs off the state home,
+   *  which is only known once storage has resolved it, so this is a factory
+   *  rather than an instance. */
+  readonly wardenReports: (stateDirectory: string) => WardenReportReader;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -48,6 +53,7 @@ export function buildWorld(): DaemonWorld {
   const worktreeClock = new SystemWorktreeClock();
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
+  const wardenFiles = new NodeWardenReportFileSystem();
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -61,6 +67,7 @@ export function buildWorld(): DaemonWorld {
     ),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
+    wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
   };
 }
 
