@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
+  HealthViewSchema,
   LearningConfigSchema,
   LearningPatchResponseSchema,
   LearningStatusSchema,
@@ -949,6 +950,82 @@ describe('daemon boot lifecycle', () => {
     // Mining refuses with a reason rather than answering with a manifest that scanned nothing.
     should(run.status).equal(501);
     should((await run.json()) as { code: string }).have.property('code', 'mining_not_mounted');
+  });
+
+  /**
+   * The daemon's own health, driven through the production composition root over a real socket.
+   *
+   * This is the mount that turns a BROKEN surface into a working one, so the proof is the CLI's own
+   * probe: `ProtocolDaemonHealth` parses `/v1/health` against `HealthViewSchema` and treats a parse
+   * failure as "the daemon did not answer". Against the previous three-field liveness body it always
+   * failed, so `fy daemon status` reported a serving daemon as unreachable and `DirectSupervisor` had
+   * no pid to signal. Parsing the response with that same schema here is the whole assertion.
+   *
+   * Nothing is faked but the shutdown signal. The counts come from the real session index, the ledger
+   * from the self-check `start` actually ran before it bound the port, and the version from the
+   * daemon's own package.
+   */
+  it('should report its own health, measured by the self-check the boot ran', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-health');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
+    await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-done', {
+      status: 'completed',
+      finishedAt: '2026-07-30T09:45:00.000Z',
+    });
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+
+    // Act
+    const liveness = await fetch(`http://127.0.0.1:${port}/healthz`);
+    // No token, because the daemon commands must answer "is it up" before one exists — the state a
+    // fresh `fy daemon install` leaves a host in.
+    const anonymous = await fetch(`http://127.0.0.1:${port}/v1/health`);
+    const answered = await fetch(`http://127.0.0.1:${port}/v1/health`, {
+      headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+    });
+    // Parsed exactly as `ProtocolDaemonHealth` parses it; a body this schema refuses is a daemon the
+    // CLI reports as unreachable.
+    const view = HealthViewSchema.parse(await answered.json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(answered.status).equal(200);
+    // The fleet came from the real session index: two known, one still able to run.
+    should([view.sessions, view.running]).deepEqual([2, 1]);
+    // This process is the one serving, which is the fact the supervisor reads instead of a pid file.
+    should(view.pid).equal(process.pid);
+    should(view.ok).be.true();
+    should(view.bootstrapState).equal('complete');
+    // The boot ran a self-check BEFORE binding, so the very first answer is a measurement rather than
+    // an empty ledger.
+    should(view.lastSelfCheckAt).not.be.null();
+    // Neither subsystem is mounted, so the daemon says so instead of reporting a broken one.
+    should(view.wardenTimerArmed).be.false();
+    should(view.wardenLastSweepSeconds).be.null();
+    should(view.scratchGcEnabled).be.false();
+    // Liveness stays public and unchanged, so nothing that probes for it needs a token.
+    should(liveness.status).equal(200);
+    should((await liveness.json()) as { status: string }).have.property('status', 'ok');
+    // The report answers a caller holding no credential and reports the SAME daemon, which is what
+    // lets `fy daemon status` work on a host where no token has been minted yet.
+    should(anonymous.status).equal(200);
+    should(HealthViewSchema.parse(await anonymous.json()).pid).equal(view.pid);
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

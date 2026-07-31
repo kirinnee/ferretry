@@ -7,6 +7,7 @@ import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
+import { daemonHealthRoutes, type DaemonHealthSubsystem } from './health.ts';
 import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
@@ -34,6 +35,8 @@ import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './
 /** Every already-built subsystem this daemon process serves. One field per subsystem; the field's
  *  presence is the proof that production constructs it. */
 export interface MountedSubsystems {
+  /** The daemon's own health, over the self-check that measures it. */
+  readonly health: DaemonHealthSubsystem;
   readonly attention: AttentionService;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. Reading only — a start, a
@@ -63,6 +66,10 @@ export interface MountedSubsystems {
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
   return [
     ...daemonApiRoutes(base),
+    // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
+    // liveness answer, and this is the scoped report the protocol declares under the same subject.
+    // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
+    ...daemonHealthRoutes(subsystems.health),
     // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
     // deeper per-session routes that follow.

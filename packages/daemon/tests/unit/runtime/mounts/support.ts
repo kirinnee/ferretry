@@ -65,6 +65,16 @@ import {
   normalizeTerminalTitle,
 } from '../../../../src/lib/terminal/policy.ts';
 import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
+import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
+import {
+  defaultSessionHealthSettings,
+  SelfRestartCoordinator,
+  SessionHealthService,
+  type IncoherencePass,
+  type SelfRestartStamp,
+  type SessionHealthEvent,
+  type SessionHealthObservation,
+} from '../../../../src/lib/session/health/index.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
 
@@ -654,6 +664,107 @@ export function recommendSubsystem(
   return {
     recommend: async input => await (input.usage ? withQuota : withoutQuota).recommend({ task: input.task }),
   };
+}
+
+/** The daemon version the health fixture reports. Any non-empty string; the wire only demands one. */
+export const HEALTH_VERSION = '9.9.9-test';
+
+/** How the health fixture may be pointed at a different fleet, build or supervision posture. */
+export interface HealthWorld {
+  readonly sessions?: readonly SessionHealthObservation[];
+  readonly bootstrapFinished?: boolean;
+  readonly bootstrapErrors?: readonly string[];
+  /** Whether this daemon runs per-session monitors and a warden sweep timer at all. */
+  readonly supervisesMonitors?: boolean;
+  readonly supervisesWarden?: boolean;
+  readonly lastSweepAt?: string;
+  /** Self-check ticks to run before the report is served, so a case can drive a filled ledger. */
+  readonly ticks?: number;
+  readonly scratch?: ScratchReclamation;
+  readonly pid?: number;
+}
+
+/**
+ * The daemon's health over the REAL `SessionHealthService`.
+ *
+ * Only the four IO ports are the test's — the fleet inventory, the consistency pass, the event sink
+ * and the restart stamp. The ledger, the wedge classifier, the sweep verdict and the report builder
+ * are all production, so a case that passes here asserts the answer the daemon would actually give
+ * rather than one the fixture composed.
+ *
+ * The monotonic clock advances by exactly one configured interval per reading, which is what an
+ * on-time tick looks like: a fixture whose clock stood still would make the second tick a zero-gap
+ * reading and the freshness a fiction.
+ */
+export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem {
+  const clean: IncoherencePass = { missingFromIndex: [], staleRows: [], zombies: [], repaired: [], unhealable: [] };
+  const events: SessionHealthEvent[] = [];
+  let stamp: SelfRestartStamp | undefined;
+  let elapsedMs = 0;
+  const service = new SessionHealthService(
+    {
+      inventory: {
+        observe: async () => ({
+          sessions: world.sessions ?? [],
+          sweep: {
+            timerArmed: world.supervisesWarden ?? false,
+            intervalMs: 0,
+            ...(world.lastSweepAt === undefined ? {} : { lastSweepAt: world.lastSweepAt }),
+          },
+          bootstrapFinished: world.bootstrapFinished ?? true,
+          bootstrapErrors: world.bootstrapErrors ?? [],
+          supervisesMonitors: world.supervisesMonitors ?? false,
+          supervisesWarden: world.supervisesWarden ?? false,
+        }),
+      },
+      consistency: { run: async () => clean },
+      repair: { startMonitor: async () => {}, rearmWarden: async () => {} },
+      events: {
+        emit: async event => {
+          events.push(event);
+        },
+      },
+      clock: { now: () => AT },
+      wallClock: { nowMs: () => AT_MS },
+      monotonic: {
+        elapsedMs: () => {
+          elapsedMs += defaultSessionHealthSettings.selfCheckIntervalMs;
+          return elapsedMs;
+        },
+      },
+      restarts: new SelfRestartCoordinator(
+        {
+          read: async () => stamp,
+          write: async written => {
+            stamp = written;
+          },
+          clear: async () => {
+            stamp = undefined;
+          },
+        },
+        { restart: async () => false },
+        defaultSessionHealthSettings,
+      ),
+      version: HEALTH_VERSION,
+    },
+    defaultSessionHealthSettings,
+  );
+  return {
+    report: async () => {
+      for (let tick = 0; tick < (world.ticks ?? 0); tick += 1) await service.selfCheck();
+      return await service.report();
+    },
+    pid: world.pid ?? 4321,
+    scratch: world.scratch ?? { enabled: false, reclaimedSessions: 0, reclaimedBytes: 0 },
+  };
+}
+
+/** One session as the self-check observes it. */
+export function healthObservation(
+  id: string,
+  overrides: Partial<SessionHealthObservation> = {},
+): SessionHealthObservation {
+  return { id, terminal: false, monitored: false, ...overrides };
 }
 
 /** A feed that never collected: enough to build the base surface without a transport. */
