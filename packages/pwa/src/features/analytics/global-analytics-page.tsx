@@ -145,6 +145,7 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
           <div
             className="flex gap-xs overflow-x-auto overscroll-x-contain pb-1 scroll-thin"
             aria-label="Query starters"
+            role="toolbar"
           >
             {GLOBAL_ANALYTICS_STARTERS.map(starter => (
               <Button
