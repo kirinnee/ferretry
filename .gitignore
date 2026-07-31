@@ -23,6 +23,7 @@ desktop.ini
 node_modules/
 dist/
 coverage/
+packages/pwa/.artifacts/
 *.tsbuildinfo
 
 ### cli release

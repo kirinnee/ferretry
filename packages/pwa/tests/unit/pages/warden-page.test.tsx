@@ -4,7 +4,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { WardenPage, type WardenPageSlots, type WardenSurfaceProps } from '../../../src/lib/pages/warden-page.tsx';
+import {
+  type WardenConfigurationProps,
+  WardenPage,
+  type WardenPageSlots,
+  type WardenSurfaceProps,
+} from '../../../src/lib/pages/warden-page.tsx';
 
 describe('WardenPage', () => {
   it('should compose the daemon-bound surfaces in outcome-first order', () => {
@@ -20,10 +25,18 @@ describe('WardenPage', () => {
         received.push(actual);
         return <div data-surface={name}>{name}</div>;
       };
+    const Configuration = ({ connection: actual, id }: WardenConfigurationProps) => {
+      received.push(actual);
+      return (
+        <div id={id} data-surface="configuration">
+          configuration
+        </div>
+      );
+    };
     const slots: WardenPageSlots = {
       Attention: surface('attention'),
       Status: surface('status'),
-      Configuration: surface('configuration'),
+      Configuration,
       Verdicts: surface('verdicts'),
     };
 
@@ -31,8 +44,8 @@ describe('WardenPage', () => {
     const html = renderToStaticMarkup(<WardenPage connection={connection} slots={slots} />);
 
     // Assert
-    should(html).containEql('aria-labelledby="warden-heading"');
     should(html).containEql('>Warden</h1>');
+    should(html).containEql('class="lucide lucide-shield-check text-accent"');
     should(html).containEql('Who needs you, then sweeps, accounts, and recent verdicts.');
     should(html).containEql('id="config"');
     should(html.indexOf('data-surface="status"')).be.above(html.indexOf('data-surface="attention"'));
