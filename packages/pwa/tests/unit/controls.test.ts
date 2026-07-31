@@ -209,6 +209,26 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(record.scopes['daemon-0']).be.undefined();
     should(record.scopes[`daemon-${MAX_DAEMON_SCOPES + 4}`]?.projectScope).equal(`/project-${MAX_DAEMON_SCOPES + 4}`);
   });
+
+  it('rejects whitespace-only daemon ids before they can evict a valid scope', () => {
+    const corrupt = Object.fromEntries(
+      Array.from({ length: MAX_DAEMON_SCOPES }, (_, index) => [
+        ' '.repeat(index + 1),
+        { projectScope: `/unreachable-${index}`, seq: index + 1 },
+      ]),
+    );
+    const record = parseControlsRecord(
+      stored({
+        v: CONTROLS_VERSION,
+        scopes: { [alpha]: { projectScope: '/keep', seq: 0 }, ...corrupt },
+      }),
+    );
+
+    // Paired daemon ids reject blank text. Keeping corrupt blank keys until
+    // after eviction would let their newer sequence numbers displace alpha.
+    should(Object.keys(record.scopes)).eql([alpha]);
+    should(controlsFor(record, alpha).projectScope).equal('/keep');
+  });
 });
 
 describe('pure transitions', () => {

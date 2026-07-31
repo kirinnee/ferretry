@@ -186,7 +186,7 @@ const readScopes = (value: unknown): Record<string, DaemonScopeEntry> => {
   const scopes = emptyScopes();
   if (!value || typeof value !== 'object' || Array.isArray(value)) return scopes;
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (key === '' || !entry || typeof entry !== 'object') continue;
+    if (key.trim() === '' || !entry || typeof entry !== 'object') continue;
     const candidate = entry as Record<string, unknown>;
     const projectScope = readProjectScope(candidate.projectScope);
     if (projectScope === null) continue;
