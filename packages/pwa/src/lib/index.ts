@@ -33,6 +33,7 @@ export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-keyboard-open.ts';
 export * from '../hooks/use-layout-mode.ts';
+export * from '../hooks/use-remote-browser.ts';
 export * from '../hooks/use-theme.ts';
 export * from '../hooks/use-warden-status.ts';
 export * from '../shell/app-bar.tsx';

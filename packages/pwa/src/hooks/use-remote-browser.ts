@@ -1,0 +1,155 @@
+/**
+ * Remote browser lifecycle state for exactly one (daemon, session) pair.
+ *
+ * kteam polled a module-global browser status keyed by session id alone. That
+ * is a correctness bug here, not a performance detail: a PWA page can switch
+ * daemons while keeping the same session id, and the previous daemon's Chrome
+ * would then be shown — and driven — under the new daemon's name.
+ *
+ * So the scope key is `(daemonId, sessionId)`. Changing it clears the snapshot
+ * synchronously and invalidates every request already in flight, rather than
+ * letting a late response from daemon A land on daemon B's screen.
+ */
+
+import type { BrowserAction, BrowserActionResult, BrowserStatus } from '@ferretry/protocol';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { fetchRemoteBrowserStatus, runRemoteBrowserAction } from '../lib/remote-browser.ts';
+
+export const REMOTE_BROWSER_POLL_MS = 2_500;
+
+export interface RemoteBrowserTransport {
+  readonly readStatus: (daemon: DaemonConnection, scope: DaemonSessionScope) => Promise<BrowserStatus>;
+  readonly runAction: (
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    action: BrowserAction,
+  ) => Promise<BrowserActionResult>;
+}
+
+const defaultTransport: RemoteBrowserTransport = {
+  readStatus: (daemon, scope) => fetchRemoteBrowserStatus(daemon, scope),
+  runAction: (daemon, scope, action) => runRemoteBrowserAction(daemon, scope, action),
+};
+
+/** Cancellable repeat, injectable so tests drive the poll instead of waiting. */
+export type RemoteBrowserScheduler = (callback: () => void, intervalMs: number) => () => void;
+
+const defaultScheduler: RemoteBrowserScheduler = (callback, intervalMs) => {
+  const timer = setInterval(callback, intervalMs);
+  return () => clearInterval(timer);
+};
+
+export interface UseRemoteBrowserOptions {
+  /**
+   * The paired daemon and its session scope. Both are effect dependencies, so a
+   * caller that rebuilds an equivalent object every render must memoize them —
+   * otherwise the poll re-arms on each frame.
+   */
+  readonly daemon: DaemonConnection;
+  readonly scope: DaemonSessionScope;
+  /** A hidden pane detaches; the daemon-side browser deliberately survives. */
+  readonly isActive?: boolean;
+  readonly pollIntervalMs?: number;
+  readonly transport?: RemoteBrowserTransport;
+  readonly schedule?: RemoteBrowserScheduler;
+}
+
+export interface RemoteBrowserModel {
+  readonly status: BrowserStatus | null;
+  readonly error: string | null;
+  readonly busy: boolean;
+  readonly runAction: (action: BrowserAction) => void;
+  readonly refresh: () => void;
+  readonly reportError: (message: string) => void;
+  readonly clearError: () => void;
+}
+
+const failureMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+export function useRemoteBrowser({
+  daemon,
+  scope,
+  isActive = true,
+  pollIntervalMs = REMOTE_BROWSER_POLL_MS,
+  transport = defaultTransport,
+  schedule = defaultScheduler,
+}: UseRemoteBrowserOptions): RemoteBrowserModel {
+  const [status, setStatus] = useState<BrowserStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const generationRef = useRef(0);
+  const mutationsRef = useRef(0);
+  const scopeRef = useRef<string | null>(null);
+
+  const scopeKey = `${daemon.daemonId} ${scope.daemonId} ${scope.sessionId}`;
+
+  // Applied during render: a re-scoped pane must never paint the previous
+  // daemon's lifecycle state, not even for the frame before its first response.
+  if (scopeRef.current !== scopeKey) {
+    scopeRef.current = scopeKey;
+    generationRef.current += 1;
+    mutationsRef.current = 0;
+    if (status !== null) setStatus(null);
+    if (error !== null) setError(null);
+    if (busy) setBusy(false);
+  }
+
+  const commit = useCallback((generation: number, next: BrowserStatus): void => {
+    if (generation !== generationRef.current) return;
+    setStatus(next);
+    if (next.state === 'error') setError(next.error);
+  }, []);
+
+  const fail = useCallback((generation: number, caught: unknown): void => {
+    if (generation === generationRef.current) setError(failureMessage(caught));
+  }, []);
+
+  const refresh = useCallback(() => {
+    // A mutation result is the authoritative newer snapshot. Polling resumes
+    // once it settles rather than racing a pre-mutation read against it.
+    if (mutationsRef.current > 0) return;
+    const generation = ++generationRef.current;
+    void transport
+      .readStatus(daemon, scope)
+      .then(next => commit(generation, next))
+      .catch((caught: unknown) => fail(generation, caught));
+  }, [commit, daemon, fail, scope, transport]);
+
+  const runAction = useCallback(
+    (action: BrowserAction) => {
+      const generation = ++generationRef.current;
+      mutationsRef.current += 1;
+      setBusy(true);
+      setError(null);
+      void transport
+        .runAction(daemon, scope, action)
+        .then(result => commit(generation, result.status))
+        .catch((caught: unknown) => fail(generation, caught))
+        .finally(() => {
+          mutationsRef.current = Math.max(0, mutationsRef.current - 1);
+          if (mutationsRef.current === 0) setBusy(false);
+        });
+    },
+    [commit, daemon, fail, scope, transport],
+  );
+
+  useEffect(() => {
+    if (!isActive) return;
+    refresh();
+    const cancel = schedule(() => refresh(), pollIntervalMs);
+    return () => {
+      cancel();
+      // A hidden or unmounted pane must not publish a response it sampled while
+      // it was still attached.
+      generationRef.current += 1;
+    };
+  }, [isActive, pollIntervalMs, refresh, schedule]);
+
+  const reportError = useCallback((message: string) => setError(message), []);
+  const clearError = useCallback(() => setError(null), []);
+
+  return { status, error, busy, runAction, refresh, reportError, clearError };
+}
