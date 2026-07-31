@@ -30,6 +30,9 @@ let
     command:
     ''${packages.bash}/bin/bash -c 'export PATH=${validator-runtime}/bin; exec ${packages.bash}/bin/bash ${command} "$@"' --'';
   bun-tool = name: "${packages.bash}/bin/bash -c 'exec ./node_modules/.bin/${name} \"$@\"' --";
+  # Like bun-tool, a repo script that drives a node_modules binary keeps the ambient
+  # devshell PATH: the validator runtime deliberately has no node for tsc's shebang.
+  bun-script = script: "${packages.bash}/bin/bash -c 'exec ${script} \"$@\"' --";
 in
 pre-commit-lib.run {
   src = ./..;
@@ -146,7 +149,7 @@ pre-commit-lib.run {
     typecheck = {
       enable = true;
       name = "TypeScript typecheck";
-      entry = bun-tool "tsc --noEmit";
+      entry = bun-script "scripts/validate/typecheck.sh";
       files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|\\.(ts|tsx|mts|cts)$)";
       pass_filenames = false;
       language = "system";

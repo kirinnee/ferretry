@@ -36,7 +36,7 @@ tasks:
   check:
     desc: Typecheck the workspace
     cmds:
-      - ./node_modules/.bin/tsc --noEmit
+      - ./scripts/validate/typecheck.sh
 
   clean:
     desc: Remove Bun build, dependency, and coverage artifacts

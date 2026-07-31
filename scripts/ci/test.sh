@@ -25,10 +25,16 @@ scope="src/lib/"
 [[ ${mode} == "int" ]] && scope="src/adapters/"
 mapfile -t scope_dirs < <(find packages -mindepth 3 -maxdepth 3 -type d -path "packages/*/${scope%/}" | sort)
 if [[ ${mode} == "unit" ]]; then
-  # The PWA is browser glue, so its hooks and AudioWorklets deliberately live
-  # outside the domain-tier src/lib directory. They are production code just as
-  # much as lib modules are, and must remain in the 100% unit ledger.
-  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name hooks -o -name worklets \) | sort)
+  # The PWA is browser glue, so its hooks, shell chrome and AudioWorklets
+  # deliberately live outside the domain-tier src/lib directory. They are
+  # production code just as much as lib modules are, and must remain in the
+  # 100% unit ledger.
+  #
+  # src/components (the feature screens) is NOT in the ledger yet: its files
+  # currently have source-text assertions rather than executed tests, so adding
+  # the directory would fail rather than measure. The PR that gives those
+  # screens real tests adds `-o -name components` here and to the awk filter.
+  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name hooks -o -name worklets -o -name shell \) | sort)
   scope_dirs+=("${pwa_dirs[@]}")
 fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
@@ -53,7 +59,7 @@ awk -v scope="${scope}" -v mode="${mode}" '
     gsub(/\\\\/, "/", path)
     files++
     allowed = path ~ "(^|/)" scope
-    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(hooks|worklets)/") allowed = 1
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(hooks|worklets|shell)/") allowed = 1
     if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
       bad = 1

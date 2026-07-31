@@ -22,8 +22,8 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/pwa": {
-      "entry": ["tests/**/*.test.{ts,tsx}"],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}"]
+      "entry": ["tests/**/*.test.{ts,tsx}", "harness/screenshot.ts", "harness/main.tsx"],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "harness/**/*.{ts,tsx}"]
     }
   },
   "rules": {

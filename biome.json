@@ -6,7 +6,12 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["packages/*/bin/**/*.ts", "packages/*/src/**/*.{ts,tsx}", "packages/*/tests/**/*.{ts,tsx}"]
+    "includes": [
+      "packages/*/bin/**/*.ts",
+      "packages/*/src/**/*.{ts,tsx}",
+      "packages/*/tests/**/*.{ts,tsx}",
+      "packages/*/harness/**/*.{ts,tsx}"
+    ]
   },
   "formatter": {
     "enabled": false
