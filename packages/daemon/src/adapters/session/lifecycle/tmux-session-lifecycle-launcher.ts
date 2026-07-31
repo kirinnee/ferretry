@@ -1,8 +1,18 @@
-import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../lib/session/lifecycle/index.ts';
+import type {
+  SessionEnvironmentStore,
+  SessionLifecycleLauncher,
+  SessionLifecycleRecord,
+} from '../../../lib/session/lifecycle/index.ts';
 import { retryDelays, type TmuxController } from '../../../lib/tmux/index.ts';
 
 /** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
 export type LauncherSleep = (milliseconds: number) => Promise<void>;
+
+/** A session with no stored environment launches with none, which is the pre-credential behaviour. */
+const NO_ENVIRONMENT: SessionEnvironmentStore = {
+  write: async () => undefined,
+  read: async () => ({}),
+};
 
 /** Maps validated lifecycle records to the daemon's isolated tmux controller. */
 export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
@@ -10,6 +20,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly tmux: TmuxController,
     private readonly sleep: LauncherSleep,
     private readonly readinessAttempts = 30,
+    private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -19,10 +30,14 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
   async launch(record: SessionLifecycleRecord): Promise<void> {
     const [program, ...arguments_] = record.config.command;
     if (program === undefined) throw new Error('session command is empty');
+    // Read per launch rather than cached at construction: a relaunch after a rotated credential must
+    // hand the pane the CURRENT secret, and one launcher instance serves every session.
+    const env = await this.environment.read(record.config.id);
     await this.tmux.launch({
       session: record.config.tmuxSession,
       cwd: record.config.cwd,
       command: [program, ...arguments_],
+      ...(Object.keys(env).length === 0 ? {} : { env }),
     });
   }
 

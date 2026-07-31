@@ -5,6 +5,9 @@ import {
   defaultSessionLifecycleSettings,
   SessionLifecycleService,
   type CreateSessionLifecycleRequest,
+  type SessionCredential,
+  type SessionCredentialIssuer,
+  type SessionEnvironmentStore,
   type SessionIdFactory,
   type SessionLifecycleEvent,
   type SessionLifecycleLauncher,
@@ -90,6 +93,27 @@ class RecordingTaskStore implements SessionTaskStore {
     if (this.failure) throw this.failure;
     this.documents.set(id, document);
     return `/state/sessions/${id}/turns/turn-001.md`;
+  }
+}
+
+const CAPABILITY = 'a-very-secret-session-capability';
+const HASH = 'f'.repeat(64);
+
+class FixedCredentialIssuer implements SessionCredentialIssuer {
+  issue(): SessionCredential {
+    return { capability: CAPABILITY, hash: HASH };
+  }
+}
+
+class RecordingEnvironmentStore implements SessionEnvironmentStore {
+  readonly written = new Map<string, Readonly<Record<string, string>>>();
+
+  async write(id: SessionId, environment: Readonly<Record<string, string>>): Promise<void> {
+    this.written.set(id, environment);
+  }
+
+  async read(id: SessionId): Promise<Readonly<Record<string, string>>> {
+    return this.written.get(id) ?? {};
   }
 }
 
@@ -221,6 +245,50 @@ describe('SessionLifecycleService', () => {
     should(repository.events).deepEqual([
       { type: 'session.created', data: { agent: AGENT, mode: 'auto', cwd: '/canonical/project' } },
     ]);
+  });
+
+  it('should mint a session credential, record only its hash, and deliver the plaintext through the environment', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    const { repository, subject } = harness({ credentials: new FixedCredentialIssuer(), environment });
+
+    // Act
+    const actual = await subject.create(input());
+
+    // Assert
+    should(actual.config.sessionCapabilityHash).equal(HASH);
+    should(repository.current().config.sessionCapabilityHash).equal(HASH);
+    // The record is what every reader of the session document gets, so the SECRET must not be
+    // anywhere in it — only the hash the task-board domain keys its grants on.
+    should(JSON.stringify(repository.current())).not.containEql(CAPABILITY);
+    should(environment.written.get(ID)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: CAPABILITY });
+  });
+
+  it('should leave the session and its environment untouched when no credential issuer is wired', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    const { repository, subject } = harness({ environment });
+
+    // Act
+    await subject.create(input());
+
+    // Assert
+    should(repository.current().config.sessionCapabilityHash).be.undefined();
+    should([...environment.written.keys()]).deepEqual([]);
+  });
+
+  it('should not write an environment for a create that never produced a record', async () => {
+    // Arrange
+    const environment = new RecordingEnvironmentStore();
+    const { launcher, subject } = harness({ credentials: new FixedCredentialIssuer(), environment });
+    launcher.live = true;
+
+    // Act
+    await should(subject.create(input())).be.rejectedWith(/already live/u);
+
+    // Assert
+    // A secret on disk for a session that does not exist is a credential nothing can ever revoke.
+    should([...environment.written.keys()]).deepEqual([]);
   });
 
   it('should refuse to create over an existing record or a live terminal of the same name', async () => {

@@ -8,15 +8,18 @@ import {
   transitionSessionRecord,
 } from './policy.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
-import type {
-  CreateSessionLifecycleRequest,
-  SessionIdFactory,
-  SessionLifecycleEvent,
-  SessionLifecycleLauncher,
-  SessionLifecycleRecord,
-  SessionLifecycleRepository,
-  SessionTaskStore,
-  WorkingDirectoryResolver,
+import {
+  SESSION_BOARD_CAPABILITY_VARIABLE,
+  type CreateSessionLifecycleRequest,
+  type SessionCredentialIssuer,
+  type SessionEnvironmentStore,
+  type SessionIdFactory,
+  type SessionLifecycleEvent,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
+  type SessionLifecycleRepository,
+  type SessionTaskStore,
+  type WorkingDirectoryResolver,
 } from './types.ts';
 
 /** Everything outside the lifecycle's own decisions. */
@@ -33,6 +36,15 @@ export interface SessionLifecyclePorts {
    * legal, and the loser's launch then overwrites a healthy session.
    */
   readonly serial: SerialExecutor;
+  /**
+   * Mints the session's own credential, when this daemon issues one.
+   *
+   * Optional together with `environment`: a daemon wired without both keeps the pre-credential
+   * behaviour exactly — no secret is minted, no environment file is written, and the pane launches
+   * with the environment it always had.
+   */
+  readonly credentials?: SessionCredentialIssuer;
+  readonly environment?: SessionEnvironmentStore;
 }
 
 function failureMessage(error: unknown): string {
@@ -53,10 +65,20 @@ export class SessionLifecycleService {
       // Ids are minted here, so an existing record means a collision, never a client naming a live
       // session — and either way the live session's record must not be reset under it.
       if (await this.ports.repository.read(id)) throw new Error(`session already exists: ${id}`);
-      const created = createSessionRecord(request, { id, cwd, at: this.ports.clock.now(), settings: this.settings });
+      // Minted BEFORE the record, so the hash is part of the single create write: a credential added
+      // afterwards would leave a window in which the session exists and no board can address it.
+      const credential = this.ports.credentials?.issue();
+      const created = createSessionRecord(
+        { ...request, ...(credential === undefined ? {} : { sessionCapabilityHash: credential.hash }) },
+        { id, cwd, at: this.ports.clock.now(), settings: this.settings },
+      );
       if (await this.ports.launcher.alive(created.record))
         throw new Error(`tmux session ${created.record.config.tmuxSession} is already live`);
       await this.ports.repository.write(created.record, created.event);
+      // AFTER the record, which is what claims the session's directory, and before any launch can
+      // read it. The plaintext goes here and nowhere else — the record holds only the hash.
+      if (credential !== undefined && this.ports.environment !== undefined)
+        await this.ports.environment.write(id, { [SESSION_BOARD_CAPABILITY_VARIABLE]: credential.capability });
       return created.record;
     });
   }
