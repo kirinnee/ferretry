@@ -48,6 +48,7 @@ import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/b
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
+import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
@@ -899,6 +900,31 @@ function Shell() {
               now={HARNESS_NOW}
               onRunNow={() => {}}
               status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Notification settings',
+      render: () => (
+        <Card aria-label="Notification settings">
+          <PanelHeader>
+            <Label>Notifications</Label>
+          </PanelHeader>
+          <PanelBody>
+            <NotificationSettingsView
+              permission="granted"
+              enabled
+              preferences={{
+                events: { attention: true, question: true, failed: true, completed: false },
+                interactiveOnly: false,
+              }}
+              delivery="active"
+              devices={[]}
+              onEnabled={() => {}}
+              onPreferences={() => {}}
+              onRevokeDevice={() => {}}
             />
           </PanelBody>
         </Card>

@@ -16,6 +16,7 @@ export * from '../features/attention/attention-board.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/browser/remote-browser-chrome.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';
+export * from '../features/settings/notification-settings.tsx';
 export * from '../features/learning/learning-header.tsx';
 export * from '../features/learning/learning-page.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';

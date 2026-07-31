@@ -121,6 +121,9 @@ try {
       const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
       await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
       process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
+      const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
+      await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
+      process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
       const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
       await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
       process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
