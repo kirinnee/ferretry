@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test';
+import type { BrowserStatus } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
@@ -18,7 +20,6 @@ import {
   runRemoteBrowserAction,
   type RemoteKeyEvent,
 } from '../../src/lib/remote-browser.ts';
-import type { BrowserStatus } from '@ferretry/protocol';
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
@@ -71,6 +72,30 @@ describe('remote browser transport', () => {
         response({ status: { ...status, state: 'bad' } }),
       ),
     ).rejects.toThrow();
+  });
+
+  it('stamps the protocol request id on the action mutation only, never the obsolete header', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return response(calls.length === 1 ? status : { status });
+    };
+    await fetchRemoteBrowserStatus(daemon, scope, fetcher);
+    await runRemoteBrowserAction(daemon, scope, { action: 'start' }, fetcher);
+    const headers = (index: number) => new Headers(calls[index]?.init?.headers);
+    expect(headers(0).get(FY_REQUEST_ID_HEADER)).toBeNull();
+    expect(headers(1).get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
+    expect(headers(1).get('x-kteam-request-id')).toBeNull();
+  });
+
+  it('rejects a server response that describes another session before publication', async () => {
+    const crossed = { ...status, sessionId: 'other/session' };
+    await expect(fetchRemoteBrowserStatus(daemon, scope, async () => response(crossed))).rejects.toThrow(
+      'daemon returned another session',
+    );
+    await expect(
+      runRemoteBrowserAction(daemon, scope, { action: 'start' }, async () => response({ status: crossed })),
+    ).rejects.toThrow('daemon returned another session');
   });
 
   it('builds a ticket-only browser stream URL on the paired daemon', () => {

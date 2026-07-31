@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { LearningStatus, ProposalView } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, type LearningStatus, type ProposalView } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
   actOnLearningProposal,
@@ -93,6 +93,31 @@ describe('learning transport', () => {
       fetchLearningStatus(daemon, async () => response({ error: 'offline', code: 'gone' }, 503)),
     ).rejects.toMatchObject({ status: 503, code: 'gone' });
     await expect(fetchLearningProposals(daemon, undefined, async () => response([{ nope: true }]))).rejects.toThrow();
+  });
+
+  it('stamps the protocol request id on mutations only and never the obsolete header', async () => {
+    const calls: { url: string; init?: RequestInit }[] = [];
+    const fetcher = async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return response(
+        [status, [proposal], proposal, { path: 'AGENTS.md', contents: 'rule' }, manifest][calls.length - 1],
+      );
+    };
+    await fetchLearningStatus(daemon, fetcher);
+    await fetchLearningProposals(daemon, undefined, fetcher);
+    await actOnLearningProposal(daemon, 'proposal/a', { action: 'edit', ruleText: 'better' }, fetcher);
+    await fetchLearningPatch(daemon, 'proposal/a', fetcher);
+    await runLearningScan(daemon, true, fetcher);
+
+    const headers = (index: number) => new Headers(calls[index]?.init?.headers);
+    // GETs never carry a request id of any kind.
+    expect(headers(0).get(FY_REQUEST_ID_HEADER)).toBeNull();
+    expect(headers(1).get(FY_REQUEST_ID_HEADER)).toBeNull();
+    // Mutations use the protocol header, and the obsolete literal is gone.
+    for (const index of [2, 3, 4]) {
+      expect(headers(index).get(FY_REQUEST_ID_HEADER)).toMatch(/^[0-9a-f-]{36}$/u);
+      expect(headers(index).get('x-kteam-request-id')).toBeNull();
+    }
   });
 });
 

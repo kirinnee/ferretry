@@ -44,4 +44,35 @@ if [ "${scan_status}" -eq 0 ]; then
 fi
 [ "${scan_status}" -gt 1 ] && echo "❌ failed to scan packages/ for legacy state references" >&2 && exit "${scan_status}"
 
+# Obsolete kteam WIRE identifiers (the `x-kteam-request-id` header and its
+# `-kteam-` family) are a regression only in production source: tests legitimately
+# assert their absence, and migration docs recount them as history. Keep this
+# pass to package source (*/src/*) so neither is flagged, and never broaden it
+# to a per-path allowlist.
+source_files=()
+for path in "${scan_files[@]}"; do
+  case "${path}" in
+  */src/*) source_files+=("${path}") ;;
+  esac
+done
+
+wire_hits=""
+wire_status=1
+if [ "${#source_files[@]}" -gt 0 ]; then
+  set +e
+  wire_hits="$(rg --line-number --fixed-strings \
+    -e 'x-kteam-request-id' \
+    -e '-kteam-' \
+    -- "${source_files[@]}")"
+  wire_status=$?
+  set -e
+fi
+
+if [ "${wire_status}" -eq 0 ]; then
+  echo "❌ obsolete kteam wire identifiers found in package source:" >&2
+  printf '%s\n' "${wire_hits}" >&2
+  exit 1
+fi
+[ "${wire_status}" -gt 1 ] && echo "❌ failed to scan package source for obsolete wire identifiers" >&2 && exit "${wire_status}"
+
 echo "✅ No legacy identifiers or state paths found under packages/"

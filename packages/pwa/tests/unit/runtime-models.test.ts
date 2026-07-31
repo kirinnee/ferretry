@@ -7,9 +7,9 @@ import {
   DaemonRuntimeModelCatalogStore,
   fetchRuntimeModelCatalog,
   parseRuntimeModelCatalog,
+  type RuntimeModelCatalog,
   requireRuntimeModelCatalogHarness,
   runtimeModelCatalogErrorMessage,
-  type RuntimeModelCatalog,
 } from '../../src/lib/runtime-models.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
@@ -34,6 +34,15 @@ const catalog = (label: string): RuntimeModelCatalog => ({
 
 const responseFor = (value: RuntimeModelCatalog): Response =>
   new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
+
+/** A fetcher whose response settles only when the test resolves it, modelling a slow daemon. */
+const deferredResponse = (): { resolve: (value: Response) => void; response: Promise<Response> } => {
+  let resolve!: (value: Response) => void;
+  const response = new Promise<Response>(res => {
+    resolve = res;
+  });
+  return { resolve, response };
+};
 
 describe('runtime model catalog parsing', () => {
   it('should preserve opaque ordered model data and optional values', () => {
@@ -133,5 +142,65 @@ describe('daemon-scoped runtime model catalog queries', () => {
     store.clearDaemon(daemonA.daemonId);
     should(store.get(scopeA)).equal(undefined);
     should(store.get(scopeB)).equal(otherDaemon);
+  });
+});
+
+describe('daemon runtime model catalog fencing', () => {
+  it('should not publish a result that completes after its daemon is cleared', async () => {
+    const store = new DaemonRuntimeModelCatalogStore();
+    const slow = deferredResponse();
+    const loadPromise = store.load(daemonA, scopeA, async () => slow.response);
+    should(store.get(scopeA)).equal(undefined);
+
+    store.clearDaemon(daemonA.daemonId);
+    slow.resolve(responseFor(catalog('stale')));
+    const result = await loadPromise;
+
+    // The original caller still receives its own result, but the late completion
+    // must not repopulate the shared cache after the clear.
+    should(result.choices[0]?.label).equal('stale');
+    should(store.get(scopeA)).equal(undefined);
+  });
+
+  it('should treat a same-id re-pair as a new generation and never publish or coalesce the prior token result', async () => {
+    const store = new DaemonRuntimeModelCatalogStore();
+    const oldToken = deferredResponse();
+    let requests = 0;
+    const oldLoad = store.load(daemonA, scopeA, async () => {
+      requests += 1;
+      return oldToken.response;
+    });
+
+    // Same daemon id and base URL, rotated device token: a re-pair, not a reuse.
+    const rePaired = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'token-a-rotated',
+    });
+    const fresh = await store.load(rePaired, scopeA, async () => {
+      requests += 1;
+      return responseFor(catalog('fresh'));
+    });
+    should(fresh.choices[0]?.label).equal('fresh');
+    // The re-pair issued its own request instead of coalescing onto the old token.
+    should(requests).equal(2);
+
+    oldToken.resolve(responseFor(catalog('old-token')));
+    await oldLoad;
+    should(store.get(scopeA)?.choices[0]?.label).equal('fresh');
+  });
+
+  it('should isolate the same session id across two daemons, including a late result', async () => {
+    const store = new DaemonRuntimeModelCatalogStore();
+    const slowA = deferredResponse();
+    const loadA = store.load(daemonA, scopeA, async () => slowA.response);
+    const daemonBResult = await store.load(daemonB, scopeB, async () => responseFor(catalog('B')));
+    should(daemonBResult.choices[0]?.label).equal('B');
+
+    // daemon-a's late completion must land only in daemon-a's slot, never daemon-b's.
+    slowA.resolve(responseFor(catalog('A-late')));
+    await loadA;
+    should(store.get(scopeA)?.choices[0]?.label).equal('A-late');
+    should(store.get(scopeB)?.choices[0]?.label).equal('B');
   });
 });

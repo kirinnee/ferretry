@@ -1,19 +1,20 @@
 import {
-  LearningPatchResponseSchema,
-  LearningStatusSchema,
-  ProposalViewSchema,
-  RunManifestSchema,
+  FY_REQUEST_ID_HEADER,
   type LearningActionRequest,
   type LearningPatchResponse,
+  LearningPatchResponseSchema,
   type LearningStatus,
+  LearningStatusSchema,
   type ProposalState,
   type ProposalView,
+  ProposalViewSchema,
   type RunManifest,
+  RunManifestSchema,
 } from '@ferretry/protocol';
 
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const errorFor = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -56,7 +57,7 @@ export const fetchLearningProposals = (
 
 const mutation = (body: unknown): RequestInit => ({
   method: 'POST',
-  headers: { 'content-type': 'application/json', 'x-kteam-request-id': crypto.randomUUID() },
+  headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
   body: JSON.stringify(body),
 });
 

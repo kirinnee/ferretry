@@ -1,17 +1,18 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
-  BrowserActionResultSchema,
-  BrowserStatusSchema,
   type BrowserAction,
   type BrowserActionResult,
+  BrowserActionResultSchema,
   type BrowserInputEvent,
   type BrowserPageSummary,
   type BrowserStatus,
+  BrowserStatusSchema,
+  FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const FRAME_MAGIC = Uint8Array.of(0x4b, 0x42, 0x52, 0x46); // KBRF
 const FRAME_VERSION = 1;
@@ -40,6 +41,25 @@ const responseError = async (response: Response): Promise<DaemonResponseError> =
   );
 };
 
+/**
+ * Browser identity is daemon-issued and read back from the response, so the
+ * server-derived session id is checked against the requested scope before any
+ * caller can act on it — a slow or crossed response must not publish another
+ * session's state.
+ */
+const parseBrowserStatus = (scope: DaemonSessionScope, body: unknown): BrowserStatus => {
+  const status = BrowserStatusSchema.parse(body);
+  if (status.sessionId !== scope.sessionId) throw new DaemonResponseError(502, 'daemon returned another session');
+  return status;
+};
+
+const parseBrowserActionResult = (scope: DaemonSessionScope, body: unknown): BrowserActionResult => {
+  const result = BrowserActionResultSchema.parse(body);
+  if (result.status.sessionId !== scope.sessionId)
+    throw new DaemonResponseError(502, 'daemon returned another session');
+  return result;
+};
+
 /** Reads the browser status from exactly the daemon that owns this session. */
 export const fetchRemoteBrowserStatus = async (
   daemon: DaemonConnection,
@@ -50,7 +70,7 @@ export const fetchRemoteBrowserStatus = async (
   const request = daemonRequest(daemon, browserPath(scope));
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
-  return BrowserStatusSchema.parse(await response.json());
+  return parseBrowserStatus(scope, await response.json());
 };
 
 /** Executes one validated browser action through the paired daemon. */
@@ -63,12 +83,12 @@ export const runRemoteBrowserAction = async (
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, browserPath(scope), {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-kteam-request-id': crypto.randomUUID() },
+    headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
     body: JSON.stringify(action),
   });
   const response = await fetcher(request.url, request.init);
   if (!response.ok) throw await responseError(response);
-  return BrowserActionResultSchema.parse(await response.json());
+  return parseBrowserActionResult(scope, await response.json());
 };
 
 /**
