@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import pkg from '../package.json' with { type: 'json' };
 import {
+  BrowserWorkerClient,
   BunSqliteIndexFactory,
   DaemonBinder,
   DaemonHealthProbe,
@@ -12,11 +13,15 @@ import {
   FileDaemonConfig,
   KeyedSerialExecutor,
   RuntimeEnvironment,
+  SocketViewerDownstream,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
   StateFileSystem,
   SystemClock,
+  SystemFrameClock,
+  type ViewerSocket,
+  type WorkerClientOptions,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
@@ -29,11 +34,13 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
 import {
+  BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
   createFoundationPaths,
   createWardenPaths,
   packageRole,
   resolveStateHome,
+  type BrowserViewerHost,
   type DaemonReadinessPorts,
 } from '../src/lib/index.ts';
 
@@ -67,6 +74,16 @@ export interface DaemonWorld {
    *  which is only known once storage has resolved it, so this is a factory
    *  rather than an instance. */
   readonly wardenReports: (stateDirectory: string) => WardenReportReader;
+  readonly browserTransport: BrowserTransportWorld;
+}
+
+/**
+ * The browser transport seam: the session runtime asks for a driver and for viewer streams, and never
+ * learns what a child process or a socket is.
+ */
+export interface BrowserTransportWorld {
+  connectWorker(options: WorkerClientOptions): Promise<BrowserWorkerClient>;
+  openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -114,6 +131,11 @@ export function buildWorld(): DaemonWorld {
     ),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
+    browserTransport: {
+      connectWorker: options => BrowserWorkerClient.connect(options),
+      openViewerStream: (host, sessionId, socket) =>
+        BrowserViewerStream.connect(host, sessionId, new SocketViewerDownstream(socket), new SystemFrameClock()),
+    },
   };
 }
 
