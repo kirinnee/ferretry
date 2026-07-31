@@ -46,6 +46,7 @@ export * from '../shell/view-tabs.tsx';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
 export * from './attention-store.ts';
+export * from './browser-login.ts';
 export * from './class-names.ts';
 export * from './daemon-connection.ts';
 export * from './daemon-scope.ts';
