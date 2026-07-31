@@ -101,6 +101,20 @@ types instead of writing shims. Because branches are squash-merged, replay only 
 `git rebase --onto main port/<dep-branch>`. A plain rebase would replay the dependency's commits and
 conflict.
 
+**The shared daemon barrel conflicts on every single merge.** `packages/daemon/src/lib/index.ts`
+(and `src/adapters/index.ts`) collect one `export *` line per unit, so every rebase after every
+merge conflicts there. Resolving by hand is both tedious and dangerous — taking one side silently
+deletes another unit's export. Resolve by **union**: keep every `export * from` line from both
+sides, sorted. This is mechanical and worth scripting; the lead did, after hitting it four times.
+
+**Nothing local reproduced the CI coverage gate, and it cost three red PRs.** CI enforces a 100%
+ledger through `scripts/ci/test.sh`, but `task test` _and_ `task test:coverage` both exit 0 while
+coverage is short — the latter prints percentages without enforcing them. `task test:gate` now
+delegates to the same script CI runs. Never trust a green `task test` alone.
+
+**Never remove a merged unit's worktree without checking for a live agent in it.** An agent whose
+cwd disappears mid-turn dies. A running session's cwd is in `~/.kteam/<id>/config.json`.
+
 **A `kteam send` cannot re-task an agent.** Teammates correctly refuse role changes from a peer
 session. To change what an agent is _for_, stop it and start a fresh one whose prompt states the new
 role. `send` is only for steering within an assignment.
@@ -198,11 +212,20 @@ git show <wip-sha> --stat
 ```
 
 **Dependent branches were stacked on `port/s2-protocol`.** After S2 is squash-merged, replay only a
-unit's own commits — a plain rebase would replay S2's commits and conflict:
+unit's own commits — a plain rebase would replay S2's commits and conflict.
+
+**Corrected in practice (2026-07-31):** the recipe below does **not** work as written, because the
+dependent branches carry _copies_ of the protocol commits with **different SHAs** than S2's
+(`d5fb2ec…` on the units vs `d2af642…` on S2). `port/s2-protocol` is therefore not their ancestor
+and `--onto main port/s2-protocol` finds nothing to replay. Use each branch's **own** base — the
+last commit before its first unit commit:
 
 ```bash
-git rebase --onto main port/s2-protocol       # inside that unit's worktree
+git rebase --onto origin/main <sha-before-your-first-own-commit>   # inside that unit's worktree
 ```
+
+The copies were verified byte-identical to S2's `src/lib`, so units could safely build against them
+before S2 landed; only the client adapter differed.
 
 ## 10. The prompt to restart the work
 
