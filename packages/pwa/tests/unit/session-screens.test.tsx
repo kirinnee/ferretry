@@ -2,6 +2,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
@@ -265,5 +266,130 @@ describe('session screen components', () => {
     } finally {
       Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: savedMatchMedia });
     }
+  });
+
+  test('renders compact context controls for an idle daemon-scoped session and reports completion', async () => {
+    const calls: Array<readonly [string, string]> = [];
+    const controls = render(
+      <SessionCommandControls
+        api={{ compact: async (daemon, sessionId) => calls.push([daemon.daemonId, sessionId]) as never }}
+        canControl
+        daemon={daemonA}
+        open
+        promptReady
+        sessionId="same-id"
+        status="awaiting_user"
+      />,
+    );
+    expect(controls.root.findByProps({ 'data-daemon-id': 'daemon-a' }).props['aria-label']).toBe('Session context');
+    const action = controls.root.findByType('button');
+    expect(action.props.disabled).toBe(false);
+    await runAsync(async () => {
+      action.props.onClick();
+      await Promise.resolve();
+    });
+    expect(calls).toEqual([['daemon-a', 'same-id']]);
+    expect(controls.root.findByProps({ role: 'status' }).children.join('')).toContain('conversation remains available');
+  });
+
+  test('renders context-control safety states and daemon compatibility failures', async () => {
+    expect(isSessionCommandUnsupported({ status: 404, code: 'unknown_route' })).toBe(true);
+    expect(isSessionCommandUnsupported({ status: 400, message: 'Runtime action unavailable' })).toBe(true);
+    expect(isSessionCommandUnsupported({ status: 400, message: 'another failure' })).toBe(false);
+    expect(isSessionCommandUnsupported(null)).toBe(false);
+
+    const terminal = render(
+      <SessionCommandControls
+        api={{ compact: async () => ({}) as never }}
+        canControl
+        daemon={daemonA}
+        open
+        promptReady
+        sessionId="terminal-id"
+        status="completed"
+      />,
+    );
+    expect(JSON.stringify(terminal.toJSON())).toContain('needs a running session');
+
+    const readonly = render(
+      <SessionCommandControls
+        api={{ compact: async () => ({}) as never }}
+        canControl={false}
+        daemon={daemonB}
+        open
+        promptReady
+        sessionId="readonly-id"
+        status="awaiting_user"
+      />,
+    );
+    expect(JSON.stringify(readonly.toJSON())).toContain('read-only');
+
+    const busy = render(
+      <SessionCommandControls
+        api={{ compact: async () => ({}) as never }}
+        canControl
+        daemon={daemonA}
+        open={false}
+        promptReady={false}
+        sessionId="busy-id"
+        status="running"
+      />,
+    );
+    expect(JSON.stringify(busy.toJSON())).toContain('never queues');
+    expect(busy.root.findByType('button').props.disabled).toBe(true);
+
+    const unsupported = render(
+      <SessionCommandControls
+        api={{
+          compact: async () =>
+            Promise.reject(Object.assign(new Error('missing'), { code: 'unknown_route', status: 404 })),
+        }}
+        canControl
+        daemon={daemonA}
+        open
+        promptReady
+        sessionId="unsupported-id"
+        status="awaiting_user"
+      />,
+    );
+    await runAsync(async () => {
+      unsupported.root.findByType('button').props.onClick();
+      await Promise.resolve();
+    });
+    expect(unsupported.root.findByProps({ role: 'alert' }).children.join('')).toContain('restart required');
+
+    const failure = render(
+      <SessionCommandControls
+        api={{ compact: async () => Promise.reject(new Error('offline')) }}
+        canControl
+        daemon={daemonA}
+        open
+        promptReady
+        sessionId="failure-id"
+        status="awaiting_user"
+      />,
+    );
+    await runAsync(async () => {
+      failure.root.findByType('button').props.onClick();
+      await Promise.resolve();
+    });
+    expect(failure.root.findByProps({ role: 'alert' }).children).toContain('offline');
+
+    const plainFailure = render(
+      <SessionCommandControls
+        api={{ compact: async () => Promise.reject({ message: 'daemon unavailable' }) }}
+        canControl
+        daemon={daemonB}
+        open
+        promptReady
+        sessionId="plain-failure-id"
+        status="awaiting_user"
+      />,
+    );
+    await runAsync(async () => {
+      plainFailure.root.findByType('button').props.onClick();
+      await Promise.resolve();
+    });
+    expect(plainFailure.root.findByProps({ role: 'alert' }).children).toContain('daemon unavailable');
   });
 });

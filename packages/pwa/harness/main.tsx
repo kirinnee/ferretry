@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import type { SessionView, TaskLive, TaskStatus, TaskSummary, WardenStatusView } from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
+import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
@@ -219,6 +220,16 @@ function Shell() {
           {viewport.width}×{viewport.height}
         </span>
       </header>
+
+      <SessionCommandControls
+        api={{ compact: async () => {} }}
+        canControl
+        daemon={daemon}
+        open
+        promptReady
+        sessionId="harness-session"
+        status="awaiting_user"
+      />
 
       <section
         aria-label="Session screen harness"

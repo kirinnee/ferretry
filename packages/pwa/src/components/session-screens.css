@@ -121,6 +121,71 @@
   border-radius: 12px;
   padding: 16px;
 }
+.fy-session-context {
+  background: var(--fy-surface);
+  border-top: 1px solid var(--fy-border);
+  color: var(--fy-fg);
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+  padding-top: 12px;
+}
+.fy-session-context h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.fy-session-context p {
+  color: var(--fy-muted);
+  margin: 4px 0 0;
+}
+.fy-session-context button {
+  align-items: center;
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+}
+.fy-session-context button:hover,
+.fy-session-context button:focus-visible {
+  background: var(--fy-surface-2);
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+.fy-session-context button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.fy-session-context button small {
+  color: var(--fy-muted);
+  margin-left: 12px;
+}
+.fy-session-context .fy-session-context-warning {
+  color: var(--warn, #a15c00);
+}
+.fy-session-context .fy-session-context-error {
+  color: var(--err, #b42318);
+}
+.fy-session-context .fy-session-context-notice {
+  color: var(--ok, #027a48);
+}
+@media (max-width: 700px) {
+  .fy-session-context button {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .fy-session-context button small {
+    margin-left: 0;
+  }
+}
 .fy-session-details dl {
   margin: 16px 0 0;
 }

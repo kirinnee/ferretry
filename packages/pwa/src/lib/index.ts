@@ -19,6 +19,7 @@ export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-warden-status.ts';
 export * from '../worklets/pcm16-worklet.ts';
+export * from '../components/session-command-controls.tsx';
 export * from './api-client.ts';
 export * from './attention-store.ts';
 export * from './class-names.ts';
