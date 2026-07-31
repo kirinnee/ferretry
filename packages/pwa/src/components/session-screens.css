@@ -91,6 +91,40 @@
 .fy-session-meta {
   min-width: 95px;
 }
+.fy-quota-readout {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.fy-session-quota {
+  color: var(--fy-muted);
+}
+.fy-quota-muted {
+  color: var(--fy-muted);
+}
+.fy-quota-divider {
+  color: var(--fy-border);
+}
+.fy-quota-warning {
+  color: var(--warn, #a15c00);
+}
+.fy-quota-error {
+  color: var(--err, #b42318);
+}
+.fy-quota-limit {
+  background: var(--err-bg, #fef3f2);
+  border-radius: 999px;
+  color: var(--err, #b42318);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  text-transform: uppercase;
+}
 .fy-session-age {
   min-width: 52px;
   text-align: right;
@@ -446,6 +480,10 @@
   .fy-session-task,
   .fy-session-meta {
     display: none;
+  }
+  .fy-session-quota {
+    grid-column: 1;
+    grid-row: 2;
   }
   .fy-session-age {
     grid-column: 2;

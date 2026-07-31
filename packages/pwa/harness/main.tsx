@@ -82,6 +82,7 @@ const harnessSession = {
     turn: 4,
     lastActivityAt: '1970-01-01T00:00:01.000Z',
     contextPercent: 54,
+    quota: { fiveHourPercent: 7, weeklyPercent: 12 },
     activity: 'Writing tests',
   },
   directory: '/work/ferretry',
