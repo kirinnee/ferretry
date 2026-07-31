@@ -21,23 +21,28 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs
 
 ## Hook inventory
 
-| Hook                        | What it enforces                                                           |
-| --------------------------- | -------------------------------------------------------------------------- |
-| `treefmt`                   | formatting: actionlint, nixfmt, prettier, shfmt                            |
-| `a-biome`                   | Biome lint on TS/JS (formatting is prettier's job, not Biome's)            |
-| `typecheck`                 | `tsc --noEmit` across the workspace                                        |
-| `a-deadcode`                | Knip, repository view (`knip.json`) — includes tests                       |
-| `a-deadcode-production`     | Knip, production view (`knip.production.json`) — from the bin entry        |
-| `a-shellcheck`              | shellcheck on every `*.sh`                                                 |
-| `a-enforce-exec`            | tracked shell scripts are executable                                       |
-| `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                     |
-| `a-action-pins-non-trusted` | everything else pins a 40-char SHA plus its tag in a comment               |
-| `a-cli-contracts`           | the release/architecture invariants in [Contracts](../contracts/README.md) |
-| `a-no-legacy-state`         | package code cannot reference predecessor state or identifiers             |
-| `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                           |
+| Hook                         | What it enforces                                                           |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| `treefmt`                    | formatting: actionlint, nixfmt, prettier, shfmt                            |
+| `a-biome`                    | Biome lint on TS/JS (formatting is prettier's job, not Biome's)            |
+| `typecheck`                  | `tsc --noEmit` across the workspace                                        |
+| `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                       |
+| `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry        |
+| `a-shellcheck`               | shellcheck on every `*.sh`                                                 |
+| `a-enforce-exec`             | tracked shell scripts are executable                                       |
+| `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                     |
+| `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment               |
+| `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md) |
+| `a-composition-reachability` | production modules are used by their package's composition root            |
+| `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers             |
+| `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                           |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
 therefore catches files that only tests reach, which the repository view considers used.
+
+Neither Knip pass can see a module that a barrel re-exports but nobody uses, because loading a file
+counts as using it. `a-composition-reachability` closes that hole — see
+[Contracts](../contracts/README.md#composition-root-reachability).
 
 `prettier` skips `Changelog.md` and `Changelog.old.md` — semantic-release owns those files and
 reformatting them would churn the release commit.

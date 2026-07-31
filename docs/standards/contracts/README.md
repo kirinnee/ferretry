@@ -15,13 +15,14 @@ invariant fits in one file, a type or a test is the better home for it.
 
 ## Validators
 
-| Script                 | Runs as                                  | Enforces                                                |
-| ---------------------- | ---------------------------------------- | ------------------------------------------------------- |
-| `cli-contracts.sh`     | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below           |
-| `action-pins.sh`       | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                            |
-| `commit-msg.sh`        | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                            |
-| `executable-shells.sh` | `a-enforce-exec`                         | every tracked `*.sh` is executable                      |
-| `no-legacy-state.sh`   | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths |
+| Script                        | Runs as                                  | Enforces                                                |
+| ----------------------------- | ---------------------------------------- | ------------------------------------------------------- |
+| `cli-contracts.sh`            | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below           |
+| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                            |
+| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                            |
+| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                      |
+| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths |
+| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root   |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 
@@ -49,6 +50,35 @@ remotely. A missing checksum verification ships a silently corruptible installer
 binary with a stale cask produces a release that installs nothing; a reordered plugin chain
 produces release notes containing the entire changelog.
 
+## Composition-root reachability
+
+`composition-reachability.sh` fails when a production module under `packages/*/src/**` is never
+_used_ by its package's composition root — `packages/cli/bin/fy.ts`, `packages/daemon/bin/fyd.ts`,
+or, for a package with no binary, the entries in its `exports` map.
+
+It exists because the same defect appeared in three unrelated reviews: a unit builds a subsystem,
+tests it to 100%, and never constructs it in the composition root. The daemon boots without it, so
+the capability does not exist in the product while every gate stays green. Two mechanisms hide it:
+
+- **Tests launder production code.** `knip.json` lists the test globs as entry points, so a module
+  only its own tests import counts as reachable. This walk never enters `tests/` at all.
+- **Barrels launder production code.** `export * from './x.ts'` makes `x` load at runtime, so
+  file-level analysis — including `knip.production.json` — reports it used even when nothing asks
+  for a single one of its symbols. This walk is symbol-aware: a re-export edge is followed only for
+  the names an importer actually demands, so a barrel line is not a mounting.
+
+The walk itself lives in `composition-reachability.ts`, because a real module graph needs resolved
+specifiers and named-import tracking rather than text matching. It parses lexically — comments and
+string literals are removed before any statement is read — and carries two tripwires that exit `2`
+instead of under-reporting: every import Bun's own transpiler sees must be one the walker also saw,
+and a demanded name that no module exports is a parser bug, not a silent miss.
+
+`reachability-allowlist.txt` enumerates the modules that are unreachable today, one exact path per
+line with a reason naming the PR that must wire it. Globs, wildcards, and directory entries are
+rejected, so silencing a new violation always costs a reviewable line in the diff; a stale entry —
+one that has since become reachable — is a hard failure, so the list can only shrink. The gate
+prints its size on success to keep growth visible.
+
 ## Action pinning
 
 `config/action-trust.json` (`schemaVersion: 1`) classifies every action as `trusted` or
@@ -63,6 +93,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/cli-contracts.sh all          # every workspace/CLI/release contract
 ./scripts/validate/cli-contracts.sh homebrew-cask # one, while iterating
 ./scripts/validate/no-legacy-state.sh             # package migration boundary
+./scripts/validate/composition-reachability.sh    # production code is actually mounted
 ./scripts/validate/action-pins.sh trusted
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```

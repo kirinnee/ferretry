@@ -1,0 +1,110 @@
+# Modules that are unreachable from their package composition root TODAY.
+#
+# Enforced by scripts/validate/composition-reachability.sh. Every line here is production code that
+# was built, tested, and never mounted — the daemon boots without it, so the capability does not
+# exist in the product. This list is a work schedule, not an exemption policy: it must shrink to
+# zero as each unit wires its subsystem into packages/daemon/bin/fyd.ts.
+#
+# Rules the gate enforces on this file:
+#   * one exact repo-relative .ts path per line — no globs, no wildcards, no directories, so
+#     silencing a NEW violation always costs a visible, reviewable line in the diff;
+#   * every entry carries a trailing '# <reason>' naming the PR or unit that must wire it;
+#   * an entry that has become reachable is a hard failure — delete it in the PR that wires it.
+
+# PR #3 — add the state home and storage foundation
+packages/daemon/src/lib/version.ts # PR #3: add the state home and storage foundation; not mounted in bin/fyd.ts
+
+# PR #5 — complete task board membership lifecycle
+packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/domain-helpers.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/error.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/exact-worker-assignee.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/index.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/invitation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/membership-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/policy.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+
+# PR #6 — add analytics ingestion and query
+packages/daemon/src/lib/analytics/model-identity.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
+packages/daemon/src/lib/analytics/pricing.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
+packages/daemon/src/lib/analytics/query.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
+packages/daemon/src/lib/analytics/results.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
+packages/daemon/src/lib/analytics/session-record.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
+
+# PR #7 — port the tmux controller
+packages/daemon/src/adapters/tmux/bun-tmux-process.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tmux/index.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/address.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/commands.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/contracts.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/controller.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/index.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/pane.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tmux/retry.ts # PR #7: port the tmux controller; not mounted in bin/fyd.ts
+
+# PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
+packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/names/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/names/policy.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/names/pool.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/names/types.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+
+# PR #10 — port the task record system and its file store
+packages/daemon/src/adapters/tasks/atomic-file.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tasks/file-operations.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tasks/file-task-store.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tasks/serial-executor.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/tasks/task-record-service.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-error.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-graph.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-id.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-order.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-policy.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-reducer.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-snapshot.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-store-port.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+packages/daemon/src/lib/tasks/task-title.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+
+# PR #12 — add bounded docx extraction
+packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/attachments/raw-deflate.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
+packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
+packages/daemon/src/lib/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
+
+# PR #13 — add learning evidence pipeline
+packages/daemon/src/adapters/learning/file-store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/aggregate.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/extract.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/policy.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+packages/daemon/src/lib/learning/types.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+
+# PR #14 — add pin domain service
+packages/daemon/src/adapters/pins/file-pin-repository.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/pins/index.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+packages/daemon/src/lib/pins/index.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+packages/daemon/src/lib/pins/policy.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+packages/daemon/src/lib/pins/service.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+packages/daemon/src/lib/pins/types.ts # PR #14: add pin domain service; not mounted in bin/fyd.ts
+
+# PR #15 — add browser session control
+packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/browser/control/login-window.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/adapters/browser/control/profile-store.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/lib/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/lib/browser/control/login.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/lib/browser/control/policy.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+packages/daemon/src/lib/browser/control/profile.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+# PR #19 — port warden supervision: detection, verdicts, failover and provenance
+packages/daemon/src/lib/warden/attention.ts # PR #19: warden supervision; the report reader is mounted but this is not
+packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report reader is mounted but this is not
+packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not
+packages/daemon/src/lib/warden/failover.ts # PR #19: warden supervision; the report reader is mounted but this is not

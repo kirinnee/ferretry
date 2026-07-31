@@ -13,6 +13,8 @@ let
     name = "workspace-validator-runtime";
     paths = [
       packages.bash
+      # The reachability gate walks the real module graph, so its validator shells out to bun.
+      packages.bun
       packages.git
       packages.jq
       packages.ripgrep
@@ -65,6 +67,15 @@ pre-commit-lib.run {
       name = "Workspace and CLI release contracts";
       entry = validator "scripts/validate/cli-contracts.sh all";
       files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|go\\.mod|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    a-composition-reachability = {
+      enable = true;
+      name = "Composition-root reachability";
+      entry = validator "scripts/validate/composition-reachability.sh";
+      files = "^(packages/.*\\.ts|packages/[^/]+/package\\.json|scripts/validate/composition-reachability\\.(sh|ts)|scripts/validate/reachability-allowlist\\.txt)$";
       pass_filenames = false;
       language = "system";
     };
