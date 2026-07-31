@@ -5,6 +5,7 @@ import {
   defaultSessionHealthSettings,
   emptySelfCheckLedger,
   parseSessionHealthSettings,
+  sessionHealthSettingsAt,
   recordSelfCheckTick,
   wedgeEvent,
   type SelfCheckLedger,
@@ -254,5 +255,34 @@ describe('session health settings', () => {
 
     // Act / Assert
     should(() => parseSessionHealthSettings(input)).throw();
+  });
+
+  it('should reproduce the shipped defaults from the cadence they were written for', () => {
+    // The pair is a ratio, not two independent numbers, and this is what proves it.
+    // Arrange / Act
+    const actual = sessionHealthSettingsAt(defaultSessionHealthSettings.selfCheckIntervalMs);
+
+    // Assert
+    should(actual).deepEqual(defaultSessionHealthSettings);
+  });
+
+  it('should move the wedge threshold with a configured cadence', () => {
+    // A daemon checking every ten seconds must not need eighteen missed ticks to admit it is wedged,
+    // and one checking every five minutes must not declare itself wedged while perfectly on time.
+    // Arrange / Act
+    const brisk = sessionHealthSettingsAt(10_000);
+    const relaxed = sessionHealthSettingsAt(300_000);
+
+    // Assert
+    should([brisk.selfCheckIntervalMs, brisk.wedgeGapMs]).deepEqual([10_000, 30_000]);
+    should([relaxed.selfCheckIntervalMs, relaxed.wedgeGapMs]).deepEqual([300_000, 900_000]);
+    // Everything the cadence does not imply is left exactly as shipped.
+    should(relaxed.incoherentRestartThreshold).equal(defaultSessionHealthSettings.incoherentRestartThreshold);
+  });
+
+  it('should refuse a cadence the schema would not accept, rather than derive a pair from it', () => {
+    // Arrange / Act / Assert
+    should(() => sessionHealthSettingsAt(0)).throw();
+    should(() => sessionHealthSettingsAt(1.5)).throw();
   });
 });

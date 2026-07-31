@@ -139,7 +139,8 @@ import {
   CALLSIGN_WINDOW_MS,
   SessionLifecycleService,
   SessionResumeService,
-  defaultSessionHealthSettings,
+  sessionHealthSettingsAt,
+  type SessionHealthSettings,
   defaultSessionResumeSettings,
   CodexPickerCleanup,
   HarnessQuirkService,
@@ -231,8 +232,13 @@ export interface DaemonWorld {
    * ONE instance serves both callers: `start` ticks it on a timer, and `GET /v1/health` reports the
    * ledgers those ticks fill. A second instance for the route would report a ledger nothing had ever
    * ticked — permanently zero self-checks beside a daemon that was self-checking every minute.
+   *
+   * `settings` is passed IN rather than defaulted here, because the cadence is the operator's
+   * (`healthIntervalSeconds`) and it is only known once configuration has loaded. The service, its
+   * consistency pass and the timer must all read the same object — a detector measuring lateness
+   * against a period the timer does not fire on is a detector measuring nothing.
    */
-  readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
+  readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
   /**
    * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
    * agent its next turn, and refuse the revives that would destroy work rather than recover it.
@@ -828,7 +834,7 @@ export function buildWorld(): DaemonWorld {
         },
         defaultSessionLifecycleSettings,
       ),
-    createSessionHealth: storage =>
+    createSessionHealth: (storage, settings) =>
       new SessionHealthService(
         {
           inventory: new StorageSessionHealthInventory(storage, {
@@ -842,7 +848,7 @@ export function buildWorld(): DaemonWorld {
             bootstrapFinished: () => true,
             bootstrapErrors: () => [],
           }),
-          consistency: new StorageConsistencyPass(storage, stateFiles, paths, defaultSessionHealthSettings),
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
           repair: new UnmountedSupervisionRepair(),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
           clock,
@@ -853,11 +859,11 @@ export function buildWorld(): DaemonWorld {
             // Nothing supervises this process yet, so the honest answer is "no restart happened":
             // the coordinator then un-latches and tells the operator to restart it themselves.
             { restart: async () => false },
-            defaultSessionHealthSettings,
+            settings,
           ),
           version: pkg.version,
         },
-        defaultSessionHealthSettings,
+        settings,
       ),
     createSessionResume: storage =>
       new SessionResumeService(
@@ -1000,7 +1006,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
-  const health = world.createSessionHealth(opened.storage);
+  // `healthIntervalSeconds` was declared in `config/daemon.json` and read by nothing, because no
+  // self-check ran to have a cadence. It is the operator's number now — and the wedge threshold moves
+  // WITH it, because "the event loop stopped running" means three missed ticks rather than a fixed
+  // three minutes. One settings object serves the service, its consistency pass and the timer below,
+  // so the period the daemon fires on cannot drift from the period the detector measures against.
+  const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
+  const health = world.createSessionHealth(opened.storage, healthSettings);
   const subsystems = world.createSubsystems(opened.storage, world.terminalRuntime, usage, health);
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
@@ -1044,7 +1056,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // daemon does not leave a timer firing at closed storage.
   const ticks = setInterval(() => {
     void health.selfCheck().catch(() => undefined);
-  }, defaultSessionHealthSettings.selfCheckIntervalMs);
+  }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
   await world.untilShutdown();
   return 0;
