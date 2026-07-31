@@ -58,6 +58,7 @@ describe('utf8ByteLength', () => {
     { value: '本', expected: 3 },
     { value: '🐿', expected: 4 },
     { value: '\ud800', expected: 3 },
+    { value: '\ud800x', expected: 4 },
     { value: 'a🐿本', expected: 8 },
   ])('should count UTF-8 bytes for $value', ({ value, expected }) => {
     // Act
