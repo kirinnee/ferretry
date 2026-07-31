@@ -10,6 +10,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
 import pkg from '../package.json' with { type: 'json' };
+import { startSttWorker } from './stt-worker.ts';
 import {
   BrowserWorkerClient,
   BunApiServer,
@@ -193,6 +194,10 @@ import {
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
+
+// The worker is started only by BunSttWorkerSpawner, but importing its entry makes the complete
+// production graph — including the runtime and recognizer factory — visible to the reachability gate.
+void startSttWorker;
 
 /** The CLI a human drives. Named here rather than derived, because the daemon
  *  package cannot read the CLI package's `bin` without depending on it. */

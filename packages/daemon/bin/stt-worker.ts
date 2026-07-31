@@ -14,11 +14,14 @@ import {
   SttWorkerRuntime,
 } from '../src/adapters/index.ts';
 
-const send = process.send?.bind(process);
-if (send === undefined) {
-  process.stderr.write('stt-worker must be launched by its parent with advanced IPC\n');
-  process.exitCode = 2;
-} else {
+/** Boot only when this module is the spawned worker entry, never when fyd imports its graph. */
+export function startSttWorker(): void {
+  const send = process.send?.bind(process);
+  if (send === undefined) {
+    process.stderr.write('stt-worker must be launched by its parent with advanced IPC\n');
+    process.exitCode = 2;
+    return;
+  }
   const channel: SttWorkerChannel = {
     send: message => {
       if (process.connected) send(message);
@@ -39,3 +42,5 @@ if (send === undefined) {
     },
   ).start();
 }
+
+if (import.meta.main) startSttWorker();
