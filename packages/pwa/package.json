@@ -8,6 +8,9 @@
     ".": "./src/lib/index.ts"
   },
   "types": "./src/lib/index.ts",
+  "dependencies": {
+    "@ferretry/protocol": "workspace:*"
+  },
   "devDependencies": {
     "should": "^13.2.3"
   }
