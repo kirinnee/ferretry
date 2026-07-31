@@ -1,4 +1,4 @@
-import type { MillisecondClockPort } from '../../runtime/readiness.ts';
+import type { MillisecondClockPort } from '../../runtime/boot.ts';
 import { daemonVersion } from '../../version.ts';
 import { jsonResponse, noStore } from '../responses.ts';
 import type { ApiRoute } from '../route.ts';

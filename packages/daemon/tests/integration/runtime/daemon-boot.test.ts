@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { DaemonBinder, DaemonHealthProbe } from '../../../src/adapters/runtime/daemon-boot.ts';
-import type { DaemonFetchPort } from '../../../src/lib/runtime/readiness.ts';
+import type { DaemonFetchPort } from '../../../src/lib/runtime/boot.ts';
 
 describe('daemon boot adapters', () => {
   it('should probe the health endpoint with an optional bearer token and treat any response as occupied', async () => {

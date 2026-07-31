@@ -3,7 +3,7 @@ import type { ApiCredentials } from './authentication.ts';
 import { ApiDispatcher } from './dispatcher.ts';
 import type { ApiRoute } from './route.ts';
 import type { ApiSocketDispatcher } from './socket.ts';
-import type { MillisecondClockPort } from '../runtime/readiness.ts';
+import type { MillisecondClockPort } from '../runtime/boot.ts';
 import { healthRoutes } from './routes/health.ts';
 import { usageRoutes } from './routes/usage.ts';
 import { ApiRouter } from './router.ts';

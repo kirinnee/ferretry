@@ -24,7 +24,6 @@ import {
   CommandUsageSource,
   DaemonBinder,
   DaemonHealthProbe,
-  DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
   FetchEnhancementTransport,
@@ -185,7 +184,6 @@ import {
   type ApiServerHandle,
   type ApiServerPort,
   type DaemonConfig,
-  type DaemonReadinessPorts,
   type MillisecondClockPort,
   type MountedSubsystems,
   type SessionId,
@@ -238,15 +236,11 @@ export interface DaemonWorld {
     readonly probe: DaemonHealthProbe;
     readonly binder: DaemonBinder;
   };
-  readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
   /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
    *  a session whose work cannot be shown to survive the relaunch. */
   readonly migratePreflight: MigrationPreflight;
-  readonly createAttentionLedgerRepository: (
-    sessionDirectory: (sessionId: string) => string,
-  ) => FileAttentionLedgerRepository;
   /** Warden report access. The reports directory hangs off the state home,
    *  which is only known once storage has resolved it, so this is a factory
    *  rather than an instance. */
@@ -328,9 +322,6 @@ export interface DaemonWorld {
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
   readonly createUsageFeed: (config: DaemonConfig) => UsageFeedPort;
-  /** Team recommendation over the published fleet manifest and the operator's
-   *  routing catalog, reading account headroom from the feed above. */
-  readonly createTeamAdvisor: (usage: UsageFeedPort) => TeamAdvisor;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
@@ -1389,7 +1380,6 @@ export function buildWorld(): DaemonWorld {
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
     },
-    createReadinessWaiter: (ports, daemonLog) => new DaemonReadinessWaiter(ports, daemonLog),
     config: new FileDaemonConfig(paths, stateFiles),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
@@ -1411,7 +1401,6 @@ export function buildWorld(): DaemonWorld {
       new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined)),
       new TmuxPaneSnapshot(tmux),
     ),
-    createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
     browserTransport: {
       connectWorker: options => BrowserWorkerClient.connect(options),
@@ -1471,7 +1460,6 @@ export function buildWorld(): DaemonWorld {
         { refreshMs: config.usage.refreshSeconds * 1_000 },
       );
     },
-    createTeamAdvisor: advisorOver,
     sessions: planner,
     provenance: new SessionProvenanceStamper(clock),
     harness: new HarnessQuirkService(
