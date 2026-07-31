@@ -19,7 +19,9 @@ describe('FleetApplyService', () => {
       fleetDirectory: '/tmp/fy-test/state/fleet',
       binDirectory: '/tmp/fy-test/state/fleet/bin',
       homesDirectory: '/tmp/fy-test/state/fleet/homes',
+      assetsDirectory: '/tmp/fy-test/state/fleet/assets',
       manifestPath: '/tmp/fy-test/state/fleet/manifest.json',
+      defaultHomeDirectories: { claude: '/tmp/fy-test/user/.claude', codex: '/tmp/fy-test/user/.codex' },
     };
     const generatedAt = '2027-01-15T08:00:00.000Z';
     const plan: FleetApplyPlan = {
@@ -37,7 +39,7 @@ describe('FleetApplyService', () => {
     const provisioner: FleetProvisioner = {
       async apply(actualPlan) {
         calls.push(['apply', actualPlan]);
-        return { accountCount: 0, operationCount: 0, manifestPath: actualPlan.manifestPath };
+        return { accountCount: 0, operationCount: 0, manifestPath: actualPlan.manifestPath, prunedWrappers: [] };
       },
     };
     const subject = new FleetApplyService(plans, provisioner);
@@ -50,6 +52,11 @@ describe('FleetApplyService', () => {
       ['build', config, layout, generatedAt],
       ['apply', plan],
     ]);
-    should(actual).deepEqual({ accountCount: 0, operationCount: 0, manifestPath: layout.manifestPath });
+    should(actual).deepEqual({
+      accountCount: 0,
+      operationCount: 0,
+      manifestPath: layout.manifestPath,
+      prunedWrappers: [],
+    });
   });
 });

@@ -72,8 +72,6 @@ export interface FleetUsageClock {
   now(): number;
 }
 
-export const systemFleetUsageClock: FleetUsageClock = { now: () => Date.now() };
-
 /** Clamp a provider percentage into the public 0–100 usage range. */
 export function clampUsagePercent(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
@@ -164,7 +162,7 @@ export class FleetUsageCollector {
 
   constructor(
     private readonly probe: FleetUsageProbe,
-    private readonly clock: FleetUsageClock = systemFleetUsageClock,
+    private readonly clock: FleetUsageClock,
     options: FleetUsageCollectorOptions = {},
   ) {
     this.concurrency = boundedConcurrency(options.concurrency);
@@ -237,8 +235,12 @@ export function escapePrometheusLabel(value: string): string {
   return value.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n');
 }
 
-/** Render fleet usage as Prometheus text; unknown measurements intentionally have no series. */
-export function renderFleetUsageMetrics(snapshot: FleetUsageSnapshot, now = Date.now()): string {
+/**
+ * Render fleet usage as Prometheus text; unknown measurements intentionally have no series.
+ * `now` is supplied by the caller — the age gauge is the only clock-dependent value here, and a
+ * default would make this function untestable without freezing time.
+ */
+export function renderFleetUsageMetrics(snapshot: FleetUsageSnapshot, now: number): string {
   const checked = FleetUsageSnapshotSchema.parse(snapshot);
   const lines = [
     '# HELP fy_fleet_usage_probe_age_seconds Seconds since the last fleet usage snapshot (-1 = never).',

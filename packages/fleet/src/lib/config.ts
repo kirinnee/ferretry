@@ -51,7 +51,7 @@ export const EnvNameSchema = z.string().regex(POSIX_ENV_NAME, {
  * explicitly, so allowing configuration to also set these would let an account silently detach
  * from the home the manifest publishes for it.
  */
-export const RESERVED_ENV_NAMES: readonly string[] = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CODEX_SQLITE_HOME'];
+export const RESERVED_ENV_NAMES = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'CODEX_SQLITE_HOME'] as const;
 
 /**
  * An environment value. A value that is exactly `$NAME` or `${NAME}` is an indirect reference,
@@ -77,7 +77,7 @@ export const EnvSchema = z.record(z.string(), EnvValueSchema).check(ctx => {
       });
       continue;
     }
-    if (RESERVED_ENV_NAMES.includes(name)) {
+    if ((RESERVED_ENV_NAMES as readonly string[]).includes(name)) {
       ctx.issues.push({
         code: 'custom',
         message: `"${name}" is reserved — an account's home is declared by its "home" field, not by the environment`,

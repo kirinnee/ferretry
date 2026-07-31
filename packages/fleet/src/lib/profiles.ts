@@ -136,7 +136,11 @@ const displayNameOf = (route: AccountRoute): string => route.displayName ?? rout
 const modelsOf = (route: AccountRoute): readonly FleetManifestModel[] =>
   route.models.map(model =>
     model.available
-      ? { id: model.id, available: true as const, ...(model.displayName === undefined ? {} : { displayName: model.displayName }) }
+      ? {
+          id: model.id,
+          available: true as const,
+          ...(model.displayName === undefined ? {} : { displayName: model.displayName }),
+        }
       : {
           id: model.id,
           available: false as const,
@@ -229,7 +233,10 @@ export function expandAliases(config: FleetConfig, accounts: readonly ResolvedAc
 
 /** Raised when two generated executables would claim the same name. */
 export class WrapperCollisionError extends Error {
-  constructor(readonly wrapper: string, readonly claimants: readonly string[]) {
+  constructor(
+    readonly wrapper: string,
+    readonly claimants: readonly string[],
+  ) {
     super(`wrapper "${wrapper}" is claimed by more than one generator: ${claimants.join(', ')}`);
     this.name = 'WrapperCollisionError';
   }
@@ -242,10 +249,7 @@ const claimantOf = (command: ResolvedCommand): string =>
  * Every generated command: those declared explicitly, then the alias fan-out. Throws on a name
  * claimed twice — by two aliases, by an alias and a command, or by a command and an account.
  */
-export function resolveCommands(
-  config: FleetConfig,
-  accounts: readonly ResolvedAccount[],
-): readonly ResolvedCommand[] {
+export function resolveCommands(config: FleetConfig, accounts: readonly ResolvedAccount[]): readonly ResolvedCommand[] {
   const explicit: readonly ResolvedCommand[] = config.commands.map(command => ({
     wrapper: command.wrapper,
     target: command.target,
@@ -295,9 +299,7 @@ export function toManifestAccounts(
 }
 
 /** Accounts sharing one provider login, keyed by `<kind>:<identity>`. */
-export function groupByIdentity(
-  accounts: readonly ResolvedAccount[],
-): ReadonlyMap<string, readonly ResolvedAccount[]> {
+export function groupByIdentity(accounts: readonly ResolvedAccount[]): ReadonlyMap<string, readonly ResolvedAccount[]> {
   const groups = new Map<string, ResolvedAccount[]>();
   for (const account of accounts) {
     const key = `${account.kind}:${account.identity}`;

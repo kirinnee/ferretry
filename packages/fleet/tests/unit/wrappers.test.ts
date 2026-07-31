@@ -258,8 +258,9 @@ describe('renderWrapperScript', () => {
     const actual = renderWrapperScript(subject);
 
     // Assert
-    should(actual.trimEnd().endsWith(`exec claude '--dangerously-skip-permissions' '--model' 'model one' "$@"`)).be
-      .true();
+    should(
+      actual.trimEnd().endsWith(`exec claude '--dangerously-skip-permissions' '--model' 'model one' "$@"`),
+    ).be.true();
   });
 
   it('should emit environment keys in a stable order so re-rendering is byte-identical', () => {

@@ -5,6 +5,7 @@ import {
   clampUsagePercent,
   escapePrometheusLabel,
   FleetUsageCollector,
+  type FleetUsageClock,
   type FleetUsageProbe,
   FleetUsageProbeResultSchema,
   FleetUsageSnapshotSchema,
@@ -35,6 +36,9 @@ const account = (id: string, patch: Record<string, unknown> = {}): Record<string
 
 const probe = (run: FleetUsageProbe['probe']): FleetUsageProbe => ({ probe: run });
 
+/** A pinned instant: the collector stamps the snapshot, so a real clock would make it unassertable. */
+const clock: FleetUsageClock = { now: () => 1_700_000_000_000 };
+
 describe('FleetUsageCollector', () => {
   it('uses only manifest account IDs, even when wrapper attributes look like aliases', async () => {
     // Arrange
@@ -44,7 +48,7 @@ describe('FleetUsageCollector', () => {
         seen.push(current.id);
         return { provider: 'anthropic', usageBased: true, ok: true, shortWindow: { usedPercent: 12 } };
       }),
-      { now: () => 1_700_000_000_000 },
+      clock,
     );
     const input = manifest([
       account('acct-z', { wrapper: 'claude-auto-north-west', displayName: 'north-west' }),
@@ -68,6 +72,7 @@ describe('FleetUsageCollector', () => {
         calls += 1;
         return { usageBased: true, ok: true };
       }),
+      clock,
     );
     const input = manifest([
       account('declared-down', { available: false, unavailableReason: 'maintenance' }),
@@ -113,6 +118,7 @@ describe('FleetUsageCollector', () => {
         if (current.id === 'network-error') throw new Error('connection refused');
         return { provider: 'cliproxy', usageBased: false, ok: false, unavailable: true, unavailableReason: 'auth' };
       }),
+      clock,
     );
 
     // Act
@@ -136,7 +142,7 @@ describe('FleetUsageCollector', () => {
         active -= 1;
         return { usageBased: true, ok: true };
       }),
-      undefined,
+      clock,
       { concurrency: 2 },
     );
 

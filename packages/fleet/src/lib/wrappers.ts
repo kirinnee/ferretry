@@ -161,7 +161,10 @@ export function renderCommandScript(input: CommandRenderInput): string {
 
 /** Raised when a command names an account that does not exist. */
 export class UnknownCommandTargetError extends Error {
-  constructor(readonly wrapper: string, readonly target: string) {
+  constructor(
+    readonly wrapper: string,
+    readonly target: string,
+  ) {
     super(`command "${wrapper}" targets unknown account "${target}"`);
     this.name = 'UnknownCommandTargetError';
   }

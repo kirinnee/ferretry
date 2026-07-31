@@ -115,7 +115,7 @@ describe('FleetConfigSchema', () => {
     should(actual).matchAny(/routes\.default\.id/);
   });
 
-  it.each(RESERVED_ENV_NAMES)('should refuse to let configuration assign %s', reserved => {
+  it.each([...RESERVED_ENV_NAMES])('should refuse to let configuration assign %s', reserved => {
     // Arrange — a home is declared by its field; letting the environment override it would lie
     const input = config({ agents: [agent({ env: { [reserved]: '/somewhere/else' } })] });
 
@@ -225,10 +225,7 @@ describe('FleetConfigSchema', () => {
       agents: [agent(), agent({ name: 'atomi', routes: { default: route({ id: ID_TWO, home: '/homes/atomi' }) } })],
     });
     const sameHome = config({
-      agents: [
-        agent(),
-        agent({ name: 'atomi', routes: { default: route({ id: ID_TWO, wrapper: 'claude-atomi' }) } }),
-      ],
+      agents: [agent(), agent({ name: 'atomi', routes: { default: route({ id: ID_TWO, wrapper: 'claude-atomi' }) } })],
     });
 
     // Act + Assert
@@ -274,9 +271,7 @@ describe('FleetConfigSchema', () => {
 
   it('should reject a defaultModel the route never lists', () => {
     // Act
-    const actual = messagesOf(
-      config({ agents: [agent({ routes: { default: route({ defaultModel: 'ghost' }) } })] }),
-    );
+    const actual = messagesOf(config({ agents: [agent({ routes: { default: route({ defaultModel: 'ghost' }) } })] }));
 
     // Assert
     should(actual).matchAny(/is not one of this account's models/);
