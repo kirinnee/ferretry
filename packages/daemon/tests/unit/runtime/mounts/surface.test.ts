@@ -6,7 +6,15 @@ import {
   type MountedSubsystems,
 } from '../../../../src/lib/runtime/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
-import { attentionService, CREDENTIALS, emptyFeed, human, pinService, taskSubsystem } from './support.ts';
+import {
+  analyticsSubsystem,
+  attentionService,
+  CREDENTIALS,
+  emptyFeed,
+  human,
+  pinService,
+  taskSubsystem,
+} from './support.ts';
 
 /**
  * The complete surface the daemon process serves.
@@ -21,6 +29,7 @@ const subsystems = (): MountedSubsystems => ({
   attention: attentionService(),
   pins: pinService([]),
   tasks: taskSubsystem(),
+  analytics: analyticsSubsystem(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -44,6 +53,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/tasks',
       'GET /v1/sessions/:sessionId/tasks/:taskId',
       'POST /v1/sessions/:sessionId/tasks/:taskId',
+      'GET /v1/analytics',
     ]);
   });
 
@@ -71,6 +81,7 @@ describe('the mounted daemon surface', () => {
     const attention = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
     const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
     const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
+    const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
 
     // Assert
     should(health.status).equal(200);
@@ -79,5 +90,6 @@ describe('the mounted daemon surface', () => {
     should(attention.status).equal(200);
     should(tasks.status).equal(200);
     should(fleet.status).equal(200);
+    should(analytics.status).equal(200);
   });
 });

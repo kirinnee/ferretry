@@ -4,6 +4,7 @@ import { ApiRouter } from '../../api/router.ts';
 import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
+import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { pinRoutes } from './pins.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
@@ -31,6 +32,8 @@ export interface MountedSubsystems {
   readonly pins: PinService;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
+  /** The fleet-wide analytics read over every finished session's durable record. */
+  readonly analytics: AnalyticsSubsystem;
 }
 
 /**
@@ -45,6 +48,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
+    ...analyticsRoutes(subsystems.analytics),
   ];
 }
 

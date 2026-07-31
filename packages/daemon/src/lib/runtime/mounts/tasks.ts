@@ -21,13 +21,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import {
-  TaskError,
-  taskBlockedBy,
-  type TaskActor,
-  type TaskEntry,
-  type TaskParseIssue,
-} from '../../tasks/index.ts';
+import { TaskError, taskBlockedBy, type TaskActor, type TaskEntry, type TaskParseIssue } from '../../tasks/index.ts';
 
 /**
  * The task record board's HTTP surface: one session's tasks, the fleet's tasks, and one task's whole
@@ -135,8 +129,7 @@ function reraise(error: unknown): never {
  *  value can never address a board outside the session tree. */
 function pathParameter(context: RouteContext, name: string, code: string): string {
   const decoded = decodeParameter(context.params.get(name) ?? '');
-  if (decoded === undefined || decoded === '')
-    throw new ApiError(400, `the ${name} in the path is not usable`, code);
+  if (decoded === undefined || decoded === '') throw new ApiError(400, `the ${name} in the path is not usable`, code);
   return decoded;
 }
 
@@ -221,7 +214,10 @@ export function taskLive(observation: AssigneeObservation | undefined): TaskLive
 }
 
 /** The blocking facts, computed over the whole board because a dependency lives in another record. */
-function blockage(task: Task, board: readonly Task[]): {
+function blockage(
+  task: Task,
+  board: readonly Task[],
+): {
   readonly blocked: boolean;
   readonly blockedReason: string | null;
   readonly blockedSince: string | null;
@@ -284,11 +280,7 @@ function parseErrorIds(issues: readonly TaskParseIssue[]): string[] | undefined 
 }
 
 /** One session's board, filtered and summarised. */
-async function listSession(
-  subsystem: TaskSubsystem,
-  sessionId: string,
-  context: RouteContext,
-): Promise<ApiResponse> {
+async function listSession(subsystem: TaskSubsystem, sessionId: string, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
   const read = await boardFor(subsystem, sessionId).list().catch(reraise);
   const board = read.entries.map(entry => entry.task);

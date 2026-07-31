@@ -5,18 +5,17 @@ import {
   type TaskActionRequest,
   type TaskCreateRequestInput,
 } from '@ferretry/protocol';
+import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
+import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
 import {
   AttentionService,
   type AttentionLedger,
   type AttentionLedgerRepository,
   type AttentionMutation,
 } from '../../../../src/lib/attention/index.ts';
+import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
-import type {
-  AssigneeObservation,
-  TaskBoardPort,
-  TaskSubsystem,
-} from '../../../../src/lib/runtime/mounts/tasks.ts';
+import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import {
   applyTaskAction,
   createTask,
@@ -181,6 +180,50 @@ export function taskSubsystem(world: TaskWorld = {}): TaskSubsystem {
     observe: async assignee => (world.observations ?? {})[assignee],
     now: () => AT,
   };
+}
+
+/**
+ * One finished session, with only the fields a case cares about spelled out.
+ *
+ * Every default is a REAL value rather than a placeholder — a created instant a query can group by,
+ * a finish instant a duration can be measured against — so a record built here is one the production
+ * derivation would accept unchanged.
+ */
+export function finishedSession(
+  overrides: Partial<FinishedAnalyticsSession> & { readonly id: string },
+): FinishedAnalyticsSession {
+  return {
+    agent: 'claude-auto',
+    selectedModel: 'claude-opus-5',
+    contextWindow: 200_000,
+    harness: 'claude',
+    mode: 'auto',
+    status: 'completed',
+    label: null,
+    cwd: '/work/ferretry',
+    parent: null,
+    createdAt: '2026-07-30T09:00:00.000Z',
+    startedAt: '2026-07-30T09:00:00.000Z',
+    finishedAt: '2026-07-30T09:30:00.000Z',
+    firstOutputAt: null,
+    turns: 4,
+    contextEndPercent: 12,
+    stalled: false,
+    failed: false,
+    migrated: false,
+    completed: true,
+    usage: null,
+    ...overrides,
+  };
+}
+
+/** An analytics subsystem over a fixed finished-session set and rate catalog. The derivation, the
+ *  query parser and the aggregator are all the REAL ones — only the session source is the test's. */
+export function analyticsSubsystem(
+  sessions: readonly FinishedAnalyticsSession[] = [],
+  pricing: readonly AnalyticsPricingRate[] = [],
+): AnalyticsSubsystem {
+  return { finished: async () => sessions, pricing: () => pricing };
 }
 
 /** A feed that never collected: enough to build the base surface without a transport. */

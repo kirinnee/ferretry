@@ -28,7 +28,12 @@ function dispatcher(world: TaskWorld = {}): ApiDispatcher {
 }
 
 const post = (path: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
-  request({ method: 'POST', path, headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  request({
+    method: 'POST',
+    path,
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 
 /** Creates one task on `session`, returning the dispatcher that owns it and the created view. */
 async function withTask(

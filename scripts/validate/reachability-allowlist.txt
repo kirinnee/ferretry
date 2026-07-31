@@ -24,12 +24,6 @@ packages/daemon/src/lib/task-boards/membership-service.ts # PR #5: complete task
 packages/daemon/src/lib/task-boards/policy.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 
-# PR #6 — add analytics ingestion and query
-packages/daemon/src/lib/analytics/model-identity.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/pricing.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/query.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/results.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/session-record.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
 packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts

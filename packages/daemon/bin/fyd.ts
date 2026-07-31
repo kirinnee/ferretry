@@ -99,7 +99,9 @@ import {
   SessionLifecycleConfigSchema,
   TaskError,
   tryParseSessionId,
+  type AnalyticsSubsystem,
   type AssigneeObservation,
+  type FinishedAnalyticsSession,
   type FoundationPaths,
   type TaskSubsystem,
   SessionLifecycleService,
@@ -333,6 +335,66 @@ function createTaskSubsystem(
   };
 }
 
+/**
+ * The analytics read, over the same authoritative session documents the rest of the daemon serves.
+ *
+ * A session counts as FINISHED when its state document carries a finish instant. Deciding it from
+ * the status enum instead would make a `stopped` session with no recorded finish look like a run of
+ * zero length, and a duration of zero is a measurement rather than a gap.
+ *
+ * Both documents are PARSED, and a session whose pair does not parse is left out entirely rather
+ * than contributed with holes: an analytics row assembled from a config the schema rejected is a row
+ * whose provenance nobody can state.
+ *
+ * The pricing catalog is EMPTY, and deliberately so. Rates are operator doctrine, the daemon mounts
+ * no source for them, and an empty catalog makes every cost `unpriced` with a reason — which is the
+ * honest answer. A hardcoded table would price historical runs off numbers nobody in this deployment
+ * agreed to; a zero would read as free.
+ */
+function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
+  const finishedRecord = async (id: SessionId): Promise<FinishedAnalyticsSession | undefined> => {
+    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const config = SessionConfigSchema.safeParse(rawConfig);
+    const state = SessionStateSchema.safeParse(rawState);
+    if (!config.success || !state.success || state.data.finishedAt === undefined) return undefined;
+    return {
+      id,
+      agent: config.data.agent,
+      // The SELECTED model only. `observedModel` is transcript evidence, and the record's own
+      // contract forbids substituting it for what the operator asked for.
+      selectedModel: config.data.model ?? null,
+      contextWindow: state.data.contextWindow ?? null,
+      harness: config.data.harness,
+      mode: config.data.mode,
+      status: state.data.status,
+      label: config.data.label ?? null,
+      cwd: config.data.cwd,
+      parent: config.data.parent ?? null,
+      createdAt: config.data.createdAt,
+      startedAt: state.data.startedAt ?? null,
+      finishedAt: state.data.finishedAt,
+      // Time-to-first-output is transcript evidence the daemon does not index; a launch instant is
+      // not an output, so reporting one here would mismeasure every session.
+      firstOutputAt: null,
+      turns: state.data.turn,
+      contextEndPercent: state.data.contextPercent ?? null,
+      stalled: state.data.status === 'stalled',
+      failed: state.data.status === 'failed',
+      migrated: config.data.migration !== undefined,
+      completed: state.data.status === 'completed',
+      // No per-session token totals are recorded anywhere the daemon can read. See the mount.
+      usage: null,
+    };
+  };
+  return {
+    finished: async () => {
+      const sessions = await Promise.all(storage.listSessions().map(session => finishedRecord(session.id)));
+      return sessions.filter((session): session is FinishedAnalyticsSession => session !== undefined);
+    },
+    pricing: () => [],
+  };
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -532,6 +594,7 @@ export function buildWorld(): DaemonWorld {
         { next: () => crypto.randomUUID() },
       ),
       tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+      analytics: createAnalyticsSubsystem(storage),
     }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },

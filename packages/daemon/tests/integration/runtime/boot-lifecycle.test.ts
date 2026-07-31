@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
+import { AnalyticsResponseSchema, SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
 import { EXIT_ALREADY_RUNNING, parseSessionId } from '../../../src/lib/index.ts';
@@ -52,15 +52,22 @@ const SESSION_ID = 'wire-1';
  * daemon will parse back out — a hand-written config that the schema rejects would make the live
  * view silently empty and the test would still pass.
  */
-async function seedSession(home: string, at: string): Promise<void> {
+async function seedSession(
+  home: string,
+  at: string,
+  sessionId: string = SESSION_ID,
+  /** Merged over the default running state, so a case can seed a FINISHED session without
+   *  restating every field the schema demands. */
+  state: Readonly<Record<string, unknown>> = {},
+): Promise<void> {
   process.env.FY_HOME = home;
   const opened = await buildWorld().storage.open();
-  const id = parseSessionId(SESSION_ID);
+  const id = parseSessionId(sessionId);
   await opened.storage.writeConfig(
     id,
     SessionConfigSchema.parse({
-      id: SESSION_ID,
-      incarnation: `${SESSION_ID}-1`,
+      id: sessionId,
+      incarnation: `${sessionId}-1`,
       runtimeGeneration: 1,
       name: 'Wire Subsystems',
       boardAccess: 'none',
@@ -86,7 +93,7 @@ async function seedSession(home: string, at: string): Promise<void> {
   );
   await opened.storage.writeState(
     id,
-    SessionStateSchema.parse({ id: SESSION_ID, status: 'running', turn: 1, lastActivityAt: at }),
+    SessionStateSchema.parse({ id: sessionId, status: 'running', turn: 1, lastActivityAt: at, ...state }),
   );
   await opened.storage.close();
 }
@@ -231,7 +238,83 @@ describe('daemon boot lifecycle', () => {
     should(detailBody.activity.map(event => event.type)).deepEqual(['created', 'status']);
     should(fleetBody.sessionId).be.null();
     should(fleetBody.tasks.map(task => [task.sessionId, task.id])).deepEqual([[SESSION_ID, 'F1']]);
-    should(JSON.parse(snapshot) as { tasks: unknown[] }).have.property('tasks').with.length(1);
+    should(JSON.parse(snapshot) as { tasks: unknown[] })
+      .have.property('tasks')
+      .with.length(1);
+  });
+
+  /**
+   * The analytics read, driven through the production composition root over a real socket.
+   *
+   * It proves the mount DOES ITS JOB rather than merely existing: the index is derived from the real
+   * session documents in the state home, a session that has not finished is left out of it, the real
+   * query parser answers the CLI's own `?q=`, and the durations reported are the ones the seeded
+   * instants imply.
+   */
+  it('should derive and query analytics from the real session documents', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-analytics');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-done', {
+      status: 'completed',
+      turn: 6,
+      startedAt: '2026-07-30T09:00:00.000Z',
+      finishedAt: '2026-07-30T09:45:00.000Z',
+    });
+    // Still running: no finish instant, so it must not be measured as a run of some length.
+    await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const analytics = `http://127.0.0.1:${port}/v1/analytics`;
+
+    // Act
+    const grouped = await fetch(`${analytics}?q=${encodeURIComponent('sum by (id)')}`, { headers });
+    const raw = await fetch(`${analytics}?q=${encodeURIComponent('{status=completed}')}`, { headers });
+    const refused = await fetch(`${analytics}?q=${encodeURIComponent('sum by (nonsense)')}`, { headers });
+    const groupedBody = AnalyticsResponseSchema.parse(await grouped.json());
+    const rawBody = AnalyticsResponseSchema.parse(await raw.json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(grouped.status).equal(200);
+    // One of the two seeded sessions has finished, so exactly one is indexed.
+    should(groupedBody.index.sessions).equal(1);
+    should(groupedBody.scope).deepEqual({ allSessions: true, indexed: 1, matched: 1 });
+    should(groupedBody.kind === 'aggregate' ? groupedBody.results.map(row => row.labels.id) : []).deepEqual([
+      'wire-done',
+    ]);
+    // 09:00 to 09:45 in the seeded state, measured by the daemon rather than asserted by the client.
+    should(groupedBody.kind === 'aggregate' ? groupedBody.results.map(row => row.durationMs.value) : []).deepEqual([
+      45 * 60_000,
+    ]);
+    should(groupedBody.kind === 'aggregate' ? groupedBody.results.map(row => row.turns.value) : []).deepEqual([6]);
+    // No token evidence is indexed, so the cost is honestly unknown rather than zero.
+    should(groupedBody.index.tokenSessions).equal(0);
+    should(
+      groupedBody.kind === 'aggregate' ? groupedBody.results.map(row => row.equivalentApiCostUsdMicros.value) : [],
+    ).deepEqual([null]);
+    should(rawBody.kind).equal('raw');
+    should(rawBody.kind === 'raw' ? rawBody.results.map(row => [row.id, row.cwd]) : []).deepEqual([
+      ['wire-done', home],
+    ]);
+    // A malformed query is the caller's mistake, not a 500 from the daemon.
+    should(refused.status).equal(400);
+    should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {
