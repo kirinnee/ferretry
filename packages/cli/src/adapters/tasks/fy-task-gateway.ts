@@ -34,18 +34,17 @@ const query = (filters: readonly (readonly [string, string])[]): string => {
  */
 export class FyTaskGateway implements ITaskGateway {
   /**
-   * The client is resolved per call rather than at wiring time, so `fy --help` and every command that
-   * never reaches the daemon keep working on a host where `FY_URL` is not set.
+   * The composition root's client, which connects on first request rather than at wiring time — so
+   * `fy --help` and every command that never reaches the daemon keep working on a host without one.
    */
-  constructor(private readonly connect: () => Promise<IFyApiClient>) {}
+  constructor(private readonly client: Pick<IFyApiClient, 'request'>) {}
 
   private sessionBase(sessionId: string): string {
     return `/v1/sessions/${encodeURIComponent(sessionId)}/tasks`;
   }
 
   async create(sessionId: string, request: TaskCreateRequest): Promise<ScopedTaskView> {
-    const client = await this.connect();
-    return client.request(
+    return this.client.request(
       this.sessionBase(sessionId),
       ScopedTaskViewSchema,
       jsonPost(TaskCreateRequestSchema, request),
@@ -53,21 +52,18 @@ export class FyTaskGateway implements ITaskGateway {
   }
 
   async list(scope: TaskScope, filters: readonly (readonly [string, string])[]) {
-    const client = await this.connect();
     return scope.sessionId === null
-      ? client.request(`/v1/tasks${query(filters)}`, FleetTaskListResponseSchema)
-      : client.request(`${this.sessionBase(scope.sessionId)}${query(filters)}`, SessionTaskListResponseSchema);
+      ? this.client.request(`/v1/tasks${query(filters)}`, FleetTaskListResponseSchema)
+      : this.client.request(`${this.sessionBase(scope.sessionId)}${query(filters)}`, SessionTaskListResponseSchema);
   }
 
   async show(sessionId: string, id: TaskId, afterSequence: number) {
-    const client = await this.connect();
     const suffix = afterSequence > 0 ? `?after=${afterSequence}` : '';
-    return client.request(`${this.sessionBase(sessionId)}/${id}${suffix}`, ScopedTaskDetailResponseSchema);
+    return this.client.request(`${this.sessionBase(sessionId)}/${id}${suffix}`, ScopedTaskDetailResponseSchema);
   }
 
   async act(sessionId: string, id: TaskId, request: TaskActionRequest): Promise<ScopedTaskView> {
-    const client = await this.connect();
-    return client.request(
+    return this.client.request(
       `${this.sessionBase(sessionId)}/${id}`,
       ScopedTaskViewSchema,
       jsonPost(TaskActionRequestSchema, request),

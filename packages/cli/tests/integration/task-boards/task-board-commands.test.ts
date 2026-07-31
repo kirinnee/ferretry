@@ -44,7 +44,7 @@ describe('the board gateway', () => {
   it('should GET the membership read and carry the peer proof', async () => {
     // Arrange
     const { client, transport } = fakeClient([membership]);
-    const gateway = new FyTaskBoardGateway(() => client);
+    const gateway = new FyTaskBoardGateway(await client);
 
     // Act
     const actual = await gateway.send({ command: 'membership' }, { [FY_BOARD_CAPABILITY_HEADER]: 'peer-proof' });
@@ -93,7 +93,7 @@ describe('the board gateway', () => {
     // Act + Assert
     for (const [command, reply, path] of commands) {
       const { client, transport } = fakeClient([reply]);
-      await new FyTaskBoardGateway(() => client).send(command, {});
+      await new FyTaskBoardGateway(await client).send(command, {});
       should(transport.exchanges[0]?.method).equal('POST');
       should(transport.exchanges[0]?.url).endWith(`${TASK_BOARD_ROUTE_PREFIX}${path}`);
     }
@@ -102,24 +102,21 @@ describe('the board gateway', () => {
   it('should reject a response that does not match its wire schema', async () => {
     // Arrange
     const { client } = fakeClient([{ role: 'sysadmin' }]);
-    const gateway = new FyTaskBoardGateway(() => client);
+    const gateway = new FyTaskBoardGateway(await client);
 
     // Act + Assert
     await should(gateway.send({ command: 'membership' }, {})).be.rejected();
   });
 
-  it('should not connect until a command needs the daemon', () => {
+  it('should not touch the daemon until a command needs it', async () => {
     // Arrange
-    let connections = 0;
+    const { client, transport } = fakeClient([membership]);
 
     // Act
-    new FyTaskBoardGateway(() => {
-      connections += 1;
-      return fakeClient([membership]).client;
-    });
+    new FyTaskBoardGateway(await client);
 
     // Assert
-    should(connections).equal(0);
+    should(transport.exchanges).have.length(0);
   });
 });
 

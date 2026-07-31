@@ -4,11 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { BunTextFileReader } from '../../../src/adapters/tasks/bun-text-file-reader';
-import {
-  createFyClient,
-  environmentBoardCredentials,
-  environmentSessionId,
-} from '../../../src/adapters/tasks/fy-client-factory';
+import { environmentBoardCredentials, environmentSessionId } from '../../../src/adapters/tasks/task-environment';
 
 const workspace = await mkdtemp(join(tmpdir(), 'fy-task-adapters-'));
 
@@ -38,23 +34,7 @@ describe('reading a brief from disk', () => {
   });
 });
 
-describe('resolving the daemon connection', () => {
-  it('should build a client from FY_URL and FY_TOKEN', async () => {
-    // Act
-    const actual = await createFyClient({ FY_URL: 'http://127.0.0.1:65535', FY_TOKEN: 'secret' }, '1.0.0');
-
-    // Assert
-    should(actual).have.property('request').which.is.a.Function();
-  });
-
-  it('should refuse to guess where the daemon is', async () => {
-    // Act + Assert
-    should(() => createFyClient({}, '1.0.0')).throw(/set FY_URL/u);
-    should(() => createFyClient({ FY_URL: '   ' }, '1.0.0')).throw(/set FY_URL/u);
-    should(() => createFyClient({ FY_URL: 'http://127.0.0.1:65535' }, '1.0.0')).throw(/set FY_TOKEN/u);
-    should(() => createFyClient({ FY_URL: 'http://127.0.0.1:65535', FY_TOKEN: ' ' }, '1.0.0')).throw(/set FY_TOKEN/u);
-  });
-
+describe('reading the task environment', () => {
   it('should read the ambient session id, treating blank as absent', () => {
     // Act + Assert
     should(environmentSessionId({ FY_SESSION_ID: '  session-7  ' })).equal('session-7');

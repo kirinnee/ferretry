@@ -17,7 +17,7 @@ describe('the task gateway', () => {
   it('should POST a create to the session it was given', async () => {
     // Arrange
     const { client, transport } = fakeClient([scoped('F9')]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     const actual = await gateway.create('session-7', {
@@ -45,7 +45,7 @@ describe('the task gateway', () => {
   it('should escape a session id that would otherwise change the path', async () => {
     // Arrange
     const { client, transport } = fakeClient([board('a/b')]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     await gateway.list({ sessionId: 'a/b' }, []);
@@ -57,7 +57,7 @@ describe('the task gateway', () => {
   it('should GET the session board with its filters as a query string', async () => {
     // Arrange
     const { client, transport } = fakeClient([board('session-7')]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     const actual = await gateway.list({ sessionId: 'session-7' }, [
@@ -77,7 +77,7 @@ describe('the task gateway', () => {
   it('should GET the fleet board from its own route when the scope has no session', async () => {
     // Arrange
     const { client, transport } = fakeClient([board(null)]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     const actual = await gateway.list({ sessionId: null }, []);
@@ -93,7 +93,7 @@ describe('the task gateway', () => {
       { sessionId: 'session-7', task: scoped('F7'), activity: [] },
       { sessionId: 'session-7', task: scoped('F7'), activity: [] },
     ]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     await gateway.show('session-7', 'F7', 0);
@@ -107,7 +107,7 @@ describe('the task gateway', () => {
   it('should POST an action to the task route', async () => {
     // Arrange
     const { client, transport } = fakeClient([scoped('F7')]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act
     const actual = await gateway.act('session-7', 'F7', { action: 'note', text: 'looked at it' });
@@ -122,7 +122,7 @@ describe('the task gateway', () => {
   it('should refuse to send a payload the wire schema rejects', async () => {
     // Arrange
     const { client, transport } = fakeClient([scoped('F7')]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act — an unknown action never reaches the daemon.
     const failure = gateway.act('session-7', 'F7', { action: 'explode' } as never);
@@ -135,28 +135,24 @@ describe('the task gateway', () => {
   it('should reject a response that does not match the wire schema', async () => {
     // Arrange
     const { client } = fakeClient([{ id: 'F7' }]);
-    const gateway = new FyTaskGateway(() => client);
+    const gateway = new FyTaskGateway(await client);
 
     // Act + Assert
     await should(gateway.act('session-7', 'F7', { action: 'note', text: 'x' })).be.rejected();
   });
 
-  it('should not connect until a command actually needs the daemon', async () => {
-    // Arrange
-    let connections = 0;
-    const { client } = fakeClient([scoped('F7')]);
-    const gateway = new FyTaskGateway(() => {
-      connections += 1;
-      return client;
-    });
+  it('should not touch the daemon until a command actually needs it', async () => {
+    // Arrange — the composition root hands over a client that connects on its first request.
+    const { client, transport } = fakeClient([scoped('F7')]);
+    const gateway = new FyTaskGateway(await client);
 
-    // Assert — construction alone must not resolve FY_URL.
-    should(connections).equal(0);
+    // Assert — construction alone must not reach the daemon.
+    should(transport.exchanges).have.length(0);
 
     // Act
     await gateway.act('session-7', 'F7', { action: 'note', text: 'x' });
 
     // Assert
-    should(connections).equal(1);
+    should(transport.exchanges).have.length(1);
   });
 });

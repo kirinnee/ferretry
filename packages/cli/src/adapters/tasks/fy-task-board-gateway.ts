@@ -51,16 +51,15 @@ function route(command: TaskBoardCommand): Route {
 }
 
 export class FyTaskBoardGateway implements ITaskBoardGateway {
-  /** Resolved per call so a host without `FY_URL` can still print help. */
-  constructor(private readonly connect: () => Promise<IFyApiClient>) {}
+  /** Connects on first request, so a host without a daemon can still print help. */
+  constructor(private readonly client: Pick<IFyApiClient, 'request'>) {}
 
   async send(command: TaskBoardCommand, headers: Readonly<Record<string, string>>): Promise<unknown> {
-    const client = await this.connect();
     const { path, schema, body } = route(command);
     const init: RequestInit =
       body === undefined
         ? { headers: { ...headers } }
         : { method: 'POST', body: JSON.stringify(body), headers: { ...headers, 'content-type': 'application/json' } };
-    return client.request(`${TASK_BOARD_ROUTE_PREFIX}${path}`, schema, init);
+    return this.client.request(`${TASK_BOARD_ROUTE_PREFIX}${path}`, schema, init);
   }
 }
