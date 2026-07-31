@@ -104,6 +104,9 @@ try {
       const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
       await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
       process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
+      const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
+      await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
+      process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
       const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
       await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
       process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);

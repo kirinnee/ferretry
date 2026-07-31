@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { useEffect, useState } from 'react';
 import type {
   BrowserStatus,
+  AnalyticsResponse,
   SessionView,
   TaskLive,
   TaskStatus,
@@ -34,6 +35,7 @@ import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
+import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
@@ -314,6 +316,60 @@ const ANALYTICS = {
   ],
 } as unknown as AnalyticsAggregateResponse;
 
+/** Raw-query fixture: its unknown price must remain visible in the responsive renderer. */
+const ANALYTICS_RAW: AnalyticsResponse = {
+  kind: 'raw',
+  query: '{status=running}',
+  parsed: { groupBy: [], matchers: [] },
+  scope: { allSessions: true, indexed: 2, matched: 1 },
+  index: {
+    schemaVersion: 6,
+    sessions: 2,
+    tokenSessions: 1,
+    transcriptSources: 2,
+    indexedTranscriptSources: 2,
+    pendingTranscriptSources: 0,
+    sourceErrors: 0,
+    refreshing: false,
+  },
+  limit: 200,
+  truncated: true,
+  results: [
+    {
+      id: 'harness-running-session',
+      agent: 'codex',
+      model: 'gpt-5.6-sol',
+      contextWindow: null,
+      harness: 'codex',
+      mode: 'auto',
+      status: 'running',
+      label: 'Port analytics response',
+      cwd: '/work/ferretry',
+      parent: null,
+      day: '2026-07-31',
+      week: '2026-W31',
+      createdAt: '2026-07-31T11:00:00.000Z',
+      pricingModel: null,
+      equivalentApiCostUsdMicros: null,
+      tokens: 12_400,
+      inputTokens: 9_100,
+      outputTokens: 3_300,
+      cachedInputTokens: 0,
+      cacheWriteInputTokens: 0,
+      cacheWrite5mInputTokens: 0,
+      cacheWrite1hInputTokens: 0,
+      turns: 4,
+      durationMs: null,
+      timeToFirstOutputMs: null,
+      contextEndPercent: 22,
+      stalled: false,
+      failed: false,
+      migrated: false,
+      completed: false,
+    },
+  ],
+};
+
 /** Temporal fixture intentionally has a missing day and an unknown cost so the
  * screenshot makes the chart's honest-gap treatment reviewable. */
 const ANALYTICS_TIME = {
@@ -576,6 +632,14 @@ function Shell() {
           </PanelHeader>
           <PanelBody className="min-w-0">
             <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
+          </PanelBody>
+        </Card>
+        <Card aria-label="Analytics raw query result" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — raw query result</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsResponseView response={ANALYTICS_RAW} />
           </PanelBody>
         </Card>
         <WardenConfigCard
