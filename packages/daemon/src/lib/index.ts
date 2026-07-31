@@ -27,4 +27,5 @@ export * from './task-boards/index.ts';
 export * from './tasks/index.ts';
 export * from './tmux/index.ts';
 export * from './version.ts';
+export * from './warden/index.ts';
 export * from './worktrees/index.ts';
