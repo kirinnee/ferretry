@@ -38,6 +38,7 @@ export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-remote-browser.ts';
 export * from '../hooks/use-theme.ts';
 export * from '../hooks/use-warden-status.ts';
+export * from '../shell/agent-sidebar-model.ts';
 export * from '../shell/app-bar.tsx';
 export * from '../shell/bottom-sheet.tsx';
 export * from '../shell/chat-width-control.tsx';
