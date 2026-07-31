@@ -23,6 +23,7 @@ import type {
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../src/components/composer.tsx';
+import { QuestionForm } from '../src/components/question-form.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
@@ -607,6 +608,30 @@ function Shell() {
               api={{ send: async () => ({}) as never }}
               daemon={daemon}
               quota={harnessSession.state.quota}
+              sessionId="harness-session"
+            />
+            <QuestionForm
+              api={{ answer: async () => ({}) }}
+              compact={phone}
+              daemon={daemon}
+              question={{
+                toolUseId: 'harness-question',
+                questions: [
+                  {
+                    header: 'Port review',
+                    question: 'Which verification should run before the PR is opened?',
+                    options: [
+                      { label: 'The complete gate', description: 'Run the exact CI reproduction.' },
+                      { label: 'A focused test only', description: 'Fast but incomplete.' },
+                    ],
+                  },
+                  {
+                    header: 'Follow-up',
+                    question: 'Should the screenshot comparison be included?',
+                    options: [{ label: 'Yes', description: 'Check both desktop and phone layouts.' }],
+                  },
+                ],
+              }}
               sessionId="harness-session"
             />
           </div>

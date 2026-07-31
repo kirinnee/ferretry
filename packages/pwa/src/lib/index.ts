@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../components/question-form.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
 export * from '../features/browser/browser-login-banner.tsx';

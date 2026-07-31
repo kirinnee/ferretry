@@ -9,11 +9,70 @@
 .fy-session-list,
 .fy-session-details,
 .fy-transcript-shell,
-.fy-composer {
+.fy-composer,
+.fy-question-form {
   color: var(--fy-fg);
   font:
     14px/1.45 system-ui,
     sans-serif;
+}
+.fy-question-form {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  padding: 12px;
+}
+.fy-question {
+  border: 0;
+  margin: 0 0 12px;
+  min-inline-size: 0;
+  padding: 0;
+}
+.fy-question legend {
+  font-weight: 700;
+}
+.fy-question p {
+  margin: 4px 0 8px;
+}
+.fy-question-options {
+  display: grid;
+  gap: 4px;
+}
+.fy-question-option {
+  align-items: start;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px;
+}
+.fy-question-option:hover,
+.fy-question-option:focus-within {
+  background: var(--fy-surface-2);
+  outline: 2px solid var(--fy-accent);
+  outline-offset: -2px;
+}
+.fy-question-option small {
+  color: var(--fy-muted);
+  display: block;
+}
+.fy-question textarea {
+  border: 1px solid var(--fy-border);
+  border-radius: 8px;
+  font: inherit;
+  min-height: 88px;
+  padding: 8px;
+  resize: vertical;
+}
+.fy-question-nav {
+  display: flex;
+  justify-content: space-between;
+}
+.fy-question-nav button,
+.fy-question-submit {
+  min-height: 44px;
+  min-width: 44px;
 }
 .fy-screen-heading,
 .fy-detail-header,
