@@ -1,10 +1,25 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { beginReadinessWait, decideReadiness, type ReadinessPolicy } from '../../../src/lib/runtime/readiness.ts';
+import {
+  beginReadinessWait,
+  decideReadiness,
+  defaultReadinessPolicy,
+  type ReadinessPolicy,
+} from '../../../src/lib/runtime/readiness.ts';
 
 const policy: ReadinessPolicy = { deadlineMs: 100, cadenceMs: 10, progressAfterMs: 20 };
 
 describe('daemon readiness policy', () => {
+  it('should keep deployment defaults internally ordered for useful startup progress', () => {
+    // Act
+    const defaults = defaultReadinessPolicy();
+
+    // Assert
+    should(defaults.cadenceMs).be.above(0);
+    should(defaults.progressAfterMs).be.above(defaults.cadenceMs);
+    should(defaults.deadlineMs).be.above(defaults.progressAfterMs);
+  });
+
   it('should create a clean wait state and publish progress once', () => {
     // Arrange
     const state = beginReadinessWait(10);
