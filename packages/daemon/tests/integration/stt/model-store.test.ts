@@ -677,4 +677,18 @@ describe('bun command runner', () => {
     should(actual.stdout.trim()).equal('out');
     should(actual.stderr.trim()).equal('err');
   });
+
+  it('should escalate to SIGKILL when the child ignores the timeout SIGTERM', async () => {
+    // Arrange — a child that traps SIGTERM and would otherwise outlive the timeout forever.
+    // Without the escalation a hanging extraction wedges an install for the whole process
+    // lifetime, which is the defect this runner exists to prevent, so the kill path must be
+    // exercised rather than assumed.
+    const runner = new BunSttCommandRunner(150);
+
+    // Act
+    const actual = await runner.run(['sh', '-c', "trap '' TERM; sleep 30"], 100);
+
+    // Assert — the child is gone and the result is reported as a timeout, not a hang.
+    should(actual.timedOut).equal(true);
+  });
 });
