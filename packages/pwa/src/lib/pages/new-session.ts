@@ -1,8 +1,9 @@
 import { StartSessionRequestSchema } from '@ferretry/protocol';
 
-import { daemonSessionScope } from '../daemon-scope';
+import type { DaemonConnection } from '../daemon-connection.ts';
+import { daemonSessionScope } from '../daemon-scope.ts';
 
-export type DaemonConnection = Parameters<typeof daemonSessionScope>[0];
+export type { DaemonConnection } from '../daemon-connection.ts';
 
 export interface NewSessionDraft {
   agent: string;
@@ -22,7 +23,7 @@ export const emptyNewSessionDraft: NewSessionDraft = {
   prompt: '',
 };
 
-export function canSubmit(
+export function canSubmitNewSession(
   draft: NewSessionDraft,
   connection: DaemonConnection | undefined,
   isSubmitting: boolean,
