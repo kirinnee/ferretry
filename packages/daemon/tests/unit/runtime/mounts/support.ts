@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   PIN_SCHEMA_VERSION,
   SessionConfigSchema,
@@ -42,6 +43,8 @@ import {
   SessionControlError,
   type SessionControlSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
+import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import {
   TeamAdvisor,
   type AccountInventoryPort,
@@ -656,12 +659,12 @@ export class FakeSessionControl implements SessionControlSubsystem {
     private readonly unknownAgents: readonly string[] = [],
   ) {}
 
-  async start(request: StartSessionRequest, requestId: string): Promise<SessionView> {
+  async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {
-      if (already.payload !== JSON.stringify(request))
+      if (already.payload !== payload)
         throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
       return sessionView(already.id, { agent: request.agent }, { status: 'running' });
     }
@@ -669,8 +672,23 @@ export class FakeSessionControl implements SessionControlSubsystem {
       throw new SessionControlError('unknown_agent', `no account is published as ${JSON.stringify(request.agent)}`);
     this.minted += 1;
     const id = `started-${this.minted}`;
-    this.spent.set(requestId, { id, payload: JSON.stringify(request) });
+    this.spent.set(requestId, { id, payload });
     return sessionView(id, { agent: request.agent, mode: request.mode }, { status: 'running' });
+  }
+
+  /**
+   * The recovery read, over the same ledger the idempotency uses.
+   *
+   * The digest is the REAL one — `fakePayloadDigest` is the same SHA-256 hex the protocol client
+   * computes — because a fake that accepted any digest would let the mount ship without the check
+   * that stops one caller reading another's request id.
+   */
+  async recover(requestId: string, digest: string): Promise<SessionView | undefined> {
+    const already = this.spent.get(requestId);
+    if (already === undefined) return undefined;
+    if (fakePayloadDigest(already.payload) !== digest)
+      throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
+    return sessionView(already.id, {}, { status: 'running' });
   }
 
   async stop(sessionId: string, reason: string | undefined): Promise<SessionView> {
@@ -678,6 +696,11 @@ export class FakeSessionControl implements SessionControlSubsystem {
     if (!this.known.includes(sessionId)) throw new SessionControlError('not_found', `no session ${sessionId}`);
     return sessionView(sessionId, {}, { status: 'stopped', ...(reason === undefined ? {} : { reason }) });
   }
+}
+
+/** The digest the protocol client sends when it recovers a start: SHA-256 hex of the body text. */
+export function fakePayloadDigest(payload: string): string {
+  return createHash('sha256').update(payload, 'utf8').digest('hex');
 }
 
 /**
@@ -827,3 +850,36 @@ export const emptyFeed: UsageFeedPort = {
   snapshotAt: () => undefined,
   hasSnapshot: () => false,
 };
+
+/**
+ * A reviver that records instead of replacing a pane.
+ *
+ * The ACTOR is what this fake exists to capture. The whole reason the resume mount reads the actor
+ * from the authorization boundary rather than the body is that an operator and an automated reviver
+ * get different privileges, and the only way to prove the mount passes the right one through is to
+ * record what the subsystem was handed.
+ *
+ * Its refusals are the four the domain raises, each drivable by the session it is asked about, so
+ * every HTTP answer the mount can give is reachable without a real service behind it.
+ */
+export class FakeSessionResume implements SessionResumeSubsystem {
+  /** Every revive that reached the subsystem, as the session, the actor and the message. */
+  readonly resumes: Array<readonly [string, ResumeActor, string | undefined]> = [];
+
+  constructor(
+    /** Sessions that exist, so a revive has something to revive. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionResumeError>> = {},
+  ) {}
+
+  async resume(sessionId: string, actor: ResumeActor, message: string | undefined): Promise<SessionView> {
+    this.resumes.push([sessionId, actor, message]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionResumeError('not_found', `no session ${sessionId}`);
+    // Turn two, because a revive that handed the agent a new turn moved the counter: a view still
+    // reporting turn one would not distinguish a revive from a read.
+    return sessionView(sessionId, {}, { status: 'running', turn: 2 });
+  }
+}

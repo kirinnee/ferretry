@@ -14,6 +14,7 @@ import {
   CREDENTIALS,
   emptyFeed,
   FakeSessionControl,
+  FakeSessionResume,
   FakeTerminals,
   healthSubsystem,
   human,
@@ -41,6 +42,7 @@ const subsystems = (): MountedSubsystems => ({
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
   sessionControl: new FakeSessionControl(),
+  sessionResume: new FakeSessionResume(),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
@@ -65,6 +67,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId',
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',
+      'GET /v1/sessions/by-request/:requestId',
+      'POST /v1/sessions/:sessionId/resume',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
@@ -126,6 +130,11 @@ describe('the mounted daemon surface', () => {
     const stopped = await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/sessions/s1/stop', headers: human, body: '{}' }),
     );
+    // The revive, over the same dispatcher: the route the protocol client's `resume` speaks, which
+    // answered `unknown_route` until the resume service was mounted behind it.
+    const revived = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/resume', headers: human, body: '{}' }),
+    );
 
     // Assert
     should(health.status).equal(200);
@@ -144,6 +153,7 @@ describe('the mounted daemon surface', () => {
     should(terminals.status).equal(200);
     should(learning.status).equal(200);
     should(stopped.status).equal(200);
+    should(revived.status).equal(200);
   });
 
   it('should serve every protocol-switching route from one table too', () => {

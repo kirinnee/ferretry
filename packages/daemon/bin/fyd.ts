@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   type LearningConfig,
@@ -164,7 +165,13 @@ import {
   normalizeCallsign,
   CALLSIGN_WINDOW_MS,
   SessionLifecycleService,
+  ResumeCancelled,
+  ResumeRefused,
+  type ResumeLauncher,
+  ReviveDedupeConflict,
+  SessionResumeError,
   SessionResumeService,
+  type SessionResumeSubsystem,
   sessionHealthSettingsAt,
   type SessionHealthSettings,
   defaultSessionResumeSettings,
@@ -292,14 +299,31 @@ export interface DaemonWorld {
    */
   readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
   /**
+   * The terminal a revive replaces: tmux panes on the daemon's own private socket, never the host's
+   * default one.
+   *
+   * A FACTORY rather than an instance, for the same reason `wardenReports` is one: the launcher reads
+   * the session's own configuration document to learn which pane, directory and command it is
+   * relaunching, and no document is readable until storage has resolved and locked the state home.
+   *
+   * It is a world field for the same reason `sessionLauncher` and `terminalRuntime` are — it is the
+   * one adapter in the resume path whose real behaviour cannot be driven from a test without killing
+   * and respawning a pane on the host. A test substitutes this and keeps the service, the real
+   * documents, the journal and the routes exactly as production builds them.
+   */
+  readonly createResumeLauncher: (storage: DaemonStorage) => ResumeLauncher;
+  /**
    * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
    * agent its next turn, and refuse the revives that would destroy work rather than recover it.
    *
    * Its monitor control is `NoMonitorSupervision` for now — this daemon runs no per-session
    * monitors, so there is genuinely nothing to disarm before a revive or arm after one. The unit
    * that lands monitoring replaces it.
+   *
+   * The launcher is passed IN rather than captured so overriding `createResumeLauncher` on a world
+   * actually changes what revives.
    */
-  readonly createSessionResume: (storage: DaemonStorage) => SessionResumeService;
+  readonly createSessionResume: (storage: DaemonStorage, launcher: ResumeLauncher) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
@@ -365,6 +389,12 @@ export interface DaemonWorld {
      * production tmux launcher no matter what a test substituted.
      */
     launcher: SessionLifecycleLauncher,
+    /**
+     * The pane a revive replaces, passed IN for the same reason: the resume service is built once per
+     * opened storage, and a factory that closed over `createResumeLauncher` would keep the production
+     * tmux launcher no matter what a test substituted.
+     */
+    reviver: ResumeLauncher,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -540,6 +570,19 @@ interface ExecutableResolverPort {
 }
 
 /**
+ * Naming a request body by its content, which is how the protocol client identifies the start it is
+ * recovering.
+ *
+ * A PORT rather than a `createHash` call at the point of use, because `src/lib` may not reach a
+ * platform capability and the mount must stay a pure function of its request. The algorithm is not
+ * this daemon's choice: the client sends the SHA-256 hex of the body it posted, so anything else
+ * would never match.
+ */
+interface PayloadDigestPort {
+  hex(payload: string): string;
+}
+
+/**
  * Callsign claiming, as a START needs it: take a name, and give one back when the start it was taken
  * for never happened.
  *
@@ -658,8 +701,10 @@ function createSessionControlSubsystem(
   executables: ExecutableResolverPort,
   ids: SessionIdFactory,
   callsigns: CallsignClaims,
+  digests: PayloadDigestPort,
 ): SessionControlSubsystem {
-  /** Request id to the session it started, plus the payload it started, for this process's lifetime. */
+  /** Request id to the session it started, plus the exact body it started from, for this process's
+   *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
   const spent = new Map<string, { readonly sessionId: SessionId; readonly payload: string }>();
 
   /** The view of a session this mount just wrote. A document it cannot read back is a wiring fault. */
@@ -674,8 +719,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId) => {
-      const payload = JSON.stringify(request);
+    start: async (request, requestId, payload) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -726,8 +770,19 @@ function createSessionControlSubsystem(
         model: plan.model,
         remoteControl: request.remoteControl === true,
         harnessFlags: [...(request.harnessFlags ?? [])],
-        // Turn zero: the first turn is delivered by the launch below, and nothing has answered it.
-        turn: 0,
+        /**
+         * WHICH TURN THIS SESSION IS ON, which is the number of the turn document it was handed.
+         *
+         * It is not "turns answered". Nothing in this daemon observes an agent answering, and the
+         * counter has a second reader that decides behaviour from it: a revive writes
+         * `turns/turn-<turn + 1>.md` and hands the agent that file. Recording zero for a session that
+         * was already given `turn-001.md` therefore makes the FIRST revive plan turn one and overwrite
+         * the very document holding the session's original assignment.
+         *
+         * A start with no prompt handed over no document, so it is genuinely on turn zero — and the
+         * first revive of it writes `turn-001.md` with nothing to overwrite.
+         */
+        turn: request.prompt === undefined ? 0 : 1,
         ...(teammate === undefined ? {} : { teammate }),
         ...(request.label === undefined ? {} : { label: request.label }),
         ...SESSION_START_DEFAULTS,
@@ -763,6 +818,24 @@ function createSessionControlSubsystem(
       spent.set(requestId, { sessionId: id, payload });
       return await view(id);
     },
+    /**
+     * The session a request id started, when the caller can prove which body it sent.
+     *
+     * The ledger is this PROCESS's, which is the honest scope and the same one the idempotency map
+     * has: the hazard being recovered from is a response lost in flight, and a daemon that restarted
+     * between the start and the recovery also dropped the connection the recovery would travel on. A
+     * restart therefore surfaces as "no such request id", which is a miss rather than a wrong answer.
+     */
+    recover: async (requestId, digest) => {
+      const already = spent.get(requestId);
+      if (already === undefined) return undefined;
+      if (digests.hex(already.payload) !== digest)
+        throw new SessionControlError(
+          'conflict',
+          `request id ${JSON.stringify(requestId)} started session ${already.sessionId} from a different request`,
+        );
+      return await view(already.sessionId);
+    },
     stop: async (reference, reason) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
@@ -777,6 +850,64 @@ function createSessionControlSubsystem(
         throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
       }
       return await view(id);
+    },
+  };
+}
+
+/** How each resume refusal the domain raises is answered. The three are genuinely different next
+ *  actions for a caller — send a message, re-read the session, resume it explicitly — so they are not
+ *  collapsed into one conflict. */
+function resumeRefusal(error: unknown): never {
+  // The most specific subclass first: both extend `ResumeRefused`, and a plain refusal is the base.
+  if (error instanceof ResumeCancelled) throw new SessionResumeError('guard_failed', error.message);
+  if (error instanceof ReviveDedupeConflict) throw new SessionResumeError('suppressed', error.message);
+  if (error instanceof ResumeRefused) throw new SessionResumeError('refused', error.message);
+  // A relaunch that was attempted and failed. The session's own record already holds the reason —
+  // `recover` journalled `session.failed` before rethrowing — so this answers with it rather than
+  // inventing one.
+  throw new SessionResumeError('failed', error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * Reviving a session, over the resume service that was built for exactly this and never called.
+ *
+ * ONE SERVICE FOR THE WHOLE OPENED STORAGE, and that is a correctness requirement rather than tidiness.
+ * Two of the service's collaborators are process-wide ledgers: the `KeyedSerialExecutor` is what stops
+ * two revivers replacing one session's pane at the same time, and `InMemoryLaunchGate` is what makes a
+ * resume that lands mid-launch wait rather than fight the bootstrap for the same terminal name. A
+ * service built per request would give each caller its own executor and its own gate, and neither
+ * would see the other — so the serialization would be a lie and the amnesty would not apply.
+ *
+ * THE ID IS PARSED AND THE SESSION IS LOOKED UP HERE, before the service is asked, for the same reason
+ * the stop does it: `ResumeRepository.read` answers `undefined` for a session that does not exist and
+ * the service turns that into a `ResumeRefused`, which would surface as a 409 about a session the
+ * caller should simply be told does not exist.
+ */
+function createSessionResumeSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  createResume: DaemonWorld['createSessionResume'],
+  reviver: ResumeLauncher,
+): SessionResumeSubsystem {
+  const service = createResume(storage, reviver);
+  return {
+    resume: async (reference, actor, message) => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (storage.findSession(id) === undefined) throw new SessionResumeError('not_found', `no session ${reference}`);
+      await service
+        .resume({ id, actor, ...(message === undefined ? {} : { message }) })
+        .catch((error: unknown) => resumeRefusal(error));
+      // Read back through the SAME reader the list and the single read serve, so a revive answers with
+      // the view those surfaces will show rather than a projection of the resume outcome.
+      const view = await sessions.get(id).catch(() => undefined);
+      if (view === undefined)
+        throw new SessionResumeError(
+          'failed',
+          `session ${id} was revived but its documents do not satisfy the protocol`,
+        );
+      return view;
     },
   };
 }
@@ -1185,6 +1316,10 @@ export function buildWorld(): DaemonWorld {
   const executables: ExecutableResolverPort = {
     resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
   };
+  /** SHA-256 hex, matching the digest the protocol client computes over the very same body text. */
+  const payloadDigests: PayloadDigestPort = {
+    hex: payload => createHash('sha256').update(payload, 'utf8').digest('hex'),
+  };
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -1204,6 +1339,39 @@ export function buildWorld(): DaemonWorld {
         serial: sessionMutations,
       },
       defaultSessionLifecycleSettings,
+    );
+  /**
+   * The pane a revive replaces, over the daemon's own private tmux socket.
+   *
+   * The launch spec is PARSED, not asserted: a revive addresses a real terminal and runs a real
+   * command, so a configuration document that no longer validates must refuse rather than launch
+   * something else. It travels through the same document mapping the lifecycle repository writes, so
+   * the executable is recovered from the argv the start recorded.
+   */
+  const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher =>
+    new TmuxResumeLauncher(
+      new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+      async id => {
+        const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id)));
+        return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
+      },
+      milliseconds => Bun.sleep(milliseconds),
+    );
+  /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
+   *  subsystems must get the same one the world publishes rather than a second construction. */
+  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher) =>
+    new SessionResumeService(
+      {
+        repository: new StorageResumeRepository(storage),
+        launcher,
+        turns: new FileResumeTurnStore(id => createSessionPaths(paths, id).directory),
+        monitors: new NoMonitorSupervision(),
+        gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
+        // Its own queue: a revive must not serialize behind storage-wide work while it holds a
+        // half-replaced terminal.
+        serial: new KeyedSerialExecutor(),
+      },
+      defaultSessionResumeSettings,
     );
   return {
     role: packageRole,
@@ -1288,32 +1456,8 @@ export function buildWorld(): DaemonWorld {
         },
         settings,
       ),
-    createSessionResume: storage =>
-      new SessionResumeService(
-        {
-          repository: new StorageResumeRepository(storage),
-          launcher: new TmuxResumeLauncher(
-            new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
-            // Parsed, not asserted: a revive addresses a real terminal and runs a real command, so
-            // a config that no longer validates must refuse rather than launch something else.
-            async id => {
-              // Through the same document mapping the lifecycle repository writes: the executable is
-              // recovered from the argv, because the document records the wrapper NAME every other
-              // surface joins on.
-              const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id)));
-              return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
-            },
-            milliseconds => Bun.sleep(milliseconds),
-          ),
-          turns: new FileResumeTurnStore(id => createSessionPaths(paths, id).directory),
-          monitors: new NoMonitorSupervision(),
-          gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
-          // Its own queue: a revive must not serialize behind storage-wide work while it holds a
-          // half-replaced terminal.
-          serial: new KeyedSerialExecutor(),
-        },
-        defaultSessionResumeSettings,
-      ),
+    createResumeLauncher,
+    createSessionResume,
     createUsageFeed: config => {
       // The collector endpoint first, then the command fallback for hosts where it is not
       // listening. Both are optional: a daemon configured with neither serves an empty fleet and
@@ -1356,7 +1500,7 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals, usage, health, launcher) => {
+    createSubsystems: (storage, terminals, usage, health, launcher, reviver) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
@@ -1389,7 +1533,9 @@ export function buildWorld(): DaemonWorld {
           executables,
           sessionIds,
           createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+          payloadDigests,
         ),
+        sessionResume: createSessionResumeSubsystem(storage, sessions, createSessionResume, reviver),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         analytics: createAnalyticsSubsystem(storage),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
@@ -1466,6 +1612,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     usage,
     health,
     world.sessionLauncher,
+    // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
+    // and threading it through the same seam as the other host adapters is what lets a test replace
+    // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
+    world.createResumeLauncher(opened.storage),
   );
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens

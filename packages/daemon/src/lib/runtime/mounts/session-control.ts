@@ -11,12 +11,17 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
- * The session WRITE surface: starting one, and stopping it.
+ * The session WRITE surface: starting one, stopping it, and recovering a start whose answer was lost.
  *
  * `POST /v1/sessions` and `POST /v1/sessions/:sessionId/stop` are the two routes `fy start` and
  * `fy stop` speak, and the daemon answered `unknown_route` to both — so every subsystem it mounts
  * was addressed by sessions the product had no way to create. `SessionLifecycleService` and its five
  * adapters were built and tested for exactly this and never called.
+ *
+ * `GET /v1/sessions/by-request/:requestId` completes that pair rather than adding a third capability:
+ * it is the LAST step of the retry contract the start's request id exists for, and the client reaches
+ * it only after both its POST attempts failed in transport. See `recover` below for why the payload
+ * digest is mandatory.
  *
  * WHAT THIS MOUNT REFUSES, AND WHY EACH REFUSAL IS BETTER THAN A GUESS. `StartSessionRequest`
  * carries two options this daemon cannot honour yet, and each is answered with `501` and a code
@@ -70,15 +75,25 @@ export class SessionControlError extends Error {
 }
 
 /**
- * Starting and stopping one session.
+ * Starting and stopping one session, and recovering a start whose answer was lost.
  *
  * `start` is IDEMPOTENT on the request id: the same id returns the session it already started
  * rather than starting a second one, and a different payload under a spent id is a conflict rather
- * than a silent second session.
+ * than a silent second session. The payload travels as the RAW body text, because that is what the
+ * client digests when it comes back to `recover` — comparing a re-serialization of the parsed value
+ * would compare something neither side ever put on the wire.
  */
 export interface SessionControlSubsystem {
-  start(request: StartSessionRequest, requestId: string): Promise<SessionView>;
+  start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView>;
   stop(sessionId: string, reason: string | undefined): Promise<SessionView>;
+  /**
+   * The session this request id started, for a caller that can prove it sent the same body.
+   *
+   * `undefined` means no start under that id, which is the honest answer for a request that never
+   * reached the daemon. A digest that disagrees is a CONFLICT rather than a miss: that id did start
+   * a session, and it is not the one the caller is describing.
+   */
+  recover(requestId: string, payloadDigest: string): Promise<SessionView | undefined>;
 }
 
 /** The HTTP status and code each refusal answers with. */
@@ -110,20 +125,28 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
-/** The request body as JSON, or a stated refusal. */
-async function body(request: ApiRequest): Promise<unknown> {
-  let text: string;
+/** The request body as text, or a stated refusal. */
+async function bodyText(request: ApiRequest): Promise<string> {
   try {
-    text = await request.text();
+    return await request.text();
   } catch {
     throw new ApiError(400, 'the request body could not be read', 'unreadable_body');
   }
+}
+
+/** Body text as JSON. An absent body is the no-fields case; malformed JSON never is. */
+function bodyJson(text: string): unknown {
   if (text.trim() === '') return {};
   try {
     return JSON.parse(text);
   } catch {
     throw new ApiError(400, 'the request body is not valid JSON', 'invalid_json');
   }
+}
+
+/** The request body as JSON, or a stated refusal. */
+async function body(request: ApiRequest): Promise<unknown> {
+  return bodyJson(await bodyText(request));
 }
 
 /** The failing fields, named without echoing what was submitted back out. */
@@ -134,8 +157,8 @@ function issueDetail(issues: ReadonlyArray<{ readonly path: ReadonlyArray<Proper
 }
 
 /** The start request, validated at the boundary and checked against what this daemon mounts. */
-async function parseStart(request: ApiRequest): Promise<StartSessionRequest> {
-  const parsed = StartSessionRequestSchema.safeParse(await body(request));
+function parseStart(text: string): StartSessionRequest {
+  const parsed = StartSessionRequestSchema.safeParse(bodyJson(text));
   if (!parsed.success)
     throw new ApiError(400, `the request body is invalid — ${issueDetail(parsed.error.issues)}`, 'invalid_request');
   const start = parsed.data;
@@ -168,10 +191,51 @@ function requestId(request: ApiRequest): string {
 
 /** Starts a session, or answers with the one this request id already started. */
 async function start(subsystem: SessionControlSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const request = await parseStart(context.request);
+  // The BYTES, kept as well as the request they parse into: the recovery route below addresses a
+  // start by the digest of exactly what was sent, so a re-serialization of the parsed value would
+  // not necessarily hash to the same thing the client hashed.
+  const payload = await bodyText(context.request);
+  const request = parseStart(payload);
   const id = requestId(context.request);
-  const view = await subsystem.start(request, id).catch(refuse);
+  const view = await subsystem.start(request, id, payload).catch(refuse);
   return jsonResponse(view, 201);
+}
+
+/** The payload digest the caller says it sent. Required: it is the whole proof. */
+function payloadDigest(context: RouteContext): string {
+  const value = context.request.query.get('payload')?.[0]?.trim() ?? '';
+  if (value === '')
+    throw new ApiError(
+      400,
+      'a recovery read must carry ?payload=<sha-256 of the start body>: without it any caller could ask which session a request id produced',
+      'missing_payload_digest',
+    );
+  return value;
+}
+
+/**
+ * Which session a request id already started.
+ *
+ * THIS IS THE THIRD STEP OF THE START'S OWN RETRY CONTRACT, and the daemon answered
+ * `unknown_route` to it. The protocol client posts the start, retries the identical POST on a
+ * transport error, and if THAT also fails it asks here — because a start whose response was lost
+ * may well have succeeded, and without this the human is handed a transport error beside a session
+ * they never learn is running.
+ *
+ * THE DIGEST IS THE AUTHORIZATION, not an optimisation. A logical request id travels in a header
+ * and is chosen by the client, so answering it on its own would let any caller holding the admin
+ * token enumerate other callers' request ids and learn which sessions they started. Proving
+ * knowledge of the exact body means only the caller that actually made the start can recover it.
+ */
+async function recover(subsystem: SessionControlSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const raw = context.params.get('requestId') ?? '';
+  const id = decodeParameter(raw);
+  if (id === undefined || id === '')
+    throw new ApiError(400, 'the request id in the path is not usable', 'invalid_request_id');
+  const view = await subsystem.recover(id, payloadDigest(context)).catch(refuse);
+  if (view === undefined)
+    throw new ApiError(404, `no start by this daemon carries request id ${JSON.stringify(id)}`, 'not-found');
+  return jsonResponse(view);
 }
 
 /** Stops a session, or answers a stated refusal. */
@@ -185,11 +249,14 @@ async function stop(subsystem: SessionControlSubsystem, context: RouteContext): 
 }
 
 /**
- * `admin` scope for both: a start spawns a process holding the daemon's own privileges and a stop
- * kills one, so neither is warden-reachable until a unit decides deliberately that it should be.
+ * `admin` scope for all three: a start spawns a process holding the daemon's own privileges and a
+ * stop kills one, and the recovery read answers with the same session view those two do — so none is
+ * warden-reachable until a unit decides deliberately that it should be.
  *
- * `noStore` because both answer with a live session view — status, turn and last activity — and a
- * cached one shows a session that has already moved on.
+ * `noStore` because all three answer with a live session view — status, turn and last activity — and
+ * a cached one shows a session that has already moved on. It matters most on the recovery read, which
+ * is a GET: an intermediary that cached it would keep answering for a request id after the session it
+ * names has stopped.
  */
 export function sessionControlRoutes(subsystem: SessionControlSubsystem): readonly ApiRoute[] {
   return [
@@ -206,6 +273,15 @@ export function sessionControlRoutes(subsystem: SessionControlSubsystem): readon
       scope: 'admin',
       noStore: true,
       handle: async context => await stop(subsystem, context),
+    },
+    // Four segments deep, so the one-segment `GET /v1/sessions/:sessionId` above cannot match it and
+    // `by-request` can never be mistaken for a session id.
+    {
+      method: 'GET',
+      path: '/v1/sessions/by-request/:requestId',
+      scope: 'admin',
+      noStore: true,
+      handle: async context => await recover(subsystem, context),
     },
   ];
 }

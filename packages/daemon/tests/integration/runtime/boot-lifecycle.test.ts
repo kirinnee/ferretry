@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -23,6 +24,8 @@ import {
   EXIT_ALREADY_RUNNING,
   parseSessionId,
   DEFAULT_CALLSIGN_POOL,
+  type PaneObservation,
+  type ResumeLauncher,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   type TerminalRecord,
@@ -216,6 +219,53 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
   async stop(record: SessionLifecycleRecord): Promise<void> {
     this.stopped.push(record.config.tmuxSession);
     this.live.delete(record.config.tmuxSession);
+  }
+}
+
+/**
+ * A reviver that records instead of replacing a pane.
+ *
+ * Substituted at `DaemonWorld.createResumeLauncher` so the boot test never kills a tmux session and
+ * never respawns an agent. It is the only thing a revive does that a test cannot let happen on the
+ * host, so everything else stays production: the real resume service, the real turn-document store,
+ * the real journalled transitions over the real state home, and the real route.
+ *
+ * `pane` is what the harness would be observed doing, set by the case. That single value is what
+ * `planResume` branches on — a live pane is typed into, a gone one is relaunched — so making it a
+ * field is what lets one boot prove both halves of the mount.
+ */
+class RecordingResumeLauncher implements ResumeLauncher {
+  /** What `observe` reports. A session nothing is running: the revive must relaunch it. */
+  pane: PaneObservation = { alive: false, dead: false, promptReady: false };
+  /** Every session relaunched, in order. */
+  readonly relaunched: string[] = [];
+  /** Every instruction typed into a pane, live or replacement. */
+  readonly delivered: string[] = [];
+  readonly killed: string[] = [];
+  readonly snapshots: string[] = [];
+
+  async observe(): Promise<PaneObservation> {
+    return this.pane;
+  }
+
+  async snapshot(id: string): Promise<void> {
+    this.snapshots.push(id);
+  }
+
+  async kill(id: string): Promise<void> {
+    this.killed.push(id);
+  }
+
+  async relaunch(id: string): Promise<void> {
+    this.relaunched.push(id);
+  }
+
+  async deliver(_id: string, instruction: string): Promise<void> {
+    this.delivered.push(instruction);
+  }
+
+  async confirmExit(): Promise<{ readonly confirmed: boolean; readonly pane: PaneObservation }> {
+    return { confirmed: true, pane: this.pane };
   }
 }
 
@@ -579,6 +629,15 @@ describe('daemon boot lifecycle', () => {
     const taken = await contested('req-boot-3', false);
     const fellBack = await contested('req-boot-4', true);
     const fellBackBody = SessionViewSchema.parse(await fellBack.json());
+    // The third step of the retry contract: after a start whose answer was lost, the client asks which
+    // session its request id produced, proving with the digest of the very body it posted.
+    const digest = createHash('sha256').update(body, 'utf8').digest('hex');
+    const recovery = (value: string): string =>
+      `${sessions}/by-request/req-boot-1?payload=${encodeURIComponent(value)}`;
+    const recovered = await fetch(recovery(digest), { headers });
+    const recoveredBody = SessionViewSchema.parse(await recovered.json());
+    const wrongDigest = await fetch(recovery(createHash('sha256').update('{}', 'utf8').digest('hex')), { headers });
+    const neverSent = await fetch(`${sessions}/by-request/req-never?payload=${digest}`, { headers });
     release();
     const code = await exit;
     await runCleanups(cleanups);
@@ -627,6 +686,150 @@ describe('daemon boot lifecycle', () => {
     should(fellBack.status).equal(201);
     should(fellBackBody.config.teammate).not.equal(SEEDED_CALLSIGN);
     should(DEFAULT_CALLSIGN_POOL).containEql(fellBackBody.config.teammate);
+    // The recovery read answers with the session that request id actually started, so a start whose
+    // response was lost in transport is recoverable instead of leaving a running session nobody knows
+    // about. The digest is the proof: without it any holder of the admin token could enumerate other
+    // callers' request ids, and a digest of a different body names a start this was not.
+    should(recovered.status).equal(200);
+    should(recoveredBody.config.id).equal(startedBody.config.id);
+    should(wrongDigest.status).equal(409);
+    should((await wrongDigest.json()) as { code: string }).have.property('code', 'request_id_reused');
+    // A request id no start ever carried is the honest miss: that start never reached the daemon.
+    should(neverSent.status).equal(404);
+  });
+
+  /**
+   * Reviving a session, driven through the production composition root over a real socket.
+   *
+   * This proves the revive DOES ITS JOB rather than merely being constructed, and it needs a session
+   * only the mounted start can produce: the resume launcher relaunches the terminal named in that
+   * session's own configuration document, and it reads the command out of the argv the start recorded.
+   *
+   * All three branches the domain plans are driven against ONE real state home, because they differ
+   * only in what the pane is doing:
+   *
+   *   * A LIVE pane and a message is a SEND — the message is typed into the running agent rather than
+   *     its terminal being replaced, and the daemon's own turn counter does not move, because nothing
+   *     observed an answer.
+   *   * A LIVE pane and NO message is a refusal: there is nothing to hand a running agent.
+   *   * A GONE pane is a relaunch: the turn counter moves, a numbered turn document is written into
+   *     the session's own private directory, and the agent is pointed at that file.
+   */
+  it('should send into a live session, refuse an empty revive, and relaunch a stopped one', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-resume');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: () => reviver,
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const cli = { ...headers, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startResponse = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-resume-1' },
+      body: JSON.stringify({
+        agent: WRAPPER,
+        mode: 'auto',
+        prompt: 'wire the revive',
+        name: 'Wire Session Revive',
+        cwd: home,
+      }),
+    });
+    // Parsed rather than cast, so a start that failed fails HERE with the daemon's own reason instead
+    // of surfacing as an unrelated assertion about a session that was never created.
+    const started = SessionViewSchema.parse(await startResponse.json());
+    const id = started.config.id;
+    const resume = async (body: unknown): Promise<Response> =>
+      await fetch(`${sessions}/${id}/resume`, { method: 'POST', headers: cli, body: JSON.stringify(body) });
+
+    // Act
+    // A live harness at a prompt: the revive types into it rather than replacing it.
+    reviver.pane = { alive: true, dead: false, promptReady: true };
+    const sent = await resume({ message: 'keep going, the gate is green' });
+    const sentBody = SessionViewSchema.parse(await sent.json());
+    // Counted here rather than at the end, because a relaunch follows and is meant to.
+    const relaunchesAfterSend = reviver.relaunched.length;
+    const emptyIntoLive = await resume({});
+    // The session ends, and its pane goes with it.
+    const stopped = await fetch(`${sessions}/${id}/stop`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ reason: 'the turn finished' }),
+    });
+    reviver.pane = { alive: false, dead: false, promptReady: false };
+    const revived = await resume({ message: 'pick the migration back up' });
+    const revivedBody = SessionViewSchema.parse(await revived.json());
+    // Both turn documents, in the session's own private directory: the assignment the start handed
+    // over, and the one the revive did.
+    const turnDirectory = join(home, 'state', 'sessions', id, 'turns');
+    const turns = (await readdir(turnDirectory)).sort();
+    const turnOne = await readFile(join(turnDirectory, 'turn-001.md'), 'utf8');
+    const turnTwo = await readFile(join(turnDirectory, 'turn-002.md'), 'utf8');
+    // The same revive over the WARDEN token, which must not be able to relaunch an agent.
+    const wardenToken = (await readFile(join(home, 'api-warden-token'), 'utf8')).trim();
+    const asWarden = await fetch(`${sessions}/${id}/resume`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${wardenToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'a warden should not reach this' }),
+    });
+    const absent = await fetch(`${sessions}/no-such-session/resume`, { method: 'POST', headers: cli, body: '{}' });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // A live pane was SENT into: the instruction is the message itself, not a turn-file pointer, and
+    // no relaunch happened at all.
+    should(sent.status).equal(200);
+    should(reviver.delivered[0]).equal('keep going, the gate is green');
+    should(relaunchesAfterSend).equal(0);
+    // The daemon's turn counter did not move, because a send is not a turn the daemon wrote.
+    should(sentBody.state.turn).equal(started.state.turn);
+    // Nothing to hand a running agent is a stated refusal, not a silent no-op that reports success.
+    should(emptyIntoLive.status).equal(409);
+    should((await emptyIntoLive.json()) as { code: string }).have.property('code', 'resume_refused');
+    should(stopped.status).equal(200);
+    // The stopped session came back: a real relaunch of the terminal its own document names.
+    should(revived.status).equal(200);
+    should(reviver.relaunched).deepEqual([id]);
+    should(revivedBody.state.status).equal('running');
+    // The counter moved for the relaunch, because THIS turn is one the daemon itself wrote.
+    should(revivedBody.state.turn).equal(started.state.turn + 1);
+    // And it wrote it where the agent was pointed: the instruction names the very file on disk.
+    should(reviver.delivered.at(-1)).containEql('turns/turn-002.md');
+    should(turnTwo).containEql('pick the migration back up');
+    // The NEW document, beside the original — not over it. A start records which turn it handed over
+    // precisely so a revive numbers the next one rather than overwriting the session's own assignment.
+    should(turns).deepEqual(['turn-001.md', 'turn-002.md']);
+    should(turnOne).containEql('wire the revive');
+    // The revive merged over the document rather than replacing it: the protocol half survived a
+    // transition that knows nothing about it.
+    should(revivedBody.config.agent).equal(WRAPPER);
+    should(revivedBody.config.name).equal('Wire Session Revive');
+    // `admin` scope, matching the start and the stop: a revive relaunches a process holding the
+    // daemon's own privileges, so the warden token is refused rather than served.
+    should(asWarden.status).equal(403);
+    should(absent.status).equal(404);
+    should((await absent.json()) as { code: string }).have.property('code', 'not-found');
   });
 
   /**
