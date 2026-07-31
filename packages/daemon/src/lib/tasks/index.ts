@@ -5,5 +5,4 @@ export * from './task-order.ts';
 export * from './task-policy.ts';
 export * from './task-reducer.ts';
 export * from './task-snapshot.ts';
-export * from './task-title.ts';
 export * from './task-store-port.ts';

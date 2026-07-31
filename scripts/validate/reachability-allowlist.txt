@@ -39,13 +39,11 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
 packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 
-# PR #10 — port the task record system and its file store
-# The rest of PR #10 is mounted: bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per
-# session and the task routes serve it. This one module has no honest caller left — it duplicates
-# packages/cli/src/lib/tasks/task-title.ts, which the CLI already uses for its own --title guidance,
-# and the API boundary enforces the five-word rule through the protocol's TaskTitleSchema. Importing
-# it from a route to satisfy the gate would be a fake edge; it should be DELETED as a duplicate.
-packages/daemon/src/lib/tasks/task-title.ts # PR #10: dead duplicate of the CLI's task-title; delete it rather than wire it
+# PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
+# bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per session and the task routes serve
+# it. `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/
+# task-title.ts, which the CLI already uses for its own --title guidance, and the API boundary
+# enforces the five-word rule through the protocol's TaskTitleSchema.
 
 # PR #12 — add bounded docx extraction
 # BLOCKED ON THE ATTACHMENT SUBSYSTEM ITSELF. Extraction is the LAST step of an upload the daemon
