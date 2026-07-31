@@ -19,8 +19,9 @@ export interface HttpServePort {
 }
 
 export interface BoundHttpServer {
-  readonly port: number;
-  readonly hostname: string;
+  /** Optional because a unix-socket host reports neither; a TCP host always reports both. */
+  readonly port?: number;
+  readonly hostname?: string;
   requestIp(request: Request): string | undefined;
   stop(closeActiveConnections?: boolean): Promise<void> | void;
 }
@@ -42,10 +43,8 @@ export class BunHttpServe implements HttpServePort {
       fetch: options.fetch,
     });
     return {
-      // Bun's declared types make these optional for the unix-socket case; a TCP `serve` always
-      // reports both, and a daemon that could not learn its own address has nothing to hand a client.
-      port: server.port ?? options.port,
-      hostname: server.hostname ?? options.hostname,
+      port: server.port,
+      hostname: server.hostname,
       requestIp: request => server.requestIP(request)?.address,
       stop: (closeActiveConnections?: boolean) => server.stop(closeActiveConnections),
     };
@@ -75,10 +74,14 @@ export class BunApiServer implements ApiServerPort {
         });
       },
     });
+    // Bun's declared types make these optional for the unix-socket case; a TCP `serve` always
+    // reports both, and falling back to what was requested beats handing a client `undefined`.
+    const port = server.port ?? options.port;
+    const hostname = server.hostname ?? options.host;
     return {
       // Bracketed for IPv6, so the URL a client is handed is one it can actually parse.
-      url: `http://${server.hostname.includes(':') ? `[${server.hostname}]` : server.hostname}:${server.port}`,
-      port: server.port,
+      url: `http://${hostname.includes(':') ? `[${hostname}]` : hostname}:${port}`,
+      port,
       stop: async () => {
         // `true` closes connections still open: a daemon shutting down must not be held up by a
         // scraper's keep-alive.
