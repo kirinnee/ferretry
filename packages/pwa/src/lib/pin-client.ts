@@ -1,6 +1,7 @@
 import {
   FY_REQUEST_ID_HEADER,
   MAX_PIN_NOTE_LENGTH,
+  MAX_PINS_PER_SESSION,
   type PinActionRequest,
   PinActionRequestSchema,
   type PinSnapshot,
@@ -192,7 +193,6 @@ export class DaemonPinClient {
           ? current.pins.map(pin => (pin.kind === 'note' && pin.id === action.id ? { ...pin, text: action.text } : pin))
           : action.kind === 'note'
             ? [
-                ...current.pins,
                 {
                   id: crypto.randomUUID(),
                   at: Math.max(1, ...current.pins.map(pin => pin.at + 1)),
@@ -203,9 +203,9 @@ export class DaemonPinClient {
                   createdBy: null,
                   createdByName: null,
                 },
-              ]
-            : [
                 ...current.pins,
+              ].slice(0, MAX_PINS_PER_SESSION)
+            : [
                 {
                   id: crypto.randomUUID(),
                   at: Math.max(1, ...current.pins.map(pin => pin.at + 1)),
@@ -218,7 +218,8 @@ export class DaemonPinClient {
                   createdBy: null,
                   createdByName: null,
                 },
-              ];
+                ...current.pins,
+              ].slice(0, MAX_PINS_PER_SESSION);
     return this.store.applyEcho(scope, { ...current, pins });
   }
 

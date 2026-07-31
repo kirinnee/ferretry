@@ -140,13 +140,13 @@ describe('daemon-scoped drafts', () => {
         const candidate = parseDraftStore(value);
         const count = Object.keys(candidate.drafts).length;
         attempts.push(count);
-        if (count > 2) throw new Error('quota');
+        if (count > 4) throw new Error('quota');
         saved = candidate;
       },
     };
     new DaemonDraftStore(retrying).save(scopeA, 'retried', 5);
-    should(attempts).deepEqual([5, 4, 3, 2]);
-    should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual(['retried', 'old-4']);
+    should(attempts).deepEqual([5, 2, 3, 4]);
+    should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual(['retried', 'old-4', 'old-3', 'old-2']);
     should(DRAFTS_KEY).equal('fy-drafts-v1');
   });
 });

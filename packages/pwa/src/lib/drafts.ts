@@ -151,14 +151,18 @@ export class DaemonDraftStore {
       // the newest drafts and progressively shrink the retry until it fits;
       // never make the same oversized write twice.
     }
-    const maximum = Math.min(10, Object.keys(store.drafts).length - 1);
-    for (let retained = maximum; retained >= 0; retained -= 1) {
+    // Quota is monotonic as entries are removed. Probe for the largest
+    // newest-first subset that fits, so a one-entry overflow loses only the
+    // oldest entry rather than collapsing immediately to a small fixed cap.
+    let lower = 0;
+    let upper = Object.keys(store.drafts).length - 1;
+    while (lower <= upper) {
+      const retained = Math.floor((lower + upper) / 2);
       try {
         this.#storage.setItem(DRAFTS_KEY, JSON.stringify(evictDraftLru(store, retained)));
-        return;
+        lower = retained + 1;
       } catch {
-        // Keep shrinking. Draft persistence is best-effort and must never
-        // block sending when even the empty document cannot be stored.
+        upper = retained - 1;
       }
     }
   }
