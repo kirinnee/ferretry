@@ -677,3 +677,80 @@ describe('the task board membership mount', () => {
     should(response.status).equal(401);
   });
 });
+
+describe('the task board membership mount, at its edges', () => {
+  it('should refuse a session credential that names no live session', async () => {
+    // Arrange — a well-formed secret matching NO session in the directory, as opposed to one matching
+    // the wrong session. The two refusals are different paths.
+    const world = await withBoard();
+
+    // Act
+    const response = await post(
+      world,
+      '/invitations/accept',
+      {},
+      {
+        'x-fy-session-board-capability': 'session:never-started',
+        'x-fy-board-invitation-capability': 'whatever',
+      },
+    );
+
+    // Assert
+    should(response.status).equal(403);
+  });
+
+  it('should report an expired invitation as a conflict rather than as a membership', async () => {
+    // Arrange
+    const world = await withBoard();
+    const invited = TaskBoardInvitationViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/invitations/request',
+          { targetSessionId: 'outsider' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/invitations/approve',
+      { invitationRequestId: invited.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const invitationCapability = world.delivered.at(-1)?.[1][BOARD_INVITATION_CAPABILITY_VARIABLE] ?? '';
+    // The proof lives 24 hours; the invitee comes back a week later.
+    world.instant = '2024-05-08T10:00:00.000Z';
+
+    // Act
+    const response = await post(
+      world,
+      '/invitations/accept',
+      {},
+      {
+        'x-fy-session-board-capability': 'session:outsider',
+        'x-fy-board-invitation-capability': invitationCapability,
+      },
+    );
+
+    // Assert — the CLI parses this route into a membership, so an expiry travels as a refusal carrying
+    // the board's own answer rather than as a shape the client cannot read.
+    should(response.status).equal(409);
+    should(jsonBody(response).error).match(/the invitation was not accepted: it is expired/u);
+  });
+
+  it('should not disguise a defect as a domain refusal', async () => {
+    // Arrange — anything that is not a `TaskBoardError` is a bug in the daemon rather than an answer a
+    // client can act on, so it must not be flattened into a 4xx.
+    const world = new FakeTaskBoards(FLEET);
+    world.repository.snapshot = async () => {
+      throw new TypeError('the repository was built wrongly');
+    };
+
+    // Act
+    const response = await get(world, '/membership', peer('anything'));
+
+    // Assert
+    should(response.status).equal(500);
+  });
+});

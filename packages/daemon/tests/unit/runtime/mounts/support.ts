@@ -989,8 +989,11 @@ export class FakeTaskBoards implements TaskBoardSubsystem {
 
   readonly sessions: TaskBoardSessionDirectory = { snapshot: async () => this.directory };
 
+  /** The instant every mutation is stamped with. Settable so a test can let an invitation expire. */
+  instant: string = AT;
+
   now(): string {
-    return AT;
+    return this.instant;
   }
 
   async operatorCapabilityHash(): Promise<string> {
