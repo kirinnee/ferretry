@@ -14,18 +14,21 @@ describe('daemon transcript composition', () => {
 
     // Act
     const actual = await Promise.all(
-      subject.transcriptSources.map(async source => await source.read(fixtures.get(source.harness)!)),
+      subject.transcripts.sources.map(async source => await source.read(fixtures.get(source.harness)!)),
     );
+    const searched = subject.transcripts.search(actual[0]?.events ?? [], 'synthetic');
 
     // Assert
     should(subject.role).equal('daemon');
     should(subject.storage.open).be.a.Function();
     should(subject.worktrees.create).be.a.Function();
     should(subject.createAttentionLedgerRepository).be.a.Function();
-    should(subject.transcriptSources).have.length(2);
+    should(subject.transcripts.sources).have.length(2);
     should(actual.map(batch => batch.harness)).deepEqual(['claude', 'codex']);
     should(actual.every(batch => batch.events.length > 0)).be.true();
     should(actual.every(batch => batch.observedInputs.length > 0)).be.true();
     should(actual.every(batch => batch.issues.length === 0)).be.true();
+    should(searched).not.be.empty();
+    should(searched.every(match => match.snippet.toLowerCase().includes('synthetic'))).be.true();
   });
 });

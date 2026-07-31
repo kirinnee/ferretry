@@ -75,7 +75,10 @@ import {
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
-  type DaemonReadinessPorts,
+  searchTranscript,
+  type TranscriptEvent,
+  type TranscriptSearchMatch,
+  type TranscriptSearchOptions,
   type TranscriptSource,
 } from '../src/lib/index.ts';
 
@@ -138,9 +141,21 @@ export interface DaemonWorld {
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
-  /** One follower per harness. The daemon never branches on harness: it picks the source whose
-   *  `harness` matches the session and reads through the common port. */
-  readonly transcriptSources: readonly TranscriptSource[];
+  readonly transcripts: TranscriptWorld;
+}
+
+/**
+ * Transcript access: one bounded follower per harness, plus the search that runs over what they
+ * produce. The daemon never branches on harness — it picks the source whose `harness` matches the
+ * session and reads through the common port.
+ */
+export interface TranscriptWorld {
+  readonly sources: readonly TranscriptSource[];
+  search(
+    events: readonly TranscriptEvent[],
+    query: string,
+    options?: TranscriptSearchOptions,
+  ): readonly TranscriptSearchMatch[];
 }
 
 /**
@@ -252,10 +267,13 @@ export function buildWorld(): DaemonWorld {
       namePrefix: DAEMON_NAME,
       remoteControlPrefix: DAEMON_NAME,
     }),
-    transcriptSources: [
-      new NodeTranscriptSource(new ClaudeTranscriptParser()),
-      new NodeTranscriptSource(new CodexTranscriptParser()),
-    ],
+    transcripts: {
+      sources: [
+        new NodeTranscriptSource(new ClaudeTranscriptParser()),
+        new NodeTranscriptSource(new CodexTranscriptParser()),
+      ],
+      search: (events, query, options) => searchTranscript(events, query, options),
+    },
   };
 }
 
