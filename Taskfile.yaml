@@ -107,6 +107,22 @@ tasks:
       - SIT_DRIVER=inprocess bun test --config=bunfig.sit.toml --coverage
       - test -f coverage/sit/lcov.info
 
+  test:gate:
+    desc: Run the exact coverage gate CI enforces (100% ledger, unit + integration)
+    cmds:
+      - task: test:gate:unit
+      - task: test:gate:int
+
+  test:gate:unit:
+    desc: Enforce the unit coverage ledger exactly as CI does
+    cmds:
+      - ./scripts/ci/test.sh unit
+
+  test:gate:int:
+    desc: Enforce the integration coverage ledger exactly as CI does
+    cmds:
+      - ./scripts/ci/test.sh int
+
   test:watch:
     desc: Watch the fast unit suite
     cmds:

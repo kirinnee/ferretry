@@ -102,11 +102,15 @@ This is a refactor with no original to diff against, so tests are what prove it 
    rejected regardless of how good they look.
 3. `direnv exec . pre-commit run --all-files` passes.
 4. `direnv exec . task test` passes.
-5. **`direnv exec . task test:coverage` passes.** CI enforces a **100% coverage gate** that plain
-   `task test` does not run — unit tier covers `src/lib/**`, integration tier covers
-   `src/adapters/**`. Passing tests are not enough: a PR with every test green but coverage short
-   **fails CI**. This is not hypothetical; it happened on the first PR of the resumed migration
-   (23/23 integration tests passing, 47% line coverage, red CI). Run it locally before you push.
+5. **`direnv exec . task test:gate` passes.** This runs the **exact** gate CI enforces: a **100%**
+   coverage ledger, unit tier over `src/lib/**` and integration tier over `src/adapters/**`.
+   Passing tests are not enough — a PR with every test green but coverage short **fails CI**.
+
+   Note that `task test` and `task test:coverage` both **exit 0 while coverage is short**;
+   `task test:coverage` prints the percentages but does not enforce them. `task test:gate` is the
+   only local command that reproduces CI. Two PRs of the resumed migration went red this way
+   before it existed. Run it before you push.
+
 6. `direnv exec . nix develop .#releaser -c ./scripts/release/publish.sh --snapshot` passes.
 7. **No gate was weakened.** No blanket knip ignores, no `|| true`, no `--no-verify`, no
    `@ts-ignore`, no tsconfig loosening, **and no shrinking or scoping of a coverage ledger to make
