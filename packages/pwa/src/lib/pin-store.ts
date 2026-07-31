@@ -1,6 +1,6 @@
-import { PinSnapshotSchema, type PinSnapshot } from '@ferretry/protocol';
+import { type PinSnapshot, PinSnapshotSchema } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from './daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 
 export type PinLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -12,6 +12,18 @@ export type PinLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export interface DaemonPinSnapshot {
   readonly snapshots: ReadonlyMap<string, PinSnapshot>;
   readonly statuses: ReadonlyMap<string, PinLoadStatus>;
+}
+
+/**
+ * An optimistic board write, tied to the exact daemon/session entry it
+ * replaced. A later response may reconcile only while this object is still
+ * current; reference identity makes superseded writes unambiguous.
+ */
+export interface DaemonPinEcho {
+  readonly scope: DaemonSessionScope;
+  readonly snapshot: PinSnapshot | undefined;
+  readonly previousSnapshot: PinSnapshot | undefined;
+  readonly previousStatus: PinLoadStatus | undefined;
 }
 
 const emptySnapshot = (): DaemonPinSnapshot => ({ snapshots: new Map(), statuses: new Map() });
@@ -27,6 +39,7 @@ export class DaemonPinStore {
   #snapshot = emptySnapshot();
   readonly #listeners = new Set<Listener>();
   readonly #daemonIds = new Map<string, DaemonId>();
+  readonly #echoes = new Map<string, DaemonPinEcho>();
 
   subscribe(listener: Listener): () => void {
     this.#listeners.add(listener);
@@ -61,8 +74,59 @@ export class DaemonPinStore {
       return false;
     }
     const key = this.#remember(scope);
+    this.#echoes.delete(key);
     const snapshots = new Map(this.#snapshot.snapshots).set(key, parsed.data);
     const statuses = new Map(this.#snapshot.statuses).set(key, 'ready');
+    this.#publish({ snapshots, statuses });
+    return true;
+  }
+
+  /**
+   * Writes a predicted board and returns the token that owns that write. An
+   * unloaded board still gets a token, so its request cannot later overwrite a
+   * snapshot that arrived while it was in flight.
+   */
+  applyEcho(scope: DaemonSessionScope, value: PinSnapshot | undefined): DaemonPinEcho {
+    if (value !== undefined) {
+      const parsed = PinSnapshotSchema.parse(value);
+      if (parsed.sessionId !== scope.sessionId) throw new Error('pin echo must describe its requested session');
+      value = parsed;
+    }
+    const key = this.#remember(scope);
+    const echo: DaemonPinEcho = {
+      scope,
+      snapshot: value,
+      previousSnapshot: this.#snapshot.snapshots.get(key),
+      previousStatus: this.#snapshot.statuses.get(key),
+    };
+    this.#echoes.set(key, echo);
+    if (value !== undefined) {
+      const snapshots = new Map(this.#snapshot.snapshots).set(key, value);
+      const statuses = new Map(this.#snapshot.statuses).set(key, 'ready');
+      this.#publish({ snapshots, statuses });
+    }
+    return echo;
+  }
+
+  /** Replaces an optimistic value only while it is the exact current value. */
+  reconcileEcho(echo: DaemonPinEcho, value: unknown): boolean {
+    const key = daemonSessionKey(echo.scope);
+    if (this.#echoes.get(key) !== echo || this.#snapshot.snapshots.get(key) !== echo.snapshot) return false;
+    return this.applySnapshot(echo.scope, value);
+  }
+
+  /** Rolls an optimistic value back only when no newer writer has replaced it. */
+  restoreEcho(echo: DaemonPinEcho): boolean {
+    const key = daemonSessionKey(echo.scope);
+    if (this.#echoes.get(key) !== echo || this.#snapshot.snapshots.get(key) !== echo.snapshot) return false;
+    this.#echoes.delete(key);
+    const snapshots = new Map(this.#snapshot.snapshots);
+    const statuses = new Map(this.#snapshot.statuses);
+    if (echo.previousSnapshot === undefined) snapshots.delete(key);
+    else snapshots.set(key, echo.previousSnapshot);
+    if (echo.previousStatus === undefined) statuses.delete(key);
+    else statuses.set(key, echo.previousStatus);
+    if (echo.previousSnapshot === undefined) this.#daemonIds.delete(key);
     this.#publish({ snapshots, statuses });
     return true;
   }
@@ -75,6 +139,7 @@ export class DaemonPinStore {
     snapshots.delete(key);
     statuses.delete(key);
     this.#daemonIds.delete(key);
+    this.#echoes.delete(key);
     this.#publish({ snapshots, statuses });
     return true;
   }
@@ -89,6 +154,7 @@ export class DaemonPinStore {
       snapshots.delete(key);
       statuses.delete(key);
       this.#daemonIds.delete(key);
+      this.#echoes.delete(key);
     }
     this.#publish({ snapshots, statuses });
   }
@@ -102,6 +168,7 @@ export class DaemonPinStore {
   #setStatus(scope: DaemonSessionScope, status: PinLoadStatus): void {
     const key = this.#remember(scope);
     if (this.#snapshot.statuses.get(key) === status) return;
+    this.#echoes.delete(key);
     this.#publish({ ...this.#snapshot, statuses: new Map(this.#snapshot.statuses).set(key, status) });
   }
 

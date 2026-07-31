@@ -3,17 +3,18 @@ import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
+  DaemonDraftStore,
   DRAFTS_KEY,
   DRAFTS_VERSION,
-  MAX_DRAFTS,
-  MAX_DRAFT_LEN,
-  DaemonDraftStore,
+  type DraftStorage,
   emptyDraftStore,
   evictDraftLru,
+  MAX_DRAFT_LEN,
+  MAX_DRAFTS,
   parseDraftStore,
+  removeDaemonDrafts,
   removeDraft,
   upsertDraft,
-  type DraftStorage,
 } from '../../src/lib/drafts.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
@@ -68,6 +69,18 @@ describe('daemon-scoped drafts', () => {
     should(removeDraft(empty, scopeA)).equal(empty);
   });
 
+  it('should remove every draft for one daemon while preserving other and unknown keys', () => {
+    let store = upsertDraft(emptyDraftStore(), scopeA, 'a', 1);
+    store = upsertDraft(store, daemonSessionScope(daemonA, 'another'), 'a2', 2);
+    store = upsertDraft(store, scopeB, 'b', 3);
+    store = { ...store, drafts: { ...store.drafts, malformed: { text: 'unknown', at: 4 } } };
+
+    const cleared = removeDaemonDrafts(store, daemonA.daemonId);
+
+    should(Object.values(cleared.drafts).map(entry => entry.text)).deepEqual(['b', 'unknown']);
+    should(removeDaemonDrafts(cleared, daemonA.daemonId)).equal(cleared);
+  });
+
   it('should drop blank and oversized drafts and keep the newest entries within the LRU cap', () => {
     const seeded = upsertDraft(emptyDraftStore(), scopeA, 'saved', 1);
     should(upsertDraft(seeded, scopeA, ' ', 2).drafts).deepEqual({});
@@ -94,6 +107,11 @@ describe('daemon-scoped drafts', () => {
     should(drafts.load(scopeA)).equal('');
     should(drafts.load(scopeB)).equal('b');
     drafts.clear(scopeA);
+    drafts.save(daemonSessionScope(daemonA, 'another'), 'a2', 3);
+    drafts.clearDaemon(daemonA.daemonId);
+    should(drafts.load(daemonSessionScope(daemonA, 'another'))).equal('');
+    should(drafts.load(scopeB)).equal('b');
+    drafts.clearDaemon(daemonA.daemonId);
   });
 
   it('should tolerate unavailable storage and retry writes after pruning', () => {
@@ -109,19 +127,26 @@ describe('daemon-scoped drafts', () => {
     should(unavailableDrafts.load(scopeA)).equal('');
     unavailableDrafts.save(scopeA, 'ignored', 1);
     unavailableDrafts.clear(scopeA);
+    unavailableDrafts.clearDaemon(daemonA.daemonId);
 
+    let seeded = emptyDraftStore();
+    for (let index = 1; index <= 4; index += 1)
+      seeded = upsertDraft(seeded, daemonSessionScope(daemonB, `old-${index}`), `old-${index}`, index);
+    const attempts: number[] = [];
+    let saved = emptyDraftStore();
     const retrying: DraftStorage = {
-      getItem: () => null,
-      setItem: (() => {
-        let attempts = 0;
-        return (_key: string, value: string): void => {
-          attempts += 1;
-          if (attempts === 1) throw new Error('quota');
-          should(Object.keys(parseDraftStore(value).drafts)).have.length(1);
-        };
-      })(),
+      getItem: () => JSON.stringify(seeded),
+      setItem: (_key, value) => {
+        const candidate = parseDraftStore(value);
+        const count = Object.keys(candidate.drafts).length;
+        attempts.push(count);
+        if (count > 2) throw new Error('quota');
+        saved = candidate;
+      },
     };
-    new DaemonDraftStore(retrying).save(scopeA, 'retried', 1);
+    new DaemonDraftStore(retrying).save(scopeA, 'retried', 5);
+    should(attempts).deepEqual([5, 4, 3, 2]);
+    should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual(['retried', 'old-4']);
     should(DRAFTS_KEY).equal('fy-drafts-v1');
   });
 });

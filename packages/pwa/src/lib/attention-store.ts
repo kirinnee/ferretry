@@ -1,6 +1,6 @@
-import { AttentionCountResponseSchema, AttentionSnapshotSchema, type AttentionSnapshot } from '@ferretry/protocol';
+import { AttentionCountResponseSchema, type AttentionSnapshot, AttentionSnapshotSchema } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from './daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 
 export type AttentionLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -79,14 +79,12 @@ export class DaemonAttentionStore {
   /** Applies a cheap count response without treating it as a complete board. */
   applyCount(scope: DaemonSessionScope, value: unknown): boolean {
     const parsed = AttentionCountResponseSchema.safeParse(value);
-    if (!parsed.success || parsed.data.sessionId !== scope.sessionId) {
-      this.fail(scope);
-      return false;
-    }
+    if (!parsed.success || parsed.data.sessionId !== scope.sessionId) return false;
     const key = this.#remember(scope);
     const counts = new Map(this.#snapshot.counts).set(key, parsed.data.count);
-    const statuses = new Map(this.#snapshot.statuses).set(key, 'ready');
-    this.#publish({ ...this.#snapshot, counts, statuses });
+    // A badge response knows only the number. It must never turn an idle or
+    // loading full board into ready, and it must not overwrite a prior status.
+    this.#publish({ ...this.#snapshot, counts });
     return true;
   }
 

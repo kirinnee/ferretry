@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { DaemonAttentionStore } from '../../src/lib/attention-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { DaemonAttentionStore } from '../../src/lib/attention-store.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });

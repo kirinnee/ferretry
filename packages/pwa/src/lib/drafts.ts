@@ -1,4 +1,5 @@
-import { daemonSessionKey, type DaemonSessionScope } from './daemon-scope.ts';
+import type { DaemonId } from './daemon-connection.ts';
+import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 
 /** The sole browser-storage key for composer drafts. */
 export const DRAFTS_KEY = 'fy-drafts-v1';
@@ -83,6 +84,23 @@ export const removeDraft = (store: DraftStore, scope: DaemonSessionScope): Draft
   return { v: DRAFTS_VERSION, drafts };
 };
 
+/** Removes every persisted draft owned by one unpaired daemon. */
+export const removeDaemonDrafts = (store: DraftStore, daemonId: DaemonId): DraftStore => {
+  const drafts = { ...store.drafts };
+  let changed = false;
+  for (const key of Object.keys(drafts)) {
+    try {
+      const scope = JSON.parse(key) as unknown;
+      if (!Array.isArray(scope) || scope.length !== 2 || scope[0] !== daemonId) continue;
+      delete drafts[key];
+      changed = true;
+    } catch {
+      // A malformed unknown key is ignored; normal parsing never creates one.
+    }
+  }
+  return changed ? { v: DRAFTS_VERSION, drafts } : store;
+};
+
 /**
  * Browser draft persistence. Its public methods require a full daemon/session
  * scope so the same session ID cannot recover a draft from another daemon.
@@ -108,6 +126,12 @@ export class DaemonDraftStore {
     if (next !== store) this.#write(next);
   }
 
+  clearDaemon(daemonId: DaemonId): void {
+    const store = this.#read();
+    const next = removeDaemonDrafts(store, daemonId);
+    if (next !== store) this.#write(next);
+  }
+
   #read(): DraftStore {
     if (!this.#storage) return emptyDraftStore();
     try {
@@ -121,11 +145,20 @@ export class DaemonDraftStore {
     if (!this.#storage) return;
     try {
       this.#storage.setItem(DRAFTS_KEY, JSON.stringify(store));
+      return;
     } catch {
+      // Quota failures are deterministic for an unchanged document. Retain
+      // the newest drafts and progressively shrink the retry until it fits;
+      // never make the same oversized write twice.
+    }
+    const maximum = Math.min(10, Object.keys(store.drafts).length - 1);
+    for (let retained = maximum; retained >= 0; retained -= 1) {
       try {
-        this.#storage.setItem(DRAFTS_KEY, JSON.stringify(evictDraftLru(store, 10)));
+        this.#storage.setItem(DRAFTS_KEY, JSON.stringify(evictDraftLru(store, retained)));
+        return;
       } catch {
-        // Draft persistence is best-effort and must never block sending.
+        // Keep shrinking. Draft persistence is best-effort and must never
+        // block sending when even the empty document cannot be stored.
       }
     }
   }
