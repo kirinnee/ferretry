@@ -239,10 +239,13 @@ class HostSocketRegistry {
         for (const frame of state.pending.splice(0)) handler.fromClient(frame);
       })
       .catch(() => {
+        if (state.closed) return;
         // The switch has already happened, so there is no status left to send: the socket is closed
-        // with a reason instead. A handler that was installed and then failed is released here too.
-        state.handler?.close();
-        if (!state.closed) this.close(socket, SOCKET_CLOSES.unavailable);
+        // with a reason instead. `finish` goes FIRST so a handler that was installed and then failed
+        // is released exactly once — closing the socket calls the runtime's own close callback, which
+        // would otherwise release the same handler a second time.
+        finish(socket);
+        this.close(socket, SOCKET_CLOSES.unavailable);
       });
   }
 
