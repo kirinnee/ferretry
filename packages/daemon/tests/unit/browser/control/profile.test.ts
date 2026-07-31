@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  BrowserProfileBusyError,
   compareChromeVersions,
   highestChromeVersion,
   isPrimedMarker,
@@ -9,6 +10,16 @@ import {
 } from '../../../../src/lib/index.ts';
 
 describe('browser profile policy', () => {
+  it('should retain the reason for a refused profile lease', () => {
+    // Act
+    const error = new BrowserProfileBusyError('chrome', 'Chrome is still using the profile');
+
+    // Assert
+    should(error.name).equal('BrowserProfileBusyError');
+    should(error.reason).equal('chrome');
+    should(error.message).equal('Chrome is still using the profile');
+  });
+
   it('should parse only complete leases and compare their identity exactly', () => {
     // Arrange
     const valid = JSON.stringify({

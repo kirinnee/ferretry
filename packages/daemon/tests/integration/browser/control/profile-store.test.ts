@@ -29,6 +29,7 @@ describe('BrowserProfileStore', () => {
     // Act
     const lease = await subject.acquire({ sessionId: 'first', chromeVersion: 'Chrome 150.0.0.0' });
     await lease.updateChromePid(2002, 'Chrome 151.0.0.0');
+    await lease.updateChromePid();
     await lease.markPrimed('Chrome 151.0.0.0');
 
     // Assert
@@ -42,9 +43,25 @@ describe('BrowserProfileStore', () => {
       downgrade = error;
     }
     should(downgrade).instanceOf(BrowserControlError);
-    should(JSON.parse(await readFile(subject.leaseFile, 'utf8'))).match({ chromePid: 2002 });
+    should(JSON.parse(await readFile(subject.leaseFile, 'utf8'))).not.have.property('chromePid');
     should(await lease.release()).be.true();
     should(await lease.release()).be.false();
+  });
+
+  it('should use the production process inspector to retain a lease owned by this daemon', async () => {
+    // Arrange
+    const root = await mkdtemp(path.join(os.tmpdir(), 'ferretry-browser-profile-production-'));
+    roots.push(root);
+    const subject = new BrowserProfileStore(path.join(root, 'daemon'));
+    const seed = await subject.acquire({ sessionId: 'seed' });
+    await seed.release();
+    await writeFile(
+      subject.leaseFile,
+      JSON.stringify({ sessionId: 'live', daemonPid: process.pid, acquiredAt: new Date(0).toISOString() }),
+    );
+
+    // Act + Assert
+    await should(subject.acquire({ sessionId: 'other' })).be.rejectedWith(BrowserProfileBusyError);
   });
 
   it('should refuse live owners, reclaim dead owners, and never reclaim their live Chrome child', async () => {
@@ -91,5 +108,17 @@ describe('BrowserProfileStore', () => {
       'SingletonCookie',
       'DevToolsActivePort',
     ]);
+  });
+
+  it('should release its just-created lease when a live Chrome lock blocks acquisition', async () => {
+    // Arrange
+    const subject = await profile(pid => pid === 9009);
+    const seed = await subject.acquire({ sessionId: 'seed' });
+    await seed.release();
+    await symlink('test-host-9009', path.join(subject.profile, 'SingletonLock'));
+
+    // Act + Assert
+    await should(subject.acquire({ sessionId: 'blocked' })).be.rejectedWith(BrowserProfileBusyError);
+    await should(readFile(subject.leaseFile, 'utf8')).be.rejected();
   });
 });

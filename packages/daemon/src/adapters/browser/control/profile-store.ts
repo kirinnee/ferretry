@@ -174,8 +174,9 @@ export class BrowserProfileStore implements BrowserProfilePort {
     }
     const current = await this.requireOwner(expected);
     if (chromeVersion !== undefined) await this.recordChromeVersion(chromeVersion);
-    const updated = { ...current, ...(chromePid === undefined ? {} : { chromePid }) };
-    await this.replaceLease(updated);
+    const { chromePid: _previousChromePid, ...withoutChromePid } = current;
+    const updated = chromePid === undefined ? withoutChromePid : { ...withoutChromePid, chromePid };
+    await this.writeJson(this.leaseFile, updated);
   }
 
   private async markPrimed(expected: BrowserProfileLeaseRecord, chromeVersion: string): Promise<void> {
@@ -323,10 +324,6 @@ export class BrowserProfileStore implements BrowserProfilePort {
     } finally {
       await handle.close();
     }
-  }
-
-  private async replaceLease(value: BrowserProfileLeaseRecord): Promise<void> {
-    await this.writeJson(this.leaseFile, value);
   }
 
   private async releaseRecord(record: BrowserProfileLeaseRecord): Promise<void> {
