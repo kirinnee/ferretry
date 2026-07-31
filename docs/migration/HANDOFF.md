@@ -19,12 +19,39 @@ _state_ of the work and the operational knowledge that is expensive to rediscove
 | Daemon composition root                             | `packages/daemon/bin/fyd.ts`           |
 | Probes removed (Kirin's decision)                   | —                                      |
 
-All three gates pass on `main`: `pre-commit run --all-files`, `task test`,
-`nix develop .#releaser -c ./scripts/release/publish.sh --snapshot`.
+### Updated 2026-07-31 — 24 units merged, all ten original branches landed
 
-**Honest progress: roughly 1% of the program.** `packages/` holds almost no ported production code
-yet. What is done is the enabling work — plan, gates, surveys, unit decomposition — plus the ten
-branches below.
+The table above is the state at the stop-work order. Since resuming, **24 PRs have merged** and
+every one of the ten branches in §2 is landed and deleted. Also on `main` now:
+
+| Landed since resuming                                         | Where                                          |
+| ------------------------------------------------------------- | ---------------------------------------------- |
+| protocol wire schemas + typed client SDK                      | `packages/protocol/**`                         |
+| state home, journal, storage, paths                           | `packages/daemon/src/{lib,adapters}/…`         |
+| fleet provisioner, manifest, usage collector                  | `packages/fleet/**`                            |
+| tmux controller, worktrees, names, Git adapter                | `packages/daemon/**`                           |
+| tasks, task boards, attention, analytics, learning, pins/push | `packages/daemon/**`                           |
+| warden supervision, browser control + transport, terminal     | `packages/daemon/**`                           |
+| session lifecycle, daemon runtime, migrate-preflight          | `packages/daemon/**`                           |
+| core recommender + usage feed, transcript ingestion           | `packages/daemon/**`                           |
+| isolated E2E harness (real tmux on a private socket)          | `tests/e2e/**`, `scripts/test/**`              |
+| **`task test:gate`** — reproduces CI's 100% coverage gate     | `Taskfile.yaml`, `scripts/ci/test.sh`          |
+| **composition-reachability gate** + enumerated allowlist      | `scripts/validate/composition-reachability.sh` |
+
+**Honest progress: roughly half the source is ported (~35k of ~68k lines), but the product is less
+complete than that implies** — see the allowlist note below. Remaining: `session-manager` sub-units
+2–5, `api-server`, ~12 CLI command groups, and the PWA with its 56 single-daemon sites.
+
+**Four gates now, not three:** `pre-commit run --all-files`, `task test`, **`task test:gate`**, and
+the snapshot publish. `task test` and `task test:coverage` both exit 0 while coverage is short —
+only `task test:gate` reproduces CI. And the reachability gate runs **only** under `pre-commit`, so
+after any rebase BOTH must be re-run, on the rebased head. Merging on a stale CI run once put nine
+unwired modules on `main` and turned it red.
+
+**~75 modules are built, tested, and NOT wired into the composition root.** They are enumerated in
+`scripts/validate/reachability-allowlist.txt`, each naming the PR that must wire it. That list is a
+work schedule and can only shrink. Until an entry is deleted, that capability does not exist in the
+running product however green its tests are.
 
 ## 2. The ten unit branches on `origin`
 
