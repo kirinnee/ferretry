@@ -17,4 +17,5 @@ export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
+export * from './usage/index.ts';
 export * from './warden/index.ts';
