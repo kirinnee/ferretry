@@ -12,7 +12,17 @@
  * shared BottomSheet with a tab switcher -- never a horizontal tab strip.
  */
 
-import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import {
   clampSidePaneWidth,
@@ -110,6 +120,24 @@ export interface SidePaneSurfaceProps {
   readonly titleId: string;
   readonly onClose: () => void;
   readonly isActive: boolean;
+}
+
+/** A narrow trigger contract for navigation chrome beside the workspace. */
+export interface SidePaneHost {
+  readonly scope: DaemonSessionScope;
+  readonly presentation: SidePaneTabPresentation;
+  /** Opening never focuses the pane; an opener receives focus only after close. */
+  readonly open: (tab: SidePaneTabId, opener?: HTMLElement | null) => void;
+  readonly close: () => void;
+  /** The + picker path: a fresh browser page, or the owning file/terminal surface. */
+  readonly openNewInstance: (kind: SidePaneInstanceKind) => void;
+}
+
+const SidePaneContext = createContext<SidePaneHost | null>(null);
+
+/** Null outside a workspace, so shared navigation can render standalone. */
+export function useSidePane(): SidePaneHost | null {
+  return useContext(SidePaneContext);
 }
 
 export interface SidePaneWorkspaceProps {
@@ -250,65 +278,68 @@ export function SidePaneWorkspace({
     : [];
   const ordinaryBody =
     displayDef && !(displayDef.retain && !compact) ? body(displayDef, state.active === displayDef.id) : undefined;
+  const host: SidePaneHost = { scope, presentation, open, close, openNewInstance };
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 w-full gap-2">
-      <div className="min-h-0 min-w-0 flex-1">{children}</div>
-      {paneVisible && (
-        <SidePaneShell
-          id={paneId}
-          titleId={titleId}
-          onClose={close}
-          width={paneWidth}
-          onWidthPreview={setPreviewWidth}
-          onWidthCommit={commitWidth}
-          hidden={!surfaceOpen}
-        >
-          {state.active && (
+    <SidePaneContext.Provider value={host}>
+      <div className="flex h-full min-h-0 min-w-0 w-full gap-2">
+        <div className="min-h-0 min-w-0 flex-1">{children}</div>
+        {paneVisible && (
+          <SidePaneShell
+            id={paneId}
+            titleId={titleId}
+            onClose={close}
+            width={paneWidth}
+            onWidthPreview={setPreviewWidth}
+            onWidthCommit={commitWidth}
+            hidden={!surfaceOpen}
+          >
+            {state.active && (
+              <SidePaneTabs
+                paneId={paneId}
+                presentation="pane"
+                tabs={openTabDefs}
+                all={allTabs}
+                current={state.active}
+                onSelect={id => activateSidePaneTab(scope, id)}
+                onAdd={open}
+                onRemove={id => removeSidePaneTab(scope, id)}
+                onNewInstance={openNewInstance}
+              />
+            )}
+            {ordinaryBody}
+            {retainedBodies}
+          </SidePaneShell>
+        )}
+        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+          {state.active ? `Opened ${activeDef?.instance?.label ?? activeDef?.label ?? state.active}` : ''}
+        </div>
+        {compact && displayDef && (
+          <BottomSheet
+            id={paneId}
+            open={surfaceOpen}
+            onClose={close}
+            labelledBy={titleId}
+            closeLabel={displayDef.closeLabel}
+            panelClassName="h-full overflow-hidden bg-surface"
+            maxHeight="calc(var(--app-h, 100dvh) - var(--gap-xs))"
+            zIndexClass="z-[70]"
+          >
             <SidePaneTabs
               paneId={paneId}
-              presentation="pane"
+              presentation="sheet"
               tabs={openTabDefs}
               all={allTabs}
-              current={state.active}
+              current={displayDef.id}
               onSelect={id => activateSidePaneTab(scope, id)}
               onAdd={open}
               onRemove={id => removeSidePaneTab(scope, id)}
               onNewInstance={openNewInstance}
             />
-          )}
-          {ordinaryBody}
-          {retainedBodies}
-        </SidePaneShell>
-      )}
-      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-        {state.active ? `Opened ${activeDef?.instance?.label ?? activeDef?.label ?? state.active}` : ''}
+            {ordinaryBody}
+          </BottomSheet>
+        )}
       </div>
-      {compact && displayDef && (
-        <BottomSheet
-          id={paneId}
-          open={surfaceOpen}
-          onClose={close}
-          labelledBy={titleId}
-          closeLabel={displayDef.closeLabel}
-          panelClassName="h-full overflow-hidden bg-surface"
-          maxHeight="calc(var(--app-h, 100dvh) - var(--gap-xs))"
-          zIndexClass="z-[70]"
-        >
-          <SidePaneTabs
-            paneId={paneId}
-            presentation="sheet"
-            tabs={openTabDefs}
-            all={allTabs}
-            current={displayDef.id}
-            onSelect={id => activateSidePaneTab(scope, id)}
-            onAdd={open}
-            onRemove={id => removeSidePaneTab(scope, id)}
-            onNewInstance={openNewInstance}
-          />
-          {ordinaryBody}
-        </BottomSheet>
-      )}
-    </div>
+    </SidePaneContext.Provider>
   );
 }
