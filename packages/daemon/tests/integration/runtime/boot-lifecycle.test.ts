@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
@@ -83,6 +83,12 @@ describe('daemon boot lifecycle', () => {
     }
     const usage = await fetch(`http://127.0.0.1:${port}/usage`);
     const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
+    // A mounted subsystem, reached with the token the boot minted. The session does not exist, so a
+    // MOUNTED pin board answers `not-found`; an unmounted one would answer `unknown_route`.
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const pins = await fetch(`http://127.0.0.1:${port}/v1/sessions/absent/pins`, {
+      headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+    });
     release();
     const code = await exit;
     await runCleanups(cleanups);
@@ -95,6 +101,8 @@ describe('daemon boot lifecycle', () => {
     should(usage.status).equal(200);
     should((await usage.json()) as { ready: boolean }).have.property('ready', false);
     should(unauthorized.status).equal(401);
+    should(pins.status).equal(404);
+    should((await pins.json()) as { code: string }).have.property('code', 'not-found');
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
