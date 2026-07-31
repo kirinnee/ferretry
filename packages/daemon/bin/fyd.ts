@@ -10,6 +10,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../src/adapters/index.ts';
+import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import {
   GitWorktreeGateway,
@@ -36,9 +37,12 @@ export interface DaemonWorld {
   readonly role: typeof packageRole;
   readonly storage: DaemonStorageFactory;
   readonly worktrees: ManagedWorktreeAdapter;
+  readonly createAttentionLedgerRepository: (
+    sessionDirectory: (sessionId: string) => string,
+  ) => FileAttentionLedgerRepository;
 }
 
-/** Builds the production adapter set. Subsystem units extend this as their adapters land. */
+/** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
   const worktreeClock = new SystemWorktreeClock();
@@ -56,6 +60,7 @@ export function buildWorld(): DaemonWorld {
       () => new KeyedSerialExecutor(),
     ),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
+    createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
   };
 }
 

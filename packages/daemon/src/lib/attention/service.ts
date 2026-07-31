@@ -54,11 +54,7 @@ export class AttentionService {
     return listed.ok ? { ok: true, value: listed.value.count } : listed;
   }
 
-  async raise(
-    sessionId: string,
-    request: RaiseAttentionRequest,
-    actor: AttentionActor,
-  ): Promise<AttentionMutation> {
+  async raise(sessionId: string, request: RaiseAttentionRequest, actor: AttentionActor): Promise<AttentionMutation> {
     return this.apply(sessionId, { action: 'raise', actor, request, at: this.clock.now() });
   }
 

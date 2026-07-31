@@ -1,5 +1,7 @@
 import {
   ATTENTION_SCHEMA_VERSION,
+  AttentionItemSchema,
+  ResolvedAttentionItemSchema,
   type AttentionAsk,
   type AttentionErrorCode,
   type AttentionId,
@@ -157,6 +159,54 @@ export function applyAttentionCommandToSession(
   command: AttentionCommand,
 ): AttentionMutation {
   return applyToLedger(current ?? emptyAttentionLedger(sessionId, command.at), command);
+}
+
+/**
+ * Decodes the internal durable form before an adapter supplies it to the state
+ * machine. Keeping this validation in the pure layer prevents corrupt storage
+ * from being silently replaced by a fresh board.
+ */
+export function parseAttentionLedger(value: unknown, sessionId: string): AttentionLedger | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (
+    raw.sessionId !== sessionId ||
+    !Number.isSafeInteger(raw.nextId) ||
+    (raw.nextId as number) < 1 ||
+    typeof raw.updatedAt !== 'string' ||
+    !Number.isFinite(Date.parse(raw.updatedAt)) ||
+    !Array.isArray(raw.entries)
+  ) {
+    return null;
+  }
+  const entries: AttentionEntry[] = [];
+  const ids = new Set<string>();
+  let maxId = 0;
+  let active = 0;
+  let agentActive = 0;
+  let addressed = 0;
+  for (const rawEntry of raw.entries) {
+    const entry = parseAttentionEntry(rawEntry);
+    if (entry === null || ids.has(entry.item.id)) return null;
+    ids.add(entry.item.id);
+    maxId = Math.max(maxId, idNumber(entry.item.id));
+    if (entry.lifecycle === 'active') {
+      active += 1;
+      if (entry.origin.kind === 'agent') agentActive += 1;
+    } else {
+      addressed += 1;
+    }
+    entries.push(entry);
+  }
+  if (
+    (raw.nextId as number) <= maxId ||
+    active > MAX_ATTENTION_PER_SESSION ||
+    agentActive > MAX_AGENT_ATTENTION_PER_SESSION ||
+    addressed > MAX_ATTENTION_RESOLUTIONS
+  ) {
+    return null;
+  }
+  return { sessionId, nextId: raw.nextId as number, entries, updatedAt: raw.updatedAt };
 }
 
 function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): AttentionMutation {
@@ -321,12 +371,61 @@ function addressById(
 }
 
 function resolveSource(ledger: AttentionLedger, command: ResolveSourceCommand): AttentionMutation {
+  if (command.actor.kind !== 'daemon') {
+    return failure('forbidden', 'only the daemon may reconcile a trusted attention source');
+  }
   const target = ledger.entries
     .filter(isActiveAttention)
     .find(entry => entry.item.source === command.source && entry.item.sourceRef === command.sourceRef);
   return target === undefined
     ? unchanged(ledger)
     : addressed(ledger, target, command.actor, command.note ?? null, command.at, 'done', 'resolved');
+}
+
+function parseAttentionEntry(value: unknown): AttentionEntry | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const origin = parseAttentionActor(raw.origin);
+  if (origin === null) return null;
+  if (raw.lifecycle === 'active') {
+    const item = AttentionItemSchema.safeParse(raw.item);
+    return item.success && sameItemOrigin(item.data, origin) ? { lifecycle: 'active', origin, item: item.data } : null;
+  }
+  if (raw.lifecycle === 'addressed') {
+    const item = ResolvedAttentionItemSchema.safeParse(raw.item);
+    return item.success && sameItemOrigin(item.data, origin)
+      ? { lifecycle: 'addressed', origin, item: item.data }
+      : null;
+  }
+  return null;
+}
+
+function parseAttentionActor(value: unknown): AttentionActor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  if (raw.kind === 'human') return { kind: 'human' };
+  if (
+    raw.kind === 'agent' &&
+    typeof raw.sessionId === 'string' &&
+    (typeof raw.name === 'string' || raw.name === null)
+  ) {
+    return { kind: 'agent', sessionId: raw.sessionId, name: raw.name };
+  }
+  if (
+    raw.kind === 'daemon' &&
+    (raw.cause === 'source-reconciliation' || raw.cause === 'warden-escalation' || raw.cause === 'system')
+  ) {
+    return { kind: 'daemon', cause: raw.cause };
+  }
+  return null;
+}
+
+function sameItemOrigin(item: AttentionItem | ResolvedAttentionItem, origin: AttentionActor): boolean {
+  return (
+    item.raisedBy === origin.kind &&
+    item.raisedBySession === (origin.kind === 'agent' ? origin.sessionId : null) &&
+    item.raisedByName === (origin.kind === 'agent' ? origin.name : null)
+  );
 }
 
 function addressed(

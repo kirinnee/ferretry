@@ -15,6 +15,7 @@ import {
   isActiveAttention,
   isWardenEscalationAttention,
   MAX_AGENT_ATTENTION_PER_SESSION,
+  parseAttentionLedger,
   type RaiseAttentionRequest,
 } from '../../../src/lib/attention/state-machine.ts';
 
@@ -509,12 +510,12 @@ describe('Attention state machine', () => {
     should(missing.error.code).equal('not-found');
   });
 
-  it('should resolve a trusted source idempotently without granting general cross-actor authority', () => {
+  it('should reserve trusted source reconciliation for the daemon', () => {
     // Arrange
     const board = raised(DAEMON, { source: 'question', sourceRef: 'tool-1', ask: undefined });
     const command: AttentionCommand = {
       action: 'resolve-source',
-      actor: OTHER_AGENT,
+      actor: DAEMON,
       source: 'question',
       sourceRef: 'tool-1',
       note: 'Question answered by the lead.',
@@ -524,15 +525,71 @@ describe('Attention state machine', () => {
     // Act
     const resolved = succeeded(applyAttentionCommand(board.ledger, command));
     const retry = succeeded(applyAttentionCommand(resolved.ledger, command));
+    const forbidden = failed(applyAttentionCommand(board.ledger, { ...command, actor: OTHER_AGENT, at: THIRD }));
 
     // Assert
     should(resolved.snapshot.count).equal(0);
     should(resolved.snapshot.resolved[0]).containDeep({
-      resolvedBy: 'agent',
-      resolvedBySession: OTHER_SESSION_ID,
+      resolvedBy: 'daemon',
+      resolvedBySession: null,
       resolutionNote: 'Question answered by the lead.',
     });
     should(retry.changed).be.false();
+    should(forbidden.error.code).equal('forbidden');
+  });
+
+  it('should decode only durable ledgers whose lifecycle, provenance, and counters agree', () => {
+    // Arrange
+    const agent = raised();
+    const human = succeeded(
+      applyAttentionCommand(agent.ledger, raiseCommand(HUMAN, { subject: 'Human request' }, SECOND)),
+    );
+    const daemon = succeeded(
+      applyAttentionCommand(
+        human.ledger,
+        raiseCommand(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }, THIRD),
+      ),
+    );
+    const addressed = succeeded(
+      applyAttentionCommand(daemon.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        at: THIRD,
+      }),
+    ).ledger;
+    const valid = structuredClone(addressed);
+    const duplicate: unknown = { ...addressed, entries: [...addressed.entries, addressed.entries[0]!] };
+    const exhausted: unknown = { ...addressed, nextId: 1 };
+    const malformedOrigin: unknown = {
+      ...addressed,
+      entries: [{ ...addressed.entries[0]!, origin: { kind: 'agent' } }, ...addressed.entries.slice(1)],
+    };
+    const mismatchedAddressedOrigin: unknown = {
+      ...addressed,
+      entries: addressed.entries.map(entry =>
+        entry.lifecycle === 'addressed' ? { ...entry, origin: { kind: 'daemon', cause: 'system' } } : entry,
+      ),
+    };
+    const unknownLifecycle: unknown = {
+      ...addressed,
+      entries: [{ ...addressed.entries[0]!, lifecycle: 'unknown' }, ...addressed.entries.slice(1)],
+    };
+
+    // Act
+    const parsed = parseAttentionLedger(valid, SESSION_ID);
+
+    // Assert
+    should(parsed).containDeep({ sessionId: SESSION_ID, nextId: 4 });
+    should(parsed?.entries.map(entry => entry.lifecycle).sort()).deepEqual(['active', 'active', 'addressed']);
+    should(parseAttentionLedger(null, SESSION_ID)).be.null();
+    should(parseAttentionLedger({ ...valid, sessionId: OTHER_SESSION_ID }, SESSION_ID)).be.null();
+    should(parseAttentionLedger(duplicate, SESSION_ID)).be.null();
+    should(parseAttentionLedger(exhausted, SESSION_ID)).be.null();
+    should(parseAttentionLedger(malformedOrigin, SESSION_ID)).be.null();
+    should(parseAttentionLedger(mismatchedAddressedOrigin, SESSION_ID)).be.null();
+    should(parseAttentionLedger(unknownLifecycle, SESSION_ID)).be.null();
   });
 
   it('should bound newest-first resolution history without reusing ids', () => {
