@@ -37,6 +37,7 @@ export * from './rebuild.ts';
 export * from './reconciliation.ts';
 export * from './runtime/index.ts';
 export * from './session-id.ts';
+export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './state-home.ts';
 export * from './storage-types.ts';

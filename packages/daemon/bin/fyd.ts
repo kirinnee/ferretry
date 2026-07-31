@@ -56,6 +56,14 @@ import {
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
+import {
+  FileSelfRestartStampStore,
+  FileSessionHealthEventSink,
+  StorageConsistencyPass,
+  StorageSessionHealthInventory,
+  SystemMonotonicClock,
+  UnmountedSupervisionRepair,
+} from '../src/adapters/session/resume/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
@@ -74,7 +82,10 @@ import {
   packageRole,
   parseSessionId,
   resolveStateHome,
+  SelfRestartCoordinator,
+  SessionHealthService,
   SessionLifecycleService,
+  defaultSessionHealthSettings,
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
@@ -144,6 +155,17 @@ export interface DaemonWorld {
    *  open once storage has resolved and locked the state home, so the service is built per opened
    *  storage rather than at process start. */
   readonly createSessionLifecycle: (storage: DaemonStorage) => SessionLifecycleService;
+  /**
+   * The daemon's own self-check: it measures how late its tick was, reconciles the session index
+   * against the authoritative session directories, and escalates an index that will not heal. Built
+   * per opened storage for the same reason as the lifecycle above.
+   *
+   * `supervision` declares which repairable subsystems this daemon actually runs. Both are false
+   * today — no per-session monitor subsystem and no warden sweep timer are mounted yet — so the
+   * self-check measures and reconciles without planning repairs it could not carry out. The units
+   * landing those subsystems flip the flags and replace `UnmountedSupervisionRepair`.
+   */
+  readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
@@ -276,6 +298,37 @@ export function buildWorld(): DaemonWorld {
           serial: new KeyedSerialExecutor(),
         },
         defaultSessionLifecycleSettings,
+      ),
+    createSessionHealth: storage =>
+      new SessionHealthService(
+        {
+          inventory: new StorageSessionHealthInventory(storage, {
+            monitors: false,
+            warden: false,
+            monitored: () => false,
+            sweepIntervalMs: 0,
+            lastSweepAt: () => undefined,
+            // Boot state is owned by `start`; until it reports otherwise a booted daemon that
+            // reached this point has finished the storage bootstrap it does have.
+            bootstrapFinished: () => true,
+            bootstrapErrors: () => [],
+          }),
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, defaultSessionHealthSettings),
+          repair: new UnmountedSupervisionRepair(),
+          events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
+          clock,
+          wallClock: { nowMs: () => Date.now() },
+          monotonic: new SystemMonotonicClock(),
+          restarts: new SelfRestartCoordinator(
+            new FileSelfRestartStampStore(stateFiles, join(paths.home, 'self-restart.json')),
+            // Nothing supervises this process yet, so the honest answer is "no restart happened":
+            // the coordinator then un-latches and tells the operator to restart it themselves.
+            { restart: async () => false },
+            defaultSessionHealthSettings,
+          ),
+          version: pkg.version,
+        },
+        defaultSessionHealthSettings,
       ),
     createUsageFeed: config => {
       // The collector endpoint first, then the command fallback for hosts where it is not
