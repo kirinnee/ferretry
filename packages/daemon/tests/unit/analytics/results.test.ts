@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { AnalyticsIndexStatus, AnalyticsRawSession } from '@ferretry/protocol';
+import { compareProtocolVersions, type AnalyticsIndexStatus, type AnalyticsRawSession } from '@ferretry/protocol';
 import { queryAnalyticsRecords } from '../../../src/lib/analytics/results.ts';
 
 const index: AnalyticsIndexStatus = {
@@ -52,6 +52,14 @@ function record(id: string, patch: Partial<AnalyticsRawSession> = {}): Analytics
 }
 
 describe('queryAnalyticsRecords', () => {
+  it('should accept equivalent protocol prereleases while interpreting query results', () => {
+    // Act
+    const actual = compareProtocolVersions('1.0.0-rc.1', '1.0.0-rc.1');
+
+    // Assert
+    should(actual).equal(0);
+  });
+
   it('should aggregate matched records while preserving unknown measures', () => {
     // Arrange
     const records = [

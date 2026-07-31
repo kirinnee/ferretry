@@ -154,4 +154,28 @@ describe('deriveAnalyticsSessionRecord', () => {
       ['second', 'analytics', undefined],
     ]);
   });
+
+  it('should leave every token metric unknown when the total cannot be represented safely', () => {
+    // Act
+    const actual = deriveAnalyticsSessionRecord(
+      {
+        ...finished,
+        usage: {
+          ...finished.usage!,
+          inputTokens: Number.MAX_SAFE_INTEGER,
+          cachedInputTokens: 0,
+          cacheWriteInputTokens: 0,
+          outputTokens: 1,
+        },
+      },
+      catalog,
+    );
+
+    // Assert
+    should(actual.raw.tokens).be.null();
+    should(actual.raw.inputTokens).be.null();
+    should(actual.raw.outputTokens).be.null();
+    should(actual.raw.cachedInputTokens).be.null();
+    should(actual.raw.cacheWriteInputTokens).be.null();
+  });
 });

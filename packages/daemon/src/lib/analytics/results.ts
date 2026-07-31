@@ -94,16 +94,8 @@ function measure(
   return { value, known: known.length, total: values.length };
 }
 
-function compareLabels(left: readonly (string | null)[], right: readonly (string | null)[]): number {
-  for (let index = 0; index < left.length; index += 1) {
-    const a = left[index]!;
-    const b = right[index]!;
-    if (a === b) continue;
-    if (a === null) return 1;
-    if (b === null) return -1;
-    return a.localeCompare(b);
-  }
-  return 0;
+function labelSortKey(labels: Record<string, string | null>, groupBy: readonly AnalyticsLabel[]): string {
+  return groupBy.map(label => `${labels[label] === null ? '1' : '0'}${labels[label] ?? ''}`).join('\u0000');
 }
 
 function aggregate(
@@ -121,10 +113,7 @@ function aggregate(
     else group.rows.push(record);
   }
   const groups = [...grouped.values()].sort((left, right) =>
-    compareLabels(
-      parsed.groupBy.map(label => left.labels[label]!),
-      parsed.groupBy.map(label => right.labels[label]!),
-    ),
+    labelSortKey(left.labels, parsed.groupBy).localeCompare(labelSortKey(right.labels, parsed.groupBy)),
   );
   if (groups.length > groupLimit)
     throw new Error(`analytics query produces more than ${groupLimit} groups; add a matcher`);

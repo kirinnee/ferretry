@@ -90,6 +90,14 @@ describe('snapshotAnalyticsUsagePricing', () => {
       { ...usage, cacheWrite5mInputTokens: 40_000, cacheWrite1hInputTokens: 40_000 },
       [rate],
     );
+    const invalid = snapshotAnalyticsUsagePricing(
+      { ...usage, cacheWrite5mInputTokens: -1, cacheWrite1hInputTokens: 100_001 },
+      [rate],
+    );
+    const missingRates = snapshotAnalyticsUsagePricing(
+      { ...usage, cacheWrite5mInputTokens: 40_000, cacheWrite1hInputTokens: 60_000 },
+      [{ ...rate, ratesUsdMicrosPerMillion: { input: 1, cachedRead: 1, output: 1 } }],
+    );
     const priced = snapshotAnalyticsUsagePricing(
       { ...usage, cacheWrite5mInputTokens: 40_000, cacheWrite1hInputTokens: 60_000 },
       [rate],
@@ -98,6 +106,8 @@ describe('snapshotAnalyticsUsagePricing', () => {
     // Assert
     should(missing).have.property('reason', 'missing_anthropic_cache_write_split');
     should(inconsistent).have.property('reason', 'inconsistent_anthropic_cache_write_split');
+    should(invalid).have.property('reason', 'invalid_token_counts');
+    should(missingRates).have.property('reason', 'invalid_rate_table');
     should(priced).have.property('kind', 'priced');
   });
 
