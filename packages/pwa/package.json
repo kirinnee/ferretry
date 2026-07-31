@@ -5,7 +5,8 @@
   "description": "Installable multi-daemon browser application",
   "type": "module",
   "exports": {
-    ".": "./src/lib/index.ts"
+    ".": "./src/lib/index.ts",
+    "./session-screens.css": "./src/components/session-screens.css"
   },
   "types": "./src/lib/index.ts",
   "dependencies": {
