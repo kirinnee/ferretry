@@ -1,5 +1,6 @@
 import type {
   TranscriptIssue,
+  TranscriptInputObserver,
   TranscriptParseInput,
   TranscriptParseResult,
   TranscriptParser,
@@ -7,6 +8,10 @@ import type {
 } from './types.ts';
 
 type TranscriptRecordParser = Pick<TranscriptParser, 'harness' | 'parseRecord'>;
+
+interface NormalizedTranscriptRecord extends TranscriptRecordResult {
+  readonly observedInputs: TranscriptParseResult['observedInputs'];
+}
 
 function utf8Length(value: string): number {
   return new TextEncoder().encode(value).byteLength;
@@ -45,26 +50,46 @@ function normalizeParsedRecord(
   line: number,
   byteOffset: number,
   byteLength: number,
-): TranscriptRecordResult {
+  observer?: TranscriptInputObserver,
+): NormalizedTranscriptRecord {
   try {
-    const result = parser.parseRecord(value, {
+    const context = {
       source: input.source,
       sessionId: input.sessionId,
       line,
       byteOffset,
       byteLength,
-    });
+      observedAt: input.observedAt,
+    };
+    const result = parser.parseRecord(value, context);
+    let observedInputs: TranscriptParseResult['observedInputs'] = [];
+    const observationIssues: TranscriptIssue[] = [];
+    if (observer !== undefined) {
+      try {
+        observedInputs = observer.harness === parser.harness ? observer.observe(value, context) : [];
+        if (observer.harness !== parser.harness) {
+          observationIssues.push(malformedLineIssue(parser, input, 'invalid-record', line, byteOffset, byteLength));
+        }
+      } catch {
+        observationIssues.push(malformedLineIssue(parser, input, 'invalid-record', line, byteOffset, byteLength));
+      }
+    }
     return {
       ...result,
-      issues: result.issues.map(issue => ({
-        ...issue,
-        byteOffset: issue.byteOffset ?? byteOffset,
-        byteLength: issue.byteLength ?? byteLength,
-      })),
+      observedInputs,
+      issues: [
+        ...result.issues.map(issue => ({
+          ...issue,
+          byteOffset: issue.byteOffset ?? byteOffset,
+          byteLength: issue.byteLength ?? byteLength,
+        })),
+        ...observationIssues,
+      ],
     };
   } catch {
     return {
       events: [],
+      observedInputs: [],
       issues: [malformedLineIssue(parser, input, 'invalid-record', line, byteOffset, byteLength)],
       recognized: true,
     };
@@ -75,8 +100,10 @@ function normalizeParsedRecord(
 export function parseTranscriptJsonl(
   parser: TranscriptRecordParser,
   input: TranscriptParseInput,
+  observer?: TranscriptInputObserver,
 ): TranscriptParseResult {
   const events = [] as TranscriptParseResult['events'][number][];
+  const observedInputs = [] as TranscriptParseResult['observedInputs'][number][];
   const issues: TranscriptIssue[] = [];
   const startLine = Math.max(1, input.startLine ?? 1);
   const startByteOffset = input.startByteOffset ?? 0;
@@ -102,8 +129,9 @@ export function parseTranscriptJsonl(
       return false;
     }
 
-    const result = normalizeParsedRecord(parser, input, value, line, byteOffset, byteLength);
+    const result = normalizeParsedRecord(parser, input, value, line, byteOffset, byteLength, observer);
     events.push(...result.events);
+    observedInputs.push(...result.observedInputs);
     issues.push(...result.issues);
     parsedRecords += 1;
     if (!result.recognized) ignoredRecords += 1;
@@ -135,6 +163,7 @@ export function parseTranscriptJsonl(
   return {
     harness: parser.harness,
     events,
+    observedInputs,
     issues,
     remainder,
     parsedRecords,

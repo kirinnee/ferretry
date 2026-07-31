@@ -9,11 +9,16 @@ describe('ClaudeTranscriptParser', () => {
     const subject = new ClaudeTranscriptParser();
 
     // Act
-    const actual = subject.parse({ text: fixture, source: 'claude.jsonl' });
+    const actual = subject.parse({ text: fixture, source: 'claude.jsonl', observedAt: '2026-01-02T03:04:12.000Z' });
 
     // Assert
     should(actual.issues).have.length(0);
     should(actual.events).have.length(13);
+    should(actual.observedInputs.map(input => input.text)).deepEqual([
+      'Please inspect the synthetic fixture.',
+      'The fixture includes an image.',
+      'Continue with the synthetic case.',
+    ]);
     should(actual.events.map(event => event.kind)).deepEqual([
       'message',
       'message',

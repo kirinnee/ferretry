@@ -191,6 +191,19 @@ export interface TranscriptIssue {
   readonly byteLength?: number;
 }
 
+export type ObservedHumanInputProof = 'normal-user-record' | 'native-queue-drain';
+
+/** Canonical evidence that human input entered the live harness conversation. */
+export interface ObservedHumanInput {
+  readonly harness: TranscriptHarness;
+  readonly text: string;
+  readonly proof: ObservedHumanInputProof;
+  readonly observedAt: string;
+  readonly originatedAt?: string;
+  readonly proofKey: string;
+  readonly shapeVersion: number;
+}
+
 export interface TranscriptParseInput {
   readonly text: string;
   readonly source?: string;
@@ -201,6 +214,8 @@ export interface TranscriptParseInput {
   readonly startLine?: number;
   /** Zero-based file byte offset assigned to the first byte in `text`. */
   readonly startByteOffset?: number;
+  /** Adapter-supplied read time used only when a proof record has no harness timestamp. */
+  readonly observedAt?: string;
 }
 
 export interface TranscriptRecordContext {
@@ -209,6 +224,17 @@ export interface TranscriptRecordContext {
   readonly line?: number;
   readonly byteOffset?: number;
   readonly byteLength?: number;
+}
+
+export interface TranscriptObservationContext extends TranscriptRecordContext {
+  readonly observedAt?: string;
+}
+
+/** Stateful pure decision boundary for harness-specific human-input proof shapes. */
+export interface TranscriptInputObserver {
+  readonly harness: TranscriptHarness;
+  observe(value: unknown, context: TranscriptObservationContext): readonly ObservedHumanInput[];
+  reset(): void;
 }
 
 export interface TranscriptRecordResult {
@@ -220,6 +246,7 @@ export interface TranscriptRecordResult {
 export interface TranscriptParseResult {
   readonly harness: TranscriptHarness;
   readonly events: readonly TranscriptEvent[];
+  readonly observedInputs: readonly ObservedHumanInput[];
   readonly issues: readonly TranscriptIssue[];
   /** Unterminated content retained for a later live-append parse. */
   readonly remainder: string;
@@ -230,8 +257,9 @@ export interface TranscriptParseResult {
 /** Common parser contract: callers inject this interface and never branch by harness. */
 export interface TranscriptParser {
   readonly harness: TranscriptHarness;
-  parse(input: TranscriptParseInput): TranscriptParseResult;
+  parse(input: TranscriptParseInput, observer?: TranscriptInputObserver): TranscriptParseResult;
   parseRecord(value: unknown, context?: TranscriptRecordContext): TranscriptRecordResult;
+  createInputObserver(): TranscriptInputObserver;
 }
 
 export interface TranscriptFileCursor {
@@ -248,6 +276,7 @@ export interface TranscriptBatch {
   readonly reset: boolean;
   readonly cursor: TranscriptFileCursor;
   readonly events: readonly TranscriptEvent[];
+  readonly observedInputs: readonly ObservedHumanInput[];
   readonly issues: readonly TranscriptIssue[];
 }
 

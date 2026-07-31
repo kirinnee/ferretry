@@ -1,8 +1,10 @@
 import { parseTranscriptJsonl } from './jsonl.ts';
+import { ClaudeObservedInputObserver } from './observed-input.ts';
 import type {
   TranscriptAttachment,
   TranscriptEvent,
   TranscriptEventMetadata,
+  TranscriptInputObserver,
   TranscriptParseInput,
   TranscriptParseResult,
   TranscriptParser,
@@ -148,8 +150,15 @@ function claudeUsage(
 export class ClaudeTranscriptParser implements TranscriptParser {
   readonly harness = 'claude' as const;
 
-  parse(input: TranscriptParseInput): TranscriptParseResult {
-    return parseTranscriptJsonl(this, input);
+  parse(
+    input: TranscriptParseInput,
+    observer: TranscriptInputObserver = this.createInputObserver(),
+  ): TranscriptParseResult {
+    return parseTranscriptJsonl(this, input, observer);
+  }
+
+  createInputObserver(): TranscriptInputObserver {
+    return new ClaudeObservedInputObserver();
   }
 
   parseRecord(value: unknown, context: TranscriptRecordContext = {}): TranscriptRecordResult {

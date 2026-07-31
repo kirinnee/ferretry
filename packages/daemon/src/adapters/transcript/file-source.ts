@@ -5,6 +5,7 @@ import type {
   TranscriptBatch,
   TranscriptFileCursor,
   TranscriptFollowOptions,
+  TranscriptInputObserver,
   TranscriptIssue,
   TranscriptIssueCode,
   TranscriptParser,
@@ -24,6 +25,16 @@ export interface TranscriptFileInfo {
 
 export interface TranscriptWatchHandle {
   close(): void;
+}
+
+interface TranscriptClock {
+  now(): string;
+}
+
+class SystemTranscriptClock implements TranscriptClock {
+  now(): string {
+    return new Date().toISOString();
+  }
 }
 
 /** Node primitives injected into the transcript source for deterministic fault tests. */
@@ -291,12 +302,19 @@ function batchOf(
   reset: boolean,
   events: TranscriptBatch['events'] = [],
   issues: TranscriptBatch['issues'] = [],
+  observedInputs: TranscriptBatch['observedInputs'] = [],
 ): TranscriptBatch {
-  return { harness: parser.harness, file, reset, cursor: cursorOf(state), events, issues };
+  return { harness: parser.harness, file, reset, cursor: cursorOf(state), events, observedInputs, issues };
 }
 
-function missingResult(parser: TranscriptParser, file: string, state: FollowState): FollowReconcileResult {
+function missingResult(
+  parser: TranscriptParser,
+  file: string,
+  state: FollowState,
+  observer?: TranscriptInputObserver,
+): FollowReconcileResult {
   const changed = state.availability !== 'missing';
+  if (changed && state.positioned) observer?.reset();
   const next: FollowState = {
     initialized: true,
     seekToEnd: false,
@@ -330,6 +348,8 @@ async function reconcileFollow(
   file: string,
   options: TranscriptFollowOptions,
   state: FollowState,
+  observer: TranscriptInputObserver,
+  clock: TranscriptClock,
 ): Promise<FollowReconcileResult> {
   let info: TranscriptFileInfo | undefined;
   try {
@@ -349,7 +369,7 @@ async function reconcileFollow(
       ),
     };
   }
-  if (info === undefined) return missingResult(parser, file, state);
+  if (info === undefined) return missingResult(parser, file, state, observer);
   if (!info.isFile) {
     if (state.availability === 'error') return { state };
     const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
@@ -377,7 +397,7 @@ async function reconcileFollow(
         runtime.readTrailingLine(file, info.size),
       ]);
     } catch (error) {
-      if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
+      if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state, observer);
       const next = { ...state, initialized: true, availability: 'error' as const };
       return {
         state: next,
@@ -396,7 +416,7 @@ async function reconcileFollow(
       afterInfo = await runtime.info(file);
     } catch {
       if (state.availability === 'error') return { state };
-      const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
+      const next = { ...state, initialized: true, availability: 'error' as const };
       return {
         state: next,
         batch: batchOf(
@@ -409,7 +429,7 @@ async function reconcileFollow(
         ),
       };
     }
-    if (afterInfo === undefined) return missingResult(parser, file, state);
+    if (afterInfo === undefined) return missingResult(parser, file, state, observer);
     if (afterInfo.identity !== info.identity || afterInfo.size < info.size) {
       if (state.availability === 'error') return { state };
       const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
@@ -454,7 +474,7 @@ async function reconcileFollow(
   try {
     reset = !(await cursorMatches(runtime, file, info, state));
   } catch (error) {
-    if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
+    if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state, observer);
     const next = { ...state, initialized: true, availability: 'error' as const };
     return {
       state: next,
@@ -490,12 +510,13 @@ async function reconcileFollow(
         identity: info.identity,
         modifiedMs: info.modifiedMs,
       };
+  if (reset) observer.reset();
 
   let appended: Uint8Array;
   try {
     appended = await runtime.readFrom(file, base.byteOffset);
   } catch (error) {
-    if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
+    if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state, observer);
     const next = { ...base, availability: 'error' as const };
     return {
       state: next,
@@ -514,14 +535,18 @@ async function reconcileFollow(
   const newline = lastNewline(combined);
   const complete = newline >= 0 ? combined.subarray(0, newline + 1) : Buffer.alloc(0);
   const partial = newline >= 0 ? combined.subarray(newline + 1) : combined;
-  const parsed = parser.parse({
-    text: complete.toString('utf8'),
-    source: file,
-    sessionId: options.sessionId,
-    endOfInput: false,
-    startLine: base.nextLine,
-    startByteOffset: base.byteOffset - base.partial.byteLength,
-  });
+  const parsed = parser.parse(
+    {
+      text: complete.toString('utf8'),
+      source: file,
+      sessionId: options.sessionId,
+      endOfInput: false,
+      startLine: base.nextLine,
+      startByteOffset: base.byteOffset - base.partial.byteLength,
+      observedAt: clock.now(),
+    },
+    observer,
+  );
   const byteOffset = base.byteOffset + appended.byteLength;
   let afterInfo: TranscriptFileInfo | undefined;
   try {
@@ -541,7 +566,7 @@ async function reconcileFollow(
       ),
     };
   }
-  if (afterInfo === undefined) return missingResult(parser, file, state);
+  if (afterInfo === undefined) return missingResult(parser, file, state, observer);
   if (afterInfo.identity !== info.identity || afterInfo.size < byteOffset) {
     return { state };
   }
@@ -571,7 +596,7 @@ async function reconcileFollow(
   const changed = !state.initialized || reset || appended.byteLength > 0 || state.availability !== 'present';
   return {
     state: next,
-    ...(changed ? { batch: batchOf(parser, file, next, reset, parsed.events, issues) } : {}),
+    ...(changed ? { batch: batchOf(parser, file, next, reset, parsed.events, issues, parsed.observedInputs) } : {}),
   };
 }
 
@@ -582,18 +607,20 @@ export class NodeTranscriptSource implements TranscriptSource {
   constructor(
     private readonly parser: TranscriptParser,
     private readonly runtime: TranscriptFileRuntime = new NodeTranscriptFileRuntime(),
+    private readonly clock: TranscriptClock = new SystemTranscriptClock(),
   ) {
     this.harness = parser.harness;
   }
 
   async read(file: string, options: TranscriptReadOptions = {}): Promise<TranscriptBatch> {
-    return await this.readConsistent(file, options, true);
+    return await this.readConsistent(file, options, true, this.parser.createInputObserver());
   }
 
   private async readConsistent(
     file: string,
     options: TranscriptReadOptions,
     canRetryIdentityChange: boolean,
+    observer: TranscriptInputObserver,
   ): Promise<TranscriptBatch> {
     let info: TranscriptFileInfo | undefined;
     try {
@@ -731,7 +758,10 @@ export class NodeTranscriptSource implements TranscriptSource {
       }).batch!;
     }
     if (!afterInfo.isFile || afterInfo.identity !== info.identity || afterInfo.size < bytes.byteLength) {
-      if (canRetryIdentityChange) return await this.readConsistent(file, options, false);
+      if (canRetryIdentityChange) {
+        observer.reset();
+        return await this.readConsistent(file, options, false, observer);
+      }
       const state: FollowState = {
         initialized: true,
         seekToEnd: false,
@@ -756,7 +786,10 @@ export class NodeTranscriptSource implements TranscriptSource {
     info = afterInfo;
 
     const text = Buffer.from(bytes).toString('utf8');
-    const parsed = this.parser.parse({ text, source: file, sessionId: options.sessionId, endOfInput: true });
+    const parsed = this.parser.parse(
+      { text, source: file, sessionId: options.sessionId, endOfInput: true, observedAt: this.clock.now() },
+      observer,
+    );
     const pending = parsed.remainder.length > 0 ? Buffer.from(bytes.subarray(lastNewline(bytes) + 1)) : Buffer.alloc(0);
     const pendingOffset = bytes.byteLength - pending.byteLength;
     const issues = parsed.issues.map(issue =>
@@ -777,12 +810,13 @@ export class NodeTranscriptSource implements TranscriptSource {
         countLines(bytes) + 1 + (bytes.byteLength > 0 && bytes.at(-1) !== 0x0a && pending.byteLength === 0 ? 1 : 0),
       modifiedMs: info.modifiedMs,
     };
-    return batchOf(this.parser, file, state, false, parsed.events, issues);
+    return batchOf(this.parser, file, state, false, parsed.events, issues, parsed.observedInputs);
   }
 
   async *follow(file: string, options: TranscriptFollowOptions = {}): AsyncGenerator<TranscriptBatch> {
     if (isAborted(options.signal)) return;
     const wake = createWakeController();
+    const observer = this.parser.createInputObserver();
     const watchIssues: TranscriptIssue[] = [];
     let watcher: TranscriptWatchHandle | undefined;
     let watchFailed = false;
@@ -806,6 +840,9 @@ export class NodeTranscriptSource implements TranscriptSource {
             watchIssues.push(
               sourceIssue(this.parser, file, 'source-watch-failed', 'transcript directory watch failed'),
             );
+            watcher?.close();
+            watcher = undefined;
+            watchFailed = true;
             wake.wake();
           },
         );
@@ -824,7 +861,7 @@ export class NodeTranscriptSource implements TranscriptSource {
     try {
       while (!isAborted(options.signal)) {
         armWatch();
-        const reconciled = await reconcileFollow(this.parser, this.runtime, file, options, state);
+        const reconciled = await reconcileFollow(this.parser, this.runtime, file, options, state, observer, this.clock);
         if (isAborted(options.signal)) break;
         state = reconciled.state;
         if (reconciled.batch !== undefined || watchIssues.length > 0) {

@@ -24,6 +24,7 @@ describe('daemon transcript composition', () => {
     should(subject.transcriptSources).have.length(2);
     should(actual.map(batch => batch.harness)).deepEqual(['claude', 'codex']);
     should(actual.every(batch => batch.events.length > 0)).be.true();
+    should(actual.every(batch => batch.observedInputs.length > 0)).be.true();
     should(actual.every(batch => batch.issues.length === 0)).be.true();
   });
 });

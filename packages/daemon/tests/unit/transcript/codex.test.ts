@@ -14,6 +14,9 @@ describe('CodexTranscriptParser', () => {
     // Assert
     should(actual.issues).have.length(0);
     should(actual.events).have.length(12);
+    should(actual.observedInputs).containDeep([
+      { harness: 'codex', text: 'Please inspect the Codex fixture.', proofKey: 'message-user' },
+    ]);
     should(actual.events.map(event => event.kind)).deepEqual([
       'message',
       'attachment',

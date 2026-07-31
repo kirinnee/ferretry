@@ -1,8 +1,10 @@
 import { parseTranscriptJsonl } from './jsonl.ts';
+import { CodexObservedInputObserver } from './observed-input.ts';
 import type {
   TranscriptAttachment,
   TranscriptEvent,
   TranscriptEventMetadata,
+  TranscriptInputObserver,
   TranscriptJsonValue,
   TranscriptParseInput,
   TranscriptParseResult,
@@ -223,8 +225,15 @@ function codexError(payload: Record<string, unknown>): { message?: string; code?
 export class CodexTranscriptParser implements TranscriptParser {
   readonly harness = 'codex' as const;
 
-  parse(input: TranscriptParseInput): TranscriptParseResult {
-    return parseTranscriptJsonl(this, input);
+  parse(
+    input: TranscriptParseInput,
+    observer: TranscriptInputObserver = this.createInputObserver(),
+  ): TranscriptParseResult {
+    return parseTranscriptJsonl(this, input, observer);
+  }
+
+  createInputObserver(): TranscriptInputObserver {
+    return new CodexObservedInputObserver();
   }
 
   parseRecord(value: unknown, context: TranscriptRecordContext = {}): TranscriptRecordResult {

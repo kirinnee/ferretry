@@ -29,6 +29,25 @@ function userRecord(text: string): Record<string, unknown> {
   };
 }
 
+function queueRemoval(text: string, timestamp: string): Record<string, unknown> {
+  return { type: 'queue-operation', operation: 'remove', content: text, timestamp };
+}
+
+function queuedCommand(text: string, timestamp: string): Record<string, unknown> {
+  return {
+    type: 'attachment',
+    uuid: `queued-${text.replaceAll(' ', '-')}`,
+    timestamp,
+    attachment: {
+      type: 'queued_command',
+      prompt: text,
+      commandMode: 'prompt',
+      origin: { kind: 'human' },
+      timestamp,
+    },
+  };
+}
+
 function jsonl(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
@@ -62,7 +81,9 @@ afterEach(async () => {
 describe('NodeTranscriptSource read', () => {
   it('should read and parse the synthetic fixture through the exact file path', async () => {
     // Arrange
-    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), {
+      now: () => '2026-01-02T03:04:12.000Z',
+    });
     const input = join(import.meta.dir, '../../fixtures/transcript/claude.jsonl');
 
     // Act
@@ -70,6 +91,12 @@ describe('NodeTranscriptSource read', () => {
 
     // Assert
     should(actual.events).have.length(13);
+    should(actual.observedInputs.map(input => input.text)).deepEqual([
+      'Please inspect the synthetic fixture.',
+      'The fixture includes an image.',
+      'Continue with the synthetic case.',
+    ]);
+    should(actual.observedInputs[2]?.observedAt).equal('2026-01-02T03:04:12.000Z');
     should(actual.issues).have.length(0);
     should(actual.cursor.byteOffset).be.above(0);
     should(actual.cursor.pendingBytes).equal(0);
@@ -186,14 +213,55 @@ describe('NodeTranscriptSource follow', () => {
 
       // Assert
       should(initial.events[0]).containDeep({ kind: 'message', text: 'first complete record' });
+      should(initial.observedInputs.map(input => input.text)).deepEqual(['first complete record']);
       should(partial.events).have.length(0);
+      should(partial.observedInputs).be.empty();
       should(partial.issues.map(issue => issue.code)).deepEqual(['incomplete-line']);
       should(partial.cursor.pendingBytes).equal(Buffer.byteLength(partialLine));
       should(completed.events[0]).containDeep({ kind: 'message', text: 'second partial record' });
+      should(completed.observedInputs.map(input => input.text)).deepEqual(['second partial record']);
       should(completed.cursor.pendingBytes).equal(0);
       should(malformed.issues.map(issue => issue.code)).deepEqual(['invalid-json']);
       should(malformed.issues[0]?.byteOffset).equal(completed.cursor.byteOffset);
       should(malformed.events[0]).containDeep({ kind: 'message', text: 'valid after interleaving' });
+      should(malformed.observedInputs.map(input => input.text)).deepEqual(['valid after interleaving']);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should carry queue-removal state across appends and emit delivery proof separately from history', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'queued.jsonl');
+    await writeFile(file, '');
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), {
+      now: () => '2026-01-02T03:04:20.000Z',
+    });
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      await nextBatch(iterator, 'empty initial transcript');
+      const prompt = 'Queued synthetic prompt.';
+      await appendFile(file, jsonl(queueRemoval(prompt, '2026-01-02T03:04:10.000Z')));
+      const removal = await nextBatch(iterator, 'queue removal');
+
+      // Act
+      await appendFile(file, jsonl(queuedCommand(prompt, '2026-01-02T03:04:08.000Z')));
+      const drained = await nextBatch(iterator, 'queued prompt drain');
+
+      // Assert
+      should(removal.events).be.empty();
+      should(removal.observedInputs).be.empty();
+      should(drained.events).containDeep([{ kind: 'message', text: prompt, inputSource: 'native-queue' }]);
+      should(drained.observedInputs).containDeep([
+        {
+          text: prompt,
+          proof: 'native-queue-drain',
+          observedAt: '2026-01-02T03:04:10.000Z',
+          originatedAt: '2026-01-02T03:04:08.000Z',
+        },
+      ]);
     } finally {
       await iterator.return?.(undefined);
     }
@@ -402,6 +470,58 @@ describe('NodeTranscriptSource follow', () => {
     }
   });
 
+  it('should retry an end cursor after transient verification failure without replaying existing records', async () => {
+    // Arrange
+    const bytes = Buffer.from(jsonl(userRecord('already present during cursor retry')));
+    let infoCalls = 0;
+    let readFromCalls = 0;
+    const runtime: TranscriptFileRuntime = {
+      async info() {
+        infoCalls += 1;
+        if (infoCalls === 2) throw new Error('synthetic verification failure');
+        return { identity: 'stable', size: bytes.byteLength, modifiedMs: infoCalls, isFile: true };
+      },
+      async readAll() {
+        return bytes;
+      },
+      async countNewlines() {
+        return 1;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange(_file, byteOffset, byteLength) {
+        return bytes.subarray(byteOffset, byteOffset + byteLength);
+      },
+      async readFrom(_file, byteOffset) {
+        readFromCalls += 1;
+        return bytes.subarray(byteOffset);
+      },
+      watch() {
+        return { close() {} };
+      },
+    };
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+    const iterator = subject
+      .follow('/synthetic/transcript.jsonl', { startAt: 'end', pollIntervalMs: 10 })
+      [Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const failed = await nextBatch(iterator, 'end cursor verification failure');
+      const recovered = await nextBatch(iterator, 'end cursor verification recovery');
+
+      // Assert
+      should(failed.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+      should(recovered.events).be.empty();
+      should(recovered.observedInputs).be.empty();
+      should(recovered.cursor.byteOffset).equal(bytes.byteLength);
+      should(readFromCalls).equal(0);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
   it('should read a replacement from byte zero when it changes while establishing an end cursor', async () => {
     for (const change of ['identity', 'truncation'] as const) {
       // Arrange
@@ -605,6 +725,9 @@ describe('NodeTranscriptSource follow', () => {
     await writeFile(file, jsonl(userRecord('initial')));
     const nodeRuntime = new NodeTranscriptFileRuntime();
     let failWatch: (() => void) | undefined;
+    let notifyWatch: (() => void) | undefined;
+    let watchCount = 0;
+    let closeCount = 0;
     const runtime: TranscriptFileRuntime = {
       info: file => nodeRuntime.info(file),
       readAll: file => nodeRuntime.readAll(file),
@@ -612,9 +735,15 @@ describe('NodeTranscriptSource follow', () => {
       readTrailingLine: (file, byteLength) => nodeRuntime.readTrailingLine(file, byteLength),
       readRange: (file, byteOffset, byteLength) => nodeRuntime.readRange(file, byteOffset, byteLength),
       readFrom: (file, byteOffset) => nodeRuntime.readFrom(file, byteOffset),
-      watch(_directory, _onChange, onError) {
-        failWatch = () => onError(new Error('synthetic watch failure'));
-        return { close() {} };
+      watch(_directory, onChange, onError) {
+        watchCount += 1;
+        notifyWatch = onChange;
+        if (watchCount === 1) failWatch = () => onError(new Error('synthetic watch failure'));
+        return {
+          close() {
+            closeCount += 1;
+          },
+        };
       },
     };
     const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
@@ -626,13 +755,22 @@ describe('NodeTranscriptSource follow', () => {
       // Act
       failWatch?.();
       const actual = await nextBatch(iterator, 'asynchronous watch failure');
+      await appendFile(file, jsonl(userRecord('after watch recovery')));
+      const pendingRecovery = nextBatch(iterator, 'polling after watch recovery');
+      await Promise.resolve();
+      notifyWatch?.();
+      const recovered = await pendingRecovery;
 
       // Assert
       should(actual.events).have.length(0);
       should(actual.issues.map(issue => issue.code)).deepEqual(['source-watch-failed']);
+      should(recovered.events).containDeep([{ kind: 'message', text: 'after watch recovery' }]);
+      should(watchCount).equal(2);
+      should(closeCount).equal(1);
     } finally {
       await iterator.return?.(undefined);
     }
+    should(closeCount).equal(2);
   });
 });
 

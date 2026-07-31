@@ -3,7 +3,7 @@ import should from 'should';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
 import { parseTranscriptJsonl } from '../../../src/lib/transcript/jsonl.ts';
-import type { TranscriptParser } from '../../../src/lib/transcript/types.ts';
+import type { TranscriptInputObserver, TranscriptParser } from '../../../src/lib/transcript/types.ts';
 
 interface ParserFixture {
   readonly name: string;
@@ -171,5 +171,37 @@ describe('JSONL normalization boundary', () => {
     // Assert
     should(actual.events).have.length(0);
     should(actual.issues).containDeep([{ code: 'invalid-record', recoverable: true }]);
+  });
+
+  it('should keep normalized history when an input observer is mismatched or fails', () => {
+    // Arrange
+    const parser = {
+      harness: 'claude' as const,
+      parseRecord() {
+        return {
+          events: [{ harness: 'claude' as const, role: 'user' as const, kind: 'message' as const, text: 'kept' }],
+          issues: [],
+          recognized: true,
+        };
+      },
+    };
+    const observers: TranscriptInputObserver[] = [
+      { harness: 'codex', observe: () => [], reset() {} },
+      {
+        harness: 'claude',
+        observe(): never {
+          throw new Error('synthetic observer failure');
+        },
+        reset() {},
+      },
+    ];
+
+    // Act
+    const actual = observers.map(observer => parseTranscriptJsonl(parser, { text: '{}\n' }, observer));
+
+    // Assert
+    should(actual.every(result => result.events[0]?.kind === 'message')).be.true();
+    should(actual.every(result => result.observedInputs.length === 0)).be.true();
+    should(actual.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
   });
 });
