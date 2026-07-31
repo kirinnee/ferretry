@@ -12,6 +12,9 @@ import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { PinController } from '../src/lib/pins/controller';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
+import { registerAttentionCommands } from '../src/lib/attention/commands';
+import { AttentionController } from '../src/lib/attention/controller';
+import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { assertSemver } from '../src/lib/version';
@@ -99,6 +102,10 @@ export function registerDomain(program: Command, world: CliWorld): void {
   const client = lazyDaemonClient(environment);
   const ownSessionId = environment.FY_SESSION_ID;
 
+  registerAttentionCommands(
+    program,
+    new AttentionController(new ProtocolAttentionGateway(client), world.io, ownSessionId),
+  );
   registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId));
   registerAnalyticsCommands(program, new AnalyticsController(client, world.io));
 }
