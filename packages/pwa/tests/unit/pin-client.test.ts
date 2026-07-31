@@ -44,6 +44,11 @@ const firstNoteText = (client: DaemonPinClient, scope: typeof scopeA): string | 
   return pin?.kind === 'note' ? pin.text : undefined;
 };
 
+const firstMessagePreview = (client: DaemonPinClient, scope: typeof scopeA): string | undefined => {
+  const pin = client.store.pins(scope)?.pins[0];
+  return pin?.kind === 'message' ? pin.preview : undefined;
+};
+
 describe('pin transport', () => {
   it('binds reads and mutations to the paired daemon with bearer auth and idempotency headers', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -219,6 +224,80 @@ describe('DaemonPinClient', () => {
     await request;
     expect(calls).toBe(1);
     expect(firstNoteText(client, scopeA)).toBe('authoritative');
+  });
+
+  it('prepends and caps an optimistic message add when the board is already full', async () => {
+    const pins = Array.from({ length: 20 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      at: 20 - index,
+      kind: 'note' as const,
+      text: `note-${index + 1}`,
+      by: 'human' as const,
+      createdBy: null,
+      createdByName: null,
+    }));
+    const full = { ...snapshot('same/session'), pins };
+    const authoritative = {
+      ...full,
+      pins: [
+        {
+          id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+          at: 21,
+          kind: 'message' as const,
+          blockId: 'block-authoritative',
+          blockKind: 'assistant' as const,
+          preview: 'authoritative',
+          by: 'human' as const,
+          createdBy: null,
+          createdByName: null,
+        },
+        ...pins.slice(0, 19),
+      ],
+    };
+    let calls = 0;
+    const client = new DaemonPinClient(undefined, async () => {
+      calls += 1;
+      return response(authoritative);
+    });
+    client.store.applySnapshot(scopeA, full);
+
+    const request = client.add(daemonA, scopeA, {
+      action: 'add',
+      kind: 'message',
+      blockId: 'block-optimistic',
+      blockKind: 'assistant',
+      preview: 'optimistic',
+    });
+
+    expect(request).toBeInstanceOf(Promise);
+    expect(client.store.pins(scopeA)?.pins).toHaveLength(20);
+    expect(firstMessagePreview(client, scopeA)).toBe('optimistic');
+    await request;
+    expect(calls).toBe(1);
+    expect(client.store.pins(scopeA)?.pins).toHaveLength(20);
+    expect(firstMessagePreview(client, scopeA)).toBe('authoritative');
+  });
+
+  it('restores the exact prior board when an optimistic add to a full board fails', async () => {
+    const pins = Array.from({ length: 20 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      at: 20 - index,
+      kind: 'note' as const,
+      text: `note-${index + 1}`,
+      by: 'human' as const,
+      createdBy: null,
+      createdByName: null,
+    }));
+    const full = { ...snapshot('same/session'), pins };
+    const client = new DaemonPinClient(undefined, async () => response({ error: 'down' }, 503));
+    client.store.applySnapshot(scopeA, full);
+    const before = client.store.pins(scopeA);
+
+    await expect(client.add(daemonA, scopeA, { action: 'add', kind: 'note', text: 'optimistic' })).rejects.toThrow(
+      'down',
+    );
+
+    expect(client.store.pins(scopeA)).toBe(before);
   });
 
   it('never lets a hydrate that predates a mutation overwrite that mutation in either completion order', async () => {

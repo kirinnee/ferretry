@@ -149,4 +149,60 @@ describe('daemon-scoped drafts', () => {
     should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual(['retried', 'old-4', 'old-3', 'old-2']);
     should(DRAFTS_KEY).equal('fy-drafts-v1');
   });
+
+  it('should retain more than ten drafts when only the oldest entry overflows the quota', () => {
+    let seeded = emptyDraftStore();
+    for (let index = 1; index <= 11; index += 1)
+      seeded = upsertDraft(seeded, daemonSessionScope(daemonB, `old-${index}`), `old-${index}`, index);
+    const attempts: number[] = [];
+    let saved = emptyDraftStore();
+    const retrying: DraftStorage = {
+      getItem: () => JSON.stringify(seeded),
+      setItem: (_key, value) => {
+        const candidate = parseDraftStore(value);
+        const count = Object.keys(candidate.drafts).length;
+        attempts.push(count);
+        if (count > 11) throw new Error('quota');
+        saved = candidate;
+      },
+    };
+    new DaemonDraftStore(retrying).save(scopeA, 'retried', 12);
+
+    // the full 12-entry document overflows; the search keeps the 11 newest, above the old fixed cap of 10
+    should(attempts).deepEqual([12, 5, 8, 10, 11]);
+    should(Object.keys(saved.drafts)).have.length(11);
+    should(Object.values(saved.drafts).map(entry => entry.text)).deepEqual([
+      'retried',
+      'old-11',
+      'old-10',
+      'old-9',
+      'old-8',
+      'old-7',
+      'old-6',
+      'old-5',
+      'old-4',
+      'old-3',
+      'old-2',
+    ]);
+  });
+
+  it('should not throw when every fallback candidate including the empty document exceeds the quota', () => {
+    let seeded = emptyDraftStore();
+    for (let index = 1; index <= 11; index += 1)
+      seeded = upsertDraft(seeded, daemonSessionScope(daemonB, `old-${index}`), `old-${index}`, index);
+    const attempts: number[] = [];
+    const alwaysOver: DraftStorage = {
+      getItem: () => JSON.stringify(seeded),
+      setItem: (_key, value) => {
+        const candidate = parseDraftStore(value);
+        attempts.push(Object.keys(candidate.drafts).length);
+        throw new Error('quota');
+      },
+    };
+    const drafts = new DaemonDraftStore(alwaysOver);
+
+    should(() => drafts.save(scopeA, 'retried', 12)).not.throw();
+    // the full document (12), then the binary-search probes 5, 2, and finally the empty document (0)
+    should(attempts).deepEqual([12, 5, 2, 0]);
+  });
 });
