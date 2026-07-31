@@ -30,6 +30,9 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
+/** Harness sections that live below the fold and are captured element by element. */
+const SECTIONS = ['harness-marks', 'harness-dead-pane'] as const;
+
 function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);
   process.exit(1);
@@ -93,14 +96,42 @@ try {
       await page.goto(server.url.toString());
       const target = join(outDir, `${viewport.name}.png`);
       await page.screenshot({ path: target });
+      process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
+      process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
       const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
       await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
-      await context.close();
-      process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-      process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
       process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
+
+      // The harness stacks every ported surface down one column, so most of it
+      // is below the fold. A full-page stitch cannot prove those: the app bar
+      // is sticky, and Chrome repaints a fixed layer into every stitched tile.
+      // So each surface below the fold is captured as ITS OWN element shot,
+      // which is both immune to that and easier to compare against the
+      // original screen by screen.
+      for (const section of SECTIONS) {
+        const element = page.locator(`#${section}`);
+        await element.scrollIntoViewIfNeeded();
+        const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
+        await element.screenshot({ path: sectionTarget });
+        process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
+      }
+
+      // The context menu is anchored and `fixed`, which is exactly what a
+      // full-page stitch cannot capture — so it gets its own viewport-sized
+      // pass behind a fragment.
+      const menuTarget = join(outDir, `${viewport.name}-menu.png`);
+      await page.goto(`${server.url}#menu`);
+      await page.reload();
+      // Wait for the rows, not just for load: the menu paints hidden and is
+      // revealed by a layout effect once it has been measured and clamped.
+      await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+      await page.screenshot({ path: menuTarget });
+      process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
+
+      await context.close();
     }
   } finally {
     await browser.close();

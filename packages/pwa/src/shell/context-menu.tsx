@@ -322,8 +322,15 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
             className={cn(
               'flex w-full items-center gap-sm rounded-control px-cell-x text-left text-ui',
               touch ? 'min-h-[44px]' : 'min-h-[34px] py-1',
-              'text-fg-soft hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
-              item.danger && 'text-err hover:text-err focus:text-err',
+              'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
+              // The ink is EXCLUSIVE, not layered. kteam wrote this as
+              // `text-fg-soft` plus `text-err` on a danger row, and which one
+              // wins is decided by the order Tailwind emits the two utilities,
+              // not by the order they appear here — in this repo's build
+              // `.text-fg-soft` is emitted last, so Stop and Migrate rendered
+              // in the same ink as Resume and the destructive tone was silently
+              // lost. Verified in the harness screenshot at both viewports.
+              item.danger ? 'text-err' : 'text-fg-soft',
               item.disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent',
             )}
           >

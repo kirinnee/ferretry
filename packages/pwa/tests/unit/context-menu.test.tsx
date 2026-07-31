@@ -326,6 +326,11 @@ describe('ContextMenu', () => {
     expect(menu.rows()[2]?.className).toContain('text-err');
     expect(menu.rows()[2]?.textContent).toBe('Migrate');
     expect(menu.rows()[0]?.className).not.toContain('text-err');
+
+    // Exclusive, not layered: carrying both inks let the emitted-CSS order
+    // decide the colour, and the destructive tone lost.
+    expect(menu.rows()[2]?.className).not.toContain('text-fg-soft');
+    expect(menu.rows()[0]?.className).toContain('text-fg-soft');
     await menu.unmount();
   });
 

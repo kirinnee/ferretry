@@ -46,6 +46,13 @@ import {
   type SidePaneTabDefinition,
 } from '../src/shell/side-pane-tab-model.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
+import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
+import { ContextMenu } from '../src/shell/context-menu.tsx';
+import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
+import { ModeBadge } from '../src/shell/mode-badge.tsx';
+import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
+import { RcBadge } from '../src/shell/rc-badge.tsx';
+import { StatusMark } from '../src/shell/status-mark.tsx';
 import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
 import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
 import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
@@ -93,6 +100,36 @@ openSidePaneFileTab(scope, 'README.md');
 
 /** Phone below this width, exactly as the app decides its presentation. */
 const PHONE_MAX = 768;
+
+/** One session per status class, so all three glyph shapes are on the page. */
+const MARK_SESSIONS: readonly (readonly [string, SessionView])[] = [
+  ['running', harnessSession],
+  [
+    'awaiting a human',
+    { ...harnessSession, state: { ...harnessSession.state, status: 'awaiting_user' } } as SessionView,
+  ],
+  [
+    'parked',
+    {
+      ...harnessSession,
+      state: {
+        ...harnessSession.state,
+        status: 'running',
+        waiting: { since: '2026-07-31T11:00:00.000Z', peerName: 'freddie', condition: 'CI to go green' },
+      },
+    } as SessionView,
+  ],
+  ['completed', { ...harnessSession, state: { ...harnessSession.state, status: 'completed' } } as SessionView],
+  ['failed', { ...harnessSession, state: { ...harnessSession.state, status: 'failed' } } as SessionView],
+];
+
+const QUOTA_CALM = { fiveHourPercent: 31, weeklyPercent: 58 } as Quota;
+const QUOTA_TIGHT = { fiveHourPercent: 92, weeklyPercent: 78, atLimit: true } as Quota;
+
+/** Stands in for a lazy pane whose chunk was pruned by a newer deploy. */
+function DeadPane(): never {
+  throw new TypeError("Cannot read properties of undefined (reading 'SessionChatPage')");
+}
 
 const task = (overrides: Partial<Omit<TaskSummary, 'live'>> & { live?: Partial<TaskLive> }): TaskSummary => ({
   v: 1,
@@ -317,6 +354,7 @@ function Shell() {
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight });
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
+  const menuOpen = window.location.hash === '#menu';
 
   // The headless browser sizes its window after the first paint, so a viewport
   // read once at mount would report the wrong width in the screenshot.
@@ -575,6 +613,65 @@ function Shell() {
             </div>
           </PanelBody>
         </Card>
+
+        <Card id="harness-marks">
+          <PanelHeader>
+            <Label>Session marks</Label>
+          </PanelHeader>
+          <PanelBody className="flex flex-col gap-sm">
+            <div className="flex flex-col gap-1">
+              {MARK_SESSIONS.map(([name, view]) => (
+                <span className="flex items-center gap-sm text-cell text-muted" key={name}>
+                  <StatusMark view={view} />
+                  {name}
+                </span>
+              ))}
+            </div>
+            <ActionGroup>
+              <ModeBadge mode="auto" />
+              <ModeBadge mode="interactive" />
+              <ModeBadge mode="auto" size="sm" />
+              <RcBadge remoteControl url="https://claude.ai/s/harness" />
+              <RcBadge remoteControl />
+            </ActionGroup>
+            <ActionGroup>
+              <QuotaReadout quota={QUOTA_CALM} now={HARNESS_NOW} />
+              <QuotaReadout quota={QUOTA_TIGHT} now={HARNESS_NOW} />
+              <QuotaReadout quota={null} showUnknown now={HARNESS_NOW} />
+            </ActionGroup>
+            <MarkerSeparator>Turn 4</MarkerSeparator>
+            <MarkerLine>Ran the unit suite — 4066 passed</MarkerLine>
+          </PanelBody>
+        </Card>
+
+        <Card className="overflow-hidden" id="harness-dead-pane">
+          <PanelHeader>
+            <Label>A pane whose chunk is gone</Label>
+          </PanelHeader>
+          <div className="h-40">
+            <ChunkErrorBoundary onChunkError={() => {}} onReload={() => {}} onReport={() => {}}>
+              <DeadPane />
+            </ChunkErrorBoundary>
+          </div>
+        </Card>
+
+        {/* Only under `#menu`, and it gets its own screenshot pass: the menu's
+            dismiss surface is `fixed inset-0`, and a fixed layer breaks
+            Chrome's scroll-and-stitch full-page capture of everything below
+            the fold. */}
+        <ContextMenu
+          open={menuOpen}
+          anchor={{ x: phone ? 40 : 420, y: 240 }}
+          ariaLabel="Session actions"
+          items={[
+            { key: 'resume', label: 'Resume', onSelect: () => {} },
+            { key: 'rename', label: 'Rename', detail: '2 selected', onSelect: () => {} },
+            { key: 'migrate', label: 'Migrate', disabled: true, onSelect: () => {} },
+            { key: 'stop', label: 'Stop', danger: true, onSelect: () => {} },
+          ]}
+          onClose={() => {}}
+          touch={phone}
+        />
 
         <BottomSheet
           id="harness-sheet"
