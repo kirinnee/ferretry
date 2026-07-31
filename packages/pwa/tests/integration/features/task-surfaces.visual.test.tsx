@@ -386,11 +386,37 @@ function Reference() {
   );
 }
 
-const documentFor = (css: string, body: string): string => `<!doctype html>
+/**
+ * Both trees are stacked in the SAME box — absolutely positioned at the same
+ * origin — and revealed one at a time. Two navigations would compare two paints,
+ * and even side-by-side blocks are wrong: a fractional container height puts the
+ * second block on a different subpixel phase, so identical markup rasterises one
+ * pixel apart. Same page, same box, same fonts, same device scale: a difference
+ * can only be the markup.
+ */
+const documentFor = (css: string, port: string, reference: string): string => `<!doctype html>
 <html lang="en" data-theme="studio-dark">
-  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style></head>
-  <body><div id="root" class="p-panel">${body}</div></body>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <style>${css}</style>
+    <style>.vis-pane { position: absolute; inset: 0 0 auto 0; } .vis-hidden { display: none; }</style>
+  </head>
+  <body>
+    <div id="root" class="relative p-panel">
+      <div class="vis-pane" id="port">${port}</div>
+      <div class="vis-pane vis-hidden" id="reference">${reference}</div>
+    </div>
+  </body>
 </html>`;
+
+/** Reveals exactly one pane, so both are measured in the identical box. */
+const REVEAL = (id: string): string => `(() => {
+  for (const pane of document.querySelectorAll('.vis-pane')) {
+    pane.classList.toggle('vis-hidden', pane.id !== ${JSON.stringify(id)});
+  }
+  return true;
+})()`;
 
 const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
@@ -436,15 +462,11 @@ describe('ported feature surfaces visual contract', () => {
   });
 
   it('should render pixel-identically to the original kteam markup at both viewports', async () => {
-    const target = documentFor(css, renderToStaticMarkup(<Port />));
-    const reference = documentFor(css, renderToStaticMarkup(<Reference />));
+    const page = documentFor(css, renderToStaticMarkup(<Port />), renderToStaticMarkup(<Reference />));
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
-      fetch(request) {
-        const body = new URL(request.url).pathname === '/reference' ? reference : target;
-        return new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-      },
+      fetch: () => new Response(page, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
     });
 
     try {
@@ -454,8 +476,8 @@ describe('ported feature surfaces visual contract', () => {
           colorScheme: 'dark',
           reducedMotion: 'reduce',
         });
-        // A public static bundle must never reach the network, and a live
-        // daemon runs on the machine that executes this suite.
+        // A public static bundle must never reach the network, and a live daemon
+        // runs on the machine that executes this suite.
         await context.route('**/*', async route => {
           if (new URL(route.request().url()).origin !== server.url.origin) {
             await route.abort();
@@ -463,19 +485,20 @@ describe('ported feature surfaces visual contract', () => {
           }
           await route.continue();
         });
-        const page = await context.newPage();
+        const tab = await context.newPage();
+        await tab.goto(server.url.toString());
 
-        await page.goto(new URL('/target', server.url).toString());
-        const overflow = await page.evaluate<{ inner: number; scroll: number }>(
+        await tab.evaluate<boolean>(REVEAL('port'));
+        const overflow = await tab.evaluate<{ inner: number; scroll: number }>(
           `({ inner: window.innerWidth, scroll: document.documentElement.scrollWidth })`,
         );
         should(overflow.scroll).be.belowOrEqual(overflow.inner);
-        const shot = await page.screenshot({ animations: 'disabled', fullPage: true });
+        const ported = await tab.locator('#port').screenshot({ animations: 'disabled' });
 
-        await page.goto(new URL('/reference', server.url).toString());
-        const original = await page.screenshot({ animations: 'disabled', fullPage: true });
+        await tab.evaluate<boolean>(REVEAL('reference'));
+        const original = await tab.locator('#reference').screenshot({ animations: 'disabled' });
 
-        should(shot.equals(original)).be.true();
+        should(ported.equals(original)).be.true();
         await context.close();
       }
     } finally {
