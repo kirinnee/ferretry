@@ -1,9 +1,12 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../components/primitives.tsx';
+export * from '../components/view-tabs.tsx';
 export * from '../hooks/use-details-tab.ts';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
+export * from './class-names.ts';
 export * from './daemon-connection.ts';
 export * from './event-transport.ts';
 export * from './daemon-scope.ts';
