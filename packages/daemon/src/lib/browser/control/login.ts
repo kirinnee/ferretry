@@ -1,22 +1,17 @@
+import type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus } from '@ferretry/protocol';
 import type { BrowserProfileLease, BrowserProfilePort } from './profile.ts';
 
-export type BrowserLoginState = 'closed' | 'opening' | 'open' | 'closing' | 'error';
-
-export interface BrowserLoginConnection {
-  readonly host: '127.0.0.1';
-  readonly port: number;
-  readonly password: string;
-  readonly sshTunnel: string;
-}
-
-export interface BrowserLoginStatus {
-  readonly state: BrowserLoginState;
-  readonly profilePrimed: boolean;
-  readonly openedAt?: string;
-  readonly expiresAt?: string;
-  readonly connection?: BrowserLoginConnection;
-  readonly error?: string;
-}
+/**
+ * The login window's status IS the wire contract — it is what the daemon answers
+ * `/v1/browser/login` with, and a reader parses it with the protocol schema. So
+ * the state-discriminated protocol types are re-exported rather than restated
+ * (the pattern `lib/pins/types.ts` already uses). Restating them here as a flat,
+ * all-optional shape let the daemon's own types admit statuses the protocol
+ * rejects: a `closed` window still carrying a live VNC password and countdown,
+ * or an `open` one with no endpoint at all. Sharing one definition makes that
+ * drift impossible rather than merely tested.
+ */
+export type { BrowserLoginConnection, BrowserLoginState, BrowserLoginStatus };
 
 export interface BrowserLoginLifecycle {
   status(): Promise<BrowserLoginStatus>;
