@@ -18,11 +18,6 @@ function escapeLabel(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 
-/** Renders a float the way the exposition format wants it: no exponent surprises, no `NaN`. */
-function renderNumber(value: number): string {
-  return Number.isFinite(value) ? String(value) : 'NaN';
-}
-
 interface Family {
   readonly name: string;
   readonly help: string;
@@ -62,7 +57,7 @@ function perAccount(accounts: readonly AccountUsage[], value: (account: AccountU
     help,
     samples: accounts.flatMap(account => {
       const sample = value(account);
-      return sample === undefined ? [] : [`${PREFIX}_${name}{${labelsFor(account)}} ${renderNumber(sample)}`];
+      return sample === undefined ? [] : [`${PREFIX}_${name}{${labelsFor(account)}} ${sample}`];
     }),
   });
 }
