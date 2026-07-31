@@ -19,6 +19,8 @@ import type {
   TaskSummary,
   WardenConfigView,
   WardenStatusView,
+  LearningStatus,
+  ProposalView,
 } from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
@@ -39,6 +41,7 @@ import { AnalyticsResultTable } from '../src/features/analytics/analytics-result
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
+import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
@@ -254,6 +257,70 @@ const WARDEN_CONFIG: WardenConfigView = {
   accounts: WARDEN.config.accounts,
   warnings: ['Account order takes effect on the next sweep.'],
 };
+
+const LEARNING_STATUS: LearningStatus = {
+  enabled: true,
+  intervalMinutes: 10,
+  lastRunAt: '2026-07-31T11:58:00.000Z',
+  pending: { total: 2, strong: 1, weak: 1 },
+  totals: { observations: 8, proposals: 2, tombstones: 0 },
+  running: false,
+};
+
+const LEARNING_PROPOSALS: readonly ProposalView[] = [
+  {
+    id: 'paired-daemon',
+    category: 'global',
+    state: 'pending',
+    title: 'Pair before opening daemon data',
+    ruleText: 'Use the selected daemon connection for every request and cache key.',
+    target: { kind: 'global-agent-guidance', path: 'AGENTS.md', anchor: 'PWA' },
+    observationIds: ['observe-1'],
+    occurrences: 5,
+    crossRepoCount: 2,
+    firstSeen: '2026-07-30T12:00:00.000Z',
+    lastSeen: '2026-07-31T11:58:00.000Z',
+    identity: 'paired-daemon',
+    history: [{ at: '2026-07-31T11:58:00.000Z', event: 'created', by: 'miner' }],
+    evidence: [
+      {
+        observationId: 'observe-1',
+        sessionId: 'harness-session',
+        repo: 'ferretry',
+        at: '2026-07-31T11:58:00.000Z',
+        quote: 'This data belongs to daemon A.',
+        source: 'human',
+        kind: 'correction',
+      },
+    ],
+  },
+  {
+    id: 'visual-review',
+    category: 'global',
+    state: 'pending',
+    title: 'Open both viewport screenshots',
+    ruleText: 'Compare mobile and desktop captures before claiming UI fidelity.',
+    target: { kind: 'global-agent-guidance', path: 'AGENTS.md' },
+    observationIds: ['observe-2'],
+    occurrences: 1,
+    crossRepoCount: 1,
+    firstSeen: '2026-07-31T11:00:00.000Z',
+    lastSeen: '2026-07-31T11:00:00.000Z',
+    identity: 'visual-review',
+    history: [{ at: '2026-07-31T11:00:00.000Z', event: 'created', by: 'miner' }],
+    evidence: [
+      {
+        observationId: 'observe-2',
+        sessionId: 'harness-session',
+        repo: 'ferretry',
+        at: '2026-07-31T11:00:00.000Z',
+        quote: 'Open the images.',
+        source: 'human',
+        kind: 'correction',
+      },
+    ],
+  },
+];
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
@@ -633,6 +700,17 @@ function Shell() {
           socketFactory={() => new HarnessBrowserSocket()}
           createObjectUrl={() => harnessFrame}
           revokeObjectUrl={() => undefined}
+        />
+
+        <LearningReview
+          connection={daemon}
+          status={LEARNING_STATUS}
+          proposals={LEARNING_PROPOSALS}
+          error={null}
+          busy={false}
+          now={HARNESS_NOW}
+          onRun={() => {}}
+          onAction={() => {}}
         />
 
         <Card aria-label="Analytics cost ledger" className="min-w-0 overflow-hidden">

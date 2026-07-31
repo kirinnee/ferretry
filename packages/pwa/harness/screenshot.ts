@@ -101,6 +101,9 @@ try {
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
       process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
+      const learningTarget = join(outDir, `learning-${viewport.name}.png`);
+      await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
+      process.stdout.write(`📸 learning -> ${learningTarget}\n`);
       const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
       await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
       process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
