@@ -54,7 +54,9 @@ export type ApproveChildGrantResult =
   | { readonly approved: true; readonly membership: TaskBoardMembership }
   | { readonly approved: false; readonly request: TaskBoardGrantRequestView };
 
-function childGrantView(intent: TaskBoardChildGrantIntent): TaskBoardGrantRequestView {
+/** The wire projection of a child-grant intent. Exported so the mount reports the same shape the
+ *  service does rather than a second, drifting copy of it. */
+export function childGrantView(intent: TaskBoardChildGrantIntent): TaskBoardGrantRequestView {
   const common = {
     requestId: intent.requestId,
     targetSessionId: intent.targetSessionId,

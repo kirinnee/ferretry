@@ -62,6 +62,12 @@ import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-at
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
+import {
+  FileTaskBoardRepository,
+  NodeTaskBoardCredentialIssuer,
+  StateBoardAdminCapability,
+  StorageTaskBoardSessionDirectory,
+} from '../src/adapters/task-boards/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
@@ -164,6 +170,7 @@ import {
   type FoundationPaths,
   type LearningSubsystem,
   type ScratchReclamation,
+  type TaskBoardSubsystem,
   type TaskSubsystem,
   TerminalMountError,
   type TerminalRuntimePort,
@@ -1543,6 +1550,53 @@ const LEARNING_CONFIG = {
  * single JSON snapshot, so two landing together would otherwise lose one. The key is a constant
  * because there is exactly one board per state home — unlike the task boards, which are per session.
  */
+/**
+ * The task-board membership lifecycle, over the state home and the opened session index.
+ *
+ * ONE document for the whole fleet, at the state home's root beside the credential files, because the
+ * reducers reason ACROSS boards: an invitation acceptance searches every board for the one that names
+ * the accepting session, and a binding is what proves a session is not already a member elsewhere.
+ * Sharding by board would make each of those a fan-out read no per-file lock could keep consistent.
+ *
+ * DELIVERY MERGES rather than replaces. The session environment store holds one document per session
+ * and `FY_SESSION_BOARD_CAPABILITY` already lives in it, so writing a board capability by replacing
+ * that document would take away the session's own identity — the credential the invitation-accept path
+ * needs — in the act of granting it board access. The read-modify-write runs inside the SAME executor
+ * every session mutation uses, so it cannot interleave with a start writing the same file.
+ */
+function createTaskBoardSubsystem(
+  paths: FoundationPaths,
+  files: StateFileSystem,
+  storage: DaemonStorage,
+  clock: SystemClock,
+  environments: FileSessionEnvironmentStore,
+  serial: KeyedSerialExecutor,
+): TaskBoardSubsystem {
+  const operator = new StateBoardAdminCapability(paths, files);
+  return {
+    repository: new FileTaskBoardRepository(join(paths.home, 'task-boards.json')),
+    sessions: new StorageTaskBoardSessionDirectory({
+      sessionIds: () => storage.listSessions().map(session => session.id),
+      readConfig: async id => await storage.readConfig(id as SessionId),
+      readState: async id => await storage.readState(id as SessionId),
+    }),
+    issuer: new NodeTaskBoardCredentialIssuer(),
+    now: () => clock.now(),
+    operatorCapabilityHash: async () => await operator.hash(),
+    deliver: async (sessionId, variables) => {
+      const id = tryParseSessionId(sessionId);
+      // A capability minted for an id the layout would refuse has nowhere to be written. The board
+      // that granted it is already committed, so this refuses loudly rather than writing outside the
+      // session tree.
+      if (id === undefined) throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
+      await serial.run(`session:${id}`, async () => {
+        const current = await environments.read(id);
+        await environments.write(id, { ...current, ...variables });
+      });
+    },
+  };
+}
+
 function createLearningSubsystem(
   paths: FoundationPaths,
   files: StateFileSystem,
@@ -1971,6 +2025,7 @@ export function buildWorld(): DaemonWorld {
           serial: new KeyedSerialExecutor(),
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+        taskBoards: createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations),
         analytics: createAnalyticsSubsystem(storage),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         names: createNameSubsystem(storage),

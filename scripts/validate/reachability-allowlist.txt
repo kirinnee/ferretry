@@ -184,17 +184,58 @@
 # security boundary, so it wants a deliberate decision rather than a wiring unit's guess — and
 # without it `create` cannot be called at all, which means no board can come into existence for any
 # of the other ten routes to address.
-packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/domain-helpers.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/error.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/exact-worker-assignee.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/index.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/invitation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/membership-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/policy.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
-packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
+# THE UNDECIDED QUESTION WAS ANSWERED BY THIS REPOSITORY, NOT BY A GUESS, AND THE BOARD IS MOUNTED.
+# `src/lib/runtime/mounts/task-boards.ts` serves EIGHT of the CLI's eleven board routes over the
+# reducers listed here, and the four adapters `types.ts` specified are ported in
+# `src/adapters/task-boards/`: a file repository whose one document makes `transaction` genuinely
+# atomic, a credential issuer, a session directory over the session index, and the operator's
+# capability.
+#
+# The blocker recorded above was "nothing mints `FY_BOARD_ADMIN_CAPABILITY` and no design says how it
+# reaches the person typing the command". This daemon had already made that exact decision for that
+# exact principal: `StateApiCredentials` mints the human's API token into `<state home>/api-token` at
+# 0600 on first boot and the operator exports what `fyd` issued. `StateBoardAdminCapability` is that
+# secret's sibling — same mint, same mode, same home, same delivery — so no distribution mechanism was
+# invented, and inventing a SECOND one is what would have been the guess.
+#
+# WHAT MOUNTING FOUND, which no unit test had reached:
+#   * `creatorMarkDone` CANNOT BE SERVED. The creation reducer adds `mark_done` to the creator's
+#     `top_agent` actions and `TASK_BOARD_ROLE_ACTIONS` in the protocol grants `mark_done` to NO role,
+#     so `TaskBoardMembershipSchema` rejects every board created with the flag — the CLI would refuse
+#     the response it asked for. The route answers 501 naming the reason rather than creating a board
+#     whose membership cannot be projected.
+#   * A LONE MEMBERSHIP ROOT CANNOT RELINQUISH: the domain requires an accepted replacement root
+#     first, so the invitation flow is the prerequisite for the exit, not an alternative to it.
+#   * `{...world}` LOSES A CLASS-BASED WORLD'S METHODS. The mount binds each one by name; spreading
+#     would have dropped `now`, `deliver` and `operatorCapabilityHash` onto the floor for any world
+#     supplied as an instance rather than a literal.
+#
+# THREE ROUTES ARE STILL NOT SERVED, and none of them is a wiring:
+#   * `POST /mark-done` and `POST /grants/revoke` — NO REDUCER EXISTS. `TaskBoardOperationKind` names
+#     `mark-done.set` and `grant.revoke`, the audit events name them, the protocol declares both
+#     request and response schemas, and nothing in `src/lib/task-boards` implements either. The only
+#     revocations that exist are the ones relinquish and coordinator-replacement perform internally.
+#     Mounting these means PORTING the domain.
+#   * `POST /coordinator/replace` — the reducer exists and its authority model does not fit the wire.
+#     `ReplaceCoordinatorCommand` takes an `administratorSessionId` checked by a
+#     `TaskBoardAdministrator` predicate, so the domain expects a SESSION to hold administrator
+#     authority; the command is authenticated by the OPERATOR, who is not a session and has no id for
+#     that field or for the audit entry it becomes. Deciding who may take a coordinator's authority
+#     away is a security decision, not a wiring one, so the mount passes a predicate that answers
+#     `false` and serves no route that reaches it.
+#
+# ONE LIMITATION IN THE PRODUCT, stated because it is not obvious from the routes. A capability is
+# delivered through the session's ENVIRONMENT STORE — the seam that already carries
+# `FY_SESSION_BOARD_CAPABILITY` — and a pane reads its environment AT LAUNCH. So a session already
+# running when its grant is issued picks `FY_BOARD_CAPABILITY` up on its next launch rather than
+# immediately. The alternative, typing an export into a live pane, would write the secret into the
+# transcript the agent later quotes back. Closing this properly means honouring `--board-access` at
+# session START, where the launch environment is written anyway: `POST /v1/sessions` still answers 501
+# for a non-`none` `boardAccess`, and that is the next unit's door.
+#
+# The two lines left are the barrel and the one module only the barrel reaches.
+packages/daemon/src/lib/task-boards/exact-worker-assignee.ts # PR #5: a board-scoped task mutation is its only possible caller, and the task routes resolve no board scope yet
+packages/daemon/src/lib/task-boards/index.ts # PR #5: the mount imports the modules it calls by name rather than the barrel, so the barrel has no importer; importing it would make exact-worker-assignee reachable while leaving it uncalled
 
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
