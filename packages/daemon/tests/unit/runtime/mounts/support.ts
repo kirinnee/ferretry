@@ -653,6 +653,8 @@ export class FakeSessionControl implements SessionControlSubsystem {
   readonly stops: Array<readonly [string, string | undefined]> = [];
   /** Every callsign a start asked for, with whether a taken one could be substituted. */
   readonly requested: Array<readonly [string, boolean]> = [];
+  /** The inline attachments each start carried, so a mount that dropped them is visible. */
+  readonly attached: Array<StartSessionRequest['initialAttachments']> = [];
   private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
   private minted = 0;
 
@@ -665,6 +667,7 @@ export class FakeSessionControl implements SessionControlSubsystem {
 
   async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
+    this.attached.push(request.initialAttachments);
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {

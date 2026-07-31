@@ -236,28 +236,23 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is rea
 # task-title.ts, which the CLI already uses for its own --title guidance, and the API boundary
 # enforces the five-word rule through the protocol's TaskTitleSchema.
 
-# PR #12 — add bounded docx extraction
-# BLOCKED ON THE ATTACHMENT SUBSYSTEM ITSELF. Extraction is the LAST step of an upload the daemon
-# cannot yet perform: POST /v1/sessions/:id/attachments is multipart, and nothing in the daemon
-# parses multipart, stores an attachment blob, or renders an AttachmentView. Extraction lands with
-# whoever mounts attachment upload; on its own it is a pure function with nothing to be handed.
+# PR #12 — add bounded docx extraction: MOUNTED AT THE START, nothing to list.
+# The three units before this one all measured the same wall — multipart, a byte reader on
+# `ApiRequest`, an attachment id with nowhere to be spent — and all three were measuring the UPLOAD
+# route. `initialAttachments` is the other door, and it was open the whole time: the bytes travel
+# INLINE as base64 inside the `POST /v1/sessions` body, so no multipart parser and no byte reader are
+# involved, and the id has nowhere to go because there is no id — the only place an opening
+# message's files are spent is the turn-one document that same start writes.
 #
-# RE-CHECKED by the second wiring unit, which names the two missing collaborators exactly. First, the
-# transport seam cannot carry an upload: `ApiRequest` exposes `text()` and nothing else, so multipart
-# bytes cannot reach a route until that seam gains a body reader and the Bun adapter implements it.
-# Second, and decisively, an attachment id is only useful to `POST /v1/sessions/:id/send`, which takes
-# `attachmentIds` — and no session send is mounted. Mounting upload alone would hand the CLI an id it
-# has nowhere to spend.
+# So bin/fyd.ts stores each attachment in the session's own directory, runs `extractDocxText` over a
+# DOCX and writes the text beside the original, and names both by absolute path in the opening
+# message. `fy start -f report.docx` now hands the agent the file its task refers to.
 #
-# RE-CHECKED by the fourth wiring unit: both halves still hold verbatim. `src/lib/api/body.ts` grew
-# `parseBody`, `parseOptionalBody` and `parseQuery`, and all three read `request.text()` — there is
-# still no byte reader anywhere on `ApiRequest`. The REVIVE now mounted at
-# `POST /v1/sessions/:id/resume` is not the missing send: it hands a live pane a message, and its
-# domain has no notion of an attachment id.
-packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/attachments/raw-deflate.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
-packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
-packages/daemon/src/lib/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
+# WHAT IS STILL NOT MOUNTED, stated so the next unit does not re-derive it: `POST
+# /v1/sessions/:id/attachments` (multipart, needs a byte reader on `ApiRequest`) and the
+# `AttachmentView` id it would mint, which is spendable only by `POST /v1/sessions/:id/send` — and
+# there is still no send. Those two remain a pair, and neither is on this list because neither is a
+# module: they are routes nobody has written.
 
 # PR #13 — add learning evidence pipeline
 # THE REVIEW SURFACE IS MOUNTED; MINING IS NOT. bin/fyd.ts builds a FileLearningStore over the state

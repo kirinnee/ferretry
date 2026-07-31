@@ -34,6 +34,7 @@ import {
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
+import { docxBytes } from '../../fixtures/docx.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -763,6 +764,103 @@ describe('daemon boot lifecycle', () => {
     should((await wrongDigest.json()) as { code: string }).have.property('code', 'request_id_reused');
     // A request id no start ever carried is the honest miss: that start never reached the daemon.
     should(neverSent.status).equal(404);
+  });
+
+  /**
+   * The files an opening message attached, driven through the production composition root.
+   *
+   * `initialAttachments` was refused with `501` for four units on the belief that attachments need a
+   * multipart route the daemon does not have. They do not: the bytes are INLINE in this very start
+   * body, and the only place they are spent is the turn-one document the same start writes. This
+   * proves the extractor DOES ITS JOB rather than merely being reachable — the DOCX is a real OOXML
+   * archive, the text comes out of `word/document.xml` through the production inflater, and the
+   * agent is pointed at both files by absolute path.
+   */
+  it('should store the files an opening message attached and name them in turn one', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-attachments');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const post = async (requestId: string, body: Readonly<Record<string, unknown>>): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId },
+        body: JSON.stringify(body),
+      });
+
+    // Act
+    const started = await post('req-attach-1', {
+      agent: WRAPPER,
+      mode: 'auto',
+      prompt: 'summarize the attached brief',
+      cwd: home,
+      initialAttachments: [
+        { filename: 'brief.docx', base64: Buffer.from(docxBytes('the brief in a real docx')).toString('base64') },
+        { filename: 'diagram.png', mime: 'image/png', base64: Buffer.from([1, 2, 3]).toString('base64') },
+      ],
+    });
+    const startedBody = SessionViewSchema.parse(await started.json());
+    const directory = join(home, 'state', 'sessions', startedBody.config.id);
+    const turnOne = await readFile(join(directory, 'turns', 'turn-001.md'), 'utf8');
+    const extracted = await readFile(join(directory, 'attachments', 'brief.docx.txt'), 'utf8');
+    const storedFiles = (await readdir(join(directory, 'attachments'))).sort();
+    // A file with nothing to attach it to: the CLI refuses the same combination on `fy send`.
+    const bare = await post('req-attach-2', {
+      agent: WRAPPER,
+      mode: 'interactive',
+      cwd: home,
+      initialAttachments: [{ filename: 'brief.docx', base64: 'QUJD' }],
+    });
+    // A filename that names no file is the caller's mistake, named as one rather than turned into a
+    // directory the attachment would be written outside of.
+    const unnamed = await post('req-attach-3', {
+      agent: WRAPPER,
+      mode: 'auto',
+      prompt: 'summarize this',
+      cwd: home,
+      initialAttachments: [{ filename: '..', base64: 'QUJD' }],
+    });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(started.status).equal(201);
+    // The opening message the agent is handed names both files, and the extracted text beside one.
+    should(turnOne).containEql('summarize the attached brief');
+    should(turnOne).containEql(join(directory, 'attachments', 'brief.docx'));
+    should(turnOne).containEql(join(directory, 'attachments', 'diagram.png'));
+    should(turnOne).containEql(`extracted text: ${join(directory, 'attachments', 'brief.docx.txt')}`);
+    // And the words really came out of the archive: this is the capability the four allowlist lines
+    // were holding, proved end to end rather than asserted.
+    should(extracted).equal('the brief in a real docx');
+    should(storedFiles).deepEqual(['brief.docx', 'brief.docx.txt', 'diagram.png']);
+    // The agent was pointed at the turn document, which is what carries the paths.
+    should(launcher.delivered[0]).containEql('turns/turn-001.md');
+    should(bare.status).equal(400);
+    should((await bare.json()) as { code: string }).have.property('code', 'invalid_request');
+    should(unnamed.status).equal(400);
+    should((await unnamed.json()) as { code: string }).have.property('code', 'invalid_request');
   });
 
   /**

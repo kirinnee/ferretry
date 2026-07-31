@@ -57,6 +57,7 @@ import {
   type ViewerSocket,
   type WorkerClientOptions,
 } from '../src/adapters/index.ts';
+import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
@@ -115,6 +116,13 @@ import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   AttentionService,
   BrowserViewerStream,
+  decodeInitialAttachments,
+  InitialAttachmentError,
+  planInitialAttachments,
+  renderInitialAttachmentSection,
+  type DecodedInitialAttachment,
+  type PlannedAttachmentFile,
+  type PlannedInitialAttachments,
   EXIT_ALREADY_RUNNING,
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -607,6 +615,66 @@ interface CallsignClaims {
   release(callsign: string, ownerId: string): Promise<void>;
 }
 
+/**
+ * An opening message's attachments, as a start needs them: decided, then written.
+ *
+ * The two halves are one dependency because they are one capability whose seam is an ORDERING — the
+ * decision must be taken before the session record exists and the write must happen after it. Layout
+ * and the extractor are the composition root's to supply, so the mount asks for the capability
+ * rather than for a directory and an inflater it would have to assemble.
+ */
+interface InitialAttachments {
+  plan(id: SessionId, attachments: readonly DecodedInitialAttachment[]): PlannedInitialAttachments;
+  write(files: readonly PlannedAttachmentFile[]): Promise<void>;
+}
+
+/** The opening message an agent will be handed, and the files that must exist before it is. */
+interface OpeningMessage {
+  readonly prompt: string | undefined;
+  readonly files: readonly PlannedAttachmentFile[];
+}
+
+/**
+ * The opening message, with every attachment decided but none of them written yet.
+ *
+ * THE ORDER IS FORCED, and it is worth stating because it is not the obvious one. A session's
+ * directory belongs to storage, which refuses to adopt one already holding files it did not create —
+ * so attachments cannot be written before the session record exists. The record carries the prompt,
+ * and the prompt names the attachments. Deciding everything in memory first breaks that cycle:
+ * extraction is a pure function over bytes already in this request, so the paths, the character
+ * counts and the refusals are all knowable before the first write. The start then creates the
+ * record, writes the files, and only then launches — so the document the agent opens never names a
+ * file that is not there.
+ *
+ * An attachment with NO opening message is refused rather than invented into one. `fy start -f`
+ * describes a file attached "to the opening message", and the CLI refuses the same combination on
+ * `fy send` — a bare interactive session is started with nothing typed into it, so there would be no
+ * document for the reference to live in.
+ */
+function composeOpeningMessage(
+  attachments: InitialAttachments,
+  id: SessionId,
+  request: StartSessionRequest,
+): OpeningMessage {
+  const stated = request.initialAttachments ?? [];
+  if (stated.length === 0) return { prompt: request.prompt, files: [] };
+  if (request.prompt === undefined)
+    throw new SessionControlError(
+      'invalid',
+      'attachments belong to an opening message: start with a prompt, or start bare without files',
+    );
+  try {
+    const planned = attachments.plan(id, decodeInitialAttachments(stated));
+    return {
+      prompt: `${request.prompt}\n${renderInitialAttachmentSection(planned.delivered)}`,
+      files: planned.files,
+    };
+  } catch (error) {
+    if (error instanceof InitialAttachmentError) throw new SessionControlError('invalid', error.message);
+    throw error;
+  }
+}
+
 /** The account this start names, or a refusal that says which half of the resolution failed. */
 async function resolveStartAccount(
   accounts: AccountInventoryPort,
@@ -679,6 +747,29 @@ async function claimCallsign(
 }
 
 /**
+ * The attachment files, written onto a session that now exists.
+ *
+ * A FAILURE HERE IS RECORDED ON THE RECORD, never raised bare. The session document already exists
+ * by this point, so a start that only threw would leave a `created` session nothing will ever launch
+ * and no stated reason anywhere. Stopping it with the reason answers the caller with the session
+ * that holds the evidence, which is exactly what a failed launch does.
+ */
+async function storeAttachments(
+  lifecycle: SessionLifecycleService,
+  attachments: InitialAttachments,
+  id: SessionId,
+  files: readonly PlannedAttachmentFile[],
+): Promise<void> {
+  try {
+    await attachments.write(files);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await lifecycle.stop(id, `the opening message's attachments could not be stored: ${reason}`).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
  * Starting and stopping a session, over the lifecycle service that was built for exactly this and
  * never called.
  *
@@ -714,6 +805,7 @@ function createSessionControlSubsystem(
   ids: SessionIdFactory,
   callsigns: CallsignClaims,
   digests: PayloadDigestPort,
+  attachments: InitialAttachments,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -747,6 +839,10 @@ function createSessionControlSubsystem(
         throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
       const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
       const id = ids.next();
+      // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
+      // a pool name for the whole resolution window on a session that never happens.
+      const opening = composeOpeningMessage(attachments, id, request);
+      const prompt = opening.prompt;
       // BEFORE the plan, because the callsign is what the harness's own remote-control session is
       // named after: a plan built on the requested name and a document recording the fallback would
       // disagree about who this session is.
@@ -794,7 +890,7 @@ function createSessionControlSubsystem(
          * A start with no prompt handed over no document, so it is genuinely on turn zero — and the
          * first revive of it writes `turn-001.md` with nothing to overwrite.
          */
-        turn: request.prompt === undefined ? 0 : 1,
+        turn: prompt === undefined ? 0 : 1,
         ...(teammate === undefined ? {} : { teammate }),
         ...(request.label === undefined ? {} : { label: request.label }),
         ...SESSION_START_DEFAULTS,
@@ -808,15 +904,21 @@ function createSessionControlSubsystem(
       };
       const lifecycle = createLifecycle(storage, launcher, envelope, id);
       try {
-        await lifecycle.createAndStart({
+        // CREATE, then write the attachments, then START — the one ordering storage's own layout
+        // rule allows. The record claims the session directory; the files land inside the directory
+        // it now owns; the launch writes the turn-one document that names them. See
+        // `composeOpeningMessage` for why the decision had to be taken before any of the three.
+        await lifecycle.create({
           agent: executable,
           command,
           cwd: request.cwd,
           mode: request.mode,
           ...(request.name === undefined ? {} : { name: request.name }),
-          ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(prompt === undefined ? {} : { prompt }),
           ...(request.parent === undefined ? {} : { parent: request.parent }),
         });
+        if (opening.files.length > 0) await storeAttachments(lifecycle, attachments, id, opening.files);
+        await lifecycle.start(id);
       } catch (error) {
         // The record survives a failed launch with the reason in it, so the failure is answered with
         // the session that holds the evidence rather than an error the caller cannot follow up.
@@ -1840,6 +1942,18 @@ export function buildWorld(): DaemonWorld {
           sessionIds,
           createCallsignClaims(storage, stateFiles, paths, callsignClaims),
           payloadDigests,
+          // The session's own private directory holds the files, and the extractor over them is the
+          // production one: `initialAttachments` is the only mounted route that carries document
+          // bytes, so this is where a DOCX becomes text the agent can read.
+          {
+            plan: (id, decoded) =>
+              planInitialAttachments(
+                decoded,
+                join(createSessionPaths(paths, id).directory, 'attachments'),
+                new NodeRawDeflate(),
+              ),
+            write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
+          },
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionMigrate: createSessionMigrateSubsystem({
