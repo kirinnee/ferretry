@@ -47,6 +47,7 @@ import {
   type SidePaneTabDefinition,
 } from '../src/shell/side-pane-tab-model.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
+import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
@@ -388,6 +389,7 @@ function Shell() {
   const state = readSidePaneTabsState(scope);
   const phone = viewport.width <= PHONE_MAX;
   const menuOpen = window.location.hash === '#menu';
+  const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
   // The headless browser sizes its window after the first paint, so a viewport
   // read once at mount would report the wrong width in the screenshot.
@@ -683,6 +685,15 @@ function Shell() {
             </ActionGroup>
             <MarkerSeparator>Turn 4</MarkerSeparator>
             <MarkerLine>Ran the unit suite — 4066 passed</MarkerLine>
+          </PanelBody>
+        </Card>
+
+        <Card id="harness-chat-width">
+          <PanelHeader>
+            <Label>Conversation width</Label>
+          </PanelHeader>
+          <PanelBody>
+            <ChatWidthControl value={chatWidth} onChange={setChatWidth} />
           </PanelBody>
         </Card>
 
