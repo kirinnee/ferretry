@@ -1,5 +1,11 @@
 #!/usr/bin/env bun
 import { join } from 'node:path';
+import {
+  SessionConfigSchema,
+  SessionStateSchema,
+  TERMINAL_MAX_GLOBAL,
+  TERMINAL_MAX_PER_SESSION,
+} from '@ferretry/protocol';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
@@ -70,7 +76,18 @@ import {
   TmuxResumeLauncher,
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
+import {
+  ManagedTerminalService,
+  TerminalRuntimeError,
+  TerminalServiceError,
+  TmuxTerminalRuntime,
+} from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
+import {
+  FileTaskStore,
+  KeyedSerialExecutor as TaskBoardSerialExecutor,
+  TaskRecordService,
+} from '../src/adapters/tasks/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
   AttentionService,
@@ -91,6 +108,21 @@ import {
   SelfRestartCoordinator,
   SessionHealthService,
   SessionLifecycleConfigSchema,
+  TaskError,
+  tryParseSessionId,
+  type AnalyticsSubsystem,
+  type AssigneeObservation,
+  type FinishedAnalyticsSession,
+  type FoundationPaths,
+  type TaskSubsystem,
+  TerminalMountError,
+  type TerminalRuntimePort,
+  type TerminalSessionResolver,
+  type TerminalSubsystem,
+  type NameClaim,
+  type NameSubsystem,
+  normalizeCallsign,
+  CALLSIGN_WINDOW_MS,
   SessionLifecycleService,
   SessionResumeService,
   defaultSessionHealthSettings,
@@ -108,6 +140,7 @@ import {
   type DaemonReadinessPorts,
   type MillisecondClockPort,
   type MountedSubsystems,
+  type SessionId,
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -214,9 +247,29 @@ export interface DaemonWorld {
   /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
   readonly api: ApiServerPort;
-  /** The subsystems mounted onto that surface. Every field here is a capability the running product
-   *  actually has; a subsystem absent from it is one the daemon never constructs. */
-  readonly subsystems: MountedSubsystems;
+  /**
+   * Where a terminal actually runs: tmux panes on the daemon's own private socket, never the host's
+   * default one.
+   *
+   * It is a world FIELD rather than a private of the factory below because it is the one adapter in
+   * the terminal subsystem whose real behaviour cannot be driven from a test without spawning
+   * shells. A test substitutes this and keeps everything else — the lifecycle service, the routes,
+   * the session resolver over real storage — exactly as production builds them.
+   */
+  readonly terminalRuntime: TerminalRuntimePort;
+  /**
+   * The subsystems mounted onto that surface. Every field the result carries is a capability the
+   * running product actually has; a subsystem absent from it is one the daemon never constructs.
+   *
+   * Built per opened storage rather than at process start because a subsystem that reads the
+   * authoritative session set — the task boards do, for the fleet-wide read and for the live view —
+   * cannot be handed a session index that has not been opened and locked yet.
+   *
+   * The terminal runtime is passed IN rather than captured, so overriding `terminalRuntime` on a
+   * world actually changes what the mounted subsystems get. A factory that closed over the field
+   * would silently keep the production one and make the seam a lie.
+   */
+  readonly createSubsystems: (storage: DaemonStorage, terminals: TerminalRuntimePort) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
@@ -258,6 +311,217 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/**
+ * The task record boards, over the state home and the opened session index.
+ *
+ * The board is ONE JSON snapshot inside the session's own private directory, which is why the path
+ * is derived here and never by the store: layout is the composition root's business, and a store that
+ * derived its own path could not be pointed at a test's temp home.
+ *
+ * The id is PARSED rather than asserted. A path-unsafe session id must never become a directory, so
+ * the refusal is raised in the task protocol's own taxonomy — the mount answers `invalid` with 400
+ * instead of leaking a schema error as a 500.
+ */
+function createTaskSubsystem(
+  paths: FoundationPaths,
+  storage: DaemonStorage,
+  clock: SystemClock,
+  boards: TaskBoardSerialExecutor,
+): TaskSubsystem {
+  /** The document a session's own state directory holds, parsed, or `undefined` when unusable. */
+  const observed = async (id: SessionId): Promise<AssigneeObservation | undefined> => {
+    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const state = SessionStateSchema.safeParse(rawState);
+    if (!state.success) return undefined;
+    const config = SessionConfigSchema.safeParse(rawConfig);
+    return {
+      sessionId: id,
+      // A missing or unreadable configuration costs the display name, not the whole observation: the
+      // state document is what carries the facts the board reports.
+      name: config.success ? config.data.name : null,
+      status: state.data.status,
+      lastActivityAt: state.data.lastActivityAt ?? null,
+    };
+  };
+  return {
+    board: sessionId => {
+      const id = tryParseSessionId(sessionId);
+      if (id === undefined) throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
+      return new TaskRecordService(
+        id,
+        new FileTaskStore(join(createSessionPaths(paths, id).directory, 'tasks.json'), { executor: boards }),
+      );
+    },
+    sessionIds: async () => storage.listSessions().map(session => session.id),
+    /**
+     * An assignee is matched against SESSION IDS only.
+     *
+     * Resolving a teammate NAME would mean reading every session's configuration on every list row,
+     * and the daemon has no fleet directory mounted to index them. An assignee that names something
+     * else is honestly unknown rather than guessed at.
+     */
+    observe: async assignee => {
+      const id = tryParseSessionId(assignee);
+      return id === undefined || storage.findSession(id) === undefined ? undefined : await observed(id);
+    },
+    now: () => clock.now(),
+  };
+}
+
+/**
+ * The analytics read, over the same authoritative session documents the rest of the daemon serves.
+ *
+ * A session counts as FINISHED when its state document carries a finish instant. Deciding it from
+ * the status enum instead would make a `stopped` session with no recorded finish look like a run of
+ * zero length, and a duration of zero is a measurement rather than a gap.
+ *
+ * Both documents are PARSED, and a session whose pair does not parse is left out entirely rather
+ * than contributed with holes: an analytics row assembled from a config the schema rejected is a row
+ * whose provenance nobody can state.
+ *
+ * The pricing catalog is EMPTY, and deliberately so. Rates are operator doctrine, the daemon mounts
+ * no source for them, and an empty catalog makes every cost `unpriced` with a reason — which is the
+ * honest answer. A hardcoded table would price historical runs off numbers nobody in this deployment
+ * agreed to; a zero would read as free.
+ */
+function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
+  const finishedRecord = async (id: SessionId): Promise<FinishedAnalyticsSession | undefined> => {
+    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const config = SessionConfigSchema.safeParse(rawConfig);
+    const state = SessionStateSchema.safeParse(rawState);
+    if (!config.success || !state.success || state.data.finishedAt === undefined) return undefined;
+    return {
+      id,
+      agent: config.data.agent,
+      // The SELECTED model only. `observedModel` is transcript evidence, and the record's own
+      // contract forbids substituting it for what the operator asked for.
+      selectedModel: config.data.model ?? null,
+      contextWindow: state.data.contextWindow ?? null,
+      harness: config.data.harness,
+      mode: config.data.mode,
+      status: state.data.status,
+      label: config.data.label ?? null,
+      cwd: config.data.cwd,
+      parent: config.data.parent ?? null,
+      createdAt: config.data.createdAt,
+      startedAt: state.data.startedAt ?? null,
+      finishedAt: state.data.finishedAt,
+      // Time-to-first-output is transcript evidence the daemon does not index; a launch instant is
+      // not an output, so reporting one here would mismeasure every session.
+      firstOutputAt: null,
+      turns: state.data.turn,
+      contextEndPercent: state.data.contextPercent ?? null,
+      stalled: state.data.status === 'stalled',
+      failed: state.data.status === 'failed',
+      migrated: config.data.migration !== undefined,
+      completed: state.data.status === 'completed',
+      // No per-session token totals are recorded anywhere the daemon can read. See the mount.
+      usage: null,
+    };
+  };
+  return {
+    finished: async () => {
+      const sessions = await Promise.all(storage.listSessions().map(session => finishedRecord(session.id)));
+      return sessions.filter((session): session is FinishedAnalyticsSession => session !== undefined);
+    },
+    pricing: () => [],
+  };
+}
+
+/**
+ * Independent shell terminals, over the session's own working directory.
+ *
+ * THE ERROR TRANSLATION IS THE POINT OF THIS FUNCTION. `ManagedTerminalService` and the tmux runtime
+ * behind it raise adapter-owned error classes, and a route in `src/lib` may not import them. Naming
+ * them here — in the one place allowed to see both sides — is what lets a full terminal list answer
+ * 409 and a tmux failure answer 502, instead of both surfacing as a 500 about a class nobody outside
+ * `src/adapters` can name.
+ *
+ * The limits come from the PROTOCOL constants rather than the service's own defaults, so the ceiling
+ * the API advertises in `limits` and the ceiling the service enforces cannot drift apart.
+ *
+ * The session resolver reads the authoritative configuration: a terminal opens in the session's own
+ * `cwd`, and a session the index does not hold resolves to nothing rather than to the daemon's own
+ * working directory.
+ */
+function createTerminalSubsystem(
+  storage: DaemonStorage,
+  runtime: TerminalRuntimePort,
+  clock: MillisecondClockPort,
+): TerminalSubsystem {
+  const sessions: TerminalSessionResolver = {
+    resolve: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined || storage.findSession(id) === undefined) return undefined;
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(id));
+      return config.success ? { id, cwd: config.data.cwd } : undefined;
+    },
+  };
+  const service = new ManagedTerminalService(
+    runtime,
+    sessions,
+    clock,
+    // A terminal id is twelve hex characters by protocol. Minting it from a UUID's own randomness
+    // beats a counter the next process would restart at one and collide on.
+    { next: () => crypto.randomUUID().replaceAll('-', '').slice(0, 12) },
+    {
+      maximumPerSession: TERMINAL_MAX_PER_SESSION,
+      maximumGlobal: TERMINAL_MAX_GLOBAL,
+      idleTimeoutMs: TERMINAL_IDLE_TIMEOUT_MS,
+    },
+  );
+  /** Adapter refusals, restated in the protocol's vocabulary so the mount can answer them. */
+  const translate = (error: unknown): never => {
+    if (error instanceof TerminalServiceError) throw new TerminalMountError(error.code, error.message);
+    if (error instanceof TerminalRuntimeError) throw new TerminalMountError('upstream_failed', error.message);
+    throw error;
+  };
+  return {
+    list: async sessionId => await service.list(sessionId).catch(translate),
+    create: async (sessionId, input) => await service.create(sessionId, input).catch(translate),
+    get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
+    rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
+    close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
+  };
+}
+
+/**
+ * Which callsigns the fleet is currently using.
+ *
+ * `teammate` is the callsign — it is what `--teammate <callsign>` writes — and `name` is the human
+ * title, so only the former is read here. A session whose configuration is unreadable or whose
+ * teammate is not a well-formed callsign contributes NOTHING rather than a guess: over-reporting a
+ * name as taken quietly shrinks the pool, and the failure is invisible.
+ *
+ * The claim window is the pool policy's own, so a callsign frees up exactly when a bare reference to
+ * it stops naming that session.
+ */
+function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
+  return {
+    claims: async () => {
+      const sessions = await Promise.all(
+        storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
+          const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
+          if (!config.success || config.data.teammate === undefined) return undefined;
+          const callsign = normalizeCallsign(config.data.teammate);
+          const claimedAtMs = Date.parse(config.data.createdAt);
+          if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
+          return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+        }),
+      );
+      return sessions.filter((claim): claim is NameClaim => claim !== undefined);
+    },
+    now: () => Date.now(),
+    // Rotating the start so two humans asking at the same moment are not both offered the same
+    // first name and then made to collide when they start their sessions.
+    startIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
+  };
+}
+
+/** How long a terminal nobody is watching stays open. One hour, matching the service's own default;
+ *  stated here so the number the API reports is the number the daemon enforces. */
+const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -269,6 +533,10 @@ export function buildWorld(): DaemonWorld {
   const wardenFiles = new NodeWardenReportFileSystem();
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
+  // ONE executor for every task board in the process. The file store keys its transactions on the
+  // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
+  // would let two concurrent requests to the same board interleave read-modify-write and lose one.
+  const taskBoards = new TaskBoardSerialExecutor();
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -436,7 +704,10 @@ export function buildWorld(): DaemonWorld {
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
-    subsystems: {
+    // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
+    // server something else on this machine already runs.
+    terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    createSubsystems: (storage, terminals) => ({
       attention: new AttentionService(
         // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
         // than asserted: an id the layout would not accept must never become a directory path.
@@ -452,7 +723,11 @@ export function buildWorld(): DaemonWorld {
         // next process would restart.
         { next: () => crypto.randomUUID() },
       ),
-    },
+      tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+      analytics: createAnalyticsSubsystem(storage),
+      terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+      names: createNameSubsystem(storage),
+    }),
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
@@ -507,7 +782,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       await world.api.listen(
         createMountedDispatcher(
           { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
-          world.subsystems,
+          world.createSubsystems(opened.storage, world.terminalRuntime),
         ),
         { host: config.host, port: config.port },
       ),

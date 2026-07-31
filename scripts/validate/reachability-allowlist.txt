@@ -12,6 +12,11 @@
 #   * an entry that has become reachable is a hard failure — delete it in the PR that wires it.
 
 # PR #5 — complete task board membership lifecycle
+# BLOCKED ON AN ADAPTER THAT DOES NOT EXIST. Every service here is a pure reducer over a
+# TaskBoardRepository whose `transaction` must be atomic, plus a TaskBoardCredentialIssuer that mints
+# and hashes board capabilities, plus a TaskBoardSessionDirectory. There is no src/adapters/task-boards
+# at all, so mounting this means PORTING the persistence and the credential minting — not wiring —
+# and a capability store built by guesswork is a security boundary built by guesswork.
 packages/daemon/src/lib/task-boards/authorization-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/child-grant-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/creation-service.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
@@ -24,44 +29,42 @@ packages/daemon/src/lib/task-boards/membership-service.ts # PR #5: complete task
 packages/daemon/src/lib/task-boards/policy.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board membership lifecycle; not mounted in bin/fyd.ts
 
-# PR #6 — add analytics ingestion and query
-packages/daemon/src/lib/analytics/model-identity.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/pricing.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/query.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/results.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
-packages/daemon/src/lib/analytics/session-record.ts # PR #6: add analytics ingestion and query; not mounted in bin/fyd.ts
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
-packages/daemon/src/lib/names/allocator.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
-packages/daemon/src/lib/names/pool.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+# The callsign POOL is mounted: bin/fyd.ts derives the held callsigns from each session's own
+# `teammate`, and GET /v1/names suggests free ones. The ALLOCATOR is not, and cannot honestly be:
+# it claims a callsign, and a claim needs a store whose tryClaim is atomic across concurrent daemon
+# requests. No adapter implements one, and the claim belongs to the request that CREATES a session
+# — the unit that mounts session start — not to the one that asks what is free.
+packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
 packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
 
 # PR #10 — port the task record system and its file store
-packages/daemon/src/adapters/tasks/atomic-file.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/file-operations.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/file-task-store.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/serial-executor.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/tasks/task-record-service.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/index.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-error.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-graph.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-id.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-order.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-policy.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-reducer.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-snapshot.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-store-port.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
-packages/daemon/src/lib/tasks/task-title.ts # PR #10: port the task record system and its file store; not mounted in bin/fyd.ts
+# The rest of PR #10 is mounted: bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per
+# session and the task routes serve it. This one module has no honest caller left — it duplicates
+# packages/cli/src/lib/tasks/task-title.ts, which the CLI already uses for its own --title guidance,
+# and the API boundary enforces the five-word rule through the protocol's TaskTitleSchema. Importing
+# it from a route to satisfy the gate would be a fake edge; it should be DELETED as a duplicate.
+packages/daemon/src/lib/tasks/task-title.ts # PR #10: dead duplicate of the CLI's task-title; delete it rather than wire it
 
 # PR #12 — add bounded docx extraction
+# BLOCKED ON THE ATTACHMENT SUBSYSTEM ITSELF. Extraction is the LAST step of an upload the daemon
+# cannot yet perform: POST /v1/sessions/:id/attachments is multipart, and nothing in the daemon
+# parses multipart, stores an attachment blob, or renders an AttachmentView. Extraction lands with
+# whoever mounts attachment upload; on its own it is a pure function with nothing to be handed.
 packages/daemon/src/adapters/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/attachments/raw-deflate.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 packages/daemon/src/lib/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 
 # PR #13 — add learning evidence pipeline
+# THE STORE IS READY; THE PIPELINE AROUND IT IS NOT. FileLearningStore needs only paths, a filesystem
+# and a clock, all of which the root already has. What is missing is everything that gives it work:
+# `extract` wants raw transcript and inbox input the daemon does not assemble, `applyMinerOutput`
+# wants a miner run the daemon cannot spawn, and LearningStatus requires an enabled flag and an
+# interval from a LearningConfig with no configuration source. Accepting a proposal also WRITES a
+# patch into the operator's own guidance file, outside the state home; mounting that from a guess at
+# the apply semantics would edit a human's files wrongly.
 packages/daemon/src/adapters/learning/file-store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
 packages/daemon/src/lib/learning/aggregate.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
@@ -73,6 +76,10 @@ packages/daemon/src/lib/learning/types.ts # PR #13: add learning evidence pipeli
 
 
 # PR #15 — add browser session control
+# BLOCKED ON A HOST CONTRACT NOTHING DECLARES. A login window is a Chrome child process plus an
+# x11vnc supervisor plus a leased profile directory, and the composition root has no display, no
+# profile root and no VNC policy to hand it. Constructing that from defaults would put a browser and
+# a VNC server on whatever machine boots the daemon, which is not a decision a wiring unit may make.
 packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/login-window.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/profile-store.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
@@ -80,20 +87,26 @@ packages/daemon/src/lib/browser/control/index.ts # PR #15: add browser session c
 packages/daemon/src/lib/browser/control/login.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/lib/browser/control/policy.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/lib/browser/control/profile.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+
 # PR #19 — port warden supervision: detection, verdicts, failover and provenance
+# BLOCKED ON THE SUPERVISOR ITSELF. All four are policy for a sweep loop that does not exist: they
+# decide which sessions get a warden, which account judges them, when a blessing suppresses an
+# anomaly, and how a fleet attention view reads. Every one of them consumes durable warden state —
+# assignments, strikes, blessings, the last sweep instant — and nothing writes any of it. A view
+# built over empty state would report `no-sweep` forever, which is true but is not the subsystem.
 packages/daemon/src/lib/warden/attention.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/failover.ts # PR #19: warden supervision; the report reader is mounted but this is not
 
 # PR #21 — establish terminal IO policies
-packages/daemon/src/adapters/terminal/index.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/terminal/service.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/terminal/stream-bridge.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/terminal/tmux-terminal-runtime.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/lib/terminal/contracts.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/lib/terminal/index.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/lib/terminal/policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/lib/terminal/runtime-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
-packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: establish terminal IO policies; not mounted in bin/fyd.ts
+# The terminal LIFECYCLE is mounted: bin/fyd.ts builds a ManagedTerminalService over a
+# TmuxTerminalRuntime on the daemon's own private socket, and the routes open, list, retitle and
+# close terminals. What remains is the STREAM, and it is blocked on a seam that does not exist: the
+# protocol gives terminal input and output their own websocket byte frames, while the daemon's API
+# is request/response only — an ApiResponse is a string body and no route can be handed a socket.
+# These two land with whoever brings the websocket transport, NOT with an HTTP endpoint invented to
+# satisfy this gate.
+packages/daemon/src/adapters/terminal/stream-bridge.ts # PR #21: terminal streaming needs the websocket transport seam, which the API does not have
+packages/daemon/src/lib/terminal/stream-policy.ts # PR #21: terminal streaming needs the websocket transport seam, which the API does not have
 

@@ -6,7 +6,17 @@ import {
   type MountedSubsystems,
 } from '../../../../src/lib/runtime/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
-import { attentionService, CREDENTIALS, emptyFeed, human, pinService } from './support.ts';
+import {
+  analyticsSubsystem,
+  attentionService,
+  CREDENTIALS,
+  emptyFeed,
+  FakeTerminals,
+  human,
+  nameSubsystem,
+  pinService,
+  taskSubsystem,
+} from './support.ts';
 
 /**
  * The complete surface the daemon process serves.
@@ -17,7 +27,14 @@ import { attentionService, CREDENTIALS, emptyFeed, human, pinService } from './s
 
 const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
 
-const subsystems = (): MountedSubsystems => ({ attention: attentionService(), pins: pinService([]) });
+const subsystems = (): MountedSubsystems => ({
+  attention: attentionService(),
+  pins: pinService([]),
+  tasks: taskSubsystem(),
+  analytics: analyticsSubsystem(),
+  terminals: new FakeTerminals(),
+  names: nameSubsystem(),
+});
 
 describe('the mounted daemon surface', () => {
   it('should serve the base feeds and every mounted subsystem from one table', () => {
@@ -35,6 +52,18 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
+      'GET /v1/tasks',
+      'GET /v1/sessions/:sessionId/tasks',
+      'POST /v1/sessions/:sessionId/tasks',
+      'GET /v1/sessions/:sessionId/tasks/:taskId',
+      'POST /v1/sessions/:sessionId/tasks/:taskId',
+      'GET /v1/analytics',
+      'GET /v1/sessions/:sessionId/terminals',
+      'POST /v1/sessions/:sessionId/terminals',
+      'GET /v1/sessions/:sessionId/terminals/:terminalId',
+      'POST /v1/sessions/:sessionId/terminals/:terminalId',
+      'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
+      'GET /v1/names',
     ]);
   });
 
@@ -60,11 +89,19 @@ describe('the mounted daemon surface', () => {
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
     const attention = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+    const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
+    const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
+    const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
+    const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
 
     // Assert
     should(health.status).equal(200);
     // The session is unknown to this fixture, which still proves the route is mounted and reached.
     should(pins.status).equal(404);
     should(attention.status).equal(200);
+    should(tasks.status).equal(200);
+    should(fleet.status).equal(200);
+    should(analytics.status).equal(200);
+    should(terminals.status).equal(200);
   });
 });
