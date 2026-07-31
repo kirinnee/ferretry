@@ -1,4 +1,7 @@
 # pwa
 
-The multi-daemon web app (timing-tower UI), centrally hosted with a daemon-served fallback.
-The workspace boundary is live; later migration units add the browser application.
+The multi-daemon web app, centrally hosted as static files with a daemon-served fallback.
+
+The initial seam deliberately has no default daemon. Pairing supplies each connection at runtime;
+every session cache/store key is `(daemonId, sessionId)`, and transport URLs are resolved from that
+connection rather than the page origin. Later browser-feature units build on these exports.
