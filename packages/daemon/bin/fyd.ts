@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   type LearningConfig,
@@ -569,6 +570,19 @@ interface ExecutableResolverPort {
 }
 
 /**
+ * Naming a request body by its content, which is how the protocol client identifies the start it is
+ * recovering.
+ *
+ * A PORT rather than a `createHash` call at the point of use, because `src/lib` may not reach a
+ * platform capability and the mount must stay a pure function of its request. The algorithm is not
+ * this daemon's choice: the client sends the SHA-256 hex of the body it posted, so anything else
+ * would never match.
+ */
+interface PayloadDigestPort {
+  hex(payload: string): string;
+}
+
+/**
  * Callsign claiming, as a START needs it: take a name, and give one back when the start it was taken
  * for never happened.
  *
@@ -687,8 +701,10 @@ function createSessionControlSubsystem(
   executables: ExecutableResolverPort,
   ids: SessionIdFactory,
   callsigns: CallsignClaims,
+  digests: PayloadDigestPort,
 ): SessionControlSubsystem {
-  /** Request id to the session it started, plus the payload it started, for this process's lifetime. */
+  /** Request id to the session it started, plus the exact body it started from, for this process's
+   *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
   const spent = new Map<string, { readonly sessionId: SessionId; readonly payload: string }>();
 
   /** The view of a session this mount just wrote. A document it cannot read back is a wiring fault. */
@@ -703,8 +719,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId) => {
-      const payload = JSON.stringify(request);
+    start: async (request, requestId, payload) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -802,6 +817,24 @@ function createSessionControlSubsystem(
       }
       spent.set(requestId, { sessionId: id, payload });
       return await view(id);
+    },
+    /**
+     * The session a request id started, when the caller can prove which body it sent.
+     *
+     * The ledger is this PROCESS's, which is the honest scope and the same one the idempotency map
+     * has: the hazard being recovered from is a response lost in flight, and a daemon that restarted
+     * between the start and the recovery also dropped the connection the recovery would travel on. A
+     * restart therefore surfaces as "no such request id", which is a miss rather than a wrong answer.
+     */
+    recover: async (requestId, digest) => {
+      const already = spent.get(requestId);
+      if (already === undefined) return undefined;
+      if (digests.hex(already.payload) !== digest)
+        throw new SessionControlError(
+          'conflict',
+          `request id ${JSON.stringify(requestId)} started session ${already.sessionId} from a different request`,
+        );
+      return await view(already.sessionId);
     },
     stop: async (reference, reason) => {
       const id = tryParseSessionId(reference);
@@ -1283,6 +1316,10 @@ export function buildWorld(): DaemonWorld {
   const executables: ExecutableResolverPort = {
     resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
   };
+  /** SHA-256 hex, matching the digest the protocol client computes over the very same body text. */
+  const payloadDigests: PayloadDigestPort = {
+    hex: payload => createHash('sha256').update(payload, 'utf8').digest('hex'),
+  };
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -1496,6 +1533,7 @@ export function buildWorld(): DaemonWorld {
           executables,
           sessionIds,
           createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+          payloadDigests,
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, createSessionResume, reviver),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),

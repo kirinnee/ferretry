@@ -5,7 +5,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeSessionControl, human } from './support.ts';
+import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './support.ts';
 
 /**
  * The session write surface: what a start refuses, what it passes through, and what a stop answers.
@@ -31,6 +31,17 @@ function startRequest(
   headers: Readonly<Record<string, string>> = { [FY_REQUEST_ID_HEADER]: REQUEST_ID },
 ) {
   return request({ method: 'POST', path: '/v1/sessions', headers: { ...human, ...headers }, body });
+}
+
+/** The recovery read as the protocol client issues it: the request id in the path, the digest of the
+ *  body it posted in the query. */
+function recoveryRequest(requestId: string, digest: string) {
+  return request({
+    method: 'GET',
+    path: `/v1/sessions/by-request/${requestId}`,
+    query: [['payload', digest]],
+    headers: human,
+  });
 }
 
 describe('the session control mount', () => {
@@ -239,5 +250,71 @@ describe('the session control mount', () => {
     should([started.status, stopped.status]).deepEqual([403, 403]);
     should(control.starts).be.empty();
     should(control.stops).be.empty();
+  });
+  it('should answer the recovery read with the session that request id started', async () => {
+    // The third step of the retry contract: the client posted, retried, and both attempts failed in
+    // transport. A start whose answer was lost may well have succeeded, and without this the human is
+    // handed a transport error beside a session they never learn is running.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+    const body = startBody();
+
+    // Act
+    const started = SessionViewSchema.parse(JSON.parse((await subject.dispatch(startRequest(body))).body));
+    const recovered = await subject.dispatch(recoveryRequest(REQUEST_ID, fakePayloadDigest(body)));
+
+    // Assert
+    should(recovered.status).equal(200);
+    should(SessionViewSchema.parse(JSON.parse(recovered.body)).config.id).equal(started.config.id);
+  });
+
+  it('should refuse a recovery read that cannot prove which body it sent', async () => {
+    // The digest is the AUTHORIZATION, not an optimisation: a logical request id travels in a header
+    // and is chosen by the client, so answering it on its own would let any holder of the admin token
+    // enumerate other callers ids and learn which sessions they started.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    await subject.dispatch(startRequest(startBody()));
+    const noDigest = await subject.dispatch(
+      request({ method: 'GET', path: `/v1/sessions/by-request/${REQUEST_ID}`, headers: human }),
+    );
+    const wrongDigest = await subject.dispatch(
+      recoveryRequest(REQUEST_ID, fakePayloadDigest(startBody({ prompt: 'something else entirely' }))),
+    );
+
+    // Assert
+    should([noDigest.status, wrongDigest.status]).deepEqual([400, 409]);
+    should((JSON.parse(noDigest.body) as { code: string }).code).equal('missing_payload_digest');
+    should((JSON.parse(wrongDigest.body) as { code: string }).code).equal('request_id_reused');
+  });
+
+  it('should answer a recovery read for a request id no start ever carried as not found', async () => {
+    // Which is the honest answer for a start that never reached the daemon at all — the commonest
+    // reason the client gets here.
+    // Arrange
+    const subject = dispatcher();
+
+    // Act
+    const unknown = await subject.dispatch(recoveryRequest('req-never-sent', fakePayloadDigest(startBody())));
+
+    // Assert
+    should(unknown.status).equal(404);
+    should((JSON.parse(unknown.body) as { code: string }).code).equal('not-found');
+  });
+
+  it('should refuse a recovery read whose request id would regain a separator', async () => {
+    // Arrange
+    const subject = dispatcher();
+
+    // Act
+    const traversal = await subject.dispatch(recoveryRequest('%2e%2e%2fetc', fakePayloadDigest(startBody())));
+
+    // Assert
+    should(traversal.status).equal(400);
+    should((JSON.parse(traversal.body) as { code: string }).code).equal('invalid_request_id');
   });
 });

@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -628,6 +629,15 @@ describe('daemon boot lifecycle', () => {
     const taken = await contested('req-boot-3', false);
     const fellBack = await contested('req-boot-4', true);
     const fellBackBody = SessionViewSchema.parse(await fellBack.json());
+    // The third step of the retry contract: after a start whose answer was lost, the client asks which
+    // session its request id produced, proving with the digest of the very body it posted.
+    const digest = createHash('sha256').update(body, 'utf8').digest('hex');
+    const recovery = (value: string): string =>
+      `${sessions}/by-request/req-boot-1?payload=${encodeURIComponent(value)}`;
+    const recovered = await fetch(recovery(digest), { headers });
+    const recoveredBody = SessionViewSchema.parse(await recovered.json());
+    const wrongDigest = await fetch(recovery(createHash('sha256').update('{}', 'utf8').digest('hex')), { headers });
+    const neverSent = await fetch(`${sessions}/by-request/req-never?payload=${digest}`, { headers });
     release();
     const code = await exit;
     await runCleanups(cleanups);
@@ -676,6 +686,16 @@ describe('daemon boot lifecycle', () => {
     should(fellBack.status).equal(201);
     should(fellBackBody.config.teammate).not.equal(SEEDED_CALLSIGN);
     should(DEFAULT_CALLSIGN_POOL).containEql(fellBackBody.config.teammate);
+    // The recovery read answers with the session that request id actually started, so a start whose
+    // response was lost in transport is recoverable instead of leaving a running session nobody knows
+    // about. The digest is the proof: without it any holder of the admin token could enumerate other
+    // callers' request ids, and a digest of a different body names a start this was not.
+    should(recovered.status).equal(200);
+    should(recoveredBody.config.id).equal(startedBody.config.id);
+    should(wrongDigest.status).equal(409);
+    should((await wrongDigest.json()) as { code: string }).have.property('code', 'request_id_reused');
+    // A request id no start ever carried is the honest miss: that start never reached the daemon.
+    should(neverSent.status).equal(404);
   });
 
   /**

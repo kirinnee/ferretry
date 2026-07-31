@@ -67,6 +67,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId',
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',
+      'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',

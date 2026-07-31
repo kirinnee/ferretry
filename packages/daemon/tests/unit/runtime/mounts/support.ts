@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   PIN_SCHEMA_VERSION,
   SessionConfigSchema,
@@ -658,12 +659,12 @@ export class FakeSessionControl implements SessionControlSubsystem {
     private readonly unknownAgents: readonly string[] = [],
   ) {}
 
-  async start(request: StartSessionRequest, requestId: string): Promise<SessionView> {
+  async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {
-      if (already.payload !== JSON.stringify(request))
+      if (already.payload !== payload)
         throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
       return sessionView(already.id, { agent: request.agent }, { status: 'running' });
     }
@@ -671,8 +672,23 @@ export class FakeSessionControl implements SessionControlSubsystem {
       throw new SessionControlError('unknown_agent', `no account is published as ${JSON.stringify(request.agent)}`);
     this.minted += 1;
     const id = `started-${this.minted}`;
-    this.spent.set(requestId, { id, payload: JSON.stringify(request) });
+    this.spent.set(requestId, { id, payload });
     return sessionView(id, { agent: request.agent, mode: request.mode }, { status: 'running' });
+  }
+
+  /**
+   * The recovery read, over the same ledger the idempotency uses.
+   *
+   * The digest is the REAL one — `fakePayloadDigest` is the same SHA-256 hex the protocol client
+   * computes — because a fake that accepted any digest would let the mount ship without the check
+   * that stops one caller reading another's request id.
+   */
+  async recover(requestId: string, digest: string): Promise<SessionView | undefined> {
+    const already = this.spent.get(requestId);
+    if (already === undefined) return undefined;
+    if (fakePayloadDigest(already.payload) !== digest)
+      throw new SessionControlError('conflict', `request id ${JSON.stringify(requestId)} started another session`);
+    return sessionView(already.id, {}, { status: 'running' });
   }
 
   async stop(sessionId: string, reason: string | undefined): Promise<SessionView> {
@@ -680,6 +696,11 @@ export class FakeSessionControl implements SessionControlSubsystem {
     if (!this.known.includes(sessionId)) throw new SessionControlError('not_found', `no session ${sessionId}`);
     return sessionView(sessionId, {}, { status: 'stopped', ...(reason === undefined ? {} : { reason }) });
   }
+}
+
+/** The digest the protocol client sends when it recovers a start: SHA-256 hex of the body text. */
+export function fakePayloadDigest(payload: string): string {
+  return createHash('sha256').update(payload, 'utf8').digest('hex');
 }
 
 /**
