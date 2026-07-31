@@ -1,9 +1,7 @@
-import { StartSessionRequestSchema } from '@ferretry/protocol';
+import { type StartSessionRequest, StartSessionRequestSchema } from '@ferretry/protocol';
 
 import type { DaemonConnection } from '../daemon-connection.ts';
-import { daemonSessionScope } from '../daemon-scope.ts';
-
-export type { DaemonConnection } from '../daemon-connection.ts';
+import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 
 export interface NewSessionDraft {
   agent: string;
@@ -40,28 +38,34 @@ function optionalText(value: string): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-export function buildStartSessionRequest(draft: NewSessionDraft) {
+export function buildStartSessionRequest(draft: NewSessionDraft): StartSessionRequest {
   const agent = draft.agent.trim();
+  const cwd = optionalText(draft.cwd);
+  const model = optionalText(draft.model);
+  const label = optionalText(draft.label);
   const prompt = optionalText(draft.prompt);
 
   return StartSessionRequestSchema.parse({
     agent,
-    ...(optionalText(draft.cwd) === undefined ? {} : { cwd: optionalText(draft.cwd) }),
-    ...(optionalText(draft.model) === undefined ? {} : { model: optionalText(draft.model) }),
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(model === undefined ? {} : { model }),
     mode: draft.mode,
-    ...(optionalText(draft.label) === undefined ? {} : { label: optionalText(draft.label) }),
+    ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
   });
 }
 
 export interface DaemonBoundSessionStarter {
-  connection: DaemonConnection;
-  start(request: ReturnType<typeof buildStartSessionRequest>): Promise<{
+  readonly connection: DaemonConnection;
+  start(request: StartSessionRequest): Promise<{
     config: { id: string };
   }>;
 }
 
-export async function submitNewSession(draft: NewSessionDraft, starter: DaemonBoundSessionStarter) {
+export async function submitNewSession(
+  draft: NewSessionDraft,
+  starter: DaemonBoundSessionStarter,
+): Promise<DaemonSessionScope> {
   const result = await starter.start(buildStartSessionRequest(draft));
   return daemonSessionScope(starter.connection, result.config.id);
 }

@@ -4,23 +4,22 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   buildStartSessionRequest,
   canSubmitNewSession,
-  emptyNewSessionDraft,
-  submitNewSession,
-  type DaemonConnection,
   type DaemonBoundSessionStarter,
+  emptyNewSessionDraft,
   type NewSessionDraft,
+  submitNewSession,
 } from '../../../src/lib/pages/new-session.ts';
 
 const connectionA = daemonConnection({
   daemonId: 'daemon-a',
   baseUrl: 'http://daemon-a.test',
   deviceToken: 'token-a',
-}) as DaemonConnection;
+});
 const connectionB = daemonConnection({
   daemonId: 'daemon-b',
   baseUrl: 'http://daemon-b.test',
   deviceToken: 'token-b',
-}) as DaemonConnection;
+});
 
 function draft(overrides: Partial<NewSessionDraft> = {}): NewSessionDraft {
   return {
@@ -52,9 +51,7 @@ describe('new session decisions', () => {
   });
 
   test('should permit an interactive session without a prompt', () => {
-    expect(
-      canSubmitNewSession(draft({ mode: 'interactive', prompt: '   ' }), connectionA, false),
-    ).toBeTrue();
+    expect(canSubmitNewSession(draft({ mode: 'interactive', prompt: '   ' }), connectionA, false)).toBeTrue();
   });
 
   test('should trim required text and omit blank optional fields', () => {

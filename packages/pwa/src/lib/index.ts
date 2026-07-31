@@ -9,5 +9,7 @@ export * from './event-transport.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
 export * from './drafts.ts';
+export * from './pages/new-session.ts';
 export * from './pages/routes.ts';
+export * from './pages/warden-page.tsx';
 export * from './pairing.ts';

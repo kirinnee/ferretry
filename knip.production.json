@@ -23,7 +23,7 @@
     },
     "packages/pwa": {
       "entry": ["src/lib/index.ts"],
-      "project": ["src/**/*.ts"]
+      "project": ["src/**/*.{ts,tsx}"]
     }
   },
   "bun": false,

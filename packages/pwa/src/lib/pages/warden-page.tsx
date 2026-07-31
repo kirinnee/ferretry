@@ -1,0 +1,47 @@
+import type { ComponentType } from 'react';
+
+import type { DaemonConnection } from '../daemon-connection.ts';
+
+export interface WardenSurfaceProps {
+  readonly connection: DaemonConnection;
+}
+
+export interface WardenPageSlots {
+  readonly Attention: ComponentType<WardenSurfaceProps>;
+  readonly Status: ComponentType<WardenSurfaceProps>;
+  readonly Configuration: ComponentType<WardenSurfaceProps>;
+  readonly Verdicts: ComponentType<WardenSurfaceProps>;
+}
+
+export interface WardenPageProps extends WardenSurfaceProps {
+  readonly slots: WardenPageSlots;
+}
+
+/**
+ * Route-level Warden composition. The concrete surfaces are supplied by the
+ * component layer, while this shell owns their outcome-first order and keeps
+ * one runtime daemon connection explicit at every boundary.
+ */
+export function WardenPage({ connection, slots }: WardenPageProps) {
+  const { Attention, Status, Configuration, Verdicts } = slots;
+
+  return (
+    <main aria-labelledby="warden-heading" className="h-full min-h-0 w-full overflow-y-auto scroll-thin pb-4">
+      <div className="mx-auto flex w-full max-w-[980px] flex-col gap-3 py-2">
+        <header className="min-w-0">
+          <h1 id="warden-heading" className="m-0 font-display text-display font-bold tracking-display">
+            Warden
+          </h1>
+          <p className="mt-0.5 text-ui text-muted">Who needs you, then sweeps, accounts, and recent verdicts.</p>
+        </header>
+
+        <Attention connection={connection} />
+        <Status connection={connection} />
+        <section id="config" aria-label="Warden configuration">
+          <Configuration connection={connection} />
+        </section>
+        <Verdicts connection={connection} />
+      </div>
+    </main>
+  );
+}
