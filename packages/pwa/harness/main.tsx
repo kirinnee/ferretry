@@ -30,6 +30,7 @@ import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
@@ -386,6 +387,31 @@ function Shell() {
             {viewport.width}×{viewport.height}
           </span>
         </header>
+
+        <WardenVerdicts
+          connection={daemon}
+          now={HARNESS_NOW}
+          onOpenReport={() => {}}
+          verdicts={[
+            {
+              at: '2026-07-31T11:58:00.000Z',
+              targetSession: 'sess-1',
+              teammate: 'ms-98',
+              verdict: 'nudged',
+              reason: 'Asked the session to report its current blocker',
+              reportPath: 'warden/2026-07-31T11-58.md',
+              spawn: {
+                agent: 'claude-auto-loge',
+                model: 'claude-sonnet-4-5',
+                modelSource: 'harness',
+                harness: 'claude',
+                failedOver: true,
+                configuredFirst: 'claude-auto-opus',
+                skipped: { 'claude-auto-opus': 'at quota' },
+              },
+            },
+          ]}
+        />
 
         <SessionCommandControls
           api={{ compact: async () => {} }}
