@@ -13,6 +13,7 @@ import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
 import { sessionControlRoutes, type SessionControlSubsystem } from './session-control.ts';
+import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
@@ -50,6 +51,9 @@ export interface MountedSubsystems {
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
   readonly sessionResume: SessionResumeSubsystem;
+  /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
+   *  document, and the relaunch that puts a different agent in the same session's chair. */
+  readonly sessionMigrate: SessionMigrateSubsystem;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
   /** The fleet-wide analytics read over every finished session's durable record. */
@@ -90,6 +94,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
     // deeper patterns. Neither can shadow the other: they differ in their final literal segment.
     ...sessionResumeRoutes(subsystems.sessionResume),
+    // The migration registers beside the revive it is built on: both are one-segment patterns under
+    // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
+    // other, and both belong above the deeper per-session subsystems.
+    ...sessionMigrateRoutes(subsystems.sessionMigrate),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),

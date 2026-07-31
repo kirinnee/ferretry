@@ -27,6 +27,7 @@ export * from './migrate/process-inventory-port.ts';
 export * from './migrate/process-table.ts';
 export * from './migrate/render-text.ts';
 export * from './migrate/report-render.ts';
+export * from './migrate/report-store.ts';
 export * from './migrate/tool-inventory.ts';
 export * from './migrate/verdict.ts';
 export * from './names/index.ts';

@@ -22,9 +22,12 @@ import { z } from 'zod';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
 import {
   EXIT_ALREADY_RUNNING,
+  MigrationPreflight,
   parseSessionId,
   DEFAULT_CALLSIGN_POOL,
   type PaneObservation,
+  type ProcessInventoryPort,
+  type ProcessObservation,
   type ResumeLauncher,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
@@ -269,8 +272,26 @@ class RecordingResumeLauncher implements ResumeLauncher {
   }
 }
 
+/**
+ * A process inventory that reports what the case decided instead of walking the host.
+ *
+ * Substituted inside a REAL `MigrationPreflight`, so every verdict, blind-spot rule and refusal the
+ * gate applies is production's — only the `ps` walk it cannot perform against work that is not
+ * actually running is replaced. It starts EMPTY, which is a pane with nothing in flight rather than
+ * a pane nobody could read.
+ */
+class StubProcessInventory implements ProcessInventoryPort {
+  observation: ProcessObservation = { kind: 'observed', processes: [] };
+
+  async collect(): Promise<ProcessObservation> {
+    return this.observation;
+  }
+}
+
 /** The wrapper name the seeded fleet publishes. It must match the lifecycle's auto-wrapper rule. */
 const WRAPPER = 'claude-auto-boot';
+/** The account a migration moves onto: a different harness family, so the relaunch argv must change. */
+const TARGET_WRAPPER = 'codex-auto-target';
 
 /**
  * A fleet whose one account is published under a wrapper this host can actually run.
@@ -306,6 +327,52 @@ async function seedFleet(home: string): Promise<string> {
   );
   process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
   return executable;
+}
+
+/**
+ * A fleet with somewhere to migrate TO.
+ *
+ * The two accounts differ in the two ways a migration has to survive: a different harness family, so
+ * the relaunch argv cannot be the old one patched, and a smaller context window, so the downgrade
+ * refusal is reachable without inventing a session state. The `[1m]` marker is the configuration
+ * convention `contextWindowFor` reads — it is how a session comes to be running in a million-token
+ * window in the first place.
+ */
+async function seedMigrationFleet(home: string): Promise<void> {
+  const binary = join(home, 'bin');
+  await mkdir(binary, { recursive: true });
+  for (const wrapper of [WRAPPER, TARGET_WRAPPER])
+    await writeFile(join(binary, wrapper), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  await mkdir(join(home, 'fleet'), { recursive: true });
+  await writeFile(
+    join(home, 'fleet', 'manifest.json'),
+    JSON.stringify({
+      accounts: [
+        {
+          id: 'account-origin',
+          agent: WRAPPER,
+          kind: 'claude',
+          mode: 'auto',
+          displayName: 'Origin',
+          defaultModel: 'claude-opus-5[1m]',
+          models: [{ id: 'claude-opus-5[1m]', available: true }],
+          available: true,
+        },
+        {
+          id: 'account-target',
+          agent: TARGET_WRAPPER,
+          kind: 'codex',
+          mode: 'auto',
+          displayName: 'Target',
+          defaultModel: 'gpt-5.6-terra',
+          models: [{ id: 'gpt-5.6-terra', available: true }],
+          available: true,
+        },
+      ],
+    }),
+    { mode: 0o600 },
+  );
+  process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
 }
 
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
@@ -828,6 +895,178 @@ describe('daemon boot lifecycle', () => {
     // `admin` scope, matching the start and the stop: a revive relaunches a process holding the
     // daemon's own privileges, so the warden token is refused rather than served.
     should(asWarden.status).equal(403);
+    should(absent.status).equal(404);
+    should((await absent.json()) as { code: string }).have.property('code', 'not-found');
+  });
+
+  /**
+   * Migrating a session onto another account, driven through the production composition root.
+   *
+   * This proves the destructive-migration SAFETY GATE does its job rather than merely being
+   * constructed: `MigrationPreflight` was built, tested and assigned to a world field that nothing
+   * ever called, so `POST /v1/sessions/:id/migrate` — a route the protocol client has always spoken —
+   * answered `unknown_route`, and the one gate in the product that refuses to destroy work guarded an
+   * operation the product could not perform.
+   *
+   * THE GATE ITSELF IS REAL HERE. Only its two host probes are doubled — the process-table walk and
+   * the pane capture, which cannot be driven without running the very work they inspect — so the
+   * verdicts, the blind-spot rules, the refusal, the report and the handoff are production's.
+   *
+   * The order of the four calls is the argument:
+   *
+   *   * A SMALLER CONTEXT WINDOW is refused before anything is inspected, because a migration that
+   *     truncates the conversation it exists to preserve is not one the caller asked for.
+   *   * A DESTRUCTIVE process in the pane is refused with the inventory in the message, and nothing
+   *     is written: no report, and a configuration document still naming the account it started on.
+   *   * A CLEAN pane migrates: the document is restamped, the LIVE pane is replaced rather than typed
+   *     into, and the replacement agent is handed a turn document pointing at the report.
+   *   * AN AGENT THE FLEET DOES NOT PUBLISH is a 404 about the agent, not about the session.
+   */
+  it('should refuse an unsafe migration and move a session the gate clears', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-session-migrate');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    const inventory = new StubProcessInventory();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: () => reviver,
+      // The REAL gate over doubled host probes: everything it decides is production's.
+      migratePreflight: new MigrationPreflight(inventory, { visible: async () => undefined }),
+    };
+    await seedMigrationFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startResponse = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-migrate-1' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'wire the migration', cwd: home }),
+    });
+    // Answered rather than cast, so a start that failed fails HERE with the daemon's own reason
+    // instead of surfacing as an unrelated assertion about a session that was never created.
+    const startedRaw: unknown = await startResponse.json();
+    if (startResponse.status !== 201) throw new Error(`the fixture start failed: ${JSON.stringify(startedRaw)}`);
+    const started = SessionViewSchema.parse(startedRaw);
+    const id = started.config.id;
+    const configFile = join(home, 'state', 'sessions', id, 'config.json');
+    const reportFile = join(home, 'state', 'sessions', id, 'migration-inflight.md');
+    const migrate = async (body: unknown): Promise<Response> =>
+      await fetch(`${sessions}/${id}/migrate`, { method: 'POST', headers: cli, body: JSON.stringify(body) });
+    const storedConfig = async (): Promise<Record<string, unknown>> =>
+      JSON.parse(await readFile(configFile, 'utf8')) as Record<string, unknown>;
+
+    // Act
+    // The pane is alive and at a prompt throughout: a migration must replace it anyway.
+    reviver.pane = { alive: true, dead: false, promptReady: true };
+    // The session is `running` and its pane holds nothing: an agent mid-turn is work this gate will
+    // not interrupt, and it says so rather than moving a session out from under a thinking agent.
+    const midTurn = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const midTurnBody = (await midTurn.json()) as { error: string; code: string };
+    const afterMidTurn = await storedConfig();
+    // The account runs out of quota. Nothing mounted produces this status — the quota reader that
+    // would is not mounted — so the state document is seeded directly, which is the whole reason a
+    // migration exists: an operator moves a rate-limited session onto an account with headroom.
+    const stateFile = join(home, 'state', 'sessions', id, 'state.json');
+    await writeFile(
+      stateFile,
+      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
+      { mode: 0o600 },
+    );
+    // The target serves a 200k window and this session was started on a 1M model.
+    const downgrade = await migrate({ agent: TARGET_WRAPPER });
+    const afterDowngrade = await storedConfig();
+    // A destructive command in the pane, which the gate must refuse to interrupt.
+    inventory.observation = {
+      kind: 'observed',
+      processes: [{ pid: 4242, argv: 'git push origin main', verdict: 'destructive_to_interrupt' }],
+    };
+    const refused = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const refusedBody = (await refused.json()) as { error: string; code: string };
+    const afterRefusal = await storedConfig();
+    const reportAfterRefusal = await readFile(reportFile, 'utf8').catch(() => undefined);
+    // The command finished; nothing is in flight.
+    inventory.observation = { kind: 'observed', processes: [] };
+    const moved = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const movedRaw: unknown = await moved.json();
+    // Same reason: a refused migration must fail with the refusal it answered, not with a schema
+    // complaint about an error envelope.
+    if (moved.status !== 200) throw new Error(`the cleared migration was refused: ${JSON.stringify(movedRaw)}`);
+    const movedBody = SessionViewSchema.parse(movedRaw);
+    const afterMove = await storedConfig();
+    const report = await readFile(reportFile, 'utf8');
+    const turnTwo = await readFile(join(home, 'state', 'sessions', id, 'turns', 'turn-002.md'), 'utf8');
+    const unknownAgent = await migrate({ agent: 'claude-auto-nowhere', allowContextDowngrade: true });
+    const absent = await fetch(`${sessions}/no-such-session/migrate`, {
+      method: 'POST',
+      headers: cli,
+      body: JSON.stringify({ agent: TARGET_WRAPPER }),
+    });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // An agent that is mid-turn is not migrated out from under itself, and the refusal names why:
+    // the record claims work the inspection could not see, which is a blind spot, not an all-clear.
+    should(midTurn.status).equal(409);
+    should(midTurnBody.code).equal('migration_refused');
+    should(midTurnBody.error).containEql('reports running work but nothing was observable');
+    should(afterMidTurn).have.property('agent', WRAPPER);
+    // A smaller window is refused BEFORE the pane is even looked at, and nothing moved.
+    should(downgrade.status).equal(409);
+    should((await downgrade.json()) as { code: string }).have.property('code', 'context_downgrade_refused');
+    should(afterDowngrade).have.property('agent', WRAPPER);
+    // The refusal carries the inventory that produced it: a bare 409 would leave the operator with
+    // no way to tell "a push is running" from "we could not look".
+    should(refused.status).equal(409);
+    should(refusedBody.code).equal('migration_refused');
+    should(refusedBody.error).containEql('git push origin main');
+    should(refusedBody.error).containEql('DESTRUCTIVE');
+    // NOTHING was written by the refusal — not the document, and not even the report.
+    should(afterRefusal).have.property('agent', WRAPPER);
+    should(reportAfterRefusal).be.undefined();
+    // The clean migration moved the session: same id, same directory, new account.
+    should(moved.status).equal(200);
+    should(movedBody.config.id).equal(id);
+    should(movedBody.config.agent).equal(TARGET_WRAPPER);
+    should(movedBody.config.harness).equal('codex');
+    // The argv the NEXT relaunch will run is the target's executable, not the account it left.
+    should((afterMove.command as readonly string[])[0]).equal(join(home, 'bin', TARGET_WRAPPER));
+    // The stamp analytics reads to call a session migrated, with both ends of the move in it.
+    should(afterMove.migration).have.properties({ from: WRAPPER, to: TARGET_WRAPPER });
+    // A new incarnation, because a different program is answering the next turn.
+    should(afterMove).have.property('runtimeGeneration', 2);
+    should(afterMove).have.property('incarnation', `${id}-2`);
+    // THE LIVE PANE WAS REPLACED, not typed into. Without that the old account would still be
+    // serving the session while its own record named the new one.
+    should(reviver.snapshots).deepEqual([id]);
+    should(reviver.relaunched).deepEqual([id]);
+    // The replacement agent is pointed at the report, through the same turn document a revive writes.
+    should(reviver.delivered.at(-1)).containEql('turns/turn-002.md');
+    should(turnTwo).containEql('migration-inflight.md');
+    // Both halves of the report: the inventory written before the pane died, and the outcome that is
+    // the only part allowed to claim the move happened.
+    should(report).containEql('# Migration in-flight report');
+    should(report).containEql('## Outcome — MIGRATION SUCCEEDED');
+    should(report).containEql(`onto \`${TARGET_WRAPPER}\``);
+    // An agent the fleet does not publish is a fact about the agent, not about the session.
+    should(unknownAgent.status).equal(404);
+    should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');
     should(absent.status).equal(404);
     should((await absent.json()) as { code: string }).have.property('code', 'not-found');
   });

@@ -8,16 +8,30 @@ import {
 import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrate/process-inventory-port.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
+/**
+ * A tmux that answers per COMMAND, because absence is now two questions rather than one.
+ *
+ * `has-session` is what the adapters ask after a failed read to tell "this session is gone" from
+ * "tmux would not answer", so a fake that returned one result for every command could not express
+ * the difference the adapters exist to draw. It defaults to a server that CONFIRMS the session is
+ * there, which is the conservative half: a case must opt into absence.
+ */
 class FakeTmux implements TmuxCommandPort {
   readonly calls: Array<readonly string[]> = [];
 
-  constructor(private readonly result: TmuxCommandResult) {}
+  constructor(
+    private readonly result: TmuxCommandResult,
+    private readonly hasSession: TmuxCommandResult = { code: 0, stdout: '', stderr: '' },
+  ) {}
 
   async execute(arguments_: readonly string[]): Promise<TmuxCommandResult> {
     this.calls.push(arguments_);
-    return this.result;
+    return arguments_[0] === 'has-session' ? this.hasSession : this.result;
   }
 }
+
+/** What tmux answers about a session it does not have. */
+const NO_SUCH_SESSION: TmuxCommandResult = { code: 1, stdout: '', stderr: "can't find session: isolated-session\n" };
 
 class FakeProbe implements ProcessProbePort {
   readonly workingDirectoryCalls: number[] = [];
@@ -59,7 +73,9 @@ describe('PaneProcessInventory', () => {
     should(probe.workingDirectoryCalls).deepEqual([200]);
   });
 
-  it('should report an unresolvable pane as unobservable rather than empty', async () => {
+  it('should report an unresolvable pane as unobservable while the session still exists', async () => {
+    // tmux answers the second question — the session IS there — so the failed pane-pid read is a
+    // genuine blind spot: something is running under a pane nobody could inspect.
     // Arrange
     const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "no server running on '/tmp/fy.sock'\n" });
 
@@ -71,6 +87,25 @@ describe('PaneProcessInventory', () => {
       kind: 'unobservable',
       reason: "the pane pid could not be resolved: no server running on '/tmp/fy.sock'",
     });
+  });
+
+  it('should report a pane tmux confirms is gone as an empty observation, not a blind spot', async () => {
+    // THE COMMONEST MIGRATION THERE IS. A session whose account died has no pane at all, and a
+    // failed pane-pid read used to be unobservable unconditionally — which made the report carry an
+    // `unknown` verdict and the gate refuse the very move the operator was trying to make. tmux is
+    // asked outright, and a session it says does not exist ran nothing.
+    // Arrange
+    const tmux = new FakeTmux({ code: 1, stdout: '', stderr: 'no server running\n' }, NO_SUCH_SESSION);
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('isolated-session');
+
+    // Assert
+    should(actual).deepEqual({ kind: 'observed', processes: [] });
+    should(tmux.calls).deepEqual([
+      ['display-message', '-p', '-t', 'isolated-session', '#{pane_pid}'],
+      ['has-session', '-t', 'isolated-session'],
+    ]);
   });
 
   it('should report a silent tmux failure with its exit code', async () => {
@@ -199,6 +234,8 @@ describe('TmuxPaneSnapshot', () => {
   });
 
   it('should raise a capture failure rather than return an empty pane', async () => {
+    // Both fakes confirm the session exists, so a failed capture is a pane that could not be read —
+    // which the preflight must record as a blind spot rather than as an empty codex footer.
     // Arrange
     const reported = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" });
     const silent = new FakeTmux({ code: 2, stdout: '', stderr: '' });
@@ -210,5 +247,23 @@ describe('TmuxPaneSnapshot', () => {
     await should(new TmuxPaneSnapshot(silent).visible('isolated-session')).be.rejectedWith(
       'tmux could not capture the pane: exited 2',
     );
+  });
+
+  it('should answer nothing at all for a pane tmux confirms is gone', async () => {
+    // `undefined` is the codex footer of a session that no longer has a terminal: there is nothing
+    // to count, which is different from a footer that could not be read. Raising here would make
+    // every stopped codex session refuse its own migration on evidence nobody could have produced.
+    // Arrange
+    const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" }, NO_SUCH_SESSION);
+
+    // Act
+    const actual = await new TmuxPaneSnapshot(tmux).visible('isolated-session');
+
+    // Assert
+    should(actual).be.undefined();
+    should(tmux.calls).deepEqual([
+      ['capture-pane', '-p', '-t', 'isolated-session'],
+      ['has-session', '-t', 'isolated-session'],
+    ]);
   });
 });

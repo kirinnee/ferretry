@@ -43,6 +43,10 @@ import {
   SessionControlError,
   type SessionControlSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import {
+  SessionMigrateError,
+  type SessionMigrateSubsystem,
+} from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import {
@@ -881,5 +885,44 @@ export class FakeSessionResume implements SessionResumeSubsystem {
     // Turn two, because a revive that handed the agent a new turn moved the counter: a view still
     // reporting turn one would not distinguish a revive from a read.
     return sessionView(sessionId, {}, { status: 'running', turn: 2 });
+  }
+}
+
+/**
+ * A migrator that records instead of moving a session.
+ *
+ * The REQUEST is what this fake exists to capture. A migration is decided from three fields the
+ * mount must pass through untouched — the target agent, the model, and whether the caller accepted a
+ * smaller context window — and the last of those is a `z.default(false)`, so proving it arrives as
+ * `false` rather than `undefined` is the difference between a truncation the caller accepted and one
+ * the daemon inferred.
+ *
+ * Its refusals are keyed by session, so every HTTP answer the mount can give is reachable without a
+ * preflight, a pane or a fleet manifest behind it.
+ */
+export class FakeSessionMigrate implements SessionMigrateSubsystem {
+  /** Every migration that reached the subsystem, as the session and the request it carried. */
+  readonly migrations: Array<
+    readonly [string, { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean }]
+  > = [];
+
+  constructor(
+    /** Sessions that exist, so a migration has something to move. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionMigrateError>> = {},
+  ) {}
+
+  async migrate(
+    sessionId: string,
+    request: { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean },
+  ): Promise<SessionView> {
+    this.migrations.push([sessionId, request]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionMigrateError('not_found', `no session ${sessionId}`);
+    // The agent the caller asked for, in the view: a migration that answered with the old account
+    // would be indistinguishable from a read.
+    return sessionView(sessionId, { agent: request.agent }, { status: 'running', turn: 2 });
   }
 }

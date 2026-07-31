@@ -14,6 +14,7 @@ import {
   CREDENTIALS,
   emptyFeed,
   FakeSessionControl,
+  FakeSessionMigrate,
   FakeSessionResume,
   FakeTerminals,
   healthSubsystem,
@@ -43,6 +44,7 @@ const subsystems = (): MountedSubsystems => ({
   sessions: sessionDirectory([sessionView('s1')]),
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
+  sessionMigrate: new FakeSessionMigrate(),
   tasks: taskSubsystem(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
@@ -69,6 +71,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
+      'POST /v1/sessions/:sessionId/migrate',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',
@@ -135,6 +138,17 @@ describe('the mounted daemon surface', () => {
     const revived = await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/sessions/s1/resume', headers: human, body: '{}' }),
     );
+    // The migration, over the same dispatcher: the route the protocol client's `migrate` speaks,
+    // which answered `unknown_route` while the safety gate that guards it sat constructed and
+    // uncalled in the world.
+    const migrated = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions/s1/migrate',
+        headers: human,
+        body: JSON.stringify({ agent: 'claude-auto-other' }),
+      }),
+    );
 
     // Assert
     should(health.status).equal(200);
@@ -154,6 +168,7 @@ describe('the mounted daemon surface', () => {
     should(learning.status).equal(200);
     should(stopped.status).equal(200);
     should(revived.status).equal(200);
+    should(migrated.status).equal(200);
   });
 
   it('should serve every protocol-switching route from one table too', () => {

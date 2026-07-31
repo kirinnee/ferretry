@@ -18,9 +18,17 @@ export interface MigrateTargetView {
   readonly subprocessSince?: string;
 }
 
-/** Reads a pane's visible text. Codex prints its background-terminal count in the footer. */
+/**
+ * Reads a pane's visible text. Codex prints its background-terminal count in the footer.
+ *
+ * `undefined` means the pane is CONFIRMED ABSENT — the terminal this session used to have is gone,
+ * so there is no footer and no background terminals rather than a footer nobody could read. It is
+ * distinct from a throw, which is the honest answer when the pane may exist and the read failed:
+ * one is an observation, the other is a blind spot, and collapsing them makes every migration of a
+ * stopped codex session refuse on evidence nobody could have produced.
+ */
 export interface PaneSnapshotPort {
-  visible(tmuxSession: string): Promise<string>;
+  visible(tmuxSession: string): Promise<string | undefined>;
 }
 
 const CODEX_HARNESS = 'codex';
@@ -63,7 +71,9 @@ export class MigrationPreflight {
   ): Promise<{ readonly count: number; readonly blindSpots: readonly string[] }> {
     if (view.harness !== CODEX_HARNESS) return { count: 0, blindSpots: [] };
     try {
-      return { count: backgroundTerminalCount(await this.panes.visible(view.tmuxSession)), blindSpots: [] };
+      const visible = await this.panes.visible(view.tmuxSession);
+      // A pane that is gone ran nothing: reporting zero here is an observation, not an assumption.
+      return { count: visible === undefined ? 0 : backgroundTerminalCount(visible), blindSpots: [] };
     } catch (error) {
       return { count: 0, blindSpots: [`the codex pane footer could not be read: ${detail(error)}`] };
     }
