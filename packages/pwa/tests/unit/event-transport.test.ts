@@ -1,0 +1,115 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import type { DaemonEventSocket } from '../../src/lib/event-transport.ts';
+import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+
+class FakeSocket implements DaemonEventSocket {
+  static latest: FakeSocket | undefined;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { readonly data: unknown }) => void) | null = null;
+  closes = 0;
+
+  constructor(readonly url: string) {
+    FakeSocket.latest = this;
+  }
+
+  close(): void {
+    this.closes += 1;
+    this.onclose?.();
+  }
+
+  message(data: unknown): void {
+    this.onmessage?.({ data });
+  }
+}
+
+const daemon = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://daemon.example.test',
+  deviceToken: 'durable-device-token',
+});
+
+const streamInput = (onMessage: (value: unknown) => void) => ({
+  url: 'wss://daemon.example.test/v1/events?after=12&sessionId=session-1',
+  token: 'durable-device-token',
+  onMessage,
+});
+
+describe('DaemonEventTransport', () => {
+  it('should open a paired-daemon event URL with a short-lived ticket and no device token', async () => {
+    // Arrange
+    const received: unknown[] = [];
+    const transport = new DaemonEventTransport(
+      daemon,
+      async actual => {
+        should(actual).equal(daemon);
+        return 'one-time-ticket';
+      },
+      url => new FakeSocket(url),
+    );
+
+    // Act
+    const streaming = transport.stream(streamInput(value => received.push(value)));
+    await Promise.resolve();
+    const socket = FakeSocket.latest as FakeSocket;
+    socket.message('{"sequence":12}');
+    socket.close();
+    await streaming;
+
+    // Assert
+    should(socket.url).equal('wss://daemon.example.test/v1/events?ticket=one-time-ticket&after=12&sessionId=session-1');
+    should(socket.url).not.containEql('durable-device-token');
+    should(received).deepEqual([{ sequence: 12 }]);
+  });
+
+  it('should reject a stream URL outside the paired daemon before opening a socket', async () => {
+    // Arrange
+    let opened = false;
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => 'one-time-ticket',
+      () => {
+        opened = true;
+        return new FakeSocket('unused');
+      },
+    );
+
+    // Act
+    const outcome = await transport
+      .stream({ ...streamInput(() => undefined), url: 'wss://other.example.test/v1/events?after=0' })
+      .then(
+        () => undefined,
+        error => error,
+      );
+
+    // Assert
+    should(outcome).be.instanceOf(Error);
+    should((outcome as Error).message).equal('event stream must remain on the paired daemon');
+    should(opened).be.false();
+  });
+
+  it('should close and reject when a received frame is not JSON', async () => {
+    // Arrange
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => 'one-time-ticket',
+      url => new FakeSocket(url),
+    );
+
+    // Act
+    const streaming = transport.stream(streamInput(() => undefined));
+    await Promise.resolve();
+    const socket = FakeSocket.latest as FakeSocket;
+    socket.message('not-json');
+    const outcome = await streaming.then(
+      () => undefined,
+      error => error,
+    );
+
+    // Assert
+    should(outcome).be.instanceOf(Error);
+    should(socket.closes).equal(1);
+  });
+});
