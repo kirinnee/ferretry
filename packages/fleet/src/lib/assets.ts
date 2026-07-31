@@ -49,18 +49,21 @@ const CODEX_ASSETS: readonly HarnessAsset[] = [
   { field: 'skills', dest: 'skills', mode: 'link' },
 ];
 
-export const HARNESS_ASSETS: Readonly<Record<HarnessKind, readonly HarnessAsset[]>> = {
+/** Every harness's destinations. Injected rather than imported, so a caller can substitute one. */
+export type HarnessAssetTable = Readonly<Record<HarnessKind, readonly HarnessAsset[]>>;
+
+export const HARNESS_ASSETS: HarnessAssetTable = {
   claude: CLAUDE_ASSETS,
   codex: CODEX_ASSETS,
 };
 
 /** Asset fields this harness has no destination for, in declaration order. */
-export function unsupportedAssetFields(kind: HarnessKind): readonly AssetField[] {
-  const supported = new Set(HARNESS_ASSETS[kind].map(asset => asset.field));
+export function unsupportedAssetFields(table: HarnessAssetTable, kind: HarnessKind): readonly AssetField[] {
+  const supported = new Set(table[kind].map(asset => asset.field));
   return ASSET_FIELDS.filter(field => !supported.has(field));
 }
 
 /** The asset entry for one field, or `undefined` when this harness has no destination for it. */
-export function harnessAsset(kind: HarnessKind, field: AssetField): HarnessAsset | undefined {
-  return HARNESS_ASSETS[kind].find(asset => asset.field === field);
+export function harnessAsset(table: HarnessAssetTable, kind: HarnessKind, field: AssetField): HarnessAsset | undefined {
+  return table[kind].find(asset => asset.field === field);
 }

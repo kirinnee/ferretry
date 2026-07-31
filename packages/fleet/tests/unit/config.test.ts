@@ -317,6 +317,7 @@ describe('FleetConfigSchema', () => {
   it('should require commands and default homes to reference accounts by id', () => {
     // Arrange
     const badTarget = config({ commands: [{ wrapper: 'yolo-kirin', target: ID_THREE }] });
+    const unknownHome = config({ defaultHomes: { claude: ID_THREE } });
     const wrongKind = config({ defaultHomes: { codex: ID_ONE } });
     const good = config({
       commands: [{ wrapper: 'yolo-kirin', target: ID_ONE, flags: ['--dangerous'] }],
@@ -325,6 +326,7 @@ describe('FleetConfigSchema', () => {
 
     // Act + Assert
     should(messagesOf(badTarget)).matchAny(/unknown target/);
+    should(messagesOf(unknownHome)).matchAny(/unknown account id/);
     should(messagesOf(wrongKind)).matchAny(/is a claude account, not codex/);
     should(messagesOf(good)).deepEqual([]);
   });

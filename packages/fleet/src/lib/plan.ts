@@ -15,7 +15,13 @@
  *   asset the harness has no destination for, a duplicate wrapper name — throws while planning,
  *   before a single byte is written, rather than being dropped silently.
  */
-import { type AssetField, harnessAsset, unsupportedAssetFields } from './assets.ts';
+import {
+  type AssetField,
+  HARNESS_ASSETS,
+  harnessAsset,
+  type HarnessAssetTable,
+  unsupportedAssetFields,
+} from './assets.ts';
 import type { FleetConfig } from './config.ts';
 import { buildFleetManifest, type FleetManifest, type HarnessKind } from './manifest.ts';
 import { expandAssetPath, expandHomePath, joinPath } from './paths.ts';
@@ -60,7 +66,23 @@ export class UnknownDefaultHomeError extends Error {
 /** The path-valued asset fields, in the order they are materialized. */
 const PATH_ASSET_FIELDS = ['memory', 'skills', 'hooks', 'hooksDir', 'mcp'] as const satisfies readonly AssetField[];
 
+/**
+ * Asset fields this account actually asks for. `settings` is a layer stack rather than a path, so
+ * "declared" means a non-empty stack; every other field is declared when it names something.
+ */
+export function declaredAssetFields(account: ResolvedAccount): readonly AssetField[] {
+  const declared: AssetField[] = [];
+  if (account.settings.length > 0) declared.push('settings');
+  for (const field of PATH_ASSET_FIELDS) {
+    if (account[field] !== undefined) declared.push(field);
+  }
+  return declared;
+}
+
 export class FleetPlan implements FleetPlanBuilder {
+  /** The destination table is a policy, so it is injected rather than reached for. */
+  constructor(private readonly assets: HarnessAssetTable = HARNESS_ASSETS) {}
+
   build(config: FleetConfig, layout: FleetLayout, generatedAt: string): FleetApplyPlan {
     const accounts = resolveAccounts(config).map(account => ({
       ...account,
@@ -135,12 +157,13 @@ export class FleetPlan implements FleetPlanBuilder {
     directory: string,
     layout: FleetLayout,
   ): readonly FleetWriteOperation[] {
-    for (const field of unsupportedAssetFields(account.kind)) {
-      if (this.declares(account, field)) throw new UnsupportedAssetError(account.id, account.kind, field);
+    const unsupported = new Set(unsupportedAssetFields(this.assets, account.kind));
+    for (const field of declaredAssetFields(account)) {
+      if (unsupported.has(field)) throw new UnsupportedAssetError(account.id, account.kind, field);
     }
 
     const operations: FleetWriteOperation[] = [];
-    const settings = harnessAsset(account.kind, 'settings');
+    const settings = harnessAsset(this.assets, account.kind, 'settings');
     if (settings?.format !== undefined && account.settings.length > 0) {
       const layers: readonly SettingsLayerSource[] = account.settings.map(layer =>
         typeof layer === 'string'
@@ -160,7 +183,7 @@ export class FleetPlan implements FleetPlanBuilder {
     for (const field of PATH_ASSET_FIELDS) {
       const reference = account[field];
       if (reference === undefined) continue;
-      const asset = harnessAsset(account.kind, field);
+      const asset = harnessAsset(this.assets, account.kind, field);
       // unsupportedAssetFields already refused a field with no destination for this harness.
       if (asset === undefined) continue;
       const source = expandAssetPath(reference, layout.userHome, layout.assetsDirectory);
@@ -169,9 +192,5 @@ export class FleetPlan implements FleetPlanBuilder {
     }
 
     return operations;
-  }
-
-  private declares(account: ResolvedAccount, field: AssetField): boolean {
-    return field === 'settings' ? account.settings.length > 0 : account[field] !== undefined;
   }
 }
