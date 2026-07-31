@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import {
   type LearningConfig,
   SessionConfigSchema,
+  type StartSessionRequest,
   SessionStateSchema,
   type SessionView,
   TERMINAL_MAX_GLOBAL,
@@ -47,6 +48,7 @@ import {
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
+import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
@@ -120,6 +122,7 @@ import {
   type RecommendSubsystem,
   type RoutingCatalogPort,
   SessionControlError,
+  type SessionControlFailure,
   type SessionControlSubsystem,
   SessionReadError,
   type AccountInventoryPort,
@@ -141,6 +144,10 @@ import {
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
+  NameAllocator,
+  type NameAllocationErrorCode,
+  type NameAllocationRequest,
+  type NameAllocationResult,
   type NameClaim,
   type NameSubsystem,
   normalizeCallsign,
@@ -515,6 +522,19 @@ interface ExecutableResolverPort {
   resolve(name: string): string | undefined;
 }
 
+/**
+ * Callsign claiming, as a START needs it: take a name, and give one back when the start it was taken
+ * for never happened.
+ *
+ * The two halves come from different objects — the allocator decides, the ledger persists — and this
+ * is the pair the composition root hands over, so the mount's own dependency is the capability rather
+ * than two collaborators it would have to know how to assemble.
+ */
+interface CallsignClaims {
+  allocate(request: NameAllocationRequest): Promise<NameAllocationResult>;
+  release(callsign: string, ownerId: string): Promise<void>;
+}
+
 /** The account this start names, or a refusal that says which half of the resolution failed. */
 async function resolveStartAccount(
   accounts: AccountInventoryPort,
@@ -545,6 +565,45 @@ async function resolveStartAccount(
       `the fleet publishes ${account.agent} but this host has no such executable on its PATH`,
     );
   return { account, executable };
+}
+
+/** How each allocation refusal is answered. A taken callsign is a conflict a human can resolve by
+ *  choosing another name; an exhausted pool is the daemon having nothing left to offer. */
+const CALLSIGN_REFUSALS: Readonly<Record<NameAllocationErrorCode, SessionControlFailure>> = {
+  invalid_callsign: 'invalid',
+  callsign_taken: 'callsign_taken',
+  pool_exhausted: 'unavailable',
+  claim_store_failed: 'failed',
+  random_source_failed: 'failed',
+};
+
+/**
+ * The callsign this session will answer to, CLAIMED rather than recorded.
+ *
+ * A start that merely wrote down the requested name would let two sessions answer to one callsign,
+ * and a bare callsign then resolves to both — which is the whole reason `NameAllocator` exists. The
+ * claim is taken before the session document is written, because the document is what everything else
+ * derives ownership from and it does not exist yet.
+ *
+ * A start that names NO callsign gets none. Allocating automatically would burn a pool name on every
+ * session nobody addresses by name, and `teammate` is optional on the wire precisely because a session
+ * need not be a teammate.
+ */
+async function claimCallsign(
+  callsigns: CallsignClaims,
+  owner: SessionId,
+  request: StartSessionRequest,
+): Promise<string | undefined> {
+  if (request.teammate === undefined) return undefined;
+  const allocated = await callsigns.allocate({
+    ownerId: owner,
+    nowMs: Date.now(),
+    requested: request.teammate,
+    // The caller decides whether a taken name is a refusal or a fallback; the daemon does not guess.
+    ...(request.teammateFallback === true ? { fallback: true } : {}),
+  });
+  if (!allocated.ok) throw new SessionControlError(CALLSIGN_REFUSALS[allocated.error.code], allocated.error.message);
+  return allocated.claim.callsign;
 }
 
 /**
@@ -581,6 +640,7 @@ function createSessionControlSubsystem(
   accounts: AccountInventoryPort,
   executables: ExecutableResolverPort,
   ids: SessionIdFactory,
+  callsigns: CallsignClaims,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the payload it started, for this process's lifetime. */
   const spent = new Map<string, { readonly sessionId: SessionId; readonly payload: string }>();
@@ -614,11 +674,15 @@ function createSessionControlSubsystem(
         throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
       const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
       const id = ids.next();
+      // BEFORE the plan, because the callsign is what the harness's own remote-control session is
+      // named after: a plan built on the requested name and a document recording the fallback would
+      // disagree about who this session is.
+      const teammate = await claimCallsign(callsigns, id, request);
       const plan = planner.plan({
         id,
         account,
         mode: request.mode,
-        ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
+        ...(teammate === undefined ? {} : { teammate }),
         ...(request.name === undefined ? {} : { name: request.name }),
         ...(request.model === undefined ? {} : { requestedModel: request.model }),
         ...(request.parent === undefined ? {} : { parent: request.parent }),
@@ -647,7 +711,7 @@ function createSessionControlSubsystem(
         harnessFlags: [...(request.harnessFlags ?? [])],
         // Turn zero: the first turn is delivered by the launch below, and nothing has answered it.
         turn: 0,
-        ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
+        ...(teammate === undefined ? {} : { teammate }),
         ...(request.label === undefined ? {} : { label: request.label }),
         ...SESSION_START_DEFAULTS,
         ...(request.intervalSeconds === undefined ? {} : { intervalSeconds: request.intervalSeconds }),
@@ -674,6 +738,9 @@ function createSessionControlSubsystem(
         // the session that holds the evidence rather than an error the caller cannot follow up.
         const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);
         if (failed !== undefined) return failed;
+        // Nothing was recorded, so nothing holds this callsign: releasing the reservation is what
+        // stops a start that never happened from parking a name for the whole resolution window.
+        if (teammate !== undefined) await callsigns.release(teammate, id).catch(() => undefined);
         throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
       }
       spent.set(requestId, { sessionId: id, payload });
@@ -850,21 +917,59 @@ function createTerminalSubsystem(
  * The claim window is the pool policy's own, so a callsign frees up exactly when a bare reference to
  * it stops naming that session.
  */
+/**
+ * The callsigns the live fleet is using, derived from each session's own configuration document.
+ *
+ * This is the DURABLE half of "what is taken": a session's `teammate` is what a bare callsign
+ * resolves through, so a name a live session answers to is not free however the reservation ledger
+ * looks. Shared by the suggestion route and the allocator's claim store so the two cannot disagree
+ * about who owns a name.
+ */
+async function liveCallsigns(storage: DaemonStorage): Promise<readonly NameClaim[]> {
+  const sessions = await Promise.all(
+    storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
+      if (!config.success || config.data.teammate === undefined) return undefined;
+      const callsign = normalizeCallsign(config.data.teammate);
+      const claimedAtMs = Date.parse(config.data.createdAt);
+      if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
+      return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+    }),
+  );
+  return sessions.filter((claim): claim is NameClaim => claim !== undefined);
+}
+
+/**
+ * Callsign claiming for a start: the real allocator over the reservation ledger and the live fleet.
+ *
+ * The randomness is the same rotation the suggestion route uses, and for the same reason — two starts
+ * racing for the pool must not both begin at its first entry — and the ledger's executor is passed in
+ * so every claim in the process serializes on the one file.
+ */
+function createCallsignClaims(
+  storage: DaemonStorage,
+  files: StateFileSystem,
+  paths: FoundationPaths,
+  executor: KeyedSerialExecutor,
+): CallsignClaims {
+  const store = new FileNameClaimStore(
+    join(paths.state, 'callsigns.json'),
+    files,
+    executor,
+    async () => await liveCallsigns(storage),
+  );
+  const allocator = new NameAllocator(store, {
+    nextIndex: upperExclusive => Math.floor(Math.random() * upperExclusive),
+  });
+  return {
+    allocate: async request => await allocator.allocate(request),
+    release: async (callsign, ownerId) => await store.release(callsign, ownerId),
+  };
+}
+
 function createNameSubsystem(storage: DaemonStorage): NameSubsystem {
   return {
-    claims: async () => {
-      const sessions = await Promise.all(
-        storage.listSessions().map(async (session): Promise<NameClaim | undefined> => {
-          const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
-          if (!config.success || config.data.teammate === undefined) return undefined;
-          const callsign = normalizeCallsign(config.data.teammate);
-          const claimedAtMs = Date.parse(config.data.createdAt);
-          if (callsign === null || !Number.isFinite(claimedAtMs)) return undefined;
-          return { callsign, ownerId: session.id, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
-        }),
-      );
-      return sessions.filter((claim): claim is NameClaim => claim !== undefined);
-    },
+    claims: async () => await liveCallsigns(storage),
     now: () => Date.now(),
     // Rotating the start so two humans asking at the same moment are not both offered the same
     // first name and then made to collide when they start their sessions.
@@ -999,6 +1104,9 @@ export function buildWorld(): DaemonWorld {
   // Its own executor: a learning verdict must not queue behind a task board's transaction, and the
   // two snapshots share no file.
   const learningBoard = new TaskBoardSerialExecutor();
+  // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
+  // the read-modify-write of that one file must never interleave with another start's.
+  const callsignClaims = new KeyedSerialExecutor();
   // ONE executor for every session mutation in the process, shared by every lifecycle service built
   // per request. Session work gets its own rather than borrowing storage's: a start holding a
   // half-launched pane must not make every unrelated document write wait behind it.
@@ -1251,6 +1359,7 @@ export function buildWorld(): DaemonWorld {
           accounts,
           executables,
           sessionIds,
+          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
         ),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         analytics: createAnalyticsSubsystem(storage),

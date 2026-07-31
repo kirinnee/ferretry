@@ -12,43 +12,38 @@
 #   * an entry that has become reachable is a hard failure — delete it in the PR that wires it.
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# THE ONE UNIT FOUR OF THESE GROUPS ARE WAITING ON: A MOUNTED SESSION LIFECYCLE
+# THE UNIT FOUR OF THESE GROUPS WERE WAITING ON HAS LANDED: SESSION START AND STOP ARE MOUNTED
 #
-# PR #9's allocator, PR #12's attachments, PR #13's miner and PR #9's worktree barrel all name "a
-# mounted session start" or "a mounted session send" as their blocker. It is the same missing unit,
-# and the THIRD wiring unit established what that unit actually has to do, so nobody re-derives it:
+# `POST /v1/sessions` and `POST /v1/sessions/:id/stop` are served. The three gaps the third wiring
+# unit named were closed rather than worked around, and the four groups that named "a mounted session
+# start" as their blocker should be re-read against what actually exists now:
 #
-#   * IT IS A PORT, NOT A WIRE. `SessionLifecycleService` and all five of its adapters are built and
-#     CONSTRUCTED in `buildWorld()` — `world.createSessionLifecycle` is simply never called. Calling
-#     it is not enough, because of the three gaps below.
-#   * THE AGENT IS AN ABSOLUTE PATH. `CreateSessionLifecycleRequest` takes `agent` as an absolute
-#     executable and `command` as an argv array; the protocol's `StartSessionRequest.agent` is a
-#     wrapper NAME. Nothing in this daemon resolves one into the other, and the fleet manifest that
-#     could is only read by the recommender.
-#   * THE LIFECYCLE'S OWN DOCUMENT IS NOT THE PROTOCOL'S. `StorageSessionLifecycleRepository.write`
-#     persists a `SessionLifecycleConfig` — id, name, agent, command, cwd, mode, prompt, parent, the
-#     two instants and `tmuxSession`. `SessionConfigSchema` additionally demands `incarnation`,
-#     `runtimeGeneration`, `boardAccess`, `harness`, `remoteControl`, `harnessFlags`, `turn`,
-#     `intervalSeconds`, `retry` and more. EVERY mounted read `safeParse`s against that schema and
-#     drops what fails, so a session this lifecycle created today would be invisible to the session
-#     list, to task-board enrichment, to analytics and to the callsign pool. Reconciling the two
-#     documents is the bulk of the unit.
-#   * THERE IS NO SEND. The service delivers turn ONE and has no method for a later turn, so
-#     `POST /v1/sessions/:id/send` — the only place an attachment id can be spent — has no service
-#     behind it yet.
+#   * THE AGENT RESOLVES. The fleet manifest turns the protocol's wrapper NAME into an account and
+#     this host's `PATH` turns that into the absolute executable the lifecycle authorizes.
+#   * THE DOCUMENTS ARE RECONCILED. `StorageSessionLifecycleRepository` merges a protocol envelope
+#     beneath the lifecycle's own fields, so a session it creates is visible to the session list,
+#     task-board enrichment, analytics and the callsign pool — and every later transition merges over
+#     that document rather than replacing it.
+#   * THE CALLSIGN IS CLAIMED. `FileNameClaimStore` is the atomic claim store PR #9's allocator was
+#     waiting for, and the start takes the claim before the session document exists.
 #
-# TWO MORE SURFACES BLOCK ON THE SAME UNIT, and are recorded here because neither has an allowlist
-# line to carry the reason:
+# WHAT IS STILL MISSING, and what each remaining group needs on top of the start:
 #
-#   * THE EVENT JOURNAL HAS NO PRODUCER. `storage.append`/`storage.replay` are complete and indexed,
-#     and the only caller of `append` is the lifecycle repository nothing invokes — so
-#     `GET /v1/sessions/:id/events` would serve an empty list for every session, forever. It also
-#     needs a wire decision: `FyEvent` requires `turn` and `source`, and `SessionEventSchema` records
-#     neither, so the mount would have to invent both.
+#   * THERE IS STILL NO SEND. `SessionLifecycleService` delivers turn ONE and has no method for a
+#     later turn, so `POST /v1/sessions/:id/send` — the only place an attachment id can be spent — has
+#     no service behind it. PR #12's attachments need that AND a body reader on `ApiRequest`, which
+#     exposes `text()` and nothing else.
+#   * THE EVENT JOURNAL NOW HAS A PRODUCER, and `GET /v1/sessions/:id/events` is still unmounted.
+#     Every lifecycle transition appends to `storage.append`, so the journal a start writes is real
+#     evidence — but the read needs a wire decision the start did not make: `FyEvent` requires `turn`
+#     and `source`, and `SessionEventSchema` records neither.
 #   * NO SESSION RECORDS ITS TRANSCRIPT. `world.transcripts` is constructed and never called, and
-#     `TranscriptSource.read` takes the transcript FILE. `SessionConfigSchema` has no transcript
-#     field at all, which is the same wall `lib/learning/extract.ts` is behind: whoever mounts
-#     session start records where the harness wrote it, and both surfaces unblock together.
+#     `TranscriptSource.read` takes the transcript FILE. `SessionConfigSchema` has no transcript field
+#     at all, which is the same wall `lib/learning/extract.ts` is behind: the harness writes it, this
+#     daemon does not yet learn where, and both surfaces unblock together when it does.
+#   * PR #9's WORKTREE barrel needs the managed-worktree REGISTRY, not the start: a start does not
+#     create a worktree, and `ManagedWorktree` carries an ownership token, a creation instant and
+#     whether the branch pre-existed — none of it derivable from Git.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 # PR #5 — complete task board membership lifecycle
@@ -80,11 +75,13 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter
-# The callsign POOL is mounted: bin/fyd.ts derives the held callsigns from each session's own
-# `teammate`, and GET /v1/names suggests free ones. The ALLOCATOR is not, and cannot honestly be:
-# it claims a callsign, and a claim needs a store whose tryClaim is atomic across concurrent daemon
-# requests. No adapter implements one, and the claim belongs to the request that CREATES a session
-# — the unit that mounts session start — not to the one that asks what is free.
+# The callsign POOL and the ALLOCATOR are both mounted now. The allocator's blocker was recorded as
+# "an atomic claim store and a mounted session start", and the unit that mounted session start built
+# the store it needed: `FileNameClaimStore` keeps the reservation ledger in the state home, serialized
+# through one executor keyed on that file, which is atomic across concurrent requests because only one
+# daemon can hold the state home at all — the lifetime lock is what stops a second one serving.
+# `POST /v1/sessions` claims the callsign BEFORE it writes the session document, so `--teammate` on a
+# name another session answers to is a 409 rather than two sessions one callsign resolves to.
 #
 # The WORKTREE barrel is a different shape of gap, and worth stating exactly: every module beneath it
 # — parser, policy, ports, types — is already reachable, because the Git adapters import them
@@ -102,7 +99,6 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 # cheapest route, the removal CHECK at `/v1/worktrees/removal`, takes a `CheckManagedWorktreeRemovalInput`
 # whose first field is the persisted `ManagedWorktree` itself — so there is no subset of this surface
 # that the registry does not gate.
-packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
 packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is reachable; the barrel awaits a mount, which awaits a managed-worktree registry
 
 # PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
