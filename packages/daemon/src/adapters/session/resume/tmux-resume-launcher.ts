@@ -1,0 +1,89 @@
+import type { SessionId } from '../../../lib/session-id.ts';
+import type { PaneObservation, ResumeLauncher } from '../../../lib/session/resume/types.ts';
+import { retryDelays, type TmuxController } from '../../../lib/tmux/index.ts';
+
+/** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
+export type ResumeSleep = (milliseconds: number) => Promise<void>;
+
+/** What a resume needs to know about a session before it can address its terminal. */
+export interface ResumeLaunchSpec {
+  readonly tmuxSession: string;
+  readonly cwd: string;
+  readonly command: readonly string[];
+}
+
+/**
+ * The terminal side of a revive, over the daemon's own isolated tmux socket.
+ *
+ * Every address goes through the injected controller, which refuses a bare executable name — so no
+ * lookup can ever land on a tmux server the host already runs, and nothing here can touch a pane
+ * this daemon did not create.
+ */
+export class TmuxResumeLauncher implements ResumeLauncher {
+  private readonly frames = new Map<string, string>();
+
+  constructor(
+    private readonly tmux: TmuxController,
+    private readonly spec: (id: SessionId) => Promise<ResumeLaunchSpec>,
+    private readonly sleep: ResumeSleep,
+    private readonly readinessAttempts = 30,
+  ) {}
+
+  /** The final frame captured before a pane was destroyed, so discarded composer text is recoverable. */
+  finalFrame(id: SessionId): string | undefined {
+    return this.frames.get(id);
+  }
+
+  async observe(id: SessionId): Promise<PaneObservation> {
+    const state = await this.tmux.state((await this.spec(id)).tmuxSession);
+    return { alive: state.alive, dead: state.dead, promptReady: state.promptReady };
+  }
+
+  async snapshot(id: SessionId): Promise<void> {
+    const state = await this.tmux.state((await this.spec(id)).tmuxSession);
+    this.frames.set(id, state.visible);
+  }
+
+  async kill(id: SessionId, _reason: string): Promise<void> {
+    await this.tmux.stop((await this.spec(id)).tmuxSession);
+  }
+
+  async relaunch(id: SessionId): Promise<void> {
+    const spec = await this.spec(id);
+    const [program, ...arguments_] = spec.command;
+    if (program === undefined) throw new Error(`session ${id} has an empty command and cannot be relaunched`);
+    await this.tmux.launch({ session: spec.tmuxSession, cwd: spec.cwd, command: [program, ...arguments_] });
+  }
+
+  /**
+   * Types into the replacement pane, but only once the harness is at a prompt. A payload sent into
+   * a still-booting terminal is swallowed by the startup repaint, which reads exactly like an agent
+   * that was revived and then given no work at all.
+   */
+  async deliver(id: SessionId, instruction: string): Promise<void> {
+    const session = (await this.spec(id)).tmuxSession;
+    for (const delay of [0, ...retryDelays(this.readinessAttempts)]) {
+      if (delay > 0) await this.sleep(delay);
+      const state = await this.tmux.state(session);
+      if (!state.alive || state.dead)
+        throw new Error(`tmux session ${session} is not running; the resumed turn cannot be delivered`);
+      if (!state.promptReady) continue;
+      await this.tmux.sendLiteral(session, instruction);
+      await this.tmux.sendKey(session, 'Enter');
+      return;
+    }
+    throw new Error(`tmux session ${session} did not become ready to accept its resumed turn`);
+  }
+
+  /**
+   * Re-probes after a relaunch error, independently of whatever reported it.
+   *
+   * A readiness or injection failure is one observation. An exit is only CONFIRMED when the pane
+   * itself agrees — a live pane whose harness is still there means the harness survived the error,
+   * and killing it would destroy a working agent over a reporting failure.
+   */
+  async confirmExit(id: SessionId): Promise<{ confirmed: boolean; pane: PaneObservation }> {
+    const pane = await this.observe(id).catch(() => ({ alive: false, dead: true, promptReady: false }));
+    return { confirmed: !pane.alive || pane.dead, pane };
+  }
+}

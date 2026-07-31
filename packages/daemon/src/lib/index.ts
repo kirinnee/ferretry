@@ -39,6 +39,7 @@ export * from './runtime/index.ts';
 export * from './session-id.ts';
 export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
+export * from './session/resume/index.ts';
 export * from './state-home.ts';
 export * from './storage-types.ts';
 export * from './task-boards/index.ts';

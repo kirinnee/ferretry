@@ -57,11 +57,16 @@ import {
   TmuxSessionLifecycleLauncher,
 } from '../src/adapters/session/lifecycle/index.ts';
 import {
+  FileResumeTurnStore,
   FileSelfRestartStampStore,
   FileSessionHealthEventSink,
+  InMemoryLaunchGate,
+  NoMonitorSupervision,
   StorageConsistencyPass,
+  StorageResumeRepository,
   StorageSessionHealthInventory,
   SystemMonotonicClock,
+  TmuxResumeLauncher,
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
@@ -84,8 +89,11 @@ import {
   resolveStateHome,
   SelfRestartCoordinator,
   SessionHealthService,
+  SessionLifecycleConfigSchema,
   SessionLifecycleService,
+  SessionResumeService,
   defaultSessionHealthSettings,
+  defaultSessionResumeSettings,
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
@@ -166,6 +174,15 @@ export interface DaemonWorld {
    * landing those subsystems flip the flags and replace `UnmountedSupervisionRepair`.
    */
   readonly createSessionHealth: (storage: DaemonStorage) => SessionHealthService;
+  /**
+   * Reviving a stopped or dead session with its conversation intact: replace the terminal, hand the
+   * agent its next turn, and refuse the revives that would destroy work rather than recover it.
+   *
+   * Its monitor control is `NoMonitorSupervision` for now — this daemon runs no per-session
+   * monitors, so there is genuinely nothing to disarm before a revive or arm after one. The unit
+   * that lands monitoring replaces it.
+   */
+  readonly createSessionResume: (storage: DaemonStorage) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
@@ -329,6 +346,29 @@ export function buildWorld(): DaemonWorld {
           version: pkg.version,
         },
         defaultSessionHealthSettings,
+      ),
+    createSessionResume: storage =>
+      new SessionResumeService(
+        {
+          repository: new StorageResumeRepository(storage),
+          launcher: new TmuxResumeLauncher(
+            new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+            // Parsed, not asserted: a revive addresses a real terminal and runs a real command, so
+            // a config that no longer validates must refuse rather than launch something else.
+            async id => {
+              const config = SessionLifecycleConfigSchema.parse(await storage.readConfig(id));
+              return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
+            },
+            milliseconds => Bun.sleep(milliseconds),
+          ),
+          turns: new FileResumeTurnStore(id => createSessionPaths(paths, id).directory),
+          monitors: new NoMonitorSupervision(),
+          gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
+          // Its own queue: a revive must not serialize behind storage-wide work while it holds a
+          // half-replaced terminal.
+          serial: new KeyedSerialExecutor(),
+        },
+        defaultSessionResumeSettings,
       ),
     createUsageFeed: config => {
       // The collector endpoint first, then the command fallback for hosts where it is not
