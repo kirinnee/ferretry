@@ -8,8 +8,6 @@
  * reviewer can compare the phone and desktop renders against the original.
  */
 
-import { createRoot } from 'react-dom/client';
-import { useEffect, useState } from 'react';
 import type {
   BrowserStatus,
   AnalyticsResponse,
@@ -22,29 +20,46 @@ import type {
   LearningStatus,
   ProposalView,
 } from '@ferretry/protocol';
+import { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
 import { Composer } from '../src/components/composer.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
-import { TaskRow } from '../src/features/tasks/task-row.tsx';
-import { TaskQuickSummary } from '../src/features/tasks/task-row.tsx';
-import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
-import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
-import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
-import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
-import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
-import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
+import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
-import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
+import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
+import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
+import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
-import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
+import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
+import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
+import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
+import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
+import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
+import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
+import { daemonConnection } from '../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
+import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
+import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
+import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
+import { ContextMenu } from '../src/shell/context-menu.tsx';
+import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
+import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
+import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
+import { RcBadge } from '../src/shell/rc-badge.tsx';
+import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
+import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
+import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
 import {
   getSidePaneTabDefinitions,
   openSidePaneFileTab,
@@ -53,24 +68,9 @@ import {
   resolveSidePaneTab,
   type SidePaneTabDefinition,
 } from '../src/shell/side-pane-tab-model.ts';
-import { AppBar } from '../src/shell/app-bar.tsx';
-import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
-import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
-import { ContextMenu } from '../src/shell/context-menu.tsx';
-import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
-import { ModeBadge } from '../src/shell/mode-badge.tsx';
-import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
-import { RcBadge } from '../src/shell/rc-badge.tsx';
-import { StatusMark } from '../src/shell/status-mark.tsx';
-import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
-import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
-import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
-import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
-import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
+import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
-import { daemonConnection } from '../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -757,6 +757,22 @@ function Shell() {
           </PanelHeader>
           <PanelBody>
             <MarkdownComposerSettings />
+          </PanelBody>
+        </Card>
+
+        <Card aria-label="Learning header">
+          <PanelHeader>
+            <Label>Learning</Label>
+          </PanelHeader>
+          <PanelBody>
+            <LearningHeader
+              busy={false}
+              canRun
+              failed={false}
+              now={HARNESS_NOW}
+              onRunNow={() => {}}
+              status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
+            />
           </PanelBody>
         </Card>
 
