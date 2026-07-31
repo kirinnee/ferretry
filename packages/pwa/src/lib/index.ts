@@ -37,4 +37,5 @@ export * from './pages/warden-page.tsx';
 export * from './pairing.ts';
 export * from './pin-store.ts';
 export * from './runtime-models.ts';
+export * from './remote-browser.ts';
 export * from './session-screens.ts';
