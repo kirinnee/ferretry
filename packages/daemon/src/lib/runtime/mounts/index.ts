@@ -2,7 +2,9 @@ import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
+import type { AttentionService } from '../../attention/index.ts';
 import type { PinService } from '../../pins/index.ts';
+import { attentionRoutes } from './attention.ts';
 import { pinRoutes } from './pins.ts';
 
 /**
@@ -24,6 +26,7 @@ import { pinRoutes } from './pins.ts';
 /** Every already-built subsystem this daemon process serves. One field per subsystem; the field's
  *  presence is the proof that production constructs it. */
 export interface MountedSubsystems {
+  readonly attention: AttentionService;
   readonly pins: PinService;
 }
 
@@ -34,7 +37,7 @@ export interface MountedSubsystems {
  * literal paths (`/healthz`, `/usage`, `/metrics`), so no subsystem pattern can shadow one.
  */
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
-  return [...daemonApiRoutes(base), ...pinRoutes(subsystems.pins)];
+  return [...daemonApiRoutes(base), ...attentionRoutes(subsystems.attention), ...pinRoutes(subsystems.pins)];
 }
 
 /** The dispatcher the transport adapter serves, over the full mounted surface. */
