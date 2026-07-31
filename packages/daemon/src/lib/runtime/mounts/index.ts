@@ -12,6 +12,7 @@ import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
+import { sessionControlRoutes, type SessionControlSubsystem } from './session-control.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
@@ -39,9 +40,11 @@ export interface MountedSubsystems {
   readonly health: DaemonHealthSubsystem;
   readonly attention: AttentionService;
   readonly pins: PinService;
-  /** The session read: what the fleet holds, and one session in full. Reading only — a start, a
-   *  send and a stop belong to the unit that mounts the session lifecycle. */
+  /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
+  /** The session write: starting one agent and stopping it. A SEND is not here — the lifecycle
+   *  delivers turn one and has no method for a later turn. */
+  readonly sessionControl: SessionControlSubsystem;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
   /** The fleet-wide analytics read over every finished session's durable record. */
@@ -74,6 +77,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
     // deeper per-session routes that follow.
     ...sessionRoutes(subsystems.sessions),
+    // The write surface registers AFTER the read for the same reason the read comes first: `POST
+    // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
+    // other and both sit above every per-session subsystem that follows.
+    ...sessionControlRoutes(subsystems.sessionControl),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
