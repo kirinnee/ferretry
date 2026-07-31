@@ -15,6 +15,7 @@ import {
   emptyFeed,
   FakeSessionControl,
   FakeSessionMigrate,
+  FakeTaskBoards,
   FakeSessionResume,
   FakeTerminals,
   healthSubsystem,
@@ -46,6 +47,7 @@ const subsystems = (): MountedSubsystems => ({
   sessionResume: new FakeSessionResume(),
   sessionMigrate: new FakeSessionMigrate(),
   tasks: taskSubsystem(),
+  taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
   names: nameSubsystem(),
@@ -81,6 +83,18 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/tasks',
       'GET /v1/sessions/:sessionId/tasks/:taskId',
       'POST /v1/sessions/:sessionId/tasks/:taskId',
+      // The board MEMBERSHIP surface. Three of the CLI's eleven board routes are absent on purpose —
+      // `/mark-done` and `/grants/revoke` have no reducer in the domain at all, and
+      // `/coordinator/replace` has one whose administrator authority the wire cannot supply. See the
+      // mount's header; this list is the proof of exactly which eight are real.
+      'GET /v1/task-boards/membership',
+      'POST /v1/task-boards/create',
+      'POST /v1/task-boards/child-grants/request',
+      'POST /v1/task-boards/child-grants/approve',
+      'POST /v1/task-boards/invitations/request',
+      'POST /v1/task-boards/invitations/approve',
+      'POST /v1/task-boards/invitations/accept',
+      'POST /v1/task-boards/membership/relinquish',
       'GET /v1/analytics',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',

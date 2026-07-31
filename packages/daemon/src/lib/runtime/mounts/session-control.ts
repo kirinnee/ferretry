@@ -27,9 +27,16 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * one option this daemon cannot honour yet, answered with `501` and a code naming the missing unit
  * rather than accepted and dropped:
  *
- *   * `boardAccess` other than `none` — a board grant is keyed on a per-session capability this
- *     daemon mints nowhere. Accepting the field would hand back a session whose caller believes it
- *     may write a board it cannot reach.
+ *   * `boardAccess` other than `none` — and the recorded reason for this has CHANGED, because the two
+ *     things it used to name both exist now. The per-session capability is minted for every session,
+ *     and the parent's own board capability travels on this very request as `x-fy-board-capability`
+ *     (see `IFyApiClient.start`), so the daemon holds everything it needs to identify the requester.
+ *     What it cannot do is finish the grant: `/v1/task-boards` is mounted, and a child grant there is
+ *     PENDING until the current coordinator approves it. A start that requested one would launch a
+ *     pane holding a capability that authorizes nothing until a third party acts, which is worse than
+ *     refusing — the session would believe it had board access. Deciding whether a start may
+ *     auto-approve its own child grant is an authorization decision about the coordinator's role, so
+ *     it belongs to a unit that makes it deliberately.
  *
  * `initialAttachments` USED TO BE THE SECOND, and it is served now. It is not the multipart upload
  * route and never needed one: the bytes travel INLINE as base64 in this very body, and the only
@@ -168,7 +175,7 @@ function parseStart(text: string): StartSessionRequest {
   if (start.boardAccess !== 'none')
     throw new ApiError(
       501,
-      'task board access is not mounted: a board grant needs a per-session capability this daemon does not mint yet',
+      'task board access at start is not mounted: a child grant is pending until the coordinator approves it, so a start cannot hand the new pane a capability that authorizes anything',
       'board_access_not_mounted',
     );
   return start;

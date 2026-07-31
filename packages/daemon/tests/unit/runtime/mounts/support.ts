@@ -37,6 +37,15 @@ import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/anal
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
+import type { TaskBoardSubsystem } from '../../../../src/lib/runtime/mounts/task-boards.ts';
+import {
+  EMPTY_TASK_BOARD_REPOSITORY_STATE,
+  type TaskBoardCredentialIssuer,
+  type TaskBoardRepository,
+  type TaskBoardRepositoryState,
+  type TaskBoardSession,
+  type TaskBoardSessionDirectory,
+} from '../../../../src/lib/task-boards/types.ts';
 import { RecommendError, type RecommendSubsystem } from '../../../../src/lib/runtime/mounts/recommend.ts';
 import { SessionReadError, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import {
@@ -928,4 +937,91 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
     // would be indistinguishable from a read.
     return sessionView(sessionId, { agent: request.agent }, { status: 'running', turn: 2 });
   }
+}
+
+/**
+ * A task-board world held entirely in memory.
+ *
+ * The REDUCERS are production code — this fake supplies only the four ports they were written against
+ * — so a board built through these routes is authorized by the same policy a real one is. What is
+ * faked is the document (a variable rather than a file), the clock, the randomness, and the delivery
+ * channel, which is recorded so a test can assert that a minted capability was handed to the session
+ * it was minted for rather than merely produced.
+ */
+export class FakeTaskBoards implements TaskBoardSubsystem {
+  /** The authoritative state, exactly as a committed document would hold it. */
+  state: TaskBoardRepositoryState = EMPTY_TASK_BOARD_REPOSITORY_STATE;
+  /** Every delivery, in order: `[sessionId, variables]`. */
+  readonly delivered: [string, Readonly<Record<string, string>>][] = [];
+  /** Ids are sequential so an assertion can name one. */
+  private minted = 0;
+  /** Raised by `deliver` when set, so the failure of a delivery is drivable. */
+  deliveryFailure?: Error;
+
+  constructor(
+    private readonly directory: readonly TaskBoardSession[] = [],
+    /** The operator's capability. A test presenting anything else must be refused. */
+    readonly operatorCapability = 'operator-secret',
+  ) {}
+
+  readonly issuer: TaskBoardCredentialIssuer = {
+    id: kind => {
+      this.minted += 1;
+      return `${kind}-${this.minted}`;
+    },
+    capability: () => {
+      this.minted += 1;
+      const value = `capability-${this.minted}`;
+      return { value, hash: this.issuer.hash(value) };
+    },
+    // A prefix rather than a digest, so a failing assertion names the secret it was derived from.
+    hash: value => `hash:${value}`,
+  };
+
+  readonly repository: TaskBoardRepository = {
+    snapshot: async () => this.state,
+    transaction: async operation => {
+      const mutation = await operation(this.state);
+      this.state = mutation.state;
+      return mutation.result;
+    },
+  };
+
+  readonly sessions: TaskBoardSessionDirectory = { snapshot: async () => this.directory };
+
+  /** The instant every mutation is stamped with. Settable so a test can let an invitation expire. */
+  instant: string = AT;
+
+  now(): string {
+    return this.instant;
+  }
+
+  async operatorCapabilityHash(): Promise<string> {
+    return this.issuer.hash(this.operatorCapability);
+  }
+
+  async deliver(sessionId: string, variables: Readonly<Record<string, string>>): Promise<void> {
+    if (this.deliveryFailure !== undefined) throw this.deliveryFailure;
+    this.delivered.push([sessionId, variables]);
+  }
+
+  /** The plaintext capability the board issued to one session, as its binding holds it. */
+  capabilityFor(sessionId: string): string | undefined {
+    return this.state.bindings.find(binding => binding.sessionId === sessionId)?.capability;
+  }
+}
+
+/** A session the board domain can address: it carries a credential hash, so a grant can bind to it. */
+export function boardSession(input: Partial<TaskBoardSession> & Pick<TaskBoardSession, 'id'>): TaskBoardSession {
+  return {
+    id: input.id,
+    incarnation: input.incarnation ?? `${input.id}-1`,
+    runtimeGeneration: input.runtimeGeneration ?? 1,
+    parentSessionId: input.parentSessionId ?? null,
+    mode: input.mode ?? 'interactive',
+    active: input.active ?? true,
+    name: input.name ?? null,
+    teammate: input.teammate ?? null,
+    sessionCapabilityHash: input.sessionCapabilityHash ?? `hash:session:${input.id}`,
+  };
 }

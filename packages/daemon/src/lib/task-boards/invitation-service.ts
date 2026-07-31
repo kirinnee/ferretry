@@ -68,7 +68,9 @@ export type AcceptanceResult =
   | { readonly accepted: true; readonly membership: TaskBoardMembership }
   | { readonly accepted: false; readonly invitation: TaskBoardInvitationView };
 
-function invitationView(invitation: TaskBoardInvitation): TaskBoardInvitationView {
+/** The wire projection of an invitation. Exported so the mount reports the same shape the service
+ *  does rather than a second, drifting copy of it. */
+export function invitationView(invitation: TaskBoardInvitation): TaskBoardInvitationView {
   const common = {
     requestId: invitation.requestId,
     sourceSessionId: invitation.sourceSessionId,

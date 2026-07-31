@@ -16,6 +16,7 @@ import { sessionControlRoutes, type SessionControlSubsystem } from './session-co
 import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
+import { taskBoardRoutes, type TaskBoardSubsystem } from './task-boards.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
 
@@ -56,6 +57,10 @@ export interface MountedSubsystems {
   readonly sessionMigrate: SessionMigrateSubsystem;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
+  /** The shared task-board MEMBERSHIP lifecycle — who is on a board and what they may do — as
+   *  distinct from `tasks`, which is the records themselves. Three of the CLI's eleven board routes
+   *  are not served; the mount's own header names each one and why. */
+  readonly taskBoards: TaskBoardSubsystem;
   /** The fleet-wide analytics read over every finished session's durable record. */
   readonly analytics: AnalyticsSubsystem;
   /** Independent shell terminals attached to a session's working directory. */
@@ -101,6 +106,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
+    // The board membership surface registers beside the records it governs. Every path is under
+    // `/v1/task-boards`, which no other subsystem uses, so it can neither shadow nor be shadowed —
+    // and its own fixed literals are registered before its deeper patterns.
+    ...taskBoardRoutes(subsystems.taskBoards),
     ...analyticsRoutes(subsystems.analytics),
     ...terminalRoutes(subsystems.terminals),
     ...nameRoutes(subsystems.names),
