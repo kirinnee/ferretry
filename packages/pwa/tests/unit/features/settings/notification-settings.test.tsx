@@ -66,6 +66,13 @@ describe('NotificationSettingsView', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_DENIED_NOTE);
   });
 
+  it('reports an in-progress Web Push registration without claiming closed-app delivery is ready', () => {
+    const { renderer } = view({ delivery: 'checking' });
+    const tree = JSON.stringify(renderer.toJSON());
+    expect(tree).toContain('Checking closed-app Web Push');
+    expect(tree).not.toContain('closed-app delivery is ready');
+  });
+
   it('updates an explicit protocol preference without creating daemon-global state', () => {
     const { calls, renderer } = view();
     const completed = renderer.root
