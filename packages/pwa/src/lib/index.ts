@@ -11,6 +11,8 @@ export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';
 export * from '../features/warden/warden-status-model.ts';
 export * from '../features/warden/warden-strip.tsx';
+export * from '../features/warden/warden-config-card.tsx';
+export * from '../features/warden/warden-verdicts.tsx';
 export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-layout-mode.ts';

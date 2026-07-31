@@ -16,6 +16,7 @@ import type {
   TaskLive,
   TaskStatus,
   TaskSummary,
+  WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
 import { Composer } from '../src/components/composer.tsx';
@@ -28,6 +29,8 @@ import { TaskQuickSummary } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
+import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
@@ -202,6 +205,12 @@ const WARDEN: WardenStatusView = {
   },
 };
 
+const WARDEN_CONFIG: WardenConfigView = {
+  config: WARDEN.config,
+  accounts: WARDEN.config.accounts,
+  warnings: ['Account order takes effect on the next sweep.'],
+};
+
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
@@ -297,7 +306,6 @@ class HarnessBrowserSocket implements RemoteBrowserSocket {
 
 const harnessFrame =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"%3E%3Crect width="640" height="480" fill="%23111827"/%3E%3Crect x="32" y="32" width="576" height="54" rx="8" fill="%231f2937"/%3E%3Ccircle cx="58" cy="59" r="8" fill="%23ef4444"/%3E%3Ccircle cx="82" cy="59" r="8" fill="%23f59e0b"/%3E%3Ccircle cx="106" cy="59" r="8" fill="%2310b981"/%3E%3Crect x="140" y="46" width="390" height="26" rx="5" fill="%23374151"/%3E%3Ctext x="158" y="64" fill="%23d1d5db" font-family="system-ui" font-size="14"%3Ehttps://example.test%3C/text%3E%3Ctext x="320" y="250" text-anchor="middle" fill="%23f9fafb" font-family="system-ui" font-size="30"%3ERemote browser%3C/text%3E%3Ctext x="320" y="286" text-anchor="middle" fill="%239ca3af" font-family="system-ui" font-size="16"%3ELive daemon-scoped frame%3C/text%3E%3C/svg%3E';
-
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
@@ -379,6 +387,31 @@ function Shell() {
             {viewport.width}×{viewport.height}
           </span>
         </header>
+
+        <WardenVerdicts
+          connection={daemon}
+          now={HARNESS_NOW}
+          onOpenReport={() => {}}
+          verdicts={[
+            {
+              at: '2026-07-31T11:58:00.000Z',
+              targetSession: 'sess-1',
+              teammate: 'ms-98',
+              verdict: 'nudged',
+              reason: 'Asked the session to report its current blocker',
+              reportPath: 'warden/2026-07-31T11-58.md',
+              spawn: {
+                agent: 'claude-auto-loge',
+                model: 'claude-sonnet-4-5',
+                modelSource: 'harness',
+                harness: 'claude',
+                failedOver: true,
+                configuredFirst: 'claude-auto-opus',
+                skipped: { 'claude-auto-opus': 'at quota' },
+              },
+            },
+          ]}
+        />
 
         <SessionCommandControls
           api={{ compact: async () => {} }}
@@ -471,6 +504,13 @@ function Shell() {
             <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
           </PanelBody>
         </Card>
+        <WardenConfigCard
+          connection={daemon}
+          view={WARDEN_CONFIG}
+          failover={WARDEN.failover}
+          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+          onSave={() => {}}
+        />
 
         <Card className="overflow-hidden">
           <PanelHeader>
