@@ -95,6 +95,51 @@ describe('tmux addresses and commands', () => {
     ])
       should(action).throw(TmuxAddressError);
   });
+
+  it('should place the session environment before the command, sorted, with the value passed through verbatim', () => {
+    // Act
+    const actual = newSessionArguments({
+      session: 'work-1',
+      cwd: '/tmp',
+      command: ['agent', '--auto'],
+      env: { FY_SESSION_ID: 'sess-1', FY_SESSION_BOARD_CAPABILITY: 'tok en$(whoami)`x`' },
+    });
+
+    // Assert
+    // `-e` is an option of `new-session`, so anything after the command word would be an argument to
+    // the AGENT rather than an environment entry — and the secret is handed over unquoted because it
+    // never reaches a shell to expand it.
+    should(actual).deepEqual([
+      'new-session',
+      '-d',
+      '-s',
+      'work-1',
+      '-c',
+      '/tmp',
+      '-e',
+      'FY_SESSION_BOARD_CAPABILITY=tok en$(whoami)`x`',
+      '-e',
+      'FY_SESSION_ID=sess-1',
+      'agent',
+      '--auto',
+    ]);
+  });
+
+  it('should refuse an environment entry tmux would deliver under the wrong name or truncate', () => {
+    // Act + Assert
+    const refused: ReadonlyArray<Readonly<Record<string, string>>> = [
+      { 'FY_A=B': 'value' },
+      { '2FY': 'value' },
+      { 'FY-A': 'value' },
+      { '': 'value' },
+      { FY_A: 'line\nmore' },
+      { FY_A: 'nul\0byte' },
+    ];
+    for (const env of refused)
+      should(() => newSessionArguments({ session: 'work-1', cwd: '/tmp', command: ['agent'], env })).throw(
+        TmuxAddressError,
+      );
+  });
 });
 
 describe('tmux pane policy', () => {

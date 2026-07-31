@@ -32,4 +32,14 @@ export interface TmuxLaunch {
   readonly command: readonly [string, ...string[]];
   readonly width?: number;
   readonly height?: number;
+  /**
+   * Environment set on the tmux session itself, for values the launched program must read from its
+   * ENVIRONMENT rather than its argv.
+   *
+   * It exists because a per-session secret has nowhere else to travel: argv is world-readable
+   * through `/proc`, and the agent wrappers this daemon launches read their board capability from
+   * `FY_SESSION_BOARD_CAPABILITY`. Every entry becomes one `-e NAME=VALUE` on `new-session`, so a
+   * value never reaches a shell for word-splitting or expansion.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
