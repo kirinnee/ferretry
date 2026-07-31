@@ -775,7 +775,6 @@ function Shell() {
             />
           </PanelBody>
         </Card>
-
         <Card className="overflow-hidden">
           <PanelHeader>
             <Label>Tasks</Label>
