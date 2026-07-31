@@ -47,7 +47,21 @@ function normalizeParsedRecord(
   byteLength: number,
 ): TranscriptRecordResult {
   try {
-    return parser.parseRecord(value, { source: input.source, sessionId: input.sessionId, line });
+    const result = parser.parseRecord(value, {
+      source: input.source,
+      sessionId: input.sessionId,
+      line,
+      byteOffset,
+      byteLength,
+    });
+    return {
+      ...result,
+      issues: result.issues.map(issue => ({
+        ...issue,
+        byteOffset: issue.byteOffset ?? byteOffset,
+        byteLength: issue.byteLength ?? byteLength,
+      })),
+    };
   } catch {
     return {
       events: [],
@@ -65,12 +79,13 @@ export function parseTranscriptJsonl(
   const events = [] as TranscriptParseResult['events'][number][];
   const issues: TranscriptIssue[] = [];
   const startLine = Math.max(1, input.startLine ?? 1);
+  const startByteOffset = input.startByteOffset ?? 0;
   const endOfInput = input.endOfInput ?? true;
   let parsedRecords = 0;
   let ignoredRecords = 0;
   let line = startLine;
   let characterOffset = 0;
-  let byteOffset = 0;
+  let byteOffset = Number.isFinite(startByteOffset) ? Math.max(0, Math.floor(startByteOffset)) : 0;
 
   const consume = (rawLine: string, complete: boolean): boolean => {
     const normalizedLine = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;

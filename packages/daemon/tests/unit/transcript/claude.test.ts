@@ -35,6 +35,7 @@ describe('ClaudeTranscriptParser', () => {
       text: 'Please inspect the synthetic fixture.',
     });
     should(actual.events[2]).containDeep({ kind: 'attachment', attachment: { kind: 'image', name: 'fixture.png' } });
+    should(actual.events[3]).containDeep({ kind: 'reasoning', stopReason: 'tool_use' });
     should(actual.events[5]).containDeep({
       kind: 'tool-call',
       call: { id: 'tool-question', name: 'AskUserQuestion', questions: [{ question: 'Which synthetic option?' }] },
@@ -108,9 +109,12 @@ describe('ClaudeTranscriptParser', () => {
     // Arrange
     const subject = new ClaudeTranscriptParser();
     const cases = [
+      {},
       { type: 'system', subtype: 'error', error: {} },
       { type: 'user', message: { role: 'user', content: [null] } },
       { type: 'user', message: { role: 'user', content: [{ type: 'tool_result' }] } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: ' ', name: 'Bash' }] } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: ' ' }] } },
     ];
 
     // Act
@@ -119,5 +123,67 @@ describe('ClaudeTranscriptParser', () => {
     // Assert
     should(actual.every(result => result.events.length === 0)).be.true();
     should(actual.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
+  });
+
+  it('should suppress an all-zero usage block', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const input = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [],
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      },
+    };
+
+    // Act
+    const actual = subject.parseRecord(input);
+
+    // Assert
+    should(actual.events).be.empty();
+    should(actual.issues).be.empty();
+  });
+
+  it('should accept only provenance-marked human queue prompts and trusted remote-control URLs', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const queued = (overrides: Record<string, unknown>) => ({
+      type: 'attachment',
+      attachment: {
+        type: 'queued_command',
+        prompt: 'Synthetic queued prompt.',
+        commandMode: 'prompt',
+        origin: { kind: 'human' },
+        ...overrides,
+      },
+    });
+    const bridge = (url: unknown) => ({
+      type: 'system',
+      subtype: 'bridge_status',
+      content: 'Remote control prose must not become chat.',
+      url,
+    });
+
+    // Act
+    const rejectedQueues = [
+      queued({ commandMode: 'task-notification' }),
+      queued({ origin: undefined }),
+      queued({ origin: { kind: 'task' } }),
+      queued({ prompt: '   ' }),
+    ].map(record => subject.parseRecord(record));
+    const rejectedBridges = [bridge(undefined), bridge('https://example.invalid/code/session')].map(record =>
+      subject.parseRecord(record),
+    );
+    const accepted = subject.parseRecord(queued({}));
+    const remote = subject.parseRecord(bridge('https://claude.ai/code/session_synthetic'));
+
+    // Assert
+    should(rejectedQueues.every(result => result.events.length === 0)).be.true();
+    should(rejectedBridges.every(result => result.events.length === 0)).be.true();
+    should(accepted.events).containDeep([
+      { role: 'user', kind: 'attachment', attachment: { kind: 'queued-command', origin: 'human' } },
+    ]);
+    should(remote.events).containDeep([{ role: 'system', kind: 'attachment', attachment: { kind: 'remote-control' } }]);
   });
 });

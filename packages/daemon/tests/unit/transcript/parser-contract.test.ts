@@ -39,6 +39,18 @@ function parserContract(fixture: ParserFixture): void {
 
       // Assert
       should(actual.events).have.length(2);
+      should(actual.events[0]).containDeep({
+        source: 'synthetic.jsonl',
+        line: 1,
+        byteOffset: 0,
+        byteLength: valid.length,
+      });
+      should(actual.events[1]).containDeep({
+        source: 'synthetic.jsonl',
+        line: 3,
+        byteOffset: Buffer.byteLength(`${valid}\n{interleaved}\n`),
+        byteLength: valid.length,
+      });
       should(actual.issues.map(issue => issue.code)).deepEqual(['invalid-json', 'truncated-json']);
       should(actual.remainder).equal('{"truncated":');
       should(actual.parsedRecords).equal(2);
@@ -106,6 +118,37 @@ function parserContract(fixture: ParserFixture): void {
       should(actual.events).have.length(0);
       should(actual.issues).have.length(1);
       should(actual.issues[0]?.code).equal('invalid-record');
+    });
+
+    it('should report malformed-line byte offsets relative to the supplied file position', () => {
+      // Act
+      const actual = fixture.subject.parse({ text: '{broken}\n', startByteOffset: 41 });
+
+      // Assert
+      should(actual.issues).containDeep([{ code: 'invalid-json', byteOffset: 41, byteLength: 8 }]);
+    });
+
+    it('should enrich semantic record issues with the record byte range', () => {
+      // Arrange
+      const valid = JSON.stringify(fixture.record);
+      const invalid = JSON.stringify(
+        fixture.name === 'Claude'
+          ? {
+              type: 'assistant',
+              message: { role: 'assistant', content: [{ type: 'tool_use', name: 'missing-id' }] },
+            }
+          : { type: 'response_item', payload: { type: 'function_call', name: 'missing-id' } },
+      );
+
+      // Act
+      const actual = fixture.subject.parse({ text: `${valid}\n${invalid}\n`, startByteOffset: 17 });
+
+      // Assert
+      should(actual.issues[0]).containDeep({
+        line: 2,
+        byteOffset: 17 + Buffer.byteLength(`${valid}\n`),
+        byteLength: Buffer.byteLength(invalid),
+      });
     });
   });
 }

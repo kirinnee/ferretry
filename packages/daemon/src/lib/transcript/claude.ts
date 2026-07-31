@@ -31,16 +31,21 @@ function claudeMetadata(
   message: Record<string, unknown>,
   role: TranscriptRole,
   blockIndex?: number,
-  fallbackSessionId?: string,
+  context: TranscriptRecordContext = {},
 ): TranscriptEventMetadata {
   return {
     harness: 'claude',
     role,
+    source: context.source,
+    line: context.line,
+    byteOffset: context.byteOffset,
+    byteLength: context.byteLength,
     timestamp: transcriptString(record.timestamp),
-    sessionId: transcriptString(record.sessionId) ?? fallbackSessionId,
+    sessionId: transcriptString(record.sessionId) ?? context.sessionId,
     recordId: transcriptString(record.uuid),
     parentRecordId: transcriptNullableString(record.parentUuid),
     messageId: transcriptString(message.id),
+    stopReason: transcriptString(message.stop_reason),
     blockIndex,
   };
 }
@@ -90,7 +95,7 @@ function claudeErrorMessage(value: unknown): { message?: string; code?: string }
 function claudeUsage(
   record: Record<string, unknown>,
   message: Record<string, unknown>,
-  fallbackSessionId?: string,
+  context: TranscriptRecordContext = {},
 ): TranscriptUsageEvent | undefined {
   const usage = transcriptObject(message.usage);
   if (usage === undefined) return undefined;
@@ -99,12 +104,10 @@ function claudeUsage(
   const outputTokens = transcriptNumber(usage.output_tokens);
   const cachedInputTokens = transcriptNumber(usage.cache_read_input_tokens);
   const cacheCreationInputTokens = transcriptNumber(usage.cache_creation_input_tokens);
-  if (
-    inputTokens === undefined &&
-    outputTokens === undefined &&
-    cachedInputTokens === undefined &&
-    cacheCreationInputTokens === undefined
-  ) {
+  const tokenValues = [inputTokens, outputTokens, cachedInputTokens, cacheCreationInputTokens].filter(
+    (value): value is number => value !== undefined,
+  );
+  if (tokenValues.length === 0 || tokenValues.every(value => value === 0)) {
     return undefined;
   }
 
@@ -113,7 +116,7 @@ function claudeUsage(
   );
   const contextTokens = contextParts.length > 0 ? contextParts.reduce((total, value) => total + value, 0) : undefined;
   return {
-    ...claudeMetadata(record, message, 'system', undefined, fallbackSessionId),
+    ...claudeMetadata(record, message, 'system', undefined, context),
     kind: 'usage',
     usage: {
       inputTokens,
@@ -147,9 +150,16 @@ export class ClaudeTranscriptParser implements TranscriptParser {
     const recordType = transcriptString(record.type);
     const message = transcriptObject(record.message) ?? {};
     const metadata = (role: TranscriptRole, blockIndex?: number): TranscriptEventMetadata =>
-      claudeMetadata(record, message, role, blockIndex, context.sessionId);
+      claudeMetadata(record, message, role, blockIndex, context);
     const events: TranscriptEvent[] = [];
     const issues = [] as TranscriptRecordResult['issues'][number][];
+
+    if (recordType === undefined && claudeRole(message.role) === undefined) {
+      issues.push(
+        transcriptRecordIssue(this.harness, context, 'invalid-record', 'Claude record has no valid type or role'),
+      );
+      return { events, issues, recognized: true };
+    }
 
     if (recordType === 'attachment') {
       const attachment = transcriptObject(record.attachment);
@@ -244,7 +254,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       if (blockType === 'tool_use' && role === 'assistant') {
         const id = transcriptString(block.id);
         const name = transcriptString(block.name);
-        if (id === undefined || name === undefined) {
+        if (id === undefined || id.trim().length === 0 || name === undefined || name.trim().length === 0) {
           issues.push(
             transcriptRecordIssue(
               this.harness,
@@ -271,7 +281,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       }
       if (blockType === 'tool_result') {
         const callId = transcriptString(block.tool_use_id);
-        if (callId === undefined) {
+        if (callId === undefined || callId.trim().length === 0) {
           issues.push(
             transcriptRecordIssue(
               this.harness,
@@ -339,7 +349,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       events.push({ ...metadata('system'), kind: 'turn', state: 'completed' });
     }
     if (role === 'assistant') {
-      const usage = claudeUsage(record, message, context.sessionId);
+      const usage = claudeUsage(record, message, context);
       if (usage !== undefined) events.push(usage);
     }
 

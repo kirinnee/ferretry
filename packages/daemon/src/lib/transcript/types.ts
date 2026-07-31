@@ -29,12 +29,19 @@ export interface TranscriptQuestion {
 export interface TranscriptEventMetadata {
   readonly harness: TranscriptHarness;
   readonly role: TranscriptRole;
+  readonly source?: string;
+  readonly line?: number;
+  readonly byteOffset?: number;
+  readonly byteLength?: number;
   readonly timestamp?: string;
   readonly sessionId?: string;
   readonly recordId?: string;
   readonly parentRecordId?: string | null;
+  readonly itemId?: string;
   readonly messageId?: string;
   readonly turnId?: string;
+  readonly phase?: string;
+  readonly stopReason?: string;
   readonly blockIndex?: number;
 }
 
@@ -77,6 +84,13 @@ export type TranscriptAttachment =
     }
   | {
       readonly kind: 'image';
+      readonly name?: string;
+      readonly mediaType?: string;
+      readonly uri?: string;
+      readonly data?: string;
+    }
+  | {
+      readonly kind: 'audio';
       readonly name?: string;
       readonly mediaType?: string;
       readonly uri?: string;
@@ -187,12 +201,16 @@ export interface TranscriptParseInput {
   readonly endOfInput?: boolean;
   /** One-based line number assigned to the first line in `text`. */
   readonly startLine?: number;
+  /** Zero-based file byte offset assigned to the first byte in `text`. */
+  readonly startByteOffset?: number;
 }
 
 export interface TranscriptRecordContext {
   readonly source?: string;
   readonly sessionId?: string;
   readonly line?: number;
+  readonly byteOffset?: number;
+  readonly byteLength?: number;
 }
 
 export interface TranscriptRecordResult {

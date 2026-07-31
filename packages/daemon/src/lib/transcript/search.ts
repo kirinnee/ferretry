@@ -28,6 +28,7 @@ function attachmentText(attachment: TranscriptAttachment): string | undefined {
     case 'document':
       return attachment.text ?? attachment.name ?? attachment.uri;
     case 'image':
+    case 'audio':
     case 'file':
       return attachment.name ?? attachment.uri;
   }

@@ -110,6 +110,12 @@ describe('searchTranscript', () => {
         harness: 'codex',
         role: 'user',
         kind: 'attachment',
+        attachment: { kind: 'audio', name: 'needle.wav' },
+      },
+      {
+        harness: 'codex',
+        role: 'user',
+        kind: 'attachment',
         attachment: { kind: 'file', uri: 'fixture://needle' },
       },
       { harness: 'codex', role: 'system', kind: 'settings', settings: { model: 'needle-model' } },
@@ -122,6 +128,7 @@ describe('searchTranscript', () => {
 
     // Assert
     should(actual.map(match => match.kind)).deepEqual([
+      'attachment',
       'attachment',
       'attachment',
       'attachment',

@@ -96,6 +96,72 @@ describe('NodeTranscriptSource read', () => {
     should(actualTruncated.issues.map(issue => issue.code)).deepEqual(['truncated-json']);
     should(actualTruncated.cursor.pendingBytes).be.above(0);
   });
+
+  it('should retain the exact raw byte length of a torn UTF-8 tail', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const prefix = Buffer.from('{"type":"user","message":{"role":"user","content":"');
+    const codePoint = Buffer.from('😀');
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+
+    for (const retainedBytes of [1, 2, 3]) {
+      const file = join(temporary, `torn-${retainedBytes}.jsonl`);
+      const raw = Buffer.concat([prefix, codePoint.subarray(0, retainedBytes)]);
+      await writeFile(file, raw);
+
+      // Act
+      const actual = await subject.read(file);
+
+      // Assert
+      should(actual.issues).containDeep([{ code: 'truncated-json', byteOffset: 0, byteLength: raw.byteLength }]);
+      should(actual.cursor.byteOffset).equal(raw.byteLength);
+      should(actual.cursor.pendingBytes).equal(raw.byteLength);
+    }
+  });
+
+  it('should retry a one-shot read when the path changes identity', async () => {
+    // Arrange
+    const bytes = Buffer.from(jsonl(userRecord('stable one-shot replacement')));
+    let infoCalls = 0;
+    const runtime: TranscriptFileRuntime = {
+      async info() {
+        infoCalls += 1;
+        return {
+          identity: infoCalls === 1 ? 'old-identity' : 'new-identity',
+          size: bytes.byteLength,
+          modifiedMs: infoCalls,
+          isFile: true,
+        };
+      },
+      async readAll() {
+        return bytes;
+      },
+      async countNewlines() {
+        return 1;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange(_file, byteOffset, byteLength) {
+        return bytes.subarray(byteOffset, byteOffset + byteLength);
+      },
+      async readFrom(_file, byteOffset) {
+        return bytes.subarray(byteOffset);
+      },
+      watch() {
+        return { close() {} };
+      },
+    };
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+
+    // Act
+    const actual = await subject.read('/synthetic/transcript.jsonl');
+
+    // Assert
+    should(actual.cursor.identity).equal('new-identity');
+    should(actual.events).containDeep([{ kind: 'message', text: 'stable one-shot replacement' }]);
+    should(infoCalls).equal(4);
+  });
 });
 
 describe('NodeTranscriptSource follow', () => {
@@ -126,6 +192,7 @@ describe('NodeTranscriptSource follow', () => {
       should(completed.events[0]).containDeep({ kind: 'message', text: 'second partial record' });
       should(completed.cursor.pendingBytes).equal(0);
       should(malformed.issues.map(issue => issue.code)).deepEqual(['invalid-json']);
+      should(malformed.issues[0]?.byteOffset).equal(completed.cursor.byteOffset);
       should(malformed.events[0]).containDeep({ kind: 'message', text: 'valid after interleaving' });
     } finally {
       await iterator.return?.(undefined);
@@ -155,6 +222,130 @@ describe('NodeTranscriptSource follow', () => {
       should(truncated.events[0]).containDeep({ text: 'short' });
       should(replaced.reset).be.true();
       should(replaced.events[0]).containDeep({ text: 'replacement' });
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should reset after a same-file rewrite that grows beyond the previous cursor', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'transcript.jsonl');
+    await writeFile(file, jsonl(userRecord('short initial record')));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      await nextBatch(iterator, 'initial record');
+      const replacement = `${jsonl(userRecord(`replacement ${'long '.repeat(40)}`))}${jsonl(
+        userRecord('second replacement record'),
+      )}`;
+
+      // Act
+      await writeFile(file, replacement);
+      const actual = await nextBatch(iterator, 'same-file rewrite');
+
+      // Assert
+      should(actual.reset).be.true();
+      should(actual.issues).be.empty();
+      should(actual.events.map(event => (event.kind === 'message' ? event.text : undefined))).deepEqual([
+        `replacement ${'long '.repeat(40)}`,
+        'second replacement record',
+      ]);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should revalidate the cursor after a transient metadata failure', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'transcript.jsonl');
+    await writeFile(file, jsonl(userRecord('initial before metadata failure')));
+    const nodeRuntime = new NodeTranscriptFileRuntime();
+    let failMetadata = false;
+    const runtime: TranscriptFileRuntime = {
+      async info(file) {
+        if (failMetadata) {
+          failMetadata = false;
+          throw new Error('synthetic metadata failure');
+        }
+        return await nodeRuntime.info(file);
+      },
+      readAll: file => nodeRuntime.readAll(file),
+      countNewlines: (file, byteLength) => nodeRuntime.countNewlines(file, byteLength),
+      readTrailingLine: (file, byteLength) => nodeRuntime.readTrailingLine(file, byteLength),
+      readRange: (file, byteOffset, byteLength) => nodeRuntime.readRange(file, byteOffset, byteLength),
+      readFrom: (file, byteOffset) => nodeRuntime.readFrom(file, byteOffset),
+      watch() {
+        return { close() {} };
+      },
+    };
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      await nextBatch(iterator, 'initial record');
+      failMetadata = true;
+      await writeFile(file, jsonl(userRecord('replacement after metadata failure')));
+
+      // Act
+      const failed = await nextBatch(iterator, 'metadata failure');
+      const recovered = await nextBatch(iterator, 'metadata recovery');
+
+      // Assert
+      should(failed.issues.map(issue => issue.code)).deepEqual(['source-read-failed']);
+      should(recovered.reset).be.true();
+      should(recovered.events).containDeep([{ kind: 'message', text: 'replacement after metadata failure' }]);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should discard bytes read across an identity change instead of emitting them twice', async () => {
+    // Arrange
+    const bytes = Buffer.from(jsonl(userRecord('replacement read once')));
+    let infoCalls = 0;
+    const runtime: TranscriptFileRuntime = {
+      async info() {
+        infoCalls += 1;
+        return {
+          identity: infoCalls === 1 ? 'old-identity' : 'new-identity',
+          size: bytes.byteLength,
+          modifiedMs: infoCalls,
+          isFile: true,
+        };
+      },
+      async readAll() {
+        return bytes;
+      },
+      async countNewlines() {
+        return 1;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange(_file, byteOffset, byteLength) {
+        return bytes.subarray(byteOffset, byteOffset + byteLength);
+      },
+      async readFrom(_file, byteOffset) {
+        return bytes.subarray(byteOffset);
+      },
+      watch() {
+        return { close() {} };
+      },
+    };
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+    const iterator = subject.follow('/synthetic/transcript.jsonl', { pollIntervalMs: 10 })[Symbol.asyncIterator]();
+
+    try {
+      // Act
+      const actual = await nextBatch(iterator, 'stable replacement');
+
+      // Assert
+      should(actual.cursor.identity).equal('new-identity');
+      should(actual.events).containDeep([{ kind: 'message', text: 'replacement read once' }]);
+      should(actual.events).have.length(1);
     } finally {
       await iterator.return?.(undefined);
     }
@@ -196,11 +387,70 @@ describe('NodeTranscriptSource follow', () => {
       // Act
       await appendFile(file, jsonl(userRecord('new append')));
       const appended = await nextBatch(iterator, 'new append');
+      const malformedOffset = appended.cursor.byteOffset;
+      await appendFile(file, '{bad}\n');
+      const malformed = await nextBatch(iterator, 'malformed append');
 
       // Assert
       should(initial.events).have.length(0);
+      should(initial.cursor.nextLine).equal(2);
       should(appended.events).have.length(1);
       should(appended.events[0]).containDeep({ text: 'new append' });
+      should(malformed.issues).containDeep([{ code: 'invalid-json', line: 3, byteOffset: malformedOffset }]);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should treat records created after an end-follow subscription as new', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'later.jsonl');
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const iterator = subject.follow(file, { startAt: 'end', pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      await nextBatch(iterator, 'missing source');
+
+      // Act
+      await writeFile(file, jsonl(userRecord('present at discovery')));
+      const discovered = await nextBatch(iterator, 'initial end cursor');
+      await appendFile(file, jsonl(userRecord('appended after discovery')));
+      const appended = await nextBatch(iterator, 'append after discovery');
+
+      // Assert
+      should(discovered.events).containDeep([{ kind: 'message', text: 'present at discovery' }]);
+      should(appended.events).containDeep([{ kind: 'message', text: 'appended after discovery' }]);
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
+  it('should retain a split UTF-8 line that completes after an end-follow subscription', async () => {
+    // Arrange
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'partial-at-end.jsonl');
+    const record = Buffer.from(jsonl(userRecord('split 😀 record')));
+    const codePoint = Buffer.from('😀');
+    const splitAt = record.indexOf(codePoint) + 2;
+    await writeFile(file, record.subarray(0, splitAt));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser());
+    const iterator = subject.follow(file, { startAt: 'end', pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      const initial = await nextBatch(iterator, 'initial partial cursor');
+
+      // Act
+      await appendFile(file, record.subarray(splitAt));
+      const completed = await nextBatch(iterator, 'completed UTF-8 record');
+
+      // Assert
+      should(initial.events).be.empty();
+      should(initial.issues).containDeep([{ code: 'incomplete-line', byteOffset: 0, byteLength: splitAt, line: 1 }]);
+      should(initial.cursor.pendingBytes).equal(splitAt);
+      should(completed.events).containDeep([{ kind: 'message', text: 'split 😀 record' }]);
+      should(completed.issues).be.empty();
+      should(completed.cursor.pendingBytes).equal(0);
     } finally {
       await iterator.return?.(undefined);
     }
@@ -232,6 +482,64 @@ describe('NodeTranscriptSource follow', () => {
     }
   });
 
+  it('should not yield after an abort during IO and should close the watcher', async () => {
+    // Arrange
+    let markInfoStarted: (() => void) | undefined;
+    let releaseInfo: (() => void) | undefined;
+    let closeCount = 0;
+    const infoStarted = new Promise<void>(resolve => {
+      markInfoStarted = resolve;
+    });
+    const infoGate = new Promise<void>(resolve => {
+      releaseInfo = resolve;
+    });
+    const runtime: TranscriptFileRuntime = {
+      async info() {
+        markInfoStarted?.();
+        await infoGate;
+        return undefined;
+      },
+      async readAll() {
+        return new Uint8Array();
+      },
+      async countNewlines() {
+        return 0;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange() {
+        return new Uint8Array();
+      },
+      async readFrom() {
+        return new Uint8Array();
+      },
+      watch() {
+        return {
+          close() {
+            closeCount += 1;
+          },
+        };
+      },
+    };
+    const controller = new AbortController();
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), runtime);
+    const iterator = subject
+      .follow('/synthetic/transcript.jsonl', { signal: controller.signal })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    await infoStarted;
+
+    // Act
+    controller.abort();
+    releaseInfo?.();
+    const actual = await pending;
+
+    // Assert
+    should(actual.done).be.true();
+    should(closeCount).equal(1);
+  });
+
   it('should surface an asynchronous directory-watch error without stopping polling', async () => {
     // Arrange
     const temporary = await temporaryDirectory();
@@ -242,6 +550,9 @@ describe('NodeTranscriptSource follow', () => {
     const runtime: TranscriptFileRuntime = {
       info: file => nodeRuntime.info(file),
       readAll: file => nodeRuntime.readAll(file),
+      countNewlines: (file, byteLength) => nodeRuntime.countNewlines(file, byteLength),
+      readTrailingLine: (file, byteLength) => nodeRuntime.readTrailingLine(file, byteLength),
+      readRange: (file, byteOffset, byteLength) => nodeRuntime.readRange(file, byteOffset, byteLength),
       readFrom: (file, byteOffset) => nodeRuntime.readFrom(file, byteOffset),
       watch(_directory, _onChange, onError) {
         failWatch = () => onError(new Error('synthetic watch failure'));
@@ -291,6 +602,15 @@ describe('NodeTranscriptFileRuntime', () => {
         throw new Error('synthetic metadata fault');
       },
       async readAll() {
+        return new Uint8Array();
+      },
+      async countNewlines() {
+        return 0;
+      },
+      async readTrailingLine() {
+        return new Uint8Array();
+      },
+      async readRange() {
         return new Uint8Array();
       },
       async readFrom() {

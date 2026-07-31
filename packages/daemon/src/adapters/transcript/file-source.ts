@@ -13,6 +13,7 @@ import type {
 } from '../../lib/transcript/types.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
+const CURSOR_ANCHOR_BYTES = 512;
 
 export interface TranscriptFileInfo {
   readonly identity: string;
@@ -29,6 +30,9 @@ export interface TranscriptWatchHandle {
 export interface TranscriptFileRuntime {
   info(file: string): Promise<TranscriptFileInfo | undefined>;
   readAll(file: string): Promise<Uint8Array>;
+  countNewlines(file: string, byteLength: number): Promise<number>;
+  readTrailingLine(file: string, byteLength: number): Promise<Uint8Array>;
+  readRange(file: string, byteOffset: number, byteLength: number): Promise<Uint8Array>;
   readFrom(file: string, byteOffset: number): Promise<Uint8Array>;
   watch(directory: string, onChange: () => void, onError: (error: Error) => void): TranscriptWatchHandle;
 }
@@ -65,6 +69,63 @@ export class NodeTranscriptFileRuntime implements TranscriptFileRuntime {
     return await readFile(file);
   }
 
+  async countNewlines(file: string, byteLength: number): Promise<number> {
+    const handle = await open(file, 'r');
+    let position = 0;
+    let lines = 0;
+    try {
+      while (position < byteLength) {
+        const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, byteLength - position));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
+        if (bytesRead === 0) break;
+        lines += countLines(chunk.subarray(0, bytesRead));
+        position += bytesRead;
+      }
+    } finally {
+      await handle.close();
+    }
+    return lines;
+  }
+
+  async readTrailingLine(file: string, byteLength: number): Promise<Uint8Array> {
+    if (byteLength === 0) return new Uint8Array();
+    const handle = await open(file, 'r');
+    const chunks: Buffer[] = [];
+    let position = byteLength;
+    try {
+      while (position > 0) {
+        const length = Math.min(READ_CHUNK_BYTES, position);
+        position -= length;
+        const chunk = Buffer.allocUnsafe(length);
+        const { bytesRead } = await handle.read(chunk, 0, length, position);
+        const bytes = chunk.subarray(0, bytesRead);
+        const newline = lastNewline(bytes);
+        chunks.unshift(newline >= 0 ? bytes.subarray(newline + 1) : bytes);
+        if (newline >= 0 || bytesRead < length) break;
+      }
+    } finally {
+      await handle.close();
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async readRange(file: string, byteOffset: number, byteLength: number): Promise<Uint8Array> {
+    if (byteLength === 0) return new Uint8Array();
+    const handle = await open(file, 'r');
+    const buffer = Buffer.allocUnsafe(byteLength);
+    let total = 0;
+    try {
+      while (total < byteLength) {
+        const { bytesRead } = await handle.read(buffer, total, byteLength - total, byteOffset + total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+      }
+    } finally {
+      await handle.close();
+    }
+    return buffer.subarray(0, total);
+  }
+
   async readFrom(file: string, byteOffset: number): Promise<Uint8Array> {
     const handle = await open(file, 'r');
     const chunks: Buffer[] = [];
@@ -92,10 +153,15 @@ export class NodeTranscriptFileRuntime implements TranscriptFileRuntime {
 
 interface FollowState {
   readonly initialized: boolean;
+  /** Whether the first usable file must still establish its cursor at EOF. */
+  readonly seekToEnd: boolean;
+  /** True after a cursor has been established against a regular file. */
+  readonly positioned: boolean;
   readonly availability: 'unknown' | 'present' | 'missing' | 'error';
   readonly identity?: string;
   readonly byteOffset: number;
   readonly partial: Uint8Array;
+  readonly anchor: Uint8Array;
   readonly nextLine: number;
   readonly modifiedMs?: number;
 }
@@ -162,6 +228,33 @@ function lastNewline(bytes: Uint8Array): number {
   return -1;
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  return left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+}
+
+function advanceAnchor(anchor: Uint8Array, appended: Uint8Array): Uint8Array {
+  const combined = Buffer.concat([Buffer.from(anchor), Buffer.from(appended)]);
+  return Buffer.from(combined.subarray(Math.max(0, combined.byteLength - CURSOR_ANCHOR_BYTES)));
+}
+
+async function readAnchor(runtime: TranscriptFileRuntime, file: string, byteOffset: number): Promise<Uint8Array> {
+  const length = Math.min(CURSOR_ANCHOR_BYTES, byteOffset);
+  return await runtime.readRange(file, byteOffset - length, length);
+}
+
+async function cursorMatches(
+  runtime: TranscriptFileRuntime,
+  file: string,
+  info: TranscriptFileInfo,
+  state: FollowState,
+): Promise<boolean> {
+  if (!state.positioned) return true;
+  if (state.identity !== undefined && state.identity !== info.identity) return false;
+  if (info.size < state.byteOffset) return false;
+  if (state.byteOffset === 0) return true;
+  return bytesEqual(await readAnchor(runtime, file, state.byteOffset), state.anchor);
+}
+
 function sourceIssue(
   parser: TranscriptParser,
   file: string,
@@ -206,9 +299,12 @@ function missingResult(parser: TranscriptParser, file: string, state: FollowStat
   const changed = state.availability !== 'missing';
   const next: FollowState = {
     initialized: true,
+    seekToEnd: false,
+    positioned: state.positioned,
     availability: 'missing',
     byteOffset: 0,
     partial: new Uint8Array(),
+    anchor: new Uint8Array(),
     nextLine: 1,
   };
   return {
@@ -219,7 +315,7 @@ function missingResult(parser: TranscriptParser, file: string, state: FollowStat
             parser,
             file,
             next,
-            state.availability === 'present',
+            state.positioned && state.identity !== undefined,
             [],
             [sourceIssue(parser, file, 'source-missing', 'transcript file is not available')],
           ),
@@ -256,7 +352,7 @@ async function reconcileFollow(
   if (info === undefined) return missingResult(parser, file, state);
   if (!info.isFile) {
     if (state.availability === 'error') return { state };
-    const next = { ...state, initialized: true, availability: 'error' as const };
+    const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
     return {
       state: next,
       batch: batchOf(
@@ -270,37 +366,126 @@ async function reconcileFollow(
     };
   }
 
-  if (!state.initialized && options.startAt === 'end') {
+  if (state.seekToEnd) {
+    let anchor: Uint8Array;
+    let nextLine: number;
+    let partial: Uint8Array;
+    try {
+      [anchor, nextLine, partial] = await Promise.all([
+        readAnchor(runtime, file, info.size),
+        runtime.countNewlines(file, info.size).then(lines => lines + 1),
+        runtime.readTrailingLine(file, info.size),
+      ]);
+    } catch (error) {
+      if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
+      const next = { ...state, initialized: true, seekToEnd: false, availability: 'error' as const };
+      return {
+        state: next,
+        batch: batchOf(
+          parser,
+          file,
+          next,
+          false,
+          [],
+          [sourceIssue(parser, file, 'source-read-failed', 'transcript cursor could not be established')],
+        ),
+      };
+    }
+    let afterInfo: TranscriptFileInfo | undefined;
+    try {
+      afterInfo = await runtime.info(file);
+    } catch {
+      if (state.availability === 'error') return { state };
+      const next = { ...state, initialized: true, availability: 'error' as const };
+      return {
+        state: next,
+        batch: batchOf(
+          parser,
+          file,
+          next,
+          false,
+          [],
+          [sourceIssue(parser, file, 'source-read-failed', 'transcript cursor could not be verified')],
+        ),
+      };
+    }
+    if (afterInfo === undefined) return missingResult(parser, file, state);
+    if (afterInfo.identity !== info.identity || afterInfo.size < info.size) {
+      if (state.availability === 'error') return { state };
+      const next = { ...state, initialized: true, availability: 'error' as const };
+      return {
+        state: next,
+        batch: batchOf(
+          parser,
+          file,
+          next,
+          false,
+          [],
+          [sourceIssue(parser, file, 'source-read-failed', 'transcript changed while its cursor was established')],
+        ),
+      };
+    }
     const next: FollowState = {
       initialized: true,
+      seekToEnd: false,
+      positioned: true,
       availability: 'present',
       identity: info.identity,
       byteOffset: info.size,
-      partial: new Uint8Array(),
-      nextLine: 1,
+      partial,
+      anchor,
+      nextLine,
       modifiedMs: info.modifiedMs,
     };
-    return { state: next, batch: batchOf(parser, file, next, false) };
+    const issues =
+      partial.byteLength > 0
+        ? [
+            sourceIssue(parser, file, 'incomplete-line', 'trailing transcript line is incomplete', {
+              line: next.nextLine,
+              byteOffset: info.size - partial.byteLength,
+              byteLength: partial.byteLength,
+            }),
+          ]
+        : [];
+    return { state: next, batch: batchOf(parser, file, next, false, [], issues) };
   }
 
-  const reset =
-    state.availability === 'present' &&
-    (state.identity !== info.identity ||
-      info.size < state.byteOffset ||
-      (info.size === state.byteOffset && state.byteOffset > 0 && state.modifiedMs !== info.modifiedMs));
+  let reset: boolean;
+  try {
+    reset = !(await cursorMatches(runtime, file, info, state));
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state);
+    const next = { ...state, initialized: true, availability: 'error' as const };
+    return {
+      state: next,
+      batch: batchOf(
+        parser,
+        file,
+        next,
+        false,
+        [],
+        [sourceIssue(parser, file, 'source-read-failed', 'transcript cursor could not be verified')],
+      ),
+    };
+  }
   const base: FollowState = reset
     ? {
         initialized: true,
+        seekToEnd: false,
+        positioned: true,
         availability: 'present',
         identity: info.identity,
         byteOffset: 0,
         partial: new Uint8Array(),
+        anchor: new Uint8Array(),
         nextLine: 1,
         modifiedMs: info.modifiedMs,
       }
     : {
         ...state,
         initialized: true,
+        seekToEnd: false,
+        positioned: true,
         availability: 'present',
         identity: info.identity,
         modifiedMs: info.modifiedMs,
@@ -335,17 +520,42 @@ async function reconcileFollow(
     sessionId: options.sessionId,
     endOfInput: false,
     startLine: base.nextLine,
+    startByteOffset: base.byteOffset - base.partial.byteLength,
   });
   const byteOffset = base.byteOffset + appended.byteLength;
-  const afterInfo = await runtime.info(file).catch(() => undefined);
+  let afterInfo: TranscriptFileInfo | undefined;
+  try {
+    afterInfo = await runtime.info(file);
+  } catch {
+    if (state.availability === 'error') return { state };
+    const next = { ...state, initialized: true, availability: 'error' as const };
+    return {
+      state: next,
+      batch: batchOf(
+        parser,
+        file,
+        next,
+        reset,
+        [],
+        [sourceIssue(parser, file, 'source-read-failed', 'transcript metadata could not be verified after reading')],
+      ),
+    };
+  }
+  if (afterInfo === undefined) return missingResult(parser, file, state);
+  if (afterInfo.identity !== info.identity || afterInfo.size < byteOffset) {
+    return { state };
+  }
   const next: FollowState = {
     initialized: true,
+    seekToEnd: false,
+    positioned: true,
     availability: 'present',
     identity: info.identity,
     byteOffset,
     partial: Buffer.from(partial),
+    anchor: advanceAnchor(base.anchor, appended),
     nextLine: base.nextLine + countLines(complete),
-    modifiedMs: afterInfo?.identity === info.identity ? afterInfo.modifiedMs : info.modifiedMs,
+    modifiedMs: afterInfo.modifiedMs,
   };
   const issues = [...parsed.issues];
   if (partial.byteLength > 0 && (appended.byteLength > 0 || reset)) {
@@ -377,15 +587,26 @@ export class NodeTranscriptSource implements TranscriptSource {
   }
 
   async read(file: string, options: TranscriptReadOptions = {}): Promise<TranscriptBatch> {
+    return await this.readConsistent(file, options, true);
+  }
+
+  private async readConsistent(
+    file: string,
+    options: TranscriptReadOptions,
+    canRetryIdentityChange: boolean,
+  ): Promise<TranscriptBatch> {
     let info: TranscriptFileInfo | undefined;
     try {
       info = await this.runtime.info(file);
     } catch {
       const state: FollowState = {
         initialized: true,
+        seekToEnd: false,
+        positioned: false,
         availability: 'error',
         byteOffset: 0,
         partial: new Uint8Array(),
+        anchor: new Uint8Array(),
         nextLine: 1,
       };
       return batchOf(
@@ -400,18 +621,24 @@ export class NodeTranscriptSource implements TranscriptSource {
     if (info === undefined)
       return missingResult(this.parser, file, {
         initialized: false,
+        seekToEnd: false,
+        positioned: false,
         availability: 'unknown',
         byteOffset: 0,
         partial: new Uint8Array(),
+        anchor: new Uint8Array(),
         nextLine: 1,
       }).batch!;
     if (!info.isFile) {
       const state: FollowState = {
         initialized: true,
+        seekToEnd: false,
+        positioned: false,
         availability: 'error',
         identity: info.identity,
         byteOffset: 0,
         partial: new Uint8Array(),
+        anchor: new Uint8Array(),
         nextLine: 1,
         modifiedMs: info.modifiedMs,
       };
@@ -432,10 +659,13 @@ export class NodeTranscriptSource implements TranscriptSource {
       const code = errorCode(error) === 'ENOENT' ? 'source-missing' : 'source-read-failed';
       const state: FollowState = {
         initialized: true,
+        seekToEnd: false,
+        positioned: false,
         availability: 'error',
         identity: info.identity,
         byteOffset: 0,
         partial: new Uint8Array(),
+        anchor: new Uint8Array(),
         nextLine: 1,
         modifiedMs: info.modifiedMs,
       };
@@ -456,18 +686,98 @@ export class NodeTranscriptSource implements TranscriptSource {
       );
     }
 
+    let afterInfo: TranscriptFileInfo | undefined;
+    try {
+      afterInfo = await this.runtime.info(file);
+    } catch {
+      const state: FollowState = {
+        initialized: true,
+        seekToEnd: false,
+        positioned: false,
+        availability: 'error',
+        identity: info.identity,
+        byteOffset: 0,
+        partial: new Uint8Array(),
+        anchor: new Uint8Array(),
+        nextLine: 1,
+        modifiedMs: info.modifiedMs,
+      };
+      return batchOf(
+        this.parser,
+        file,
+        state,
+        false,
+        [],
+        [
+          sourceIssue(
+            this.parser,
+            file,
+            'source-read-failed',
+            'transcript metadata could not be verified after reading',
+          ),
+        ],
+      );
+    }
+    if (afterInfo === undefined) {
+      return missingResult(this.parser, file, {
+        initialized: true,
+        seekToEnd: false,
+        positioned: false,
+        availability: 'error',
+        byteOffset: 0,
+        partial: new Uint8Array(),
+        anchor: new Uint8Array(),
+        nextLine: 1,
+      }).batch!;
+    }
+    if (!afterInfo.isFile || afterInfo.identity !== info.identity || afterInfo.size < bytes.byteLength) {
+      if (canRetryIdentityChange) return await this.readConsistent(file, options, false);
+      const state: FollowState = {
+        initialized: true,
+        seekToEnd: false,
+        positioned: false,
+        availability: 'error',
+        identity: afterInfo.identity,
+        byteOffset: 0,
+        partial: new Uint8Array(),
+        anchor: new Uint8Array(),
+        nextLine: 1,
+        modifiedMs: afterInfo.modifiedMs,
+      };
+      return batchOf(
+        this.parser,
+        file,
+        state,
+        false,
+        [],
+        [sourceIssue(this.parser, file, 'source-read-failed', 'transcript changed while being read')],
+      );
+    }
+    info = afterInfo;
+
     const text = Buffer.from(bytes).toString('utf8');
     const parsed = this.parser.parse({ text, source: file, sessionId: options.sessionId, endOfInput: true });
+    const pending = parsed.remainder.length > 0 ? Buffer.from(bytes.subarray(lastNewline(bytes) + 1)) : Buffer.alloc(0);
+    const pendingOffset = bytes.byteLength - pending.byteLength;
+    const issues = parsed.issues.map(issue =>
+      issue.code === 'truncated-json' && issue.byteOffset === pendingOffset
+        ? { ...issue, byteLength: pending.byteLength }
+        : issue,
+    );
     const state: FollowState = {
       initialized: true,
+      seekToEnd: false,
+      positioned: true,
       availability: 'present',
       identity: info.identity,
       byteOffset: bytes.byteLength,
-      partial: Buffer.from(parsed.remainder),
-      nextLine: countLines(bytes) + 1,
+      partial: pending,
+      anchor: advanceAnchor(new Uint8Array(), bytes),
+      nextLine:
+        countLines(bytes) + 1 + (bytes.byteLength > 0 && bytes.at(-1) !== 0x0a && pending.byteLength === 0 ? 1 : 0),
       modifiedMs: info.modifiedMs,
     };
-    return batchOf(this.parser, file, state, false, parsed.events, parsed.issues);
+    return batchOf(this.parser, file, state, false, parsed.events, issues);
   }
 
   async *follow(file: string, options: TranscriptFollowOptions = {}): AsyncGenerator<TranscriptBatch> {
@@ -478,9 +788,12 @@ export class NodeTranscriptSource implements TranscriptSource {
     let watchFailed = false;
     let state: FollowState = {
       initialized: false,
+      seekToEnd: options.startAt === 'end',
+      positioned: false,
       availability: 'unknown',
       byteOffset: 0,
       partial: new Uint8Array(),
+      anchor: new Uint8Array(),
       nextLine: 1,
     };
     const armWatch = (): void => {
@@ -512,6 +825,7 @@ export class NodeTranscriptSource implements TranscriptSource {
       while (!isAborted(options.signal)) {
         armWatch();
         const reconciled = await reconcileFollow(this.parser, this.runtime, file, options, state);
+        if (isAborted(options.signal)) break;
         state = reconciled.state;
         if (reconciled.batch !== undefined || watchIssues.length > 0) {
           const batch = reconciled.batch ?? batchOf(this.parser, file, state, false);

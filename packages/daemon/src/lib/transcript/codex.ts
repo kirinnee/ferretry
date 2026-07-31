@@ -35,14 +35,20 @@ function codexMetadata(
   return {
     harness: 'codex',
     role,
+    source: context.source,
+    line: context.line,
+    byteOffset: context.byteOffset,
+    byteLength: context.byteLength,
     timestamp: transcriptString(record.timestamp),
     sessionId:
       transcriptString(payload.session_id) ??
       (record.type === 'session_meta' ? transcriptString(payload.id) : undefined) ??
       context.sessionId,
-    recordId: transcriptString(payload.id),
-    messageId: transcriptString(payload.id),
+    recordId: transcriptString(record.id),
+    itemId: transcriptString(payload.id),
+    messageId: payload.type === 'message' ? transcriptString(payload.id) : undefined,
     turnId: transcriptString(payload.turn_id),
+    phase: transcriptString(payload.phase),
     blockIndex,
   };
 }
@@ -61,6 +67,10 @@ function codexToolName(itemType: string, payload: Record<string, unknown>): stri
       return 'apply_patch';
     case 'mcp_call':
       return 'mcp';
+    case 'tool_search_call':
+      return 'tool_search';
+    case 'image_generation_call':
+      return 'image_generation';
     default:
       return undefined;
   }
@@ -76,6 +86,8 @@ function isCodexToolCall(itemType: string): boolean {
     case 'apply_patch_call':
     case 'mcp_call':
     case 'tool_call':
+    case 'tool_search_call':
+    case 'image_generation_call':
       return true;
     default:
       return false;
@@ -107,8 +119,15 @@ function codexToolFailed(payload: Record<string, unknown>): boolean {
     payload.success === false ||
     status === 'failed' ||
     status === 'error' ||
+    status === 'incomplete' ||
     status === 'cancelled'
   );
+}
+
+function isCodexMessageBlock(role: TranscriptRole, blockType: string | undefined): boolean {
+  if (blockType === undefined || blockType === 'text') return true;
+  if (role === 'assistant') return blockType === 'output_text' || blockType === 'refusal';
+  return blockType === 'input_text';
 }
 
 function codexToolInput(payload: Record<string, unknown>): {
@@ -117,13 +136,19 @@ function codexToolInput(payload: Record<string, unknown>): {
 } {
   if ('arguments' in payload) {
     const raw = payload.arguments;
-    if (typeof raw !== 'string') return { value: transcriptJsonValue(raw), invalidEmbeddedJson: false };
-    const trimmed = raw.trim();
-    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
-      return { value: raw, invalidEmbeddedJson: false };
+    if (typeof raw !== 'string') {
+      return {
+        value: transcriptJsonValue(raw),
+        invalidEmbeddedJson: raw === null || typeof raw !== 'object',
+      };
     }
+    const trimmed = raw.trim();
     try {
-      return { value: transcriptJsonValue(JSON.parse(trimmed) as unknown), invalidEmbeddedJson: false };
+      const parsed = JSON.parse(trimmed) as unknown;
+      return {
+        value: transcriptJsonValue(parsed),
+        invalidEmbeddedJson: parsed === null || typeof parsed !== 'object',
+      };
     } catch {
       return { value: raw, invalidEmbeddedJson: true };
     }
@@ -133,25 +158,41 @@ function codexToolInput(payload: Record<string, unknown>): {
   if ('execution' in payload) {
     return { value: { execution: transcriptJsonValue(payload.execution) }, invalidEmbeddedJson: false };
   }
+  if ('revised_prompt' in payload) {
+    return {
+      value: { revisedPrompt: transcriptJsonValue(payload.revised_prompt) },
+      invalidEmbeddedJson: false,
+    };
+  }
   return { value: {}, invalidEmbeddedJson: false };
 }
 
 function codexAttachment(block: Record<string, unknown>): TranscriptAttachment | undefined {
   const type = transcriptString(block.type);
-  if (type !== 'input_image' && type !== 'image' && type !== 'input_file' && type !== 'file') return undefined;
+  if (
+    type !== 'input_image' &&
+    type !== 'image' &&
+    type !== 'input_file' &&
+    type !== 'file' &&
+    type !== 'input_audio' &&
+    type !== 'audio'
+  )
+    return undefined;
   const source = transcriptObject(block.source) ?? {};
   const uri =
     transcriptString(block.image_url) ??
+    transcriptString(block.audio_url) ??
     transcriptString(block.file_url) ??
+    transcriptString(block.file_id) ??
     transcriptString(block.url) ??
     transcriptString(source.url);
-  const data = transcriptString(block.data) ?? transcriptString(source.data);
+  const data = transcriptString(block.data) ?? transcriptString(block.file_data) ?? transcriptString(source.data);
   const mediaType =
     transcriptString(block.media_type) ?? transcriptString(block.mime_type) ?? transcriptString(source.media_type);
   const name = transcriptString(block.name) ?? transcriptString(block.filename);
-  return type === 'input_image' || type === 'image'
-    ? { kind: 'image', name, mediaType, uri, data }
-    : { kind: 'file', name, mediaType, uri, data };
+  if (type === 'input_image' || type === 'image') return { kind: 'image', name, mediaType, uri, data };
+  if (type === 'input_audio' || type === 'audio') return { kind: 'audio', name, mediaType, uri, data };
+  return { kind: 'file', name, mediaType, uri, data };
 }
 
 function codexError(payload: Record<string, unknown>): { message?: string; code?: string } {
@@ -189,6 +230,23 @@ export class CodexTranscriptParser implements TranscriptParser {
     const itemType = transcriptString(payload.type);
     const events: TranscriptEvent[] = [];
     const issues = [] as TranscriptRecordResult['issues'][number][];
+
+    if (recordType === undefined) {
+      issues.push(transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex record has no type'));
+      return { events, issues, recognized: true };
+    }
+    if (recordType === 'event_msg' && itemType === undefined) {
+      issues.push(
+        transcriptRecordIssue(
+          this.harness,
+          context,
+          'invalid-record',
+          'Codex event message has no item type',
+          recordType,
+        ),
+      );
+      return { events, issues, recognized: true };
+    }
 
     if ((recordType === 'event_msg' && itemType === 'thread_settings_applied') || recordType === 'turn_context') {
       const settings =
@@ -265,18 +323,22 @@ export class CodexTranscriptParser implements TranscriptParser {
       const inputTokens = transcriptNumber(last.input_tokens);
       const outputTokens = transcriptNumber(last.output_tokens);
       const cachedInputTokens = transcriptNumber(last.cached_input_tokens);
+      const cacheCreationInputTokens = transcriptNumber(last.cache_write_input_tokens);
       const reasoningTokens = transcriptNumber(last.reasoning_output_tokens);
       const contextWindow = transcriptNumber(info.model_context_window);
-      if (
-        inputTokens === undefined &&
-        outputTokens === undefined &&
-        cachedInputTokens === undefined &&
-        reasoningTokens === undefined &&
-        contextWindow === undefined
-      ) {
+      const tokenValues = [
+        inputTokens,
+        outputTokens,
+        cachedInputTokens,
+        cacheCreationInputTokens,
+        reasoningTokens,
+      ].filter((value): value is number => value !== undefined);
+      if (tokenValues.length === 0 || tokenValues.every(value => value === 0)) {
         return { events, issues, recognized: true };
       }
-      const contextTokens = (inputTokens ?? 0) + (outputTokens ?? 0);
+      const contextParts = [inputTokens, outputTokens].filter((value): value is number => value !== undefined);
+      const contextTokens =
+        contextParts.length > 0 ? contextParts.reduce((total, value) => total + value, 0) : undefined;
       events.push({
         ...codexMetadata(record, payload, 'system', context),
         kind: 'usage',
@@ -284,6 +346,7 @@ export class CodexTranscriptParser implements TranscriptParser {
           inputTokens,
           outputTokens,
           cachedInputTokens,
+          cacheCreationInputTokens,
           reasoningTokens,
           contextTokens,
           contextWindow,
@@ -365,14 +428,7 @@ export class CodexTranscriptParser implements TranscriptParser {
         const block = transcriptObject(value);
         const blockType = transcriptString(block?.type);
         const text = transcriptString(block?.text) ?? transcriptString(block?.output_text);
-        if (
-          text !== undefined &&
-          (blockType === undefined ||
-            blockType === 'input_text' ||
-            blockType === 'output_text' ||
-            blockType === 'text' ||
-            blockType === 'refusal')
-        ) {
+        if (text !== undefined && isCodexMessageBlock(role, blockType)) {
           events.push({ ...metadata, kind: 'message', text });
           continue;
         }
@@ -391,6 +447,11 @@ export class CodexTranscriptParser implements TranscriptParser {
             block === undefined ? 'Codex message block is not an object' : 'Codex message block type is not supported',
             blockType ?? itemType,
           ),
+        );
+      }
+      if (events.length === 0 && issues.length === 0) {
+        issues.push(
+          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex message has no content', itemType),
         );
       }
       return { events, issues, recognized: true };
@@ -418,7 +479,7 @@ export class CodexTranscriptParser implements TranscriptParser {
     if (isCodexToolCall(itemType)) {
       const id = transcriptString(payload.call_id) ?? transcriptString(payload.id);
       const name = codexToolName(itemType, payload);
-      if (id === undefined || name === undefined) {
+      if (id === undefined || id.trim().length === 0 || name === undefined || name.trim().length === 0) {
         issues.push(
           transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool call lacks id or name', itemType),
         );
@@ -436,7 +497,19 @@ export class CodexTranscriptParser implements TranscriptParser {
           ),
         );
       }
-      const questions = /^(request_user_input|askuserquestion)$/iu.test(name) ? transcriptQuestions(input.value) : [];
+      const questionTool = /^(request_user_input|askuserquestion)$/iu.test(name);
+      const questions = questionTool ? transcriptQuestions(input.value) : [];
+      if (questionTool && questions.length === 0 && !input.invalidEmbeddedJson) {
+        issues.push(
+          transcriptRecordIssue(
+            this.harness,
+            context,
+            'invalid-tool-input',
+            'Codex question tool input has no valid questions',
+            itemType,
+          ),
+        );
+      }
       events.push({
         ...codexMetadata(record, payload, 'assistant', context),
         kind: 'tool-call',
@@ -447,14 +520,28 @@ export class CodexTranscriptParser implements TranscriptParser {
           ...(questions.length > 0 ? { questions } : {}),
         },
       });
+      const generatedImage = itemType === 'image_generation_call' ? transcriptString(payload.result) : undefined;
+      if (generatedImage !== undefined) {
+        events.push({
+          ...codexMetadata(record, payload, 'assistant', context),
+          kind: 'attachment',
+          attachment: { kind: 'image', data: generatedImage },
+        });
+      }
       return { events, issues, recognized: true };
     }
 
     if (isCodexToolOutput(itemType)) {
       const callId = transcriptString(payload.call_id) ?? transcriptString(payload.id);
-      if (callId === undefined) {
+      if (callId === undefined || callId.trim().length === 0) {
         issues.push(
           transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool result lacks call id', itemType),
+        );
+        return { events, issues, recognized: true };
+      }
+      if (!('output' in payload || 'result' in payload || 'tools' in payload || 'content' in payload)) {
+        issues.push(
+          transcriptRecordIssue(this.harness, context, 'invalid-record', 'Codex tool result has no content', itemType),
         );
         return { events, issues, recognized: true };
       }
