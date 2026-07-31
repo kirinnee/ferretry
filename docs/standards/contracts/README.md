@@ -79,6 +79,28 @@ rejected, so silencing a new violation always costs a reviewable line in the dif
 one that has since become reachable — is a hard failure, so the list can only shrink. The gate
 prints its size on success to keep growth visible.
 
+## Composition-root invocation
+
+`composition-invocation.sh` fails when a world field on `DaemonWorld` or `CliWorld` is declared,
+populated in the world literal, and read by nothing.
+
+It is the OTHER half of the defect above, and the reachability walk is structurally blind to it: a
+module the composition root imports and constructs IS reached, so it stays off the allowlist at 100%
+coverage while nothing ever calls it. `SessionResumeService` sat that way through four wiring units —
+`createSessionResume` was a world field nothing invoked, so `POST /v1/sessions/:id/resume` answered
+`unknown_route` — and wiring it surfaced three defects no unit test had reached.
+
+The rule is a count, not a graph: a field mentioned twice in the composition root is a declaration
+and an assignment, which is nothing calling it. A third mention, or any mention in the package's own
+`src/`, is a genuine read. **Comments are stripped before counting**, in the root and in every
+candidate file, because this composition root is documented as densely as it is written — the first
+unit to run the gate silenced it by accident with a comment explaining why a field had no caller.
+
+Two shapes resolve a report, and neither is a suppression list: wire the field into a real caller, or
+delete it when a live wiring already exists elsewhere. There is deliberately no allowlist — a field
+that cannot be resolved either way is a decision for a human, and the gate holds the commit until
+somebody makes it.
+
 ## Action pinning
 
 `config/action-trust.json` (`schemaVersion: 1`) classifies every action as `trusted` or
@@ -94,6 +116,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/cli-contracts.sh homebrew-cask # one, while iterating
 ./scripts/validate/no-legacy-state.sh             # package migration boundary
 ./scripts/validate/composition-reachability.sh    # production code is actually mounted
+./scripts/validate/composition-invocation.sh      # every world field has a caller
 ./scripts/validate/action-pins.sh trusted
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```

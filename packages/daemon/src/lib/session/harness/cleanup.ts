@@ -9,7 +9,7 @@
  * needed, never whether cleanup can succeed.
  */
 
-import type { SleepPort } from '../../runtime/readiness.ts';
+import type { SleepPort } from '../../runtime/boot.ts';
 import { isAddressablePaneId, nextPickerDismissStep, MAX_PICKER_DISMISS_ATTEMPTS } from './dismiss.ts';
 import type { CodexPickerPanePort } from './ports.ts';
 import { failureMessage } from './quarantine.ts';

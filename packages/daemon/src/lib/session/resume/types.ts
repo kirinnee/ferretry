@@ -1,16 +1,39 @@
+import { SessionStatusSchema, type SessionStatus } from '@ferretry/protocol';
 import { z } from 'zod';
 import { SessionIdSchema, type SessionId } from '../../session-id.ts';
-import { LifecycleSessionStatusSchema } from '../lifecycle/types.ts';
 
 /**
- * A session waiting on an automatic retry is neither running nor finished, and the lifecycle's own
- * machine has no name for it: it is the resume slice that schedules and consumes it.
+ * Which statuses a resume can act on: EVERY status the protocol's state document may hold.
+ *
+ * It used to be the LIFECYCLE's own six plus `retrying`, and that was a defect the moment the route
+ * was mounted. The status this parses comes off `state.json`, which `SessionStateSchema` governs, and
+ * that schema has sixteen — so a session sitting in `stalled`, `rate_limited`, `awaiting_question`,
+ * `thinking`, `tool_running`, `interrupted`, `waiting` or `completed` failed to parse here, the
+ * repository answered "no target", and `POST /v1/sessions/:id/resume` told the operator
+ * `session not found` about a session `GET /v1/sessions` was listing at that same moment.
+ *
+ * Those are not obscure states: `stalled` and `rate_limited` are the two an operator revives FROM,
+ * and they are also the two a migration onto another account exists for. Reading the document with
+ * its own schema is what makes the answer honest — a status the resume policy has no special opinion
+ * about is simply a non-terminal one, which is what it was.
  */
-export const ResumableSessionStatusSchema = z.union([LifecycleSessionStatusSchema, z.literal('retrying')]);
-export type ResumableSessionStatus = z.infer<typeof ResumableSessionStatusSchema>;
+export const ResumableSessionStatusSchema = SessionStatusSchema;
+export type ResumableSessionStatus = SessionStatus;
 
-/** Statuses from which a session will never run again without a deliberate revive. */
-export const TERMINAL_RESUME_STATUSES: ReadonlySet<ResumableSessionStatus> = new Set(['failed', 'stopped']);
+/**
+ * Statuses from which a session will never run again without a deliberate revive.
+ *
+ * `completed` joins the two the lifecycle knew about, and for exactly their reason: a session that
+ * finished its work has no agent left to type into, so its leftover pane is not a session to send a
+ * message to — a revive replaces it. Every other status is a session that may still be running,
+ * including `stalled` and `rate_limited`, where the pane is usually alive and the send shortcut is
+ * the right answer.
+ */
+export const TERMINAL_RESUME_STATUSES: ReadonlySet<ResumableSessionStatus> = new Set([
+  'failed',
+  'stopped',
+  'completed',
+]);
 
 /**
  * Who asked. An operator at a CLI and an automatic reviver reach the same method, and they must not
@@ -30,6 +53,20 @@ export interface ResumePolicy {
    * not lineage, so it may only ever gate an automatic reviver.
    */
   readonly dedupeSharedRecoveryScope: boolean;
+  /**
+   * Whether a LIVE, healthy pane must be replaced rather than typed into.
+   *
+   * A plain resume takes the send shortcut when the harness is still at a prompt, because the
+   * cheapest way to hand a running agent its next turn is to type it. A MIGRATION cannot: the whole
+   * point is that a different executable answers the next turn, so typing into the pane that is
+   * already running would leave the old account serving a session whose own document says it moved.
+   *
+   * It is a policy field rather than a second method because everything else about the relaunch —
+   * the snapshot before the kill, the journalled composer discard, the turn document, the retry
+   * accounting, the launch gate and the per-session queue — is identical, and a parallel path would
+   * be those orderings written a second time.
+   */
+  readonly replaceLiveTerminal?: boolean | undefined;
   /** Refuse if the session is no longer in this status — the state it was scheduled against. */
   readonly expectedStatus?: ResumableSessionStatus | undefined;
   /** Refuse if the retry counter moved, so two schedulers cannot both consume one attempt. */

@@ -121,6 +121,8 @@ export type ResumeAction =
  * into. Nothing monitors it — it survived a daemon restart or a reconciled completion — so a message
  * typed there is simply lost. It is killed and replaced by a tracked relaunch, while a genuinely
  * live, non-terminal session takes the plain-send shortcut instead.
+ *
+ * `replaceLiveTerminal` is what a migration sets to give up that shortcut: see the policy field.
  */
 export function planResume(
   target: ResumeTarget,
@@ -134,7 +136,7 @@ export function planResume(
   // A quarantined session may be sitting in an unknown native modal, so its pane cannot be trusted
   // to receive input even while it looks alive.
   const quarantined = target.needsHumanKind !== undefined;
-  if (usable && !isTerminalForResume(target) && !quarantined) {
+  if (usable && !isTerminalForResume(target) && !quarantined && policy.replaceLiveTerminal !== true) {
     if (!trimmed) throw new ResumeRefused(`session ${target.id} is already running`);
     return { kind: 'send', message: trimmed };
   }

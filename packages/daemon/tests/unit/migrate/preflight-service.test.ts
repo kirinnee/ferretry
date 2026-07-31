@@ -22,9 +22,10 @@ class StubInventory implements ProcessInventoryPort {
 class StubPanes implements PaneSnapshotPort {
   readonly sessions: string[] = [];
 
-  constructor(private readonly text: string | Error) {}
+  /** `undefined` is a pane the adapter CONFIRMED is gone; an `Error` is one it could not read. */
+  constructor(private readonly text: string | Error | undefined) {}
 
-  async visible(tmuxSession: string): Promise<string> {
+  async visible(tmuxSession: string): Promise<string | undefined> {
     this.sessions.push(tmuxSession);
     if (this.text instanceof Error) throw this.text;
     return this.text;
@@ -121,6 +122,26 @@ describe('MigrationPreflight', () => {
       forced: false,
       reason: 'refused: the codex pane footer could not be read: no server running',
     });
+  });
+
+  it('should treat a codex pane that is confirmed gone as no background terminals at all', async () => {
+    // A stopped session has no footer to read, which is not the same as a footer nobody could read.
+    // Blind-spotting it would refuse the migration of every dead codex session — the exact case an
+    // operator moves a session for — on evidence that could not exist.
+    // Arrange
+    const preflight = new MigrationPreflight(
+      new StubInventory({ kind: 'observed', processes: [] }),
+      new StubPanes(undefined),
+    );
+
+    // Act
+    const report = await preflight.inspect(view({ harness: 'codex', status: 'stopped' }));
+
+    // Assert
+    should(report.blindSpots).be.empty();
+    should(report.codexBackgroundTerminals).equal(0);
+    should(report.empty).be.true();
+    should(preflight.gate(report)).deepEqual({ proceed: true, forced: false, reason: 'no in-flight work' });
   });
 
   it('should refuse a session whose pane could not be walked at all', async () => {

@@ -1,0 +1,17 @@
+# Composition-root fields that are constructed but CANNOT yet be called, with the blocker.
+#
+# Enforced by scripts/validate/composition-invocation.sh. This is not an exemption policy: an entry
+# here is a capability the product does not have, and the line stays until the blocker is gone.
+#
+# Rules the gate enforces on this file:
+#   * one exact `Interface.field` per line — no globs, so silencing a NEW field always costs a
+#     visible, reviewable line in the diff;
+#   * every entry carries a trailing '# <blocker>' stating what is missing, as a checkable fact;
+#   * an entry that has become called is a hard failure — delete it in the PR that wires it.
+#
+# Do not add a line because wiring is inconvenient. Add it only when calling the field would be
+# WRONG or IMPOSSIBLE, and say which.
+
+DaemonWorld.wardenReports # nothing writes a warden report: WardenReportFileSystem declares only listFiles and readText, warden/reports is never created, and the sweep that would author one is the subsystem PR #19 is blocked on. Mounting the reader would serve an empty list forever — and pwa warden-strip renders a green ShieldCheck for an empty list, so it would assert "fleet healthy" on no evidence. Not mounting is the honest state.
+DaemonWorld.browserTransport # connectWorker spawns a worker PROGRAM this repo does not contain: bin/ ships stt-worker.ts only, the sole browser worker is a test fixture, and nothing implements BrowserViewerHost. Wiring means writing the worker, not calling the field.
+DaemonWorld.transcripts # TranscriptSource.read takes the transcript FILE and no document records one; state.lastTranscriptAt is read only by the unmounted warden detector and written by nothing.

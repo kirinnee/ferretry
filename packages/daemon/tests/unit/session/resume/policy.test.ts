@@ -216,6 +216,27 @@ describe('resume plan', () => {
     should(actual).deepEqual({ kind: 'send', message: 'do the next thing' });
   });
 
+  it('should replace a live pane when the caller is moving the session to another account', () => {
+    // A MIGRATION cannot take the send shortcut: the point of it is that a different executable
+    // answers the next turn, so typing the handoff into the harness that is already running would
+    // leave the old account serving a session whose own record says it moved. Everything else about
+    // the relaunch is the same, which is why this is a policy field and not a second code path.
+    // Arrange
+    const migrating: ResumePolicy = { ...EXPLICIT, replaceLiveTerminal: true };
+
+    // Act
+    const actual = planResume(target(), LIVE, 'read the migration report', migrating, SETTINGS);
+
+    // Assert
+    should(actual.kind).equal('relaunch');
+    // Snapshot first: the pane is live, and its final frame is the only record of unsent input.
+    should(actual).have.property('pane', 'snapshot-and-kill');
+    // The turn advances, so the replacement agent reads a NEW document rather than the assignment
+    // the agent being replaced was already working from.
+    should(actual).have.property('turn', 4);
+    should(actual).have.property('prompt', 'read the migration report');
+  });
+
   it('should refuse a message-less resume of a session that is already running', () => {
     // Act / Assert
     should(() => planResume(target(), LIVE, undefined, EXPLICIT, SETTINGS)).throw(ResumeRefused);
@@ -364,6 +385,31 @@ describe('terminal classification', () => {
 
     // Assert
     should(actual).deepEqual([false, false, false, false, false, true, true]);
+  });
+
+  it('should classify every status the state document can actually hold', () => {
+    // The resumable set used to be the LIFECYCLE's six plus `retrying`, so a session sitting in any
+    // of these parsed as nothing and the revive answered "session not found" about a session the
+    // list was serving. They are ordinary non-terminal states — `stalled` and `rate_limited` are the
+    // two an operator revives from — except `completed`, which has no agent left to type into.
+    // Arrange
+    const statuses = [
+      'thinking',
+      'tool_running',
+      'awaiting_question',
+      'awaiting_user',
+      'interrupted',
+      'rate_limited',
+      'waiting',
+      'stalled',
+      'completed',
+    ] as const;
+
+    // Act
+    const actual = statuses.map(status => isTerminalForResume(target({ status })));
+
+    // Assert
+    should(actual).deepEqual([false, false, false, false, false, false, false, false, true]);
   });
 });
 

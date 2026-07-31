@@ -142,6 +142,24 @@ describe('storage resume repository', () => {
     await opened.storage.close();
   });
 
+  it('should take the turn from the document that actually moves', async () => {
+    // Both documents carry a turn and only the STATE's is ever updated: a revive records the turn it
+    // handed over through `transition({ turn })`, and nothing rewrites the configuration's copy.
+    // Reading the configuration first froze every session at the turn it was created on, so the
+    // SECOND revive planned the same number again and overwrote the first revive's assignment.
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', turn: 7 });
+
+    // Act
+    const actual = await new StorageResumeRepository(opened.storage).read(ID);
+
+    // Assert
+    should(actual).have.property('turn', 7);
+    await opened.storage.close();
+  });
+
   it('should report nothing for a session that was never written', async () => {
     // Arrange
     const { opened } = await openStorage();

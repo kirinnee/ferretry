@@ -2,7 +2,7 @@ import type { UsageFeedPort, UsageSnapshot } from '../../usage/types.ts';
 import { renderUsageMetrics } from '../metrics.ts';
 import { jsonResponse, PROMETHEUS_CONTENT_TYPE, textResponse } from '../responses.ts';
 import type { ApiRoute } from '../route.ts';
-import type { MillisecondClockPort } from '../../runtime/readiness.ts';
+import type { MillisecondClockPort } from '../../runtime/boot.ts';
 
 /**
  * The account-health feed, in the two shapes its consumers need.

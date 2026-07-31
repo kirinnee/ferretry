@@ -106,7 +106,19 @@ export class StorageResumeRepository implements ResumeRepository {
       mode,
       cwd,
       ...(text(config.label) === undefined ? {} : { label: text(config.label) }),
-      turn: count(config.turn) ?? count(state.turn) ?? 0,
+      /**
+       * THE STATE'S TURN WINS, and reading the configuration first was a defect that destroyed work.
+       *
+       * Both documents carry a `turn`: the start writes it into both, and after that only the STATE
+       * moves — `transition({ turn })` is how a revive records the document it just handed over, and
+       * nothing ever rewrites the configuration's copy. Preferring the configuration therefore froze
+       * every session at the turn it was created on, so `planResume` planned `turn + 1` from that
+       * frozen number and the SECOND revive of a session wrote `turns/turn-002.md` again — over the
+       * first revive's assignment, which the agent may not have read yet.
+       *
+       * The configuration remains the fallback for a session whose state document predates the field.
+       */
+      turn: count(state.turn) ?? count(config.turn) ?? 0,
       ...(count(state.retryAttempt) === undefined ? {} : { retryAttempt: count(state.retryAttempt) }),
       ...(toolUseId === undefined ? {} : { pendingQuestion: { toolUseId } }),
       ...(text(state.needsHumanKind) === undefined ? {} : { needsHumanKind: text(state.needsHumanKind) }),

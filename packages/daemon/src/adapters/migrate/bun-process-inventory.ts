@@ -8,7 +8,7 @@ import type {
 } from '../../lib/migrate/process-inventory-port.ts';
 import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../lib/migrate/process-table.ts';
 import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
-import { capturePaneArguments, panePidArguments } from '../../lib/tmux/commands.ts';
+import { capturePaneArguments, hasSessionArguments, panePidArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etimes=,args='] as const;
@@ -69,8 +69,16 @@ export class PaneProcessInventory implements ProcessInventoryPort {
   async collect(tmuxSession: string): Promise<ProcessObservation> {
     try {
       const pane = await this.tmux.execute(panePidArguments(tmuxSession));
-      if (pane.code !== 0)
+      if (pane.code !== 0) {
+        // ASK A SECOND QUESTION BEFORE CALLING THIS A BLIND SPOT. A failed pane-pid read used to be
+        // unobservable unconditionally, which is right when tmux may be hiding something and wrong
+        // for the commonest migration there is: a session whose account died has no pane at all, and
+        // "I could not look" then blocks the very move the operator is trying to make. tmux is asked
+        // outright whether the session exists, and only a session it CONFIRMS is gone becomes an
+        // empty observation — a server that will not answer either question stays a blind spot.
+        if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
         return unobservable(`the pane pid could not be resolved: ${pane.stderr.trim() || `tmux exited ${pane.code}`}`);
+      }
       const panePid = Number(pane.stdout.trim());
       if (!Number.isFinite(panePid) || panePid <= 1)
         return unobservable(`tmux reported an unusable pane pid ${JSON.stringify(pane.stdout.trim())}`);
@@ -84,6 +92,10 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }
   }
+
+  private async paneConfirmedAbsent(tmuxSession: string): Promise<boolean> {
+    return await paneConfirmedAbsent(this.tmux, tmuxSession);
+  }
 }
 
 function unobservable(reason: string): ProcessObservation {
@@ -91,16 +103,34 @@ function unobservable(reason: string): ProcessObservation {
 }
 
 /**
+ * Whether tmux positively reports that this session does not exist.
+ *
+ * `has-session` is the only question tmux answers unambiguously about absence: a non-zero exit means
+ * no such session on this socket — including the case where the private server is not running at
+ * all, which means no managed pane exists to hold work. Anything that stops the question being asked
+ * (a tmux that will not spawn, an address the validator refuses) throws or answers zero, and the
+ * caller then keeps its blind spot rather than reading a failure as an absence.
+ */
+async function paneConfirmedAbsent(tmux: TmuxCommandPort, tmuxSession: string): Promise<boolean> {
+  const probe = await tmux.execute(hasSessionArguments(tmuxSession));
+  return probe.code !== 0;
+}
+
+/**
  * Reads a pane's visible text through the socket-scoped tmux port, so the codex footer can be
  * counted without the migrate subsystem ever naming a command of its own.
+ *
+ * A capture that fails is asked the same second question the inventory above asks, and for the same
+ * reason: a session tmux confirms is gone has no footer to read, and raising there would turn every
+ * stopped codex session into a blind spot that refuses its own migration.
  */
 export class TmuxPaneSnapshot implements PaneSnapshotPort {
   constructor(private readonly tmux: TmuxCommandPort) {}
 
-  async visible(tmuxSession: string): Promise<string> {
+  async visible(tmuxSession: string): Promise<string | undefined> {
     const result = await this.tmux.execute(capturePaneArguments(tmuxSession, false));
-    if (result.code !== 0)
-      throw new Error(`tmux could not capture the pane: ${result.stderr.trim() || `exited ${result.code}`}`);
-    return result.stdout;
+    if (result.code === 0) return result.stdout;
+    if (await paneConfirmedAbsent(this.tmux, tmuxSession)) return undefined;
+    throw new Error(`tmux could not capture the pane: ${result.stderr.trim() || `exited ${result.code}`}`);
   }
 }

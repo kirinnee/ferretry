@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import {
   type LearningConfig,
+  type MigrateSessionRequest,
   SessionConfigSchema,
   type StartSessionRequest,
   SessionStateSchema,
@@ -10,6 +11,7 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
+import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { startSttWorker } from './stt-worker.ts';
 import {
@@ -24,7 +26,6 @@ import {
   CommandUsageSource,
   DaemonBinder,
   DaemonHealthProbe,
-  DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
   FetchEnhancementTransport,
@@ -57,6 +58,7 @@ import {
   type WorkerClientOptions,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
@@ -122,6 +124,7 @@ import {
   createSessionPaths,
   createSttPaths,
   createWardenPaths,
+  authorizeSessionCommand,
   defaultSessionLifecycleSettings,
   defaultStartWaitPolicy,
   packageRole,
@@ -181,11 +184,17 @@ import {
   TmuxController,
   type BrowserViewerHost,
   MigrationPreflight,
+  type MigrationReportStore,
+  type ObservedSession,
+  contextWindowFor,
+  jsonObject,
+  SessionMigrateError,
+  type SessionMigrateFailure,
+  type SessionMigrateSubsystem,
   usageProbeCommand,
   type ApiServerHandle,
   type ApiServerPort,
   type DaemonConfig,
-  type DaemonReadinessPorts,
   type MillisecondClockPort,
   type MountedSubsystems,
   type SessionId,
@@ -238,15 +247,11 @@ export interface DaemonWorld {
     readonly probe: DaemonHealthProbe;
     readonly binder: DaemonBinder;
   };
-  readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
   /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
    *  a session whose work cannot be shown to survive the relaunch. */
   readonly migratePreflight: MigrationPreflight;
-  readonly createAttentionLedgerRepository: (
-    sessionDirectory: (sessionId: string) => string,
-  ) => FileAttentionLedgerRepository;
   /** Warden report access. The reports directory hangs off the state home,
    *  which is only known once storage has resolved it, so this is a factory
    *  rather than an instance. */
@@ -328,9 +333,6 @@ export interface DaemonWorld {
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
   readonly createUsageFeed: (config: DaemonConfig) => UsageFeedPort;
-  /** Team recommendation over the published fleet manifest and the operator's
-   *  routing catalog, reading account headroom from the feed above. */
-  readonly createTeamAdvisor: (usage: UsageFeedPort) => TeamAdvisor;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
@@ -395,6 +397,14 @@ export interface DaemonWorld {
      * tmux launcher no matter what a test substituted.
      */
     reviver: ResumeLauncher,
+    /**
+     * The destructive-migration gate, passed IN for the same reason as every other host adapter here:
+     * it walks the machine's own process table and reads live panes, so it is the one collaborator in
+     * a migration whose real behaviour cannot be driven from a test without running the work it is
+     * inspecting. A test substitutes this and keeps the restamp, the report, the relaunch, the real
+     * documents and the route exactly as production builds them.
+     */
+    preflight: MigrationPreflight,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -878,6 +888,10 @@ function resumeRefusal(error: unknown): never {
  * service built per request would give each caller its own executor and its own gate, and neither
  * would see the other — so the serialization would be a lie and the amnesty would not apply.
  *
+ * That is why the SERVICE is passed in rather than the factory: the migration below relaunches through
+ * the same machinery, and a second service built for it would be a second executor and a second gate —
+ * so a migrate and a revive of one session could replace its pane at the same moment.
+ *
  * THE ID IS PARSED AND THE SESSION IS LOOKED UP HERE, before the service is asked, for the same reason
  * the stop does it: `ResumeRepository.read` answers `undefined` for a session that does not exist and
  * the service turns that into a `ResumeRefused`, which would surface as a 409 about a session the
@@ -886,10 +900,8 @@ function resumeRefusal(error: unknown): never {
 function createSessionResumeSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
-  createResume: DaemonWorld['createSessionResume'],
-  reviver: ResumeLauncher,
+  service: SessionResumeService,
 ): SessionResumeSubsystem {
-  const service = createResume(storage, reviver);
   return {
     resume: async (reference, actor, message) => {
       const id = tryParseSessionId(reference);
@@ -908,6 +920,277 @@ function createSessionResumeSubsystem(
           `session ${id} was revived but its documents do not satisfy the protocol`,
         );
       return view;
+    },
+  };
+}
+
+/** The collaborators a migration needs. Grouped because eight positional arguments in the order the
+ *  flow happens to use them is a call site nobody can check. */
+interface SessionMigrateParts {
+  readonly storage: DaemonStorage;
+  readonly sessions: SessionDirectorySubsystem;
+  /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
+  readonly resume: SessionResumeService;
+  readonly preflight: MigrationPreflight;
+  readonly reports: MigrationReportStore;
+  readonly planner: SessionPlanner;
+  readonly accounts: AccountInventoryPort;
+  readonly executables: ExecutableResolverPort;
+  readonly clock: SystemClock;
+  /** Serializes whole migrations of one session, so two cannot restamp the same document. */
+  readonly serial: KeyedSerialExecutor;
+}
+
+/** The documents a migration reasons about, parsed by the schemas that govern them. */
+interface MigrateSubject {
+  readonly config: z.infer<typeof SessionConfigSchema>;
+  readonly state: z.infer<typeof SessionStateSchema>;
+  readonly tmuxSession: string;
+}
+
+/** How each account-resolution refusal is restated in the migration's own taxonomy. The resolver is
+ *  shared with the start, and its vocabulary is the start's. */
+const MIGRATE_RESOLUTION_REFUSALS: Partial<Record<SessionControlFailure, SessionMigrateFailure>> = {
+  unknown_agent: 'unknown_agent',
+  unavailable: 'unavailable',
+};
+
+/** How each resume refusal is restated once a migration is the thing that asked for the relaunch. */
+function migrateRelaunchRefusal(error: unknown): never {
+  // A guard or a dedupe conflict cannot reach here: the migration states its own policy, which sets
+  // neither an expected status nor the dedupe heuristic. Everything the domain refuses is therefore
+  // the session's own condition — a live pane holding an unanswered question, an unconfirmed kill.
+  if (error instanceof ResumeRefused) throw new SessionMigrateError('refused', error.message);
+  throw new SessionMigrateError('failed', error instanceof Error ? error.message : String(error));
+}
+
+/** The window this session is running in today: what the harness reported, else what its model implies. */
+function currentContextWindow(config: z.infer<typeof SessionConfigSchema>, state: z.infer<typeof SessionStateSchema>) {
+  return state.contextWindow ?? contextWindowFor({ configuredModel: config.model ?? config.modelHint });
+}
+
+/**
+ * Moving one session onto another account, over the preflight that was built for exactly this and
+ * never called.
+ *
+ * WHAT A MIGRATION IS MADE OF, and why each part is where it is:
+ *
+ *   * THE GATE RUNS FIRST AND WRITES NOTHING. `MigrationPreflight` inventories the pane's process
+ *     tree, the codex footer and the session's own open tools, and refuses work it cannot show will
+ *     survive the kill. Nothing above it is allowed to mutate the session, so a refused migration
+ *     leaves a session exactly as it found it.
+ *   * THE REPORT IS WRITTEN BEFORE THE PANE DIES, because it is the only account of what the kill
+ *     destroyed and the pane is the evidence. It is also what the replacement agent is handed: the
+ *     handoff message names the file.
+ *   * THE DOCUMENT IS RESTAMPED, NOT REPLACED. `updateConfig` merges over what is on disk, so the
+ *     session keeps its id, directory, journal, callsign and history and changes only the account,
+ *     the model, the argv the relaunch will run, and the incarnation counting the relaunches.
+ *   * THE RELAUNCH IS THE REVIVE, with one policy field flipped. Everything a safe replacement needs
+ *     — snapshot before kill, journalled composer discard, the turn document, the launch gate, the
+ *     per-session queue — is the resume domain's, already built and tested. `replaceLiveTerminal`
+ *     is what stops it taking its send shortcut and typing the handoff into the agent being replaced.
+ *
+ * ONLY `revived` IS A MIGRATION. The resume domain answers three other dispositions, and two of them
+ * are relaunch failures that do NOT throw: `preserved` means the replacement reported failure while
+ * the OLD harness was still at a prompt, and `retry-scheduled` means the relaunch failed and a retry
+ * was booked. Both leave the session on the account it started on while its record already names the
+ * new one, so both settle the report as a FAILURE. Treating the absence of an exception as success
+ * here is precisely how a migration reports a move that did not happen.
+ *
+ * THE CONFIGURATION IS NOT ROLLED BACK when the relaunch fails, and the report says so in those
+ * words. A rollback is a second write that can fail on its own, and it would race whatever the resume
+ * domain did next — it may have preserved a live harness or scheduled a retry that will relaunch from
+ * this very document. Reporting "left staged on the target" is a fact; reporting a rollback that was
+ * attempted and not verified would not be.
+ */
+function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem {
+  /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
+   *  is one nothing may restamp: the write would merge new fields over a document already broken. */
+  const subject = async (id: SessionId): Promise<MigrateSubject> => {
+    const raw = await parts.storage.readConfig(id);
+    const config = SessionConfigSchema.safeParse(raw);
+    const state = SessionStateSchema.safeParse(await parts.storage.readState(id));
+    if (!config.success || !state.success)
+      throw new SessionMigrateError('unusable', `the documents for session ${id} do not satisfy the protocol`);
+    // The tmux address lives in the lifecycle's half of the same document, and it is what every
+    // signal the preflight reads is addressed by.
+    const lifecycle = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(raw));
+    if (!lifecycle.success)
+      throw new SessionMigrateError('unusable', `session ${id} records no terminal this daemon could inspect`);
+    return { config: config.data, state: state.data, tmuxSession: lifecycle.data.tmuxSession };
+  };
+
+  /** The view of a session this mount just moved. A document it cannot read back is a wiring fault. */
+  const view = async (id: SessionId, when: string): Promise<SessionView> => {
+    const found = await parts.sessions.get(id).catch(() => undefined);
+    if (found === undefined) throw new SessionMigrateError('failed', `session ${id} ${when} but cannot be read back`);
+    return found;
+  };
+
+  /** What the session looks like after a failed attempt, for the outcome section. An unreadable one
+   *  is reported as absent rather than guessed at — the renderer says UNKNOWN, which is the truth. */
+  const observed = async (id: SessionId): Promise<ObservedSession | undefined> => {
+    const found = await parts.sessions.get(id).catch(() => undefined);
+    if (found === undefined) return undefined;
+    return {
+      binary: found.config.agent,
+      ...(found.config.model === undefined ? {} : { model: found.config.model }),
+      status: found.state.status,
+    };
+  };
+
+  const migrate = async (id: SessionId, request: MigrateSessionRequest): Promise<SessionView> => {
+    const { config, state, tmuxSession } = await subject(id);
+    const { account, executable } = await resolveStartAccount(parts.accounts, request.agent, parts.executables).catch(
+      (error: unknown) => {
+        if (!(error instanceof SessionControlError)) throw error;
+        const failure = MIGRATE_RESOLUTION_REFUSALS[error.failure];
+        if (failure === undefined) throw error;
+        throw new SessionMigrateError(failure, error.message);
+      },
+    );
+    // The same planner the start uses, so the model a migration records and the window it is measured
+    // against come from the one decision rather than two that can disagree.
+    const plan = parts.planner.plan({
+      id,
+      account,
+      mode: config.mode,
+      ...(config.teammate === undefined ? {} : { teammate: config.teammate }),
+      ...(config.name === undefined ? {} : { name: config.name }),
+      ...(request.model === undefined ? {} : { requestedModel: request.model }),
+      ...(config.parent === undefined ? {} : { parent: config.parent }),
+    });
+    // Rebuilt rather than patched: the remote-control arguments are the TARGET harness's, and a
+    // codex session inheriting a claude session's flags would relaunch into an argument error.
+    //
+    // AUTHORIZED with the start's own rule, because a migration does not go through the lifecycle
+    // service that applies it. The relaunch reads this argv straight out of the document written
+    // below, so without this check a fleet manifest publishing something that is not an auto wrapper
+    // would be launchable by a migrate and refused by a start.
+    const command = ((): readonly string[] => {
+      try {
+        return authorizeSessionCommand(
+          executable,
+          [executable, ...(config.remoteControl ? plan.extraArgs : []), ...config.harnessFlags],
+          defaultSessionLifecycleSettings,
+        );
+      } catch (error) {
+        throw new SessionMigrateError('unavailable', error instanceof Error ? error.message : String(error));
+      }
+    })();
+    const window = currentContextWindow(config, state);
+    if (plan.contextWindow < window && !request.allowContextDowngrade)
+      throw new SessionMigrateError(
+        'context_downgrade',
+        `${account.agent} serves ${plan.model} with a ${plan.contextWindow}-token window and this session is ` +
+          `running in ${window}; the conversation would be truncated. Send allowContextDowngrade to accept that.`,
+      );
+    const report = await parts.preflight.inspect({
+      sessionId: id,
+      harness: config.harness,
+      tmuxSession,
+      status: state.status,
+      turn: state.turn,
+      // The state document's own record of the tool calls this session has open. The chat tail is
+      // EMPTY because no transcript is indexed — `world.transcripts` reads a file no session records
+      // — so an open id joins to nothing and is classified `unknown`, which the gate then refuses.
+      // That is the fail-closed answer: the daemon knows a tool is running and not what it is.
+      openTools: state.openTools ?? [],
+      ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
+    });
+    const decision = parts.preflight.gate(report);
+    if (!decision.proceed)
+      throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`);
+    const at = parts.clock.now();
+    const reportPath = await parts.reports.write(
+      id,
+      parts.preflight.document(report, {
+        sessionId: id,
+        targetAgent: account.agent,
+        targetModel: plan.model,
+        forced: decision.forced,
+        at,
+      }),
+    );
+    const from = config.agent;
+    const generation = config.runtimeGeneration + 1;
+    await parts.storage.updateConfig(id, current => ({
+      ...(jsonObject(current) ?? {}),
+      agent: account.agent,
+      harness: account.kind,
+      model: plan.model,
+      modelHint: request.model ?? account.defaultModel ?? '',
+      command: [...command],
+      incarnation: `${id}-${generation}`,
+      runtimeGeneration: generation,
+      migration: { from, to: account.agent, at },
+      updatedAt: at,
+    }));
+    await parts.storage.append(id, 'session.migrating', {
+      from,
+      to: account.agent,
+      model: plan.model,
+      report: reportPath,
+      verdict: report.worstVerdict,
+    });
+    const settle = async (ok: boolean, detail?: string): Promise<void> => {
+      const record = await observed(id);
+      await parts.reports.append(
+        id,
+        parts.preflight.settle({
+          ok,
+          from,
+          targetAgent: account.agent,
+          targetModel: plan.model,
+          at: parts.clock.now(),
+          ...(detail === undefined ? {} : { detail }),
+          ...(record === undefined ? {} : { observed: record }),
+        }),
+      );
+      await parts.storage.append(id, ok ? 'session.migrated' : 'session.migrate_failed', {
+        from,
+        to: account.agent,
+        ...(detail === undefined ? {} : { detail }),
+      });
+    };
+    const outcome = await parts.resume
+      .resume({
+        id,
+        // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
+        // id, and the preflight above is the guard a migration has.
+        policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
+        message: parts.preflight.handoff(reportPath),
+      })
+      .catch(async (error: unknown) => {
+        await settle(false, error instanceof Error ? error.message : String(error));
+        migrateRelaunchRefusal(error);
+      });
+    if (outcome.disposition !== 'revived') {
+      const detail =
+        outcome.disposition === 'preserved'
+          ? `the relaunch failed and the previous harness was still at a prompt, so ${from} is still serving ` +
+            `this session while its record already names ${account.agent}`
+          : `the relaunch failed and an automatic retry was scheduled; the session is still on ${from}`;
+      await settle(false, detail);
+      throw new SessionMigrateError('failed', detail);
+    }
+    await settle(true);
+    // Read back through the SAME reader the list and the single read serve, so a migration answers
+    // with the view those surfaces will show rather than a projection of its own writes.
+    return await view(id, 'was migrated');
+  };
+
+  return {
+    migrate: async (reference, request) => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (parts.storage.findSession(id) === undefined)
+        throw new SessionMigrateError('not_found', `no session ${reference}`);
+      // WHOLE migrations serialize, not just their writes: the gate reads a pane, the restamp writes
+      // the document that pane's replacement is launched from, and a second migration interleaving
+      // between the two would relaunch the first one's target under the second one's account.
+      return await parts.serial.run(id, async () => await migrate(id, request));
     },
   };
 }
@@ -1389,7 +1672,6 @@ export function buildWorld(): DaemonWorld {
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
     },
-    createReadinessWaiter: (ports, daemonLog) => new DaemonReadinessWaiter(ports, daemonLog),
     config: new FileDaemonConfig(paths, stateFiles),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
@@ -1411,7 +1693,6 @@ export function buildWorld(): DaemonWorld {
       new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined)),
       new TmuxPaneSnapshot(tmux),
     ),
-    createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
     browserTransport: {
       connectWorker: options => BrowserWorkerClient.connect(options),
@@ -1471,7 +1752,6 @@ export function buildWorld(): DaemonWorld {
         { refreshMs: config.usage.refreshSeconds * 1_000 },
       );
     },
-    createTeamAdvisor: advisorOver,
     sessions: planner,
     provenance: new SessionProvenanceStamper(clock),
     harness: new HarnessQuirkService(
@@ -1500,10 +1780,14 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals, usage, health, launcher, reviver) => {
+    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
+      // ONE resume service for this opened storage, shared by the revive and the migration: its
+      // executor and its launch gate are what stop two relaunches of one session racing, and a
+      // second service would give each caller a private copy of both. See the revive's own header.
+      const resume = createSessionResume(storage, reviver);
       return {
         health: createHealthSubsystem(health),
         attention: new AttentionService(
@@ -1535,7 +1819,21 @@ export function buildWorld(): DaemonWorld {
           createCallsignClaims(storage, stateFiles, paths, callsignClaims),
           payloadDigests,
         ),
-        sessionResume: createSessionResumeSubsystem(storage, sessions, createSessionResume, reviver),
+        sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
+        sessionMigrate: createSessionMigrateSubsystem({
+          storage,
+          sessions,
+          resume,
+          preflight,
+          reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
+          planner,
+          accounts,
+          executables,
+          clock,
+          // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
+          // make every unrelated document write in the process wait behind it.
+          serial: new KeyedSerialExecutor(),
+        }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         analytics: createAnalyticsSubsystem(storage),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
@@ -1616,6 +1914,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     // and threading it through the same seam as the other host adapters is what lets a test replace
     // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
     world.createResumeLauncher(opened.storage),
+    world.migratePreflight,
   );
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens

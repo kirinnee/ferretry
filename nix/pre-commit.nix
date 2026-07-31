@@ -83,6 +83,15 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    a-composition-invocation = {
+      enable = true;
+      name = "Composition-root invocation";
+      entry = validator "scripts/validate/composition-invocation.sh";
+      files = "^(packages/[^/]+/bin/.*\\.ts|packages/[^/]+/src/.*\\.ts|scripts/validate/composition-invocation\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-legacy-state = {
       enable = true;
       name = "No legacy package state";

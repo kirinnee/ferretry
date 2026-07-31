@@ -3,8 +3,10 @@ import {
   healthEndpoint,
   shouldRetryBind,
   type BindRetryPolicy,
+  type DaemonFetchPort,
+  type MillisecondClockPort,
+  type SleepPort,
 } from '../../lib/runtime/boot.ts';
-import type { DaemonFetchPort, MillisecondClockPort, SleepPort } from '../../lib/runtime/readiness.ts';
 
 export interface DaemonHealthProbeOptions {
   readonly url: string;
