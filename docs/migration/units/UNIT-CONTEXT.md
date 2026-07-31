@@ -42,6 +42,22 @@ PR.
 Full comprehension with no code is a failure. If you cannot finish the whole unit, open the PR with
 what works and say plainly what is left — the lead will schedule the rest.
 
+### Mount what you build, or it does not exist
+
+**Your unit is not done when the module is written and tested. It is done when the product actually
+uses it.** Wire your work into the composition root — `packages/daemon/bin/fyd.ts` (or
+`packages/cli/bin/fy.ts`) — so the running binary constructs and calls it.
+
+Three separate PRs failed this way before the rule was written, each caught only by a human reading
+the diff: a bind-guard and readiness waiter that `fyd` never constructed, an entire warden —
+detection, verdicts, failover — that production boot never called, and a frame governor no adapter
+ever wired. All three were fully tested at 100% coverage and all three shipped a capability the
+daemon did not have.
+
+**Why no gate caught it:** `knip.json` lists `tests/**/*.test.ts` as an entry point, so a module
+imported only by its own tests counts as reachable and the dead-code rule stays silent. Tests
+launder dead production code. A reachability gate now closes this; do not wait for it to fail you.
+
 ### The completeness declaration is mandatory
 
 Every PR body MUST contain a section titled **"Source coverage"** listing **every non-test source
