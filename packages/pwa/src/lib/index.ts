@@ -5,6 +5,7 @@ export * from '../components/question-form.tsx';
 export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
+export * from '../components/session-tasks.tsx';
 export * from '../features/analytics/analytics-api.ts';
 export * from '../features/analytics/analytics-query-autocomplete.tsx';
 export * from '../features/analytics/analytics-query-complete.ts';

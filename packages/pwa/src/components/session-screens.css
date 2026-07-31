@@ -525,28 +525,53 @@
   padding: 16px;
 }
 .fy-message {
-  border: 1px solid var(--fy-border);
-  border-radius: 12px;
+  min-width: 0;
   max-width: min(76ch, 88%);
-  padding: 10px 12px;
+  overflow-wrap: anywhere;
 }
-.fy-message header,
-.fy-message time {
+.fy-message header {
+  align-items: baseline;
   color: var(--fy-muted);
+  display: flex;
   font-size: 12px;
+  gap: 8px;
+  justify-content: space-between;
+}
+.fy-message time {
+  flex: 0 0 auto;
 }
 .fy-message p {
-  margin: 4px 0;
+  margin: 3px 0 0;
   white-space: pre-wrap;
 }
 .fy-message-user {
   background: var(--user-bg, var(--fy-surface-2));
+  border: 1px solid var(--fy-border);
+  border-radius: 12px 12px 3px 12px;
   margin-left: auto;
+  padding: 10px 12px;
+}
+.fy-message-assistant {
+  padding: 4px 2px;
 }
 .fy-message-tool,
 .fy-message-notice {
-  background: var(--fy-surface-2);
   max-width: 100%;
+}
+.fy-message-chrome {
+  align-items: baseline;
+  border-left: 2px solid var(--fy-border);
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  padding: 2px 0 2px 10px;
+}
+.fy-message-chrome header {
+  flex: 0 0 auto;
+}
+.fy-message-chrome p {
+  margin: 0;
 }
 .fy-thinking {
   color: var(--fy-muted);
@@ -669,6 +694,10 @@
   }
   .fy-message {
     max-width: 95%;
+  }
+  .fy-message-assistant,
+  .fy-message-chrome {
+    max-width: 100%;
   }
   .fy-composer-actions p {
     max-width: 60%;

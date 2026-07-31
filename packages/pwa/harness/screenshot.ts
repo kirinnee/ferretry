@@ -133,6 +133,9 @@ try {
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
+      const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
+      await page.getByLabel('Session task board').screenshot({ path: sessionTasksTarget });
+      process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
 
       const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
       await page.goto(`${server.url}?attachment-unlock`);
