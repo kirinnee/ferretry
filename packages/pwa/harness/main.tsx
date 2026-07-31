@@ -41,6 +41,8 @@ import { MarkdownComposerSettings } from '../src/features/settings/markdown-comp
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
+import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
@@ -214,6 +216,7 @@ const TASKS: readonly TaskSummary[] = [
     dependsOn: ['F12'],
   }),
 ];
+const TASK_DAG = taskDag(TASKS);
 
 const WARDEN: WardenStatusView = {
   config: {
@@ -816,6 +819,25 @@ function Shell() {
           </div>
           <PanelBody>
             <TaskQuickSummary task={TASKS[1] as TaskSummary} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Task dependency graph',
+      render: () => (
+        <Card aria-label="Task dependency graph" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Task dependency graph</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <TaskDagGraph
+              daemonId={daemon.daemonId}
+              dag={filterTaskDag(TASK_DAG, statuses)}
+              onOpen={() => {}}
+              onNavigate={() => {}}
+              onShowAll={() => setStatuses(null)}
+            />
           </PanelBody>
         </Card>
       ),
