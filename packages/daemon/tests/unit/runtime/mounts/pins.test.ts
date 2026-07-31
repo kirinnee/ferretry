@@ -1,74 +1,20 @@
-import { PIN_SCHEMA_VERSION, type Pin, type PinSnapshot } from '@ferretry/protocol';
+import { PIN_SCHEMA_VERSION } from '@ferretry/protocol';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher, ApiRouter, type ApiResponse } from '../../../../src/lib/api/index.ts';
-import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
-import {
-  createMountedDispatcher,
-  mountedDaemonRoutes,
-  pinActor,
-  pinRoutes,
-} from '../../../../src/lib/runtime/index.ts';
-import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
-import { fixedClock, jsonBody, request } from '../../api/support.ts';
-
-const AT = '2024-05-01T10:00:00.000Z';
-const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
-const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret' } as const;
-
-/** A repository under the test's control: the domain rules are real, the storage is not. */
-class FakeRepository implements PinRepository {
-  constructor(private pins: readonly Pin[] = []) {}
-
-  async snapshot(sessionId: string): Promise<PinSnapshot> {
-    return this.document(sessionId, this.pins);
-  }
-
-  async mutate(sessionId: string, transform: (current: readonly Pin[]) => readonly Pin[]): Promise<PinSnapshot> {
-    this.pins = transform(this.pins);
-    return this.document(sessionId, this.pins);
-  }
-
-  private document(sessionId: string, pins: readonly Pin[]): PinSnapshot {
-    return { v: PIN_SCHEMA_VERSION, sessionId, pins: [...pins], updatedAt: AT };
-  }
-}
-
-class FakeSessions implements PinSessionDirectory {
-  constructor(private readonly known: readonly string[]) {}
-
-  async has(sessionId: string): Promise<boolean> {
-    return this.known.includes(sessionId);
-  }
-}
+import { pinActor, pinRoutes } from '../../../../src/lib/runtime/index.ts';
+import { jsonBody, request } from '../../api/support.ts';
+import { AT, CREDENTIALS, IDS, agentIn, human, pinService } from './support.ts';
 
 interface Fixture {
   readonly dispatch: (overrides: Parameters<typeof request>[0]) => Promise<ApiResponse>;
-  readonly repository: FakeRepository;
 }
 
-function fixture(options: { readonly pins?: readonly Pin[]; readonly instant?: string } = {}): Fixture {
-  const repository = new FakeRepository(options.pins ?? []);
-  let minted = -1;
-  const service = new PinService(
-    new FakeSessions(['s1', 's2']),
-    repository,
-    { now: () => options.instant ?? AT },
-    {
-      next: () => {
-        minted += 1;
-        return IDS[minted] ?? `unexpected-${minted}`;
-      },
-    },
-  );
-  const dispatcher = new ApiDispatcher(new ApiRouter([...pinRoutes(service)]), CREDENTIALS);
-  return { dispatch: async overrides => await dispatcher.dispatch(request(overrides)), repository };
+function fixture(options: { readonly instant?: string } = {}): Fixture {
+  const routes = pinRoutes(pinService(['s1', 's2'], options.instant ?? AT));
+  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS);
+  return { dispatch: async overrides => await dispatcher.dispatch(request(overrides)) };
 }
-
-/** The human's CLI. */
-const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;
-/** An agent calling from inside its own pane. */
-const agentIn = (sessionId: string) => ({ ...human, 'x-ferretry-session-id': sessionId });
 
 const post = (body: unknown, headers: Readonly<Record<string, string>> = human) => ({
   method: 'POST',
@@ -291,49 +237,5 @@ describe('pin routes', () => {
 
     // Assert
     should(response.status).equal(401);
-  });
-});
-
-/** A feed that never collected: enough to build the base surface without a transport. */
-const emptyFeed: UsageFeedPort = {
-  accounts: async () => [],
-  snapshotAt: () => undefined,
-  hasSnapshot: () => false,
-};
-
-describe('the mounted daemon surface', () => {
-  const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
-  const subsystems = {
-    pins: new PinService(new FakeSessions([]), new FakeRepository(), { now: () => AT }, { next: () => IDS[0]! }),
-  };
-
-  it('should serve the base feeds and every mounted subsystem from one table', () => {
-    // Arrange / Act
-    const paths = mountedDaemonRoutes(base, subsystems).map(route => `${route.method} ${route.path}`);
-
-    // Assert
-    should(paths).containDeep([
-      'GET /healthz',
-      'GET /v1/health',
-      'GET /usage',
-      'GET /v1/usage',
-      'GET /metrics',
-      'GET /v1/sessions/:sessionId/pins',
-      'POST /v1/sessions/:sessionId/pins',
-    ]);
-  });
-
-  it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {
-    // Arrange
-    const dispatcher = createMountedDispatcher(base, subsystems);
-
-    // Act
-    const health = await dispatcher.dispatch(request({ path: '/healthz' }));
-    const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
-
-    // Assert
-    should(health.status).equal(200);
-    // The session is unknown to this fixture, which still proves the route is mounted and reached.
-    should(pins.status).equal(404);
   });
 });

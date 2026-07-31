@@ -59,6 +59,7 @@ import {
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
+  AttentionService,
   BrowserViewerStream,
   EXIT_ALREADY_RUNNING,
   createMountedDispatcher,
@@ -71,6 +72,7 @@ import {
   defaultSessionLifecycleSettings,
   defaultStartWaitPolicy,
   packageRole,
+  parseSessionId,
   resolveStateHome,
   SessionLifecycleService,
   TmuxController,
@@ -309,6 +311,12 @@ export function buildWorld(): DaemonWorld {
     },
     api: new BunApiServer(),
     subsystems: {
+      attention: new AttentionService(
+        // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
+        // than asserted: an id the layout would not accept must never become a directory path.
+        new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        clock,
+      ),
       pins: new PinService(
         new FilePinSessionDirectory(paths, stateFiles),
         // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
