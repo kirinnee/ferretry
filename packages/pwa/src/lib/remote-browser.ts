@@ -4,6 +4,8 @@ import {
   BrowserStatusSchema,
   type BrowserAction,
   type BrowserActionResult,
+  type BrowserInputEvent,
+  type BrowserPageSummary,
   type BrowserStatus,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
@@ -139,4 +141,120 @@ export const remoteCanvasPoint = (
     x: Math.max(0, Math.min(width - 1, ((clientX - rect.left) * width) / Math.max(1, rect.width))),
     y: Math.max(0, Math.min(height - 1, ((clientY - rect.top) * height) / Math.max(1, rect.height))),
   };
+};
+
+export const REMOTE_MULTI_CLICK_MS = 500;
+export const REMOTE_MULTI_CLICK_SLOP = 5;
+export const REMOTE_MAX_CLICK_COUNT = 3;
+
+export interface RemoteClickRun {
+  readonly count: number;
+  readonly at: number;
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * `PointerEvent.detail` is 0 for pointerdown/pointerup, so it can never carry a
+ * click run. Track the run here from time plus distance instead, and send the
+ * SAME count on press and release so Chrome sees a well-formed multi-click.
+ */
+export const nextRemoteClickRun = (
+  previous: RemoteClickRun | null,
+  point: { readonly x: number; readonly y: number },
+  at: number,
+): RemoteClickRun => {
+  const continues =
+    previous !== null &&
+    at - previous.at <= REMOTE_MULTI_CLICK_MS &&
+    Math.abs(point.x - previous.x) <= REMOTE_MULTI_CLICK_SLOP &&
+    Math.abs(point.y - previous.y) <= REMOTE_MULTI_CLICK_SLOP;
+  return {
+    count: continues ? Math.min(REMOTE_MAX_CLICK_COUNT, previous.count + 1) : 1,
+    at,
+    x: point.x,
+    y: point.y,
+  };
+};
+
+/**
+ * True for the LOCAL paste chord, which must reach the surface's own paste
+ * handler rather than being forwarded as a keystroke. Forwarding it makes the
+ * remote Chrome paste the REMOTE clipboard, which the reader never asked for.
+ */
+export const isLocalPasteChord = (event: {
+  readonly key: string;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+}): boolean => (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v';
+
+export type RemotePointerButton = 'none' | 'left' | 'middle' | 'right' | 'back' | 'forward';
+
+const POINTER_BUTTONS: readonly RemotePointerButton[] = ['left', 'middle', 'right', 'back', 'forward'];
+
+/** Maps a DOM `PointerEvent.button` index onto the CDP button vocabulary. */
+export const remotePointerButton = (button: number): RemotePointerButton => POINTER_BUTTONS[button] ?? 'none';
+
+/** Packs DOM modifier flags into the CDP modifier bitmask. */
+export const remoteInputModifiers = (event: {
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly shiftKey: boolean;
+}): number => (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
+
+export interface RemoteKeyEvent {
+  readonly key: string;
+  readonly code: string;
+  readonly keyCode: number;
+  readonly location: number;
+  readonly repeat: boolean;
+  readonly altKey: boolean;
+  readonly ctrlKey: boolean;
+  readonly metaKey: boolean;
+  readonly shiftKey: boolean;
+}
+
+/**
+ * Builds one keyboard input event. `text` is attached only for an unmodified
+ * printable key-down: sending it for a chord would make Chrome insert the
+ * character *and* run the shortcut.
+ */
+export const remoteKeyInput = (event: RemoteKeyEvent, type: 'keyDown' | 'keyUp'): BrowserInputEvent => {
+  const printable = type === 'keyDown' && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+  return {
+    kind: 'key',
+    type,
+    key: event.key,
+    code: event.code,
+    ...(printable ? { text: event.key, unmodifiedText: event.key } : {}),
+    windowsVirtualKeyCode: event.keyCode,
+    nativeVirtualKeyCode: event.keyCode,
+    modifiers: remoteInputModifiers(event),
+    autoRepeat: event.repeat,
+    isKeypad: event.location === 3,
+  };
+};
+
+/**
+ * Turns a retained key-down into the key-up that releases it. Modifiers are
+ * cleared deliberately: the release runs after focus is already gone, so the
+ * live modifier state is unknowable and a stale one would strand Chrome in it.
+ */
+export const remoteKeyRelease = (pressed: BrowserInputEvent): BrowserInputEvent | null => {
+  if (pressed.kind !== 'key') return null;
+  const { text: _text, unmodifiedText: _unmodifiedText, ...rest } = pressed;
+  return { ...rest, type: 'keyUp', modifiers: 0, autoRepeat: false };
+};
+
+/** Tab copy comes from the real page, never from a client-side guess. */
+export const remotePageLabel = (page: BrowserPageSummary): string => {
+  const title = page.title.trim();
+  if (title) return title;
+  if (!page.url || page.url === 'about:blank') return 'New tab';
+  try {
+    return new URL(page.url).hostname || page.url;
+  } catch {
+    return page.url;
+  }
 };
