@@ -14,6 +14,8 @@ import {
   DaemonReadinessWaiter,
   DaemonStorageFactory,
   DaemonSecretsLoader,
+  StateHomeLockedError,
+  type OpenedDaemonStorage,
   BunSecretShell,
   daemonSecretSourceProgram,
   FileDaemonConfig,
@@ -36,6 +38,7 @@ import {
   type WorkerClientOptions,
 } from '../src/adapters/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
@@ -56,9 +59,11 @@ import {
 import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
+  AttentionService,
   BrowserViewerStream,
-  createApiDispatcher,
   EXIT_ALREADY_RUNNING,
+  createMountedDispatcher,
+  PinService,
   SessionPlanner,
   TeamAdvisor,
   createFoundationPaths,
@@ -67,6 +72,7 @@ import {
   defaultSessionLifecycleSettings,
   defaultStartWaitPolicy,
   packageRole,
+  parseSessionId,
   resolveStateHome,
   SessionLifecycleService,
   TmuxController,
@@ -77,6 +83,8 @@ import {
   type ApiServerPort,
   type DaemonConfig,
   type DaemonReadinessPorts,
+  type MillisecondClockPort,
+  type MountedSubsystems,
   type UsageFeedPort,
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -150,8 +158,14 @@ export interface DaemonWorld {
   /** The daemon's HTTP surface: `/healthz`, `/v1/health`, `/usage`, `/v1/usage`
    *  and `/metrics` today, plus whatever each subsystem unit mounts as it lands. */
   readonly api: ApiServerPort;
+  /** The subsystems mounted onto that surface. Every field here is a capability the running product
+   *  actually has; a subsystem absent from it is one the daemon never constructs. */
+  readonly subsystems: MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
+  /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
+   *  the uptime and freshness the API reports are drivable from a test. */
+  readonly clock: MillisecondClockPort;
   /** Resolves when the process should shut down. Injected so a test can drive a
    *  full boot without the daemon running forever. */
   readonly untilShutdown: () => Promise<void>;
@@ -296,28 +310,81 @@ export function buildWorld(): DaemonWorld {
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
+    subsystems: {
+      attention: new AttentionService(
+        // The ledger repository is handed raw ids from the transport, so the id is parsed here rather
+        // than asserted: an id the layout would not accept must never become a directory path.
+        new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        clock,
+      ),
+      pins: new PinService(
+        new FilePinSessionDirectory(paths, stateFiles),
+        // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
+        new FilePinRepository(paths, stateFiles, new KeyedSerialExecutor(), clock),
+        clock,
+        // A pin id is a protocol UUID, so it is minted as one rather than derived from a counter the
+        // next process would restart.
+        { next: () => crypto.randomUUID() },
+      ),
+    },
     credentials: new StateApiCredentials(paths, stateFiles),
+    clock: { now: () => Date.now() },
     untilShutdown: untilTerminated,
   };
 }
 
-/** Boots the daemon from an already-built world, so tests can inject their own. */
+/**
+ * Boots the daemon from an already-built world, so tests can inject their own.
+ *
+ * The ORDER is the design, and it is not the order the source used.
+ *
+ * The state home comes FIRST. Opening it takes the lifetime lock, establishes the layout and opens
+ * the session index, and every document the daemon then reads or writes — configuration included —
+ * lives inside it. Loading configuration first, as the source did, writes `config/daemon.json` into
+ * a home that has no layout marker yet, and the layout gate correctly refuses a non-empty unmarked
+ * home as foreign state: a first boot on a fresh home could not get past its own configuration
+ * step. Owning the home before writing into it removes the whole class.
+ *
+ * A held lifetime lock is then the same answer as a responder on the address — another daemon is
+ * already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them surfacing as a
+ * crash about SQLite.
+ *
+ * The socket comes last, and every acquisition registers its release as it is made rather than in
+ * one block at the end, so a failure part-way through unwinds exactly what succeeded.
+ */
 export async function start(world: DaemonWorld, cleanups: Array<() => void | Promise<void>> = []): Promise<number> {
   if (world.role !== 'daemon') return 1;
+
+  // Registered for release immediately: an exception from anything below must not leave the lock
+  // behind, because a stale lock fails the NEXT start for a reason unrelated to what broke.
+  let opened: OpenedDaemonStorage;
+  try {
+    opened = await world.storage.open();
+  } catch (error) {
+    if (error instanceof StateHomeLockedError) return EXIT_ALREADY_RUNNING;
+    throw error;
+  }
+  cleanups.push(() => opened.storage.close());
+
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
   if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
+
   const usage = world.createUsageFeed(config);
+  const startedAtMs = world.clock.now();
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
-  // up fighting whatever else the host already runs on it.
-  const server: ApiServerHandle = await world.api.listen(
-    createApiDispatcher({
-      credentials: await world.credentials.load(),
-      usage,
-      clock: { now: () => Date.now() },
-      startedAtMs: Date.now(),
-    }),
-    { host: config.host, port: config.port },
+  // up fighting whatever else the host already runs on it. The bind is retried because the common
+  // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
+  // window routinely and reported a permanent failure for a condition that clears in a second.
+  const server: ApiServerHandle = await world.boot.binder.bind(
+    async () =>
+      await world.api.listen(
+        createMountedDispatcher(
+          { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs },
+          world.subsystems,
+        ),
+        { host: config.host, port: config.port },
+      ),
   );
   cleanups.push(() => server.stop());
   await world.untilShutdown();
