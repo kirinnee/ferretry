@@ -102,10 +102,16 @@ This is a refactor with no original to diff against, so tests are what prove it 
    rejected regardless of how good they look.
 3. `direnv exec . pre-commit run --all-files` passes.
 4. `direnv exec . task test` passes.
-5. `direnv exec . nix develop .#releaser -c ./scripts/release/publish.sh --snapshot` passes.
-6. **No gate was weakened.** No blanket knip ignores, no `|| true`, no `--no-verify`, no
-   `@ts-ignore`, no tsconfig loosening. If something genuinely must be scoped, scope it as narrowly
-   as possible and justify it in the PR. A weakened gate is a rejected PR.
+5. **`direnv exec . task test:coverage` passes.** CI enforces a **100% coverage gate** that plain
+   `task test` does not run — unit tier covers `src/lib/**`, integration tier covers
+   `src/adapters/**`. Passing tests are not enough: a PR with every test green but coverage short
+   **fails CI**. This is not hypothetical; it happened on the first PR of the resumed migration
+   (23/23 integration tests passing, 47% line coverage, red CI). Run it locally before you push.
+6. `direnv exec . nix develop .#releaser -c ./scripts/release/publish.sh --snapshot` passes.
+7. **No gate was weakened.** No blanket knip ignores, no `|| true`, no `--no-verify`, no
+   `@ts-ignore`, no tsconfig loosening, **and no shrinking or scoping of a coverage ledger to make
+   a number go green**. If something genuinely must be scoped, scope it as narrowly as possible and
+   justify it in the PR. A weakened gate is a rejected PR.
 
 ## Self-review before reporting
 

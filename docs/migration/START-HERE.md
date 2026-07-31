@@ -75,10 +75,13 @@ judgement depends on this baseline.
 never start it, never kill tmux sessions you did not create, never bind its ports. Tests always use
 a temporary `FY_HOME`. `kloge` and `loctl` stay external and out of scope.
 
-**Merge gate, all three, every time:** `pre-commit run --all-files`, `task test`, and the snapshot
-publish. **Never weaken a gate to make something pass** — no blanket knip ignores, no `|| true`, no
-`@ts-ignore`, no loosened tsconfig. This refactor has no original to diff against, so the gates and
-the tests are its only oracle.
+**Merge gate, all four, every time:** `pre-commit run --all-files`, `task test`,
+**`task test:coverage`**, and the snapshot publish. The coverage gate is the one that bites — CI
+enforces **100%** (`src/lib/**` from the unit tier, `src/adapters/**` from the integration tier) and
+plain `task test` does not run it, so a branch can be green locally and red in CI. **Never weaken a
+gate to make something pass** — no blanket knip ignores, no `|| true`, no `@ts-ignore`, no loosened
+tsconfig, no shrinking a coverage ledger. This refactor has no original to diff against, so the
+gates and the tests are its only oracle.
 
 ## 5. Order of work
 
