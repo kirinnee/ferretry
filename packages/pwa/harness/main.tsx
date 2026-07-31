@@ -34,6 +34,7 @@ import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { RemoteBrowserViewer, type RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
+import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
@@ -311,6 +312,37 @@ const ANALYTICS = {
   ],
 } as unknown as AnalyticsAggregateResponse;
 
+/** Temporal fixture intentionally has a missing day and an unknown cost so the
+ * screenshot makes the chart's honest-gap treatment reviewable. */
+const ANALYTICS_TIME = {
+  kind: 'aggregate',
+  aggregation: 'sum',
+  query: 'sum by (day)',
+  parsed: { aggregation: 'sum', groupBy: ['day'], matchers: [] },
+  results: [
+    {
+      labels: { day: '2026-07-29' },
+      sessions: 2,
+      tokens: { value: 904_320, known: 2, total: 2 },
+      inputTokens: { value: 700_100, known: 2, total: 2 },
+      outputTokens: { value: 204_220, known: 2, total: 2 },
+      cachedInputTokens: { value: 100_000, known: 2, total: 2 },
+      cacheWriteInputTokens: { value: 10_000, known: 2, total: 2 },
+      equivalentApiCostUsdMicros: { value: 2_450_000, known: 2, total: 2 },
+    },
+    {
+      labels: { day: '2026-07-31' },
+      sessions: 1,
+      tokens: { value: 80_120, known: 1, total: 1 },
+      inputTokens: { value: 67_000, known: 1, total: 1 },
+      outputTokens: { value: 13_120, known: 1, total: 1 },
+      cachedInputTokens: { value: 0, known: 1, total: 1 },
+      cacheWriteInputTokens: { value: 0, known: 1, total: 1 },
+      equivalentApiCostUsdMicros: { value: null, known: 0, total: 1 },
+    },
+  ],
+} as unknown as AnalyticsAggregateResponse;
+
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
   binaryType: BinaryType = 'blob';
@@ -550,6 +582,15 @@ function Shell() {
           availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
           onSave={() => {}}
         />
+
+        <Card aria-label="Analytics time series" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — time series</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsTimeSeries response={ANALYTICS_TIME} />
+          </PanelBody>
+        </Card>
 
         <Card className="overflow-hidden">
           <PanelHeader>
