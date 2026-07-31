@@ -36,16 +36,24 @@ packages/daemon/src/lib/task-boards/types.ts # PR #5: complete task board member
 # it claims a callsign, and a claim needs a store whose tryClaim is atomic across concurrent daemon
 # requests. No adapter implements one, and the claim belongs to the request that CREATES a session
 # — the unit that mounts session start — not to the one that asks what is free.
+#
+# The WORKTREE barrel is a different shape of gap, and worth stating exactly: every module beneath it
+# — parser, policy, ports, types — is already reachable, because the Git adapters import them
+# directly. The barrel has no importer because no MOUNT exists to be the one caller that wants the
+# domain as a whole. There cannot be one yet: `ManagedWorktreeAdapter` is constructed in the world but
+# nothing calls it, and the routes the CLI already speaks (`/v1/worktrees`, `/v1/worktrees/remove`)
+# need a registry of managed worktrees to serve. A `ManagedWorktree` record carries an ownership
+# token, a creation instant and whether its branch pre-existed — none of it derivable from Git — so it
+# must be PERSISTED when the worktree is created, by a session start that is not mounted either. The
+# barrel is left rather than deleted because it is the import the mount will take, not dead weight.
 packages/daemon/src/lib/names/allocator.ts # PR #9: allocation needs an atomic claim store and a mounted session start; suggestions do not claim
-packages/daemon/src/lib/worktrees/index.ts # PR #9: add the callsign name pool, managed worktrees, and the Git adapter; not mounted in bin/fyd.ts
+packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is reachable; the barrel awaits a mount, which awaits a managed-worktree registry
 
-# PR #10 — port the task record system and its file store
-# The rest of PR #10 is mounted: bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per
-# session and the task routes serve it. This one module has no honest caller left — it duplicates
-# packages/cli/src/lib/tasks/task-title.ts, which the CLI already uses for its own --title guidance,
-# and the API boundary enforces the five-word rule through the protocol's TaskTitleSchema. Importing
-# it from a route to satisfy the gate would be a fake edge; it should be DELETED as a duplicate.
-packages/daemon/src/lib/tasks/task-title.ts # PR #10: dead duplicate of the CLI's task-title; delete it rather than wire it
+# PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
+# bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per session and the task routes serve
+# it. `task-title.ts` was DELETED rather than wired: it duplicated packages/cli/src/lib/tasks/
+# task-title.ts, which the CLI already uses for its own --title guidance, and the API boundary
+# enforces the five-word rule through the protocol's TaskTitleSchema.
 
 # PR #12 — add bounded docx extraction
 # BLOCKED ON THE ATTACHMENT SUBSYSTEM ITSELF. Extraction is the LAST step of an upload the daemon
@@ -58,28 +66,27 @@ packages/daemon/src/lib/attachments/document-extraction.ts # PR #12: add bounded
 packages/daemon/src/lib/attachments/index.ts # PR #12: add bounded docx extraction; not mounted in bin/fyd.ts
 
 # PR #13 — add learning evidence pipeline
-# THE STORE IS READY; THE PIPELINE AROUND IT IS NOT. FileLearningStore needs only paths, a filesystem
-# and a clock, all of which the root already has. What is missing is everything that gives it work:
-# `extract` wants raw transcript and inbox input the daemon does not assemble, `applyMinerOutput`
-# wants a miner run the daemon cannot spawn, and LearningStatus requires an enabled flag and an
-# interval from a LearningConfig with no configuration source. Accepting a proposal also WRITES a
-# patch into the operator's own guidance file, outside the state home; mounting that from a guess at
-# the apply semantics would edit a human's files wrongly.
-packages/daemon/src/adapters/learning/file-store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/aggregate.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/extract.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/index.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/policy.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/store.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
-packages/daemon/src/lib/learning/types.ts # PR #13: add learning evidence pipeline; not mounted in bin/fyd.ts
+# THE REVIEW SURFACE IS MOUNTED; MINING IS NOT. bin/fyd.ts builds a FileLearningStore over the state
+# home and `src/lib/runtime/mounts/learning.ts` serves the routes `fy learning` already speaks:
+# status, config, the proposal board, a human's accept/reject/edit verdict, and the rendered patch.
+# The two modules below are the MINER's half of the subsystem, and nothing can hand them work:
+# `extract` wants a finished session's transcript and inbox, and no session document records where a
+# harness wrote its transcript nor is there an inbox; `applyMinerOutput` wants the result of a miner
+# run, and no session start is mounted to launch one. POST /v1/learning/run therefore refuses with a
+# stated reason rather than answering with a manifest that scanned nothing.
+packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; no mounted session start can produce a miner run
+packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcript and inbox the daemon does not assemble
 
 
 # PR #15 — add browser session control
-# BLOCKED ON A HOST CONTRACT NOTHING DECLARES. A login window is a Chrome child process plus an
-# x11vnc supervisor plus a leased profile directory, and the composition root has no display, no
-# profile root and no VNC policy to hand it. Constructing that from defaults would put a browser and
-# a VNC server on whatever machine boots the daemon, which is not a decision a wiring unit may make.
+# BLOCKED ON AN ADAPTER THAT DOES NOT EXIST — and it is a PORT, not a wiring. The host contract is
+# declared, not missing: `BrowserLoginRuntime` in adapters/browser/control/login-window.ts names
+# every effect the window needs. Nothing implements it. Doing so means writing Chrome executable
+# discovery, X display resolution, an x11vnc supervisor, a one-shot VNC password file, free-port
+# allocation and readiness polling — a new adapter of real size, whose first successful call puts a
+# browser and a VNC server on whatever machine booted the daemon. The CLI already speaks
+# `/v1/browser/login` and `/v1/sessions/:id/browser`, so this is the largest gap the product has
+# between a shipped command and a mounted capability; it belongs to the unit that ports the runtime.
 packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/login-window.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
 packages/daemon/src/adapters/browser/control/profile-store.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
@@ -92,8 +99,17 @@ packages/daemon/src/lib/browser/control/profile.ts # PR #15: add browser session
 # BLOCKED ON THE SUPERVISOR ITSELF. All four are policy for a sweep loop that does not exist: they
 # decide which sessions get a warden, which account judges them, when a blessing suppresses an
 # anomaly, and how a fleet attention view reads. Every one of them consumes durable warden state —
-# assignments, strikes, blessings, the last sweep instant — and nothing writes any of it. A view
-# built over empty state would report `no-sweep` forever, which is true but is not the subsystem.
+# assignments, strikes, blessings, the last sweep instant — and nothing writes any of it.
+#
+# `attention.ts` was investigated closely, because on paper the daemon holds all four of its other
+# inputs: sessions from the index, boards from the attention ledgers it already serves, verdicts from
+# the mounted WardenReportReader, and anomalies from `detectAnomalies`. It is the LAST of those that
+# refuses. `detectAnomalies` takes a `hasLiveMonitor` per session, and this daemon mounts no monitor
+# subsystem at all — `StorageSessionHealthInventory` is constructed with `monitors: false`. Every
+# session in an actively-monitored status would therefore be detected as `dead_monitor`, and the
+# fleet view would be a wall of one anomaly class that no warden exists to act on. Passing an empty
+# anomaly list instead is worse: "nothing is wrong" is a claim nothing measured. The view lands with
+# the monitor subsystem, not before it.
 packages/daemon/src/lib/warden/attention.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/bless.ts # PR #19: warden supervision; the report reader is mounted but this is not
 packages/daemon/src/lib/warden/concurrency.ts # PR #19: warden supervision; the report reader is mounted but this is not

@@ -15,6 +15,7 @@ import {
   emptyFeed,
   FakeTerminals,
   human,
+  learningSubsystem,
   nameSubsystem,
   pinService,
   taskSubsystem,
@@ -36,6 +37,7 @@ const subsystems = (): MountedSubsystems => ({
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
   names: nameSubsystem(),
+  learning: learningSubsystem(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -66,6 +68,12 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
       'GET /v1/names',
+      'GET /v1/learning/status',
+      'GET /v1/learning/config',
+      'GET /v1/learning/proposals',
+      'POST /v1/learning/proposals/:id',
+      'GET /v1/learning/proposals/:id/patch',
+      'POST /v1/learning/run',
     ]);
   });
 
@@ -95,6 +103,7 @@ describe('the mounted daemon surface', () => {
     const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
+    const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
 
     // Assert
     should(health.status).equal(200);
@@ -105,6 +114,7 @@ describe('the mounted daemon surface', () => {
     should(fleet.status).equal(200);
     should(analytics.status).equal(200);
     should(terminals.status).equal(200);
+    should(learning.status).equal(200);
   });
 
   it('should serve every protocol-switching route from one table too', () => {

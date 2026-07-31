@@ -3,6 +3,7 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type CreateTerminalRequest,
+  type LearningConfig,
   type Pin,
   type PinSnapshot,
   type TaskActionRequest,
@@ -18,8 +19,17 @@ import {
   type AttentionLedgerRepository,
   type AttentionMutation,
 } from '../../../../src/lib/attention/index.ts';
+import type {
+  LearningState,
+  LearningStorePort,
+  Observation,
+  Proposal,
+  RunManifest,
+  Tombstone,
+} from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
+import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
@@ -381,6 +391,151 @@ export function nameSubsystem(claims: readonly NameClaim[] = [], nowMs: number =
 /** One held callsign, claimed now and expiring at the end of the pool policy's own window. */
 export function nameClaim(callsign: string, ownerId = 's1', claimedAtMs: number = AT_MS): NameClaim {
   return { callsign, ownerId, claimedAtMs, expiresAtMs: claimedAtMs + CALLSIGN_WINDOW_MS };
+}
+
+/**
+ * An in-memory learning store.
+ *
+ * Every document the real `FileLearningStore` keeps on disk, kept in a field instead: the mount's
+ * whole job is the decisions it makes over these documents, and a route test that passes here
+ * exercises the same policy the daemon runs.
+ */
+export class FakeLearningStore implements LearningStorePort {
+  readonly patches: Array<{ readonly id: string; readonly contents: string }> = [];
+
+  constructor(
+    public proposals: readonly Proposal[] = [],
+    public observations: readonly Observation[] = [],
+    public tombstones: readonly Tombstone[] = [],
+    public state: LearningState = {},
+    /** The manifest `latestRunManifest` answers with; deliberately `unknown` so a case can hand over
+     *  a damaged one and prove the status read refuses it. */
+    public manifest: unknown = undefined,
+  ) {}
+
+  async ensureDirectories(): Promise<void> {}
+
+  async loadState(): Promise<LearningState> {
+    return this.state;
+  }
+
+  async saveState(state: LearningState): Promise<void> {
+    this.state = state;
+  }
+
+  async readObservations(): Promise<readonly Observation[]> {
+    return this.observations;
+  }
+
+  async observationsById(): Promise<ReadonlyMap<string, Observation>> {
+    return new Map(this.observations.map(observation => [observation.id, observation]));
+  }
+
+  async appendObservations(observations: readonly Observation[]): Promise<readonly Observation[]> {
+    this.observations = [...this.observations, ...observations];
+    return observations;
+  }
+
+  async loadProposals(): Promise<readonly Proposal[]> {
+    return this.proposals;
+  }
+
+  async saveProposals(proposals: readonly Proposal[]): Promise<void> {
+    this.proposals = proposals;
+  }
+
+  async loadTombstones(): Promise<readonly Tombstone[]> {
+    return this.tombstones;
+  }
+
+  async saveTombstones(tombstones: readonly Tombstone[]): Promise<void> {
+    this.tombstones = tombstones;
+  }
+
+  async writeRunManifest(manifest: RunManifest): Promise<void> {
+    this.manifest = manifest;
+  }
+
+  async readRunManifest(): Promise<RunManifest | undefined> {
+    return this.manifest as RunManifest | undefined;
+  }
+
+  async latestRunManifest(): Promise<RunManifest | undefined> {
+    return this.manifest as RunManifest | undefined;
+  }
+
+  async writePatch(id: string, contents: string): Promise<string> {
+    this.patches.push({ id, contents });
+    return `/patches/${id}.md`;
+  }
+}
+
+/** The learning schedule the fixtures report. Mining is off for the same reason production reports
+ *  it off: no miner is mounted. */
+export const LEARNING_CONFIG: LearningConfig = {
+  enabled: false,
+  agent: 'claude',
+  intervalMinutes: 60,
+  batchSize: 20,
+  maxMinersPerRun: 2,
+  maxSessionsPerRun: 40,
+  minSpawnGapMinutes: 30,
+};
+
+/** A learning subsystem over an in-memory store. The transaction is real serialization — a promise
+ *  chain — so a case can prove two concurrent verdicts do not lose one. */
+export function learningSubsystem(store: FakeLearningStore = new FakeLearningStore()): LearningSubsystem {
+  let tail: Promise<unknown> = Promise.resolve();
+  return {
+    store,
+    transaction: work => {
+      const result = tail.then(work);
+      tail = result.then(
+        () => undefined,
+        () => undefined,
+      );
+      return result;
+    },
+    config: () => LEARNING_CONFIG,
+    now: () => AT,
+  };
+}
+
+/** One observation, with only the fields a case cares about spelled out. */
+export function observation(overrides: Partial<Observation> & { readonly id: string }): Observation {
+  return {
+    sessionId: 's1',
+    mode: 'auto',
+    cwd: '/work/ferretry',
+    repo: 'ferretry',
+    at: AT,
+    kind: 'correction',
+    gist: 'prefer the repo task surface',
+    quote: 'use task test, not bun test',
+    source: 'human',
+    verified: true,
+    runId: 'run-1',
+    ...overrides,
+  };
+}
+
+/** One proposal, defaulting to a pending rule supported by a single observation. */
+export function proposal(overrides: Partial<Proposal> & { readonly id: string }): Proposal {
+  return {
+    category: 'global',
+    state: 'pending',
+    title: 'Always run the repo task surface',
+    ruleText: 'Run `task test` rather than invoking the test runner directly.',
+    target: { kind: 'global-agent-guidance', path: 'guidance.md', anchor: '## Agent rules' },
+    observationIds: ['obs_1'],
+    occurrences: 1,
+    crossRepoCount: 1,
+    firstSeen: AT,
+    lastSeen: AT,
+    identity: 'always-run-the-repo-task-surface',
+    history: [{ at: AT, event: 'proposed:run-1', by: 'miner' }],
+    ...overrides,
+  };
 }
 
 /** A feed that never collected: enough to build the base surface without a transport. */

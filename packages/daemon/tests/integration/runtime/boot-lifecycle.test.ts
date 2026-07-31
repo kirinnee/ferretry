@@ -1,8 +1,12 @@
 import { afterEach, describe, it } from 'bun:test';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
+  LearningConfigSchema,
+  LearningPatchResponseSchema,
+  LearningStatusSchema,
+  ProposalViewSchema,
   SessionConfigSchema,
   SessionStateSchema,
   NameSuggestionsSchema,
@@ -10,6 +14,7 @@ import {
   TerminalViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { z } from 'zod';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
 import {
   EXIT_ALREADY_RUNNING,
@@ -600,6 +605,170 @@ describe('daemon boot lifecycle', () => {
     // Every suggestion is a real pool entry, not something the route invented.
     should(names.every(name => DEFAULT_CALLSIGN_POOL.includes(name))).be.true();
     should(refused.status).equal(400);
+  });
+
+  /**
+   * The learning review board, driven through the production composition root over a real socket.
+   *
+   * Nothing is faked but the shutdown signal. The evidence is written into the state home in the
+   * exact on-disk shape `FileLearningStore` owns — a JSONL append log and a JSON board — which is the
+   * contract the daemon shares with whoever produces it, and then every answer comes back through the
+   * real store, the real policy and the real routes.
+   *
+   * It proves the mount DOES ITS JOB rather than merely existing: the counters are recomputed from
+   * the evidence on disk, a verdict rewrites the board durably, the rejection writes the tombstone
+   * that stops the rule coming back, and the accepted patch lands inside the state home rather than
+   * anywhere near the operator's own guidance file.
+   */
+  it('should serve, judge and durably record learning proposals through the mounted board', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-learning');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const learningHome = join(home, 'state', 'learning');
+    await mkdir(learningHome, { recursive: true, mode: 0o700 });
+    const evidence = (id: string, sessionId: string, repo: string, quote: string): string =>
+      JSON.stringify({
+        id,
+        sessionId,
+        mode: 'auto',
+        cwd: home,
+        repo,
+        at: '2026-07-30T09:00:00.000Z',
+        kind: 'correction',
+        gist: 'run the repo task surface',
+        quote,
+        source: 'human',
+        verified: true,
+        runId: 'run-1',
+      });
+    await writeFile(
+      join(learningHome, 'observations.jsonl'),
+      `${evidence('obs_1', 'wire-1', 'ferretry', 'use task test')}\n${evidence('obs_2', 'wire-2', 'kteam', 'not bun test')}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      join(learningHome, 'proposals.json'),
+      JSON.stringify([
+        {
+          id: 'proposal_a',
+          category: 'global',
+          state: 'pending',
+          title: 'Always run the repo task surface',
+          ruleText: 'Run `task test` rather than invoking the test runner directly.',
+          target: { kind: 'global-agent-guidance', path: 'guidance.md', anchor: '## Agent rules' },
+          // Claims three observations; only two exist, so the counters must come down.
+          observationIds: ['obs_1', 'obs_2', 'obs_gone'],
+          occurrences: 9,
+          crossRepoCount: 7,
+          firstSeen: '2026-07-30T09:00:00.000Z',
+          lastSeen: '2026-07-30T09:00:00.000Z',
+          identity: 'always-run-the-repo-task-surface',
+          history: [{ at: '2026-07-30T09:00:00.000Z', event: 'proposed:run-1', by: 'miner' }],
+        },
+        {
+          id: 'proposal_b',
+          category: 'global',
+          state: 'pending',
+          title: 'Never bypass the commit hooks',
+          ruleText: 'Do not pass --no-verify.',
+          target: { kind: 'automation-guidance', path: 'automation.md' },
+          observationIds: ['obs_2'],
+          occurrences: 1,
+          crossRepoCount: 1,
+          firstSeen: '2026-07-30T09:00:00.000Z',
+          lastSeen: '2026-07-30T09:00:00.000Z',
+          identity: 'never-bypass-the-commit-hooks',
+          history: [{ at: '2026-07-30T09:00:00.000Z', event: 'proposed:run-1', by: 'miner' }],
+        },
+      ]),
+      { mode: 0o600 },
+    );
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const learning = `http://127.0.0.1:${port}/v1/learning`;
+    const judge = async (id: string, body: unknown): Promise<Response> =>
+      await fetch(`${learning}/proposals/${id}`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+    // Act
+    const status = LearningStatusSchema.parse(await (await fetch(`${learning}/status`, { headers })).json());
+    const config = LearningConfigSchema.parse(await (await fetch(`${learning}/config`, { headers })).json());
+    const listed = z.array(ProposalViewSchema).parse(await (await fetch(`${learning}/proposals`, { headers })).json());
+    const accepted = ProposalViewSchema.parse(await (await judge('proposal_a', { action: 'accept' })).json());
+    const rejected = ProposalViewSchema.parse(
+      await (await judge('proposal_b', { action: 'reject', note: 'covered by the hook' })).json(),
+    );
+    const patch = LearningPatchResponseSchema.parse(
+      await (await fetch(`${learning}/proposals/proposal_a/patch`, { headers })).json(),
+    );
+    const run = await fetch(`${learning}/run`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ spawn: false }),
+    });
+    const pendingAfter = z
+      .array(ProposalViewSchema)
+      .parse(await (await fetch(`${learning}/proposals?state=pending`, { headers })).json());
+    // Read back off disk, which is the only thing that proves the verdicts are durable.
+    const board = JSON.parse(await readFile(join(learningHome, 'proposals.json'), 'utf8')) as {
+      id: string;
+      state: string;
+    }[];
+    const tombstones = JSON.parse(await readFile(join(learningHome, 'tombstones.json'), 'utf8')) as {
+      identity: string;
+    }[];
+    const patchFiles = await readdir(join(learningHome, 'patches'));
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // Mining is off because no miner is mounted, and the store held no run to report.
+    should(config.enabled).be.false();
+    should(status.enabled).be.false();
+    should(status.running).be.false();
+    should(status.lastRun).be.undefined();
+    should(status.totals).deepEqual({ observations: 2, proposals: 2, tombstones: 0 });
+    should(status.pending).deepEqual({ total: 2, strong: 0, weak: 2 });
+    // The counters came down to the evidence that actually exists on disk.
+    should(listed.map(view => [view.id, view.occurrences, view.crossRepoCount])).deepEqual([
+      ['proposal_a', 2, 2],
+      ['proposal_b', 1, 1],
+    ]);
+    should(listed[0]?.evidence.map(entry => entry.quote)).deepEqual(['use task test', 'not bun test']);
+    should(accepted.state).equal('accepted');
+    should(rejected.state).equal('rejected');
+    // Both verdicts survived into the file, which a response alone would not prove.
+    should(board.map(entry => [entry.id, entry.state])).deepEqual([
+      ['proposal_a', 'accepted'],
+      ['proposal_b', 'rejected'],
+    ]);
+    should(tombstones.map(entry => entry.identity)).deepEqual(['never-bypass-the-commit-hooks']);
+    should(pendingAfter).be.empty();
+    // The patch is the rule as a document aimed at the operator's file — not that file rewritten.
+    should(patch.path).equal('guidance.md');
+    should(patch.contents).containEql('Run `task test`');
+    // What the human agreed to was recorded INSIDE the state home and nowhere else.
+    should(patchFiles.some(file => file.startsWith('always-run-the-repo-task-surface-'))).be.true();
+    // Mining refuses with a reason rather than answering with a manifest that scanned nothing.
+    should(run.status).equal(501);
+    should((await run.json()) as { code: string }).have.property('code', 'mining_not_mounted');
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {
