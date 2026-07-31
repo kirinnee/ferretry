@@ -9,8 +9,8 @@
  */
 
 import type {
-  BrowserStatus,
   AnalyticsResponse,
+  BrowserStatus,
   SessionView,
   TaskLive,
   TaskStatus,
@@ -20,7 +20,7 @@ import type {
   LearningStatus,
   ProposalView,
 } from '@ferretry/protocol';
-import { useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../src/components/composer.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
@@ -28,9 +28,9 @@ import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
+import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
-import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
@@ -530,6 +530,393 @@ function Shell() {
 
   const rerender = () => bump(version + 1);
 
+  // Keep feature surfaces append-only. PWA units add one entry instead of
+  // competing to edit the gallery's JSX body during integration.
+  const HARNESS_CARDS: ReadonlyArray<{ label: string; render: () => ReactNode }> = [
+    {
+      label: 'Warden verdicts',
+      render: () => (
+        <WardenVerdicts
+          connection={daemon}
+          now={HARNESS_NOW}
+          onOpenReport={() => {}}
+          verdicts={[
+            {
+              at: '2026-07-31T11:58:00.000Z',
+              targetSession: 'sess-1',
+              teammate: 'ms-98',
+              verdict: 'nudged',
+              reason: 'Asked the session to report its current blocker',
+              reportPath: 'warden/2026-07-31T11-58.md',
+              spawn: {
+                agent: 'claude-auto-loge',
+                model: 'claude-sonnet-4-5',
+                modelSource: 'harness',
+                harness: 'claude',
+                failedOver: true,
+                configuredFirst: 'claude-auto-opus',
+                skipped: { 'claude-auto-opus': 'at quota' },
+              },
+            },
+          ]}
+        />
+      ),
+    },
+    {
+      label: 'Session command controls',
+      render: () => (
+        <SessionCommandControls
+          api={{ compact: async () => {} }}
+          canControl
+          daemon={daemon}
+          open
+          promptReady
+          sessionId="harness-session"
+          status="awaiting_user"
+        />
+      ),
+    },
+    {
+      label: 'Session screen',
+      render: () => (
+        <section
+          aria-label="Session screen harness"
+          className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
+          id="harness-session-screen"
+        >
+          <SessionList daemonId={daemon.daemonId} onOpenSession={() => {}} sessions={[harnessSession]} />
+          <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
+            <SessionHeader
+              daemonId={daemon.daemonId}
+              onBack={() => {}}
+              onOpenDetails={() => {}}
+              onOpenFleet={() => {}}
+              session={harnessSession}
+            />
+            <Transcript
+              busy
+              daemonId={daemon.daemonId}
+              entries={[
+                { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
+                { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
+                { id: 'notice', kind: 'notice', text: 'Drafts remain scoped to this paired daemon.' },
+              ]}
+              sessionId="harness-session"
+            />
+            <Composer
+              api={{ send: async () => ({}) as never }}
+              daemon={daemon}
+              quota={harnessSession.state.quota}
+              sessionId="harness-session"
+            />
+          </div>
+          <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
+        </section>
+      ),
+    },
+    {
+      label: 'Side pane tabs',
+      render: () => (
+        <Card className="flex min-h-0 flex-col overflow-hidden">
+          <SidePaneTabs
+            paneId="harness-pane"
+            presentation={phone ? 'sheet' : 'pane'}
+            tabs={tabs}
+            all={getSidePaneTabDefinitions()}
+            current={state.active ?? tabs[0]?.id ?? ''}
+            onSelect={id => {
+              openSidePaneTab(scope, id);
+              rerender();
+            }}
+            onAdd={id => {
+              openSidePaneTab(scope, id);
+              rerender();
+            }}
+            onRemove={() => rerender()}
+          />
+          <PanelBody className="min-h-[180px] text-ui text-muted">
+            The active surface body renders here. Feature surfaces are a sibling unit.
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Warden strip',
+      render: () => (
+        <Card>
+          <PanelHeader className="flex items-center justify-between">
+            <Label>Warden — fleet checks</Label>
+          </PanelHeader>
+          <PanelBody>
+            <WardenStrip status={WARDEN} now={HARNESS_NOW} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Browser login',
+      render: () => (
+        <Card className="overflow-hidden">
+          <PanelHeader>
+            <Label>Browser login</Label>
+          </PanelHeader>
+          <BrowserLoginBanner
+            status={BROWSER_LOGIN}
+            now={HARNESS_NOW}
+            onClose={async () => ({ state: 'closed', profilePrimed: false })}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Remote browser',
+      render: () => (
+        <RemoteBrowserViewer
+          daemon={daemon}
+          scope={scope}
+          status={REMOTE_BROWSER}
+          streamTicket="harness-ticket"
+          socketFactory={() => new HarnessBrowserSocket()}
+          createObjectUrl={() => harnessFrame}
+          revokeObjectUrl={() => undefined}
+        />
+      ),
+    },
+    {
+      label: 'Analytics cost ledger',
+      render: () => (
+        <Card aria-label="Analytics cost ledger" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — cost ledger</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Analytics raw query result',
+      render: () => (
+        <Card aria-label="Analytics raw query result" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — raw query result</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsResponseView response={ANALYTICS_RAW} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Warden configuration',
+      render: () => (
+        <WardenConfigCard
+          connection={daemon}
+          view={WARDEN_CONFIG}
+          failover={WARDEN.failover}
+          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
+          onSave={() => {}}
+        />
+      ),
+    },
+    {
+      label: 'Analytics time series',
+      render: () => (
+        <Card aria-label="Analytics time series" className="min-w-0 overflow-hidden">
+          <PanelHeader>
+            <Label>Analytics — time series</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AnalyticsTimeSeries response={ANALYTICS_TIME} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Markdown composer settings',
+      render: () => (
+        <Card aria-label="Markdown composer settings">
+          <PanelHeader>
+            <Label>Composer settings</Label>
+          </PanelHeader>
+          <PanelBody>
+            <MarkdownComposerSettings />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Learning header',
+      render: () => (
+        <Card aria-label="Learning header">
+          <PanelHeader>
+            <Label>Learning</Label>
+          </PanelHeader>
+          <PanelBody>
+            <LearningHeader
+              busy={false}
+              canRun
+              failed={false}
+              now={HARNESS_NOW}
+              onRunNow={() => {}}
+              status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Tasks',
+      render: () => (
+        <Card className="overflow-hidden">
+          <PanelHeader>
+            <Label>Tasks</Label>
+          </PanelHeader>
+          {/* Outside the header on purpose: `.kt-panel__header` is declared after
+            `@tailwind utilities`, so its own flex rules beat any utility a
+            caller adds and the filter would be centred. */}
+          <div className="px-panel pb-panel">
+            <TaskStatusFilter
+              counts={taskStatusCounts(TASKS)}
+              selected={statuses}
+              onSelect={status => setStatuses(toggleTaskStatusFilter(statuses, status))}
+              onShowAll={() => setStatuses(null)}
+            />
+          </div>
+          <div className="flex flex-col divide-y divide-border-soft">
+            {TASKS.filter(entry => statuses === null || statuses.has(entry.status)).map(entry => (
+              <TaskRow daemonId={daemon.daemonId} key={entry.id} onOpen={() => {}} task={entry} />
+            ))}
+          </div>
+          <PanelBody>
+            <TaskQuickSummary task={TASKS[1] as TaskSummary} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Primitives',
+      render: () => (
+        <Card>
+          <PanelHeader className="flex items-center justify-between">
+            <Label>Primitives</Label>
+            <ActionGroup>
+              <Button size="sm">Outline</Button>
+              <Button size="sm" variant="primary">
+                Primary
+              </Button>
+              <Button size="sm" variant="ghost">
+                Ghost
+              </Button>
+              <Button size="sm" variant="danger">
+                Danger
+              </Button>
+            </ActionGroup>
+          </PanelHeader>
+          <PanelBody className="flex flex-col gap-sm">
+            <ActionGroup>
+              <Badge tone="ok">ok</Badge>
+              <Badge tone="warn">warn</Badge>
+              <Badge tone="err">err</Badge>
+              <Badge tone="pend">pend</Badge>
+              <Badge tone="accent">accent</Badge>
+            </ActionGroup>
+            <ViewTabs
+              tabs={[
+                { id: 'chat', label: 'Chat' },
+                { id: 'terminal', label: 'Terminal' },
+              ]}
+              current={view}
+              onChange={setView}
+            />
+            <Textarea rows={2} defaultValue="A composer draft." />
+            <div>
+              <Button onClick={() => setSheetOpen(true)}>Open the bottom sheet</Button>
+            </div>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Session marks',
+      render: () => (
+        <Card id="harness-marks">
+          <PanelHeader>
+            <Label>Session marks</Label>
+          </PanelHeader>
+          <PanelBody className="flex flex-col gap-sm">
+            <div className="flex flex-col gap-1">
+              {MARK_SESSIONS.map(([name, view]) => (
+                <span className="flex items-center gap-sm text-cell text-muted" key={name}>
+                  <StatusMark view={view} />
+                  {name}
+                </span>
+              ))}
+            </div>
+            <ActionGroup>
+              <ModeBadge mode="auto" />
+              <ModeBadge mode="interactive" />
+              <ModeBadge mode="auto" size="sm" />
+              <RcBadge remoteControl url="https://claude.ai/s/harness" />
+              <RcBadge remoteControl />
+            </ActionGroup>
+            <ActionGroup>
+              <QuotaReadout quota={QUOTA_CALM} now={HARNESS_NOW} />
+              <QuotaReadout quota={QUOTA_TIGHT} now={HARNESS_NOW} />
+              <QuotaReadout quota={null} showUnknown now={HARNESS_NOW} />
+            </ActionGroup>
+            <MarkerSeparator>Turn 4</MarkerSeparator>
+            <MarkerLine>Ran the unit suite — 4066 passed</MarkerLine>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Conversation width',
+      render: () => (
+        <Card id="harness-chat-width">
+          <PanelHeader>
+            <Label>Conversation width</Label>
+          </PanelHeader>
+          <PanelBody>
+            <ChatWidthControl value={chatWidth} onChange={setChatWidth} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Missing pane chunk',
+      render: () => (
+        <Card className="overflow-hidden" id="harness-dead-pane">
+          <PanelHeader>
+            <Label>A pane whose chunk is gone</Label>
+          </PanelHeader>
+          <div className="h-40">
+            <ChunkErrorBoundary onChunkError={() => {}} onReload={() => {}} onReport={() => {}}>
+              <DeadPane />
+            </ChunkErrorBoundary>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Learning review',
+      render: () => (
+        <LearningReview
+          connection={daemon}
+          status={LEARNING_STATUS}
+          proposals={LEARNING_PROPOSALS}
+          error={null}
+          busy={false}
+          now={HARNESS_NOW}
+          onRun={() => {}}
+          onAction={() => {}}
+        />
+      ),
+    },
+  ];
+
   return (
     <div className="flex min-h-dvh flex-col">
       <AppBar
@@ -586,308 +973,9 @@ function Shell() {
           </span>
         </header>
 
-        <WardenVerdicts
-          connection={daemon}
-          now={HARNESS_NOW}
-          onOpenReport={() => {}}
-          verdicts={[
-            {
-              at: '2026-07-31T11:58:00.000Z',
-              targetSession: 'sess-1',
-              teammate: 'ms-98',
-              verdict: 'nudged',
-              reason: 'Asked the session to report its current blocker',
-              reportPath: 'warden/2026-07-31T11-58.md',
-              spawn: {
-                agent: 'claude-auto-loge',
-                model: 'claude-sonnet-4-5',
-                modelSource: 'harness',
-                harness: 'claude',
-                failedOver: true,
-                configuredFirst: 'claude-auto-opus',
-                skipped: { 'claude-auto-opus': 'at quota' },
-              },
-            },
-          ]}
-        />
-
-        <SessionCommandControls
-          api={{ compact: async () => {} }}
-          canControl
-          daemon={daemon}
-          open
-          promptReady
-          sessionId="harness-session"
-          status="awaiting_user"
-        />
-
-        <section
-          aria-label="Session screen harness"
-          className="grid gap-panel xl:grid-cols-[minmax(17rem,0.8fr)_minmax(0,1.4fr)_minmax(15rem,0.7fr)]"
-          id="harness-session-screen"
-        >
-          <SessionList daemonId={daemon.daemonId} onOpenSession={() => {}} sessions={[harnessSession]} />
-          <div className="flex min-h-[320px] flex-col rounded-panel border border-border bg-surface">
-            <SessionHeader
-              daemonId={daemon.daemonId}
-              onBack={() => {}}
-              onOpenDetails={() => {}}
-              onOpenFleet={() => {}}
-              session={harnessSession}
-            />
-            <Transcript
-              busy
-              daemonId={daemon.daemonId}
-              entries={[
-                { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
-                { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
-                { id: 'notice', kind: 'notice', text: 'Drafts remain scoped to this paired daemon.' },
-              ]}
-              sessionId="harness-session"
-            />
-            <Composer
-              api={{ send: async () => ({}) as never }}
-              daemon={daemon}
-              quota={harnessSession.state.quota}
-              sessionId="harness-session"
-            />
-          </div>
-          <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
-        </section>
-
-        <Card className="flex min-h-0 flex-col overflow-hidden">
-          <SidePaneTabs
-            paneId="harness-pane"
-            presentation={phone ? 'sheet' : 'pane'}
-            tabs={tabs}
-            all={getSidePaneTabDefinitions()}
-            current={state.active ?? tabs[0]?.id ?? ''}
-            onSelect={id => {
-              openSidePaneTab(scope, id);
-              rerender();
-            }}
-            onAdd={id => {
-              openSidePaneTab(scope, id);
-              rerender();
-            }}
-            onRemove={() => rerender()}
-          />
-          <PanelBody className="min-h-[180px] text-ui text-muted">
-            The active surface body renders here. Feature surfaces are a sibling unit.
-          </PanelBody>
-        </Card>
-
-        <Card>
-          <PanelHeader className="flex items-center justify-between">
-            <Label>Warden — fleet checks</Label>
-          </PanelHeader>
-          <PanelBody>
-            <WardenStrip status={WARDEN} now={HARNESS_NOW} />
-          </PanelBody>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <PanelHeader>
-            <Label>Browser login</Label>
-          </PanelHeader>
-          <BrowserLoginBanner
-            status={BROWSER_LOGIN}
-            now={HARNESS_NOW}
-            onClose={async () => ({ state: 'closed', profilePrimed: false })}
-          />
-        </Card>
-
-        <RemoteBrowserViewer
-          daemon={daemon}
-          scope={scope}
-          status={REMOTE_BROWSER}
-          streamTicket="harness-ticket"
-          socketFactory={() => new HarnessBrowserSocket()}
-          createObjectUrl={() => harnessFrame}
-          revokeObjectUrl={() => undefined}
-        />
-
-        <LearningReview
-          connection={daemon}
-          status={LEARNING_STATUS}
-          proposals={LEARNING_PROPOSALS}
-          error={null}
-          busy={false}
-          now={HARNESS_NOW}
-          onRun={() => {}}
-          onAction={() => {}}
-        />
-
-        <Card aria-label="Analytics cost ledger" className="min-w-0 overflow-hidden">
-          <PanelHeader>
-            <Label>Analytics — cost ledger</Label>
-          </PanelHeader>
-          <PanelBody className="min-w-0">
-            <AnalyticsResultTable response={ANALYTICS} caption="Harness analytics cost ledger" />
-          </PanelBody>
-        </Card>
-        <Card aria-label="Analytics raw query result" className="min-w-0 overflow-hidden">
-          <PanelHeader>
-            <Label>Analytics — raw query result</Label>
-          </PanelHeader>
-          <PanelBody className="min-w-0">
-            <AnalyticsResponseView response={ANALYTICS_RAW} />
-          </PanelBody>
-        </Card>
-        <WardenConfigCard
-          connection={daemon}
-          view={WARDEN_CONFIG}
-          failover={WARDEN.failover}
-          availableAccounts={[{ agent: 'claude-auto-sonnet', model: 'claude-sonnet-4-5' }]}
-          onSave={() => {}}
-        />
-
-        <Card aria-label="Analytics time series" className="min-w-0 overflow-hidden">
-          <PanelHeader>
-            <Label>Analytics — time series</Label>
-          </PanelHeader>
-          <PanelBody className="min-w-0">
-            <AnalyticsTimeSeries response={ANALYTICS_TIME} />
-          </PanelBody>
-        </Card>
-
-        <Card aria-label="Markdown composer settings">
-          <PanelHeader>
-            <Label>Composer settings</Label>
-          </PanelHeader>
-          <PanelBody>
-            <MarkdownComposerSettings />
-          </PanelBody>
-        </Card>
-
-        <Card aria-label="Learning header">
-          <PanelHeader>
-            <Label>Learning</Label>
-          </PanelHeader>
-          <PanelBody>
-            <LearningHeader
-              busy={false}
-              canRun
-              failed={false}
-              now={HARNESS_NOW}
-              onRunNow={() => {}}
-              status={{ enabled: true, lastRunAt: '2026-07-31T11:58:00.000Z', pending: { total: 4, strong: 2 } }}
-            />
-          </PanelBody>
-        </Card>
-        <Card className="overflow-hidden">
-          <PanelHeader>
-            <Label>Tasks</Label>
-          </PanelHeader>
-          {/* Outside the header on purpose: `.kt-panel__header` is declared after
-            `@tailwind utilities`, so its own flex rules beat any utility a
-            caller adds and the filter would be centred. */}
-          <div className="px-panel pb-panel">
-            <TaskStatusFilter
-              counts={taskStatusCounts(TASKS)}
-              selected={statuses}
-              onSelect={status => setStatuses(toggleTaskStatusFilter(statuses, status))}
-              onShowAll={() => setStatuses(null)}
-            />
-          </div>
-          <div className="flex flex-col divide-y divide-border-soft">
-            {TASKS.filter(entry => statuses === null || statuses.has(entry.status)).map(entry => (
-              <TaskRow daemonId={daemon.daemonId} key={entry.id} onOpen={() => {}} task={entry} />
-            ))}
-          </div>
-          <PanelBody>
-            <TaskQuickSummary task={TASKS[1] as TaskSummary} />
-          </PanelBody>
-        </Card>
-
-        <Card>
-          <PanelHeader className="flex items-center justify-between">
-            <Label>Primitives</Label>
-            <ActionGroup>
-              <Button size="sm">Outline</Button>
-              <Button size="sm" variant="primary">
-                Primary
-              </Button>
-              <Button size="sm" variant="ghost">
-                Ghost
-              </Button>
-              <Button size="sm" variant="danger">
-                Danger
-              </Button>
-            </ActionGroup>
-          </PanelHeader>
-          <PanelBody className="flex flex-col gap-sm">
-            <ActionGroup>
-              <Badge tone="ok">ok</Badge>
-              <Badge tone="warn">warn</Badge>
-              <Badge tone="err">err</Badge>
-              <Badge tone="pend">pend</Badge>
-              <Badge tone="accent">accent</Badge>
-            </ActionGroup>
-            <ViewTabs
-              tabs={[
-                { id: 'chat', label: 'Chat' },
-                { id: 'terminal', label: 'Terminal' },
-              ]}
-              current={view}
-              onChange={setView}
-            />
-            <Textarea rows={2} defaultValue="A composer draft." />
-            <div>
-              <Button onClick={() => setSheetOpen(true)}>Open the bottom sheet</Button>
-            </div>
-          </PanelBody>
-        </Card>
-
-        <Card id="harness-marks">
-          <PanelHeader>
-            <Label>Session marks</Label>
-          </PanelHeader>
-          <PanelBody className="flex flex-col gap-sm">
-            <div className="flex flex-col gap-1">
-              {MARK_SESSIONS.map(([name, view]) => (
-                <span className="flex items-center gap-sm text-cell text-muted" key={name}>
-                  <StatusMark view={view} />
-                  {name}
-                </span>
-              ))}
-            </div>
-            <ActionGroup>
-              <ModeBadge mode="auto" />
-              <ModeBadge mode="interactive" />
-              <ModeBadge mode="auto" size="sm" />
-              <RcBadge remoteControl url="https://claude.ai/s/harness" />
-              <RcBadge remoteControl />
-            </ActionGroup>
-            <ActionGroup>
-              <QuotaReadout quota={QUOTA_CALM} now={HARNESS_NOW} />
-              <QuotaReadout quota={QUOTA_TIGHT} now={HARNESS_NOW} />
-              <QuotaReadout quota={null} showUnknown now={HARNESS_NOW} />
-            </ActionGroup>
-            <MarkerSeparator>Turn 4</MarkerSeparator>
-            <MarkerLine>Ran the unit suite — 4066 passed</MarkerLine>
-          </PanelBody>
-        </Card>
-
-        <Card id="harness-chat-width">
-          <PanelHeader>
-            <Label>Conversation width</Label>
-          </PanelHeader>
-          <PanelBody>
-            <ChatWidthControl value={chatWidth} onChange={setChatWidth} />
-          </PanelBody>
-        </Card>
-
-        <Card className="overflow-hidden" id="harness-dead-pane">
-          <PanelHeader>
-            <Label>A pane whose chunk is gone</Label>
-          </PanelHeader>
-          <div className="h-40">
-            <ChunkErrorBoundary onChunkError={() => {}} onReload={() => {}} onReport={() => {}}>
-              <DeadPane />
-            </ChunkErrorBoundary>
-          </div>
-        </Card>
+        {HARNESS_CARDS.map(card => (
+          <Fragment key={card.label}>{card.render()}</Fragment>
+        ))}
 
         {/* Only under `#menu`, and it gets its own screenshot pass: the menu's
             dismiss surface is `fixed inset-0`, and a fixed layer breaks
