@@ -3,10 +3,8 @@ import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
-  BunCommandPort,
   BunProcessProbe,
   BunSqliteIndexFactory,
-  BunTmuxProcess,
   DaemonBinder,
   DaemonHealthProbe,
   DaemonReadinessWaiter,
@@ -19,6 +17,7 @@ import {
   RuntimeEnvironment,
   SocketViewerDownstream,
   PaneProcessInventory,
+  TmuxPaneSnapshot,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
@@ -59,26 +58,23 @@ import {
   SessionLifecycleService,
   TmuxController,
   type BrowserViewerHost,
+  MigrationPreflight,
   type DaemonReadinessPorts,
-  type ProcessInventoryPort,
 } from '../src/lib/index.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
 
-<<<<<<< HEAD
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
   const executable = Bun.which('tmux');
   if (executable === null) throw new Error('tmux was not found on PATH; it is required to manage sessions');
   return executable;
 }
-=======
 /** Fallback when tmux is not on `$PATH`. Absolute by construction: the tmux adapter refuses a bare
  *  name so no lookup can ever land on the machine's default socket, and an absent binary surfaces
  *  as a failed inspection, which the migration gate then refuses. */
 const FALLBACK_TMUX = '/usr/bin/tmux';
->>>>>>> c7e9b63 (fix(daemon): refuse migration when in-flight work is unobservable)
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -100,7 +96,9 @@ export interface DaemonWorld {
   readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
-  readonly processInventory: ProcessInventoryPort;
+  /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
+   *  a session whose work cannot be shown to survive the relaunch. */
+  readonly migratePreflight: MigrationPreflight;
   readonly createAttentionLedgerRepository: (
     sessionDirectory: (sessionId: string) => string,
   ) => FileAttentionLedgerRepository;
@@ -133,6 +131,7 @@ export function buildWorld(): DaemonWorld {
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
   const wardenFiles = new NodeWardenReportFileSystem();
+  const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -167,9 +166,9 @@ export function buildWorld(): DaemonWorld {
       }),
       { set: (key, value) => (process.env[key] = value) },
     ),
-    processInventory: new PaneProcessInventory(
-      new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock')),
-      new BunProcessProbe(Bun.which('ps') ?? undefined),
+    migratePreflight: new MigrationPreflight(
+      new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined)),
+      new TmuxPaneSnapshot(tmux),
     ),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),

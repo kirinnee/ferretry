@@ -47,6 +47,8 @@ export interface AssembleInflightReportInput {
   readonly processes: ProcessObservation;
   readonly codexBackgroundTerminals: number;
   readonly subprocessSince?: string;
+  /** Signals the caller itself could not read, contributed alongside the ones found here. */
+  readonly blindSpots?: readonly string[];
 }
 
 const activeStatuses: ReadonlySet<SessionStatus> = new Set([
@@ -67,7 +69,8 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   const discrepancy = Math.max(0, input.codexBackgroundTerminals);
   const inspection = input.processes;
   const processes = inspection.kind === 'observed' ? inspection.processes : [];
-  const blindSpots: string[] = inspection.kind === 'unobservable' ? [inspection.reason] : [];
+  const blindSpots: string[] = [...(input.blindSpots ?? [])];
+  if (inspection.kind === 'unobservable') blindSpots.push(inspection.reason);
   const claimsWork = activeStatuses.has(input.status) || input.subprocessSince !== undefined;
   const observedItems = input.openTools.length + processes.length + discrepancy;
   if (inspection.kind === 'observed' && claimsWork && observedItems === 0)

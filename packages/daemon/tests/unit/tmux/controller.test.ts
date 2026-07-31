@@ -7,6 +7,7 @@ import {
   listSessionsArguments,
   newSessionArguments,
   paneMetadataArguments,
+  panePidArguments,
   paneTarget,
   parsePaneMetadata,
   promptIsReady,
@@ -46,6 +47,7 @@ describe('tmux addresses and commands', () => {
       history: capturePaneArguments('work-1', true),
       visible: capturePaneArguments('work-1', false),
       metadata: paneMetadataArguments('work-1'),
+      panePid: panePidArguments('work-1'),
       literal: sendLiteralArguments('work-1', 'hello world'),
       key: sendKeyArguments('work-1', 'C-u'),
       launch: newSessionArguments({
@@ -67,6 +69,7 @@ describe('tmux addresses and commands', () => {
       list: ['list-sessions', '-F', '#{session_name}'],
       history: ['capture-pane', '-p', '-S', '-', '-t', 'work-1'],
       visible: ['capture-pane', '-p', '-t', 'work-1'],
+      panePid: ['display-message', '-p', '-t', 'work-1', '#{pane_pid}'],
       metadata: [
         'display-message',
         '-p',

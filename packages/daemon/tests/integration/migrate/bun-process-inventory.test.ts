@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { BunProcessProbe, PaneProcessInventory } from '../../../src/adapters/migrate/bun-process-inventory.ts';
+import {
+  BunProcessProbe,
+  PaneProcessInventory,
+  TmuxPaneSnapshot,
+} from '../../../src/adapters/migrate/bun-process-inventory.ts';
 import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrate/process-inventory-port.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
@@ -178,5 +182,33 @@ describe('BunProcessProbe', () => {
     // Assert
     should(own).equal(globalThis.process.cwd());
     should(absent).be.undefined();
+  });
+});
+
+describe('TmuxPaneSnapshot', () => {
+  it('should capture the visible pane through the socket-scoped tmux port', async () => {
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '2 background terminals running\n', stderr: '' });
+
+    // Act
+    const actual = await new TmuxPaneSnapshot(tmux).visible('isolated-session');
+
+    // Assert
+    should(actual).equal('2 background terminals running\n');
+    should(tmux.calls).deepEqual([['capture-pane', '-p', '-t', 'isolated-session']]);
+  });
+
+  it('should raise a capture failure rather than return an empty pane', async () => {
+    // Arrange
+    const reported = new FakeTmux({ code: 1, stdout: '', stderr: "can't find pane\n" });
+    const silent = new FakeTmux({ code: 2, stdout: '', stderr: '' });
+
+    // Act + Assert
+    await should(new TmuxPaneSnapshot(reported).visible('isolated-session')).be.rejectedWith(
+      "tmux could not capture the pane: can't find pane",
+    );
+    await should(new TmuxPaneSnapshot(silent).visible('isolated-session')).be.rejectedWith(
+      'tmux could not capture the pane: exited 2',
+    );
   });
 });

@@ -7,7 +7,8 @@ import type {
   ProcessTableRead,
 } from '../../lib/migrate/process-inventory-port.ts';
 import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../lib/migrate/process-table.ts';
-import { panePidArguments } from '../../lib/tmux/commands.ts';
+import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
+import { capturePaneArguments, panePidArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etimes=,args='] as const;
@@ -87,4 +88,19 @@ export class PaneProcessInventory implements ProcessInventoryPort {
 
 function unobservable(reason: string): ProcessObservation {
   return { kind: 'unobservable', reason };
+}
+
+/**
+ * Reads a pane's visible text through the socket-scoped tmux port, so the codex footer can be
+ * counted without the migrate subsystem ever naming a command of its own.
+ */
+export class TmuxPaneSnapshot implements PaneSnapshotPort {
+  constructor(private readonly tmux: TmuxCommandPort) {}
+
+  async visible(tmuxSession: string): Promise<string> {
+    const result = await this.tmux.execute(capturePaneArguments(tmuxSession, false));
+    if (result.code !== 0)
+      throw new Error(`tmux could not capture the pane: ${result.stderr.trim() || `exited ${result.code}`}`);
+    return result.stdout;
+  }
 }
