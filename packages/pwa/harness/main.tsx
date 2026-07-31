@@ -48,6 +48,7 @@ import {
 } from '../src/shell/side-pane-tab-model.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
+import { ChatWidthControl, type ChatWidth } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
