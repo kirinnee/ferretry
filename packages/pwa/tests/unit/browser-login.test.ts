@@ -251,6 +251,102 @@ describe('DaemonBrowserLoginStore', () => {
     should(statusOf(store.getSnapshot(daemonA.daemonId))?.state).equal('open');
   });
 
+  it('never lets a superseded action reinstall the connection it was authorised by', async () => {
+    const post = deferred();
+    const seen: DaemonConnection[] = [];
+    const stalePort = new FakeLoginPort(async () => {
+      await post.promise;
+      return openOn('old-secret');
+    });
+    const freshPort = new FakeLoginPort(() => Promise.resolve(closed));
+    const store = new DaemonBrowserLoginStore(daemon => {
+      seen.push(daemon);
+      return seen.length === 1 ? stalePort : freshPort;
+    });
+
+    // The action POSTs on the connection it was given...
+    const action = store.act(daemonA, { action: 'start' });
+    // ...and the daemon is re-paired elsewhere before that POST answers.
+    const rotated = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a-new.example.test',
+      deviceToken: 'token-a-rotated',
+    });
+    should(await store.refresh(rotated)).deepEqual(closed);
+
+    post.release();
+    // The superseded action answers its own caller with its own POST status...
+    should(passwordOf(await action)).equal('old-secret');
+    // ...and stops there. Reading on would have rebound the daemon to the
+    // obsolete connection and published its dead VNC password.
+    should(store.getSnapshot(daemonA.daemonId)).deepEqual(closed);
+    should(stalePort.kinds).deepEqual(['act']);
+    should(seen.map(connection => connection.deviceToken)).deepEqual(['token-a', 'token-a-rotated']);
+  });
+
+  it('never lets an older action publish over a newer one or satisfy its read', async () => {
+    const first = deferred();
+    const second = deferred();
+    const port = new FakeLoginPort(async (_call, index) => {
+      if (index === 0) {
+        await first.promise;
+        return openOn('from-the-older-action');
+      }
+      if (index === 1) {
+        await second.promise;
+        return openOn('from-the-newer-action');
+      }
+      return openOn('authoritative-after-the-newer-action');
+    });
+    const store = new DaemonBrowserLoginStore(only(port));
+
+    const older = store.act(daemonA, { action: 'start' });
+    const newer = store.act(daemonA, { action: 'confirm' });
+
+    first.release();
+    should(passwordOf(await older)).equal('from-the-older-action');
+    // The older action started no read at all. One started here would carry
+    // the newer action's generation, and the newer action's own read would
+    // then dedupe onto it — returning state observed before its POST applied.
+    should(port.kinds).deepEqual(['act', 'act']);
+    should(store.getSnapshot(daemonA.daemonId)).be.null();
+
+    second.release();
+    should(passwordOf(await newer)).equal('authoritative-after-the-newer-action');
+    should(port.kinds).deepEqual(['act', 'act', 'status']);
+    should(passwordOf(store.getSnapshot(daemonA.daemonId))).equal('authoritative-after-the-newer-action');
+  });
+
+  it('restarts the poll when a replaced connection subscribes to listeners already attached', async () => {
+    const scheduler = new ManualScheduler();
+    const port = new FakeLoginPort(() => Promise.resolve(openOn('secret-a')));
+    const store = new DaemonBrowserLoginStore(() => port, { schedule: scheduler.schedule });
+
+    store.subscribe(daemonA, () => undefined);
+    should(await store.refresh(daemonA)).deepEqual(openOn('secret-a'));
+    should(scheduler.live).have.length(1);
+
+    // A second listener joining a daemon that is already polling reads nothing.
+    store.subscribe(daemonA, () => undefined);
+    should(port.calls).have.length(1);
+
+    const rotated = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'token-a-rotated',
+    });
+    store.subscribe(rotated, () => undefined);
+    // The rebind dropped the old credential and cancelled its poll. Counting
+    // listeners alone would skip the read here and leave the two listeners
+    // that stayed attached watching a daemon nothing polls.
+    should(store.getSnapshot(daemonA.daemonId)).be.null();
+    should(port.calls).have.length(2);
+
+    should(passwordOf(await store.refresh(rotated))).equal('secret-a');
+    should(port.calls).have.length(2);
+    should(scheduler.live).have.length(1);
+  });
+
   it('keeps two daemons reading at once apart, down to the promise and the password', async () => {
     const gateA = deferred();
     const gateB = deferred();

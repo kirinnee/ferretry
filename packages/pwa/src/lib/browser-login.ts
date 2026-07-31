@@ -33,6 +33,17 @@
  *   - 2s polling while anything is happening, 30s while closed, and no polling
  *     at all while nobody is listening.
  *
+ * Decided here, because a single daemon and a single action at a time could
+ * never raise it: an action SUPERSEDED while its POST is in flight — by a
+ * newer action, an unpair, or a re-pair — stops at its own POST status. It
+ * publishes nothing, reads nothing further and schedules nothing. Otherwise an
+ * older action's authoritative read lands after a newer one's (publishing
+ * pre-action state as the newer action's result), or drags the connection the
+ * older action was authorised by back into use after the daemon has moved off
+ * it. The fence is symmetric: the action that IS still current re-fences
+ * before its own authoritative read, so a read that started during its POST
+ * can neither publish afterwards nor be handed to it by the in-flight dedupe.
+ *
  * Not ported: `resetBrowserLoginStore` and `browserLoginSnapshotForTest`
  * (source 164-176). Both exist only because the state was a module singleton.
  *
@@ -198,14 +209,19 @@ export class DaemonBrowserLoginStore {
   }
 
   /**
-   * Watches one daemon. The first listener starts the read, and losing the
-   * last one stops the poll — an unmounted banner must not keep a daemon busy.
+   * Watches one daemon. Losing the last listener stops the poll — an unmounted
+   * banner must not keep a daemon busy.
+   *
+   * The kick enforces the invariant that a watched daemon always has either a
+   * poll scheduled or a read in flight. That covers the first listener, and
+   * also the case a listener count alone misses: subscribing with a REPLACED
+   * connection, where the rebind has just dropped the snapshot and cancelled
+   * the poll, leaving the listeners that stayed attached blind forever.
    */
   subscribe(daemon: DaemonConnection, listener: () => void): () => void {
     const login = this.#login(daemon);
-    const wasEmpty = login.listeners.size === 0;
     login.listeners.add(listener);
-    if (wasEmpty) void this.refresh(daemon);
+    if (login.cancelPoll === null && login.inFlight === null) void this.#read(login);
     return () => {
       login.listeners.delete(listener);
       if (login.listeners.size === 0) clearPoll(login);
@@ -223,20 +239,7 @@ export class DaemonBrowserLoginStore {
    * they look.
    */
   refresh(daemon: DaemonConnection): Promise<BrowserLoginSnapshot> {
-    const login = this.#login(daemon);
-    const requestGeneration = login.generation;
-    if (login.inFlight?.generation === requestGeneration) return login.inFlight.promise;
-    const promise = login.port
-      .status()
-      .then(value => this.#settle(login, requestGeneration, readStatus(value)))
-      .catch(caught =>
-        this.#settle(login, requestGeneration, unknownFrom(caught, 'Cannot reach the browser-login window.')),
-      )
-      .finally(() => {
-        if (login.inFlight?.promise === promise) login.inFlight = null;
-      });
-    login.inFlight = { generation: requestGeneration, promise };
-    return promise;
+    return this.#read(this.#login(daemon));
   }
 
   /** Carries out one explicit human intent against one daemon. */
@@ -248,10 +251,22 @@ export class DaemonBrowserLoginStore {
     clearPoll(login);
     try {
       const status = readStatus(await login.port.act(action));
-      if (login.generation === actionGeneration) publish(login, status);
+      // Superseded while the POST was in flight — by a newer action, an
+      // unpair, or a re-pair. It answers its own caller with what its own POST
+      // returned, and touches nothing else: publishing would overwrite a newer
+      // result, and reading on would let a connection the entry has already
+      // moved off reinstall itself as the one this daemon is bound to.
+      if (login.generation !== actionGeneration) return status;
+      publish(login, status);
       // The POST answers with a status, but the daemon keeps tearing down or
       // starting up after it: read the authoritative state straight back.
-      return await this.refresh(daemon);
+      //
+      // The read is fenced first. Any read that started while the POST was in
+      // flight observed the daemon before this action applied, so it must be
+      // unable to publish afterwards AND unable to be handed back here by the
+      // in-flight dedupe as though it were this action's authoritative answer.
+      login.generation += 1;
+      return await this.#read(login);
     } catch (caught) {
       const failed = unknownFrom(caught, 'Browser-login action failed.');
       if (login.generation === actionGeneration) {
@@ -306,6 +321,28 @@ export class DaemonBrowserLoginStore {
     return existing;
   }
 
+  /**
+   * The one read path, and it takes the ENTRY rather than a connection.
+   * `#login` is the only place a daemon may be (re)bound to a connection, and
+   * only a public call reaches it, so no continuation held by an older
+   * action, poll or listener can rebind the daemon it was started under.
+   */
+  #read(login: DaemonLogin): Promise<BrowserLoginSnapshot> {
+    const requestGeneration = login.generation;
+    if (login.inFlight?.generation === requestGeneration) return login.inFlight.promise;
+    const promise = login.port
+      .status()
+      .then(value => this.#settle(login, requestGeneration, readStatus(value)))
+      .catch(caught =>
+        this.#settle(login, requestGeneration, unknownFrom(caught, 'Cannot reach the browser-login window.')),
+      )
+      .finally(() => {
+        if (login.inFlight?.promise === promise) login.inFlight = null;
+      });
+    login.inFlight = { generation: requestGeneration, promise };
+    return promise;
+  }
+
   #invalidate(login: DaemonLogin): void {
     login.generation += 1;
     login.inFlight = null;
@@ -325,7 +362,7 @@ export class DaemonBrowserLoginStore {
     if (login.listeners.size === 0) return;
     const delayMs = snapshot.state === 'closed' ? this.#closedPollMs : this.#openPollMs;
     login.cancelPoll = this.#schedule(() => {
-      void this.refresh(login.connection);
+      void this.#read(login);
     }, delayMs);
   }
 }
