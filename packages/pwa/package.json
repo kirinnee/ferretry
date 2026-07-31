@@ -10,6 +10,7 @@
     "./components/session-details": "./src/components/session-details.tsx",
     "./components/session-list": "./src/components/session-list.tsx",
     "./components/transcript": "./src/components/transcript.tsx",
+    "./shell/side-pane": "./src/shell/side-pane.tsx",
     "./features/analytics-result-table": "./src/features/analytics/analytics-result-table.tsx",
     "./features/analytics-time-series": "./src/features/analytics/analytics-time-series.tsx",
     "./features/browser-login-banner": "./src/features/browser/browser-login-banner.tsx",
