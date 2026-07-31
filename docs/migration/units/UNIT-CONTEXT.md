@@ -38,9 +38,26 @@ understanding does not. If you notice you are deep into your context with nothin
 reading immediately, write and commit what you already understand, and note the remainder in your
 PR.
 
-**A partial PR containing real, tested modules is a success.** Full comprehension with no code is a
-failure. If you cannot finish the whole unit, open the PR with what works and say plainly what is
-left — the lead will schedule the rest.
+**A partial PR containing real, tested modules is a success — but ONLY if you declare the gap.**
+Full comprehension with no code is a failure. If you cannot finish the whole unit, open the PR with
+what works and say plainly what is left — the lead will schedule the rest.
+
+### The completeness declaration is mandatory
+
+Every PR body MUST contain a section titled **"Source coverage"** listing **every non-test source
+file your brief assigned you**, each marked `PORTED` or `NOT PORTED`, with one line saying what a
+`NOT PORTED` file does and what capability is therefore still missing.
+
+This is not paperwork. **The gates cannot detect a missing feature.** Coverage measures the code
+that exists, so a port of half a subsystem still reports 100% and CI still goes green. Three PRs of
+this migration shipped exactly that way — one delivered speech-to-text that could install models but
+could not transcribe (`stt-service.ts`, `stt-worker.ts`, `stt-worker-client.ts` silently absent,
+15/15 checks green). Another shipped terminal support with the whole decision layer and no adapters
+at all. Nothing but a human reading the file list caught them.
+
+So: a PR with no "Source coverage" section is rejected unreviewed. A PR whose declaration is
+**wrong** — it claims PORTED for a file with no target equivalent — is treated as a defect, not an
+oversight.
 
 ## Safety — non-negotiable, read twice
 
