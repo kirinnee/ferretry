@@ -25,6 +25,9 @@ set -euo pipefail
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 status=0
+blocked_file="scripts/validate/invocation-blocked.txt"
+declared=""
+stale=""
 
 # Source text with `//` and `/* */` stripped, so only code is counted. A `//` inside a string
 # literal truncates the rest of that line, which can only ever hide a mention — the conservative
@@ -71,6 +74,7 @@ check_root() {
   root_code="$(strip_comments "${file}")"
 
   local unused=""
+  stale=""
   for field in ${fields}; do
     local in_root elsewhere
     # `|| true` matters: grep exits non-zero on no match, and `set -e` with `pipefail` would
@@ -87,13 +91,33 @@ check_root() {
       fi
     done <<<"$({ grep -rlE "\b${field}\b" "${package_src}" 2>/dev/null || true; })"
     if [ "${in_root}" -le 2 ] && [ "${elsewhere}" -eq 0 ]; then
-      unused="${unused}   ${interface}.${field}"$'\n'
+      # A field may be DECLARED blocked — calling it would be wrong or impossible — in
+      # invocation-blocked.txt, with the blocker stated. Anything else fails.
+      if grep -qE "^${interface}\.${field} # " "${blocked_file}" 2>/dev/null; then
+        declared="${declared} ${interface}.${field}"
+      else
+        unused="${unused}   ${interface}.${field}"$'\n'
+      fi
+    else
+      # A declared field that is now called is a stale entry: the list must shrink, so this is
+      # a hard failure rather than a silent pass.
+      if grep -qE "^${interface}\.${field} # " "${blocked_file}" 2>/dev/null; then
+        stale="${stale}   ${interface}.${field}"$'\n'
+      fi
     fi
   done
 
   if [ -n "${unused}" ]; then
     echo "❌ constructed but never called in ${file}:" >&2
     printf '%s' "${unused}" >&2
+    echo "   Wire each into a caller, or delete it. If calling it would be WRONG or IMPOSSIBLE," >&2
+    echo "   declare it in ${blocked_file} with the blocker stated as a checkable fact." >&2
+    status=1
+  fi
+
+  if [ -n "${stale}" ]; then
+    echo "❌ stale entries in ${blocked_file} — these are called now, delete them:" >&2
+    printf '%s' "${stale}" >&2
     status=1
   fi
 }
@@ -107,4 +131,9 @@ if [ "${status}" -ne 0 ]; then
   echo "   The reachability gate cannot see this shape — that is why this gate exists." >&2
   exit 1
 fi
-echo "✅ Every composition-root field is called by something"
+n="$(grep -cE "^[A-Za-z]+\.[A-Za-z]+ # " "${blocked_file}" 2>/dev/null || echo 0)"
+if [ "${n}" -gt 0 ]; then
+  echo "✅ Every composition-root field is called, or declared blocked (${n} declared)"
+else
+  echo "✅ Every composition-root field is called by something"
+fi
