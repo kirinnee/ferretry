@@ -50,25 +50,30 @@ export class CachedUsageFeed implements UsageFeedPort {
   }
 
   /**
-   * An aborted read resolves to the last known accounts rather than an empty list: emptiness is a
-   * claim about the fleet, and cancelling a read is not evidence for it.
+   * A read never resolves to an empty list on the strength of a failure: emptiness is a claim about
+   * the fleet, and a cancelled read or a dead collector is not evidence for it. Every path answers
+   * from the cache, which {@link recordUsageRefresh} only ever replaces with a successful reading —
+   * so the source's "return `[]` when the read was cancelled", indistinguishable from "every account
+   * vanished", is unrepresentable rather than merely avoided.
+   *
+   * An already-aborted caller skips the probe entirely; one aborted mid-flight still gets the
+   * snapshot, because the refresh it was waiting on has already folded itself into the cache.
    */
   async accounts(signal?: AbortSignal): Promise<readonly AccountUsage[]> {
-    const aborted = (): boolean => signal?.aborted ?? false;
-    if (aborted()) return cachedAccounts(this.state);
+    if (signal?.aborted === true) return cachedAccounts(this.state);
     const decision = decideUsageRead(this.state, this.clock(), this.refreshMs);
     if (decision.kind === 'serve') return decision.accounts;
 
     const pending = this.pending ?? this.refresh(signal);
     this.pending = pending;
     try {
-      const accounts = await pending;
-      return aborted() ? cachedAccounts(this.state) : accounts;
+      return await pending;
     } finally {
       if (this.pending === pending) this.pending = undefined;
     }
   }
 
+  /** Reads the sources in order and folds the outcome into the cache, which it then answers from. */
   private async refresh(signal?: AbortSignal): Promise<readonly AccountUsage[]> {
     let firstDefined: readonly AccountUsage[] | undefined;
     for (const source of this.sources) {

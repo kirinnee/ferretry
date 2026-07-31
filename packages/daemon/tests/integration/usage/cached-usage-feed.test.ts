@@ -199,10 +199,12 @@ describe('CachedUsageFeed', () => {
   });
 
   it('should answer an already-aborted read from cache without probing', async () => {
-    // Arrange
-    const source = new RecordingSource([[{ agent: 'writer' }]]);
-    const feed = new CachedUsageFeed([source], { now: () => 1_000 });
+    // Arrange — the snapshot is stale, so only the abort can stop a second probe going out
+    const source = new RecordingSource([[{ agent: 'writer' }], [{ agent: 'fresh' }]]);
+    const time = clock(1_000);
+    const feed = new CachedUsageFeed([source], { now: time.now, refreshMs: 10_000 });
     await feed.accounts();
+    time.advance(20_000);
     const controller = new AbortController();
     controller.abort();
 
@@ -215,7 +217,31 @@ describe('CachedUsageFeed', () => {
   });
 
   it('should return the last known accounts, not an empty fleet, when a read is cancelled mid-flight', async () => {
-    // Arrange
+    // Arrange — the second probe is killed by the cancellation, so the refresh comes back with nothing
+    const controller = new AbortController();
+    const time = clock(1_000);
+    let reads = 0;
+    const source: UsageSourcePort = {
+      read: async signal => {
+        reads += 1;
+        if (reads === 1) return [{ agent: 'writer' }];
+        controller.abort();
+        return signal?.aborted === true ? undefined : [{ agent: 'fresh' }];
+      },
+    };
+    const feed = new CachedUsageFeed([source], { now: time.now, refreshMs: 10_000 });
+    await feed.accounts();
+    time.advance(20_000);
+
+    // Act
+    const accounts = await feed.accounts(controller.signal);
+
+    // Assert — the source answered `[]` here, indistinguishable from "every account vanished"
+    should(accounts).deepEqual([{ agent: 'writer' }]);
+  });
+
+  it('should still answer a mid-flight cancellation with the reading the refresh did collect', async () => {
+    // Arrange — cancelling after the data arrived must not throw that data away either
     const controller = new AbortController();
     const source: UsageSourcePort = {
       read: async () => {
@@ -230,6 +256,7 @@ describe('CachedUsageFeed', () => {
 
     // Assert
     should(accounts).deepEqual([{ agent: 'fresh' }]);
+    should(feed.snapshotAt()).equal(1_000);
   });
 
   it('should use the wall clock and the shared interval when given no options', async () => {
