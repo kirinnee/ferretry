@@ -117,6 +117,37 @@ describe('browser worker snapshots', () => {
     should(normalized.ok && normalized.value.activePageId).equal(activePageId);
   });
 
+  it('should refuse a snapshot the wire schema rejects rather than emit one that fails later', () => {
+    // Arrange: bounding a string is not the same as knowing it is a URL.
+    const notAUrl = snapshotReply({ pages: [{ id: 'p1', url: 'not a url' }] });
+    const relative = snapshotReply({ pages: [{ id: 'p1', url: '/index.html' }] });
+    const blank = snapshotReply({ pages: [{ id: 'p1', url: '   ' }] });
+
+    // Act & Assert: a worker fault must surface as an upstream failure, never as an invalid snapshot.
+    for (const reply of [notAUrl, relative, blank]) {
+      should(normalizeWorkerSnapshot(reply)).deepEqual({
+        ok: false,
+        message: 'browser worker returned a snapshot the protocol rejects',
+      });
+      should(normalizeWorkerActionSnapshot({ ...reply, actedPageId: 'p1' })).deepEqual({
+        ok: false,
+        message: 'browser worker returned a snapshot the protocol rejects',
+      });
+    }
+  });
+
+  it('should refuse an acted page the action schema cannot accept', () => {
+    // Arrange: provenance is bounded on its own, so only the schema can reject this shape.
+    const reply = { ...snapshotReply(), actedPageId: 'p1' };
+
+    // Act
+    const accepted = normalizeWorkerActionSnapshot(reply);
+
+    // Assert
+    should(accepted.ok).be.true();
+    should(accepted.ok && accepted.value.actedPageId).equal('p1');
+  });
+
   it('should refuse a snapshot with no usable or no matching active page', () => {
     // Act & Assert
     should(normalizeWorkerSnapshot(undefined)).deepEqual({
@@ -180,6 +211,23 @@ describe('browser worker lines', () => {
     if (event.kind !== 'frame') return;
     should(event.frame).deepEqual({ dataBase64: 'AAAA', width: 800, height: 1, pageId: 'p1' });
     should(BrowserScreencastFrameSchema.safeParse(event.frame).success).be.true();
+  });
+
+  it('should carry a usable acknowledgement id and drop an unusable one', () => {
+    // Arrange
+    const base = { type: 'screencast-frame', dataBase64: 'AAAA', width: 10, height: 10, pageId: 'p1' };
+
+    // Act
+    const withAck = parseWorkerLine(JSON.stringify({ ...base, ackId: 7 }));
+    const fractional = parseWorkerLine(JSON.stringify({ ...base, ackId: 1.5 }));
+    const textual = parseWorkerLine(JSON.stringify({ ...base, ackId: '7' }));
+    const absent = parseWorkerLine(JSON.stringify(base));
+
+    // Assert: acknowledging the wrong frame would release a window the browser is still holding.
+    should(withAck.kind === 'frame' && withAck.ackId).equal(7);
+    should(fractional.kind === 'frame' && fractional.ackId).be.undefined();
+    should(textual.kind === 'frame' && textual.ackId).be.undefined();
+    should(absent.kind === 'frame' && absent.ackId).be.undefined();
   });
 
   it('should ignore frames that are unattributable, empty, oversized, or unmeasured', () => {

@@ -57,8 +57,11 @@ class FakeDownstream implements ViewerDownstream {
     return this.result;
   }
 
+  throwOnClose = false;
+
   close(code: number, reason: string): void {
     this.closes.push({ code, reason });
+    if (this.throwOnClose) throw new Error('socket is already gone');
   }
 
   bufferedBytes(): number {
@@ -499,12 +502,17 @@ describe('browser viewer stream — held keys', () => {
   });
 
   it('should tolerate a transport that throws while being closed', async () => {
-    // Arrange
-    const { host, stream } = await connect();
+    // Arrange: a socket that has already gone away throws from close().
+    const { host, downstream, stream } = await connect();
+    downstream.throwOnClose = true;
+
+    // Act
     host.onTerminal?.({ code: 1011, reason: 'browser crashed' });
 
-    // Assert
+    // Assert: the stream still finishes and still releases its viewer slot.
+    should(downstream.closes).deepEqual([{ code: 1011, reason: 'browser crashed' }]);
     should(stream.finished).be.true();
+    should(host.detachments).equal(1);
   });
 
   it('should cancel a pending frame retry when the stream ends', async () => {

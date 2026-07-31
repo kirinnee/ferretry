@@ -1,5 +1,7 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
+  BrowserPageActionSnapshotSchema,
+  BrowserPageSnapshotSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
   type BrowserPageSnapshot,
@@ -71,6 +73,22 @@ export type WorkerSnapshotResult<TSnapshot> =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * The wire schema has the last word at this boundary, exactly as it does for client input: bounding a
+ * worker's strings is not the same as knowing the result is a legal snapshot. Without this, a worker
+ * that reports `'not a url'` produces a value that the HTTP surface later rejects as a 500, instead of
+ * the upstream failure it actually is.
+ */
+function parsed<TSnapshot>(
+  schema: { safeParse(value: unknown): { success: boolean; data?: unknown } },
+  candidate: unknown,
+): WorkerSnapshotResult<TSnapshot> {
+  const result = schema.safeParse(candidate);
+  return result.success
+    ? { ok: true, value: result.data as TSnapshot }
+    : { ok: false, message: 'browser worker returned a snapshot the protocol rejects' };
+}
+
+/**
  * The worker is a separate process, so its page model is untrusted input: bound every string, cap the
  * tab list, and never let a malformed reply widen the typed snapshot the runtime consumes.
  */
@@ -106,22 +124,19 @@ export function normalizeWorkerSnapshot(value: unknown): WorkerSnapshotResult<Br
   const state = raw['pageState'];
   const pageState = state === 'loading' || state === 'error' ? state : 'ready';
   const pageError = coarseWorkerError(raw['pageError']);
-  return {
-    ok: true,
-    value: {
-      // Top-level identity derives from the active summary, so it can never drift from the tab it
-      // claims to describe.
-      url: active.url,
-      title: active.title,
-      pages,
-      activePageId,
-      pageState,
-      // The wire schema allows an error string only in the error state, and demands one there.
-      ...(pageState === 'error' ? { pageError: pageError === '' ? 'unknown error' : pageError } : {}),
-      canGoBack: raw['canGoBack'] === true,
-      canGoForward: raw['canGoForward'] === true,
-    },
-  };
+  return parsed(BrowserPageSnapshotSchema, {
+    // Top-level identity derives from the active summary, so it can never drift from the tab it
+    // claims to describe.
+    url: active.url,
+    title: active.title,
+    pages,
+    activePageId,
+    pageState,
+    // The wire schema allows an error string only in the error state, and demands one there.
+    ...(pageState === 'error' ? { pageError: pageError === '' ? 'unknown error' : pageError } : {}),
+    canGoBack: raw['canGoBack'] === true,
+    canGoForward: raw['canGoForward'] === true,
+  });
 }
 
 /**
@@ -133,7 +148,8 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
   const actedPageId = pageIdentity(asRecord(value)['actedPageId']);
   if (actedPageId === undefined) return { ok: false, message: 'browser worker returned no acted page' };
   const snapshot = normalizeWorkerSnapshot(value);
-  return snapshot.ok ? { ok: true, value: { ...snapshot.value, actedPageId } } : snapshot;
+  if (!snapshot.ok) return snapshot;
+  return parsed(BrowserPageActionSnapshotSchema, { ...snapshot.value, actedPageId });
 }
 
 /** Text results are bounded here so no page content can grow without limit inside the daemon. */
@@ -149,7 +165,15 @@ export function boundedScreenshot(value: unknown): string {
 export type WorkerEvent =
   | { readonly kind: 'ready' }
   | { readonly kind: 'fatal'; readonly message: string }
-  | { readonly kind: 'frame'; readonly frame: BrowserScreencastFrame }
+  | {
+      readonly kind: 'frame';
+      readonly frame: BrowserScreencastFrame;
+      /**
+       * Present when the worker wants the daemon to acknowledge this frame before the browser
+       * captures the next one, so flow control follows the real path to the viewers.
+       */
+      readonly ackId?: number;
+    }
   | { readonly kind: 'result'; readonly id: number; readonly result: unknown }
   | { readonly kind: 'failure'; readonly id: number; readonly message: string }
   | { readonly kind: 'ignored' };
@@ -175,6 +199,7 @@ function parseFrame(message: Readonly<Record<string, unknown>>): WorkerEvent {
   ) {
     return IGNORED;
   }
+  const ackId = message['ackId'];
   return {
     kind: 'frame',
     frame: {
@@ -183,6 +208,9 @@ function parseFrame(message: Readonly<Record<string, unknown>>): WorkerEvent {
       height: Math.max(1, Math.round(height)),
       pageId: framePageId,
     },
+    // An unusable ack id is dropped rather than guessed at: acknowledging the wrong frame would
+    // release a window the browser is still holding.
+    ...(typeof ackId === 'number' && Number.isSafeInteger(ackId) ? { ackId } : {}),
   };
 }
 

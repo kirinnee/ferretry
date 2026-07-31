@@ -272,6 +272,7 @@ describe('browser frame governor', () => {
     // Assert
     should(sink.written).deepEqual([]);
     should(governor.snapshot()).deepEqual({
+      disposed: false,
       activeSession: 'session-1',
       heldAcknowledgements: 0,
       timerArmed: false,
@@ -339,9 +340,14 @@ describe('browser frame governor', () => {
     // Act
     governor.dispose();
 
-    // Assert
+    // Assert: no blocked state survives, since nothing is left that could ever clear it.
     should(sink.drainListeners).equal(0);
-    should(governor.snapshot()).deepEqual({ heldAcknowledgements: 0, timerArmed: false, sinkWritable: false });
+    should(governor.snapshot()).deepEqual({
+      disposed: true,
+      heldAcknowledgements: 0,
+      timerArmed: false,
+      sinkWritable: true,
+    });
 
     // Act: a drain after disposal must not resurrect a released listener.
     sink.drain();
@@ -349,6 +355,29 @@ describe('browser frame governor', () => {
 
     // Assert
     should(sink.written).deepEqual(['frame-1']);
+  });
+
+  it('should refuse a rebind after disposal instead of accepting frames it can never emit', () => {
+    // Arrange: disposed while the sink was blocked — the state that used to wedge the stream silently.
+    const { clock, sink, governor } = build();
+    const acknowledged: string[] = [];
+    governor.bind('session-1');
+    sink.acceptNext = false;
+    governor.capture('session-1', 'frame-1', () => void acknowledged.push('frame-1'));
+    governor.dispose();
+    sink.acceptNext = true;
+
+    // Act
+    governor.bind('session-2');
+    for (const frame of ['a', 'b', 'c']) governor.capture('session-2', frame, () => undefined);
+    clock.advance(20_000);
+
+    // Assert: the refusal is explicit and visible, not a stream that quietly stops painting.
+    should(governor.snapshot().disposed).be.true();
+    should(governor.snapshot().activeSession).be.undefined();
+    should(governor.snapshot().heldAcknowledgements).equal(0);
+    should(sink.written).deepEqual(['frame-1']);
+    should(acknowledged).be.empty();
   });
 
   it('should not stall forever behind a sink that cannot signal recovery', () => {

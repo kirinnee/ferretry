@@ -38,6 +38,7 @@ export class BrowserFrameGovernor<TFrame> {
   private timer?: FrameTimer;
   private disposeDrain?: () => void;
   private sinkWritable = true;
+  private disposed = false;
   private lastOutputAt?: number;
   private recoverySession?: string;
 
@@ -53,8 +54,15 @@ export class BrowserFrameGovernor<TFrame> {
     );
   }
 
-  /** Starts governing a new capture session, discarding everything the previous one retained. */
+  /**
+   * Starts governing a new capture session, discarding everything the previous one retained.
+   *
+   * Refused after `dispose()`: the drain subscription that would clear a blocked sink is gone by then,
+   * so a rebind could accept frames it would never be able to emit. Silence there looks exactly like
+   * a healthy stream that has stopped painting.
+   */
   bind(session: string): void {
+    if (this.disposed) return;
     this.resetSession();
     this.activeSession = session;
   }
@@ -91,10 +99,14 @@ export class BrowserFrameGovernor<TFrame> {
     this.resetSession();
     this.disposeDrain?.();
     this.disposeDrain = undefined;
+    // No subscription is left to report recovery, so no blocked state may outlive this call.
+    this.sinkWritable = true;
+    this.disposed = true;
   }
 
   snapshot(): FrameGovernorSnapshot<TFrame> {
     return {
+      disposed: this.disposed,
       ...(this.activeSession === undefined ? {} : { activeSession: this.activeSession }),
       ...(this.pending === undefined ? {} : { pendingFrame: this.pending.frame }),
       heldAcknowledgements: this.heldAcknowledgements.length,

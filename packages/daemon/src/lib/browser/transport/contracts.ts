@@ -44,5 +44,7 @@ export interface FrameGovernorSnapshot<TFrame> {
   readonly heldAcknowledgements: number;
   readonly timerArmed: boolean;
   readonly sinkWritable: boolean;
+  /** A disposed governor accepts nothing further; a rebind is refused rather than silently inert. */
+  readonly disposed: boolean;
   readonly lastOutputAt?: number;
 }
