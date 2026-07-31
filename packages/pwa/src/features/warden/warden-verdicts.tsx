@@ -12,7 +12,7 @@ import { useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
-import { displayCallsign } from './warden-status-model.ts';
+import { displayCallsign } from '../../lib/callsign.ts';
 
 export type WardenVerdictKind = 'killed' | 'revived' | 'nudged' | 'cleared' | 'needs_human' | 'unknown';
 

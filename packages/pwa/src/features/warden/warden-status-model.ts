@@ -2,22 +2,17 @@
  * What the fleet-checks strip says, worked out without a browser.
  *
  * Ported from kteam `ui/src/components/WardenStrip.tsx` (the projections it
- * computed inline) plus `ui/src/lib/callsign.ts`. The strip itself is quiet by
- * design, so every judgement it makes about severity lives here where it can be
- * proved, rather than being buried in a ternary inside JSX.
+ * computed inline). The strip itself is quiet by design, so every judgement it
+ * makes about severity lives here where it can be proved, rather than being
+ * buried in a ternary inside JSX.
+ *
+ * `displayCallsign` used to live here as the strip's only caller. It moved to
+ * `lib/callsign.ts` when the command palette needed it too: a shared helper
+ * inside one feature is a dependency the shell should never have to take.
  */
 
 import type { WardenAnomaly, WardenFailoverAccountView, WardenStatusView } from '@ferretry/protocol';
-
-/** Title-cases a callsign slug for display: `ms-98` → `Ms-98`. */
-export const displayCallsign = (raw: string | null | undefined): string => {
-  const slug = (raw ?? '').trim();
-  if (slug === '') return '';
-  return slug
-    .split('-')
-    .map(segment => (segment === '' ? segment : `${segment[0]?.toUpperCase() ?? ''}${segment.slice(1)}`))
-    .join('-');
-};
+import { displayCallsign } from '../../lib/callsign.ts';
 
 const NO_CREDENTIALS = /credentials rejected|no credentials/iu;
 
