@@ -1,9 +1,11 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
-export * from './daemon-connection.ts';
+export * from '../hooks/use-details-tab.ts';
+export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
-export * from './drafts.ts';
+export * from './daemon-connection.ts';
 export * from './daemon-scope.ts';
 export * from './daemon-transport.ts';
+export * from './drafts.ts';
 export * from './pairing.ts';

@@ -9,9 +9,11 @@
   },
   "types": "./src/lib/index.ts",
   "dependencies": {
-    "@ferretry/protocol": "workspace:*"
+    "@ferretry/protocol": "workspace:*",
+    "react": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
     "should": "^13.2.3"
   }
 }
