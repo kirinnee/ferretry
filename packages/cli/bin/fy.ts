@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-import type { AnalyticsResponse, IFyApiClient } from '@ferretry/protocol';
+import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
+import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
@@ -21,6 +22,7 @@ import { AnalyticsController } from '../src/lib/analytics/controller';
 import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
+import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -38,6 +40,7 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
+import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { assertSemver } from '../src/lib/version';
 
 // Identity is single-sourced from package.json: the bin key names the binary, version feeds --version.
@@ -111,14 +114,23 @@ function lazyDaemonConnection(environment: Record<string, string | undefined>): 
   return (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
 }
 
+/**
+ * The slice of the daemon SDK the shared client exposes. Widening it is additive — a group that
+ * needs one more call adds it here and no existing group changes — and every member stays deferred.
+ */
+type SharedDaemonClient = Pick<IFyApiClient, 'request' | 'analytics' | 'list' | 'get' | 'stop'>;
+
 /** The deferred connection as the client object every command group is wired with. */
-function lazyDaemonClient(client: () => Promise<IFyApiClient>): Pick<IFyApiClient, 'request' | 'analytics'> {
+function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClient {
   return {
     request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
       const ready = await client();
       return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
     },
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
+    list: async (): Promise<SessionView[]> => (await client()).list(),
+    get: async (id: string): Promise<SessionView> => (await client()).get(id),
+    stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
   };
 }
 
@@ -129,7 +141,7 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): Pick<IFyApiClien
 export interface DomainWiring {
   readonly program: Command;
   readonly world: CliWorld;
-  readonly client: Pick<IFyApiClient, 'request' | 'analytics'>;
+  readonly client: SharedDaemonClient;
   readonly ownSessionId: string | undefined;
 }
 
@@ -164,6 +176,22 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       io: world.io,
       credentials: environmentBoardCredentials(world.environment),
     }),
+  ({ program, world, client, ownSessionId }) =>
+    registerStopCommands(
+      program,
+      new BulkStopController(client, world.io, world.prompt, {
+        interactive: world.interactive,
+        ...(ownSessionId === undefined ? {} : { callerId: ownSessionId }),
+        binaryName: BINARY_NAME,
+      }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerBrowserCommands(
+      program,
+      new BrowserController(client, world.io, new FileScreenshotWriter(), {
+        ...(ownSessionId === undefined ? {} : { selfSessionId: ownSessionId }),
+      }),
+    ),
 ];
 
 /**
