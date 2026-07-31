@@ -11,6 +11,7 @@ import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
 import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
+import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
@@ -309,6 +310,30 @@ describe('session screen components', () => {
     expect(jump.children.join('')).toContain('1 new message · Jump to latest');
     run(() => jump.props.onClick());
     expect(viewport.scrollTop).toBe(900);
+  });
+
+  test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', () => {
+    const rows = render(
+      <>
+        <TranscriptRow entry={{ id: 'user', kind: 'user', text: 'A human message' }} />
+        <TranscriptRow entry={{ at: Number.NaN, id: 'assistant', kind: 'assistant', text: 'A response' }} />
+        <TranscriptRow entry={{ id: 'tool', kind: 'tool', text: 'working tree clean' }} />
+        <TranscriptRow entry={{ id: 'notice', kind: 'notice', text: 'Daemon reconnected' }} />
+      </>,
+    );
+    expect(rows.root.findAllByProps({ 'data-transcript-kind': 'user' })[0]?.props.className).toContain(
+      'fy-message-user',
+    );
+    expect(rows.root.findAllByProps({ 'data-transcript-kind': 'assistant' })[0]?.props.className).toContain(
+      'fy-message-assistant',
+    );
+    expect(rows.root.findAllByProps({ className: 'fy-message fy-message-tool fy-message-chrome' })).toHaveLength(1);
+    expect(rows.root.findAllByProps({ className: 'fy-message fy-message-notice fy-message-chrome' })).toHaveLength(1);
+    expect(findText(rows.root, 'You')).toHaveLength(1);
+    expect(findText(rows.root, 'Assistant')).toHaveLength(1);
+    expect(findText(rows.root, 'Tool')).toHaveLength(1);
+    expect(findText(rows.root, 'Daemon')).toHaveLength(1);
+    expect(rows.root.findAllByType('time')).toHaveLength(0);
   });
 
   test('submits, scopes drafts per daemon, and surfaces a send failure from the rendered composer', async () => {

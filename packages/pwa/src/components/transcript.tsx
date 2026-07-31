@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { transcriptIsFollowing, type TranscriptEntry } from '../lib/session-screens.ts';
+import { TranscriptRow } from './transcript-row.tsx';
 
 export interface TranscriptProps {
   readonly daemonId: string;
@@ -68,13 +69,7 @@ export function Transcript({ daemonId, sessionId, entries, busy = false, label =
         aria-live="polite"
       >
         {entries.map(entry => (
-          <article className={`fy-message fy-message-${entry.kind}`} key={entry.id}>
-            <header>{entry.label ?? entry.kind}</header>
-            <p>{entry.text}</p>
-            {entry.at ? (
-              <time dateTime={new Date(entry.at).toISOString()}>{new Date(entry.at).toLocaleTimeString()}</time>
-            ) : null}
-          </article>
+          <TranscriptRow entry={entry} key={entry.id} />
         ))}
         {busy ? <p className="fy-thinking">Working…</p> : null}
       </div>
