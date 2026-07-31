@@ -123,4 +123,21 @@ describe('CodexTranscriptParser', () => {
     should(actual.every(result => result.events.length === 0)).be.true();
     should(actual.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
   });
+
+  it('should normalize a top-level error without requiring a nested payload', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord({ type: 'error', message: 'Synthetic top-level failure.', code: 'fixture' });
+
+    // Assert
+    should(actual.issues).be.empty();
+    should(actual.events).containDeep([
+      {
+        kind: 'error',
+        error: { message: 'Synthetic top-level failure.', code: 'fixture', recoverable: true },
+      },
+    ]);
+  });
 });

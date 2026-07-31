@@ -31,12 +31,13 @@ function claudeMetadata(
   message: Record<string, unknown>,
   role: TranscriptRole,
   blockIndex?: number,
+  fallbackSessionId?: string,
 ): TranscriptEventMetadata {
   return {
     harness: 'claude',
     role,
     timestamp: transcriptString(record.timestamp),
-    sessionId: transcriptString(record.sessionId),
+    sessionId: transcriptString(record.sessionId) ?? fallbackSessionId,
     recordId: transcriptString(record.uuid),
     parentRecordId: transcriptNullableString(record.parentUuid),
     messageId: transcriptString(message.id),
@@ -89,6 +90,7 @@ function claudeErrorMessage(value: unknown): { message?: string; code?: string }
 function claudeUsage(
   record: Record<string, unknown>,
   message: Record<string, unknown>,
+  fallbackSessionId?: string,
 ): TranscriptUsageEvent | undefined {
   const usage = transcriptObject(message.usage);
   if (usage === undefined) return undefined;
@@ -111,7 +113,7 @@ function claudeUsage(
   );
   const contextTokens = contextParts.length > 0 ? contextParts.reduce((total, value) => total + value, 0) : undefined;
   return {
-    ...claudeMetadata(record, message, 'system'),
+    ...claudeMetadata(record, message, 'system', undefined, fallbackSessionId),
     kind: 'usage',
     usage: {
       inputTokens,
@@ -144,6 +146,8 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const recordType = transcriptString(record.type);
     const message = transcriptObject(record.message) ?? {};
+    const metadata = (role: TranscriptRole, blockIndex?: number): TranscriptEventMetadata =>
+      claudeMetadata(record, message, role, blockIndex, context.sessionId);
     const events: TranscriptEvent[] = [];
     const issues = [] as TranscriptRecordResult['issues'][number][];
 
@@ -159,7 +163,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         text.trim().length > 0
       ) {
         events.push({
-          ...claudeMetadata(record, message, 'user'),
+          ...metadata('user'),
           kind: 'attachment',
           attachment: { kind: 'queued-command', text, origin: 'human' },
         });
@@ -171,7 +175,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       const url = transcriptString(record.url);
       if (url !== undefined && /^https:\/\/claude\.ai\/code\//u.test(url)) {
         events.push({
-          ...claudeMetadata(record, message, 'system'),
+          ...metadata('system'),
           kind: 'attachment',
           attachment: { kind: 'remote-control', url },
         });
@@ -193,7 +197,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         );
       } else {
         events.push({
-          ...claudeMetadata(record, message, 'system'),
+          ...metadata('system'),
           kind: 'error',
           error: { message: normalized.message, code: normalized.code, recoverable: true },
         });
@@ -208,9 +212,9 @@ export class ClaudeTranscriptParser implements TranscriptParser {
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const value = blocks[blockIndex];
-      const metadata = claudeMetadata(record, message, role, blockIndex);
+      const blockMetadata = metadata(role, blockIndex);
       if (typeof value === 'string') {
-        events.push({ ...metadata, kind: 'message', text: value });
+        events.push({ ...blockMetadata, kind: 'message', text: value });
         continue;
       }
 
@@ -230,11 +234,11 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       }
 
       if (blockType === 'text' && typeof block.text === 'string') {
-        events.push({ ...metadata, kind: 'message', text: block.text });
+        events.push({ ...blockMetadata, kind: 'message', text: block.text });
         continue;
       }
       if (blockType === 'thinking' && role === 'assistant' && typeof block.thinking === 'string') {
-        events.push({ ...metadata, kind: 'reasoning', text: block.thinking, format: 'thinking' });
+        events.push({ ...blockMetadata, kind: 'reasoning', text: block.thinking, format: 'thinking' });
         continue;
       }
       if (blockType === 'tool_use' && role === 'assistant') {
@@ -254,7 +258,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         }
         const questions = name === 'AskUserQuestion' ? transcriptQuestions(block.input) : [];
         events.push({
-          ...metadata,
+          ...blockMetadata,
           kind: 'tool-call',
           call: {
             id,
@@ -281,7 +285,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         }
         const text = transcriptText(block.content);
         events.push({
-          ...claudeMetadata(record, message, 'tool', blockIndex),
+          ...metadata('tool', blockIndex),
           kind: 'tool-result',
           result: {
             callId,
@@ -295,14 +299,14 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
       const attachment = claudeAttachment(block);
       if (attachment !== undefined) {
-        events.push({ ...metadata, kind: 'attachment', attachment });
+        events.push({ ...blockMetadata, kind: 'attachment', attachment });
         continue;
       }
       if (blockType === 'error') {
         const normalized = claudeErrorMessage(block);
         if (normalized.message !== undefined) {
           events.push({
-            ...claudeMetadata(record, message, 'system', blockIndex),
+            ...metadata('system', blockIndex),
             kind: 'error',
             error: { message: normalized.message, code: normalized.code, recoverable: true },
           });
@@ -332,10 +336,10 @@ export class ClaudeTranscriptParser implements TranscriptParser {
     }
 
     if (role === 'assistant' && message.stop_reason === 'end_turn') {
-      events.push({ ...claudeMetadata(record, message, 'system'), kind: 'turn', state: 'completed' });
+      events.push({ ...metadata('system'), kind: 'turn', state: 'completed' });
     }
     if (role === 'assistant') {
-      const usage = claudeUsage(record, message);
+      const usage = claudeUsage(record, message, context.sessionId);
       if (usage !== undefined) events.push(usage);
     }
 

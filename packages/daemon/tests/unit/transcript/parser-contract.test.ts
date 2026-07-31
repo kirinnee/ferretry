@@ -72,6 +72,18 @@ function parserContract(fixture: ParserFixture): void {
       should(actual.remainder).equal('');
     });
 
+    it('should use the parser input session id when the record omits one', () => {
+      // Arrange
+      const input = JSON.stringify(fixture.record);
+
+      // Act
+      const actual = fixture.subject.parse({ text: input, sessionId: 'session-from-source' });
+
+      // Assert
+      should(actual.events).not.be.empty();
+      should(actual.events.every(event => event.sessionId === 'session-from-source')).be.true();
+    });
+
     it('should ignore blank CRLF lines and count unknown valid records', () => {
       // Arrange
       const input = `\r\n${JSON.stringify({ type: 'synthetic-unknown' })}\r\n`;

@@ -314,7 +314,7 @@ export class CodexTranscriptParser implements TranscriptParser {
       (recordType === 'event_msg' && (itemType === 'error' || itemType === 'stream_error')) ||
       recordType === 'error'
     ) {
-      const normalized = codexError(payload);
+      const normalized = codexError(recordType === 'error' ? record : payload);
       if (normalized.message === undefined) {
         issues.push(
           transcriptRecordIssue(
