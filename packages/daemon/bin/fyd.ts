@@ -5,6 +5,7 @@ import {
   DaemonStorageFactory,
   DaemonSecretsLoader,
   BunSecretShell,
+  daemonSecretSourceProgram,
   FileDaemonConfig,
   KeyedSerialExecutor,
   RuntimeEnvironment,
@@ -75,7 +76,22 @@ export function buildWorld(): DaemonWorld {
     ),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
     config: new FileDaemonConfig(paths, new StateFileSystem(paths)),
-    secrets: new DaemonSecretsLoader(new BunSecretShell(), { set: (key, value) => (process.env[key] = value) }),
+    secrets: new DaemonSecretsLoader(
+      new BunSecretShell({
+        source: file => {
+          const child = Bun.spawnSync({
+            cmd: ['/bin/sh', '-c', daemonSecretSourceProgram, 'fyd-secrets', file, process.execPath],
+            stdin: 'ignore',
+            stdout: 'pipe',
+            stderr: 'ignore',
+            timeout: 5_000,
+            maxBuffer: 1_024 * 1_024,
+          });
+          return { success: child.success, stdout: child.stdout.toString() };
+        },
+      }),
+      { set: (key, value) => (process.env[key] = value) },
+    ),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
   };
