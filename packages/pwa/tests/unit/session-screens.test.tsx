@@ -2,6 +2,7 @@ import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, test } from 'bun:test';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { ComposerQuota, composerQuotaPercent, composerQuotaSpoken } from '../../src/components/composer-quota.tsx';
 import { ModeBadge } from '../../src/components/mode-badge.tsx';
 import { QuotaReadout } from '../../src/components/quota-readout.tsx';
 import { isSessionCommandUnsupported, SessionCommandControls } from '../../src/components/session-command-controls.tsx';
@@ -350,6 +351,41 @@ describe('session screen components', () => {
       await Promise.resolve();
     });
     expect(failing.root.findByProps({ role: 'alert' }).children).toContain('offline');
+  });
+
+  test('renders the composer quota as a fixed, daemon-supplied context token', () => {
+    expect(composerQuotaPercent(undefined)).toBe('—');
+    expect(composerQuotaPercent(Number.NaN)).toBe('—');
+    expect(composerQuotaPercent(-3)).toBe('0%');
+    expect(composerQuotaPercent(12.6)).toBe('13%');
+    expect(composerQuotaSpoken(null)).toContain('5-hour window unknown');
+
+    const unknown = render(<ComposerQuota />);
+    expect(JSON.stringify(unknown.toJSON())).toContain('5h ');
+    expect(JSON.stringify(unknown.toJSON())).toContain('wk ');
+    expect(JSON.stringify(unknown.toJSON())).toContain('—');
+
+    const auth = render(<ComposerQuota quota={{ authOk: false }} />);
+    expect(findText(auth.root, 'quota auth!')).toHaveLength(1);
+
+    const warning = render(<ComposerQuota quota={{ fiveHourPercent: 75, weeklyPercent: 10 }} />);
+    expect(warning.root.findAllByProps({ className: ' fy-quota-warning' })).toHaveLength(1);
+
+    const composer = render(
+      <Composer
+        api={{ send: async () => ({}) as never }}
+        daemon={daemonA}
+        quota={{ fiveHourPercent: 75, weeklyPercent: 92, atLimit: true }}
+        sessionId="quota-id"
+      />,
+    );
+    const quota = composer.root.findByProps({ className: 'fy-composer-quota' });
+    expect(quota.props.title).toContain('Account is at limit');
+    expect(findText(quota, '5h ')).toHaveLength(1);
+    expect(findText(quota, '75%')).toHaveLength(1);
+    expect(findText(quota, 'wk ')).toHaveLength(1);
+    expect(findText(quota, '92%')).toHaveLength(1);
+    expect(composer.root.findAllByProps({ className: ' fy-quota-error' })).toHaveLength(2);
   });
 
   test('keeps Enter inert on touch hardware and disables its rendered submit action when disabled', () => {

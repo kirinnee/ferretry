@@ -4,6 +4,7 @@ import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../lib/drafts.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
+import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
@@ -12,6 +13,8 @@ export interface ComposerProps {
   readonly busy?: boolean;
   readonly disabled?: boolean;
   readonly placeholder?: string;
+  /** This session's own daemon reading; composer quota is never ambient state. */
+  readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
 }
@@ -30,6 +33,7 @@ export function Composer({
   busy = false,
   disabled = false,
   placeholder = 'Message this session',
+  quota,
   draftStore = defaultDraftStore,
   onSent,
 }: ComposerProps) {
@@ -102,6 +106,7 @@ export function Composer({
       />
       <div className="fy-composer-actions">
         <p id={hintId}>{busy ? 'Queue for the next turn' : 'Enter to send · Shift+Enter for a new line'}</p>
+        <ComposerQuota quota={quota} />
         <button disabled={!canSubmitComposer(draft, disabled, sending)} type="submit">
           {sending ? 'Sending…' : busy ? 'Queue' : 'Send'}
         </button>

@@ -645,7 +645,12 @@ function Shell() {
               ]}
               sessionId="harness-session"
             />
-            <Composer api={{ send: async () => ({}) as never }} daemon={daemon} sessionId="harness-session" />
+            <Composer
+              api={{ send: async () => ({}) as never }}
+              daemon={daemon}
+              quota={harnessSession.state.quota}
+              sessionId="harness-session"
+            />
           </div>
           <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
         </section>

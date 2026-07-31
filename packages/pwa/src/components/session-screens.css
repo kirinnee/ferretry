@@ -515,8 +515,18 @@
 }
 .fy-composer-actions p {
   color: var(--fy-muted);
+  flex: 1;
   font-size: 12px;
   margin: 0;
+}
+.fy-composer-quota {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  gap: 5px;
+  white-space: nowrap;
 }
 .fy-composer-actions button {
   background: var(--fy-accent);
