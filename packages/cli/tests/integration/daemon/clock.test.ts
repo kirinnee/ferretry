@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SystemClock } from '../../../src/adapters/daemon/clock';
+import { SystemMillisecondClock } from '../../../src/adapters/daemon/clock';
 
 describe('system clock', () => {
   it('should report real wall-clock milliseconds', () => {
     // Arrange
-    const subject = new SystemClock();
+    const subject = new SystemMillisecondClock();
     const before = Date.now();
 
     // Act
@@ -18,7 +18,7 @@ describe('system clock', () => {
 
   it('should actually wait, so a poll loop does not spin the CPU', async () => {
     // Arrange
-    const subject = new SystemClock();
+    const subject = new SystemMillisecondClock();
     const before = subject.now();
 
     // Act
