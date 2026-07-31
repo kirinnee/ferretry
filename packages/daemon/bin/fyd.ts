@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import pkg from '../package.json' with { type: 'json' };
 import {
   BrowserWorkerClient,
+  BunProcessProbe,
   BunSqliteIndexFactory,
   DaemonBinder,
   DaemonHealthProbe,
@@ -15,6 +16,8 @@ import {
   KeyedSerialExecutor,
   RuntimeEnvironment,
   SocketViewerDownstream,
+  PaneProcessInventory,
+  TmuxPaneSnapshot,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
   StateHomeLayout,
@@ -55,6 +58,7 @@ import {
   SessionLifecycleService,
   TmuxController,
   type BrowserViewerHost,
+  MigrationPreflight,
   type DaemonReadinessPorts,
 } from '../src/lib/index.ts';
 
@@ -67,6 +71,10 @@ function resolveTmuxExecutable(): string {
   if (executable === null) throw new Error('tmux was not found on PATH; it is required to manage sessions');
   return executable;
 }
+/** Fallback when tmux is not on `$PATH`. Absolute by construction: the tmux adapter refuses a bare
+ *  name so no lookup can ever land on the machine's default socket, and an absent binary surfaces
+ *  as a failed inspection, which the migration gate then refuses. */
+const FALLBACK_TMUX = '/usr/bin/tmux';
 
 /**
  * The adapters a daemon process needs. Subsystem units add their ports here as they land; this is
@@ -88,6 +96,9 @@ export interface DaemonWorld {
   readonly createReadinessWaiter: (ports: DaemonReadinessPorts, daemonLog: string) => DaemonReadinessWaiter;
   readonly config: FileDaemonConfig;
   readonly secrets: DaemonSecretsLoader;
+  /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
+   *  a session whose work cannot be shown to survive the relaunch. */
+  readonly migratePreflight: MigrationPreflight;
   readonly createAttentionLedgerRepository: (
     sessionDirectory: (sessionId: string) => string,
   ) => FileAttentionLedgerRepository;
@@ -120,6 +131,7 @@ export function buildWorld(): DaemonWorld {
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
   const wardenFiles = new NodeWardenReportFileSystem();
+  const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   return {
     role: packageRole,
     storage: new DaemonStorageFactory(
@@ -153,6 +165,10 @@ export function buildWorld(): DaemonWorld {
         },
       }),
       { set: (key, value) => (process.env[key] = value) },
+    ),
+    migratePreflight: new MigrationPreflight(
+      new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined)),
+      new TmuxPaneSnapshot(tmux),
     ),
     createAttentionLedgerRepository: sessionDirectory => new FileAttentionLedgerRepository(sessionDirectory),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
