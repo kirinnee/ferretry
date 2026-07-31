@@ -1,0 +1,283 @@
+:root {
+  --fy-surface: var(--surface, #fff);
+  --fy-surface-2: var(--surface-2, #f8fafc);
+  --fy-fg: var(--fg, #182230);
+  --fy-muted: var(--muted, #667085);
+  --fy-border: var(--border, #d0d5dd);
+  --fy-accent: var(--accent, #0b6e99);
+}
+.fy-session-list,
+.fy-session-details,
+.fy-transcript-shell,
+.fy-composer {
+  color: var(--fy-fg);
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+}
+.fy-screen-heading,
+.fy-detail-header,
+.fy-composer-actions,
+.fy-session-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.fy-screen-heading,
+.fy-detail-header {
+  justify-content: space-between;
+}
+.fy-eyebrow {
+  color: var(--fy-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-transform: uppercase;
+}
+.fy-screen-heading h1,
+.fy-detail-header h2 {
+  font-size: 20px;
+  margin: 2px 0 0;
+}
+.fy-count {
+  background: var(--fy-surface-2);
+  border: 1px solid var(--fy-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.fy-session-rows {
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  margin-top: 16px;
+  overflow: hidden;
+}
+.fy-session-row {
+  background: var(--fy-surface);
+  border: 0;
+  border-bottom: 1px solid var(--fy-border);
+  color: inherit;
+  cursor: pointer;
+  min-height: 52px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+}
+.fy-session-row:last-child {
+  border-bottom: 0;
+}
+.fy-session-row:hover,
+.fy-session-row:focus-visible {
+  background: var(--fy-surface-2);
+  outline: 2px solid var(--fy-accent);
+  outline-offset: -2px;
+}
+.fy-session-identity {
+  display: grid;
+  min-width: 154px;
+}
+.fy-session-identity small,
+.fy-session-task,
+.fy-session-meta,
+.fy-session-age {
+  color: var(--fy-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-session-task {
+  flex: 1;
+}
+.fy-session-meta {
+  min-width: 95px;
+}
+.fy-session-age {
+  min-width: 52px;
+  text-align: right;
+}
+.fy-status {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 128px;
+  text-transform: capitalize;
+}
+.fy-status i {
+  background: currentColor;
+  border-radius: 50%;
+  height: 8px;
+  margin-top: 6px;
+  width: 8px;
+}
+.fy-empty {
+  border: 1px dashed var(--fy-border);
+  border-radius: 12px;
+  color: var(--fy-muted);
+  padding: 24px;
+  text-align: center;
+}
+.fy-session-details {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.fy-session-details dl {
+  margin: 16px 0 0;
+}
+.fy-detail-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 100px minmax(0, 1fr);
+  padding: 8px 0;
+}
+.fy-detail-row dt {
+  color: var(--fy-muted);
+}
+.fy-detail-row dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-icon-button {
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 24px;
+  height: 44px;
+  width: 44px;
+}
+.fy-transcript-shell {
+  display: grid;
+  min-height: 0;
+  position: relative;
+}
+.fy-transcript {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+.fy-message {
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  max-width: min(76ch, 88%);
+  padding: 10px 12px;
+}
+.fy-message header,
+.fy-message time {
+  color: var(--fy-muted);
+  font-size: 12px;
+}
+.fy-message p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+.fy-message-user {
+  background: var(--user-bg, var(--fy-surface-2));
+  margin-left: auto;
+}
+.fy-message-tool,
+.fy-message-notice {
+  background: var(--fy-surface-2);
+  max-width: 100%;
+}
+.fy-thinking {
+  color: var(--fy-muted);
+  margin: 0;
+}
+.fy-jump-latest {
+  bottom: 16px;
+  border: 1px solid var(--fy-border);
+  border-radius: 999px;
+  box-shadow: 0 3px 8px #0002;
+  justify-self: center;
+  padding: 8px 12px;
+  position: absolute;
+}
+.fy-composer {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-radius: 12px;
+  padding: 10px;
+}
+.fy-composer:focus-within {
+  outline: 2px solid var(--fy-accent);
+  outline-offset: 2px;
+}
+.fy-composer textarea {
+  background: transparent;
+  border: 0;
+  box-sizing: border-box;
+  color: inherit;
+  font: inherit;
+  min-height: 44px;
+  resize: vertical;
+  width: 100%;
+}
+.fy-composer textarea:focus {
+  outline: 0;
+}
+.fy-composer-actions {
+  justify-content: space-between;
+}
+.fy-composer-actions p {
+  color: var(--fy-muted);
+  font-size: 12px;
+  margin: 0;
+}
+.fy-composer-actions button {
+  background: var(--fy-accent);
+  border: 0;
+  border-radius: 8px;
+  color: #fff;
+  min-height: 36px;
+  padding: 0 14px;
+}
+.fy-composer-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.fy-composer-error {
+  color: var(--err, #b42318);
+  margin: 8px 0 0;
+}
+.sr-only {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+@media (max-width: 700px) {
+  .fy-session-row {
+    align-items: flex-start;
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+  .fy-session-task,
+  .fy-session-meta {
+    display: none;
+  }
+  .fy-session-age {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .fy-status {
+    min-width: auto;
+  }
+  .fy-session-details {
+    border-radius: 16px 16px 0 0;
+  }
+  .fy-message {
+    max-width: 95%;
+  }
+  .fy-composer-actions p {
+    max-width: 60%;
+  }
+  .fy-composer-actions button {
+    min-height: 44px;
+  }
+}
