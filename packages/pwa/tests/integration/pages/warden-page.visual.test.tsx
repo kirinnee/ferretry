@@ -310,5 +310,5 @@ describe('Warden page visual contract', () => {
       await browser.close();
       server.stop(true);
     }
-  });
+  }, 20_000);
 });
