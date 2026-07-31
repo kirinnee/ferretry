@@ -23,6 +23,7 @@ import type {
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../src/components/composer.tsx';
+import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
@@ -1051,6 +1052,12 @@ function Shell() {
         >
           <div className="p-panel text-ui">The shared modal shell, swipe handle and all.</div>
         </BottomSheet>
+        <AttachmentUnlockPrompt
+          filename="design-brief.pdf"
+          onCancel={() => {}}
+          onUnlock={async () => {}}
+          open={window.location.search === '?attachment-unlock'}
+        />
       </div>
     </div>
   );
