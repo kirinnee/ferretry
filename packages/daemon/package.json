@@ -5,10 +5,14 @@
   "description": "Per-host agent daemon runtime",
   "type": "module",
   "exports": {
-    ".": "./src/lib/index.ts"
+    ".": "./src/lib/index.ts",
+    "./adapters": "./src/adapters/index.ts"
   },
   "types": "./src/lib/index.ts",
   "bin": {
     "fyd": "bin/fyd.ts"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
   }
 }
