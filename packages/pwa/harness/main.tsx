@@ -75,6 +75,7 @@ import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
+import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
@@ -1281,6 +1282,20 @@ function Shell() {
         active="warden"
         themeToggle={<Button size="sm">Theme</Button>}
       />
+      <section aria-label="Fleet navigation rail preview" className="border-b border-border-soft bg-surface">
+        <FleetNavigationRail
+          daemon={daemon.daemonId}
+          sessionCount={7}
+          mode="auto"
+          modeCounts={{ all: 7, auto: 5, interactive: 2 }}
+          rcOnly={false}
+          includeFinished={false}
+          onExpand={() => {}}
+          onSetMode={() => {}}
+          onSetRcOnly={() => {}}
+          onSetIncludeFinished={() => {}}
+        />
+      </section>
 
       <div className="flex min-h-0 flex-col gap-panel p-panel">
         {/* The desktop workspace: conversation on the left, the pane on the right

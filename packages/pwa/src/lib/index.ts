@@ -51,6 +51,7 @@ export * from '../shell/chat-width-control.tsx';
 export * from '../shell/chunk-error-boundary.tsx';
 export * from '../shell/command-palette.tsx';
 export * from '../shell/context-menu.tsx';
+export * from '../shell/fleet-navigation-rail.tsx';
 export * from '../shell/marker.tsx';
 export * from '../shell/mode-badge.tsx';
 export * from '../shell/palette-destinations.ts';
