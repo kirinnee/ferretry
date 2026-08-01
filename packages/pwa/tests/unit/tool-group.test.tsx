@@ -4,7 +4,7 @@ import { CodeBlock } from '../../src/components/code-block.tsx';
 import { bodyLanguage, elapsedLabel, summarizeToolRun, ToolGroup } from '../../src/components/tool-group.tsx';
 import { extractToolSummary } from '../../src/lib/tool-extract.ts';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
-import { useLiveClock } from '../../src/hooks/use-live-clock.ts';
+import { selectionHeld, transcriptHeldStill, useLiveClock } from '../../src/hooks/use-live-clock.ts';
 import type { ToolCall } from '../../src/lib/session-screens.ts';
 import { render, run } from '../support/react.ts';
 
@@ -349,6 +349,15 @@ function ClockProbe({ now, intervalMs, hold }: { now: () => number; intervalMs: 
 }
 
 describe('useLiveClock', () => {
+  test('holds only a real selected range, unless a pointer gesture is still active', () => {
+    expect(selectionHeld(null)).toBeFalse();
+    expect(selectionHeld({ isCollapsed: true, rangeCount: 1 })).toBeFalse();
+    expect(selectionHeld({ isCollapsed: false, rangeCount: 0 })).toBeFalse();
+    expect(selectionHeld({ isCollapsed: false, rangeCount: 1 })).toBeTrue();
+    expect(transcriptHeldStill(true, null)).toBeTrue();
+    expect(transcriptHeldStill(false, { isCollapsed: false, rangeCount: 1 })).toBeTrue();
+  });
+
   test('advances on its interval and stops when the transcript must hold still', async () => {
     let ticks = 100;
     const now = () => {
