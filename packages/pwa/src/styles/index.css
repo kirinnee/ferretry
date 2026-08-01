@@ -1,6 +1,7 @@
 @import './themes.css';
 @import './highlight.css';
 @import '../components/session-screens.css';
+@import '../components/files.css';
 @import '../features/tasks/task-dag-graph.css';
 @import '../features/attention/attention-board.css';
 

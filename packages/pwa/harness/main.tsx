@@ -32,11 +32,14 @@ import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
+import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
+import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
+import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
@@ -79,11 +82,13 @@ import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import { buildLineage } from '../src/lib/lineage.ts';
+import { writeMdComposePref } from '../src/lib/md-compose.ts';
+import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
-import { writeMdComposePref } from '../src/lib/md-compose.ts';
-import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
@@ -95,10 +100,6 @@ import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
-import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
-import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
-import { buildLineage } from '../src/lib/lineage.ts';
-import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
@@ -511,6 +512,23 @@ const LEARNING_PROPOSALS: readonly ProposalView[] = [
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
+
+/** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
+const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
+  [
+    '$ direnv exec . task test',
+    '🧪 Running unit tests with coverage...',
+    'bun test v1.3.13 (bf2e2cec)',
+    '',
+    ' packages/pwa/tests/unit/terminal-snapshot.test.tsx:',
+    ' ✓ terminal snapshot view > polls the paired daemon, prints the pane [4.00ms]',
+    ' ✓ terminal snapshot view > keeps the last good pane when the daemon goes quiet [3.00ms]',
+    '',
+    ' 7 pass',
+    ' 0 fail',
+    '✅ Coverage artifact matches the complete unit production ledger',
+    '$ ',
+  ].join('\n');
 
 /** One daemon's fleet, as the palette ranks and renders it. */
 const PALETTE_SESSIONS = paletteSessionEntries([
@@ -1861,6 +1879,22 @@ function Shell() {
             <div className="min-w-0 flex-1 p-panel text-meta text-muted">
               The transcript sits here. The column beside it is the sidebar under test.
             </div>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Terminal snapshot',
+      render: () => (
+        <Card aria-label="Terminal snapshot" className="min-w-0 overflow-hidden" id="harness-terminal-snapshot">
+          <div className="flex h-64 flex-col">
+            <TerminalSnapshotView
+              daemon={daemon}
+              scope={scope}
+              tmuxSession="ms9u6kfu-16918932"
+              now={() => HARNESS_NOW}
+              readSnapshot={HARNESS_PANE_SNAPSHOT}
+            />
           </div>
         </Card>
       ),

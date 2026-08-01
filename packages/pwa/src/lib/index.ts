@@ -20,6 +20,8 @@ export * from '../components/session-chat-parts.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
 export * from '../components/session-tasks.tsx';
+export * from '../components/terminal-snapshot.tsx';
+export * as terminalSnapshotModel from '../components/terminal-snapshot-model.ts';
 export * from '../features/analytics/analytics-api.ts';
 export * from '../features/analytics/analytics-query-autocomplete.tsx';
 export * from '../features/analytics/analytics-query-complete.ts';
