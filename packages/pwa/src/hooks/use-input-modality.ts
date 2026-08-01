@@ -165,7 +165,8 @@ export function createInputModalityStore(sourceProvider: () => InputModalitySour
   };
 }
 
-const browserSource = (): InputModalitySource | null => {
+/** The browser implementation of the declared input-capability port. */
+export const browserInputModalitySource = (): InputModalitySource | null => {
   if (typeof window === 'undefined') return null;
   return {
     matchMedia(query) {
@@ -181,7 +182,7 @@ const browserSource = (): InputModalitySource | null => {
   };
 };
 
-const inputModalityStore = createInputModalityStore(browserSource);
+const inputModalityStore = createInputModalityStore(browserInputModalitySource);
 inputModalityStore.read();
 
 /** Synchronous read for safety-sensitive event handlers. */

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { attemptPortraitLock, isPhoneLandscape, syncPortraitGate } from '../../src/lib/orientation-lock.ts';
+import {
+  attemptPortraitLock,
+  installPortraitLock,
+  isPhoneLandscape,
+  syncPortraitGate,
+} from '../../src/lib/orientation-lock.ts';
 
 const phone = (width: number, height: number, coarse = true): Window =>
   ({
@@ -47,5 +52,34 @@ describe('syncPortraitGate', () => {
     expect(nodes.size).toBe(1);
     syncPortraitGate(doc, phone(390, 844));
     expect(nodes.size).toBe(0);
+  });
+});
+
+describe('installPortraitLock', () => {
+  it('syncs immediately, tracks viewport changes, and retries after the first gesture when needed', async () => {
+    const originalScreen = Object.getOwnPropertyDescriptor(globalThis, 'screen');
+    Object.defineProperty(globalThis, 'screen', { configurable: true, value: { orientation: {} } });
+    const listeners = new Map<string, () => void>();
+    const view = {
+      ...phone(390, 844),
+      addEventListener: (type: string, listener: () => void) => listeners.set(type, listener),
+    } as unknown as Window;
+    const doc = {
+      body: { appendChild: () => {} },
+      getElementById: () => null,
+      createElement: () => ({ id: '', innerHTML: '', setAttribute: () => {}, remove: () => {} }),
+    } as unknown as Document;
+
+    try {
+      installPortraitLock(view, doc);
+      await Promise.resolve();
+      listeners.get('pointerdown')?.();
+      await Promise.resolve();
+
+      expect([...listeners.keys()].sort()).toEqual(['orientationchange', 'pointerdown', 'resize']);
+    } finally {
+      if (originalScreen) Object.defineProperty(globalThis, 'screen', originalScreen);
+      else Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'screen');
+    }
   });
 });

@@ -61,10 +61,14 @@ describe('usePullToSearch', () => {
     await interact(() => scroller.dispatchEvent(touch('touchstart', 100)));
     await interact(() => scroller.dispatchEvent(touch('touchmove', 20)));
     await interact(() => scroller.dispatchEvent(touch('touchend', 0, 0)));
-    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 1 });
+    let scrollTop = 0;
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => scrollTop });
     await interact(() => scroller.dispatchEvent(touch('touchstart', 100)));
+    scrollTop = 1;
     await interact(() => scroller.dispatchEvent(touch('touchmove', 200)));
     await interact(() => scroller.dispatchEvent(touch('touchcancel', 0, 0)));
+    await interact(() => scroller.dispatchEvent(touch('touchstart', 100)));
+    await interact(() => scroller.dispatchEvent(touch('touchend', 0, 0)));
 
     expect(fired).toBe(0);
     expect(states.at(-1)?.distance).toBe(0);

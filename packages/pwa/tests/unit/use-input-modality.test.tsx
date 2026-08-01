@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import '../support/dom.ts';
 import {
   createInputModalityStore,
+  browserInputModalitySource,
   readInputModality,
   resolveInputModality,
   type InputModalitySignals,
@@ -150,6 +151,13 @@ describe('createInputModalityStore', () => {
     source.pointer('mouse');
     expect(failed.read()).toEqual({ touchAffected: true, enterSends: false });
     failed.dispose();
+  });
+
+  it('detaches the browser pointer listener when an injected browser store is disposed', () => {
+    const store = createInputModalityStore(browserInputModalitySource);
+    store.subscribe(() => {});
+    store.dispose();
+    expect(store.getSnapshot()).toEqual({ touchAffected: true, enterSends: false });
   });
 
   it('supports legacy media listeners and treats a throwing media read as unknown', () => {
