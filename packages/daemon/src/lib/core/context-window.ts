@@ -37,6 +37,29 @@ export interface ContextWindowEvidence {
 }
 
 /**
+ * The context evidence recorded by one live session.
+ *
+ * The configured model and the harness observation must stay separate.  In
+ * particular, a wrapper's configured alias can say `opus` while the harness
+ * reports the served `glm-5.2`; model-window overrides apply to the latter.
+ * Conversely, the `[1m]` selector is retained only in configuration, not in
+ * the harness report.  Keeping this projection here prevents callers that
+ * compare live and target windows (notably migration) from dropping either
+ * half of that evidence.
+ */
+export interface SessionContextWindowEvidence {
+  /** The model selected in the session's configuration. */
+  readonly configuredModel?: string;
+  /** The configured fallback when the selected model was not recorded. */
+  readonly modelHint?: string;
+  /** The model the harness says it is actually serving. */
+  readonly observedModel?: string;
+  /** A context window the harness reports about the running session. */
+  readonly reportedWindow?: number;
+  readonly overrides?: Readonly<Record<string, number>>;
+}
+
+/**
  * The context window for a session.
  *
  * Precedence: a harness that reports its own window is believed verbatim; then configured
@@ -62,6 +85,24 @@ export function contextWindowFor(evidence: ContextWindowEvidence): number {
 
   const extended = configured?.includes(EXTENDED_MARKER) === true || served?.includes(EXTENDED_MARKER) === true;
   return extended ? EXTENDED_CONTEXT_WINDOW : DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Resolves the context window of an existing session from its persisted
+ * configuration and live harness evidence.
+ *
+ * This is intentionally a small semantic wrapper over {@link contextWindowFor}
+ * rather than making every consumer remember which model string is configured
+ * and which one is observed.  A migration is destructive, so getting this
+ * distinction wrong can incorrectly permit a smaller target window.
+ */
+export function contextWindowForSession(evidence: SessionContextWindowEvidence): number {
+  return contextWindowFor({
+    configuredModel: evidence.configuredModel ?? evidence.modelHint,
+    servedModel: evidence.observedModel,
+    ...(evidence.reportedWindow === undefined ? {} : { reportedWindow: evidence.reportedWindow }),
+    ...(evidence.overrides === undefined ? {} : { overrides: evidence.overrides }),
+  });
 }
 
 /** How much of the window a transcript has consumed, as a percentage that never exceeds 100. */

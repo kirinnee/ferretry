@@ -229,7 +229,7 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type ObservedSession,
-  contextWindowFor,
+  contextWindowForSession,
   jsonObject,
   SessionMigrateError,
   type SessionMigrateFailure,
@@ -1312,9 +1312,21 @@ function migrateRelaunchRefusal(error: unknown): never {
   throw new SessionMigrateError('failed', error instanceof Error ? error.message : String(error));
 }
 
-/** The window this session is running in today: what the harness reported, else what its model implies. */
+/**
+ * The window this session is running in today.
+ *
+ * The observed model is deliberately carried through: aliases are configured
+ * names, whereas a context override describes the model the harness actually
+ * serves.  The core projection also retains a configured `[1m]` selector that
+ * harness output strips away.
+ */
 function currentContextWindow(config: z.infer<typeof SessionConfigSchema>, state: z.infer<typeof SessionStateSchema>) {
-  return state.contextWindow ?? contextWindowFor({ configuredModel: config.model ?? config.modelHint });
+  return contextWindowForSession({
+    configuredModel: config.model,
+    modelHint: config.modelHint,
+    observedModel: state.observedModel,
+    reportedWindow: state.contextWindow,
+  });
 }
 
 /**

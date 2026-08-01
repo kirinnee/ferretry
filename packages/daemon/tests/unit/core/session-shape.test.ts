@@ -3,6 +3,7 @@ import should from 'should';
 import {
   contextPercent,
   contextWindowFor,
+  contextWindowForSession,
   harnessDisplayName,
   remoteControlArgs,
   resolveParent,
@@ -207,6 +208,42 @@ describe('contextWindowFor', () => {
     // Arrange / Act / Assert
     should(contextWindowFor({})).equal(200_000);
     should(contextWindowFor({ servedModel: '  ', overrides: {} })).equal(200_000);
+  });
+});
+
+describe('contextWindowForSession', () => {
+  it('should retain the configured extended selector when the harness strips it', () => {
+    // Arrange / Act
+    const window = contextWindowForSession({
+      configuredModel: 'claude-opus-4-8[1m]',
+      observedModel: 'claude-opus-4-8',
+    });
+
+    // Assert
+    should(window).equal(1_000_000);
+  });
+
+  it('should match configured overrides against the model the harness actually serves', () => {
+    // Arrange — a wrapper alias is not the served model, so only the observation matches the policy.
+    const window = contextWindowForSession({
+      configuredModel: 'opus',
+      observedModel: 'glm-5.2',
+      overrides: { 'glm-5.2': 131_072 },
+    });
+
+    // Assert
+    should(window).equal(131_072);
+  });
+
+  it('should believe a live harness window above its configured and observed model evidence', () => {
+    // Arrange / Act / Assert
+    should(
+      contextWindowForSession({
+        configuredModel: 'claude-opus-4-8[1m]',
+        observedModel: 'claude-opus-4-8',
+        reportedWindow: 258_400,
+      }),
+    ).equal(258_400);
   });
 });
 
