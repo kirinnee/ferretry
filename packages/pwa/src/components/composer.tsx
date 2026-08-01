@@ -7,6 +7,8 @@ import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
+import { useComposerAutocomplete } from './composer-autocomplete.ts';
+import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 
 export interface ComposerProps {
@@ -51,6 +53,14 @@ export function Composer({
   const highlighted = useMdComposePref() === 'on';
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const autocompleteProviders = useMemo(() => createComposerAutocompleteProviders({ daemon, scope }), [daemon, scope]);
+  const autocomplete = useComposerAutocomplete({
+    value: draft,
+    onValueChange: setDraft,
+    inputRef,
+    providers: autocompleteProviders,
+    disabled: disabled || sending,
+  });
   const syncHighlight = useCallback((input: HTMLTextAreaElement) => {
     syncComposerHighlightViewport(input, overlayRef.current);
   }, []);
@@ -104,6 +114,7 @@ export function Composer({
     setError(null);
     try {
       await api.send(sessionId, { message: draft.trim(), now: !busy });
+      for (const provider of autocompleteProviders) provider.reset?.();
       setDraft('');
       draftStore.clear(scope);
       onSent?.();
@@ -135,9 +146,11 @@ export function Composer({
           onChange={event => {
             const input = event.currentTarget as unknown as HTMLTextAreaElement;
             setDraft(input.value);
+            autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
             syncHighlight(input);
           }}
           onKeyDown={event => {
+            if (autocomplete.handleKeyDown(event)) return;
             if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
               return;
             const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
@@ -148,10 +161,15 @@ export function Composer({
             void submit();
           }}
           onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
+          onSelect={event => {
+            const input = event.currentTarget as unknown as HTMLTextAreaElement;
+            autocomplete.syncSelection({ start: input.selectionStart, end: input.selectionEnd });
+          }}
           placeholder={placeholder}
           ref={inputRef}
           rows={1}
           value={draft}
+          {...autocomplete.textareaAria}
         />
       </div>
       <div className="fy-composer-actions">
