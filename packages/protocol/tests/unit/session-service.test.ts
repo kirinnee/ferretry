@@ -44,6 +44,16 @@ const sendRecord = {
   evidence: sendEvidence,
 };
 
+const transcriptProvenance = {
+  v: 1,
+  home: '/home/agent/.claude',
+  harnessSessionId: '11111111-2222-3333-4444-555555555555',
+  identity: 'minted',
+  correlationToken: '/state/sessions/session-1',
+  file: '/home/agent/.claude/projects/-work-repo/11111111-2222-3333-4444-555555555555.jsonl',
+  resolvedAt: INSTANT,
+};
+
 const pendingQuestion = {
   toolUseId: 'tool-1',
   questions: [{ question: 'Proceed?', header: 'Choice', options: [{ label: 'Yes' }], multiSelect: false }],
@@ -90,6 +100,18 @@ const sessionCases: SchemaCase[] = [
   { name: 'question option', schema: session.PendingQuestionOptionSchema, value: { label: 'Yes' } },
   { name: 'pending question', schema: session.PendingQuestionSchema, value: pendingQuestion },
   { name: 'board access', schema: session.TaskBoardAccessSchema, value: 'worker' },
+  { name: 'transcript identity', schema: session.TranscriptIdentitySchema, value: 'minted' },
+  { name: 'transcript provenance', schema: session.TranscriptProvenanceSchema, value: transcriptProvenance },
+  {
+    name: 'undiscovered transcript provenance',
+    schema: session.TranscriptProvenanceSchema,
+    value: { v: 1, home: '/home/agent/.codex', identity: 'undiscovered', baseline: ['rollout-1'] },
+  },
+  {
+    name: 'session config with transcript provenance',
+    schema: session.SessionConfigSchema,
+    value: { ...sessionView.config, transcript: transcriptProvenance },
+  },
   { name: 'session config', schema: session.SessionConfigSchema, value: sessionView.config },
   { name: 'session health', schema: session.SessionHealthSchema, value: 'healthy' },
   { name: 'account availability', schema: session.AccountAvailabilitySchema, value: 'available' },
@@ -259,6 +281,23 @@ describe('session schemas', () => {
         value: { kind: 'working', until: INSTANT },
       },
       { name: 'unknown send key', schema: session.SendRequestSchema, value: { message: 'x', from: 'spoof' } },
+      {
+        // An identity with no harness session is the shape that would let a reader believe a
+        // transcript had been attributed when nothing was.
+        name: 'identified transcript naming no harness session',
+        schema: session.TranscriptProvenanceSchema,
+        value: { v: 1, home: '/home/agent/.claude', identity: 'minted', file: '/transcript.jsonl' },
+      },
+      {
+        name: 'identified transcript naming no file',
+        schema: session.TranscriptProvenanceSchema,
+        value: { v: 1, home: '/home/agent/.claude', identity: 'correlated', harnessSessionId: 'rollout-1' },
+      },
+      {
+        name: 'undiscovered transcript naming a file anyway',
+        schema: session.TranscriptProvenanceSchema,
+        value: { v: 1, home: '/home/agent/.codex', identity: 'undiscovered', file: '/transcript.jsonl' },
+      },
     ];
 
     // Act + Assert

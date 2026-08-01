@@ -314,7 +314,12 @@ async function seedFleet(home: string): Promise<string> {
   const binary = join(home, 'bin');
   await mkdir(binary, { recursive: true });
   const executable = join(binary, WRAPPER);
-  await writeFile(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  // The wrapper DECLARES its harness home, which is how a real fleet wrapper is written and the only
+  // evidence the daemon has for where this account's transcripts land. `seedMigrationFleet` below
+  // deliberately does not, so the no-provenance path stays covered too.
+  await writeFile(executable, `#!/bin/sh\nexport CLAUDE_CONFIG_DIR="${join(home, 'harness')}"\nexit 0\n`, {
+    mode: 0o755,
+  });
   await mkdir(join(home, 'fleet'), { recursive: true });
   await writeFile(
     join(home, 'fleet', 'manifest.json'),
@@ -882,8 +887,25 @@ describe('daemon boot lifecycle', () => {
     should(startedBody.config.name).equal('Wire Session Lifecycle');
     should(startedBody.state.status).equal('running');
     // The agent that was launched is the ABSOLUTE executable this host resolved, in the caller's
-    // directory — not a bare name the lifecycle would have refused.
-    should(launcher.launched[0]).deepEqual({ command: [executable], cwd: home });
+    // directory — not a bare name the lifecycle would have refused. It carries the harness session
+    // id this start MINTED, which is what makes the transcript path below true rather than guessed.
+    const launched = launcher.launched[0];
+    should(launched?.cwd).equal(home);
+    should(launched?.command.slice(0, 2)).deepEqual([executable, '--session-id']);
+    // The transcript record is on the session's own document, in the same write as everything else
+    // the start decided — and it names the exact file the harness will write.
+    const provenance = startedBody.config.transcript;
+    should(provenance).have.properties({ home: join(home, 'harness'), identity: 'minted' });
+    should(provenance?.harnessSessionId).equal(launched?.command[2]);
+    should(provenance?.file).equal(
+      join(
+        home,
+        'harness',
+        'projects',
+        home.replaceAll(/[^a-zA-Z0-9]/gu, '-'),
+        `${provenance?.harnessSessionId}.jsonl`,
+      ),
+    );
     // The assignment was handed over by pointing the agent at a file, and the file is really there.
     should(launcher.delivered[0]).containEql('turns/turn-001.md');
     should(turnOne).containEql('wire the session lifecycle');
@@ -1410,6 +1432,47 @@ describe('daemon boot lifecycle', () => {
     const reportAfterRefusal = await readFile(reportFile, 'utf8').catch(() => undefined);
     // The command finished; nothing is in flight.
     inventory.observation = { kind: 'observed', processes: [] };
+    // THE SESSION HAS A TOOL OPEN, AND ITS TRANSCRIPT SAYS WHAT IT IS. Before a session recorded its
+    // transcript this joined to nothing and the open id was classified `unknown`, which this gate
+    // refuses on — so seeding an open tool here would have made the migration below impossible. The
+    // provenance record names a real file, the file says the tool is a `Read`, and a `Read` is
+    // `safe_to_kill`. That is `world.transcripts` deciding the outcome of a mounted operation.
+    const harnessHome = join(home, 'harness');
+    const transcriptFile = join(harnessHome, 'projects', 'seeded', 'session.jsonl');
+    await mkdir(join(harnessHome, 'projects', 'seeded'), { recursive: true });
+    await writeFile(
+      transcriptFile,
+      `${JSON.stringify({
+        type: 'assistant',
+        uuid: 'record-open-tool',
+        timestamp: '2026-07-31T23:00:00.000Z',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tool-open-1', name: 'Read', input: { file_path: '/work/open.ts' } }],
+        },
+      })}\n`,
+      { mode: 0o600 },
+    );
+    await writeFile(
+      configFile,
+      JSON.stringify({
+        ...(await storedConfig()),
+        transcript: {
+          v: 1,
+          home: harnessHome,
+          harnessSessionId: 'seeded-harness-session',
+          identity: 'minted',
+          file: transcriptFile,
+          resolvedAt: '2026-07-31T22:00:00.000Z',
+        },
+      }),
+      { mode: 0o600 },
+    );
+    await writeFile(
+      stateFile,
+      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), openTools: ['tool-open-1'] }),
+      { mode: 0o600 },
+    );
     const moved = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-4');
     const movedRaw: unknown = await moved.json();
     // Same reason: a refused migration must fail with the refusal it answered, not with a schema
@@ -1420,10 +1483,15 @@ describe('daemon boot lifecycle', () => {
     const report = await readFile(reportFile, 'utf8');
     const turnTwo = await readFile(join(home, 'state', 'sessions', id, 'turns', 'turn-002.md'), 'utf8');
     // The replacement runs out of quota too. Seeded the same way and for the same reason: a migrated
-    // session comes back `running`, and an agent mid-turn is not one this gate interrupts.
+    // session comes back `running`, and an agent mid-turn is not one this gate interrupts. The open
+    // tool goes with it: the pane was REPLACED, so the previous harness's tool ids are stale.
     await writeFile(
       stateFile,
-      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
+      JSON.stringify({
+        ...(JSON.parse(await readFile(stateFile, 'utf8')) as object),
+        status: 'rate_limited',
+        openTools: [],
+      }),
       { mode: 0o600 },
     );
     // Straight back again, which is the case that used to destroy work: the turn a revive hands over
@@ -1474,6 +1542,9 @@ describe('daemon boot lifecycle', () => {
     should(movedBody.config.harness).equal('codex');
     // The argv the NEXT relaunch will run is the target's executable, not the account it left.
     should((afterMove.command as readonly string[])[0]).equal(join(home, 'bin', TARGET_WRAPPER));
+    // The transcript record went with the account. The target wrapper declares no harness home, so
+    // the honest answer is NO transcript — never the departed account's file under a codex parser.
+    should(afterMove).not.have.property('transcript');
     // The stamp analytics reads to call a session migrated, with both ends of the move in it.
     should(afterMove.migration).have.properties({ from: WRAPPER, to: TARGET_WRAPPER });
     // A new incarnation, because a different program is answering the next turn.
@@ -1489,6 +1560,11 @@ describe('daemon boot lifecycle', () => {
     // Both halves of the report: the inventory written before the pane died, and the outcome that is
     // the only part allowed to claim the move happened.
     should(report).containEql('# Migration in-flight report');
+    // The open tool was NAMED, from the session's own transcript. Without provenance this line reads
+    // `? … (command not found in chat tail)` and the migration above is refused instead of run.
+    should(report).containEql('Read');
+    should(report).containEql('/work/open.ts');
+    should(report).not.containEql('command not found in chat tail');
     should(report).containEql('## Outcome — MIGRATION SUCCEEDED');
     should(report).containEql(`onto \`${TARGET_WRAPPER}\``);
     // The way back needs no downgrade flag — the origin's window is the larger one — and it writes a
