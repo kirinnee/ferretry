@@ -12,6 +12,7 @@
     "./components/attachment-unlock-prompt": "./src/components/attachment-unlock-prompt.tsx",
     "./components/session-details": "./src/components/session-details.tsx",
     "./components/session-list": "./src/components/session-list.tsx",
+    "./components/thinking-indicator": "./src/components/thinking-indicator.tsx",
     "./components/transcript": "./src/components/transcript.tsx",
     "./components/question-form": "./src/components/question-form.tsx",
     "./shell/side-pane": "./src/shell/side-pane.tsx",
