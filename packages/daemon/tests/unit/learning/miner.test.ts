@@ -26,12 +26,12 @@ const config: LearningConfig = {
   minSpawnGapMinutes: 30,
 };
 
-function session(transcript = true): SessionView {
+function session(transcript = true, id = 'session-1'): SessionView {
   return {
-    directory: '/daemon/state/sessions/session-1',
+    directory: `/daemon/state/sessions/${id}`,
     config: {
-      id: 'session-1',
-      incarnation: 'session-1-1',
+      id,
+      incarnation: `${id}-1`,
       runtimeGeneration: 1,
       name: 'Complete task',
       boardAccess: 'none',
@@ -66,7 +66,7 @@ function session(transcript = true): SessionView {
           }
         : {}),
     },
-    state: { id: 'session-1', status: 'completed', turn: 1, finishedAt: AT },
+    state: { id, status: 'completed', turn: 1, finishedAt: AT },
   };
 }
 
@@ -163,7 +163,10 @@ test('mines only a session with resolved provenance and aggregates verified outp
     paths,
     filesystem,
     store,
-    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    {
+      list: async () => [session(true, 'session-2'), session()],
+      get: async () => undefined,
+    } as SessionDirectorySubsystem,
     {
       tail: async () => [{ type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } }],
     } as unknown as SessionTranscriptReader,
@@ -211,4 +214,77 @@ test('reports missing provenance rather than mining a partial conversation', asy
   );
   const run = await miner.run(true);
   expect(run.message).toContain('missing or unresolved transcript provenance');
+});
+
+test('does not spawn when a resolved transcript contains no human signal', async () => {
+  const store = new Store();
+  const miner = new LearningMiner(
+    paths,
+    files({}),
+    store,
+    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    { tail: async () => [] } as unknown as SessionTranscriptReader,
+    {} as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+
+  const run = await miner.run(true);
+
+  expect(run.message).toBe('no human signal in the scanned batch');
+});
+
+test('completes a malformed miner output without applying it', async () => {
+  const store = new Store();
+  const filesystem = files({
+    '/daemon/state/sessions/session-1/turns/turn-001.md': 'Use direnv exec . for every command.',
+    '/daemon/state/sessions/session-1/channel/inbox.jsonl':
+      '{"type":"message","message":"Use direnv exec . for every command."}\n',
+    '/daemon/state/sessions/session-1/events.jsonl': '',
+  });
+  const miner = new LearningMiner(
+    paths,
+    filesystem,
+    store,
+    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    {
+      tail: async () => [{ type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } }],
+    } as unknown as SessionTranscriptReader,
+    {
+      start: async () => session(),
+      stop: async () => session(),
+      recover: async () => undefined,
+    } as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+  await miner.run(true);
+  await filesystem.writeTextAtomic(
+    '/daemon/state/learning/runs/2026-08-01T00-00-00-000Z/observations.json',
+    'not json',
+  );
+
+  const run = await miner.run(false);
+
+  expect(run.message).toBe('miner output was not valid JSON — quarantined');
+  expect(store.observations).toHaveLength(0);
+});
+
+test('records an empty run when its watermark has no newer terminal sessions', async () => {
+  const store = new Store();
+  await store.saveState({ watermarkAt: '9999-12-31T23:59:59.999Z', watermarkId: 'future' });
+  const miner = new LearningMiner(
+    paths,
+    files({}),
+    store,
+    { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+    {} as SessionTranscriptReader,
+    {} as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+
+  const run = await miner.run(true);
+
+  expect(run.message).toBe('no new terminal sessions to scan');
 });
