@@ -17,6 +17,7 @@ import {
   type SttWorkerHandle,
   SttWorkerRuntime,
   type SttWorkerSpawner,
+  type SttWorkerTimers,
 } from '../../../src/adapters/index.ts';
 import { recognizerModuleFrom } from '../../../src/adapters/stt/sherpa-recognizer.ts';
 import type { SttError } from '../../../src/lib/index.ts';
@@ -768,4 +769,102 @@ describe('worker child process', () => {
     should(subject.status().phase).equal('error');
     await subject.close();
   }, 30_000);
+});
+
+/** Timers the test fires by hand, so idleness is a decision rather than a wait. */
+class ManualTimers implements SttWorkerTimers {
+  private next = 1;
+  private readonly armed = new Map<number, { callback: () => void; milliseconds: number }>();
+
+  set(callback: () => void, milliseconds: number): unknown {
+    const handle = this.next++;
+    this.armed.set(handle, { callback, milliseconds });
+    return handle;
+  }
+
+  clear(handle: unknown): void {
+    this.armed.delete(handle as number);
+  }
+
+  /** How many timers are currently armed for exactly this delay. */
+  armedFor(milliseconds: number): number {
+    return [...this.armed.values()].filter(timer => timer.milliseconds === milliseconds).length;
+  }
+
+  /** Fire every timer armed for exactly this delay, and say how many there were. */
+  fire(milliseconds: number): number {
+    const due = [...this.armed.entries()].filter(([, timer]) => timer.milliseconds === milliseconds);
+    for (const [handle, timer] of due) {
+      this.armed.delete(handle);
+      timer.callback();
+    }
+    return due.length;
+  }
+}
+
+const IDLE_MS = 999;
+
+/**
+ * Closes a client whose timers the test owns.
+ *
+ * The shutdown escalation is a real part of `close`, so the two delays it arms have to be fired by
+ * hand or the close would wait for an exit the fake child will never report.
+ */
+async function shutDown(subject: SttWorkerClient, timers: ManualTimers): Promise<void> {
+  const closing = subject.close();
+  timers.fire(20);
+  timers.fire(40);
+  await closing;
+}
+
+describe('idle worker release', () => {
+  it('should free a loaded worker that has sat idle, and warm a fresh one for the next caller', async () => {
+    // Arrange — a loaded speech model is hundreds of megabytes, and this daemon outlives the request.
+    const timers = new ManualTimers();
+    const spawner = readySpawner();
+    const subject = client(spawner, { timers, idleTimeoutMs: IDLE_MS });
+    await subject.ensureReady();
+    // A second ready call re-arms rather than stacking a second release.
+    await subject.ensureReady();
+    const armed = timers.armedFor(IDLE_MS);
+
+    // Act
+    const fired = timers.fire(IDLE_MS);
+    const released = subject.status();
+    await subject.ensureReady();
+
+    // Assert
+    should([armed, fired]).deepEqual([1, 1], 'exactly one release is ever armed, and firing it releases');
+    should(spawner.children[0]?.killed).be.above(0, 'the child is killed, never merely dropped');
+    should(released.phase).equal('cold');
+    should(spawner.children).have.length(2, 'the next caller gets a fresh worker rather than a dead handle');
+    await shutDown(subject, timers);
+  });
+
+  it('should never arm a release over a live decode, or at all when it is switched off', async () => {
+    // Arrange — a worker that takes the transcription and never answers it.
+    const timers = new ManualTimers();
+    const spawner = readySpawner();
+    const busy = client(spawner, { timers, idleTimeoutMs: IDLE_MS });
+    const resident = client(readySpawner(), { timers, idleTimeoutMs: 0 });
+
+    // Act
+    const decoding = busy.transcribe(new Float32Array(16_000));
+    await spawned(spawner);
+    const duringDecode = timers.armedFor(IDLE_MS);
+    await resident.ensureReady();
+    const whenDisabled = timers.armedFor(0);
+    // The decode deadline is what ends this, not the idle release.
+    timers.fire(50);
+    const failure = await decoding.then(
+      () => 'resolved',
+      (error: SttError) => error.code,
+    );
+
+    // Assert
+    should([duringDecode, whenDisabled]).deepEqual([0, 0], 'a decode in flight owns the child');
+    should(failure).equal('worker_unavailable');
+    await shutDown(busy, timers);
+    await shutDown(resident, timers);
+  });
 });

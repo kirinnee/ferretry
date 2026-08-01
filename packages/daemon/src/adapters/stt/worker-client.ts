@@ -50,6 +50,14 @@ export interface SttWorkerClientOptions {
   readonly shutdownTimeoutMs?: number;
   /** How long a kill is given before the supervisor stops waiting for the exit. */
   readonly killTimeoutMs?: number;
+  /**
+   * How long a loaded worker may sit idle before it is released, or `0` to keep it resident.
+   *
+   * A loaded speech model is hundreds of megabytes and the daemon is long-lived, so a worker that
+   * transcribed once at breakfast holds that memory until the daemon restarts. Releasing it costs
+   * the next caller one load; keeping it costs everything else on the box all day.
+   */
+  readonly idleTimeoutMs?: number;
   readonly onStderr?: (chunk: string) => void;
   readonly requestId?: () => string;
 }
@@ -101,6 +109,8 @@ export class SttWorkerClient {
   private readonly decodeTimeoutMs: number;
   private readonly shutdownTimeoutMs: number;
   private readonly killTimeoutMs: number;
+  private readonly idleTimeoutMs: number;
+  private idleTimer: unknown;
   private readonly nextRequestId: () => string;
   private readonly exitWaiters: (() => void)[] = [];
   private child: SttWorkerHandle | undefined;
@@ -122,6 +132,7 @@ export class SttWorkerClient {
     this.decodeTimeoutMs = options.decodeTimeoutMs ?? 120_000;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2_000;
     this.killTimeoutMs = options.killTimeoutMs ?? 1_000;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? 5 * 60_000;
     this.nextRequestId =
       options.requestId ??
       (() => {
@@ -145,7 +156,9 @@ export class SttWorkerClient {
   /** Spawns and loads the model if needed; concurrent callers share one load. */
   async ensureReady(): Promise<{ modelId: string; loadMs: number }> {
     if (this.closed) throw new SttError('service_closed', 'speech-to-text is shutting down');
+    this.cancelIdle();
     if (this.child !== undefined && this.loadedModel !== undefined && this.loadedAt !== undefined) {
+      this.scheduleIdle();
       return { modelId: this.loadedModel.id, loadMs: 0 };
     }
     const existing = this.loading;
@@ -156,6 +169,7 @@ export class SttWorkerClient {
       return await warming;
     } finally {
       if (this.loading === warming) this.loading = undefined;
+      this.scheduleIdle();
     }
   }
 
@@ -166,6 +180,7 @@ export class SttWorkerClient {
     const child = this.child;
     if (child === undefined) throw new SttError('worker_unavailable', 'the batch transcriber is not running');
     this.busy = true;
+    this.cancelIdle();
     try {
       const value = await this.exchange(
         child,
@@ -177,6 +192,7 @@ export class SttWorkerClient {
       return value as SttWorkerTranscription;
     } finally {
       this.busy = false;
+      this.scheduleIdle();
     }
   }
 
@@ -184,6 +200,7 @@ export class SttWorkerClient {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.cancelIdle();
     const child = this.child;
     this.failPending(new SttError('service_closed', 'speech-to-text is shutting down'));
     if (child !== undefined) await this.stop(child);
@@ -261,6 +278,7 @@ export class SttWorkerClient {
   private handleExit(generation: number, exitCode: number | null, signal: string | number | null): void {
     this.releaseExitWaiters();
     if (generation !== this.generation) return;
+    this.cancelIdle();
     this.child = undefined;
     this.loadedModel = undefined;
     this.loadedAt = undefined;
@@ -326,6 +344,31 @@ export class SttWorkerClient {
         );
       }
     });
+  }
+
+  private cancelIdle(): void {
+    if (this.idleTimer === undefined) return;
+    this.timers.clear(this.idleTimer);
+    this.idleTimer = undefined;
+  }
+
+  /**
+   * Arm the idle release, if there is anything to release.
+   *
+   * Every guard here is a state in which firing would be wrong: a closed client has no child to
+   * free, a busy or loading one is mid-request, and a client with no child has already released it.
+   * The timer re-checks them when it fires, because the client can become busy in between — a
+   * release that raced a decode would kill the child out from under it.
+   */
+  private scheduleIdle(): void {
+    this.cancelIdle();
+    if (this.idleTimeoutMs <= 0 || this.closed || this.busy || this.child === undefined) return;
+    this.idleTimer = this.timers.set(() => {
+      this.idleTimer = undefined;
+      const child = this.child;
+      if (this.closed || this.busy || this.pending !== undefined || child === undefined) return;
+      this.discard(child);
+    }, this.idleTimeoutMs);
   }
 
   /** Abandon a child we no longer trust: it is killed, never merely dropped. */
