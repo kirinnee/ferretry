@@ -1,0 +1,433 @@
+/**
+ * The Files tab — a deliberately ordinary read-only file browser for ONE
+ * session on ONE paired daemon. Ported from `ui/src/components/FilesTab.tsx`.
+ *
+ * ONE bar carries the path and the actions. Browsing: tree toggle, breadcrumbs,
+ * refresh. Viewing: back, the file's path, and its view actions. The original's
+ * standalone breadcrumb rail is gone on purpose — the crumbs ARE the bar's path
+ * segment.
+ *
+ * MULTI-DAEMON. Every read is addressed to the daemon passed in, and the
+ * remembered open-file tabs are keyed by `(daemonId, sessionId)`
+ * (`files-tab-model.ts`). Switching the connection therefore cannot show one
+ * daemon's directory, file bytes, diff or open-tab list under another's name;
+ * while the remembered state is still being swapped in, the pane says it is
+ * loading rather than painting the previous daemon's tree.
+ */
+
+import { ArrowLeft, Code2, GitCompareArrows, ListTree, RefreshCw, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useInputModality } from '../hooks/use-input-modality.ts';
+import { useLayoutMode } from '../hooks/use-layout-mode.ts';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { formatCodeReference } from '../lib/references.ts';
+import { FileTree } from './file-tree.tsx';
+import { fsApi, useFsProbe, type FsFile, type FsListing } from './files-api.ts';
+import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { useFsResource } from './files-resource.ts';
+import {
+  filesTreeOpenByDefault,
+  readFilesTabState,
+  scrollFileLineIntoView,
+  selectionFromReference,
+  writeFilesTabState,
+  type CodeReferenceOpenRequest,
+  type ColumnCodeReference,
+  type FileView,
+  type OpenFileTab,
+} from './files-tab-model.ts';
+import {
+  BrowseList,
+  DiffBody,
+  Failed,
+  FileBody,
+  Loading,
+  Note,
+  OpenFileTabs,
+  type FilesMarkdownContext,
+} from './files-views.tsx';
+
+export interface FilesTabProps {
+  daemon: DaemonConnection;
+  scope: DaemonSessionScope;
+  /**
+   * The session's working directory — the viewer's root, shown as the `root`
+   * breadcrumb's title so it is obvious WHICH tree is being read.
+   */
+  cwd?: string;
+  /** Programmatic open request from whichever surface hosts this pane. */
+  requestedReference?: CodeReferenceOpenRequest | null;
+  onRequestedReferenceHandled?: (sequence: number) => void;
+  /** Proof and navigation the Markdown renderer needs; without it, prose. */
+  markdown?: FilesMarkdownContext;
+}
+
+export const FilesTab = ({
+  daemon,
+  scope,
+  cwd,
+  requestedReference,
+  onRequestedReferenceHandled,
+  markdown,
+}: FilesTabProps) => {
+  const probe = useFsProbe(daemon, scope);
+  const layout = useLayoutMode();
+  const key = daemonSessionKey(scope);
+  const restored = readFilesTabState(scope);
+  const [stateKey, setStateKey] = useState(key);
+  const [dir, setDir] = useState(restored.dir);
+  const [tabs, setTabs] = useState<readonly OpenFileTab[]>(restored.tabs);
+  const [activePath, setActivePath] = useState<string | null>(restored.activePath);
+  const [treePref, setTreePref] = useState<boolean | undefined>(restored.tree);
+  const [treeRefresh, setTreeRefresh] = useState(0);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const { touchAffected } = useInputModality();
+  const paneRef = useRef<HTMLDivElement>(null);
+  const targetLineRef = useRef<HTMLSpanElement>(null);
+  const handledReference = useRef<number | null>(null);
+  const touchAffectedRef = useRef(touchAffected);
+  touchAffectedRef.current = touchAffected;
+  const stateMatchesScope = stateKey === key;
+
+  useEffect(() => {
+    if (stateMatchesScope) return;
+    const next = readFilesTabState(scope);
+    setDir(next.dir);
+    setTabs(next.tabs);
+    setActivePath(next.activePath);
+    setTreePref(next.tree);
+    setTreeRefresh(0);
+    setFocusRequest(0);
+    handledReference.current = null;
+    setStateKey(key);
+  }, [key, scope, stateMatchesScope]);
+
+  const repo = probe.changes?.repo ?? false;
+  const changes = useMemo(() => probe.changes?.changes ?? [], [probe.changes]);
+  const changesTruncated = probe.changes?.truncated ?? false;
+  const changeMap = useMemo(() => new Map(changes.map(change => [change.path, change])), [changes]);
+  const active = stateMatchesScope && activePath ? (tabs.find(tab => tab.path === activePath) ?? null) : null;
+
+  const openFile = useCallback((path: string) => {
+    setTabs(current =>
+      current.some(tab => tab.path === path)
+        ? current.map(tab => (tab.path === path ? { path, view: 'normal' } : tab))
+        : [...current, { path, view: 'normal' }],
+    );
+    setActivePath(path);
+    // Opening from the directory replaces the control that held focus. Ask for
+    // the content once; clicking an EXISTING file tab never increments this, so
+    // tab switching leaves focus exactly where the reader put it.
+    setFocusRequest(request => request + 1);
+  }, []);
+
+  const openReference = useCallback((reference: ColumnCodeReference) => {
+    if (!isOpenablePath(reference.path)) return;
+    const selection = selectionFromReference(reference);
+    setTabs(current =>
+      current.some(tab => tab.path === reference.path)
+        ? current.map(tab => (tab.path === reference.path ? { ...tab, selection } : tab))
+        : [...current, { path: reference.path, view: 'normal', selection }],
+    );
+    setActivePath(reference.path);
+    setFocusRequest(request => request + 1);
+  }, []);
+
+  const closeFile = useCallback(
+    (path: string) => {
+      const index = tabs.findIndex(tab => tab.path === path);
+      if (index < 0) return;
+      const remaining = tabs.filter(tab => tab.path !== path);
+      setTabs(remaining);
+      setActivePath(current =>
+        current === path ? (remaining[Math.min(index, remaining.length - 1)]?.path ?? null) : current,
+      );
+    },
+    [tabs],
+  );
+
+  const setActiveView = useCallback(
+    (view: FileView) => {
+      if (!activePath) return;
+      setTabs(current => current.map(tab => (tab.path === activePath ? { path: tab.path, view } : tab)));
+    },
+    [activePath],
+  );
+
+  const clearActiveSelection = useCallback(() => {
+    if (!activePath) return;
+    setTabs(current => current.map(tab => (tab.path === activePath ? { path: tab.path, view: tab.view } : tab)));
+  }, [activePath]);
+
+  useEffect(() => {
+    if (!stateMatchesScope) return;
+    writeFilesTabState(scope, { dir, tabs, activePath, ...(treePref === undefined ? {} : { tree: treePref }) });
+  }, [activePath, dir, scope, stateMatchesScope, tabs, treePref]);
+
+  useEffect(() => {
+    if (!stateMatchesScope || !requestedReference || handledReference.current === requestedReference.sequence) return;
+    handledReference.current = requestedReference.sequence;
+    openReference(requestedReference.reference);
+    onRequestedReferenceHandled?.(requestedReference.sequence);
+  }, [onRequestedReferenceHandled, openReference, requestedReference, stateMatchesScope]);
+
+  // Never on touch: an unrequested focus there summons the keyboard and jumps
+  // the viewport (input capability, not viewport width, owns that policy).
+  // `focusRequest` is the ONLY dependency on purpose — raw/diff changes and file
+  // tab activation update `active` but must keep focus on the control used.
+  useEffect(() => {
+    if (touchAffectedRef.current || focusRequest === 0) return;
+    paneRef.current?.focus({ preventScroll: true });
+  }, [focusRequest]);
+
+  const listing = useFsResource<FsListing>(
+    stateMatchesScope && !active ? `list:${key}:${dir}` : null,
+    useCallback(signal => fsApi.list(daemon, scope, dir, signal), [daemon, scope, dir]),
+  );
+
+  const diffPath = active?.view === 'diff' && active.selection === undefined ? active.path : null;
+  const diff = useFsResource<string>(
+    diffPath ? `diff:${key}:${diffPath}` : null,
+    useCallback(signal => fsApi.diff(daemon, scope, diffPath ?? '', signal), [daemon, scope, diffPath]),
+  );
+
+  const filePath = active && (active.view !== 'diff' || active.selection !== undefined) ? active.path : null;
+  const file = useFsResource<FsFile>(
+    filePath ? `file:${key}:${filePath}` : null,
+    useCallback(signal => fsApi.file(daemon, scope, filePath ?? '', undefined, signal), [daemon, scope, filePath]),
+  );
+
+  useEffect(() => {
+    if (!active?.selection || !file.data) return;
+    const pane = paneRef.current;
+    const target = targetLineRef.current;
+    if (!pane || !target) return;
+    scrollFileLineIntoView(pane, target);
+  }, [active?.selection, file.data]);
+
+  const parsedDiff = useMemo(() => (diff.data === null ? null : parseUnifiedDiff(diff.data)), [diff.data]);
+  // A diff that is nothing but plumbing headers has nothing to show — the
+  // emptiness test has to agree with what DiffBody actually renders.
+  const diffHasBody = useMemo(() => (parsedDiff ? renderableDiffLines(parsedDiff).length > 0 : false), [parsedDiff]);
+
+  if (!stateMatchesScope)
+    return (
+      <div className="kt-fs rounded-md border border-border bg-surface">
+        <Loading what="session files" />
+      </div>
+    );
+
+  const title = active ? formatCodeReference({ path: active.path, ...active.selection }) : '';
+  const rawActive = active?.view === 'raw';
+  const diffActive = active?.view === 'diff' && active.selection === undefined;
+  const treeOpen = filesTreeOpenByDefault(treePref, layout);
+
+  return (
+    // `.kt-fs` owns flex:1 + min-height:0 (files.css) — the pane fills what the
+    // page gives it and its scroller, not the page, takes the overflow.
+    <div className="kt-fs rounded-md border border-border bg-surface">
+      <div className="kt-fs-bar">
+        {active ? (
+          <button
+            type="button"
+            className="kt-fs-icon-button"
+            onClick={() => setActivePath(null)}
+            aria-label="Back to the file list"
+            title="Back to files"
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="kt-fs-icon-button"
+            data-active={treeOpen || undefined}
+            aria-pressed={treeOpen}
+            onClick={() => setTreePref(!treeOpen)}
+            aria-label={treeOpen ? 'Hide the folder tree' : 'Show the folder tree'}
+            title={treeOpen ? 'Hide tree' : 'Show tree'}
+          >
+            <ListTree size={16} aria-hidden="true" />
+          </button>
+        )}
+        {active ? (
+          <span className="kt-fs-title" title={title}>
+            <span className="kt-fs-title-path">{title}</span>
+          </span>
+        ) : (
+          <nav className="kt-fs-crumbs scroll-thin" aria-label="Folder path">
+            {crumbs(dir).map((crumb, index) => (
+              <span key={crumb.path || 'root'} className="contents">
+                {index > 0 && (
+                  <span className="kt-fs-crumb-sep" aria-hidden="true">
+                    /
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="kt-fs-crumb"
+                  aria-current={crumb.path === dir ? 'page' : undefined}
+                  onClick={() => setDir(crumb.path)}
+                  title={index === 0 ? cwd : crumb.path}
+                  aria-label={index === 0 ? `Go to the session root${cwd ? ` (${cwd})` : ''}` : `Go to ${crumb.path}`}
+                >
+                  {crumb.label}
+                </button>
+              </span>
+            ))}
+          </nav>
+        )}
+        <span className="kt-fs-actions">
+          {active?.selection && (
+            <button
+              type="button"
+              className="kt-fs-icon-button"
+              onClick={clearActiveSelection}
+              aria-label={`Clear line selection for ${active.path}`}
+              title={active.view === 'diff' ? 'Clear highlight and return to diff' : 'Clear line highlight'}
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
+          )}
+          {active && (
+            <button
+              type="button"
+              className="kt-fs-icon-button"
+              data-active={rawActive || undefined}
+              aria-pressed={rawActive}
+              onClick={() => setActiveView(rawActive ? 'normal' : 'raw')}
+              aria-label={rawActive ? `Show ${active.path} normally` : `Show raw bytes for ${active.path}`}
+              title={rawActive ? 'Show normally' : 'Show raw'}
+            >
+              <Code2 size={17} aria-hidden="true" />
+            </button>
+          )}
+          {active && repo && (
+            <button
+              type="button"
+              className="kt-fs-icon-button"
+              data-active={diffActive || undefined}
+              aria-pressed={diffActive}
+              onClick={() => setActiveView(diffActive ? 'normal' : 'diff')}
+              aria-label={diffActive ? `Show ${active.path} normally` : `Show git diff for ${active.path}`}
+              title={diffActive ? 'Show file' : 'Show git diff'}
+            >
+              <GitCompareArrows size={17} aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="kt-fs-icon-button"
+            onClick={() => {
+              probe.refresh();
+              if (diffActive) diff.reload();
+              else if (active) file.reload();
+              else {
+                listing.reload();
+                setTreeRefresh(nonce => nonce + 1);
+              }
+            }}
+            aria-label={probe.refreshing ? 'Refreshing files' : 'Refresh files'}
+            title="Re-read the working tree"
+          >
+            <RefreshCw size={16} className={probe.refreshing ? 'animate-spin' : undefined} aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+
+      {tabs.length > 0 && (
+        <OpenFileTabs tabs={tabs} activePath={activePath} onActivate={setActivePath} onClose={closeFile} />
+      )}
+
+      <div className="kt-fs-body">
+        {treeOpen && (
+          // Mounted (hidden) while a file is open, so expansion and the loaded
+          // listings survive a read-then-back round trip. Keyed by the daemon
+          // scope so a connection switch rebuilds it rather than reusing one
+          // daemon's expanded folders against another's tree.
+          <FileTree
+            key={key}
+            daemon={daemon}
+            scope={scope}
+            dir={dir}
+            refreshNonce={treeRefresh}
+            hidden={!!active}
+            onEnter={setDir}
+            onOpenFile={openFile}
+          />
+        )}
+        <div ref={paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
+          {diffActive && active ? (
+            diff.loading ? (
+              <Loading what="the diff" />
+            ) : diff.error ? (
+              <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
+            ) : parsedDiff?.binary ? (
+              <Note tone="warn" role="status">
+                git reports this pair as binary — there is no textual diff to show.
+              </Note>
+            ) : parsedDiff && diffHasBody ? (
+              <>
+                <DiffBody parsed={parsedDiff} />
+                {parsedDiff.truncated && (
+                  <div className="kt-fs-note" role="status">
+                    Showing the first {parsedDiff.lines.length.toLocaleString()} of {parsedDiff.total.toLocaleString()}{' '}
+                    diff lines.
+                  </div>
+                )}
+              </>
+            ) : (
+              <Note role="status">No textual changes in this file.</Note>
+            )
+          ) : active ? (
+            file.loading ? (
+              <Loading what={baseName(active.path)} />
+            ) : file.error ? (
+              <Failed what={baseName(active.path)} error={file.error} onRetry={file.reload} />
+            ) : file.data ? (
+              <FileBody
+                file={file.data}
+                path={active.path}
+                raw={rawActive}
+                selection={active.selection}
+                targetLineRef={targetLineRef}
+                markdown={markdown}
+              />
+            ) : (
+              <Note role="status">Nothing to show.</Note>
+            )
+          ) : (
+            <>
+              {probe.state === 'error' && (
+                <Note tone="warn" role="status">
+                  Files still browse normally, but git change markers are unavailable: {probe.error ?? 'unknown error'}.
+                </Note>
+              )}
+              {changesTruncated && (
+                <Note tone="warn" role="status">
+                  Some change dots may be missing because the daemon capped this repository’s status response.
+                </Note>
+              )}
+              {listing.loading ? (
+                <Loading what={dir || 'the session root'} />
+              ) : listing.error ? (
+                <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
+              ) : listing.data ? (
+                <BrowseList
+                  listing={listing.data}
+                  dir={dir}
+                  changes={changeMap}
+                  onEnter={setDir}
+                  onOpenFile={openFile}
+                />
+              ) : (
+                <Note role="status">Nothing to show.</Note>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

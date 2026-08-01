@@ -220,6 +220,11 @@ try {
       await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
       process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
 
+      const filesTarget = join(outDir, `files-${viewport.name}.png`);
+      await page.locator('#harness-files').scrollIntoViewIfNeeded();
+      await page.getByLabel('Files browser').screenshot({ path: filesTarget });
+      process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
+
       const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
       // The thumbnail is `loading="lazy"` and the harness stacks it thousands
       // of pixels below the fold, so Chrome has not started decoding it yet.

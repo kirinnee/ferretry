@@ -33,6 +33,7 @@ import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prom
 import { Composer } from '../src/components/composer.tsx';
 import { DictationControl } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
+import { FilesTab } from '../src/components/files-tab.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
@@ -550,6 +551,49 @@ const HARNESS_ATTACHMENTS = [
     textExtractionFailure: { code: 'password_protected_document', message: 'the document is password protected' },
   },
 ];
+
+/**
+ * The Files tab reads its directory, git status and file bytes through the
+ * global `fetch`, because `useFsProbe` is a page-level store rather than a
+ * prop. The harness has no daemon and must not reach one, so the fixture is
+ * installed as a narrow wrapper: anything addressed to the harness daemon's
+ * `/fs` routes is answered here, and every other request still goes through the
+ * real fetch (which the screenshot pass aborts if it leaves the loopback
+ * origin). Harness-only — nothing in `src/` patches a global.
+ */
+const HARNESS_FS_LISTINGS: Readonly<Record<string, unknown>> = {
+  '': {
+    entries: [
+      { name: 'docs', type: 'dir' },
+      { name: 'packages', type: 'dir' },
+      { name: 'node_modules', type: 'dir', ignored: true },
+      { name: 'CLAUDE.md', type: 'file', size: 4_812 },
+      { name: 'Taskfile.yaml', type: 'file', size: 9_233 },
+      { name: 'flake.nix', type: 'file', size: 2_104 },
+      { name: '.env', type: 'file', denied: true },
+      { name: 'result', type: 'symlink', escapes: true },
+    ],
+  },
+};
+
+const HARNESS_FS_CHANGES = {
+  repo: true,
+  branch: 'port/pwafiles3',
+  changes: [
+    { path: 'CLAUDE.md', status: ' M', additions: 12, deletions: 3 },
+    { path: 'Taskfile.yaml', status: '??' },
+  ],
+};
+
+const harnessFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
+  if (url.hostname !== 'daemon.invalid' || !url.pathname.includes('/fs')) return await harnessFetch(input, init);
+  const body = url.pathname.endsWith('/fs/changes')
+    ? HARNESS_FS_CHANGES
+    : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+}) as typeof fetch;
 
 /** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
 const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
@@ -1917,6 +1961,16 @@ function Shell() {
             <div className="min-w-0 flex-1 p-panel text-meta text-muted">
               The transcript sits here. The column beside it is the sidebar under test.
             </div>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Files browser',
+      render: () => (
+        <Card aria-label="Files browser" className="min-w-0 overflow-hidden" id="harness-files">
+          <div className="flex h-[26rem] flex-col">
+            <FilesTab daemon={daemon} scope={scope} cwd="/work/ferretry" />
           </div>
         </Card>
       ),
