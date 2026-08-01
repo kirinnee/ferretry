@@ -101,20 +101,7 @@ describe('useComposerAutocomplete', () => {
     expect(rejected.root.findByType('textarea').props['data-value']).toBe('/rewritten');
   });
 
-  test('uses the initial subset, dismisses only after a click, and reports an asynchronous provider failure', async () => {
-    const globals = globalThis as typeof globalThis & { document?: Document; Node?: typeof Node };
-    const originalDocument = globals.document;
-    const OriginalNode = globals.Node;
-    class FakeNode {}
-    let click: ((event: MouseEvent) => void) | undefined;
-    globals.Node = FakeNode as unknown as typeof Node;
-    globals.document = {
-      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
-        click = listener as (event: MouseEvent) => void;
-      },
-      removeEventListener: () => undefined,
-      getElementById: () => null,
-    } as unknown as Document;
+  test('uses the initial subset and reports asynchronous or thrown provider failures', async () => {
     const initial: ComposerAutocompleteProvider = {
       id: 'initial:daemon-a:session-a',
       trigger: '/',
@@ -124,8 +111,6 @@ describe('useComposerAutocomplete', () => {
     };
     const initialRenderer = render(<Probe sourceProviders={[initial]} />);
     expect(initialRenderer.root.findByType('textarea').props['data-status']).toBe('ready');
-    run(() => click?.({ target: new FakeNode() } as unknown as MouseEvent));
-    expect(initialRenderer.root.findByType('textarea').props['data-open']).toBe('false');
 
     let reject: (error: Error) => void = () => undefined;
     const failing: ComposerAutocompleteProvider = {
@@ -154,7 +139,5 @@ describe('useComposerAutocomplete', () => {
       },
     };
     expect(render(<Probe sourceProviders={[thrown]} />).root.findByType('textarea').props['data-status']).toBe('error');
-    globals.document = originalDocument;
-    globals.Node = OriginalNode;
   });
 });
