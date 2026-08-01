@@ -1,11 +1,11 @@
 import '../support/dom.ts';
 
-import { describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
 import type { ComponentType } from 'react';
 
 import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
-import type { ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
+import { projectScopePath, projectScopeState, type ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { WardenStatusReader } from '../../src/hooks/use-warden-status.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -22,6 +22,25 @@ const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.inva
 const beta = daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.invalid', deviceToken: 'beta-token' });
 const now = () => Date.parse('2026-08-01T12:00:00.000Z');
 
+/**
+ * The dashboard drops its view switch below 900px, and `innerWidth` is a
+ * process-wide global an earlier suite in the same bun process can leave at a
+ * phone width. Pin the desktop width these assertions describe, and hand back
+ * whatever was there so this file leaks nothing of its own.
+ */
+const DESKTOP_WIDTH = 1_440;
+let originalWidth: PropertyDescriptor | undefined;
+
+beforeAll(() => {
+  originalWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: DESKTOP_WIDTH });
+});
+
+afterAll(() => {
+  if (originalWidth) Object.defineProperty(window, 'innerWidth', originalWidth);
+  else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'innerWidth');
+});
+
 const storage = (): ControlsStorage => {
   const values = new Map<string, string>();
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
@@ -30,17 +49,24 @@ const storage = (): ControlsStorage => {
 interface FakeNavigation extends ScopeNavigation {
   readonly pushes: string[];
   readonly replaces: string[];
+  /** Listeners still attached — a mounted scope machine holds exactly one. */
+  readonly listeners: () => number;
+  /** Listener invocations `announce` actually delivered, ever. */
+  readonly notified: () => number;
 }
 
 const navigation = (path = '/d/alpha'): FakeNavigation => {
   let current = new URL(path, 'https://pwa.invalid');
   let state: unknown = null;
-  const listeners = new Set<() => void>();
+  let notifications = 0;
+  const pops = new Set<() => void>();
   const pushes: string[] = [];
   const replaces: string[] = [];
   return {
     pushes,
     replaces,
+    listeners: () => pops.size,
+    notified: () => notifications,
     snapshot: () => ({ pathname: current.pathname, search: current.search, state }),
     push: (next, url) => {
       pushes.push(url);
@@ -53,15 +79,75 @@ const navigation = (path = '/d/alpha'): FakeNavigation => {
       state = next;
     },
     announce: () => {
-      listeners.forEach(listener => {
+      pops.forEach(listener => {
+        notifications += 1;
         listener();
       });
     },
     listen: listener => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
+      pops.add(listener);
+      return () => {
+        pops.delete(listener);
+      };
     },
   };
+};
+
+interface Deferred<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason: Error) => void;
+}
+
+const deferred = <T,>(): Deferred<T> => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((ok, fail) => {
+    resolve = ok;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+};
+
+interface DeferredFleetPort extends DaemonFleetPort {
+  /** The gate for one connection key, created on first mention. */
+  readonly pending: (key: string) => Deferred<readonly SessionView[]>;
+  /** Every `list` call in order, named by the key that identified it. */
+  readonly calls: readonly string[];
+}
+
+/**
+ * A fleet port whose reads finish when the test says so, keyed by whatever
+ * identifies the connection for the fencing under proof: the daemon id when two
+ * daemons race, the device token when one daemon is re-paired underneath.
+ */
+const deferredFleet = (keyOf: (daemon: DaemonConnection) => string): DeferredFleetPort => {
+  const gates = new Map<string, Deferred<readonly SessionView[]>>();
+  const calls: string[] = [];
+  const pending = (key: string): Deferred<readonly SessionView[]> => {
+    const existing = gates.get(key);
+    if (existing !== undefined) return existing;
+    const gate = deferred<readonly SessionView[]>();
+    gates.set(key, gate);
+    return gate;
+  };
+  return {
+    calls,
+    pending,
+    list: daemon => {
+      const key = keyOf(daemon);
+      calls.push(key);
+      return pending(key).promise;
+    },
+    get: () => Promise.reject(new Error('not used')),
+  };
+};
+
+/** Lets real timers run inside `act`, following the `use-usage` precedent. */
+const elapse = async (ms: number): Promise<void> => {
+  await interact(async () => {
+    await new Promise(resolve => setTimeout(resolve, ms));
+  });
 };
 
 const sessions = (prefix: string): readonly SessionView[] => [
@@ -322,5 +408,186 @@ describe('SessionsPage', () => {
     await settle();
     expect(page.container.textContent).toContain('Alpha-Team');
     await page.unmount();
+  });
+
+  it('never lets a late Alpha hydrate overwrite the Beta row holding the same id', async () => {
+    const port = deferredFleet(daemon => daemon.daemonId);
+    const fleet = new DaemonFleetStore(port);
+    const props = pageProps({ fleet });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    await page.render(<SessionsPage {...props} connection={beta} scopeNavigation={navigation('/d/beta')} />);
+    await settle();
+    expect(port.calls).toEqual([alpha.daemonId, beta.daemonId]);
+
+    await interact(() => port.pending(beta.daemonId).resolve(sessions('beta')));
+    await settle();
+    expect(page.container.textContent).toContain('Beta-Team');
+
+    // Alpha answers last, into a page that is now paired elsewhere.
+    await interact(() => port.pending(alpha.daemonId).resolve(sessions('alpha')));
+    await settle();
+    expect(page.container.textContent).toContain('Beta-Team');
+    expect(page.container.textContent).not.toContain('Alpha-Team');
+    expect(page.container.querySelector('a[href="/d/beta/session/shared"]')).not.toBeNull();
+    expect(page.container.querySelector('a[href="/d/alpha/session/shared"]')).toBeNull();
+    expect(must(fleet.session({ daemonId: beta.daemonId, sessionId: 'shared' }), 'beta row').config.name).toBe(
+      'beta task',
+    );
+    // The answer was published — to the slice that asked for it, not this one.
+    expect(must(fleet.session({ daemonId: alpha.daemonId, sessionId: 'shared' }), 'alpha row').config.name).toBe(
+      'alpha task',
+    );
+    await page.unmount();
+  });
+
+  it('never lets a late Alpha hydrate paper over the Beta fleet error', async () => {
+    const port = deferredFleet(daemon => daemon.daemonId);
+    const fleet = new DaemonFleetStore(port);
+    const props = pageProps({ fleet });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    await page.render(<SessionsPage {...props} connection={beta} scopeNavigation={navigation('/d/beta')} />);
+    await settle();
+
+    await interact(() => port.pending(beta.daemonId).reject(new Error('beta offline')));
+    await settle();
+    expect(page.container.textContent).toContain('beta offline');
+
+    await interact(() => port.pending(alpha.daemonId).resolve(sessions('alpha')));
+    await settle();
+    expect(page.container.textContent).toContain('beta offline');
+    expect(page.container.textContent).not.toContain('Alpha-Team');
+    const slice = fleet.fleet(beta.daemonId);
+    expect(slice.sessions).toBeNull();
+    expect(slice.status).toBe('error');
+    expect(slice.error).toBe('beta offline');
+    await page.unmount();
+  });
+
+  it('keeps the re-paired hydrate when the replaced connection answers last', async () => {
+    const rotated = daemonConnection({
+      daemonId: alpha.daemonId,
+      baseUrl: 'https://alpha-relay.invalid',
+      deviceToken: 'alpha-token-2',
+    });
+    const port = deferredFleet(daemon => daemon.deviceToken);
+    const fleet = new DaemonFleetStore(port);
+    const props = pageProps({ fleet });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    await page.render(<SessionsPage {...props} connection={rotated} />);
+    await settle();
+    // Same durable daemon, two connections: the re-pair is its own read.
+    expect(port.calls).toEqual([alpha.deviceToken, rotated.deviceToken]);
+
+    await interact(() => port.pending(rotated.deviceToken).resolve(sessions('repaired')));
+    await settle();
+    expect(page.container.textContent).toContain('Repaired-Team');
+
+    await interact(() => port.pending(alpha.deviceToken).resolve(sessions('stale')));
+    await settle();
+    expect(page.container.textContent).toContain('Repaired-Team');
+    expect(page.container.textContent).not.toContain('Stale-Team');
+    const rows = must(fleet.fleet(alpha.daemonId).sessions, 'alpha rows');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.config.name).toBe('repaired task');
+    await page.unmount();
+  });
+
+  it('polls usage only while full density is mounted and leaves it stopped after unmount', async () => {
+    const reads: string[] = [];
+    const props = pageProps({
+      usage: new DaemonUsageStore(
+        {
+          usage: daemon => {
+            reads.push(daemon.daemonId);
+            return Promise.resolve({ at: '2026-08-01T11:59:00.000Z', stale: false, accounts: [] });
+          },
+        },
+        { pollMs: 5, isHidden: () => false },
+      ),
+    });
+    props.controls.setDeviceControls({ density: 'compact' });
+    const page = await mount(<SessionsPage {...props} />);
+    let atUnmount = 0;
+    try {
+      await settle();
+      expect(reads).toEqual([]);
+
+      await interact(() => props.controls.setDeviceControls({ density: 'full' }));
+      await settle();
+      expect(reads).toEqual([alpha.daemonId]);
+      await elapse(26);
+      const polled = reads.length;
+      expect(polled).toBeGreaterThan(1);
+
+      await interact(() => props.controls.setDeviceControls({ density: 'minimal' }));
+      await settle();
+      const lean = reads.length;
+      await elapse(26);
+      expect(reads).toHaveLength(lean);
+
+      // Re-enter full so unmount has a live poll to tear down, not a dead one.
+      await interact(() => props.controls.setDeviceControls({ density: 'full' }));
+      await settle();
+      await elapse(26);
+      expect(reads.length).toBeGreaterThan(lean + 1);
+    } finally {
+      await page.unmount();
+      atUnmount = reads.length;
+    }
+    await elapse(26);
+    expect(reads).toHaveLength(atUnmount);
+  });
+
+  it('detaches the warden poll and the scope listener at unmount', async () => {
+    let reads = 0;
+    const gate = deferred<WardenStatusView>();
+    const nav = navigation();
+    const props = pageProps({
+      scopeNavigation: nav,
+      wardenStatus: () => {
+        reads += 1;
+        return gate.promise;
+      },
+    });
+    const page = await mount(<SessionsPage {...props} />);
+    await settle();
+    expect(reads).toBe(1);
+    expect(nav.listeners()).toBe(1);
+
+    // An unrelated control write must not restart either subscription.
+    await interact(() => props.controls.setDeviceControls({ query: 'shared' }));
+    await settle();
+    expect(reads).toBe(1);
+    expect(nav.listeners()).toBe(1);
+
+    // The stimulus, proved live first: a scoped address a listener honours.
+    await interact(() => {
+      nav.push(projectScopeState(alpha.daemonId, '/alpha/repo'), projectScopePath(alpha.daemonId, '/alpha/repo'));
+      nav.announce();
+    });
+    expect(nav.notified()).toBe(1);
+    expect(props.controls.controls(alpha.daemonId).projectScope).toBe('/alpha/repo');
+
+    await page.unmount();
+    expect(nav.listeners()).toBe(0);
+
+    // The same stimulus after teardown reaches nobody and writes nothing.
+    await interact(() => {
+      nav.push(projectScopeState(alpha.daemonId, '/alpha/other'), projectScopePath(alpha.daemonId, '/alpha/other'));
+      nav.announce();
+    });
+    expect(nav.notified()).toBe(1);
+    expect(props.controls.controls(alpha.daemonId).projectScope).toBe('/alpha/repo');
+
+    // The read still in flight at teardown answers a cancelled effect: the
+    // reader is never called again, and nothing throws out of the resolution.
+    await interact(async () => {
+      gate.resolve(warden);
+      await gate.promise;
+    });
+    expect(reads).toBe(1);
   });
 });
