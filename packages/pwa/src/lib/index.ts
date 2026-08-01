@@ -140,6 +140,7 @@ export * from './push-subscriptions.ts';
 export * from './references.ts';
 export * from './remote-browser.ts';
 export * from './runtime-models.ts';
+export * from './search-focus.ts';
 export * from './send-badge.ts';
 export * from './send-ledger.ts';
 export * from './send-ledger-join.ts';
