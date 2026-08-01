@@ -48,6 +48,8 @@ import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
+import { registerMigrationCommands } from '../src/lib/migration/commands';
+import { MigrationController } from '../src/lib/migration/controller';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
@@ -150,7 +152,7 @@ function lazyDaemonConnection(environment: Record<string, string | undefined>): 
  */
 type SharedDaemonClient = Pick<
   IFyApiClient,
-  'request' | 'analytics' | 'list' | 'get' | 'stop' | 'scratchPlan' | 'scratchSweep'
+  'request' | 'analytics' | 'list' | 'get' | 'stop' | 'migrate' | 'scratchPlan' | 'scratchSweep'
 >;
 
 /** The deferred connection as the client object every command group is wired with. */
@@ -164,6 +166,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string): Promise<SessionView> => (await client()).get(id),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
+    migrate: async (id, agent, model, allowContextDowngrade, requestId) =>
+      (await client()).migrate(id, agent, model, allowContextDowngrade, requestId),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
   };
@@ -277,6 +281,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, client }) =>
+    registerMigrationCommands(
+      program,
+      new MigrationController(client, new SessionPresenter(world.io, new SystemClock())),
+    ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>
