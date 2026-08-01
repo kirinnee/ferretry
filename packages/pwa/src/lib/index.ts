@@ -28,6 +28,7 @@ export * from '../features/tasks/task-board-model.ts';
 export * from '../features/tasks/task-dag-graph.tsx';
 export { filterTaskDag, layoutTaskDag, taskDag } from '../features/tasks/task-dag.ts';
 export type { FilteredTaskDag, TaskDag, TaskDagLayout, TaskDagNode, TaskDagTask } from '../features/tasks/task-dag.ts';
+export * from '../features/tasks/task-name.tsx';
 export * from '../features/tasks/task-presentation.ts';
 export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';

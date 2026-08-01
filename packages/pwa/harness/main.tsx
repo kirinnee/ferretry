@@ -57,6 +57,7 @@ import { MarkdownComposerSettings } from '../src/features/settings/markdown-comp
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
+import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
@@ -806,6 +807,19 @@ function Shell() {
           </div>
           <SessionDetails daemonId={daemon.daemonId} session={harnessSession} />
         </section>
+      ),
+    },
+    {
+      label: 'Task name',
+      render: () => (
+        <Card aria-label="Task name" className="min-w-0">
+          <PanelHeader>
+            <Label>Task name</Label>
+          </PanelHeader>
+          <PanelBody>
+            <TaskName name="[Hayden] Port the remaining PWA feature components" />
+          </PanelBody>
+        </Card>
       ),
     },
     {
