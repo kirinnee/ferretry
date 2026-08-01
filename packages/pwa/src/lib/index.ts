@@ -29,6 +29,7 @@ export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/settings/notification-settings.tsx';
+export * from '../features/settings/settings-catalog.ts';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
 export type { FilteredTaskDag, TaskDag, TaskDagLayout, TaskDagNode, TaskDagTask } from '../features/tasks/task-dag.ts';
