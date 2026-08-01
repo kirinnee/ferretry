@@ -74,6 +74,8 @@ import { DictationShortcutPicker } from '../src/features/settings/dictation-shor
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
+import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
+import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
@@ -134,6 +136,32 @@ const daemon = daemonConnection({
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
 const settingsControls = new DaemonControlsStore();
+
+/**
+ * A skills catalog covering both scopes and every origin chip, so the row
+ * chrome, the group headings and the badge column can all be compared against
+ * the original at both widths.
+ */
+const HARNESS_SKILLS: SkillsCatalog = {
+  harness: 'claude',
+  skills: [
+    { name: 'kteam', description: 'Coordinate detached teammates.', scope: 'global', origin: 'claude' },
+    { name: 'summary', description: 'Recap the current work, outcome first.', scope: 'global', origin: 'both' },
+    {
+      name: 'liftoff-ops',
+      description: 'Infrastructure access for Kubernetes, metrics and logs.',
+      scope: 'global',
+      origin: 'codex',
+    },
+    {
+      name: 'cli-authoring',
+      description: 'Doctrine for extending the CLI package.',
+      scope: 'project',
+      origin: 'claude',
+    },
+    { name: 'floop', description: 'Review the diff until every reviewer agrees.', scope: 'project', origin: 'unknown' },
+  ],
+};
 
 /**
  * The dictation fixtures. The harness never reaches the network, so the daemon's
@@ -1474,6 +1502,14 @@ function Shell() {
           <PanelBody>
             <PinsTrigger id="harness-pins" count={3} expanded={false} onClick={() => {}} />
           </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Skills',
+      render: () => (
+        <Card aria-label="Skills catalog" className="h-[520px] min-w-0 overflow-hidden" id="harness-skills">
+          <SkillsSurface scope={scope} onInsert={() => {}} loadCatalog={async () => HARNESS_SKILLS} />
         </Card>
       ),
     },
