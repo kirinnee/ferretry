@@ -75,6 +75,9 @@ import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins
 import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
+  DurableTerminalPaneRegistrar,
+  DurableTerminalPaneStore,
+  ExactTmuxPaneReaper,
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
   lifecycleConfigDocument,
@@ -384,6 +387,7 @@ export interface DaemonWorld {
     envelope?: SessionProtocolEnvelope,
     id?: SessionId,
   ) => SessionLifecycleService;
+  readonly createTerminalReaper: (storage: DaemonStorage) => TerminalReapService;
   /**
    * The daemon's own self-check: it measures how late its tick was, reconciles the session index
    * against the authoritative session directories, and escalates an index that will not heal. Built
@@ -2434,8 +2438,20 @@ export function buildWorld(): DaemonWorld {
       // world-readable on this host through /proc, and the fleet wrappers read the value from their
       // environment anyway.
       sessionEnvironments,
+      new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
     ),
     createSessionLifecycle,
+    createTerminalReaper: storage => {
+      const store = new DurableTerminalPaneStore(storage, stateFiles, paths);
+      const runtime = new ExactTmuxPaneReaper(launchTmux);
+      return new TerminalReapService(
+        paths.home,
+        { list: daemonId => store.registrations(daemonId) },
+        { list: daemonId => store.sessions(daemonId) },
+        runtime,
+        runtime,
+      );
+    },
     createSessionHealth: (storage, settings) =>
       new SessionHealthService(
         {
@@ -2884,17 +2900,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(waitTicks);
     await subsystems.monitor.close();
   });
-  // The sweep is intentionally live before terminal-pane registration lands. Its empty durable
-  // registry is the safe state: a daemon with no exact registrations must never infer targets from
-  // tmux names, a process list, or an idle-looking pane. The next increment supplies the registry,
-  // durable session reader, exact observer, and exact reaper through these same four ports.
-  const terminalReaper = new TerminalReapService(
-    opened.storage.paths.home,
-    { list: async () => [] },
-    { list: async () => [] },
-    { observe: async () => undefined },
-    { reap: async () => undefined },
-  );
+  // The registry, durable session reader, exact observer and exact reaper the earlier increment
+  // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
+  const terminalReaper = world.createTerminalReaper(opened.storage);
   const terminalReapTicks = setInterval(() => {
     void terminalReaper.sweep().catch(() => undefined);
   }, 5_000);
