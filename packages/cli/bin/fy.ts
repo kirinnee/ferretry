@@ -45,10 +45,17 @@ import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
+import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
+import { FilesystemController } from '../src/lib/filesystem/controller';
+import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
+import { registerMigrationCommands } from '../src/lib/migration/commands';
+import { MigrationController } from '../src/lib/migration/controller';
 import { registerPinCommands } from '../src/lib/pins/commands';
+import { registerScratchCommands } from '../src/lib/scratch/commands';
+import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
@@ -64,6 +71,7 @@ import {
   SendMessageController,
   type SessionEnvironment,
   SessionPresenter,
+  SignalSessionController,
   SessionStatusController,
   StartSessionController,
   SuggestNamesController,
@@ -95,6 +103,8 @@ export interface CliWorld {
   readonly spinner: ISpinner;
   readonly prompt: IPrompt;
   readonly interactive: boolean;
+  /** The invocation directory, injected alongside the environment for hermetic in-process journeys. */
+  readonly cwd: string;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
 }
@@ -107,6 +117,7 @@ export function buildWorld(): CliWorld {
     spinner: new OraSpinner(),
     prompt: new InquirerPrompt(),
     interactive: io.interactive(),
+    cwd: process.cwd(),
     environment: process.env,
   };
 }
@@ -146,7 +157,10 @@ function lazyDaemonConnection(environment: Record<string, string | undefined>): 
  * The slice of the daemon SDK the shared client exposes. Widening it is additive — a group that
  * needs one more call adds it here and no existing group changes — and every member stays deferred.
  */
-type SharedDaemonClient = Pick<IFyApiClient, 'request' | 'analytics' | 'list' | 'get' | 'stop'>;
+type SharedDaemonClient = Pick<
+  IFyApiClient,
+  'request' | 'analytics' | 'list' | 'get' | 'stop' | 'migrate' | 'scratchPlan' | 'scratchSweep'
+>;
 
 /** The deferred connection as the client object every command group is wired with. */
 function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClient {
@@ -159,6 +173,10 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string): Promise<SessionView> => (await client()).get(id),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
+    migrate: async (id, agent, model, allowContextDowngrade, requestId) =>
+      (await client()).migrate(id, agent, model, allowContextDowngrade, requestId),
+    scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
+    scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
   };
 }
 
@@ -270,6 +288,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, client }) =>
+    registerFilesystemCommands(program, new FilesystemController(new ProtocolFilesystemGateway(client), world.io)),
+  ({ program, world, client }) =>
+    registerMigrationCommands(
+      program,
+      new MigrationController(client, new SessionPresenter(world.io, new SystemClock())),
+    ),
+  ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>
     registerTaskCommands(program, {
@@ -357,16 +383,19 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
  * command actually runs.
  */
 function sessionCommands(world: CliWorld, ownSessionId: string | undefined): SessionCommandDeps {
+  const cliEnvironment = world.environment;
   const environment: SessionEnvironment = {
-    cwd: process.cwd(),
+    cwd: world.cwd,
     ...(ownSessionId === undefined ? {} : { callerSessionId: ownSessionId }),
-    ...(process.env.FY_BOARD_CAPABILITY === undefined ? {} : { boardCapability: process.env.FY_BOARD_CAPABILITY }),
+    ...(cliEnvironment.FY_BOARD_CAPABILITY === undefined
+      ? {}
+      : { boardCapability: cliEnvironment.FY_BOARD_CAPABILITY }),
   };
   const api = new FySessionApi(
     createFyClientConnector({
       version: assertSemver(pkg.version),
-      ...(process.env.FY_URL === undefined ? {} : { url: process.env.FY_URL }),
-      ...(process.env.FY_TOKEN === undefined ? {} : { token: process.env.FY_TOKEN }),
+      ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
+      ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
       ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
     }),
   );
@@ -383,6 +412,7 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
     names: new SuggestNamesController(api, presenter),
     interrupt: new InterruptSessionController(api, presenter),
     resume: new ResumeSessionController(api, presenter),
+    signal: new SignalSessionController(api, presenter, environment),
   };
 }
 
