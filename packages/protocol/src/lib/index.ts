@@ -3,6 +3,7 @@ export * from './analytics-query.ts';
 export * from './attention.ts';
 export * from './browser.ts';
 export * from './browser-login.ts';
+export * from './catalog.ts';
 export * from './client.ts';
 export * from './common.ts';
 export * from './learning.ts';

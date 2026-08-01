@@ -35,6 +35,7 @@ export const DaemonConfigSchema = z
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),
     usage: UsageFeedConfigSchema.prefault({}),
+    projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
   })
   .strict()
   .transform(value => ({ ...value, publicUrl: value.publicUrl ?? `http://${value.host}:${value.port}` }));

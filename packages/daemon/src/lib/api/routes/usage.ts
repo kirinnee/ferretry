@@ -27,6 +27,13 @@ export interface UsageFeedDocument {
   readonly accounts: UsageSnapshot['accounts'];
 }
 
+/** Authenticated protocol projection: an ISO instant and an explicit stale state for the PWA. */
+export interface VersionedUsageFeedDocument {
+  readonly at?: string;
+  readonly stale: boolean;
+  readonly accounts: UsageSnapshot['accounts'];
+}
+
 async function currentSnapshot(feed: UsageFeedPort): Promise<UsageSnapshot | undefined> {
   let accounts: UsageSnapshot['accounts'];
   try {
@@ -44,6 +51,14 @@ function document(snapshot: UsageSnapshot | undefined): UsageFeedDocument {
   return { at: snapshot?.at ?? 0, ready: snapshot !== undefined, accounts: snapshot?.accounts ?? [] };
 }
 
+function versionedDocument(snapshot: UsageSnapshot | undefined): VersionedUsageFeedDocument {
+  return {
+    ...(snapshot === undefined ? {} : { at: new Date(snapshot.at).toISOString() }),
+    stale: snapshot === undefined,
+    accounts: snapshot?.accounts ?? [],
+  };
+}
+
 /**
  * `/usage` is public and `/v1/usage` is token-scoped, serving the same body.
  *
@@ -53,10 +68,11 @@ function document(snapshot: UsageSnapshot | undefined): UsageFeedDocument {
  * versioned API has one consistent authorization story.
  */
 export function usageRoutes(feed: UsageFeedPort, clock: MillisecondClockPort): readonly ApiRoute[] {
-  const usage = async () => jsonResponse(document(await currentSnapshot(feed)));
+  const publicUsage = async () => jsonResponse(document(await currentSnapshot(feed)));
+  const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
-    { method: 'GET', path: '/usage', scope: 'public', noStore: true, handle: usage },
-    { method: 'GET', path: '/v1/usage', scope: 'warden', noStore: true, handle: usage },
+    { method: 'GET', path: '/usage', scope: 'public', noStore: true, handle: publicUsage },
+    { method: 'GET', path: '/v1/usage', scope: 'warden', noStore: true, handle: versionedUsage },
     {
       method: 'GET',
       path: '/metrics',

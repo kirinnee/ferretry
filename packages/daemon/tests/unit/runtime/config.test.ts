@@ -7,6 +7,7 @@ describe('daemon configuration', () => {
     // Act + Assert
     should(defaultDaemonConfig()).containDeep({ host: '127.0.0.1', publicUrl: 'http://127.0.0.1:7337' });
     should(parseDaemonConfig({ host: 'localhost', port: 9000 })).containDeep({ publicUrl: 'http://localhost:9000' });
+    should(parseDaemonConfig({ projectRoots: ['~/Work'] }).projectRoots).deepEqual(['~/Work']);
     should(() => parseDaemonConfig({ host: '', port: 0 })).throw();
     should(() => parseDaemonConfig({ host: 'localhost', port: 7337, unknown: true })).throw();
   });

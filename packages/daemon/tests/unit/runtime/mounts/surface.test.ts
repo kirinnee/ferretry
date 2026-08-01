@@ -47,6 +47,10 @@ const subsystems = (): MountedSubsystems => ({
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
+  catalogs: {
+    projects: async () => [],
+    skills: async session => ({ harness: session.config.harness, skills: [] }),
+  },
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
   sessionMigrate: new FakeSessionMigrate(),
@@ -75,6 +79,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/health',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
+      'GET /v1/projects',
+      'GET /v1/sessions/:sessionId/skills',
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',
@@ -148,6 +154,8 @@ describe('the mounted daemon surface', () => {
     const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
+    const projects = await dispatcher.dispatch(request({ path: '/v1/projects', headers: human }));
+    const skills = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/skills', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
     const attention = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
     const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
@@ -188,6 +196,8 @@ describe('the mounted daemon surface', () => {
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.
     should(session.status).equal(200);
+    should(projects.status).equal(200);
+    should(skills.status).equal(200);
     // The session is unknown to this fixture, which still proves the route is mounted and reached.
     should(pins.status).equal(404);
     should(attention.status).equal(200);

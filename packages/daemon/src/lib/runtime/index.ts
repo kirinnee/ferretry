@@ -2,6 +2,7 @@ export * from './boot.ts';
 export * from './config.ts';
 export * from './mounts/analytics.ts';
 export * from './mounts/attention.ts';
+export * from './mounts/catalogs.ts';
 export * from './mounts/health.ts';
 export * from './mounts/index.ts';
 export * from './mounts/learning.ts';
