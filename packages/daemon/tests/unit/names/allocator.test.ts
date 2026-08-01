@@ -188,12 +188,16 @@ describe('NameAllocator', () => {
     if (!actual.ok) should(actual.error.message).containEql('entropy unavailable');
   });
 
-  it('should map store failures from reads and claims without swallowing diagnostics', async () => {
-    // Arrange
+  it('should answer a fixed, path-free message for store failures from reads and claims', async () => {
+    // The adapter's own error carries the ledger path and decode detail; the allocator is the boundary
+    // that scrubs it, so neither reaches the public result a route would write into a response body.
+    // Arrange — store failures whose messages carry the kind of detail the API must not leak.
     const readStore = new MemoryClaimStore();
-    readStore.failure = new Error('read failed');
+    readStore.failure = new Error(
+      'invalid callsign claim ledger /home/operator/.fy/state/callsigns.json: malformed JSON',
+    );
     const claimStore = new MemoryClaimStore();
-    claimStore.failure = 'claim failed';
+    claimStore.failure = new Error('invalid callsign claim for /home/operator/.fy/state/callsigns.json: bad row');
 
     // Act
     const readActual = await new NameAllocator(readStore, firstIndex, ['ada']).allocate({ ownerId: 'one', nowMs: 0 });
@@ -203,11 +207,21 @@ describe('NameAllocator', () => {
       requested: 'ada',
     });
 
-    // Assert
+    // Assert — both are store failures with the SAME fixed, path-free message; the verbatim diagnostic
+    // (and the absolute path it carried) never enters the public message.
     should(readActual.ok).be.false();
     should(claimActual.ok).be.false();
-    if (!readActual.ok) should(readActual.error.message).containEql('read failed');
-    if (!claimActual.ok) should(claimActual.error.message).containEql('claim failed');
+    if (!readActual.ok) {
+      should(readActual.error.code).equal('claim_store_failed');
+      should(readActual.error.message).equal('callsign persistence failed');
+      should(readActual.error.message).not.containEql('/home/operator');
+      should(readActual.error.message).not.containEql('malformed JSON');
+    }
+    if (!claimActual.ok) {
+      should(claimActual.error.code).equal('claim_store_failed');
+      should(claimActual.error.message).equal('callsign persistence failed');
+      should(claimActual.error.message).not.containEql('/home/operator');
+    }
   });
 
   it('should allocate from the default pool when no pool is injected', async () => {

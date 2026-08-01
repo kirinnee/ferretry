@@ -165,8 +165,13 @@ describe('FileNameClaimStore', () => {
 
     // Assert
     should(allocated.ok).be.false();
-    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
-    should(allocated.ok ? '' : allocated.error.message).containEql('invalid callsign claim ledger');
+    const failure = allocated.ok ? null : allocated.error;
+    should(failure?.code).equal('claim_store_failed');
+    // The allocator's public message is fixed and path-free; the absolute ledger path never reaches it.
+    should(failure?.message).equal('callsign persistence failed');
+    should(failure?.message).not.containEql(subject.file);
+    // The adapter still carries the diagnostic internally — only the allocator's public message is scrubbed.
+    await should(subject.store.listClaims()).be.rejectedWith(/invalid callsign claim ledger/u);
     should(await readFile(subject.file, 'utf8')).equal(damaged);
   });
 
@@ -201,7 +206,11 @@ describe('FileNameClaimStore', () => {
     // are guarded by the same decoder that guards reads.
     // Arrange — a valid reservation already on disk, captured byte-for-byte.
     const subject = await fixture();
-    const held = DEFAULT_CALLSIGN_POOL[0]!;
+    // Three pool entries, guarded once so the case needs no non-null assertion: the seeded name plus
+    // two free ones the malformed claims target.
+    const [held, freeOne, freeTwo] = DEFAULT_CALLSIGN_POOL;
+    if (held === undefined || freeOne === undefined || freeTwo === undefined)
+      throw new Error('DEFAULT_CALLSIGN_POOL must expose at least three entries');
     const seeded = await subject.allocator.allocate({ ownerId: 'session-a', nowMs: NOW, requested: held });
     should(seeded.ok).be.true();
     const before = await readFile(subject.file, 'utf8');
@@ -210,11 +219,11 @@ describe('FileNameClaimStore', () => {
     const malformed: readonly NameClaim[] = [
       // A free name whose expiry is at its creation: with no conflict this is exactly the row that,
       // unguarded, would land on disk and throw on the next read.
-      { callsign: DEFAULT_CALLSIGN_POOL[1]!, ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW },
+      { callsign: freeOne, ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW },
       // A non-canonical callsign the decoder rejects.
       { callsign: 'NOT-CANONICAL', ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
       // An empty owner id, which the schema forbids.
-      { callsign: DEFAULT_CALLSIGN_POOL[2]!, ownerId: '', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
+      { callsign: freeTwo, ownerId: '', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
     ];
     for (const bad of malformed) {
       await should(subject.store.tryClaim(bad)).be.rejectedWith(/invalid callsign claim/u);

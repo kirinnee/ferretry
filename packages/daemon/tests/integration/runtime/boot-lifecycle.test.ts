@@ -949,6 +949,71 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * A damaged callsign ledger must NOT leak its absolute path, and must read as the unavailable
+   * condition it is rather than a launch defect.
+   *
+   * The reservation file is the only proof an in-flight start owns its name, so the store fails closed
+   * over a damaged one. That refusal used to surface as `500 session_launch_failed` carrying the
+   * adapter's verbatim error — ledger path and all — in the body. It is now a stable `503
+   * callsign_unavailable` with a fixed, path-free message: the caller may retry once the store is
+   * mended, and no agent on the host learns where the daemon keeps its state.
+   */
+  it('should answer a path-free 503 for a start over a damaged callsign ledger', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-callsign-damaged');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    // Corrupt the reservation ledger AFTER boot: a missing file is an empty ledger, so the damage must
+    // be real bytes the decoder refuses.
+    const ledger = join(home, 'state', 'callsigns.json');
+    await mkdir(join(home, 'state'), { recursive: true });
+    const damaged = 'not json at all';
+    await writeFile(ledger, damaged, { mode: 0o600 });
+
+    // Act — a start that asks for a callsign must claim it before launch, and the claim reads this file.
+    const refused = await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'req-callsign-1' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'claim a name', teammate: 'atlas', cwd: home }),
+    });
+    const body = (await refused.json()) as { code: string; error: string };
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(refused.status).equal(503);
+    should(body.code).equal('callsign_unavailable');
+    // The message is the allocator's fixed, path-free string; the whole body omits the temp home the
+    // ledger path would have exposed.
+    should(body.error).equal('callsign persistence failed');
+    should(JSON.stringify(body)).not.containEql(home);
+    // Nothing launched — the start failed at the claim, before the pane.
+    should(launcher.launched).have.length(0);
+    // And the damaged evidence is left untouched for diagnosis.
+    should(await readFile(ledger, 'utf8')).equal(damaged);
+  });
+
+  /**
    * `fy start --board-access worker`, driven end to end through the production composition root.
    *
    * The start refused this with `501` on the belief that it "would launch a pane holding a capability
