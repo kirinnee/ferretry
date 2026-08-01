@@ -7,10 +7,10 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import type { DashboardView, Density } from '../lib/controls.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { BadgeTone } from '../shell/primitives.tsx';
 import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
-import type { Density } from '../lib/controls.ts';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
   full: ['Teammate', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
@@ -24,6 +24,22 @@ export const DENSITY_COLUMN_WIDTHS: Readonly<Record<Density, readonly string[]>>
   compact: ['w-[28%]', 'w-[44%]', 'w-[28%]'],
   minimal: ['w-[38%]', 'w-[62%]'],
 };
+
+/** A persisted choice wins; otherwise a narrow viewport defaults to cards. */
+export function dashboardMode(preference: DashboardView | null, narrow: boolean): DashboardView {
+  return preference ?? (narrow ? 'cards' : 'table');
+}
+
+/** The two reachable empty states after daemon-scoped scope recovery. */
+export function dashboardEmptyMessage(scope: string | null): string {
+  return scope === null ? 'No matching sessions.' : 'No sessions in this folder match the filters.';
+}
+
+export const SCOPE_RECOVERY_MESSAGE = 'That folder is no longer available — showing the whole fleet.';
+
+export function sessionCountLabel(count: number): string {
+  return `${count} session${count === 1 ? '' : 's'}`;
+}
 
 /**
  * The source maps `awaiting_user` to ok before its unreachable accent branch.

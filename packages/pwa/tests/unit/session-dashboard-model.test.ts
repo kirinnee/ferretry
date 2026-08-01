@@ -4,7 +4,10 @@ import {
   DENSITY_COLUMN_LABELS,
   DENSITY_COLUMN_WIDTHS,
   GROUP_HUES,
+  SCOPE_RECOVERY_MESSAGE,
   activityLine,
+  dashboardEmptyMessage,
+  dashboardMode,
   dashboardTone,
   groupHueIndex,
   groupHueVar,
@@ -12,6 +15,7 @@ import {
   hoistedStatus,
   isBusy,
   sessionAge,
+  sessionCountLabel,
   statusWord,
 } from '../../src/components/session-dashboard-model.ts';
 import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
@@ -35,6 +39,19 @@ describe('session dashboard model', () => {
     expect(DENSITY_COLUMN_WIDTHS.full).toEqual(['w-[16%]', 'w-[22%]', 'w-[9%]', 'w-[14%]', 'w-[26%]', 'w-[13%]']);
     expect(DENSITY_COLUMN_WIDTHS.compact).toEqual(['w-[28%]', 'w-[44%]', 'w-[28%]']);
     expect(DENSITY_COLUMN_WIDTHS.minimal).toEqual(['w-[38%]', 'w-[62%]']);
+  });
+
+  it('derives view, empty copy, recovery notice, and pluralized counts', () => {
+    expect(dashboardMode(null, true)).toBe('cards');
+    expect(dashboardMode(null, false)).toBe('table');
+    expect(dashboardMode('table', true)).toBe('table');
+    expect(dashboardMode('cards', false)).toBe('cards');
+    expect(dashboardEmptyMessage(null)).toBe('No matching sessions.');
+    expect(dashboardEmptyMessage('/work/project')).toBe('No sessions in this folder match the filters.');
+    expect(SCOPE_RECOVERY_MESSAGE).toBe('That folder is no longer available — showing the whole fleet.');
+    expect(sessionCountLabel(0)).toBe('0 sessions');
+    expect(sessionCountLabel(1)).toBe('1 session');
+    expect(sessionCountLabel(2)).toBe('2 sessions');
   });
 
   it('projects badge tones without reviving the source dead awaiting-user branch', () => {
