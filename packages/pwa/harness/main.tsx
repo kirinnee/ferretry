@@ -26,6 +26,8 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
+import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
+import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
@@ -53,6 +55,7 @@ import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
+import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
@@ -74,6 +77,8 @@ import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
+import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
@@ -113,6 +118,69 @@ const daemon = daemonConnection({
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
 const settingsControls = new DaemonControlsStore();
+
+/**
+ * The dictation fixtures. The harness never reaches the network, so the daemon's
+ * speech status is answered here and the capture host is a silent stand-in: the
+ * point of these cards is what the strip and the settings surface LOOK like, at
+ * both widths, not whether a microphone exists in headless Chrome.
+ */
+const HARNESS_STT_SETTINGS: SttSettings = {
+  ...DEFAULT_STT_SETTINGS,
+  dictionary: ['ferretry = ferretree', 'nitroso'],
+  userContext: 'I work on ferretry and the daemon fleet. Our services: nitroso, diene, alcohol.',
+};
+
+/**
+ * A stand-in analyser branch. It paints a real waveform from a synthetic tone,
+ * so the meter in a screenshot is the actual paint path rather than an empty
+ * box — headless Chrome has no microphone to open.
+ */
+const harnessMonitor: CaptureMonitor = {
+  createAnalyser: () => ({
+    analyser: {
+      fftSize: 512,
+      smoothingTimeConstant: 0.5,
+      minDecibels: -90,
+      maxDecibels: -10,
+      getFloatTimeDomainData: (target: Float32Array) => {
+        for (let index = 0; index < target.length; index += 1) {
+          target[index] = 0.34 * Math.sin((index / target.length) * Math.PI * 12);
+        }
+      },
+    },
+    disconnect: () => undefined,
+  }),
+};
+
+const harnessSttFetch: FetchLike = async url =>
+  url.includes('/v1/stt/status')
+    ? new Response(
+        JSON.stringify({
+          available: true,
+          streaming: false,
+          worker: { phase: 'ready', modelId: 'parakeet-tdt-0.6b' },
+          languages: ['en'],
+          models: {
+            daemon: {
+              id: 'parakeet-tdt-0.6b',
+              kind: 'daemon',
+              label: 'Parakeet TDT 0.6B',
+              state: 'ready',
+              languages: ['en'],
+              costs: {
+                downloadBytes: 652_000_000,
+                diskBytes: 652_000_000,
+                ramBytesApprox: 1_100_000_000,
+                summary: 'Parakeet TDT 0.6B — 652 MB on disk, about 1.1 GB of RAM while transcribing.',
+              },
+              install: { phase: 'ready', receivedBytes: 652_000_000, totalBytes: 652_000_000 },
+            },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      )
+    : new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
 
 /**
  * The markdown composer preference is a single reader-wide setting, so the
@@ -761,6 +829,7 @@ function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [sttSettings, setSttSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
   const [statuses, setStatuses] = useState<ReadonlySet<TaskStatus> | null>(null);
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('identity');
   const [paneWidth, setPaneWidth] = useState(SIDE_PANE_DEFAULT_WIDTH);
@@ -1297,6 +1366,57 @@ function Shell() {
       ),
     },
     {
+      label: 'Dictation panel',
+      render: () => (
+        <Card aria-label="Dictation panel" className="min-w-0" id="harness-dictation-panel">
+          <PanelBody className="flex flex-col gap-4">
+            {(
+              [
+                ['recording', undefined],
+                ['transcribing', undefined],
+                ['empty', undefined],
+                ['error', 'permission-denied'],
+              ] as ReadonlyArray<readonly [DictationStage, string | undefined]>
+            ).map(([stage, errorCode]) => (
+              // The panel is absolutely positioned above its composer, so each
+              // example needs its own positioned box at the same width.
+              <div key={stage} className="relative h-[120px] min-w-0">
+                <div className="absolute inset-x-0 top-[120px]">
+                  <DictationSheet
+                    open
+                    stage={stage}
+                    elapsedMs={65_000}
+                    inputMonitor={harnessMonitor}
+                    {...(errorCode ? { errorCode, errorMessage: 'Microphone access was blocked for this site.' } : {})}
+                    onDismiss={() => {}}
+                    onStop={() => {}}
+                    onCancel={() => {}}
+                    onRetry={() => {}}
+                  />
+                </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Dictation settings',
+      render: () => (
+        <Card aria-label="Dictation settings" className="min-w-0" id="harness-dictation-settings">
+          <PanelBody>
+            <DictationSettings
+              daemon={daemon}
+              settings={sttSettings}
+              update={patch => setSttSettings(current => ({ ...current, ...patch }))}
+              persisted
+              fetchImpl={harnessSttFetch}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
       label: 'Learning header',
       render: () => (
         <Card aria-label="Learning header">
@@ -1348,7 +1468,13 @@ function Shell() {
           <SettingsPage
             daemonId={daemon.daemonId}
             controls={settingsControls}
-            dictation={{ binding: DEFAULT_DICTATION_SHORTCUT, onChange: () => {} }}
+            dictation={{
+              daemon,
+              settings: sttSettings,
+              update: patch => setSttSettings(current => ({ ...current, ...patch })),
+              persisted: true,
+              fetchImpl: harnessSttFetch,
+            }}
             notifications={
               <NotificationSettingsView
                 permission="granted"

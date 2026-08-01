@@ -17,7 +17,7 @@ import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
-import { DictationShortcutPicker, type DictationShortcutPickerProps } from './dictation-shortcut-picker.tsx';
+import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { SETTINGS_DEFINITIONS, SETTINGS_LINKS, type SettingDefinition, type SettingId } from './settings-catalog.ts';
 
@@ -109,7 +109,8 @@ export interface SettingsPageProps {
   readonly daemonId: DaemonId;
   /** Reader-local controls; only device fields are edited here. */
   readonly controls: DaemonControlsStore;
-  readonly dictation: DictationShortcutPickerProps;
+  /** The daemon-scoped dictation surface: engine readiness, chord, enhancer. */
+  readonly dictation: DictationSettingsProps;
   /** The daemon-aware notification host, supplied by the composition root. */
   readonly notifications?: ReactNode;
   /** Called for the header's in-app Back action. */
@@ -200,7 +201,7 @@ export function SettingsPage({
       ),
       'composer-markdown': <MarkdownComposerSettings />,
       theme: <ThemeSettings theme={theme} />,
-      dictation: <DictationShortcutPicker {...dictation} />,
+      dictation: <DictationSettings {...dictation} />,
       notifications: notifications ?? (
         <p role="status" className="m-0 text-ui leading-base text-muted">
           Notification delivery is unavailable until this page is composed with the paired daemon’s push-subscription
