@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { IFyApiClient } from '@ferretry/protocol';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
+import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
@@ -49,9 +50,40 @@ export function Composer({
   // paints a textarea, so a daemon switch must not change the editor chrome.
   const highlighted = useMdComposePref() === 'on';
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const syncHighlight = useCallback((input: HTMLTextAreaElement) => {
     syncComposerHighlightViewport(input, overlayRef.current);
   }, []);
+
+  // The draft is read through a ref so registration survives every keystroke:
+  // re-registering on each character would churn the quote registry for nothing.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  // Publish this composer as the quote target for its own (daemon, session).
+  // Transcript quoting addresses a scope, never "whatever textarea is visible" —
+  // two panes can belong to different daemons.
+  useEffect(
+    () =>
+      registerComposerQuoteTarget({
+        ...scope,
+        draft: () => draftRef.current,
+        replaceDraft: next => {
+          setDraft(next);
+          const input = inputRef.current;
+          if (input === null) return;
+          input.focus();
+          // A detached or hidden textarea can refuse a selection; the value still
+          // landed, so the caret is a nicety rather than part of the contract.
+          try {
+            input.setSelectionRange(next.length, next.length);
+          } catch {
+            // Intentionally ignored — see above.
+          }
+        },
+      }),
+    [scope],
+  );
 
   // `scope` already carries the daemon identity, so it changes whenever the daemon does; listing
   // daemon.daemonId as well only re-ran this redundantly.
@@ -117,6 +149,7 @@ export function Composer({
           }}
           onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
           placeholder={placeholder}
+          ref={inputRef}
           rows={1}
           value={draft}
         />
