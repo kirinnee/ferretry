@@ -7,6 +7,7 @@ export * from '../components/file-tree.tsx';
 export * as fileTreeModel from '../components/file-tree-model.ts';
 export * as filesApi from '../components/files-api.ts';
 export * as filesModel from '../components/files-model.ts';
+export * from '../components/new-session-page.tsx';
 export * from '../components/question-form.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';

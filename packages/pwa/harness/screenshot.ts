@@ -32,6 +32,7 @@ const VIEWPORTS = [
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
+  'harness-new-session',
   'harness-session-screen',
   'harness-composer-markdown',
   'harness-marks',
