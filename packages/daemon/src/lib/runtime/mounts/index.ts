@@ -7,6 +7,7 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
+import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
@@ -70,6 +71,11 @@ export interface MountedSubsystems {
    *  The only path that can write `completed`, and the only one that can declare the wait the warden
    *  detector was already built to read. */
   readonly sessionSignal: SessionSignalSubsystem;
+  /** The declared-wait watcher: the tick that makes `signal waiting` end. It serves no route — a park
+   *  is ended by a timer, not by a request — and it is a mounted subsystem for exactly that reason.
+   *  A background loop nothing constructs is the same absent capability as an unserved route, and
+   *  before this field the daemon recorded every park and woke none of them. */
+  readonly monitor: MonitorLoop;
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;

@@ -185,23 +185,16 @@ describe('one tick over the parks this daemon holds', () => {
   });
 });
 
-describe('a session another path has taken ownership of', () => {
-  it('is skipped entirely rather than merely left un-woken', async () => {
-    const { service, waits, heartbeats } = build([parked(ONE)], SINCE_MS + SETTINGS.backstopMs);
-    service.suspend(ONE);
-    const report = await service.tick();
-    should(waits.expired).be.empty();
-    should(heartbeats.published).be.empty();
-    should(report.expired).be.empty();
-    should(service.health().suspended).equal(1);
-  });
-
-  it('publishes fresh proof on the first tick after it comes back', async () => {
-    const { service, heartbeats } = build([parked(ONE)]);
+describe('the heartbeat marks the loop keeps in memory', () => {
+  it('are pruned to the roster, so a long-lived daemon does not accumulate them', async () => {
+    const { service, waits, heartbeats } = build([parked(ONE)]);
     await service.tick();
     should(heartbeats.published).have.length(1);
-    service.suspend(ONE);
-    service.resume(ONE);
+    // The park ends by some other route — a peer reply, `signal working` — and the session comes back
+    // parked later. Its mark must have gone with it, or the new park stays silent for an interval.
+    waits.set([]);
+    await service.tick();
+    waits.set([parked(ONE)]);
     await service.tick();
     should(heartbeats.published).have.length(2);
   });

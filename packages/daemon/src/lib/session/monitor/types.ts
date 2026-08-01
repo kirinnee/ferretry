@@ -165,6 +165,31 @@ export interface MonitorTickReport {
 }
 
 /**
+ * The monitor loop, as the composition root drives it.
+ *
+ * A port rather than the adapter class, because the mount table is `src/lib` and may not reach into
+ * `src/adapters`. It carries its own cadence for the reason the self-check tick does: the number the
+ * timer fires on IS the number the overdue rule measures against, so a composition root that chose
+ * its own would make every on-time tick look late.
+ */
+export interface MonitorLoop {
+  readonly intervalMs: number;
+  /** Marks the loop as running. Before this, its health record says it is not. */
+  arm(): void;
+  /** One tick, with its outcome published. Never rejects — a background timer must not take the
+   *  daemon down, and the failure is carried by the record instead. */
+  run(): Promise<MonitorTickReport | undefined>;
+  /**
+   * Disarms the loop and republishes the record saying so, WITHOUT ticking.
+   *
+   * A shutdown runs after the storage it would read is already closed, so the last thing the record
+   * hears must be a statement, not another attempt. Leaving the previous tick's `armed: true` behind
+   * would tell the next reader that a loop is watching these parks when the process is gone.
+   */
+  close(): Promise<void>;
+}
+
+/**
  * The loop's own health, which is the answer to "did a tick get missed".
  *
  * `overdue` is the whole point of publishing this. A monitor that silently stops looks exactly like a
@@ -180,8 +205,6 @@ export interface MonitorHealth {
   readonly sinceLastTickMs: number;
   readonly overdue: boolean;
   readonly parked: number;
-  /** Sessions deliberately out of the loop's reach. A leaked suspension is a park nothing will wake. */
-  readonly suspended: number;
   /** Consecutive ticks that threw outright, as distinct from a tick with per-session failures. */
   readonly consecutiveFailures: number;
   readonly lastFailure: string | undefined;

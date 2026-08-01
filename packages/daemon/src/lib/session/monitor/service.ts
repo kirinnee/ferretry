@@ -1,5 +1,5 @@
 import type { ClockPort } from '../../ports.ts';
-import type { SessionId } from '../../session-id.ts';
+
 import { planWaitTick, tickOverdue, wakeSendId } from './policy.ts';
 import type { SessionMonitorSettings } from './settings.ts';
 import type {
@@ -50,14 +50,19 @@ function message(error: unknown): string {
  * into a pane that may be gone; doing it the other way round would leave a session told to continue
  * while the document still says it is parked — and the next tick would tell it again.
  *
- * A SUSPENDED SESSION IS SKIPPED ENTIRELY, not merely left un-woken. A revive replaces the pane it
- * would type into and rewrites the status it would hold, so ticking one mid-relaunch races the
- * relaunch for the same two things.
+ * THE HEARTBEAT MARKS ARE PRUNED TO THE ROSTER at the end of every tick. They are the one piece of
+ * in-memory state the loop keeps, and a daemon that runs for weeks would otherwise hold a mark for
+ * every session that was ever parked in it.
+ *
+ * A REVIVE IS NOT RACED, and it is worth saying why nothing here guards against one. The nudge goes
+ * through the send slice, which refuses — or waits out — a session whose launch is in flight, and a
+ * relaunch registers with that same gate. The status hold is not a race either: a park stands on the
+ * document until something clears it, so `waiting` is the correct status for a revived-but-still-
+ * parked session, exactly as it is for any other.
  */
 export class SessionMonitorService {
   /** Session id → wall milliseconds at its last published heartbeat. Per daemon, never shared. */
   private readonly beats = new Map<string, number>();
-  private readonly suspended = new Set<string>();
   private ticks = 0;
   private lastTickAt: string | undefined;
   /** Monotonic reading at the last COMPLETED tick, or at arming when none has completed. */
@@ -86,19 +91,6 @@ export class SessionMonitorService {
     return this.lastTickElapsedMs !== undefined;
   }
 
-  /** Takes one session out of the loop's reach, for as long as another path owns its pane. */
-  suspend(id: SessionId): void {
-    this.suspended.add(id);
-  }
-
-  resume(id: SessionId): void {
-    this.suspended.delete(id);
-    // The park's heartbeat mark is dropped with the suspension: whatever happened while the session
-    // was out of reach, the first tick after it returns should publish fresh proof rather than wait
-    // out an interval measured from before the pane was replaced.
-    this.beats.delete(id);
-  }
-
   async tick(): Promise<MonitorTickReport> {
     let roster: readonly ParkedSession[];
     try {
@@ -114,13 +106,13 @@ export class SessionMonitorService {
     const held: string[] = [];
     const failures = new Map<string, string>();
     for (const session of roster) {
-      if (this.suspended.has(session.id)) continue;
       try {
         await this.service(session, nowMs, expired, heartbeats, held);
       } catch (error) {
         failures.set(session.id, message(error));
       }
     }
+    this.prune(roster);
     const elapsedMs = this.ports.monotonic.elapsedMs();
     const sinceLastTickMs = this.lastTickElapsedMs === undefined ? undefined : elapsedMs - this.lastTickElapsedMs;
     this.ticks += 1;
@@ -154,10 +146,16 @@ export class SessionMonitorService {
       // reporting that as "not late yet" is the benign reading of missing evidence.
       overdue: !this.armed || tickOverdue(sinceLastTickMs, this.settings),
       parked: this.parked,
-      suspended: this.suspended.size,
       consecutiveFailures: this.consecutiveFailures,
       lastFailure: this.lastFailure,
     };
+  }
+
+  /** Drops the heartbeat mark of every session that is no longer parked, so the map cannot grow
+   *  without bound in a daemon that runs for weeks. */
+  private prune(roster: readonly ParkedSession[]): void {
+    const live = new Set<string>(roster.map(session => session.id));
+    for (const id of this.beats.keys()) if (!live.has(id)) this.beats.delete(id);
   }
 
   private async service(
