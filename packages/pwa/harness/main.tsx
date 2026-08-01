@@ -64,6 +64,7 @@ import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
@@ -763,6 +764,38 @@ function Shell() {
             onSelect={() => {}}
           />
         </Card>
+      ),
+    },
+    {
+      label: 'Warden attention',
+      render: () => (
+        <WardenAttention
+          connection={daemon}
+          now={HARNESS_NOW}
+          state={{
+            status: 'ready',
+            view: {
+              lastSweepAt: '2026-07-31T11:57:00.000Z',
+              items: [
+                {
+                  id: 'A3',
+                  sessionId: 'sess-1',
+                  teammate: 'ms-98',
+                  sessionStatus: 'awaiting_user',
+                  subject: 'Approve this browser pairing request',
+                  why: 'The device needs permission before it can read this daemon’s session ledger.',
+                  context: 'The pairing link identifies this daemon at runtime; its credential is never bundled.',
+                  waitingSince: '2026-07-31T11:30:00.000Z',
+                  judgement: { state: 'pending', reportPath: 'warden/2026-07-31T11-58.md' },
+                  recommendation: { action: 'nudge', reason: 'Ask the session to report its exact blocker.' },
+                },
+              ],
+            },
+          }}
+          onOpenSession={() => {}}
+          onOpenReport={() => {}}
+          onRunAction={() => {}}
+        />
       ),
     },
     {

@@ -34,6 +34,7 @@ export * from '../features/tasks/task-presentation.ts';
 export * from '../features/tasks/task-row.tsx';
 export * from '../features/tasks/task-status-filter.tsx';
 export * from '../features/warden/warden-config-card.tsx';
+export * from '../features/warden/warden-attention.tsx';
 export * from '../features/warden/warden-status-model.ts';
 export * from '../features/warden/warden-strip.tsx';
 export * from '../features/warden/warden-verdicts.tsx';
