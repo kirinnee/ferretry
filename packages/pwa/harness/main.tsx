@@ -26,6 +26,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
+import { DictationControl } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
@@ -77,6 +78,7 @@ import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
@@ -151,6 +153,17 @@ const harnessMonitor: CaptureMonitor = {
     },
     disconnect: () => undefined,
   }),
+};
+
+/**
+ * A microphone that is asked for and never answers. Headless Chrome has no
+ * device, and the point of the mic-button card is the button's two layouts, not
+ * a capture: the panel's own card covers what recording looks like.
+ */
+const harnessCaptureHost: CaptureHost = {
+  openMicrophone: () => new Promise(() => undefined),
+  buildGraph: () => new Promise(() => undefined),
+  watchHidden: () => () => undefined,
 };
 
 const harnessSttFetch: FetchLike = async url =>
@@ -1394,6 +1407,28 @@ function Shell() {
                     onRetry={() => {}}
                   />
                 </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Dictation mic button',
+      render: () => (
+        <Card aria-label="Dictation mic button" className="min-w-0" id="harness-dictation-mic">
+          <PanelBody className="flex flex-wrap items-center gap-4">
+            {(['compact', 'full'] as const).map(layout => (
+              <div key={layout} className="relative flex items-center gap-2">
+                <Label>{layout}</Label>
+                <DictationControl
+                  daemon={daemon}
+                  draft=""
+                  onDraftChange={() => {}}
+                  settings={sttSettings}
+                  captureHost={harnessCaptureHost}
+                  layout={layout}
+                />
               </div>
             ))}
           </PanelBody>
