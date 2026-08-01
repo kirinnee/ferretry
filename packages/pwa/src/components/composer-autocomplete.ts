@@ -536,7 +536,7 @@ export function useComposerAutocomplete({
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
         if (boundedActive >= 0) accept(boundedActive);
-        return true;
+        return !event.nativeEvent.isComposing;
       }
       return false;
     },

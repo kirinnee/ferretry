@@ -213,11 +213,10 @@ const skillsRequest = async (
   const response = await fetcher(request.url, request.init);
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { readonly error?: unknown; readonly code?: unknown };
-    throw new DaemonResponseError(
-      response.status,
-      typeof body.error === 'string' && body.error.trim() !== '' ? body.error : fallbackMessage(response.status),
-      typeof body.code === 'string' ? body.code : undefined,
-    );
+    const message =
+      typeof body.error === 'string' && body.error.trim() !== '' ? body.error : fallbackMessage(response.status);
+    const code = typeof body.code === 'string' ? body.code : undefined;
+    throw new DaemonResponseError(response.status, message, code);
   }
   return parseSkillsResponse(await response.json());
 };
