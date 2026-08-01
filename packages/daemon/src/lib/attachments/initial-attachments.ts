@@ -29,6 +29,15 @@ export const MAX_INITIAL_ATTACHMENTS = 16;
  *  which buffering the start body threatens the daemon. */
 export const MAX_INITIAL_ATTACHMENT_BYTES = 32 * 1024 * 1024;
 
+/**
+ * The start body is buffered before its JSON is parsed, and every attachment is decoded into that
+ * process heap before the session exists. Per-file limits alone therefore still allow a single
+ * request to reserve 16 × 32 MiB. Keep the whole opening payload within the same deliberate budget
+ * as one large document; callers with more material must attach the essential file, not exhaust the
+ * daemon before it can start an agent.
+ */
+const MAX_INITIAL_ATTACHMENT_TOTAL_BYTES = MAX_INITIAL_ATTACHMENT_BYTES;
+
 /** The local ZIP signature every OOXML container begins with. */
 const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04] as const;
 
@@ -63,6 +72,8 @@ export class InitialAttachmentError extends Error {
 export interface InitialAttachmentLimits {
   readonly maxAttachments?: number;
   readonly maxBytes?: number;
+  /** The decoded-byte budget shared by all attachments in one start. */
+  readonly maxTotalBytes?: number;
 }
 
 /** One attachment exactly as the protocol states it. */
@@ -102,6 +113,10 @@ export function safeAttachmentFilename(filename: string): string {
   return bare;
 }
 
+function base64LengthFor(bytes: number): number {
+  return Math.ceil(bytes / 3) * 4;
+}
+
 function decodeBase64(text: string): Uint8Array | undefined {
   let binary: string;
   try {
@@ -131,6 +146,11 @@ export function decodeInitialAttachment(
 ): DecodedInitialAttachment {
   const maxBytes = limits.maxBytes ?? MAX_INITIAL_ATTACHMENT_BYTES;
   const filename = safeAttachmentFilename(request.filename);
+  // `atob` must materialize the entire decoded payload. Refuse from the encoded length first so a
+  // caller cannot make the process allocate a multi-gigabyte string merely to learn it is too big.
+  if (request.base64.length > base64LengthFor(maxBytes)) {
+    throw new InitialAttachmentError('too_large', `attachment ${filename} is over the ${maxBytes}-byte limit`);
+  }
   const bytes = decodeBase64(request.base64);
   if (bytes === undefined || bytes.byteLength === 0) {
     throw new InitialAttachmentError('undecodable', `attachment ${filename} is not decodable base64 content`);
@@ -158,13 +178,26 @@ export function decodeInitialAttachments(
   limits: InitialAttachmentLimits = {},
 ): readonly DecodedInitialAttachment[] {
   const maxAttachments = limits.maxAttachments ?? MAX_INITIAL_ATTACHMENTS;
+  const maxBytes = limits.maxBytes ?? MAX_INITIAL_ATTACHMENT_BYTES;
+  const maxTotalBytes = limits.maxTotalBytes ?? MAX_INITIAL_ATTACHMENT_TOTAL_BYTES;
   if (requests.length > maxAttachments) {
     throw new InitialAttachmentError(
       'too_many',
       `a start may carry at most ${maxAttachments} attachments; this one carries ${requests.length}`,
     );
   }
-  return requests.map(request => decodeInitialAttachment(request, limits));
+  const attachments: DecodedInitialAttachment[] = [];
+  let totalBytes = 0;
+  for (const request of requests) {
+    const remaining = maxTotalBytes - totalBytes;
+    if (remaining <= 0) {
+      throw new InitialAttachmentError('too_large', `initial attachments exceed the ${maxTotalBytes}-byte total limit`);
+    }
+    const attachment = decodeInitialAttachment(request, { ...limits, maxBytes: Math.min(maxBytes, remaining) });
+    totalBytes += attachment.bytes.byteLength;
+    attachments.push(attachment);
+  }
+  return attachments;
 }
 
 /** Text lifted out of an attachment, and where it will be written. */
