@@ -123,6 +123,14 @@ describe('decodeInitialAttachment', () => {
     should(MAX_INITIAL_ATTACHMENT_BYTES).equal(32 * 1024 * 1024);
     should(MAX_INITIAL_ATTACHMENTS).equal(16);
   });
+
+  it('should refuse an encoded payload before decoding bytes beyond the budget', () => {
+    // The body is untrusted and `atob` allocates before it can report a decoded size. The encoded
+    // length check keeps that allocation bounded even when the caller lies with valid base64.
+    should(() => decodeInitialAttachment({ filename: 'huge.bin', base64: 'A'.repeat(17) }, { maxBytes: 12 })).throw(
+      'attachment huge.bin is over the 12-byte limit',
+    );
+  });
 });
 
 describe('decodeInitialAttachments', () => {
@@ -150,6 +158,32 @@ describe('decodeInitialAttachments', () => {
     should(() => decodeInitialAttachments(stated.slice(0, 2), { maxAttachments: 1 })).throw(
       'a start may carry at most 1 attachments; this one carries 2',
     );
+  });
+
+  it('should apply one decoded-byte budget across the whole start', () => {
+    // The individual files are valid under their own ceiling, but retaining both while composing
+    // the opening message would exceed the daemon's one-start allocation budget.
+    should(() =>
+      decodeInitialAttachments(
+        [
+          { filename: 'one.txt', base64: base64('12345678') },
+          { filename: 'two.txt', base64: base64('abcdefgh') },
+        ],
+        { maxBytes: 8, maxTotalBytes: 12 },
+      ),
+    ).throw('attachment two.txt is over the 4-byte limit');
+
+    // Once an attachment has spent the whole budget, reject the next one without attempting to
+    // decode its base64 at all.
+    should(() =>
+      decodeInitialAttachments(
+        [
+          { filename: 'one.txt', base64: base64('12345678') },
+          { filename: 'two.txt', base64: base64('abcdefgh') },
+        ],
+        { maxBytes: 8, maxTotalBytes: 8 },
+      ),
+    ).throw('initial attachments exceed the 8-byte total limit');
   });
 });
 
