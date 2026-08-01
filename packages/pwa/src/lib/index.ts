@@ -42,6 +42,7 @@ export * from '../features/warden/warden-verdicts.tsx';
 export * from '../hooks/use-attention.ts';
 export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
+export * from '../hooks/use-fleet-view.ts';
 export * from '../hooks/use-keyboard-open.ts';
 export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-live-clock.ts';
