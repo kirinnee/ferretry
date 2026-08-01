@@ -7,6 +7,7 @@ import { SuggestNamesController } from '../../../src/lib/session/name-controller
 import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
 import { ListSessionsController } from '../../../src/lib/session/ps-controller.ts';
 import { SendMessageController } from '../../../src/lib/session/send-controller.ts';
+import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
 import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
 import { attachmentView, capturedPresenter, FakeFiles, RecordingApi } from './controller-doubles.ts';
@@ -422,5 +423,116 @@ describe('ResumeSessionController', () => {
 
     // Assert
     should(api.calls).deepEqual([{ method: 'resume', args: ['ses-1', undefined] }]);
+  });
+});
+
+describe('SignalSessionController', () => {
+  it('should record a declared peer wait for the calling session', async () => {
+    // Arrange
+    const waiting = sessionView(
+      {},
+      { status: 'waiting', waiting: { since: '2026-01-01T00:00:00.000Z', peer: 'ses-peer', peerName: 'Hayden' } },
+    );
+    const api = new RecordingApi({ signal: waiting });
+    const { io, presenter } = capturedPresenter();
+    const controller = new SignalSessionController(api, presenter, IN_PANE);
+
+    // Act
+    await controller.execute('waiting', ' build ', { peer: ' Hayden ', on: ' a reply ', until: ' 2h ' });
+
+    // Assert
+    should(api.calls[0]?.args).deepEqual([
+      'ses-caller',
+      'waiting',
+      'build',
+      { until: '2h', condition: 'a reply', peer: 'Hayden' },
+    ]);
+    should(io.out[0]).containEql('waiting recorded for a reply from Hayden (open-ended)');
+    should(io.out[0]).containEql('daemon wakes this session');
+  });
+
+  it('should accept an explicit session and report a condition deadline', async () => {
+    // Arrange
+    const waiting = sessionView(
+      {},
+      {
+        status: 'waiting',
+        waiting: { since: '2026-01-01T00:00:00.000Z', condition: 'CI', until: '2026-01-01T02:00:00.000Z' },
+      },
+    );
+    const api = new RecordingApi({ signal: waiting });
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new SignalSessionController(api, presenter, HERE).execute('waiting', undefined, {
+      session: ' Fable ',
+      on: 'CI',
+    });
+
+    // Assert
+    should(api.calls[0]?.args[0]).equal('Fable');
+    should(io.out[0]).containEql('for CI until 2026-01-01T02:00:00.000Z');
+  });
+
+  it('should print the resulting session as JSON', async () => {
+    // Arrange
+    const api = new RecordingApi({ signal: sessionView({}, { status: 'completed' }) });
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new SignalSessionController(api, presenter, IN_PANE).execute('done', undefined, { json: true });
+
+    // Assert
+    should(JSON.parse(io.out[0] ?? '')).have.property('state');
+  });
+
+  it('should render each non-waiting lifecycle acknowledgement', async () => {
+    // Arrange
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    for (const kind of ['done', 'help', 'working'] as const) {
+      const api = new RecordingApi({ signal: sessionView() });
+      await new SignalSessionController(api, presenter, IN_PANE).execute(
+        kind,
+        kind === 'help' ? 'blocked' : undefined,
+        {},
+      );
+    }
+
+    // Assert
+    should(io.out).deepEqual(['done signal recorded', 'help signal recorded', 'working signal recorded']);
+  });
+
+  it('should reject caller mistakes before contacting the daemon', async () => {
+    // Arrange
+    const api = new RecordingApi({ signal: sessionView() });
+    const { presenter } = capturedPresenter();
+
+    // Act + Assert
+    await should(new SignalSessionController(api, presenter, IN_PANE).execute('nope', undefined, {})).be.rejectedWith(
+      /kind must be one of/u,
+    );
+    await should(new SignalSessionController(api, presenter, HERE).execute('done', undefined, {})).be.rejectedWith(
+      /FY_SESSION_ID is unset/u,
+    );
+    await should(new SignalSessionController(api, presenter, IN_PANE).execute('help', '   ', {})).be.rejectedWith(
+      'signal help requires a message',
+    );
+    await should(
+      new SignalSessionController(api, presenter, IN_PANE).execute('done', undefined, { until: '2h' }),
+    ).be.rejectedWith('--until/--on/--peer apply to `signal waiting`');
+    should(api.calls).be.empty();
+  });
+
+  it('should fail closed when a waiting response carries no wait evidence', async () => {
+    // Arrange
+    const api = new RecordingApi({ signal: sessionView({}, { status: 'waiting' }) });
+    const { presenter } = capturedPresenter();
+
+    // Act + Assert
+    await should(
+      new SignalSessionController(api, presenter, IN_PANE).execute('waiting', undefined, {}),
+    ).be.rejectedWith('daemon accepted waiting but returned no declared-wait state');
   });
 });

@@ -5,6 +5,7 @@ import type { SuggestNamesController } from './name-controller.ts';
 import type { SessionPresenter } from './presenter.ts';
 import type { ListSessionsController } from './ps-controller.ts';
 import type { SendMessageController } from './send-controller.ts';
+import type { SignalSessionController } from './signal-controller.ts';
 import type { StartSessionController } from './start-controller.ts';
 import type { SessionStatusController } from './status-controller.ts';
 
@@ -19,6 +20,7 @@ export interface SessionCommandDeps {
   readonly names: SuggestNamesController;
   readonly interrupt: InterruptSessionController;
   readonly resume: ResumeSessionController;
+  readonly signal: SignalSessionController;
 }
 
 /** Repeatable option accumulator. */
@@ -235,6 +237,28 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
       guard(async (id: string, parts: string[], options: CommanderOptions) => {
         await deps.resume.execute(id, {
           ...(joined(parts) === undefined ? {} : { message: joined(parts) }),
+          ...(flag(options, 'json') === undefined ? {} : { json: true }),
+        });
+      }),
+    );
+
+  program
+    .command('signal')
+    .description('done | help | waiting | working — the teammate lifecycle signals')
+    .argument('<kind>', 'done, help, waiting, or working')
+    .argument('[message...]', 'optional signal detail; required for help')
+    .option('--session <id>', 'session id or callsign; defaults to FY_SESSION_ID')
+    .option('--until <when>', 'waiting deadline as a duration (45m, 2h) or ISO timestamp')
+    .option('--on <condition>', 'what external condition is being waited for')
+    .option('--peer <id>', 'park until this teammate sends a reply')
+    .option('--json', 'print the resulting session as JSON')
+    .action(
+      guard(async (kind: string, parts: string[], options: CommanderOptions) => {
+        await deps.signal.execute(kind, joined(parts), {
+          ...(text(options, 'session') === undefined ? {} : { session: text(options, 'session') }),
+          ...(text(options, 'until') === undefined ? {} : { until: text(options, 'until') }),
+          ...(text(options, 'on') === undefined ? {} : { on: text(options, 'on') }),
+          ...(text(options, 'peer') === undefined ? {} : { peer: text(options, 'peer') }),
           ...(flag(options, 'json') === undefined ? {} : { json: true }),
         });
       }),

@@ -12,6 +12,7 @@ export * from './registration.ts';
 export * from './selection.ts';
 export * from './send-controller.ts';
 export * from './send-plan.ts';
+export * from './signal-controller.ts';
 export * from './start-controller.ts';
 export * from './start-request.ts';
 export * from './status-controller.ts';

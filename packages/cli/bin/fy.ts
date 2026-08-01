@@ -71,6 +71,7 @@ import {
   SendMessageController,
   type SessionEnvironment,
   SessionPresenter,
+  SignalSessionController,
   SessionStatusController,
   StartSessionController,
   SuggestNamesController,
@@ -405,6 +406,7 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
     names: new SuggestNamesController(api, presenter),
     interrupt: new InterruptSessionController(api, presenter),
     resume: new ResumeSessionController(api, presenter),
+    signal: new SignalSessionController(api, presenter, environment),
   };
 }
 

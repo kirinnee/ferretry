@@ -9,6 +9,7 @@ import type { SessionEnvironment } from '../../../src/lib/session/ports.ts';
 import { ListSessionsController } from '../../../src/lib/session/ps-controller.ts';
 import { registerSessionCommands } from '../../../src/lib/session/registration.ts';
 import { SendMessageController } from '../../../src/lib/session/send-controller.ts';
+import { SignalSessionController } from '../../../src/lib/session/signal-controller.ts';
 import { StartSessionController } from '../../../src/lib/session/start-controller.ts';
 import { SessionStatusController } from '../../../src/lib/session/status-controller.ts';
 import { attachmentView, type CapturedIo, capturedPresenter, FakeFiles, RecordingApi } from './controller-doubles.ts';
@@ -55,6 +56,7 @@ function harness(
     names: new SuggestNamesController(api, presenter),
     interrupt: new InterruptSessionController(api, presenter),
     resume: new ResumeSessionController(api, presenter),
+    signal: new SignalSessionController(api, presenter, environment),
   });
   return {
     api,
@@ -341,5 +343,26 @@ describe('registerSessionCommands · the rest of the group', () => {
     // Assert
     should(subject.api.calls).deepEqual([{ method: 'suggestNames', args: [1] }]);
     should(JSON.parse(subject.io.out.join('\n'))).deepEqual(['Hayden']);
+  });
+
+  it('should record a lifecycle signal for the current session', async () => {
+    // Arrange
+    const waiting = sessionView(
+      {},
+      { status: 'waiting', waiting: { since: '2026-01-01T00:00:00.000Z', peer: 'ses-peer' } },
+    );
+    const subject = harness({ signal: waiting }, { cwd: '/work/repo', callerSessionId: 'ses-caller' });
+
+    // Act
+    await subject.run(['signal', 'waiting', 'external', 'build', '--peer', 'ses-peer', '--until', '45m', '--json']);
+
+    // Assert
+    should(subject.api.calls[0]?.args).deepEqual([
+      'ses-caller',
+      'waiting',
+      'external build',
+      { until: '45m', peer: 'ses-peer' },
+    ]);
+    should(JSON.parse(subject.io.out[0] ?? '')).have.property('state');
   });
 });
