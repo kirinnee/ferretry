@@ -6,15 +6,77 @@ import { AtomicFileWriter } from '../../../src/adapters/tasks/atomic-file.ts';
 import { SystemInstantSource } from '../../../src/adapters/tasks/file-operations.ts';
 import { FileTaskStore } from '../../../src/adapters/tasks/file-task-store.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/tasks/serial-executor.ts';
+import { TaskRecordService } from '../../../src/adapters/tasks/task-record-service.ts';
+import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import { ApiRouter } from '../../../src/lib/api/router.ts';
+import { taskRoutes, type TaskSubsystem } from '../../../src/lib/runtime/mounts/tasks.ts';
+import { TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
-import { createdActivity, shouldReject, task, withTempRoot } from './fixtures.ts';
+import { jsonBody, request } from '../../unit/api/support.ts';
+import { CREDENTIALS, human } from '../../unit/runtime/mounts/support.ts';
+import { createdActivity, INSTANT, shouldReject, task, withTempRoot } from './fixtures.ts';
 
-const boardPath = (root: string): string => join(root, 'boards', 'session-alpha', 'tasks.json');
+const SESSION = 'session-alpha';
+
+const boardPath = (root: string): string => join(root, 'boards', SESSION, 'tasks.json');
 
 const snapshot = (...ids: readonly string[]): TaskSnapshot => ({
   v: 1,
   tasks: ids.map(id => ({ task: task({ id: id as never }), activity: [createdActivity()] })),
 });
+
+/**
+ * A genuinely damaged board: the first entry is missing everything the decoder needs, the second is
+ * a perfectly good task. This is the harder shape of damage — the file still parses as JSON, so only
+ * the per-entry check stands between a half-read board and a caller that would trust it.
+ */
+const DAMAGED_BOARD = JSON.stringify({
+  v: 1,
+  tasks: [{ task: { id: 'F1' } }, { task: task(), activity: [createdActivity()] }],
+});
+
+/**
+ * Asserts the call fails as a PERSISTENCE refusal.
+ *
+ * Deliberately not `shouldReject`, which asserts a `TaskError` carrying a protocol code: a damaged
+ * snapshot is not in that taxonomy at all, and asserting it there is what let the mount answer 400.
+ */
+const shouldBeUnavailable = async (act: () => Promise<unknown>): Promise<void> => {
+  let thrown: unknown;
+  try {
+    await act();
+  } catch (error) {
+    thrown = error;
+  }
+  should(thrown).be.instanceof(TaskStateUnavailableError);
+  should((thrown as TaskStateUnavailableError).code).equal('unavailable');
+};
+
+/** Writes `content` as the board's authoritative snapshot, creating the board directory for it. */
+const writeBoard = async (root: string, content: string): Promise<string> => {
+  const path = boardPath(root);
+  await mkdir(join(root, 'boards', SESSION), { recursive: true });
+  await writeFile(path, content);
+  return path;
+};
+
+/**
+ * The daemon's real task routes over a real file-backed board.
+ *
+ * Nothing here is a double: the router, the dispatcher, the record service and the store are the
+ * production ones, and the only thing under the test's control is the bytes on disk. That is what
+ * makes the status assertions below evidence about the daemon rather than about a fixture.
+ */
+const mountedOver = (path: string): ApiDispatcher => {
+  const board = new TaskRecordService(SESSION, new FileTaskStore(path), { now: () => INSTANT });
+  const subsystem: TaskSubsystem = {
+    board: () => board,
+    sessionIds: async () => [SESSION],
+    observe: async () => new Map(),
+    now: () => INSTANT,
+  };
+  return new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
+};
 
 describe('FileTaskStore', () => {
   it('should read an empty board before anything has ever been written', async () => {
@@ -86,13 +148,8 @@ describe('FileTaskStore', () => {
   it('should diagnose a damaged entry but refuse to use or rewrite the partial board', async () => {
     await withTempRoot(async root => {
       // Arrange
-      const path = boardPath(root);
-      await mkdir(join(root, 'boards', 'session-alpha'), { recursive: true });
-      const damaged = JSON.stringify({
-        v: 1,
-        tasks: [{ task: { id: 'F1' } }, { task: task(), activity: [createdActivity()] }],
-      });
-      await writeFile(path, damaged);
+      const damaged = DAMAGED_BOARD;
+      const path = await writeBoard(root, damaged);
       const store = new FileTaskStore(path);
 
       // Act
@@ -103,8 +160,8 @@ describe('FileTaskStore', () => {
       should(decoded.fatal).be.false();
       should(decoded.snapshot.tasks).have.length(1);
       should(decoded.parseErrors).have.length(1);
-      await shouldReject('invalid', () => store.read());
-      await shouldReject('invalid', () => store.transact(() => ({ container: snapshot('F2'), result: null })));
+      await shouldBeUnavailable(() => store.read());
+      await shouldBeUnavailable(() => store.transact(() => ({ container: snapshot('F2'), result: null })));
       should(await readFile(path, 'utf8')).equal(damaged);
     });
   });
@@ -112,13 +169,11 @@ describe('FileTaskStore', () => {
   it('should refuse to mutate a board it could not read, preserving the evidence', async () => {
     await withTempRoot(async root => {
       // Arrange
-      const path = boardPath(root);
-      await mkdir(join(root, 'boards', 'session-alpha'), { recursive: true });
-      await writeFile(path, 'not json at all');
+      const path = await writeBoard(root, 'not json at all');
       const store = new FileTaskStore(path);
 
       // Act & Assert
-      await shouldReject('invalid', () => store.transact(() => ({ container: snapshot('F1'), result: null })));
+      await shouldBeUnavailable(() => store.transact(() => ({ container: snapshot('F1'), result: null })));
       should(await readFile(path, 'utf8')).equal('not json at all');
     });
   });
@@ -190,6 +245,76 @@ describe('FileTaskStore', () => {
       // Assert — a real ISO instant, not a fixture
       should(Number.isNaN(Date.parse(store.now()))).be.false();
       should((await store.read()).tasks).have.length(1);
+    });
+  });
+});
+
+/**
+ * What a damaged board on disk answers over HTTP.
+ *
+ * The store's refusal only matters if it survives the mount, and the mount is where it was being
+ * mistranslated: a corrupt snapshot came out as `TaskError('invalid')`, which the status table
+ * answers 400, telling an operator their perfectly well-formed request was wrong. These drive the
+ * real routes over a real file so nothing but the bytes on disk is a fixture.
+ */
+describe('the task mount over a damaged snapshot', () => {
+  it('should answer a task read with a server-side status, never the caller’s fault', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const dispatch = mountedOver(await writeBoard(root, DAMAGED_BOARD));
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: `/v1/sessions/${SESSION}/tasks/F1`, headers: human }));
+
+      // Assert
+      should(response.status).equal(503);
+      should(response.status).not.equal(400);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+    });
+  });
+
+  it('should answer a write against a damaged board the same way, and leave the evidence alone', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const path = await writeBoard(root, 'not json at all');
+      const dispatch = mountedOver(path);
+
+      // Act
+      const response = await dispatch.dispatch(
+        request({
+          method: 'POST',
+          path: `/v1/sessions/${SESSION}/tasks`,
+          headers: { ...human, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            kind: 'feature',
+            title: 'Wire the boards',
+            ask: { text: 'wire it', source: 'human' },
+          }),
+        }),
+      );
+
+      // Assert
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+      // The refusal must not have replaced the corrupt board with an apparently healthy one.
+      should(await readFile(path, 'utf8')).equal('not json at all');
+    });
+  });
+
+  it('should still call a request the caller got wrong a bad request', async () => {
+    await withTempRoot(async root => {
+      // A damaged board must not turn every answer into a 5xx: an unknown filter is still 400.
+      // Arrange
+      const dispatch = mountedOver(await writeBoard(root, DAMAGED_BOARD));
+
+      // Act
+      const response = await dispatch.dispatch(
+        request({ path: `/v1/sessions/${SESSION}/tasks`, headers: human, query: [['owner', 'ossy']] }),
+      );
+
+      // Assert
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'unknown_filter');
     });
   });
 });

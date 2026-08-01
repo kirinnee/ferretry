@@ -21,7 +21,14 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { TaskError, taskBlockedBy, type TaskActor, type TaskEntry, type TaskParseIssue } from '../../tasks/index.ts';
+import {
+  TaskError,
+  TaskStateUnavailableError,
+  taskBlockedBy,
+  type TaskActor,
+  type TaskEntry,
+  type TaskParseIssue,
+} from '../../tasks/index.ts';
 
 /**
  * The task record board's HTTP surface: one session's tasks, the fleet's tasks, and one task's whole
@@ -95,6 +102,9 @@ export interface TaskSubsystem {
  * well-formed and the board's current state is what refused it — so they answer 409 and a client can
  * distinguish "you asked wrongly" from "you asked at the wrong time". `ambiguous` is 409 for the same
  * reason: the board holds two records under one id, which is the board's problem to resolve.
+ *
+ * Every code here describes something a CALLER did, so `invalid` stays 400. A board the store cannot
+ * read is not in this table at all — see {@link TASK_UNAVAILABLE_STATUS}.
  */
 const TASK_ERROR_STATUS: Readonly<Record<TaskErrorCode, number>> = {
   invalid: 400,
@@ -127,9 +137,23 @@ export function taskActor(actor: ApiActor | undefined): TaskActor {
     : { kind: 'human', id: raw, name: null, sessionId: null };
 }
 
+/**
+ * How a persistence refusal is reported: 503, never a 4xx.
+ *
+ * A damaged board is state this daemon holds and will not serve, not a request anyone should
+ * rephrase — the caller could retry the identical request forever and it would keep failing until an
+ * operator repairs the file. 503 rather than 500 because 500 in this API means a DEFECT, whose
+ * message the dispatcher replaces with a fixed one; this is a known, named condition the daemon can
+ * explain. It is the status the task-board mount already gives `unavailable`, raised by the sibling
+ * repository over exactly this — a durable document it refuses to read.
+ */
+const TASK_UNAVAILABLE_STATUS = 503;
+
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug still
  *  becomes a 500 instead of being reported as the client's fault. */
 function reraise(error: unknown): never {
+  if (error instanceof TaskStateUnavailableError)
+    throw new ApiError(TASK_UNAVAILABLE_STATUS, error.message, error.code);
   if (error instanceof TaskError) throw new ApiError(TASK_ERROR_STATUS[error.code], error.message, error.code);
   throw error;
 }

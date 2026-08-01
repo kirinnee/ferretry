@@ -87,6 +87,7 @@ import {
   emptyTaskSnapshot,
   requireTaskEntry,
   TaskError,
+  TaskStateUnavailableError,
   type TaskActor,
   type TaskEntry,
   type TaskParseIssue,
@@ -201,12 +202,16 @@ export class FakeTaskBoard implements TaskBoardPort {
     private readonly sessionId: string,
     private snapshot: TaskSnapshot = emptyTaskSnapshot(),
     private readonly parseErrors: readonly TaskParseIssue[] = [],
-    /** Set to make every read fail, standing in for a snapshot the decoder refused. */
+    /**
+     * Set to make every read fail, standing in for a snapshot the decoder refused. It raises the
+     * SAME error the file store raises over a damaged snapshot — a persistence refusal, not a
+     * protocol one — so a route test cannot pass here on a classification the daemon never produces.
+     */
     private readonly unreadable = false,
   ) {}
 
   async list(): Promise<{ readonly entries: readonly TaskEntry[]; readonly parseErrors: readonly TaskParseIssue[] }> {
-    if (this.unreadable) throw new TaskError('invalid', 'the snapshot could not be read');
+    if (this.unreadable) throw new TaskStateUnavailableError('the snapshot could not be read');
     return { entries: this.snapshot.tasks, parseErrors: this.parseErrors };
   }
 

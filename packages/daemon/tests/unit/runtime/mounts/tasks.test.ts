@@ -370,8 +370,9 @@ describe('the task board mount', () => {
       should(body.parseErrorIds).deepEqual(['F7']);
     });
 
-    it('should report an unreadable board as a refusal rather than an empty one', async () => {
-      // Replacing a corrupt board with an apparently empty one destroys the evidence.
+    it('should report an unreadable board as the daemon’s own state, not the caller’s request', async () => {
+      // Replacing a corrupt board with an apparently empty one destroys the evidence, and answering
+      // 400 sends an operator to audit a request that was perfectly well formed.
       // Arrange
       const dispatch = dispatcher({ boards: { s1: new FakeTaskBoard('s1', undefined, [], true) } });
 
@@ -379,8 +380,8 @@ describe('the task board mount', () => {
       const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
 
       // Assert
-      should(response.status).equal(400);
-      should(jsonBody(response)).have.property('code', 'invalid');
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
     });
   });
 

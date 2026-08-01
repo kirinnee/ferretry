@@ -1,4 +1,4 @@
-import { TaskError } from '../../lib/tasks/task-error.ts';
+import { TaskStateUnavailableError } from '../../lib/tasks/task-error.ts';
 import type { DecodedTaskSnapshot, TaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
 import { emptyTaskSnapshot, parseTaskSnapshot, serializeTaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
 import type { TaskStoreMutation, TaskStorePort } from '../../lib/tasks/task-store-port.ts';
@@ -76,12 +76,17 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
     });
   }
 
-  /** One malformed entry or activity is enough to make a whole-snapshot replacement destructive. */
+  /**
+   * One malformed entry or activity is enough to make a whole-snapshot replacement destructive.
+   *
+   * The refusal is a PERSISTENCE failure, not a protocol one: whoever asked did nothing wrong, and
+   * this file is damaged until an operator repairs it. Raising it as `TaskError('invalid')` made the
+   * HTTP mount answer 400 and blame the caller for the daemon's own unreadable board.
+   */
   private requireClean(decoded: DecodedTaskSnapshot): TaskSnapshot {
     const first = decoded.parseErrors[0];
     if (first !== undefined) {
-      throw new TaskError(
-        'invalid',
+      throw new TaskStateUnavailableError(
         `refusing to use a damaged task snapshot at ${this.snapshotPath}: ${first.detail}`,
       );
     }
