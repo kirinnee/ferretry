@@ -555,6 +555,20 @@ export class FyApiClient implements IFyApiClient {
     this.#onVersionSkew?.(skew);
   }
 
+  /**
+   * Re-requests the child grant a recovered start could not confirm the daemon had made.
+   *
+   * Only the RECOVERY path reaches here: a start whose POST was answered had its grant requested by
+   * the daemon, which is why the board capability travels on `/v1/sessions` at all. When both POSTs
+   * died in transport the client cannot know how far the daemon got, so it asks again — and the ask
+   * is safe to repeat because the board derives its own request id from the operation's identity and
+   * replays rather than opening a second intent.
+   *
+   * The path is plural. `/v1/task-boards` is the prefix the daemon mounts and the one
+   * `TASK_BOARD_ROUTE_PREFIX` names for the CLI's own eleven routes; the singular spelling this used
+   * to carry reached no route at all, so the one call that exists to make a recovered start whole
+   * answered `unknown_route`.
+   */
   async #ensureBoardAccess(
     view: SessionView,
     role: Exclude<StartSessionRequestInput['boardAccess'], undefined | 'none'>,
@@ -563,7 +577,7 @@ export class FyApiClient implements IFyApiClient {
     capability: string,
   ): Promise<void> {
     await this.request(
-      '/v1/task-board/child-grants/request',
+      '/v1/task-boards/child-grants/request',
       TaskBoardGrantRequestViewSchema,
       {
         ...jsonRequest('POST', TaskBoardChildGrantRequestSchema, {

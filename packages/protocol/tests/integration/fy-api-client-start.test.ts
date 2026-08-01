@@ -153,7 +153,7 @@ describe('FyApiClient session start', () => {
     const digest = digestOf(bodyStringOf(transport, 0));
     should(actual).deepEqual(sessionView);
     should(transport.calls).have.length(8);
-    should(transport.calls[7]?.url).equal(`${BASE_URL}/v1/task-board/child-grants/request`);
+    should(transport.calls[7]?.url).equal(`${BASE_URL}/v1/task-boards/child-grants/request`);
     should(transport.calls[7]?.init.method).equal('POST');
     should(jsonBodyOf(transport, 7)).deepEqual({ targetSessionId: sessionView.config.id, role: 'worker' });
     should(headersOf(transport, 7).get('x-fy-request-id')).equal(`caller-request-2:board-access:${digest}`);
