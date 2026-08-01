@@ -140,6 +140,9 @@ try {
       const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
       await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
       process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
+      const settingsPageTarget = join(outDir, `settings-page-${viewport.name}.png`);
+      await page.getByLabel('Settings page preview').screenshot({ path: settingsPageTarget });
+      process.stdout.write(`📸 Settings page -> ${settingsPageTarget}\n`);
       const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
       await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
       process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
