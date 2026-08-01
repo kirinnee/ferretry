@@ -2,10 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import {
   UNOPENABLE_NAME_REASON,
   changeRowLabel,
+  countLabel,
   crumbs,
+  dirPrefix,
   entryRefusal,
   formatBytes,
   isMarkdownPath,
+  isPlumbingMeta,
   isOpenablePath,
   joinRel,
   normalizeRel,
@@ -66,5 +69,16 @@ describe('files model', () => {
     expect(parsed.lines.filter(line => line.kind === 'del')[0]).toMatchObject({ text: '--', oldNo: 1 });
     expect(parsed.lines.filter(line => line.kind === 'add')[0]).toMatchObject({ text: '++', newNo: 1 });
     expect(renderableDiffLines(parsed).map(line => line.text)).toEqual(['@@ -1,2 +1,2 @@', '--', '++']);
+  });
+  it('handles binary, malformed and capped diffs plus display formatter boundaries', () => {
+    const binary = parseUnifiedDiff('Binary files a and b differ\n\\ No newline at end of file', 1);
+    expect(binary).toMatchObject({ binary: true, truncated: true, total: 2 });
+    expect(parseUnifiedDiff('@@ nonsense\nplain').lines.map(line => line.kind)).toEqual(['hunk', 'ctx']);
+    expect(isPlumbingMeta({ kind: 'meta', text: 'index abcd..0123' })).toBeTrue();
+    expect(dirPrefix('src/a.ts')).toBe('src/');
+    expect(formatBytes(10 * 1024 * 1024 * 1024)).toBe('10 GB');
+    expect(formatBytes(-1)).toBe('');
+    expect(countLabel(1, 'file')).toBe('1 file');
+    expect(countLabel(2, 'child', 'children')).toBe('2 children');
   });
 });
