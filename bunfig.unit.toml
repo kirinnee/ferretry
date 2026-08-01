@@ -1,7 +1,9 @@
 [test]
 root = "packages"
 pathIgnorePatterns = ["**/tests/integration/**", "**/tests/sit/**"]
-coverageReporter = ["text", "lcov"]
+# Bun 1.3.13 truncates LCOV at 640 KiB when the text reporter is also active.
+# The gate reads and validates the complete LCOV ledger directly.
+coverageReporter = ["lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true
 # Unit ledger = the domain tier only (src/lib, 100% goal); adapters/glue belong to other tiers, tests/** never counts.
