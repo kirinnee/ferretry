@@ -51,6 +51,7 @@ export * from '../hooks/use-debounce.ts';
 export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-fleet-view.ts';
+export * from '../hooks/use-input-modality.ts';
 export * from '../hooks/use-keyboard-open.ts';
 export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-live-clock.ts';
