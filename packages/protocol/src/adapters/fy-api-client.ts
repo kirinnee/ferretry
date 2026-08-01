@@ -454,13 +454,20 @@ export class FyApiClient implements IFyApiClient {
     return this.#post(id, 'resume', ResumeSessionRequestSchema, { message }, SessionViewSchema);
   }
 
-  migrate(id: string, agent: string, model?: string, allowContextDowngrade = false): Promise<SessionView> {
+  migrate(
+    id: string,
+    agent: string,
+    model?: string,
+    allowContextDowngrade = false,
+    requestId?: string,
+  ): Promise<SessionView> {
     return this.#post(
       id,
       'migrate',
       MigrateSessionRequestSchema,
       { agent, model, allowContextDowngrade },
       SessionViewSchema,
+      NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
     );
   }
 
@@ -603,14 +610,24 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
+  /**
+   * `requestId` is threaded as a SUPPLIED header rather than left to `request()`'s per-call default,
+   * because `request()` computes its logical id once and reuses it across all three retry attempts —
+   * so handing it one here is what makes the whole retry sequence one logical operation to the daemon.
+   */
   #post<RequestOutput, ResponseOutput>(
     id: string,
     action: string,
     requestSchema: z.ZodType<RequestOutput>,
     value: unknown,
     responseSchema: z.ZodType<ResponseOutput>,
+    requestId?: string,
   ): Promise<ResponseOutput> {
     const path = `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/${action}`;
-    return this.request(path, responseSchema, jsonRequest('POST', requestSchema, value));
+    const init = jsonRequest('POST', requestSchema, value);
+    if (requestId === undefined) return this.request(path, responseSchema, init);
+    const headers = new Headers(init.headers);
+    headers.set(FY_REQUEST_ID_HEADER, requestId);
+    return this.request(path, responseSchema, { ...init, headers });
   }
 }

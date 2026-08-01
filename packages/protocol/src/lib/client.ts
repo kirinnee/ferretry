@@ -82,7 +82,20 @@ export interface IFyApiClient {
   interrupt(id: string): Promise<SessionView>;
   stop(id: string, reason?: string): Promise<SessionView>;
   resume(id: string, message?: string): Promise<SessionView>;
-  migrate(id: string, agent: string, model?: string, allowContextDowngrade?: boolean): Promise<SessionView>;
+  /**
+   * `requestId` is the LOGICAL identity of one migration, and it is what makes this route safe to
+   * retry. A migration is destructive — the pane is killed and relaunched — and `request()` retries
+   * a POST up to three times on transport failure, so without a stable id a lost response would
+   * relaunch the session a second time. Omitted, one is minted per call, which is correct for a
+   * caller that never retries and wrong for one that does.
+   */
+  migrate(
+    id: string,
+    agent: string,
+    model?: string,
+    allowContextDowngrade?: boolean,
+    requestId?: string,
+  ): Promise<SessionView>;
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;

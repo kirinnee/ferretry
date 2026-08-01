@@ -24,7 +24,8 @@
  *
  * Rename and Migrate are entry points ONLY. This never performs them and never
  * bypasses their confirmations: it reports the choice and the owner renders the
- * sheet. (Those two sheets are not ported yet — see the PR's source coverage.)
+ * sheet. Both sheets are now exported; a production owner still waits on the
+ * repository-wide app-root/composition work, so this menu cannot mount them.
  */
 
 import type { SessionView } from '@ferretry/protocol';

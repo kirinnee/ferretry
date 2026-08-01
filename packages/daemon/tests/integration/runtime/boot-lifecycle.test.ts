@@ -1367,8 +1367,15 @@ describe('daemon boot lifecycle', () => {
     const id = started.config.id;
     const configFile = join(home, 'state', 'sessions', id, 'config.json');
     const reportFile = join(home, 'state', 'sessions', id, 'migration-inflight.md');
-    const migrate = async (body: unknown): Promise<Response> =>
-      await fetch(`${sessions}/${id}/migrate`, { method: 'POST', headers: cli, body: JSON.stringify(body) });
+    // Each ask carries its OWN request id, because each is a different question put to a world that
+    // has changed since the last one. Reusing an id is how the route recognises a retried POST, and a
+    // retry is exactly what these are not.
+    const migrate = async (body: unknown, requestId: string): Promise<Response> =>
+      await fetch(`${sessions}/${id}/migrate`, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': requestId },
+        body: JSON.stringify(body),
+      });
     const storedConfig = async (): Promise<Record<string, unknown>> =>
       JSON.parse(await readFile(configFile, 'utf8')) as Record<string, unknown>;
 
@@ -1377,7 +1384,7 @@ describe('daemon boot lifecycle', () => {
     reviver.pane = { alive: true, dead: false, promptReady: true };
     // The session is `running` and its pane holds nothing: an agent mid-turn is work this gate will
     // not interrupt, and it says so rather than moving a session out from under a thinking agent.
-    const midTurn = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const midTurn = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-1');
     const midTurnBody = (await midTurn.json()) as { error: string; code: string };
     const afterMidTurn = await storedConfig();
     // The account runs out of quota. Nothing mounted produces this status — the quota reader that
@@ -1390,20 +1397,20 @@ describe('daemon boot lifecycle', () => {
       { mode: 0o600 },
     );
     // The target serves a 200k window and this session was started on a 1M model.
-    const downgrade = await migrate({ agent: TARGET_WRAPPER });
+    const downgrade = await migrate({ agent: TARGET_WRAPPER }, 'req-migrate-ask-2');
     const afterDowngrade = await storedConfig();
     // A destructive command in the pane, which the gate must refuse to interrupt.
     inventory.observation = {
       kind: 'observed',
       processes: [{ pid: 4242, argv: 'git push origin main', verdict: 'destructive_to_interrupt' }],
     };
-    const refused = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const refused = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-3');
     const refusedBody = (await refused.json()) as { error: string; code: string };
     const afterRefusal = await storedConfig();
     const reportAfterRefusal = await readFile(reportFile, 'utf8').catch(() => undefined);
     // The command finished; nothing is in flight.
     inventory.observation = { kind: 'observed', processes: [] };
-    const moved = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true });
+    const moved = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-4');
     const movedRaw: unknown = await moved.json();
     // Same reason: a refused migration must fail with the refusal it answered, not with a schema
     // complaint about an error envelope.
@@ -1423,13 +1430,16 @@ describe('daemon boot lifecycle', () => {
     // is recorded on the STATE document, and reading the configuration's frozen copy first made every
     // second relaunch write `turn-002.md` a second time — over an assignment the agent may not have
     // read yet.
-    const movedBack = await migrate({ agent: WRAPPER });
+    const movedBack = await migrate({ agent: WRAPPER }, 'req-migrate-back');
     const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns'))).sort();
     const secondReport = await readFile(reportFile, 'utf8');
-    const unknownAgent = await migrate({ agent: 'claude-auto-nowhere', allowContextDowngrade: true });
+    const unknownAgent = await migrate(
+      { agent: 'claude-auto-nowhere', allowContextDowngrade: true },
+      'req-migrate-unknown',
+    );
     const absent = await fetch(`${sessions}/no-such-session/migrate`, {
       method: 'POST',
-      headers: cli,
+      headers: { ...cli, 'x-fy-request-id': 'req-migrate-absent' },
       body: JSON.stringify({ agent: TARGET_WRAPPER }),
     });
     release();

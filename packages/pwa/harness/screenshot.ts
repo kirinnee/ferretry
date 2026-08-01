@@ -245,6 +245,17 @@ try {
       await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
       process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
 
+      for (const [label, slug] of [
+        ['Session dashboard full table', 'session-dashboard-table'],
+        ['Session dashboard full cards', 'session-dashboard-cards'],
+        ['Session dashboard compact panel', 'session-dashboard-compact'],
+        ['Session dashboard scoped', 'session-dashboard-scoped'],
+      ] as const) {
+        const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
+        await page.getByLabel(label, { exact: true }).screenshot({ path: dashboardTarget });
+        process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
+      }
+
       const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
       await page.goto(`${server.url}?attachment-unlock`);
       await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });
@@ -332,6 +343,20 @@ try {
         await page.screenshot({ path: drawerTarget });
         process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
       }
+
+      const renameTarget = join(outDir, `${viewport.name}-rename.png`);
+      await page.goto(`${server.url}#rename`);
+      await page.reload();
+      await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
+      await page.screenshot({ path: renameTarget });
+      process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
+
+      const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
+      await page.goto(`${server.url}#migrate`);
+      await page.reload();
+      await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
+      await page.screenshot({ path: migrateTarget });
+      process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
 
       await context.close();
     }

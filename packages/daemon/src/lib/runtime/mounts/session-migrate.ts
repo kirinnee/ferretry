@@ -1,7 +1,13 @@
-import { MigrateSessionRequestSchema, type SessionView } from '@ferretry/protocol';
+import { FY_REQUEST_ID_HEADER, MigrateSessionRequestSchema, type SessionView } from '@ferretry/protocol';
+import {
+  MIGRATION_REPLAY_MAX_ENTRIES,
+  MigrationReplayCapacityError,
+  MigrationReplayGuard,
+  MigrationReplayMismatchError,
+} from '../../migrate/replay-guard.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
+import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
@@ -95,7 +101,37 @@ function refuse(error: unknown): never {
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
+  // 409: the id is usable, but it already names a different migration, and the caller has to decide
+  // which one it meant. Not 400 — the request itself is well formed.
+  if (error instanceof MigrationReplayMismatchError) throw new ApiError(409, error.message, 'request_id_reused');
+  // 503: the request is valid and the caller did nothing wrong — this daemon has simply recorded as
+  // many migrations as it will hold, and it refuses to start another rather than discard a receipt and
+  // let some later retry relaunch a session twice. NOTHING WAS DESTROYED to produce this answer.
+  //
+  // 503 rather than 429, because this is not a rate: waiting does not clear it. The ledger frees a
+  // slot only when a migration is refused before it touches the pane, and otherwise not until the
+  // process restarts — which the message says outright, since it is the operator's actual remedy.
+  if (error instanceof MigrationReplayCapacityError) throw new ApiError(503, error.message, 'migration_ledger_full');
   throw error;
+}
+
+/**
+ * Whether a rejection arrived AFTER the migration destroyed the pane.
+ *
+ * Only `failed` is: its own doc comment says "the relaunch under the new account was attempted and
+ * failed. The session records why" — the kill and the restamp are already behind it, so an automatic
+ * retry would relaunch a session that has no pane left. Every other failure in the taxonomy is
+ * decided before anything is touched: `invalid` and `not_found` never reach the session, `unusable`
+ * is refused precisely because nothing can be restamped safely, `unknown_agent` and `unavailable`
+ * reject the target, and `refused`/`context_downgrade` are the two gates that exist to stop the
+ * destruction happening. Those must stay retryable so the sheet's "Retry safety check" re-evaluates.
+ *
+ * An error outside the taxonomy — a bug, an I/O fault mid-relaunch — is retained. It cannot be
+ * placed relative to the point of no return, and the safe assumption about an unplaceable failure in
+ * a destructive operation is that the destruction happened.
+ */
+function committedAfterDestruction(error: unknown): boolean {
+  return error instanceof SessionMigrateError ? error.failure === 'failed' : true;
 }
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
@@ -107,16 +143,45 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
-/** Migrates a session, or answers a stated refusal. */
-async function migrate(subsystem: SessionMigrateSubsystem, context: RouteContext): Promise<ApiResponse> {
+/**
+ * The logical request id this migration is identified by.
+ *
+ * MANDATORY, for the same reason the start's is: the protocol client retries this POST up to three
+ * times on transport failure, and a migration kills and relaunches a pane. A request that cannot be
+ * recognised on its second arrival cannot be protected from performing its destruction twice, so the
+ * daemon refuses to begin one rather than accept a caller's word that it will never retry.
+ */
+function requestId(request: ApiRequest): string {
+  const value = headerValue(request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+  if (value === '')
+    throw new ApiError(
+      400,
+      `a migration must carry ${FY_REQUEST_ID_HEADER}: without it a retried request relaunches the session a second time`,
+      'missing_request_id',
+    );
+  return value;
+}
+
+/** Migrates a session, or answers a stated refusal — at most once per logical request id. */
+async function migrate(
+  subsystem: SessionMigrateSubsystem,
+  guard: MigrationReplayGuard,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, MigrateSessionRequestSchema);
-  const view = await subsystem
-    .migrate(sessionId, {
-      agent: request.agent,
-      ...(request.model === undefined ? {} : { model: request.model }),
-      allowContextDowngrade: request.allowContextDowngrade,
-    })
+  const id = requestId(context.request);
+  const target = {
+    agent: request.agent,
+    ...(request.model === undefined ? {} : { model: request.model }),
+    allowContextDowngrade: request.allowContextDowngrade,
+  };
+  // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
+  // because a third party presents it later as proof, whereas this only ever compares two requests
+  // the daemon parsed itself — and two spellings of one target are the same migration.
+  const fingerprint = JSON.stringify([target.agent, target.model ?? null, target.allowContextDowngrade]);
+  const view = await guard
+    .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.migrate(sessionId, target))
     .catch(refuse);
   return jsonResponse(view);
 }
@@ -130,15 +195,24 @@ async function migrate(subsystem: SessionMigrateSubsystem, context: RouteContext
  *
  * `noStore` because the answer is a live session view whose agent, model and status are exactly what
  * the call changed; a cached one describes the account the session just left.
+ *
+ * `maxReplayEntries` exists so a test can reach the ledger's admission limit in three requests instead
+ * of four thousand. Production never passes it.
  */
-export function sessionMigrateRoutes(subsystem: SessionMigrateSubsystem): readonly ApiRoute[] {
+export function sessionMigrateRoutes(
+  subsystem: SessionMigrateSubsystem,
+  maxReplayEntries: number = MIGRATION_REPLAY_MAX_ENTRIES,
+): readonly ApiRoute[] {
+  // One guard per mount, so it lives as long as the daemon does. A guard created per request would
+  // recognise nothing, which is the bug this route had.
+  const guard = new MigrationReplayGuard(committedAfterDestruction, maxReplayEntries);
   return [
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/migrate',
       scope: 'admin',
       noStore: true,
-      handle: async context => await migrate(subsystem, context),
+      handle: async context => await migrate(subsystem, guard, context),
     },
   ];
 }
