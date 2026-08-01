@@ -8,11 +8,8 @@
  * measurement path would be a second thing to keep true. The observer is
  * per-consumer and detaches with the component.
  *
- * THE PRODUCER IS NOT PORTED YET. kteam's `useAppViewport` is what writes the
- * attribute, from `visualViewport` baselines; it belongs with the app-viewport
- * unit, not with theme chrome. Until it lands, the attribute is simply never
- * set, this hook reports `false`, and every consumer behaves exactly as it does
- * on a desktop — which is the correct degradation, not a stub.
+ * `useAppViewport` is the producer: it writes the attribute from visual viewport
+ * geometry, while this hook only observes that stable shared signal.
  */
 
 import { useEffect, useState } from 'react';

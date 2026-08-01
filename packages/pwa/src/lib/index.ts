@@ -65,6 +65,7 @@ export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-fleet-view.ts';
 export * from '../hooks/use-input-modality.ts';
+export * from '../hooks/use-app-viewport.ts';
 export * from '../hooks/use-keyboard-open.ts';
 export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-live-clock.ts';

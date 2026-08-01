@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
-import { DENSITY_OPTIONS, implicitDensity, readImplicitDensity, useDensity } from '../../src/hooks/use-density.ts';
+import {
+  DENSITY_OPTIONS,
+  densityFromMatchMedia,
+  densityFromMediaQuery,
+  implicitDensity,
+  readImplicitDensity,
+  useDensity,
+} from '../../src/hooks/use-density.ts';
 import '../support/dom.ts';
 import { interact, mount } from '../support/dom.ts';
 
@@ -34,6 +41,14 @@ describe('density defaults', () => {
     expect(implicitDensity(false)).toBe('full');
     expect(DENSITY_OPTIONS.map(option => option.id)).toEqual(['full', 'compact', 'minimal']);
     expect(['full', 'compact']).toContain(readImplicitDensity());
+    expect(densityFromMediaQuery(() => true)).toBe('compact');
+    expect(
+      densityFromMediaQuery(() => {
+        throw new Error('unavailable');
+      }),
+    ).toBe('full');
+    expect(densityFromMatchMedia(undefined)).toBe('full');
+    expect(densityFromMatchMedia(() => ({ matches: false }))).toBe('full');
   });
 });
 

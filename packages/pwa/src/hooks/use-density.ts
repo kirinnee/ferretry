@@ -28,20 +28,26 @@ export const implicitDensity = (touchPrimary: boolean): Density => (touchPrimary
 
 let firstLoadDefault: Density | undefined;
 
+/** Reads one media-query result defensively; browser capability probes can throw in embedded webviews. */
+export const densityFromMediaQuery = (match: () => boolean): Density => {
+  try {
+    return implicitDensity(match());
+  } catch {
+    return 'full';
+  }
+};
+
+/** The browser-free capability port used by the cached first-load read below. */
+export const densityFromMatchMedia = (
+  matchMedia: ((query: string) => Readonly<{ matches: boolean }>) | undefined,
+): Density =>
+  matchMedia ? densityFromMediaQuery(() => matchMedia('(pointer: coarse) and (hover: none)').matches) : 'full';
+
 /** Samples the device once. Resizing must never turn an implicit preference into a stored choice. */
 export const readImplicitDensity = (): Density => {
   if (firstLoadDefault !== undefined) return firstLoadDefault;
-  if (typeof window === 'undefined' || !window.matchMedia) {
-    firstLoadDefault = 'full';
-    return firstLoadDefault;
-  }
-  try {
-    firstLoadDefault = implicitDensity(window.matchMedia('(pointer: coarse) and (hover: none)').matches);
-    return firstLoadDefault;
-  } catch {
-    firstLoadDefault = 'full';
-    return firstLoadDefault;
-  }
+  firstLoadDefault = typeof window === 'undefined' ? 'full' : densityFromMatchMedia(window.matchMedia);
+  return firstLoadDefault;
 };
 
 export interface DensityState {
