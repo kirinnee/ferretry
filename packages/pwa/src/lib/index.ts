@@ -40,6 +40,9 @@ export {
   learningStrength,
   ProposalCard,
 } from '../features/learning/learning-page.tsx';
+export * from '../features/lineage/lineage-name.tsx';
+export * from '../features/lineage/lineage-surface-model.ts';
+export * from '../features/lineage/lineage-surface.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
