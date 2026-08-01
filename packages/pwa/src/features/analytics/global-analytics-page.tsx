@@ -56,6 +56,18 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
   const [querying, setQuerying] = useState(true);
   const requestSerial = useRef(0);
   const treeIds = useMemo(() => [], []);
+  const [renderedDaemon, setRenderedDaemon] = useState(connection.daemonId);
+
+  // Invalidate daemon A during the re-scoped render. Waiting for an effect
+  // cleanup leaves one committed frame in which A can still publish under B.
+  if (renderedDaemon !== connection.daemonId) {
+    setRenderedDaemon(connection.daemonId);
+    requestSerial.current += 1;
+    setQuery(GLOBAL_ANALYTICS_DEFAULT_QUERY);
+    setQuerying(true);
+    setResult(null);
+    setError(null);
+  }
 
   const runQuery = useCallback(
     async (source: string) => {
@@ -176,6 +188,7 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               Global analytics query
             </label>
             <AnalyticsQueryAutocomplete
+              key={connection.daemonId}
               inputId={queryId}
               value={query}
               onValueChange={setQuery}

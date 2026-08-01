@@ -66,57 +66,94 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
   const [status, setStatus] = useState<LearningStatus | null>(null);
   const [proposals, setProposals] = useState<readonly ProposalView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // `busy` is a count of in-flight same-scope operations, not a boolean: two
+  // overlapping accepts/scans on one daemon keep the controls disabled until
+  // both finish, and a scope change resets it to zero.
+  const [busy, setBusy] = useState(0);
+
+  // A daemon switch starts a fresh load, but everything the old daemon started —
+  // the `Promise.all`, an in-flight accept, a running scan — is still on the
+  // network. Left unfenced, its late settle would paint the old daemon over the
+  // new one, or stamp the old daemon's error (or finalizer) across it.
+  //
+  // `scopeRef` is a monotonic epoch that advances on every daemonId change and
+  // is never reused, so even an A→B→A round trip gives the second A a fresh
+  // epoch and the first A's stale settle — whose daemonId would match again —
+  // is still dropped. Each async op captures the epoch at launch and publishes
+  // only while that epoch is still current.
+  //
+  // The epoch advances and the view clears *during render*, in the same pass
+  // that sees the new daemonId (React's adjust-state-when-a-prop-changes
+  // pattern), so the new daemon's render never briefly paints the old daemon's
+  // data: the clear is committed before paint, not deferred to an effect.
+  const scopeRef = useRef(0);
+  const [scopedDaemonId, setScopedDaemonId] = useState(connection.daemonId);
+  if (scopedDaemonId !== connection.daemonId) {
+    setScopedDaemonId(connection.daemonId);
+    scopeRef.current += 1;
+    setStatus(null);
+    setProposals([]);
+    setError(null);
+    setBusy(0);
+  }
+  // Frozen for this render so each `load`/`act`/`run` callback OWNS the epoch it
+  // was created under. The fence compares this immutable copy to the live
+  // `scopeRef.current`; capturing at render (not at invocation) is what stops a
+  // stale callback that is re-entered later — e.g. an old `act` calling its own
+  // old `load` after an A→B→A round trip — from re-reading the current epoch and
+  // publishing as though it were still current.
+  const scope = scopeRef.current;
+
   const load = useCallback(async () => {
     try {
       const [nextStatus, nextProposals] = await Promise.all([
         fetchLearningStatus(connection),
         fetchLearningProposals(connection),
       ]);
+      if (scopeRef.current !== scope) return;
       setStatus(nextStatus);
       setProposals(nextProposals);
       setError(null);
     } catch (reason) {
+      if (scopeRef.current !== scope) return;
       setError(learningErrorMessage(reason));
     }
-  }, [connection]);
+  }, [connection, scope]);
   useEffect(() => {
-    setStatus(null);
-    setProposals([]);
     void load();
   }, [load]);
   const act = useCallback(
     async (id: string, action: LearningActionRequest) => {
-      setBusy(true);
+      setBusy(count => count + 1);
       try {
         await actOnLearningProposal(connection, id, action);
         await load();
       } catch (reason) {
-        setError(learningErrorMessage(reason));
+        if (scopeRef.current === scope) setError(learningErrorMessage(reason));
       } finally {
-        setBusy(false);
+        if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
       }
     },
-    [connection, load],
+    [connection, load, scope],
   );
   const run = useCallback(async () => {
-    setBusy(true);
+    setBusy(count => count + 1);
     try {
       await runLearningScan(connection, true);
       await load();
     } catch (reason) {
-      setError(learningErrorMessage(reason));
+      if (scopeRef.current === scope) setError(learningErrorMessage(reason));
     } finally {
-      setBusy(false);
+      if (scopeRef.current === scope) setBusy(count => Math.max(0, count - 1));
     }
-  }, [connection, load]);
+  }, [connection, load, scope]);
   return (
     <LearningReview
       connection={connection}
       status={status}
       proposals={proposals}
       error={error}
-      busy={busy}
+      busy={busy > 0}
       now={now}
       onRun={run}
       onAction={act}
@@ -313,6 +350,7 @@ export function ProposalCard({
   const [draft, setDraft] = useState(proposal.ruleText);
   const [copied, setCopied] = useState<'rule' | 'patch' | null>(null);
   const [patchError, setPatchError] = useState<string | null>(null);
+  const editFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const strength = learningStrength(proposal.occurrences);
 
@@ -322,6 +360,13 @@ export function ProposalCard({
     },
     [],
   );
+
+  // Preserve the source page's desktop editing flow without the page-load
+  // autofocus attribute. Touch devices intentionally keep focus put so opening
+  // Edit does not cover the proposal with a software keyboard.
+  useEffect(() => {
+    if (editing && !touchAffected) editFieldRef.current?.focus();
+  }, [editing, touchAffected]);
 
   const markCopied = (kind: 'rule' | 'patch') => {
     if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current);
@@ -381,12 +426,9 @@ export function ProposalCard({
       </div>
       {editing ? (
         <textarea
+          ref={editFieldRef}
           className="kt-input resize-y"
           rows={3}
-          // Desktop opens Edit already able to type; a touch-affected device
-          // does not, because autofocus there throws a keyboard over the card
-          // the reader was about to read.
-          autoFocus={!touchAffected}
           aria-label={`Edit rule text for ${proposal.title}`}
           value={draft}
           onChange={event => setDraft(event.target.value)}

@@ -262,6 +262,111 @@ describe('useRemoteBrowser', () => {
     expect(harness.model().busy).toBe(false);
   });
 
+  it('does not let a stale daemon-a mutation finally clear daemon-b busy', async () => {
+    const clock = manualScheduler();
+    // Each runAction hands back a promise the test resolves by hand, in order.
+    const pending: Array<{
+      readonly resolve: (result: BrowserActionResult) => void;
+      readonly reject: (error: unknown) => void;
+    }> = [];
+    const harness = mount(
+      {
+        readStatus: async () => statusFor('s'),
+        runAction: () =>
+          new Promise<BrowserActionResult>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      },
+      clock.schedule,
+    );
+    await settle();
+    // Daemon A mutation goes in flight.
+    run(() => harness.model().runAction({ action: 'start' }));
+    expect(harness.model().busy).toBe(true);
+    // Pane re-scopes to daemon B while A is still pending.
+    await harness.setDaemon(daemonB);
+    expect(harness.model().busy).toBe(false);
+    // Daemon B mutation goes in flight.
+    run(() => harness.model().runAction({ action: 'reload' }));
+    expect(harness.model().busy).toBe(true);
+    // A resolves late. Its finally must not touch B's mutation accounting.
+    run(() => pending[0]?.resolve({ status: statusFor('daemon-a', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(true);
+    // A's late result is fenced off B's screen as well.
+    expect(harness.model().status?.sessionId).not.toBe('daemon-a');
+    // B resolves. Only now does busy clear, and B's result wins.
+    run(() => pending[1]?.resolve({ status: statusFor('daemon-b', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(false);
+    expect(harness.model().status?.sessionId).toBe('daemon-b');
+  });
+
+  it('does not let a stale daemon-a mutation rejection clear daemon-b busy', async () => {
+    const clock = manualScheduler();
+    const pending: Array<{
+      readonly resolve: (result: BrowserActionResult) => void;
+      readonly reject: (error: unknown) => void;
+    }> = [];
+    const harness = mount(
+      {
+        readStatus: async () => statusFor('s'),
+        runAction: () =>
+          new Promise<BrowserActionResult>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      },
+      clock.schedule,
+    );
+    await settle();
+    run(() => harness.model().runAction({ action: 'start' }));
+    await harness.setDaemon(daemonB);
+    run(() => harness.model().runAction({ action: 'reload' }));
+    expect(harness.model().busy).toBe(true);
+    // A rejects late. The shared finally path must stay scope-safe here too,
+    // and the fenced fail() must not surface A's error on B's screen.
+    run(() => pending[0]?.reject(new Error('daemon-a gone')));
+    await settle();
+    expect(harness.model().busy).toBe(true);
+    expect(harness.model().error).toBeNull();
+    run(() => pending[1]?.resolve({ status: statusFor('daemon-b', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(false);
+  });
+
+  it('does not confuse a stale mutation with the same daemon after an a-b-a rescope', async () => {
+    const clock = manualScheduler();
+    const pending: Array<(result: BrowserActionResult) => void> = [];
+    const harness = mount(
+      {
+        readStatus: async () => statusFor('s'),
+        runAction: () =>
+          new Promise<BrowserActionResult>(resolve => {
+            pending.push(resolve);
+          }),
+      },
+      clock.schedule,
+    );
+    await settle();
+    run(() => harness.model().runAction({ action: 'start' }));
+    await harness.setDaemon(daemonB);
+    await harness.setDaemon(daemonA);
+    run(() => harness.model().runAction({ action: 'reload' }));
+    expect(harness.model().busy).toBe(true);
+
+    // String identity alone would call both launches "daemon-a/session-1" and
+    // let the first finalizer settle the second. The scope epoch distinguishes
+    // the two visits even though their public identity is deliberately equal.
+    run(() => pending[0]?.({ status: statusFor('old-daemon-a', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(true);
+    expect(harness.model().status?.sessionId).not.toBe('old-daemon-a');
+    run(() => pending[1]?.({ status: statusFor('new-daemon-a', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(false);
+    expect(harness.model().status?.sessionId).toBe('new-daemon-a');
+  });
+
   it('detaches while inactive and cancels the poll on unmount', async () => {
     const clock = manualScheduler();
     let readCount = 0;

@@ -83,13 +83,15 @@ export function useRemoteBrowser({
   const generationRef = useRef(0);
   const mutationsRef = useRef(0);
   const scopeRef = useRef<string | null>(null);
+  const scopeEpochRef = useRef(0);
 
-  const scopeKey = `${daemon.daemonId} ${scope.daemonId} ${scope.sessionId}`;
+  const scopeKey = JSON.stringify([daemon.daemonId, scope.daemonId, scope.sessionId]);
 
   // Applied during render: a re-scoped pane must never paint the previous
   // daemon's lifecycle state, not even for the frame before its first response.
   if (scopeRef.current !== scopeKey) {
     scopeRef.current = scopeKey;
+    scopeEpochRef.current += 1;
     generationRef.current += 1;
     mutationsRef.current = 0;
     if (status !== null) setStatus(null);
@@ -121,6 +123,13 @@ export function useRemoteBrowser({
   const runAction = useCallback(
     (action: BrowserAction) => {
       const generation = ++generationRef.current;
+      // The mutation counter is reset to 0 on every re-scope and thereafter
+      // belongs to the new scope. An old daemon's late finally must not settle
+      // that new scope's accounting — it would decrement a counter it never
+      // incremented and could clear busy while a new-scope action is in flight.
+      // Capturing the scope at launch makes the finalizer scope-safe without
+      // weakening the generation fence on commit/fail above.
+      const scopeEpochAtLaunch = scopeEpochRef.current;
       mutationsRef.current += 1;
       setBusy(true);
       setError(null);
@@ -129,6 +138,7 @@ export function useRemoteBrowser({
         .then(result => commit(generation, result.status))
         .catch((caught: unknown) => fail(generation, caught))
         .finally(() => {
+          if (scopeEpochAtLaunch !== scopeEpochRef.current) return;
           mutationsRef.current = Math.max(0, mutationsRef.current - 1);
           if (mutationsRef.current === 0) setBusy(false);
         });

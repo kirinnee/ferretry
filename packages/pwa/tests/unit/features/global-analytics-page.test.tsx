@@ -171,6 +171,49 @@ describe('GlobalAnalyticsPage', () => {
     expect(calls).toContain('count by (status)');
   });
 
+  it('drops the previous daemon autocomplete cache before replacement values arrive', async () => {
+    let resolveBValues: ((response: AnalyticsResponse) => void) | undefined;
+    const withStatus = (value: string, query: string): AnalyticsResponse => {
+      const response = aggregate(query);
+      if (response.kind !== 'aggregate') throw new Error('aggregate fixture changed kind');
+      return {
+        ...response,
+        results: response.results.map((row, index) =>
+          index === 0 ? { ...row, labels: { ...row.labels, status: value } } : row,
+        ),
+      };
+    };
+    const requestAnalytics = async (daemon: typeof daemonA, query?: string): Promise<AnalyticsResponse> => {
+      if (query !== 'count by (status)') return aggregate(query);
+      if (daemon.daemonId === daemonA.daemonId) return withStatus('daemon-a-only', query);
+      return new Promise<AnalyticsResponse>(resolve => {
+        resolveBValues = resolve;
+      });
+    };
+    const renderer = render(<GlobalAnalyticsPage connection={daemonA} requestAnalytics={requestAnalytics} />);
+    await runAsync(async () => await Promise.resolve());
+    const openStatusValues = async () => {
+      const input = renderer.root.findByProps({ role: 'combobox' });
+      run(() => {
+        input.props.onFocus();
+        input.props.onChange({ currentTarget: { value: '{status=', selectionStart: 8 } });
+      });
+      await runAsync(async () => await Promise.resolve());
+    };
+    await openStatusValues();
+    expect(JSON.stringify(renderer.toJSON())).toContain('daemon-a-only');
+
+    run(() => renderer.update(<GlobalAnalyticsPage connection={daemonB} requestAnalytics={requestAnalytics} />));
+    await runAsync(async () => await Promise.resolve());
+    await openStatusValues();
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('daemon-a-only');
+    await runAsync(async () => {
+      resolveBValues?.(withStatus('daemon-b-only', 'count by (status)'));
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain('daemon-b-only');
+  });
+
   it('drops a late daemon response when the route switches to another paired daemon', async () => {
     let resolveA: ((response: AnalyticsResponse) => void) | undefined;
     const requestAnalytics = (daemon: typeof daemonA, query?: string) =>

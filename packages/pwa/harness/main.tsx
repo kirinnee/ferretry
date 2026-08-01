@@ -39,16 +39,15 @@ import { AnalyticsResponseView } from '../src/features/analytics/analytics-respo
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
+import { type AnalyticsRequest, GlobalAnalyticsPage } from '../src/features/analytics/global-analytics-page.tsx';
+import {
+  type SessionAnalyticsRequest,
+  SessionAnalyticsSurface,
+} from '../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
-import {
-  RemoteBrowserControls,
-  RemoteBrowserGovernor,
-  RemoteBrowserNavigation,
-  RemoteBrowserPageTabs,
-  RemoteBrowserStatusBar,
-} from '../src/features/browser/remote-browser-chrome.tsx';
-import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
+import { RemoteBrowserPane } from '../src/features/browser/remote-browser-pane.tsx';
+import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
@@ -70,6 +69,7 @@ import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx'
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
+import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
 import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
@@ -560,12 +560,33 @@ const REMOTE_BROWSER: BrowserStatus = {
   capacity: { running: 1, maximum: 3 },
 };
 
+/** A deterministic daemon seam: the visual harness must never reach a live daemon. */
+const HARNESS_BROWSER_TRANSPORT: RemoteBrowserTransport = {
+  readStatus: async () => REMOTE_BROWSER,
+  runAction: async () => ({ status: REMOTE_BROWSER }),
+};
+
+/** Keep the fixture stable after its one initial read instead of arming a real poll. */
+const HARNESS_BROWSER_SCHEDULE: RemoteBrowserScheduler = () => () => undefined;
+
 /** A daemon response fixture: the unpriced row is deliberate and must stay
  * visible rather than being treated as a zero-cost result. */
 const ANALYTICS = {
   kind: 'aggregate',
   aggregation: 'sum',
   query: 'sum by (model)',
+  parsed: { aggregation: 'sum', groupBy: ['model'], matchers: [] },
+  scope: { allSessions: true, indexed: 5, matched: 1 },
+  index: {
+    schemaVersion: 6,
+    sessions: 5,
+    tokenSessions: 5,
+    transcriptSources: 5,
+    indexedTranscriptSources: 5,
+    pendingTranscriptSources: 0,
+    sourceErrors: 0,
+    refreshing: false,
+  },
   results: [
     {
       labels: { model: 'gpt-5.6-sol' },
@@ -651,6 +672,17 @@ const ANALYTICS_TIME = {
   aggregation: 'sum',
   query: 'sum by (day)',
   parsed: { aggregation: 'sum', groupBy: ['day'], matchers: [] },
+  scope: { allSessions: true, indexed: 3, matched: 3 },
+  index: {
+    schemaVersion: 6,
+    sessions: 3,
+    tokenSessions: 3,
+    transcriptSources: 3,
+    indexedTranscriptSources: 3,
+    pendingTranscriptSources: 0,
+    sourceErrors: 0,
+    refreshing: false,
+  },
   results: [
     {
       labels: { day: '2026-07-29' },
@@ -675,6 +707,16 @@ const ANALYTICS_TIME = {
   ],
 } as unknown as AnalyticsAggregateResponse;
 
+/** Stable injected requests prevent parent harness renders from restarting either analytics surface. */
+const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) => ({
+  ...ANALYTICS_TIME,
+  query: query ?? ANALYTICS_TIME.query,
+});
+const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) => ({
+  ...ANALYTICS,
+  query: query ?? ANALYTICS.query,
+});
+
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
   binaryType: BinaryType = 'blob';
@@ -686,7 +728,7 @@ class HarnessBrowserSocket implements RemoteBrowserSocket {
       this.emit('open', new Event('open'));
       const id = new TextEncoder().encode('harness-page');
       const frame = new Uint8Array(7 + id.length + 1);
-      frame.set([0x4b, 0x42, 0x52, 0x46, 1, 0, id.length]);
+      frame.set([0x46, 0x59, 0x42, 0x46, 1, 0, id.length]);
       frame.set(id, 7);
       frame[frame.length - 1] = 0;
       this.emit('message', new MessageEvent('message', { data: frame.buffer }));
@@ -711,6 +753,10 @@ class HarnessBrowserSocket implements RemoteBrowserSocket {
 
 const harnessFrame =
   'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480"%3E%3Crect width="640" height="480" fill="%23111827"/%3E%3Crect x="32" y="32" width="576" height="54" rx="8" fill="%231f2937"/%3E%3Ccircle cx="58" cy="59" r="8" fill="%23ef4444"/%3E%3Ccircle cx="82" cy="59" r="8" fill="%23f59e0b"/%3E%3Ccircle cx="106" cy="59" r="8" fill="%2310b981"/%3E%3Crect x="140" y="46" width="390" height="26" rx="5" fill="%23374151"/%3E%3Ctext x="158" y="64" fill="%23d1d5db" font-family="system-ui" font-size="14"%3Ehttps://example.test%3C/text%3E%3Ctext x="320" y="250" text-anchor="middle" fill="%23f9fafb" font-family="system-ui" font-size="30"%3ERemote browser%3C/text%3E%3Ctext x="320" y="286" text-anchor="middle" fill="%239ca3af" font-family="system-ui" font-size="16"%3ELive daemon-scoped frame%3C/text%3E%3C/svg%3E';
+const HARNESS_BROWSER_SOCKET_FACTORY = () => new HarnessBrowserSocket();
+const HARNESS_BROWSER_CREATE_OBJECT_URL = () => harnessFrame;
+const HARNESS_BROWSER_REVOKE_OBJECT_URL = () => undefined;
+
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
@@ -1144,30 +1190,16 @@ function Shell() {
       label: 'Remote browser',
       render: () => (
         <Card aria-label="Remote browser" className="min-w-0 overflow-hidden" data-harness="remote-browser">
-          <RemoteBrowserStatusBar status={REMOTE_BROWSER} connection="connected" />
-          <RemoteBrowserPageTabs status={REMOTE_BROWSER} onAction={() => {}} />
-          <RemoteBrowserNavigation status={REMOTE_BROWSER} onAction={() => {}} />
-          <RemoteBrowserControls
-            status={REMOTE_BROWSER}
-            connection="connected"
-            fit
-            viewportMode="responsive"
-            onAction={() => {}}
-            onToggleFit={() => {}}
-            onToggleViewportMode={() => {}}
-            onPasteFromClipboard={() => {}}
-          />
-          <RemoteBrowserViewer
+          <RemoteBrowserPane
             daemon={daemon}
             scope={scope}
-            status={REMOTE_BROWSER}
             streamTicket="harness-ticket"
-            interactive
-            socketFactory={() => new HarnessBrowserSocket()}
-            createObjectUrl={() => harnessFrame}
-            revokeObjectUrl={() => undefined}
+            transport={HARNESS_BROWSER_TRANSPORT}
+            schedule={HARNESS_BROWSER_SCHEDULE}
+            socketFactory={HARNESS_BROWSER_SOCKET_FACTORY}
+            createObjectUrl={HARNESS_BROWSER_CREATE_OBJECT_URL}
+            revokeObjectUrl={HARNESS_BROWSER_REVOKE_OBJECT_URL}
           />
-          <RemoteBrowserGovernor status={REMOTE_BROWSER} />
         </Card>
       ),
     },
@@ -1194,6 +1226,22 @@ function Shell() {
           <PanelBody className="min-w-0">
             <AnalyticsResponseView response={ANALYTICS_RAW} />
           </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Global analytics',
+      render: () => <GlobalAnalyticsPage connection={daemon} requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST} />,
+    },
+    {
+      label: 'Session analytics',
+      render: () => (
+        <Card aria-label="Session analytics" className="min-w-0 overflow-hidden">
+          <SessionAnalyticsSurface
+            connection={daemon}
+            scope={scope}
+            requestAnalytics={HARNESS_SESSION_ANALYTICS_REQUEST}
+          />
         </Card>
       ),
     },

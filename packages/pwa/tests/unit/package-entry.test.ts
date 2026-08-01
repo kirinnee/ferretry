@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DETAILS_TAB_ORDER, PCM16_WORKLET_NAME, packageRole } from '../../src/lib/index.ts';
+import {
+  DETAILS_TAB_ORDER,
+  PCM16_WORKLET_NAME,
+  RemoteBrowserPane,
+  SessionAnalyticsSurface,
+  packageRole,
+} from '../../src/lib/index.ts';
 
 describe('pwa package entry', () => {
   it('should expose its workspace role', () => {
@@ -25,5 +31,12 @@ describe('pwa package entry', () => {
 
     // Assert
     should(actual).deepEqual(['identity', 'runtime', 'progress', 'budget']);
+  });
+
+  it('should expose the composed browser and session analytics surfaces', () => {
+    // Act + Assert — these are library composition roots until the PWA app
+    // assembler mounts concrete side-pane bodies in its own migration unit.
+    should(RemoteBrowserPane).be.a.Function();
+    should(SessionAnalyticsSurface).be.a.Function();
   });
 });

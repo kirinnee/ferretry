@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { BrowserInputEvent, BrowserStatus } from '@ferretry/protocol';
+import type { ReactNode } from 'react';
+import { useLayoutEffect } from 'react';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../../../src/features/browser/remote-browser-viewer.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { interact, mount } from '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 class FakeSocket implements RemoteBrowserSocket {
@@ -85,6 +88,19 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('Display idle');
   });
 
+  it('can defer its standalone header to an embedding pane', () => {
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        streamTicket={null}
+        status={null}
+        showHeader={false}
+      />,
+    );
+    expect(renderer.root.findAllByType('header')).toHaveLength(0);
+  });
+
   it('tears down the old daemon stream when an identical session is re-scoped', () => {
     const sockets: FakeSocket[] = [];
     const socketFactory = () => {
@@ -147,7 +163,7 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('Display stalled');
   });
 
-  it('shows an actionable transport failure and reconnects after an unexpected close', async () => {
+  it('reconnects after every unexpected close and every manual retry', async () => {
     const sockets: FakeSocket[] = [];
     const renderer = render(
       <RemoteBrowserViewer
@@ -169,6 +185,142 @@ describe('RemoteBrowserViewer', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('Remote display disconnected; reconnecting');
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 5)));
     expect(sockets).toHaveLength(2);
+
+    run(() => sockets[1]?.emit('close', new CloseEvent('close', { code: 1006 })));
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 5)));
+    expect(sockets).toHaveLength(3);
+
+    // The counter is an effect identity, not a one-way boolean: every click,
+    // including clicks after earlier automatic reconnects, opens a fresh stream.
+    run(() => renderer.root.findByType('button').props.onClick());
+    expect(sockets).toHaveLength(4);
+    run(() => renderer.root.findByType('button').props.onClick());
+    expect(sockets).toHaveLength(5);
+  });
+});
+
+/**
+ * A layout effect runs once its own commit is in the DOM and before any passive
+ * effect, so it sees exactly what a reader could have seen on screen — and it is
+ * the only place a test can act while a superseded socket is still attached.
+ */
+function CommitProbe({ children, onCommit }: { readonly children: ReactNode; readonly onCommit: () => void }) {
+  useLayoutEffect(onCommit);
+  return <>{children}</>;
+}
+
+describe('RemoteBrowserViewer re-scoping', () => {
+  it('never commits the previous daemon frame, and rejects its socket in the effect window', async () => {
+    const sockets: FakeSocket[] = [];
+    const socketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const painted: string[] = [];
+    const box: { container?: HTMLElement } = {};
+    let duringCommit: (() => void) | null = null;
+    const onCommit = () => {
+      duringCommit?.();
+      painted.push(box.container?.innerHTML ?? '');
+    };
+    const tree = (daemon: typeof daemonA, ticket: string, blob: string) => (
+      <CommitProbe onCommit={onCommit}>
+        <RemoteBrowserViewer
+          daemon={daemon}
+          scope={daemonSessionScope(daemon, 'same-session')}
+          streamTicket={ticket}
+          status={running('same-session')}
+          socketFactory={socketFactory}
+          createObjectUrl={() => blob}
+          revokeObjectUrl={() => undefined}
+        />
+      </CommitProbe>
+    );
+
+    const mounted = await mount(tree(daemonA, 'ticket-a', 'blob:daemon-a'));
+    box.container = mounted.container;
+    const first = sockets[0];
+    if (first === undefined) throw new Error('the viewer opened no stream');
+    await interact(() => first.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(mounted.container.innerHTML).toContain('blob:daemon-a');
+
+    painted.length = 0;
+    // Daemon A's socket is not torn down until the passive effects of this same
+    // commit run, so this is a late frame from a transport that no longer speaks
+    // for the viewer — exactly the delivery that must not repopulate it.
+    duringCommit = () => first.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+    await mounted.render(tree(daemonB, 'ticket-b', 'blob:daemon-b'));
+    duringCommit = null;
+
+    // Not one committed frame — not merely the settled tree — showed daemon A's
+    // pixels once the viewer belonged to daemon B.
+    expect(painted.length).toBeGreaterThan(0);
+    expect(painted.some(html => html.includes('blob:daemon-a'))).toBe(false);
+    expect(mounted.container.innerHTML).not.toContain('blob:daemon-a');
+    expect(first.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+    expect(sockets).toHaveLength(2);
+    await mounted.unmount();
+  });
+
+  it('commits no page A frame after page B becomes active without reconnecting', async () => {
+    const sockets: FakeSocket[] = [];
+    const socketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const objectUrls = ['blob:page-a', 'blob:page-b'];
+    const createObjectUrl = () => objectUrls.shift() ?? 'blob:unexpected';
+    const revoked: string[] = [];
+    const revokeObjectUrl = (url: string) => revoked.push(url);
+    const painted: string[] = [];
+    const box: { container?: HTMLElement } = {};
+    let duringCommit: (() => void) | null = null;
+    const onCommit = () => {
+      duringCommit?.();
+      painted.push(box.container?.innerHTML ?? '');
+    };
+    const tree = (pageId: string) => (
+      <CommitProbe onCommit={onCommit}>
+        <RemoteBrowserViewer
+          daemon={daemonA}
+          scope={daemonSessionScope(daemonA, 'session-a')}
+          streamTicket="ticket"
+          status={running('session-a', pageId)}
+          socketFactory={socketFactory}
+          createObjectUrl={createObjectUrl}
+          revokeObjectUrl={revokeObjectUrl}
+        />
+      </CommitProbe>
+    );
+
+    const mounted = await mount(tree('page-a'));
+    box.container = mounted.container;
+    const socket = sockets[0];
+    if (socket === undefined) throw new Error('the viewer opened no stream');
+    await interact(() => socket.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(mounted.container.innerHTML).toContain('blob:page-a');
+
+    painted.length = 0;
+    // Deliver another A frame during B's commit, before passive effects could
+    // possibly clean anything up. Render-current filtering must reject it.
+    duringCommit = () => socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+    await mounted.render(tree('page-b'));
+    duringCommit = null;
+
+    expect(painted.length).toBeGreaterThan(0);
+    expect(painted.every(html => !html.includes('blob:page-a'))).toBe(true);
+    expect(mounted.container.innerHTML).not.toContain('blob:page-a');
+    expect(mounted.container.textContent).toContain('Waiting for the first frame');
+    expect(sockets).toHaveLength(1);
+    expect(socket.closes).toEqual([]);
+    expect(revoked).toContain('blob:page-a');
+
+    await interact(() => socket.emit('message', new MessageEvent('message', { data: frame('page-b') })));
+    expect(mounted.container.innerHTML).toContain('blob:page-b');
+    expect(sockets).toHaveLength(1);
+    await mounted.unmount();
   });
 });
 
@@ -203,6 +355,7 @@ const interactive = (overrides: Record<string, unknown> = {}) => {
   run(() => {
     socket.readyState = 1;
     socket.emit('open', new Event('open'));
+    socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
   });
   const canvas = renderer.root.find(node => node.props.className === 'fy-remote-browser-input');
   return { renderer, socket, canvas, activity };
@@ -217,6 +370,13 @@ const pointerEvent = (overrides: Record<string, unknown> = {}) => ({
   ctrlKey: false,
   metaKey: false,
   shiftKey: false,
+  pointerId: 1,
+  pointerType: 'mouse',
+  currentTarget: {
+    setPointerCapture: () => undefined,
+    hasPointerCapture: () => false,
+    releasePointerCapture: () => undefined,
+  },
   preventDefault: () => {},
   ...overrides,
 });
@@ -270,6 +430,45 @@ describe('RemoteBrowserViewer input', () => {
     expect(inputs[2]).toMatchObject({ type: 'mouseReleased' });
   });
 
+  it('captures each pointer through release/cancel and requests mobile text focus on touch', () => {
+    const focusRequests: string[] = [];
+    const { canvas } = interactive({ onTouchInputFocus: () => focusRequests.push('focus') });
+    const captured = new Set<number>();
+    const released: number[] = [];
+    const target = {
+      setPointerCapture: (pointerId: number) => captured.add(pointerId),
+      hasPointerCapture: (pointerId: number) => captured.has(pointerId),
+      releasePointerCapture: (pointerId: number) => {
+        captured.delete(pointerId);
+        released.push(pointerId);
+      },
+    };
+    let touchPrevented = false;
+
+    run(() =>
+      canvas.props.onPointerDown(
+        pointerEvent({
+          currentTarget: target,
+          pointerId: 7,
+          pointerType: 'touch',
+          preventDefault: () => {
+            touchPrevented = true;
+          },
+        }),
+      ),
+    );
+    expect(captured.has(7)).toBe(true);
+    expect(focusRequests).toEqual(['focus']);
+    expect(touchPrevented).toBe(true);
+    run(() => canvas.props.onPointerUp(pointerEvent({ currentTarget: target, pointerId: 7, buttons: 0 })));
+    expect(captured.has(7)).toBe(false);
+
+    run(() => canvas.props.onPointerDown(pointerEvent({ currentTarget: target, pointerId: 8 })));
+    run(() => canvas.props.onPointerCancel(pointerEvent({ currentTarget: target, pointerId: 8, buttons: 0 })));
+    expect(released).toEqual([7, 8]);
+    expect(focusRequests).toEqual(['focus']);
+  });
+
   it('releases every held key when the frame loses focus', () => {
     const { socket, canvas } = interactive();
     run(() => canvas.props.onKeyDown(keyEvent({ shiftKey: true })));
@@ -283,6 +482,24 @@ describe('RemoteBrowserViewer input', () => {
     // A second blur has nothing left to release.
     run(() => canvas.props.onBlur());
     expect(socket.inputs()).toHaveLength(4);
+  });
+
+  it('releases held keys on window blur and document visibility loss', () => {
+    const { socket, canvas } = interactive();
+    run(() => canvas.props.onKeyDown(keyEvent()));
+    run(() => window.dispatchEvent(new Event('blur')));
+    expect(socket.inputs().at(-1)).toMatchObject({ type: 'keyUp', code: 'KeyA' });
+
+    run(() => canvas.props.onKeyDown(keyEvent({ key: 'b', code: 'KeyB', keyCode: 66 })));
+    const ownVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    try {
+      run(() => document.dispatchEvent(new Event('visibilitychange')));
+    } finally {
+      if (ownVisibility === undefined) Reflect.deleteProperty(document, 'visibilityState');
+      else Object.defineProperty(document, 'visibilityState', ownVisibility);
+    }
+    expect(socket.inputs().at(-1)).toMatchObject({ type: 'keyUp', code: 'KeyB' });
   });
 
   it('stops tracking a key once its own key-up has been sent', () => {
@@ -351,8 +568,94 @@ describe('RemoteBrowserViewer input', () => {
   it('falls back to the frame element when no measurement is injected', () => {
     const { socket, canvas } = interactive({ measureFrame: undefined });
     run(() => canvas.props.onPointerDown(pointerEvent()));
-    // No DOM node is mounted here, so the point degrades to the origin rather
-    // than being invented from a stale rect.
+    // No DOM node is mounted here, so neither the image nor surface can report a
+    // box; the point degrades to the origin rather than inventing a stale rect.
     expect(socket.inputs()[0]).toMatchObject({ x: 0, y: 0 });
+  });
+
+  it('keeps 1:1 image and input pixels at the scroll box top-left', () => {
+    const { renderer, canvas } = interactive({ fit: false });
+    const container = renderer.root.find(node => node.props.className === 'fy-remote-browser-canvas');
+    const image = renderer.root.findByType('img');
+
+    expect(container.props.style).toMatchObject({
+      alignItems: 'flex-start',
+      justifyContent: 'flex-start',
+      overflow: 'auto',
+    });
+    expect(image.props.style).toMatchObject({ flex: '0 0 auto', maxHeight: 'none', maxWidth: 'none' });
+    expect(canvas.props).toMatchObject({ width: 640, height: 480 });
+    expect(canvas.props.style).toMatchObject({ height: 480, maxHeight: 'none', maxWidth: 'none', width: 640 });
+  });
+
+  it('maps Fit clicks from the displayed image rectangle, never the letterboxed container', async () => {
+    const socket = new FakeSocket();
+    const mounted = await mount(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        streamTicket="ticket"
+        status={running('session-a')}
+        interactive
+        fit
+        socketFactory={() => socket}
+        createObjectUrl={() => 'blob:fit-frame'}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+    await interact(() => {
+      socket.readyState = 1;
+      socket.emit('open', new Event('open'));
+      socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+    });
+
+    const container = mounted.container.querySelector<HTMLElement>('.fy-remote-browser-canvas');
+    const image = mounted.container.querySelector<HTMLImageElement>('img[alt="Live remote browser frame"]');
+    const surface = mounted.container.querySelector<HTMLCanvasElement>('.fy-remote-browser-input');
+    if (container === null || image === null || surface === null) throw new Error('the fitted frame was not mounted');
+
+    // Both replaced elements carry the same intrinsic viewport and the same
+    // contain constraints, so flex centers one shared 320x240 frame rather than
+    // stretching the transparent surface across this wider 800x400 container.
+    expect(container.style.display).toBe('flex');
+    expect(surface.width).toBe(640);
+    expect(surface.height).toBe(480);
+    expect(surface.style.inset).toBe('auto');
+    expect(surface.style.maxWidth).toBe('100%');
+    expect(surface.style.maxHeight).toBe('100%');
+
+    const rect = (left: number, top: number, width: number, height: number): DOMRect =>
+      ({
+        bottom: top + height,
+        height,
+        left,
+        right: left + width,
+        top,
+        width,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    image.getBoundingClientRect = () => rect(240, 80, 320, 240);
+    surface.getBoundingClientRect = () => rect(0, 0, 800, 400);
+    surface.setPointerCapture = () => undefined;
+    surface.hasPointerCapture = () => false;
+    surface.releasePointerCapture = () => undefined;
+
+    await interact(() =>
+      surface.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          bubbles: true,
+          button: 0,
+          buttons: 1,
+          clientX: 400,
+          clientY: 200,
+          pointerId: 9,
+          pointerType: 'mouse',
+        }),
+      ),
+    );
+    expect(socket.inputs().at(-1)).toMatchObject({ type: 'mousePressed', x: 320, y: 240 });
+    await mounted.unmount();
   });
 });

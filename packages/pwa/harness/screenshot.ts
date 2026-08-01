@@ -112,6 +112,7 @@ try {
       }
 
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
+      await page.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
       process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
       // The whole pane, not just the display: the tab strip, address bar and
@@ -131,6 +132,12 @@ try {
       const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
       await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
       process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
+      const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
+      await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
+      process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
+      const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
+      await page.getByLabel('Session analytics', { exact: true }).screenshot({ path: sessionAnalyticsTarget });
+      process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
       const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
       await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
       process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
