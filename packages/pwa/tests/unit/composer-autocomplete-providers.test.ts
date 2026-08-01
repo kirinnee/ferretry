@@ -195,11 +195,14 @@ describe('composer skills provider', () => {
   });
 
   it('preserves a daemon error code while falling back from an empty error message', async () => {
-    await expect(
-      loadSkillsCatalog(daemonA, scopeA, new AbortController().signal, async () =>
+    try {
+      await loadSkillsCatalog(daemonA, scopeA, new AbortController().signal, async () =>
         json({ error: ' ', code: 'skills_denied' }, 403),
-      ),
-    ).rejects.toMatchObject({ code: 'skills_denied' });
+      );
+      throw new Error('expected the skills catalog request to fail');
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'skills_denied' });
+    }
   });
 });
 

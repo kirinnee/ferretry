@@ -101,7 +101,11 @@ describe('useComposerAutocomplete', () => {
 
     const accepted = render(<Probe input={input} />);
     const acceptedTextarea = () => accepted.root.findByType('textarea');
-    run(() => acceptedTextarea().props.onKeyDown(key('Tab')));
+    let acceptedByTab = false;
+    run(() => {
+      acceptedByTab = acceptedTextarea().props.onKeyDown(key('Tab'));
+    });
+    expect(acceptedByTab).toBe(true);
     expect(acceptedTextarea().props['data-value']).toBe('/compact ');
     expect(acceptedTextarea().props['data-open']).toBe('false');
     expect(selected).toEqual([[9, 9]]);
