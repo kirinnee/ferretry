@@ -7,6 +7,7 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
+import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
@@ -21,6 +22,7 @@ import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-mi
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
 import { sessionSendRoutes, type SessionSendSubsystem } from './session-send.ts';
 import { sessionSignalRoutes, type SessionSignalSubsystem } from './session-signal.ts';
+import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { sttRawRoutes, type SttSubsystem } from './stt.ts';
 import { taskBoardRoutes, type TaskBoardSubsystem } from './task-boards.ts';
@@ -96,6 +98,9 @@ export interface MountedSubsystems {
    *  daemon's only BYTE-shaped ones, so they are served from the raw table rather than this one —
    *  see `mounts/stt.ts`. */
   readonly stt: SttSubsystem;
+  /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
+   *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
+  readonly sessionFilesystem: SessionFilesystem;
 }
 
 /**
@@ -154,6 +159,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
     ...recommendRoutes(subsystems.recommend),
+    // The working-tree read registers last among the per-session subsystems: three of its four paths are
+    // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
+    // its one-segment `fs`, so nothing here can shadow or be shadowed.
+    ...sessionFilesystemRoutes(subsystems.sessionFilesystem, subsystems.sessions),
   ];
 }
 

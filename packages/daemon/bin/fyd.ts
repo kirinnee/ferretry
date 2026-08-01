@@ -78,6 +78,7 @@ import {
 } from '../src/adapters/task-boards/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
+import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   GitWorktreeGateway,
@@ -163,6 +164,7 @@ import {
   createMountedSocketDispatcher,
   PinService,
   SessionPlanner,
+  SessionFilesystem,
   SttEnhancementService,
   TeamAdvisor,
   createFoundationPaths,
@@ -2664,6 +2666,13 @@ export function buildWorld(): DaemonWorld {
         learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
         recommend: createRecommendSubsystem(advisorOver, usage),
         stt,
+        // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
+        // the Git reader is the same hardened runner the worktree gateway already uses. Both are
+        // stateless, so one instance serves every session.
+        sessionFilesystem: new SessionFilesystem(
+          new ProcfsSessionRootPinner(),
+          new RunnerSessionGit(new BunGitRunner()),
+        ),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

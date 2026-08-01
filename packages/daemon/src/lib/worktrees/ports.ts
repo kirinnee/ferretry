@@ -1,8 +1,25 @@
 export interface GitInvocation {
   readonly args: readonly string[];
+  /**
+   * Working directory for the child.
+   *
+   * A caller reached from HTTP MUST pass a PINNED path — one that resolves to an already-open descriptor —
+   * rather than a configured pathname. A pathname is only a claim about the past: renamed away and
+   * replaced with a symlink between validation and spawn, it makes Git operate on a different tree than
+   * the one whose paths passed containment and the secrets gates.
+   */
   readonly cwd: string;
   readonly timeoutMs?: number;
   readonly maxStdoutBytes?: number;
+  /** Bytes piped to stdin. Used by the commands that take a NUL-separated batch of paths that way. */
+  readonly stdin?: Uint8Array;
+  /**
+   * Whether pathspecs are forced literal. Defaults to true.
+   *
+   * Off only for `check-ignore`, which errors on `literal` pathspec magic. A caller that turns it off must
+   * defuse the magic itself — `./`-prefixing every path is how this repository does it.
+   */
+  readonly literalPathspecs?: boolean;
 }
 
 export interface GitExecution {

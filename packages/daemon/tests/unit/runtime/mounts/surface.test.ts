@@ -9,6 +9,8 @@ import {
   mountedSocketRoutes,
   type MountedSubsystems,
 } from '../../../../src/lib/runtime/index.ts';
+import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import {
   analyticsSubsystem,
@@ -67,6 +69,7 @@ const subsystems = (): MountedSubsystems => ({
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
   stt: new FakeStt(),
+  sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
 });
 
 describe('the mounted daemon surface', () => {
@@ -135,6 +138,12 @@ describe('the mounted daemon surface', () => {
       'GET /v1/learning/proposals/:id/patch',
       'POST /v1/learning/run',
       'POST /v1/recommend',
+      // The working-tree read. Its three deeper paths come before the one-segment `fs`, which is what
+      // keeps `fs/file` reachable at all: the router matches in registration order.
+      'GET /v1/sessions/:sessionId/fs/file',
+      'GET /v1/sessions/:sessionId/fs/changes',
+      'GET /v1/sessions/:sessionId/fs/diff',
+      'GET /v1/sessions/:sessionId/fs',
     ]);
   });
 
