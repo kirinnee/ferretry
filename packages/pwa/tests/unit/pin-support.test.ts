@@ -12,8 +12,9 @@ import {
 import { DaemonPinClient } from '../../src/lib/pin-client.ts';
 import { pinReferenceMarkdown } from '../../src/lib/pin-links.ts';
 import { createPinReferenceResolver } from '../../src/lib/pin-reference-context.ts';
-import { pinSelection, truncatePinSelection } from '../../src/lib/pin-selection.ts';
+import { pinSelection, pinSelectionBlockId, truncatePinSelection } from '../../src/lib/pin-selection.ts';
 import type { DaemonPinSnapshot } from '../../src/lib/pin-store.ts';
+import '../support/dom.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
@@ -100,5 +101,26 @@ describe('pin support', () => {
     expect(bodies).toEqual([{ action: 'add', kind: 'note', text: 'useful selection', source: { blockId: 'block-1' } }]);
     expect(pinSelection(daemonA, client, '   ')).toEqual({ ok: false, reason: 'empty' });
     clearForegroundPinScope(scopeA);
+  });
+
+  it('finds an in-transcript selection endpoint without accepting an adjacent pane', () => {
+    const root = document.createElement('main');
+    const row = document.createElement('article');
+    row.dataset.blockId = 'block-a';
+    const child = document.createElement('em');
+    const text = document.createTextNode('selected');
+    child.append(text);
+    row.append(child);
+    root.append(row);
+    const elsewhere = document.createElement('span');
+    document.body.append(root, elsewhere);
+
+    expect(pinSelectionBlockId(text, null, root)).toBe('block-a');
+    expect(pinSelectionBlockId(null, row, root)).toBe('block-a');
+    expect(pinSelectionBlockId(elsewhere, null, root)).toBeNull();
+    expect(pinSelectionBlockId(null, null, root)).toBeNull();
+    expect(pinSelectionBlockId(text, null, null)).toBeNull();
+    root.remove();
+    elsewhere.remove();
   });
 });
