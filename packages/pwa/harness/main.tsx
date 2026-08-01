@@ -58,6 +58,8 @@ import {
 } from '../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
+import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
+import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
 import { RemoteBrowserPane } from '../src/features/browser/remote-browser-pane.tsx';
 import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
@@ -594,6 +596,19 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 }) as typeof fetch;
+
+/** Two link states worth looking at: an ordinary remote page and one that
+ *  names the reader's own phone rather than the agent's machine. */
+const HARNESS_REMOTE_LINK: BrowserDestination = {
+  href: 'https://docs.example.test/getting-started',
+  hostname: 'docs.example.test',
+  scope: 'cross-origin',
+};
+const HARNESS_LOOPBACK_LINK: BrowserDestination = {
+  href: 'http://localhost:5173/',
+  hostname: 'localhost',
+  scope: 'device-loopback',
+};
 
 /** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
 const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
@@ -1961,6 +1976,32 @@ function Shell() {
             <div className="min-w-0 flex-1 p-panel text-meta text-muted">
               The transcript sits here. The column beside it is the sidebar under test.
             </div>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'In-app link preview',
+      render: () => (
+        <Card aria-label="In-app link preview" className="min-w-0 overflow-hidden" id="harness-in-app-browser">
+          <div className="flex h-[24rem] flex-col">
+            {/* The frame stays empty on purpose: the harness aborts every
+                off-origin request, which is exactly the refusal the surface
+                already warns about, so this IS the honest steady state. */}
+            <InAppBrowserSurface
+              destination={HARNESS_REMOTE_LINK}
+              presentation="pane"
+              titleId="harness-in-app-browser-title"
+              onClose={() => {}}
+            />
+          </div>
+          <div className="flex h-[18rem] flex-col border-t border-border">
+            <InAppBrowserSurface
+              destination={HARNESS_LOOPBACK_LINK}
+              presentation="pane"
+              titleId="harness-in-app-browser-loopback-title"
+              onClose={() => {}}
+            />
           </div>
         </Card>
       ),

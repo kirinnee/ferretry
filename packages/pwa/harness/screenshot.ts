@@ -220,6 +220,11 @@ try {
       await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
       process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
 
+      const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
+      await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
+      await page.getByLabel('In-app link preview').screenshot({ path: inAppTarget });
+      process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
+
       const filesTarget = join(outDir, `files-${viewport.name}.png`);
       await page.locator('#harness-files').scrollIntoViewIfNeeded();
       await page.getByLabel('Files browser').screenshot({ path: filesTarget });
