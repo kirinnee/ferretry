@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Copy, FileDown, GraduationCap, Pencil, RefreshCw, X } from 'lucide-react';
 import type { LearningActionRequest, LearningStatus, ProposalView } from '@ferretry/protocol';
 
@@ -273,7 +273,7 @@ function ProposalGroup({
   );
 }
 
-function ProposalCard({
+export function ProposalCard({
   proposal,
   busy,
   onAction,
@@ -288,28 +288,52 @@ function ProposalCard({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proposal.ruleText);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'rule' | 'patch' | null>(null);
+  const [patchError, setPatchError] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const strength = learningStrength(proposal.occurrences);
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current);
+    },
+    [],
+  );
+
+  const markCopied = (kind: 'rule' | 'patch') => {
+    if (copiedTimer.current !== undefined) clearTimeout(copiedTimer.current);
+    setCopied(kind);
+    copiedTimer.current = setTimeout(() => setCopied(null), 1_500);
+  };
+
   const copy = async () => {
     try {
       await navigator.clipboard?.writeText(proposal.ruleText);
-      setCopied(true);
+      markCopied('rule');
     } catch {
-      setCopied(false);
+      // The rule remains visible and selectable when the browser denies
+      // clipboard access, so the control need not pretend the copy succeeded.
+      setCopied(null);
     }
   };
   const savePatch = async () => {
-    const patch = await fetchLearningPatch(connection, proposal.id);
-    const url = URL.createObjectURL(new Blob([patch.contents], { type: 'text/markdown' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${proposal.identity}.md`;
-    link.click();
-    URL.revokeObjectURL(url);
+    try {
+      const patch = await fetchLearningPatch(connection, proposal.id);
+      const url = URL.createObjectURL(new Blob([patch.contents], { type: 'text/markdown' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${proposal.identity}.md`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setPatchError(null);
+      markCopied('patch');
+    } catch (reason) {
+      setPatchError(learningErrorMessage(reason));
+    }
   };
   return (
     <article className="kt-panel flex flex-col gap-2 p-3" aria-label={`Learning proposal ${proposal.title}`}>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-start gap-2">
         <span className="kt-badge" data-tone={strength === 'strong' ? 'accent' : strength === 'weak' ? 'pend' : 'ok'}>
           {proposal.occurrences}×
         </span>
@@ -318,10 +342,10 @@ function ProposalCard({
         </span>
         <h3 className="m-0 min-w-0 flex-1 text-ui font-semibold">{proposal.title}</h3>
       </div>
-      <p className="m-0 mono text-meta text-faint">
+      <div className="mono text-meta text-faint">
         → {proposal.target.path}
         {proposal.target.anchor ? ` (${proposal.target.anchor})` : ''}
-      </p>
+      </div>
       {editing ? (
         <textarea
           className="kt-input resize-y"
@@ -333,20 +357,21 @@ function ProposalCard({
       ) : (
         <p className="m-0 whitespace-pre-wrap text-ui text-fg-soft">{proposal.ruleText}</p>
       )}
-      <details className="rounded-control border border-border-soft bg-surface-2">
-        <summary className="min-h-[44px] cursor-pointer px-2 text-meta text-muted">
+      <details className="rounded border border-border-soft bg-surface-1">
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center px-2 text-meta font-medium text-muted">
           Evidence · {proposal.evidence.length} verified quote{proposal.evidence.length === 1 ? '' : 's'}
         </summary>
-        <ul className="m-0 list-none p-2 pt-0">
+        <ul className="m-0 flex list-none flex-col gap-1 p-2 pt-0">
           {proposal.evidence.map(evidence => (
             <li key={evidence.observationId}>
               <a
-                className="flex min-h-[44px] flex-col justify-center px-2"
+                className="flex min-h-[44px] flex-col justify-center gap-0.5 rounded px-2 py-1 hover:bg-surface-2"
                 href={`/d/${encodeURIComponent(connection.daemonId)}/session/${encodeURIComponent(evidence.sessionId)}`}
               >
-                <span className="text-ui">“{evidence.quote}”</span>
+                <span className="text-ui text-fg-soft">“{evidence.quote}”</span>
                 <span className="mono text-meta text-faint">
-                  {evidence.source} · {evidence.repo} · {evidence.at}
+                  {evidence.source === 'teammate' ? 'teammate steer' : 'human'}
+                  {evidence.teammate ? ` · ${evidence.teammate}` : ''} · {evidence.repo} · {evidence.at}
                 </span>
               </a>
             </li>
@@ -359,23 +384,32 @@ function ProposalCard({
             <Button
               size="sm"
               variant="primary"
+              className="min-h-[44px] items-center gap-xs"
               disabled={busy}
               onClick={() => onAction(proposal.id, { action: 'accept' })}
+              aria-label={`Accept ${proposal.title}`}
             >
-              <Check size={14} />
+              <Check size={14} aria-hidden="true" />
               Accept
             </Button>
-            <Button size="sm" onClick={() => setEditing(true)}>
-              <Pencil size={14} />
+            <Button
+              size="sm"
+              className="min-h-[44px] items-center gap-xs"
+              onClick={() => setEditing(true)}
+              aria-label={`Edit ${proposal.title}`}
+            >
+              <Pencil size={14} aria-hidden="true" />
               Edit
             </Button>
             <Button
               size="sm"
               variant="danger"
+              className="min-h-[44px] items-center gap-xs"
               disabled={busy}
               onClick={() => onAction(proposal.id, { action: 'reject' })}
+              aria-label={`Reject ${proposal.title} permanently`}
             >
-              <X size={14} />
+              <X size={14} aria-hidden="true" />
               Reject
             </Button>
           </>
@@ -385,35 +419,56 @@ function ProposalCard({
             <Button
               size="sm"
               variant="primary"
+              className="min-h-[44px] items-center gap-xs"
               disabled={busy || draft.trim() === ''}
               onClick={() => {
                 onAction(proposal.id, { action: 'edit', ruleText: draft });
                 setEditing(false);
               }}
+              aria-label={`Save rule text for ${proposal.title}`}
             >
-              <Check size={14} />
+              <Check size={14} aria-hidden="true" />
               Save
             </Button>
             <Button
               size="sm"
+              className="min-h-[44px]"
               onClick={() => {
                 setDraft(proposal.ruleText);
                 setEditing(false);
               }}
+              aria-label={`Cancel editing ${proposal.title}`}
             >
               Cancel
             </Button>
           </>
         )}
-        <Button size="sm" variant="ghost" onClick={() => void copy()}>
-          <Copy size={14} />
-          {copied ? 'Copied' : 'Copy rule'}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="min-h-[44px] items-center gap-xs"
+          onClick={() => void copy()}
+          aria-label={`Copy rule text for ${proposal.title}`}
+        >
+          <Copy size={14} aria-hidden="true" />
+          {copied === 'rule' ? 'Copied' : 'Copy rule'}
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => void savePatch()}>
-          <FileDown size={14} />
-          Save patch
+        <Button
+          size="sm"
+          variant="ghost"
+          className="min-h-[44px] items-center gap-xs"
+          onClick={() => void savePatch()}
+          aria-label={`Save a patch file for ${proposal.title}`}
+        >
+          <FileDown size={14} aria-hidden="true" />
+          {copied === 'patch' ? 'Saved' : 'Save patch'}
         </Button>
       </div>
+      {patchError !== null && (
+        <p role="alert" className="m-0 text-meta text-warn">
+          {patchError}
+        </p>
+      )}
     </article>
   );
 }

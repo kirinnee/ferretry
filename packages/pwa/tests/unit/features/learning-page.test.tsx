@@ -4,6 +4,7 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   LearningPage,
   LearningReview,
+  ProposalCard,
   learningErrorMessage,
   learningStrength,
 } from '../../../src/features/learning/learning-page.tsx';
@@ -150,6 +151,55 @@ describe('LearningReview', () => {
     expect([learningStrength(1), learningStrength(2), learningStrength(5)]).toEqual(['weak', 'normal', 'strong']);
     expect(learningErrorMessage('bad')).toContain('unavailable');
     expect(learningErrorMessage(new Error('bad'))).toBe('bad');
+  });
+
+  it('keeps every proposal action touch-safe and names it for assistive technology', () => {
+    const renderer = render(
+      <ProposalCard
+        connection={connection}
+        proposal={makeProposal('pending', 5, 'accessible')}
+        busy={false}
+        accepted={false}
+        onAction={() => undefined}
+      />,
+    );
+    const buttons = renderer.root.findAllByType('button');
+    expect(buttons.map(button => button.props['aria-label'])).toEqual([
+      'Accept pending accessible',
+      'Edit pending accessible',
+      'Reject pending accessible permanently',
+      'Copy rule text for pending accessible',
+      'Save a patch file for pending accessible',
+    ]);
+    expect(buttons.every(button => String(button.props.className).includes('min-h-[44px]'))).toBe(true);
+    expect(JSON.stringify(renderer.toJSON())).toContain('verified quote');
+  });
+
+  it('shows a patch download failure and clears its transient feedback on unmount', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'patch unavailable' }), { status: 503 })) as unknown as typeof fetch;
+    const renderer = render(
+      <ProposalCard
+        connection={connection}
+        proposal={makeProposal('pending', 5, 'patch-failure')}
+        busy={false}
+        accepted={false}
+        onAction={() => undefined}
+      />,
+    );
+    try {
+      const patch = renderer.root.findByProps({ 'aria-label': 'Save a patch file for pending patch-failure' });
+      await runAsync(async () => {
+        patch.props.onClick();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(JSON.stringify(renderer.toJSON())).toContain('patch unavailable');
+    } finally {
+      run(() => renderer.unmount());
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('loads and refreshes only through the supplied daemon connection', async () => {
