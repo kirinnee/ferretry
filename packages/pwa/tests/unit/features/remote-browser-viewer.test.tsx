@@ -592,6 +592,18 @@ describe('RemoteBrowserViewer input', () => {
   });
 
   it('maps Fit clicks from the displayed image rectangle, never the letterboxed container', async () => {
+    const globals = globalThis as typeof globalThis & { ResizeObserver?: unknown };
+    const previousResizeObserver = globals.ResizeObserver;
+    let observeResize: ResizeObserverCallback | undefined;
+    class StubResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        observeResize = callback;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    globals.ResizeObserver = StubResizeObserver;
     const socket = new FakeSocket();
     const mounted = await mount(
       <RemoteBrowserViewer
@@ -644,6 +656,9 @@ describe('RemoteBrowserViewer input', () => {
     expect(surface.style.top).toBe('80px');
     expect(surface.style.width).toBe('320px');
     expect(surface.style.height).toBe('240px');
+    // Container/image resizes use the same measured rectangle seam; exercise
+    // the observer callback rather than trusting the one-time image load.
+    await interact(() => observeResize?.([], {} as ResizeObserver));
 
     // Keep coordinate conversion independently defensive: if a host stylesheet
     // regressed the canvas to the container, this off-centre point would map to
@@ -668,5 +683,7 @@ describe('RemoteBrowserViewer input', () => {
     );
     expect(socket.inputs().at(-1)).toMatchObject({ type: 'mousePressed', x: 160, y: 120 });
     await mounted.unmount();
+    if (previousResizeObserver === undefined) Reflect.deleteProperty(globals, 'ResizeObserver');
+    else globals.ResizeObserver = previousResizeObserver;
   });
 });
