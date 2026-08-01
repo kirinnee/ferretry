@@ -399,7 +399,7 @@ function NativePickerButton({
 }) {
   return (
     <button
-      className="kt-btn mt-3 flex min-h-[44px] w-full min-w-[44px] items-center justify-between gap-sm text-left"
+      className="kt-btn !h-auto !justify-between !whitespace-normal !text-left mt-3 flex min-h-[44px] w-full min-w-[44px] items-center gap-sm py-2"
       disabled={disabled}
       onClick={onClick}
       type="button"
@@ -499,7 +499,7 @@ export function RuntimeModelChoices({
                 aria-busy={pending || undefined}
                 aria-current={current ? 'true' : undefined}
                 aria-label={`Switch model in place to ${choice.label}${current ? ', current' : ''}`}
-                className="kt-btn flex min-h-[44px] w-full min-w-[44px] items-center justify-between gap-sm text-left"
+                className="kt-btn !h-auto !justify-between !whitespace-normal !text-left flex min-h-[44px] w-full min-w-[44px] items-center gap-sm py-2"
                 disabled={disabled}
                 onClick={() => onChoose(choice)}
                 type="button"
@@ -619,7 +619,7 @@ export function RuntimeReasoningChoices({
                 aria-busy={pending || undefined}
                 aria-current={current ? 'true' : undefined}
                 aria-label={`Set ${model.label} reasoning to ${effortDisplayName(effort.value)}${current ? ', current' : ''}`}
-                className="kt-btn flex min-h-[44px] w-full min-w-[44px] items-center justify-between gap-sm text-left"
+                className="kt-btn !h-auto !justify-between !whitespace-normal !text-left flex min-h-[44px] w-full min-w-[44px] items-center gap-sm py-2"
                 disabled={disabled}
                 onClick={() => onChoose(effort.value)}
                 type="button"
