@@ -12,8 +12,9 @@ const SAFE_TEMP_TOKEN = /^[A-Za-z0-9_-]{1,64}$/u;
 
 /**
  * Writes one file so that a reader never observes a partial document: the payload lands in a scratch
- * file in the *same* directory, is then renamed over the target, and the scratch is removed on any
- * failure. Placement is not this class's business — it is handed an absolute path and nothing else.
+ * file in the *same* directory, is flushed, then renamed over the target before the directory entry
+ * is flushed. Scratch creation is exclusive, so a token collision cannot alter another writer's
+ * file. Placement is not this class's business — it is handed an absolute path and nothing else.
  */
 export class AtomicFileWriter {
   private readonly files: TaskFileOperations;
@@ -41,11 +42,16 @@ export class AtomicFileWriter {
     const directory = dirname(target);
     await this.files.ensureDirectory(directory, PRIVATE_DIRECTORY_MODE);
     const scratch = this.scratchFor(target);
+    let ownsScratch = false;
     try {
       await this.files.write(scratch, contents, PRIVATE_FILE_MODE);
+      ownsScratch = true;
       await this.files.replace(scratch, target);
+      await this.files.syncDirectory(directory);
     } catch (error) {
-      await this.files.discard(scratch).catch(() => undefined);
+      // `write` only resolves once its exclusive create succeeded. Before then the name may belong
+      // to another writer, so cleanup would be destructive; after then this writer owns it.
+      if (ownsScratch) await this.files.discard(scratch).catch(() => undefined);
       throw error;
     }
   }

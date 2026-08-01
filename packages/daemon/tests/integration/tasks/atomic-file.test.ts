@@ -3,17 +3,17 @@ import { readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { AtomicFileWriter } from '../../../src/adapters/tasks/atomic-file.ts';
-import { NodeTaskFileOperations } from '../../../src/adapters/tasks/file-operations.ts';
 import type { TaskFileOperations } from '../../../src/adapters/tasks/file-operations.ts';
+import { NodeTaskFileOperations } from '../../../src/adapters/tasks/file-operations.ts';
 import { FixedTempNameSource, shouldReject, withTempRoot } from './fixtures.ts';
 
 /** Wraps the real filesystem and fails exactly one named step, leaving every other step honest. */
 class FaultyFileOperations implements TaskFileOperations {
   readonly calls: string[] = [];
   private readonly inner = new NodeTaskFileOperations();
-  private readonly failOn: 'write' | 'replace' | null;
+  private readonly failOn: 'write' | 'replace' | 'sync' | null;
 
-  constructor(failOn: 'write' | 'replace' | null) {
+  constructor(failOn: 'write' | 'replace' | 'sync' | null) {
     this.failOn = failOn;
   }
 
@@ -35,6 +35,12 @@ class FaultyFileOperations implements TaskFileOperations {
     this.calls.push('replace');
     if (this.failOn === 'replace') throw new Error('rename failed');
     await this.inner.replace(from, to);
+  }
+
+  async syncDirectory(path: string): Promise<void> {
+    this.calls.push('syncDirectory');
+    if (this.failOn === 'sync') throw new Error('directory flush failed');
+    await this.inner.syncDirectory(path);
   }
 
   async discard(path: string): Promise<void> {
@@ -91,7 +97,7 @@ describe('AtomicFileWriter', () => {
     });
   });
 
-  it('should keep the previous contents and clean the scratch file when the write step fails', async () => {
+  it('should keep the previous contents when exclusive scratch creation fails', async () => {
     await withTempRoot(async root => {
       // Arrange
       const target = join(root, 'tasks.json');
@@ -106,7 +112,7 @@ describe('AtomicFileWriter', () => {
       await should(act()).be.rejectedWith('disk full');
       should(await new AtomicFileWriter().read(target)).equal('original');
       should(await readdir(root)).deepEqual(['tasks.json']);
-      should(files.calls).deepEqual(['write', 'discard']);
+      should(files.calls).deepEqual(['write']);
     });
   });
 
@@ -126,6 +132,46 @@ describe('AtomicFileWriter', () => {
       should(await new AtomicFileWriter().read(target)).equal('original');
       should(await readdir(root)).deepEqual(['tasks.json']);
       should(files.calls).deepEqual(['write', 'replace', 'discard']);
+    });
+  });
+
+  it('should flush the containing directory after rename and surface a flush failure', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const target = join(root, 'tasks.json');
+      await new AtomicFileWriter().write(target, 'original');
+      const files = new FaultyFileOperations('sync');
+      const subject = new AtomicFileWriter(files, new FixedTempNameSource(['scratch1']));
+
+      // Act
+      const act = async (): Promise<void> => await subject.write(target, 'replacement');
+
+      // Assert — rename has already made replacement visible, but its directory entry was not
+      // confirmed durable, so the caller gets the failure rather than a false success.
+      await should(act()).be.rejectedWith('directory flush failed');
+      should(await new AtomicFileWriter().read(target)).equal('replacement');
+      should(await readdir(root)).deepEqual(['tasks.json']);
+      should(files.calls).deepEqual(['write', 'replace', 'syncDirectory', 'discard']);
+    });
+  });
+
+  it('should preserve another writer’s scratch file when a generated token collides', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const target = join(root, 'tasks.json');
+      const scratch = join(root, '.tasks.json.claimed.tmp');
+      await writeFile(target, 'original');
+      await writeFile(scratch, 'other writer');
+      const subject = new AtomicFileWriter(new NodeTaskFileOperations(), new FixedTempNameSource(['claimed']));
+
+      // Act
+      const refusal = subject.write(target, 'replacement');
+
+      // Assert — `wx` does not overwrite the foreign scratch, and the writer does not clean a path
+      // it did not create itself.
+      await should(refusal).be.rejectedWith(/EEXIST/u);
+      should(await subject.read(target)).equal('original');
+      should(await subject.read(scratch)).equal('other writer');
     });
   });
 
