@@ -9,10 +9,10 @@ import {
   ServerCog,
   ShieldAlert,
 } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { daemonApiClient } from '../lib/api-client.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
 import { Button } from '../shell/primitives.tsx';
 import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
@@ -91,7 +91,7 @@ export function MigrateSheet({
   // All local draft/error/acknowledgement state belongs to this exact daemon
   // and session. Same-shaped ids on another paired daemon start clean.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     setAgent(config.agent);
     setModel(currentModel);
@@ -109,7 +109,7 @@ export function MigrateSheet({
     targetModel: model,
   });
   const scopeMismatch = connection.daemonId !== scope.daemonId || scope.sessionId !== config.id;
-  const hasRuntimeChange = migrationHasRuntimeChange(config.agent, currentModel, target);
+  const hasRuntimeChange = migrationHasRuntimeChange(config.agent, currentModel, config.modelHint, target);
   const canReview = canMutate && !scopeMismatch && target !== null && hasRuntimeChange && !context.conversationTooLarge;
   const suggestions = migrationModelSuggestions(currentModel);
   const caution = migrationRoutingCaution(agent);

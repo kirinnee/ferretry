@@ -1,6 +1,6 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { AlertTriangle, LoaderCircle, Pencil } from 'lucide-react';
-import { type FormEvent, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { type FormEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { daemonApiClient } from '../lib/api-client.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
@@ -85,7 +85,7 @@ export function RenameSheet({
   // Scope identity is the reset trigger. A colliding session id on another
   // daemon must never inherit edits, errors or an in-flight lock from this one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scope reset trigger, see above
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     setTitle(config.name);
     setTeammate(config.teammate ?? '');

@@ -1,16 +1,17 @@
 import '../support/dom.ts';
 
-import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
+  type RenameClientFactory,
   RenameSheet,
   type RenameSheetProps,
-  type RenameClientFactory,
   renameErrorsFor,
   renamePatch,
 } from '../../src/components/rename-sheet.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { mount } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -244,5 +245,25 @@ describe('RenameSheet', () => {
     await submit(view.root);
     expect(calls).toEqual(['daemon-a', 'daemon-b']);
     expect(closed).toEqual(['closed']);
+  });
+
+  it('shows the newly selected daemon session fields immediately when opening in the DOM', async () => {
+    const next = source();
+    const daemonBView = {
+      ...next,
+      config: { ...next.config, name: 'Daemon B Task', teammate: 'daemon-b' },
+    } as SessionView;
+    const mounted = await mount(
+      <RenameSheet connection={daemonA} onClose={() => undefined} open={false} view={source()} />,
+    );
+
+    await mounted.render(<RenameSheet connection={daemonB} onClose={() => undefined} open view={daemonBView} />);
+
+    expect(
+      [...mounted.container.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"])')].map(
+        input => input.value,
+      ),
+    ).toEqual(['Daemon B Task', 'daemon-b']);
+    await mounted.unmount();
   });
 });

@@ -97,14 +97,20 @@ export const migrationContextDecision = ({
   };
 };
 
-/** Relaunching the same account with its current/default model only destroys a pane. */
+/**
+ * A non-empty source hint records a model selection, whereas an omitted target
+ * asks the account planner for its default. That can be a real runtime change
+ * even when the account name is unchanged, so it must reach the daemon gate.
+ */
 export const migrationHasRuntimeChange = (
   currentAgent: string,
   currentModel: string,
+  currentModelHint: string,
   target: MigrationTarget | null,
 ): boolean =>
   target !== null &&
-  (target.agent !== currentAgent || (target.model !== undefined && target.model.trim() !== currentModel.trim()));
+  (target.agent !== currentAgent ||
+    (target.model === undefined ? currentModelHint.trim() !== '' : target.model.trim() !== currentModel.trim()));
 
 export const migrationRoutingCaution = (agent: string): string | null =>
   /(mm3|minimax|dsv4|glm52)/iu.test(agent)

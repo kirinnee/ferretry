@@ -13,6 +13,7 @@ import {
 } from '../../src/components/migrate-sheet.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { mount } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -157,6 +158,28 @@ describe('MigrateSheet', () => {
     expect(calls).toEqual([[daemonA, scopeA, { agent: 'codex-auto-atomi', allowContextDowngrade: false }]]);
     expect(updates).toEqual([[daemonA, scopeA, migrated]]);
     expect(closes).toBe(1);
+  });
+
+  it('allows an explicitly selected model to be cleared for the same account default', async () => {
+    const calls: unknown[][] = [];
+    const view = render(
+      <MigrateSheet
+        {...props({
+          migrateSession: async (...args) => {
+            calls.push(args);
+            return source('stopped');
+          },
+          view: source('stopped'),
+        })}
+      />,
+    );
+
+    change(field(view.root, 1), '   ');
+    expect(button(view.root, 'Review migration').props.disabled).toBe(false);
+    review(view.root);
+    await press(view.root, 'Relaunch on selected runtime');
+
+    expect(calls).toEqual([[daemonA, scopeA, { agent: 'codex-auto-loge', allowContextDowngrade: false }]]);
   });
 
   it('blocks an oversized conversation and a mismatched daemon/session scope before the RPC', () => {
@@ -349,5 +372,31 @@ describe('MigrateSheet', () => {
     expect(calls).toEqual(['daemon-a', 'daemon-b']);
     expect(updates).toEqual(['daemon-b']);
     expect(closes).toEqual(['closed']);
+  });
+
+  it('shows the newly selected daemon session fields immediately when opening in the DOM', async () => {
+    const next = source('stopped');
+    const daemonBView = {
+      ...next,
+      config: {
+        ...next.config,
+        agent: 'claude-auto-loge',
+        harness: 'claude',
+        model: 'claude-opus-5',
+        modelHint: 'claude-opus-5',
+      },
+    } as SessionView;
+    const mounted = await mount(<MigrateSheet {...props({ open: false })} />);
+
+    await mounted.render(
+      <MigrateSheet {...props({ connection: daemonB, open: true, scope: scopeB, view: daemonBView })} />,
+    );
+
+    expect(
+      [...mounted.container.querySelectorAll<HTMLInputElement>('input:not([type="checkbox"])')].map(
+        input => input.value,
+      ),
+    ).toEqual(['claude-auto-loge', 'claude-opus-5']);
+    await mounted.unmount();
   });
 });

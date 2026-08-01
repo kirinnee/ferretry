@@ -1,9 +1,8 @@
-import { FyHttpError } from '@ferretry/protocol/client';
 import { describe, expect, it } from 'bun:test';
+import { FyHttpError } from '@ferretry/protocol/client';
 import {
-  LARGE_CONTEXT_WINDOW,
-  SMALL_CONTEXT_WINDOW,
   contextWindowForModel,
+  LARGE_CONTEXT_WINDOW,
   migrationContextDecision,
   migrationFailure,
   migrationHasRuntimeChange,
@@ -12,6 +11,7 @@ import {
   migrationTarget,
   modelFromDowngradeError,
   oneMillionVariant,
+  SMALL_CONTEXT_WINDOW,
   withoutOneMillionVariant,
 } from '../../src/components/migrate-model.ts';
 
@@ -69,18 +69,36 @@ describe('migration model selection', () => {
   });
 
   it('requires an actual account or model change and warns on restricted routing tiers', () => {
-    expect(migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', null)).toBe(false);
+    expect(migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', null)).toBe(false);
     expect(
-      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', migrationTarget('codex-auto-loge', 'gpt-5.6-sol')),
+      migrationHasRuntimeChange(
+        'codex-auto-loge',
+        'gpt-5.6-sol',
+        'gpt-5.6-sol',
+        migrationTarget('codex-auto-loge', 'gpt-5.6-sol'),
+      ),
     ).toBe(false);
-    expect(migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', migrationTarget('codex-auto-loge', ''))).toBe(
-      false,
-    );
-    expect(migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', migrationTarget('codex-auto-atomi', ''))).toBe(
-      true,
-    );
     expect(
-      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', migrationTarget('codex-auto-loge', 'gpt-5.6-terra')),
+      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', migrationTarget('codex-auto-loge', '')),
+    ).toBe(false);
+    expect(
+      migrationHasRuntimeChange(
+        'codex-auto-loge',
+        'gpt-5.6-sol',
+        'gpt-5.6-sol',
+        migrationTarget('codex-auto-loge', ''),
+      ),
+    ).toBe(true);
+    expect(
+      migrationHasRuntimeChange('codex-auto-loge', 'gpt-5.6-sol', '', migrationTarget('codex-auto-atomi', '')),
+    ).toBe(true);
+    expect(
+      migrationHasRuntimeChange(
+        'codex-auto-loge',
+        'gpt-5.6-sol',
+        'gpt-5.6-sol',
+        migrationTarget('codex-auto-loge', 'gpt-5.6-terra'),
+      ),
     ).toBe(true);
     expect(migrationRoutingCaution('claude-auto-mm3')).toContain('Restricted tier');
     expect(migrationRoutingCaution('codex-auto-loge')).toBeNull();
