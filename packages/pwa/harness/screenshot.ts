@@ -43,6 +43,7 @@ const SECTIONS = [
   'harness-runtime-controls',
   'harness-pending-sends',
   'harness-skills',
+  'harness-thinking-indicator',
 ] as const;
 
 function fail(message: string): never {

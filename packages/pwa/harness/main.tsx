@@ -46,6 +46,7 @@ import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
+import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
@@ -2133,6 +2134,19 @@ function Shell() {
             <div className="h-40">
               <ThreadSkeleton />
             </div>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Thinking indicator',
+      render: () => (
+        <Card className="min-w-0" id="harness-thinking-indicator">
+          <PanelHeader>
+            <Label>Thinking indicator</Label>
+          </PanelHeader>
+          <PanelBody>
+            <ThinkingIndicator activity="Writing the migration tests (34s · 2.1k tokens)" since={Date.now() - 34_000} />
           </PanelBody>
         </Card>
       ),
