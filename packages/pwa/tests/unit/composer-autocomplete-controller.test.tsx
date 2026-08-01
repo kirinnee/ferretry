@@ -5,6 +5,7 @@ import {
   useComposerAutocomplete,
 } from '../../src/components/composer-autocomplete.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { interact, mount, must } from '../support/dom.ts';
 
 const providers: readonly ComposerAutocompleteProvider[] = [
   {
@@ -69,6 +70,15 @@ function Probe({
 const key = (value: string) => ({ key: value, nativeEvent: { isComposing: false }, preventDefault() {} });
 
 describe('useComposerAutocomplete', () => {
+  test('dismisses an open list only after a document click outside the textarea', async () => {
+    const mounted = await mount(<Probe />);
+    const textarea = must(mounted.container.querySelector('textarea'), 'composer textarea');
+    expect(textarea.getAttribute('aria-expanded')).toBe('true');
+    await interact(() => document.body.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(textarea.getAttribute('aria-expanded')).toBeNull();
+    await mounted.unmount();
+  });
+
   test('renders a real controller state, navigates enabled candidates, accepts, and dismisses', () => {
     const selected: Array<readonly [number, number]> = [];
     const input = { value: '/', setSelectionRange: (start: number, end: number) => selected.push([start, end]) };
