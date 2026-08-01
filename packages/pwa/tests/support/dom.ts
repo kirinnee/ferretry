@@ -69,3 +69,14 @@ export const interact = async (callback: () => unknown): Promise<void> => {
 export const pressKey = (target: EventTarget, key: string, init: KeyboardEventInit = {}): void => {
   target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
 };
+
+/**
+ * Narrows away a `null` the DOM cannot promise us, by FAILING rather than by
+ * asserting non-null. A missing element is a genuine test failure and deserves
+ * to say which one went missing; `!` would surface it as an unrelated
+ * `TypeError` several lines later.
+ */
+export const must = <T>(value: T | null | undefined, what: string): T => {
+  if (value === null || value === undefined) throw new Error(`expected ${what} to be present`);
+  return value;
+};

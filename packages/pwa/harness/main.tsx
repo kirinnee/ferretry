@@ -70,6 +70,7 @@ import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
+import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
@@ -379,29 +380,31 @@ const PALETTE_SESSIONS = paletteSessionEntries([
  * bulk-stop warning: an included caller, a current-session ancestor, and
  * descendants that an orphan stop would leave running.
  */
-const STOP_FLEET = [
-  harnessSession,
-  {
-    ...harnessSession,
-    config: {
-      ...harnessSession.config,
-      id: 'ms9hi4ts-b22751c4',
-      teammate: 'jessica',
-      name: 'Port the command palette',
-      parent: 'harness-session',
-    },
+const stopLead = harnessSession;
+
+const stopChild = {
+  ...harnessSession,
+  config: {
+    ...harnessSession.config,
+    id: 'ms9hi4ts-b22751c4',
+    teammate: 'jessica',
+    name: 'Port the command palette',
+    parent: 'harness-session',
   },
-  {
-    ...harnessSession,
-    config: {
-      ...harnessSession.config,
-      id: 'kq21ffds-90ab12cd',
-      teammate: 'ms-98',
-      name: 'Wire the daemon picker',
-      parent: 'ms9hi4ts-b22751c4',
-    },
+} as SessionView;
+
+const stopGrandchild = {
+  ...harnessSession,
+  config: {
+    ...harnessSession.config,
+    id: 'kq21ffds-90ab12cd',
+    teammate: 'ms-98',
+    name: 'Wire the daemon picker',
+    parent: 'ms9hi4ts-b22751c4',
   },
-] as SessionView[];
+} as SessionView;
+
+const STOP_FLEET: SessionView[] = [stopLead, stopChild, stopGrandchild];
 
 const PALETTE_COMMANDS = [
   {
@@ -678,6 +681,7 @@ function Shell() {
   const phone = viewport.width <= PHONE_MAX;
   const menuOpen = window.location.hash === '#menu';
   const paletteOpen = window.location.hash === '#palette';
+  const rowMenuOpen = window.location.hash === '#row-menu';
   const stopOpen = window.location.hash === '#stop';
   const stopResultsOpen = window.location.hash === '#stop-results';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
@@ -1337,6 +1341,19 @@ function Shell() {
           touchAffected={phone}
         />
 
+        {/* Only under `#row-menu`: the REAL sidebar row menu, so the screenshot
+            shows the entries the port actually builds rather than hand-written
+            stand-ins — the four explicit stop scopes and their target counts. */}
+        <SessionRowMenu
+          state={rowMenuOpen ? { view: stopLead, x: phone ? 40 : 420, y: 240 } : null}
+          sessions={STOP_FLEET}
+          canMutate
+          onClose={() => {}}
+          onRun={() => {}}
+          onBulkStop={() => {}}
+          touch={phone}
+        />
+
         {/* Only under `#stop` / `#stop-results`: another fixed overlay, and the
             two states are different screens — the confirmation lists what will
             die, the report lists what did. */}
@@ -1356,11 +1373,11 @@ function Shell() {
                     scope: 'cascade',
                     targets: STOP_FLEET,
                     outcomes: [
-                      { id: STOP_FLEET[0]!.config.id, name: 'Fable', ok: true },
-                      { id: STOP_FLEET[1]!.config.id, name: 'Jessica', ok: true },
-                      { id: STOP_FLEET[2]!.config.id, name: 'MS-98', ok: false, detail: 'already exited' },
+                      { id: stopLead.config.id, name: 'Fable', ok: true },
+                      { id: stopChild.config.id, name: 'Jessica', ok: true },
+                      { id: stopGrandchild.config.id, name: 'MS-98', ok: false, detail: 'already exited' },
                     ],
-                    newTargets: [STOP_FLEET[2]!],
+                    newTargets: [stopGrandchild],
                   }
                 : null
           }

@@ -185,6 +185,13 @@ try {
       await page.screenshot({ path: paletteTarget });
       process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
 
+      const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
+      await page.goto(`${server.url}#row-menu`);
+      await page.reload();
+      await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+      await page.screenshot({ path: rowMenuTarget });
+      process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
+
       // The bulk-stop confirmation is a fixed overlay like the menu and the
       // palette, and its two states are different screens: what will die, and
       // what did.

@@ -6,7 +6,7 @@ import {
   stopTargetName,
 } from '../../src/shell/bulk-stop-confirmation.tsx';
 import type { BulkStopRequest } from '../../src/shell/agent-sidebar-model.ts';
-import { interact, mount, pressKey } from '../support/dom.ts';
+import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const lead = sessionView('lead-1', { config: { name: 'Fleet Lead', teammate: 'nero' } });
@@ -154,7 +154,10 @@ describe('BulkStopConfirmation', () => {
     const view = await render({ request: request({ running: true }) });
     await interact(() => button(view.container, 'Refreshing…').click());
     expect(view.confirmed).toEqual([]);
-    const scrim = view.container.querySelector<HTMLButtonElement>('button[aria-label="Close stop confirmation"]')!;
+    const scrim = must(
+      view.container.querySelector<HTMLButtonElement>('button[aria-label="Close stop confirmation"]'),
+      'the scrim',
+    );
     expect(scrim.disabled).toBe(true);
     await interact(() => scrim.click());
     expect(view.closes()).toBe(0);
@@ -244,7 +247,7 @@ describe('BulkStopConfirmation', () => {
 
   it('claims a modal contract and points its label at the title it renders', async () => {
     const view = await render();
-    const dialog = view.container.querySelector('[role="dialog"]')!;
+    const dialog = must(view.container.querySelector('[role="dialog"]'), 'the dialog');
     expect(dialog.getAttribute('aria-modal')).toBe('true');
     expect(dialog.getAttribute('aria-labelledby')).toBe('bulk-stop-title');
     expect(view.container.querySelector('#bulk-stop-title')).toBeTruthy();
