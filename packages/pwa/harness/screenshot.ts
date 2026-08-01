@@ -133,6 +133,9 @@ try {
       const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
       await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });
       process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
+      const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
+      await page.getByLabel('Pins ledger').screenshot({ path: pinsTarget });
+      process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);

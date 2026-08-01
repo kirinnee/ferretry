@@ -13,6 +13,7 @@ import type {
   AttentionSnapshot,
   BrowserStatus,
   LearningStatus,
+  PinSnapshot,
   ProposalView,
   SessionView,
   TaskLive,
@@ -49,6 +50,7 @@ import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/b
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
+import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
@@ -411,6 +413,36 @@ const ATTENTION: AttentionSnapshot = {
     },
   ],
   resolved: [],
+};
+
+/** Notes and a transcript pin exercise provenance, edit affordances, and the
+ * exact-message action without ever connecting the visual harness to a daemon. */
+const PINS: PinSnapshot = {
+  v: 1,
+  sessionId: 'harness-session',
+  updatedAt: '2026-07-31T12:00:00.000Z',
+  pins: [
+    {
+      id: '00000000-0000-4000-8000-000000000021',
+      at: 2,
+      kind: 'note',
+      text: 'Check the snapshot release before asking the lead to merge.',
+      by: 'agent',
+      createdBy: 'harness-agent',
+      createdByName: 'Zoe',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000022',
+      at: 1,
+      kind: 'message',
+      blockId: 'harness-message',
+      blockKind: 'assistant',
+      preview: 'The visual harness now captures this feature at both breakpoints.',
+      by: 'human',
+      createdBy: null,
+      createdByName: null,
+    },
+  ],
 };
 
 const BROWSER_LOGIN: BrowserLoginView = {
@@ -977,6 +1009,21 @@ function Shell() {
             error={null}
             now={HARNESS_NOW}
             onAction={() => {}}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Pins ledger',
+      render: () => (
+        <Card className="min-h-[400px] overflow-hidden">
+          <PinsBoard
+            snapshot={PINS}
+            status="ready"
+            onAddNote={() => {}}
+            onEditNote={() => {}}
+            onRemove={() => {}}
+            onOpenMessage={() => {}}
           />
         </Card>
       ),
