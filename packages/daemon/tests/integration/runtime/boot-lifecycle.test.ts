@@ -2378,10 +2378,13 @@ describe('daemon boot lifecycle', () => {
     // The boot ran a self-check BEFORE binding, so the very first answer is a measurement rather than
     // an empty ledger.
     should(view.lastSelfCheckAt).not.be.null();
-    // Neither subsystem is mounted, so the daemon says so instead of reporting a broken one.
+    // The warden sweep is not mounted, so the daemon says so instead of reporting a broken one.
     should(view.wardenTimerArmed).be.false();
     should(view.wardenLastSweepSeconds).be.null();
-    should(view.scratchGcEnabled).be.false();
+    // Scratch GC IS mounted now. Enabled means the collector runs, not that it deletes: the policy
+    // refuses anything that is not a daemon-owned entry, not terminal, or under the TTL, and refuses
+    // outright when there is no finishedAt and no mtime to age from.
+    should(view.scratchGcEnabled).be.true();
     // Liveness stays public and unchanged, so nothing that probes for it needs a token.
     should(liveness.status).equal(200);
     should((await liveness.json()) as { status: string }).have.property('status', 'ok');

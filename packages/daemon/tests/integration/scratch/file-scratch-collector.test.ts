@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, lutimes, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -86,6 +86,55 @@ describe('FileScratchCollector', () => {
       // Assert
       should(plan).match({ eligible: false, reason: 'the tmux pane is still alive' });
       should(await Bun.file(join(directory, 'checkout')).exists()).be.true();
+    });
+  });
+
+  it('should reclaim a write-protected tree without following a symlink out of it', async () => {
+    await withTempRoot(async root => {
+      // Arrange. An agent that leaves its scratch read-only would otherwise strand the directory
+      // forever: `rm` answers EACCES, and the only way through is to relax the mode first. The
+      // symlink is the hazard that relaxing must NOT follow — chmod through it would change the
+      // mode of a file outside the scratch tree, which the collector has no business touching.
+      const id = 'locked-session';
+      const directory = join(root, id);
+      const outside = join(root, 'outside.txt');
+      const locked = join(directory, 'checkout');
+      const record = sessionView(id, {}, { status: 'completed', finishedAt: OLD.toISOString() });
+      await writeFile(outside, 'not the collector-s business');
+      await chmod(outside, 0o644);
+      await mkdir(locked, { recursive: true });
+      await writeFile(join(locked, 'output.txt'), 'build output');
+      await symlink(outside, join(locked, 'escape'));
+      await utimes(join(locked, 'output.txt'), OLD, OLD);
+      // lutimes, not utimes: ageing the LINK. utimes would follow it and backdate the target, which
+      // is the very file this test asserts the collector never touches.
+      await lutimes(join(locked, 'escape'), OLD, OLD);
+      await utimes(locked, OLD, OLD);
+      await chmod(locked, 0o500);
+      const subject = new FileScratchCollector(
+        {
+          list: () => [{ id }],
+          config: async () => record.config,
+          state: async () => record.state,
+          directory: () => directory,
+        },
+        { alive: async () => false },
+        { enabled: true, ttlHours: 24, perSweep: 20 },
+        () => NOW,
+      );
+
+      // Act
+      const result = await subject.sweep();
+      // If the sweep left the tree behind, the mode it was given would also defeat this test's own
+      // cleanup, and that EACCES would mask the assertion below. Succeeds-or-not, hand the mode back.
+      await chmod(locked, 0o700).catch(() => undefined);
+
+      // Assert
+      should(result).match({ sessions: 1, failures: 0 });
+      should(await Bun.file(locked).exists()).be.false();
+      // The link died with its directory; its target did not, and kept the mode it arrived with.
+      should(await readFile(outside, 'utf8')).equal('not the collector-s business');
+      should((await Bun.file(outside).stat()).mode & 0o777).equal(0o644);
     });
   });
 });
