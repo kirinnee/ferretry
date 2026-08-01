@@ -85,7 +85,8 @@ const attachTranscriptHold = (): void => {
   });
 };
 
-const subscribeTranscriptHold = (listener: HoldListener): (() => void) => {
+/** Subscribe without React; kept public for DOM-free controller tests. */
+export const subscribeTranscriptHold = (listener: HoldListener): (() => void) => {
   holdListeners.add(listener);
   attachTranscriptHold();
   return () => holdListeners.delete(listener);
