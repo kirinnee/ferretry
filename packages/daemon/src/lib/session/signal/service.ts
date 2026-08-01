@@ -89,6 +89,68 @@ export class SessionSignalService {
     });
   }
 
+  /**
+   * Ends a declared wait because its deadline has passed.
+   *
+   * THE THIRD WAY A PARK ENDS, and the one that was missing entirely: the session says `working`, the
+   * peer replies, or the clock runs out. All three land here, on the same `clearWait` — the credit
+   * against the turn ceiling and the activity re-anchor are this slice's arithmetic, and a monitor
+   * that did its own would drift from the other two the first time either changed.
+   *
+   * THE DEADLINE IS RE-EVALUATED UNDER THE LOCK, from the wait on the document rather than the one
+   * the caller planned against. A monitor reads the fleet and then acts on it session by session, so
+   * between the two the session may have been woken and re-parked on something longer; waking it then
+   * would abandon a teammate that is genuinely still waiting. `deadlineMs` returning `undefined` means
+   * the wait's own timestamps will not parse, and that is treated as elapsed — see `WaitExpiryBasis`.
+   *
+   * Returns the wait it cleared, so the caller can address the teammate about the park that actually
+   * ended, or `undefined` when it cleared nothing.
+   */
+  async expireWait(
+    id: SessionId,
+    nowMs: number,
+    deadlineMs: (wait: DeclaredWait) => number | undefined,
+    reason: string,
+  ): Promise<DeclaredWait | undefined> {
+    return await this.ports.serial.run(id, async () => {
+      const target = await this.ports.repository.read(id);
+      const waiting = target?.waiting;
+      if (target === undefined || waiting === undefined) return undefined;
+      const deadline = deadlineMs(waiting);
+      if (deadline !== undefined && nowMs < deadline) return undefined;
+      await this.clearWait(target, waiting, reason);
+      return waiting;
+    });
+  }
+
+  /**
+   * Puts a parked session's status back to `waiting`, and reports whether it had to.
+   *
+   * `waiting` ON THE DOCUMENT IS THE AUTHORITY FOR A PARK, not the status. Other paths recompute the
+   * status from what they observe, so without this the park survives on the record while every
+   * surface that reads a status — the listing, the UI, `fy wait` — shows a running session. kteam
+   * learned this from the tool result of `signal waiting` itself erasing the park it had just made.
+   *
+   * A PROTECTED STATUS IS NEVER WRITTEN OVER, for the reason a park may not be declared from one: it
+   * is a verdict another path reached, and a wait that outlived its session must not resurrect a
+   * stopped record. Such a park is left for the deadline to clear.
+   */
+  async holdWait(id: SessionId): Promise<boolean> {
+    return await this.ports.serial.run(id, async () => {
+      const target = await this.ports.repository.read(id);
+      if (target?.waiting === undefined) return false;
+      if (target.status === 'waiting' || PROTECTED_SIGNAL_STATUSES.has(target.status)) return false;
+      await this.ports.repository.transition(id, {
+        event: 'session.waiting_held',
+        status: 'waiting',
+        health: 'waiting',
+        reason: `held: the declared wait is still in force but the status had moved to ${target.status}`,
+        data: { from: target.status },
+      });
+      return true;
+    });
+  }
+
   private async locked(request: SessionSignalRequest): Promise<SignalTarget> {
     const target = await this.require(request.id);
     if (request.kind === 'done') return await this.complete(target, request.message);

@@ -567,3 +567,144 @@ describe('every signal', () => {
     should(repository.transitions).be.empty();
   });
 });
+
+/**
+ * The THIRD way a park ends, after the session saying `working` and the peer replying.
+ *
+ * All three land on the same `clearWait`, which is the point: the credit against the turn ceiling and
+ * the activity re-anchor are one piece of arithmetic, and a monitor with its own copy would drift
+ * from the other two the first time either changed.
+ */
+describe('a declared wait reaching its deadline', () => {
+  const WAIT_SINCE = '2026-08-01T11:00:00.000Z';
+  const DEADLINE = Date.parse('2026-08-01T11:30:00.000Z');
+  const NOW_MS = Date.parse(NOW);
+
+  it('should clear the park, credit the time back, and report the wait it ended', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: WAIT_SINCE }, status: 'waiting' }));
+
+    // Act
+    const cleared = await service.expireWait(ID, NOW_MS, () => DEADLINE, 'declared wait elapsed');
+
+    // Assert
+    should(cleared?.since).equal(WAIT_SINCE);
+    should(repository.events).deepEqual(['session.waiting_cleared']);
+    should(repository.transitions[0]?.waiting).equal('clear');
+    should(repository.transitions[0]?.reanchorActivity).be.true();
+    should(repository.transitions[0]?.waitingCreditSeconds).equal(3600);
+  });
+
+  it('should clear a park whose own timestamps could not be read at all', async () => {
+    // A deadline that cannot be established is supervision switched off for a length of time nobody
+    // can state, so the wake is the fail-closed direction — see `WaitExpiryBasis`.
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: 'the other day' }, status: 'waiting' }));
+
+    // Act
+    const cleared = await service.expireWait(ID, NOW_MS, () => undefined, 'unreadable');
+
+    // Assert
+    should(cleared).not.be.undefined();
+    should(repository.events).deepEqual(['session.waiting_cleared']);
+  });
+
+  it('should leave a park that was replaced by a longer one under the lock', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: WAIT_SINCE }, status: 'waiting' }));
+
+    // Act
+    const cleared = await service.expireWait(ID, NOW_MS, () => NOW_MS + 60_000, 'declared wait elapsed');
+
+    // Assert
+    should(cleared).be.undefined();
+    should(repository.transitions).be.empty();
+  });
+
+  it('should do nothing for a session that is not parked at all', async () => {
+    // Arrange
+    const { service, repository } = parts(target());
+
+    // Act
+    const cleared = await service.expireWait(ID, NOW_MS, () => DEADLINE, 'declared wait elapsed');
+
+    // Assert
+    should(cleared).be.undefined();
+    should(repository.transitions).be.empty();
+  });
+
+  it('should do nothing for a session that is not there', async () => {
+    // Arrange
+    const { service, repository } = partsWithoutSession();
+
+    // Act
+    const cleared = await service.expireWait(ID, NOW_MS, () => DEADLINE, 'declared wait elapsed');
+
+    // Assert
+    should(cleared).be.undefined();
+    should(repository.transitions).be.empty();
+  });
+
+  it("should run under the session's own lock", async () => {
+    // Arrange
+    const { service, serial } = parts(target({ waiting: { since: WAIT_SINCE }, status: 'waiting' }));
+
+    // Act
+    await service.expireWait(ID, NOW_MS, () => DEADLINE, 'declared wait elapsed');
+
+    // Assert
+    should(serial.keys).deepEqual([ID]);
+  });
+});
+
+/**
+ * `waiting` on the document is the authority for a park; the status is a derived view of it.
+ *
+ * Without the hold, a park survives on the record while every surface that reads a status shows a
+ * running session — which is how kteam's own `signal waiting` tool result erased the park it had just
+ * made.
+ */
+describe('holding the status of a session that is still parked', () => {
+  it('should put a drifted status back to waiting and say that it had to', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: NOW }, status: 'running' }));
+
+    // Act
+    const held = await service.holdWait(ID);
+
+    // Assert
+    should(held).be.true();
+    should(repository.events).deepEqual(['session.waiting_held']);
+    should(repository.transitions[0]?.status).equal('waiting');
+    should(repository.transitions[0]?.data).have.property('from', 'running');
+  });
+
+  it('should write nothing when the status already agrees with the park', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: NOW }, status: 'waiting' }));
+
+    // Act & Assert
+    should(await service.holdWait(ID)).be.false();
+    should(repository.transitions).be.empty();
+  });
+
+  it('should never resurrect a verdict another path already reached', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: NOW }, status: 'stopped' }));
+
+    // Act & Assert
+    should(await service.holdWait(ID)).be.false();
+    should(repository.transitions).be.empty();
+  });
+
+  it('should write nothing for a session that is not parked, or not there', async () => {
+    // Arrange
+    const parked = parts(target({ status: 'running' }));
+    const absent = partsWithoutSession();
+
+    // Act & Assert
+    should(await parked.service.holdWait(ID)).be.false();
+    should(await absent.service.holdWait(ID)).be.false();
+    should(parked.repository.transitions).be.empty();
+  });
+});
