@@ -9,9 +9,10 @@ import {
   DaemonStorageFactory,
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
-  NodeSessionCredentialIssuer,
   KeyedSerialExecutor,
+  NodeSessionCredentialIssuer,
   NodeWorkingDirectoryResolver,
+  type PaneDeliveryOptions,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
@@ -22,21 +23,20 @@ import {
   TmuxPaneDelivery,
   TmuxSessionLifecycleLauncher,
   UnusableSessionRecordError,
-  type PaneDeliveryOptions,
 } from '../../../../src/adapters/index.ts';
-import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 import {
   createSessionPaths,
   createSessionRecord,
   defaultSessionLifecycleSettings,
   parseSessionId,
+  type SessionEnvironmentStore,
+  type SessionLifecycleRecord,
   SessionLifecycleService,
+  type TmuxCommandPort,
   TmuxController,
   transitionSessionRecord,
-  type SessionLifecycleRecord,
-  type SessionEnvironmentStore,
-  type TmuxCommandPort,
 } from '../../../../src/lib/index.ts';
+import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';

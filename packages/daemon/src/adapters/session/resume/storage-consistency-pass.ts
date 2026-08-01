@@ -1,10 +1,10 @@
-import type { FileSystemPort } from '../../../lib/ports.ts';
 import { createSessionPaths, type FoundationPaths } from '../../../lib/paths.ts';
-import type { SessionId } from '../../../lib/session-id.ts';
+import type { FileSystemPort } from '../../../lib/ports.ts';
 import type { ConsistencyPassPort } from '../../../lib/session/health/service.ts';
 import type { SessionHealthSettings } from '../../../lib/session/health/settings.ts';
 import type { IncoherencePass } from '../../../lib/session/health/types.ts';
 import { detectZombies, type TerminalSessionActivity } from '../../../lib/session/health/zombie.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
 /** Statuses from which a session will never run again; a journal still growing under one is a zombie. */

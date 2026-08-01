@@ -16,15 +16,15 @@ import {
   StateHomeLayout,
   StorageConsistencyPass,
   StorageSessionHealthInventory,
+  type SupervisionCapabilities,
   SystemClock,
   SystemMonotonicClock,
   UnmountedSupervisionRepair,
-  type SupervisionCapabilities,
 } from '../../../../src/adapters/index.ts';
 import {
+  CURRENT_SESSION_VERSION,
   createFoundationPaths,
   createSessionPaths,
-  CURRENT_SESSION_VERSION,
   defaultSessionHealthSettings,
   parseSessionId,
   resolveStateHome,

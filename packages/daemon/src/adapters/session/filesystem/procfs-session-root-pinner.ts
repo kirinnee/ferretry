@@ -188,8 +188,13 @@ class ProcfsPinnedTarget implements PinnedTarget {
         kept.push(await this.classify(own, dirent.name, type));
       }
     } finally {
-      // Breaking out of `for await` already closes the handle, and a second close then throws.
-      await dir.close().catch(() => undefined);
+      // Breaking out of `for await` already closes the handle, and a second close then throws — or, in
+      // Bun, returns undefined rather than a promise, so this cannot be a `.catch()`.
+      try {
+        await dir.close();
+      } catch {
+        // already closed by the iterator
+      }
     }
     return { entries: kept, truncated };
   }
@@ -252,15 +257,13 @@ class ProcfsPinnedRoot implements PinnedRoot {
         const isLeaf = index === segments.length - 1;
         const wantDirectory = !isLeaf || options.wantDirectory === true;
         const next = await this.step(procPath(current.fd), segment, [...walked, segment].join('/'), rel, wantDirectory);
-        const nextMetadata = await next.stat().catch(async error => {
-          await next.close().catch(() => undefined);
-          throw error;
-        });
-        walked.push(segment);
+        // Adopt the new handle BEFORE describing it. The outer catch closes whatever `current` holds, so a
+        // failing `fstat` needs no error path of its own and cannot leak a descriptor.
         await current.close().catch(() => undefined);
         current = next;
-        metadata = nextMetadata;
-        identities.push(componentIdentity(nextMetadata));
+        metadata = await current.stat();
+        walked.push(segment);
+        identities.push(componentIdentity(metadata));
       }
       return new ProcfsPinnedTarget(current, pinnedMetadata(metadata), walked.join('/'), identities, this.rootReal);
     } catch (error) {
