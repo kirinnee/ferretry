@@ -49,6 +49,8 @@ import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
+import { registerScratchCommands } from '../src/lib/scratch/commands';
+import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
@@ -146,7 +148,10 @@ function lazyDaemonConnection(environment: Record<string, string | undefined>): 
  * The slice of the daemon SDK the shared client exposes. Widening it is additive — a group that
  * needs one more call adds it here and no existing group changes — and every member stays deferred.
  */
-type SharedDaemonClient = Pick<IFyApiClient, 'request' | 'analytics' | 'list' | 'get' | 'stop'>;
+type SharedDaemonClient = Pick<
+  IFyApiClient,
+  'request' | 'analytics' | 'list' | 'get' | 'stop' | 'scratchPlan' | 'scratchSweep'
+>;
 
 /** The deferred connection as the client object every command group is wired with. */
 function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClient {
@@ -159,6 +164,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string): Promise<SessionView> => (await client()).get(id),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
+    scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
+    scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
   };
 }
 
@@ -270,6 +277,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>
     registerTaskCommands(program, {
