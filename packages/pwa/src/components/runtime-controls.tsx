@@ -48,6 +48,7 @@ import {
   runtimeModelCatalogErrorMessage,
 } from '../lib/runtime-models.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import type { RuntimeSwitchLifecycle } from './composer-runtime.tsx';
 
 /**
  * The four persistable levels the installed Claude CLI accepts. `auto` (reset to
@@ -136,17 +137,17 @@ export const codexPickerFallbackNeeded = (
   return choice?.reasoningEfforts.length === 0;
 };
 
-/** The lifecycle a sheet body drives so its host's readouts stay honest. Named to
- *  match `composer-runtime.tsx`'s `RuntimeSwitchLifecycle`, which is what supplies
- *  these when the controls are rendered into the bar. */
-export interface RuntimeSwitchCallbacks {
-  /** A switch was submitted: the host readout goes stale-until-evidence. */
-  readonly onSwitchSubmitted?: () => void;
-  /** The submit failed, so nothing is pending and the readout is current again. */
-  readonly onSwitchFailed?: () => void;
-  /** Claude effort is not observable; a successful send is all there is to show. */
-  readonly onClaudeEffortSent?: (effort: string) => void;
-  readonly onClose: () => void;
+/**
+ * The lifecycle a sheet body drives so its host's readouts stay honest.
+ *
+ * DERIVED FROM `composer-runtime.tsx`, not re-declared beside it: that file owns
+ * the contract and hands one of these to each sheet body it renders, so a
+ * spread — `renderModelControls={lifecycle => <RuntimeModelControls {...lifecycle} … />}`
+ * — is the whole wiring, and the two cannot drift. The details sheet supplies
+ * only `onClose`, which is why the rest are optional here.
+ */
+export interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose'>> {
+  readonly onClose: RuntimeSwitchLifecycle['onClose'];
 }
 
 interface RuntimeControlBase extends RuntimeSwitchCallbacks {
