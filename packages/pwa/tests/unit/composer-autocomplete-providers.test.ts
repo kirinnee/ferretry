@@ -193,6 +193,14 @@ describe('composer skills provider', () => {
     expect(result.notice).toContain(message);
     expect(result.notice).toContain('Built-in commands still work');
   });
+
+  it('preserves a daemon error code while falling back from an empty error message', async () => {
+    await expect(
+      loadSkillsCatalog(daemonA, scopeA, new AbortController().signal, async () =>
+        json({ error: ' ', code: 'skills_denied' }, 403),
+      ),
+    ).rejects.toMatchObject({ code: 'skills_denied' });
+  });
 });
 
 describe('composer files provider', () => {
