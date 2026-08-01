@@ -64,6 +64,31 @@ export class SessionSignalService {
     return await this.ports.serial.run(request.id, async () => await this.locked(request));
   }
 
+  /**
+   * Ends a declared wait because the session it named has just replied.
+   *
+   * THIS IS THE HALF THAT WAS MISSING. `park` already resolved the peer whose reply would end the
+   * wait and wrote it onto the document — and nothing could ever fire this, because the reply is a
+   * SEND and the daemon had no send. Every `--peer` park therefore ran to its deadline, however
+   * promptly the peer answered.
+   *
+   * It lives here rather than in the send domain because clearing a wait means crediting the parked
+   * time back against the turn ceiling and re-anchoring the activity ledger, and that is this slice's
+   * own arithmetic. The send merely reports that a reply arrived.
+   *
+   * A REPLY FROM ANYONE ELSE CHANGES NOTHING, and the check is made under the lock rather than by the
+   * caller: the session may have been re-parked on a different peer between the send landing and this
+   * call, and waking it then would resume a teammate that is still waiting for somebody.
+   */
+  async endPeerWait(recipient: SessionId, sender: SessionId): Promise<void> {
+    await this.ports.serial.run(recipient, async () => {
+      const target = await this.ports.repository.read(recipient);
+      const waiting = target?.waiting;
+      if (target === undefined || waiting === undefined || waiting.peer !== sender) return;
+      await this.clearWait(target, waiting, `${waiting.peerName ?? sender} replied`);
+    });
+  }
+
   private async locked(request: SessionSignalRequest): Promise<SignalTarget> {
     const target = await this.require(request.id);
     if (request.kind === 'done') return await this.complete(target, request.message);

@@ -43,6 +43,7 @@ export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/resume/index.ts';
+export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './session/transcript/index.ts';
 export * from './state-home.ts';

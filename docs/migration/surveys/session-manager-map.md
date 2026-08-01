@@ -19,21 +19,21 @@ searching for the capability under every name it plausibly travels under, not by
 BODIES were not read line by line** — this map answers "is the capability carried", not "is it
 carried identically". Rows where the shape is known to differ say so.
 
-## The headline: the daemon serves 3 of the 8 session verbs the client speaks
+## The headline: the daemon serves 6 of the 8 session verbs the client speaks
 
 `IFyApiClient` posts eight actions to `/v1/sessions/:id/<action>`. The daemon's route table answers
-`unknown_route` to five of them.
+`unknown_route` to two of them.
 
-| Client action | Daemon route                           | State                   |
-| ------------- | -------------------------------------- | ----------------------- |
-| `stop`        | `POST /v1/sessions/:sessionId/stop`    | PORTED                  |
-| `resume`      | `POST /v1/sessions/:sessionId/resume`  | PORTED                  |
-| `migrate`     | `POST /v1/sessions/:sessionId/migrate` | PORTED                  |
-| `signal`      | `POST /v1/sessions/:sessionId/signal`  | **PORTED BY THIS UNIT** |
-| `send`        | —                                      | **GAP**                 |
-| `answer`      | —                                      | **GAP**                 |
-| `interrupt`   | —                                      | **GAP**                 |
-| `rename`      | —                                      | **GAP**                 |
+| Client action | Daemon route                             | State                                                        |
+| ------------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `stop`        | `POST /v1/sessions/:sessionId/stop`      | PORTED                                                       |
+| `resume`      | `POST /v1/sessions/:sessionId/resume`    | PORTED                                                       |
+| `migrate`     | `POST /v1/sessions/:sessionId/migrate`   | PORTED                                                       |
+| `signal`      | `POST /v1/sessions/:sessionId/signal`    | **PORTED BY THIS UNIT**                                      |
+| `send`        | `POST /v1/sessions/:sessionId/send`      | **PORTED BY THIS UNIT**                                      |
+| `interrupt`   | `POST /v1/sessions/:sessionId/interrupt` | **PORTED BY THIS UNIT** — turn-stop only; bound abandon 501s |
+| `answer`      | —                                        | **GAP** — see B                                              |
+| `rename`      | —                                        | **GAP**                                                      |
 
 And of the GET surface the client reads: `snapshot`, `logs`, `events`, `attachments`, `gc`,
 `warden/status`, `warden/run`, `warden/config`, `cgroups/config` and `pwa/config` are all unserved.
@@ -59,19 +59,19 @@ And of the GET surface the client reads: `snapshot`, `logs`, `events`, `attachme
 
 ## B. Messaging — the largest gap in the daemon
 
-| Source                                                          | Line             | Ferretry                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `send`                                                          | 2642             | **GAP** — `mounts/index.ts` states it outright: "A SEND is not here — the lifecycle delivers turn one and has no method for a later turn." `packages/cli/src/lib/session/send-controller.ts` and `send-plan.ts` are built and call a 404 |
-| `sendUnlocked`                                                  | 7166             | **GAP**                                                                                                                                                                                                                                  |
-| `listSends`, `sendDisposition`                                  | 1615, 1705       | **GAP** — `SendDispositionSchema` exists in the protocol; no send ledger anywhere in the daemon                                                                                                                                          |
-| `queueNativeSend`                                               | 3106             | **GAP**                                                                                                                                                                                                                                  |
-| `deliverToIdlePrompt`                                           | 3294             | PARTIAL — `ResumeLauncher.deliver` types into a prompt-ready pane, but only as part of a resume                                                                                                                                          |
-| `reviveWithMessage`, `queueForExplicitRevive`, `withAutoRevive` | 3179, 3240, 3410 | PARTIAL — `lib/session/resume/policy.ts` `planResume` chooses send-vs-relaunch; the auto-revive-on-send wrapper is **GAP**                                                                                                               |
-| `answer`                                                        | 3438             | **GAP** — `packages/cli/src/lib/session/answer-controller.ts` and `answer-plan.ts` are built and call a 404                                                                                                                              |
-| `interrupt`                                                     | 3557             | **GAP**                                                                                                                                                                                                                                  |
-| `scheduleTerminalSendFinalization`, `finalizeTerminalSends`     | 6316, 6377       | **GAP**                                                                                                                                                                                                                                  |
-| `isDirectPayload`, `systemPrompt`, `promptInstruction`          | 7543, 7508, 7534 | PARTIAL — `lib/session/resume/policy.ts` composes the resume turn document and its instruction; the start's own system prompt lives in `lib/session/lifecycle/policy.ts`                                                                 |
-| `peerPreamble` (module fn, 800)                                 | 800              | **GAP** — peer attribution on a send. `packages/cli/src/lib/session/ports.ts` documents that the Ferretry pane is what makes it possible                                                                                                 |
+| Source                                                          | Line             | Ferretry                                                                                                                                                                                                                      |
+| --------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `send`                                                          | 2642             | PORTED — `lib/session/send/service.ts`, `mounts/session-send.ts`, `adapters/session/send/*`                                                                                                                                   |
+| `sendUnlocked`                                                  | 7166             | PORTED — `SessionSendService.locked`, under the slice's own `SerialExecutor`                                                                                                                                                  |
+| `listSends`, `sendDisposition`                                  | 1615, 1705       | PARTIAL — `dispositionOf` and the durable `FileSendLedger` are ported; there is no `GET` that LISTS sends, and no fate matcher (that needs the monitor's observed inputs — F)                                                 |
+| `queueNativeSend`                                               | 3106             | PORTED — `SessionSendService.queue`, `lib/tmux/queue.ts`, `adapters/tmux/pane-queue.ts`                                                                                                                                       |
+| `deliverToIdlePrompt`                                           | 3294             | PORTED — `SessionSendService.deliver`                                                                                                                                                                                         |
+| `reviveWithMessage`, `queueForExplicitRevive`, `withAutoRevive` | 3179, 3240, 3410 | PARTIAL — the revive-with-message and the durable hold are ported (`SessionSendService.revive`/`hold`, `ResumeSendReviver`); `withAutoRevive`, which re-revives after a control action killed the pane, is **GAP**            |
+| `answer`                                                        | 3438             | **GAP** — and downstream of F rather than of this unit: nothing in the daemon ever WRITES `pendingQuestion`, so an `answer` route could only ever refuse. `answer-controller.ts` still calls a 404                            |
+| `interrupt`                                                     | 3557             | PARTIAL — the turn-stop path is ported (`SessionSendService.interrupt`), including the suppression that stops an idle-prompt stop key quitting Codex. The BOUND abandon needs the structured-question drive and answers `501` |
+| `scheduleTerminalSendFinalization`, `finalizeTerminalSends`     | 6316, 6377       | **GAP** — the EOF drain that settles a send's fate after a terminal state. It reads observed inputs, so it belongs with the monitor loop (F)                                                                                  |
+| `isDirectPayload`, `systemPrompt`, `promptInstruction`          | 7543, 7508, 7534 | PARTIAL — `isDirectPayload` and `turnInstruction` are ported in `lib/session/send/policy.ts`; the start's own system prompt lives in `lib/session/lifecycle/policy.ts`                                                        |
+| `peerPreamble` (module fn, 800)                                 | 800              | PORTED — `lib/session/send/policy.ts`, with the sender taken from the caller's own credential rather than the body                                                                                                            |
 
 ## C. Signals and declared waits — **this unit**
 
@@ -82,7 +82,7 @@ And of the GET surface the client reads: `snapshot`, `logs`, `events`, `attachme
 | `applyWaitingSignal`                  | 4538       | PORTED — `SessionSignalService.park`                                                                                                                                                                           |
 | `parseDeadline` (module fn)           | 814        | PORTED — `lib/session/signal/policy.ts`, including the anchored ISO guard and the backstop clamp                                                                                                               |
 | `clearWaiting`                        | 4608       | PORTED — `SessionSignalService.clearWait`, with the credit and the activity re-anchor                                                                                                                          |
-| `endPeerWait`                         | 4599       | **GAP** — it fires from `send`, which does not exist. A park with a `peer` therefore ends only at its deadline                                                                                                 |
+| `endPeerWait`                         | 4599       | PORTED — `SessionSignalService.endPeerWait`, fired by the send once a message has actually landed. A message merely HELD for an explicit revive does not end a park                                            |
 | `serviceWaiting`                      | 4640       | **GAP** — the heartbeat, the deadline wake and the `waiting` status hold are one monitor tick, and there is no monitor. `lib/warden/detect.ts` already DETECTS a stale wait; nothing wakes one                 |
 
 Two divergences worth recording:
@@ -109,15 +109,15 @@ Two divergences worth recording:
 
 ## E. Runtime control and harness quirks
 
-| Source                                                           | Line       | Ferretry                                                                                                                                                     |
-| ---------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `runtime`, `runtimeModels`                                       | 2855, 2828 | PARTIAL — `lib/session/harness/runtime-switch.ts` and `lib/core/catalog.ts` carry the model/effort switch; no `POST /v1/sessions/:id/runtime` route          |
-| `dismissCodexPicker`, `dismissCodexPickerInTmux` (module fns)    | 236, 265   | PORTED — `lib/session/harness/dismiss.ts`, `picker-screen.ts`, `adapters/session/harness/tmux-codex-picker-pane.ts`                                          |
-| `quarantineUnconfirmedCodexPicker`                               | 3039       | PORTED — `lib/session/harness/quarantine.ts`                                                                                                                 |
-| `rejectKillFailedPaneInput`, `rejectUnconfirmedCodexPickerInput` | 542, 548   | PARTIAL — `lib/session/harness/quirks.ts` models the per-harness quirks these refusals come from; the refusals themselves guard `send`, which does not exist |
-| `CodexPickerCleanup` (kteam: the quarantine sweep)               | 3039       | PORTED — `lib/session/harness/cleanup.ts`                                                                                                                    |
-| `claimedCodexSessionIds`                                         | 7659       | **GAP** — the harness mints its own ids (`quirks.mintsOwnSessionIds`), and nothing in the daemon inventories which session has claimed which                 |
-| `runSessionCommand`                                              | 3091       | **GAP**                                                                                                                                                      |
+| Source                                                           | Line       | Ferretry                                                                                                                                            |
+| ---------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime`, `runtimeModels`                                       | 2855, 2828 | PARTIAL — `lib/session/harness/runtime-switch.ts` and `lib/core/catalog.ts` carry the model/effort switch; no `POST /v1/sessions/:id/runtime` route |
+| `dismissCodexPicker`, `dismissCodexPickerInTmux` (module fns)    | 236, 265   | PORTED — `lib/session/harness/dismiss.ts`, `picker-screen.ts`, `adapters/session/harness/tmux-codex-picker-pane.ts`                                 |
+| `quarantineUnconfirmedCodexPicker`                               | 3039       | PORTED — `lib/session/harness/quarantine.ts`                                                                                                        |
+| `rejectKillFailedPaneInput`, `rejectUnconfirmedCodexPickerInput` | 542, 548   | PORTED — `authorizeSend` in `lib/session/send/policy.ts` refuses both before a frame is even captured                                               |
+| `CodexPickerCleanup` (kteam: the quarantine sweep)               | 3039       | PORTED — `lib/session/harness/cleanup.ts`                                                                                                           |
+| `claimedCodexSessionIds`                                         | 7659       | **GAP** — the harness mints its own ids (`quirks.mintsOwnSessionIds`), and nothing in the daemon inventories which session has claimed which        |
+| `runSessionCommand`                                              | 3091       | **GAP**                                                                                                                                             |
 
 ## F. The monitor loop — absent in full
 
@@ -204,9 +204,10 @@ client speaks is served, and no sweep timer exists; `world.wardenReports` is a f
 
 ## What to take next, in the brief's own order of preference
 
-1. **`send` + `interrupt` + `answer`** (B). The absence is a correctness problem, not a missing
-   convenience: the CLI ships three controllers that call 404s, and `endPeerWait` — already ported in
-   spirit — cannot fire without a send. `send` is also what makes a declared peer wait terminable.
+1. ~~**`send` + `interrupt` + `answer`** (B)~~ — `send` and the turn-stop half of `interrupt` are
+   done, and `endPeerWait` fires with them. `answer` turned out NOT to belong here: it is downstream
+   of the monitor loop, because nothing writes `pendingQuestion` and so no session can ever reach
+   `awaiting_question`. Take it WITH F, together with the bound-abandon path of `interrupt`.
 2. **Scratch GC** (L). Unbounded disk growth on the operator's machine, with the protocol shape
    already agreed.
 3. **The monitor loop** (F). The largest single piece, and the prerequisite for `serviceWaiting`,

@@ -12,6 +12,7 @@ export * from './mounts/recommend.ts';
 export * from './mounts/session-control.ts';
 export * from './mounts/session-migrate.ts';
 export * from './mounts/session-resume.ts';
+export * from './mounts/session-send.ts';
 export * from './mounts/session-signal.ts';
 export * from './mounts/sessions.ts';
 export * from './mounts/stt.ts';

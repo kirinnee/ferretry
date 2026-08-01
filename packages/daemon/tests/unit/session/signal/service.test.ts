@@ -470,6 +470,78 @@ describe('a session signalling that it is working again', () => {
   });
 });
 
+describe('a peer replying to a session that was parked on it', () => {
+  it('should end the wait, credit the parked time back, and name who replied', async () => {
+    // THE HALF THAT WAS MISSING. `park` resolved the peer whose reply would end the wait and wrote it
+    // onto the document, and nothing could ever fire this — so every `--peer` park ran to its
+    // deadline however promptly the peer answered.
+    // Arrange
+    const parked = target({ waiting: { since: '2026-08-01T11:58:00.000Z', peer: PEER, peerName: 'iris' } });
+    const { service, repository } = parts(parked);
+
+    // Act
+    await service.endPeerWait(ID, PEER);
+
+    // Assert
+    const change = repository.transitions[0];
+    should(change?.event).equal('session.waiting_cleared');
+    should(change?.reason).equal('iris replied');
+    should(change?.status).equal('running');
+    should(change?.waiting).equal('clear');
+    should(change?.waitingCreditSeconds).equal(120);
+    should(change?.reanchorActivity).be.true();
+  });
+
+  it('should fall back to the session id when the peer has no callsign', async () => {
+    // Arrange
+    const { service, repository } = parts(target({ waiting: { since: '2026-08-01T11:59:00.000Z', peer: PEER } }));
+
+    // Act
+    await service.endPeerWait(ID, PEER);
+
+    // Assert
+    should(repository.transitions[0]?.reason).equal(`${PEER} replied`);
+  });
+
+  it('should leave a wait on somebody else, and a session that is not parked at all, untouched', async () => {
+    // Checked HERE rather than by the caller: the session may have been re-parked on a different peer
+    // between the send landing and this call, and waking it then resumes a teammate still waiting.
+    // Arrange
+    const other = parts(target({ waiting: { since: '2026-08-01T11:59:00.000Z', peer: 'session-9' } }));
+    const unparked = parts(target());
+
+    // Act
+    await other.service.endPeerWait(ID, PEER);
+    await unparked.service.endPeerWait(ID, PEER);
+
+    // Assert
+    should(other.repository.transitions).be.empty();
+    should(unparked.repository.transitions).be.empty();
+  });
+
+  it('should write nothing for a session that is not there', async () => {
+    // Arrange
+    const { service, repository } = partsWithoutSession();
+
+    // Act
+    await service.endPeerWait(ID, PEER);
+
+    // Assert
+    should(repository.transitions).be.empty();
+  });
+
+  it("should run under the recipient's own lock", async () => {
+    // Arrange
+    const { service, serial } = parts(target({ waiting: { since: '2026-08-01T11:59:00.000Z', peer: PEER } }));
+
+    // Act
+    await service.endPeerWait(ID, PEER);
+
+    // Assert
+    should(serial.keys).deepEqual([ID]);
+  });
+});
+
 describe('every signal', () => {
   it('should run under the session"s own lock, so a completion and a park cannot interleave', async () => {
     // Arrange
