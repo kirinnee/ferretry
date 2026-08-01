@@ -51,6 +51,8 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
+import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
+import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
@@ -949,6 +951,19 @@ function Shell() {
           </PanelHeader>
           <PanelBody>
             <MarkdownComposerSettings />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Dictation shortcut settings',
+      render: () => (
+        <Card aria-label="Dictation shortcut settings">
+          <PanelHeader>
+            <Label>Dictation</Label>
+          </PanelHeader>
+          <PanelBody>
+            <DictationShortcutPicker binding={DEFAULT_DICTATION_SHORTCUT} onChange={() => {}} />
           </PanelBody>
         </Card>
       ),

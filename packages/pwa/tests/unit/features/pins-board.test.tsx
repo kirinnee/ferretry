@@ -165,7 +165,6 @@ describe('PinsBoard', () => {
       }),
     ).toBe('Assistant message');
   });
-
   it('hydrates and mutates only the matching daemon/session board, surfacing client failures honestly', async () => {
     const actions: string[] = [];
     const live = new DaemonPinClient(undefined, async (_input, init) => {

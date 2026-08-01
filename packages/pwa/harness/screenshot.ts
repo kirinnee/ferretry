@@ -121,6 +121,9 @@ try {
       const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
       await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
       process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
+      const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
+      await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
+      process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
       const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
       await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
       process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
