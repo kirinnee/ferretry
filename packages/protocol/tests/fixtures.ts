@@ -3,11 +3,13 @@ import type {
   AttachmentView,
   CgroupConfigView,
   FyEvent,
+  FyEventStreamFrame,
   HealthView,
   PwaConfigView,
   ScratchPlanView,
   ScratchSweepView,
   SendResult,
+  SessionAttachTarget,
   SessionView,
   TaskBoardGrantRequestView,
   UsageFeedView,
@@ -82,6 +84,32 @@ export const fyEvent = {
   source: 'daemon',
   data: { ok: true },
 } satisfies FyEvent;
+
+/** One wrapped event frame, as `/v1/events` emits it. */
+export const fyEventFrame = { kind: 'event', event: fyEvent } satisfies FyEventStreamFrame;
+
+/** The scoped heartbeat: quiet, but naming the cursor it is quiet at. */
+export const sessionIdleFrame = {
+  kind: 'idle',
+  idleSeconds: 30,
+  scope: { kind: 'session', sessionId: sessionView.config.id, after: 1 },
+} satisfies FyEventStreamFrame;
+
+/** The fleet heartbeat, which invents no global cursor. */
+export const fleetIdleFrame = {
+  kind: 'idle',
+  idleSeconds: 45,
+  scope: { kind: 'fleet', followedSessions: 3 },
+} satisfies FyEventStreamFrame;
+
+/** Short-lived process evidence: never derived from a session view. */
+export const sessionAttachTarget = {
+  socketPath: '/run/user/1000/fy/tmux.sock',
+  tmuxSession: 'fy-session-1',
+  paneId: '%7',
+  pid: 4_242,
+  processStartTicks: 987_654,
+} satisfies SessionAttachTarget;
 
 export const healthView = {
   ok: true,

@@ -5,9 +5,9 @@
  * and mutation half of `FleetStore`. This is the FIRST slice of that port and
  * deliberately stops there: no event socket, no replay buffers, no sequence
  * cursors, no debounced refresh, no reconcile interval, no usage poll, no
- * transcript search. Those need a mounted `/v1/events` and `/v1/usage`, and
- * neither exists yet, so they are separate modules that will layer on top of
- * this one rather than being stubbed inside it.
+ * transcript search. The daemon now mounts `/v1/events`, but browser ticket
+ * issuance and this store's event reconciliation remain separate work; those
+ * layers do not belong as stubs inside the snapshot cache.
  *
  * WHAT CHANGED FOR FERRETRY — survey rows 35-37, and the reason this file is
  * not a transliteration.

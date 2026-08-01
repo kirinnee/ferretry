@@ -1,4 +1,4 @@
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { IFyApiClient, SessionAttachTarget } from '@ferretry/protocol';
 
 /**
  * The daemon reads the operator commands need, and nothing else.
@@ -7,13 +7,19 @@ import type { IFyApiClient } from '@ferretry/protocol';
  * VIEW until it settles. Keeping them on one narrow port is what lets every controller below be tested
  * against a hand-written double.
  *
- * `fy attach` is ABSENT from this domain and from the CLI, and the blocker is on this port's own subject:
- * a `SessionView` carries no terminal address. Legacy `kteam attach` read `view.config.tmuxSession` and
- * handed it to `tmux attach-session`; `SessionConfigSchema` has no such member, so no client can name the
- * pane to attach to. Guessing one from the session id would address whatever pane happened to answer to
- * that name — including another daemon's — which is precisely the failure this unit must not ship.
+ * `attachTarget` is intentionally NOT a field on `SessionView`: it is short-lived process evidence,
+ * resolved by the daemon from its own durable registration and fresh tmux observation. `stream` is the
+ * daemon's optional-id socket rather than a client-side merge of session journals.
  */
-export type IReadsGateway = Pick<IFyApiClient, 'get' | 'snapshot' | 'logs' | 'events' | 'history'>;
+export type IReadsGateway = Pick<
+  IFyApiClient,
+  'get' | 'attachTarget' | 'snapshot' | 'logs' | 'events' | 'history' | 'stream'
+>;
+
+/** The host action behind `fy attach`, separately injected because it inherits the human terminal. */
+export interface ITerminalAttacher {
+  attach(target: SessionAttachTarget): Promise<number>;
+}
 
 /** Terminal output for the operator reads. `success` is stdout; `error` is stderr. */
 export interface IReadsIo {

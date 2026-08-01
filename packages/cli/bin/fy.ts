@@ -57,6 +57,7 @@ import { registerPinCommands } from '../src/lib/pins/commands';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
+import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSttCommands } from '../src/lib/stt/commands';
@@ -174,6 +175,8 @@ type SharedDaemonClient = Pick<
   | 'logs'
   | 'events'
   | 'history'
+  | 'attachTarget'
+  | 'stream'
 >;
 
 /** The deferred connection as the client object every command group is wired with. */
@@ -196,6 +199,9 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     events: async (id: string, after?: number, limit?: number, signal?: AbortSignal) =>
       (await client()).events(id, after, limit, signal),
     history: async (id: string, after?: number, limit?: number) => (await client()).history(id, after, limit),
+    attachTarget: async (id: string) => (await client()).attachTarget(id),
+    stream: async (sessionId, after, onEvent, signal, onIdle) =>
+      (await client()).stream(sessionId, after, onEvent, signal, onIdle),
   };
 }
 
@@ -363,7 +369,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client }) =>
     registerReadsCommands(
       program,
-      new ReadsController(client, world.io, new SystemPollClock(), new FileMarkerProbe(world.cwd)),
+      new ReadsController(
+        client,
+        world.io,
+        new SystemPollClock(),
+        new FileMarkerProbe(world.cwd),
+        new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment),
+      ),
     ),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.

@@ -16,13 +16,18 @@ export function renderEvent(event: FyEvent): string {
 }
 
 /**
- * The advisory a stream prints when a poll window passed with nothing in it.
+ * The advisory a stream prints when the daemon proves its live socket has been quiet.
  *
  * A stream that produces nothing looks exactly like a quiet session unless it says otherwise, and the
  * difference matters: one means the agent is thinking and the other means the follow is broken. It
  * goes to stderr so a `--json` consumer's stdout stays parseable, and it names the cursor so the note
- * doubles as proof the loop is still running against the right position.
+ * doubles as proof the socket is still following the right position.
  */
 export function renderStreamIdle(sessionId: string, cursor: number, seconds: number): string {
   return `fy stream: no new events for ${sessionId} in ${seconds}s (still following from #${cursor})`;
+}
+
+/** Fleet form of the server's idle proof; no global cursor is invented. */
+export function renderFleetStreamIdle(followedSessions: number, seconds: number): string {
+  return `fy stream: no new fleet events in ${seconds}s (socket is live; following ${followedSessions} sessions)`;
 }

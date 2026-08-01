@@ -21,11 +21,10 @@ import type { SessionDirectorySubsystem } from './sessions.ts';
  * indistinguishable from "that session has done nothing" — which is the same failure the refusals
  * inside the subsystem exist to prevent, one layer up.
  *
- * WHAT IS DELIBERATELY NOT SERVED HERE. There is no live feed. `IFyApiClient.stream` opens a WebSocket
- * on `/v1/events`, and mounting that needs a broadcast bus the daemon does not have: nothing in it
- * publishes a journal append to a subscriber. Serving a socket that accepts a connection and then never
- * emits would be worse than the current honest `unknown_route`, because a silent stream and a quiet
- * session look identical. `fy stream` therefore follows this route's cursor instead, and says so.
+ * WHAT IS DELIBERATELY NOT SERVED HERE. The live feed is a WebSocket, not a fourth HTTP read. It is
+ * mounted separately at `/v1/events` through the socket dispatcher and receives durable appends from
+ * the same opened daemon storage. Keeping that transport out of these routes prevents a long-lived
+ * stream from being mistaken for another page of replay history.
  */
 
 /** The HTTP status and code each refusal answers with. */

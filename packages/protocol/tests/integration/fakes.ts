@@ -40,6 +40,8 @@ export interface RecordedEventCall {
 
 export class QueuedEventTransport implements IFyEventTransport {
   readonly calls: RecordedEventCall[] = [];
+  /** The signal each call was handed, so a test can prove cancellation reached the socket layer. */
+  readonly signals: Array<AbortSignal | undefined> = [];
   readonly #messages: unknown[] = [];
 
   constructor(...messages: unknown[]) {
@@ -50,9 +52,18 @@ export class QueuedEventTransport implements IFyEventTransport {
     this.#messages.push(...messages);
   }
 
-  async stream(input: { url: string; token: string; onMessage(value: unknown): void }): Promise<void> {
+  async stream(input: {
+    url: string;
+    token: string;
+    signal?: AbortSignal;
+    onMessage(value: unknown): void;
+  }): Promise<void> {
     this.calls.push({ url: input.url, token: input.token });
-    for (const message of this.#messages.splice(0)) input.onMessage(message);
+    this.signals.push(input.signal);
+    for (const message of this.#messages.splice(0)) {
+      if (input.signal?.aborted === true) return;
+      input.onMessage(message);
+    }
   }
 }
 

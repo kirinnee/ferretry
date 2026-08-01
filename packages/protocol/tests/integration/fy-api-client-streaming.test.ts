@@ -183,17 +183,19 @@ describe('FyApiClient attachment upload', () => {
   });
 });
 
+const eventFrame = (sequence: number): unknown => ({ kind: 'event', event: eventAt(sequence) });
+
 describe('FyApiClient event streaming', () => {
-  it('should open a ws stream scoped to one session and parse every event', async () => {
+  it('should open a ws stream scoped to one session and unwrap every event frame', async () => {
     // Arrange
-    const eventTransport = new QueuedEventTransport(eventAt(4), eventAt(5));
+    const eventTransport = new QueuedEventTransport(eventFrame(4), eventFrame(5));
     const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
     const received: FyEvent[] = [];
 
     // Act
     await client.stream(SESSION_ID, 3, event => received.push(event));
 
-    // Assert
+    // Assert — the wrapper is a transport detail; the consumer still sees plain protocol events.
     should(received).deepEqual([eventAt(4), eventAt(5)]);
     should(eventTransport.calls).deepEqual([
       { url: `ws://daemon.test/api/v1/events?after=3&sessionId=session-1`, token: 'secret-token' },
@@ -215,18 +217,78 @@ describe('FyApiClient event streaming', () => {
     should(eventTransport.calls[0]?.url).equal('wss://daemon.test/api/v1/events?after=0');
   });
 
-  it('should reject a malformed streamed event and invalid stream arguments', async () => {
+  it('should route idle proofs to the idle handler and never to the event handler', async () => {
+    // Arrange — one quiet stretch per scope, interleaved with a real event.
+    const eventTransport = new QueuedEventTransport(
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: SESSION_ID, after: 3 } },
+      eventFrame(4),
+      { kind: 'idle', idleSeconds: 45, scope: { kind: 'fleet', followedSessions: 2 } },
+    );
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+    const idles: unknown[] = [];
+
+    // Act
+    await client.stream(
+      SESSION_ID,
+      3,
+      event => received.push(event),
+      undefined,
+      idle => idles.push(idle),
+    );
+
+    // Assert — a heartbeat that reached onEvent would be indistinguishable from a session event.
+    should(received).deepEqual([eventAt(4)]);
+    should(idles).deepEqual([
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: SESSION_ID, after: 3 } },
+      { kind: 'idle', idleSeconds: 45, scope: { kind: 'fleet', followedSessions: 2 } },
+    ]);
+  });
+
+  it('should still validate an idle frame a caller declined to observe', async () => {
     // Arrange
-    const eventTransport = new QueuedEventTransport({ sequence: -1 });
+    const eventTransport = new QueuedEventTransport(
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'fleet', followedSessions: 0 } },
+      eventFrame(4),
+    );
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+
+    // Act — no onIdle is supplied, so the frame is parsed and then deliberately dropped.
+    await client.stream(undefined, 0, event => received.push(event));
+
+    // Assert
+    should(received).deepEqual([eventAt(4)]);
+  });
+
+  it('should hand the caller cancellation straight to the socket transport', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport(eventFrame(4), eventFrame(5));
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const controller = new AbortController();
+    const received: FyEvent[] = [];
+    controller.abort();
+
+    // Act
+    await client.stream(SESSION_ID, 3, event => received.push(event), controller.signal);
+
+    // Assert — the signal is the socket's, not a post-hoc filter over delivered events.
+    should(eventTransport.signals).deepEqual([controller.signal]);
+    should(received).be.empty();
+  });
+
+  it('should reject a malformed streamed frame and invalid stream arguments', async () => {
+    // Arrange — a bare event is exactly the pre-wrapper shape that must no longer be accepted.
+    const eventTransport = new QueuedEventTransport(eventAt(4));
     const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
 
     // Act
-    const malformedEvent = await captureError(() => client.stream(SESSION_ID, 0, () => undefined));
+    const malformedFrame = await captureError(() => client.stream(SESSION_ID, 0, () => undefined));
     const negativeCursor = await captureError(() => client.stream(SESSION_ID, -1, () => undefined));
     const blankSessionId = await captureError(() => client.stream('   ', 0, () => undefined));
 
     // Assert
-    should(malformedEvent instanceof z.ZodError).be.true();
+    should(malformedFrame instanceof z.ZodError).be.true();
     should(negativeCursor instanceof z.ZodError).be.true();
     should(blankSessionId instanceof z.ZodError).be.true();
     should(eventTransport.calls).have.length(1);
@@ -235,12 +297,26 @@ describe('FyApiClient event streaming', () => {
 
 interface FakeSocketEvent {
   readonly data?: string;
+  readonly code?: number;
+  readonly reason?: string;
 }
 
+interface FakeSocketClose {
+  readonly code: number | undefined;
+  readonly reason: string | undefined;
+}
+
+/**
+ * A socket that records its listener bookkeeping.
+ *
+ * `listenerCount` exists because a long-lived stream that settles must let go of everything it
+ * registered — a leaked listener on a closed socket is the shape that used to keep a cancelled
+ * follow alive.
+ */
 class FakeWebSocket {
   static latest: FakeWebSocket | undefined;
   readonly #listeners = new Map<string, Array<(event: FakeSocketEvent) => void>>();
-  closes = 0;
+  readonly closeCalls: FakeSocketClose[] = [];
 
   constructor(
     readonly url: string | URL,
@@ -249,22 +325,38 @@ class FakeWebSocket {
     FakeWebSocket.latest = this;
   }
 
+  get closes(): number {
+    return this.closeCalls.length;
+  }
+
   addEventListener(type: string, listener: (event: FakeSocketEvent) => void): void {
     this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
   }
 
-  close(): void {
-    this.closes += 1;
+  removeEventListener(type: string, listener: (event: FakeSocketEvent) => void): void {
+    this.#listeners.set(
+      type,
+      (this.#listeners.get(type) ?? []).filter(entry => entry !== listener),
+    );
+  }
+
+  listenerCount(): number {
+    return [...this.#listeners.values()].reduce((total, listeners) => total + listeners.length, 0);
+  }
+
+  close(code?: number, reason?: string): void {
+    this.closeCalls.push({ code, reason });
   }
 
   emit(type: string, event: FakeSocketEvent = {}): void {
-    for (const listener of this.#listeners.get(type) ?? []) listener(event);
+    for (const listener of [...(this.#listeners.get(type) ?? [])]) listener(event);
   }
 }
 
 const withFakeWebSocket = async (
   scenario: (socket: () => FakeWebSocket, stream: Promise<void>) => Promise<void>,
   onMessage: (value: unknown) => void = () => undefined,
+  signal?: AbortSignal,
 ): Promise<void> => {
   const original = globalThis.WebSocket;
   globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
@@ -273,6 +365,7 @@ const withFakeWebSocket = async (
       url: 'ws://daemon.test/api/v1/events?after=0',
       token: 'secret-token',
       onMessage,
+      ...(signal === undefined ? {} : { signal }),
     });
     await scenario(() => FakeWebSocket.latest as FakeWebSocket, stream);
   } finally {
@@ -282,9 +375,10 @@ const withFakeWebSocket = async (
 };
 
 describe('WebSocketEventTransport', () => {
-  it('should authenticate the socket, forward parsed messages, and resolve on close', async () => {
+  it('should authenticate the socket and forward every parsed message', async () => {
     // Arrange
     const received: unknown[] = [];
+    const controller = new AbortController();
 
     // Act + Assert
     await withFakeWebSocket(
@@ -295,17 +389,119 @@ describe('WebSocketEventTransport', () => {
         // Act
         opened.emit('message', { data: JSON.stringify({ sequence: 1 }) });
         opened.emit('message', { data: JSON.stringify({ sequence: 2 }) });
-        opened.emit('close');
+        controller.abort();
         await stream;
 
         // Assert
         should(opened.url).equal('ws://daemon.test/api/v1/events?after=0');
         should(opened.options).deepEqual({ headers: { authorization: 'Bearer secret-token' } });
         should(received).deepEqual([{ sequence: 1 }, { sequence: 2 }]);
-        should(opened.closes).equal(0);
       },
       value => received.push(value),
+      controller.signal,
     );
+  });
+
+  it('should close the socket cleanly and drop every listener when the caller cancels', async () => {
+    // Arrange
+    const controller = new AbortController();
+
+    // Act + Assert
+    await withFakeWebSocket(
+      async (socket, stream) => {
+        // Arrange
+        const opened = socket();
+
+        // Act
+        controller.abort();
+        await stream;
+
+        // Assert — a cancelled follow is a successful release: normal close, nothing left registered.
+        should(opened.closeCalls).deepEqual([{ code: 1_000, reason: 'event stream cancelled' }]);
+        should(opened.listenerCount()).equal(0);
+      },
+      () => undefined,
+      controller.signal,
+    );
+  });
+
+  it('should ignore a socket close that arrives after the caller already cancelled', async () => {
+    // Arrange
+    const controller = new AbortController();
+
+    // Act + Assert
+    await withFakeWebSocket(
+      async (socket, stream) => {
+        // Arrange
+        const opened = socket();
+
+        // Act
+        controller.abort();
+        opened.emit('close', { code: 1_006, reason: '' });
+        await stream;
+
+        // Assert — the late close must not turn a released stream into a failed one.
+        should(opened.closes).equal(1);
+      },
+      () => undefined,
+      controller.signal,
+    );
+  });
+
+  it('should never open a socket when the caller signal is already aborted', async () => {
+    // Arrange
+    const original = globalThis.WebSocket;
+    const controller = new AbortController();
+    controller.abort();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+
+    // Act
+    try {
+      await new WebSocketEventTransport().stream({
+        url: 'ws://daemon.test/api/v1/events?after=0',
+        token: 'secret-token',
+        signal: controller.signal,
+        onMessage: () => undefined,
+      });
+    } finally {
+      globalThis.WebSocket = original;
+    }
+
+    // Assert — nothing was constructed, so nothing has to be torn down.
+    should(FakeWebSocket.latest).be.undefined();
+  });
+
+  it('should reject with the close code when the daemon drops the socket', async () => {
+    // Act + Assert
+    await withFakeWebSocket(async (socket, stream) => {
+      // Arrange
+      const opened = socket();
+
+      // Act
+      opened.emit('close', { code: 1_006, reason: '' });
+      const actual = await captureError(() => stream);
+
+      // Assert — a silent resolve here made a dropped feed look like an ordinary end of stream.
+      should((actual as Error).message).equal('WebSocket stream closed unexpectedly: code 1006');
+      should(opened.listenerCount()).equal(0);
+    });
+  });
+
+  it('should include the daemon reason when the close carries one', async () => {
+    // Act + Assert
+    await withFakeWebSocket(async (socket, stream) => {
+      // Arrange
+      const opened = socket();
+
+      // Act
+      opened.emit('close', { code: 1_011, reason: 'event journal unreadable' });
+      const actual = await captureError(() => stream);
+
+      // Assert
+      should((actual as Error).message).equal(
+        'WebSocket stream closed unexpectedly: event journal unreadable (code 1011)',
+      );
+    });
   });
 
   it('should close and reject once on an unparseable message and ignore later events', async () => {
@@ -323,6 +519,7 @@ describe('WebSocketEventTransport', () => {
       // Assert
       should(actual instanceof SyntaxError).be.true();
       should(opened.closes).equal(1);
+      should(opened.listenerCount()).equal(0);
     });
   });
 

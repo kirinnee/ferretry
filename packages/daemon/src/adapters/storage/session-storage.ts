@@ -6,8 +6,8 @@ import {
   createJournalScanCursor,
   createSessionEvent,
   createSessionPaths,
-  decideSessionMarker,
   type DirectoryEntry,
+  decideSessionMarker,
   type EventPointer,
   encodeSessionEvent,
   type FileSystemPort,
@@ -154,6 +154,8 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
 
 export class DaemonStorage {
   private closed = false;
+  /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
+  private readonly eventListeners = new Set<(event: SessionEvent) => void>();
 
   constructor(
     readonly paths: FoundationPaths,
@@ -935,8 +937,23 @@ export class DaemonStorage {
           throw new DurableEventIndexError(id, { cause: error });
         }
       }
+      // Publication happens only after both durable bytes and their disposable index pointer agree.
+      // A listener cannot make the journal mutation fail: sockets are observers, never part of the
+      // commit, and one broken peer must not prevent every other subsystem from recording history.
+      for (const listener of this.eventListeners) {
+        try {
+          listener(event);
+        } catch {}
+      }
       return event;
     });
+  }
+
+  /** Subscribe to this daemon instance's successful durable appends. */
+  subscribeEvents(listener: (event: SessionEvent) => void): () => void {
+    this.assertOpen();
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
   }
 
   private async resolvePointers(
@@ -997,6 +1014,92 @@ export class DaemonStorage {
         hasMore: pointers.length > limit,
       };
     });
+  }
+
+  private async resolveFleetPointers(pointers: readonly EventPointer[]): Promise<readonly SessionEvent[] | undefined> {
+    const bySession = new Map<SessionId, EventPointer[]>();
+    for (const pointer of pointers) {
+      const group = bySession.get(pointer.sessionId) ?? [];
+      group.push(pointer);
+      bySession.set(pointer.sessionId, group);
+    }
+    const events = new Map<string, SessionEvent>();
+    for (const [id, group] of bySession) {
+      const resolved = await this.resolvePointers(id, group);
+      if (resolved === undefined) return undefined;
+      for (const event of resolved) events.set(`${event.sessionId}\n${event.sequence}`, event);
+    }
+    const ordered = pointers.map(pointer => events.get(`${pointer.sessionId}\n${pointer.sequence}`));
+    return ordered.every((event): event is SessionEvent => event !== undefined) ? ordered : undefined;
+  }
+
+  /** Reconcile the disposable session index against every readable durable directory. */
+  private async synchronizeFleetSessionsUnlocked(): Promise<readonly SessionId[]> {
+    const surveyed = await this.surveySessionDirectories();
+    const evidenceById = new Map(surveyed.map(entry => [entry.id, entry]));
+    for (const session of this.index.listSessions()) {
+      if (!evidenceById.has(session.id))
+        throw new Error(`session ${session.id} is indexed but has no readable durable directory evidence`);
+    }
+    // Survey both directions. Rebuilding only sessions SQLite already remembers would accept a
+    // wholly lost index as an honestly empty fleet. Every readable durable directory is therefore
+    // synchronized into the disposable index before its id is claimed by an idle proof or tail.
+    for (const evidence of surveyed) {
+      if (evidence.journalLost)
+        throw new MissingSessionJournalError(evidence.id, createSessionPaths(this.paths, evidence.id).events);
+      const synchronized = await this.synchronizedSession(evidence.id);
+      if (synchronized === undefined)
+        throw new Error(`session ${evidence.id} has durable directory evidence but could not be indexed`);
+    }
+    const indexed = this.index.listSessions();
+    if (indexed.length !== surveyed.length)
+      throw new Error('the fleet index does not exactly match its durable session directories');
+    return indexed.map(session => session.id);
+  }
+
+  /**
+   * The bounded recent fleet tail.
+   *
+   * Pointer selection is global and bounded in SQLite. Journal bytes are then proved against those
+   * pointers; one mismatch triggers a re-index of only the sessions represented in the tail, and a
+   * second mismatch refuses rather than reporting a shorter, falsely healthy fleet.
+   */
+  async tailEvents(limit = 5_000): Promise<readonly SessionEvent[]> {
+    this.assertOpen();
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000)
+      throw new Error('fleet event limit must be an integer between 1 and 10000');
+    return await this.serial.runExclusive(async () => {
+      const sessionIds = await this.synchronizeFleetSessionsUnlocked();
+      // A tail query cannot prove that rows are complete merely by resolving the rows SQLite did
+      // return: a damaged disposable index may omit every pointer and make a non-empty fleet look
+      // empty. Reconcile each indexed journal first, then require the contiguous event-count
+      // invariant the append path establishes before selecting the bounded global tail.
+      for (const id of sessionIds) {
+        const synchronized = this.index.findSession(id);
+        if (synchronized === undefined || this.index.countEvents(id) !== synchronized.lastSequence)
+          throw new Error(`event index for ${id} does not completely represent its durable journal`);
+      }
+      let pointers = this.index.fleetEventPointers(limit);
+      let events = await this.resolveFleetPointers(pointers);
+      if (events !== undefined) return events;
+      for (const id of new Set(pointers.map(pointer => pointer.sessionId))) await this.syncSessionUnlocked(id);
+      pointers = this.index.fleetEventPointers(limit);
+      events = await this.resolveFleetPointers(pointers);
+      if (events === undefined) throw new Error('fleet event index is inconsistent after re-indexing');
+      return events;
+    });
+  }
+
+  /**
+   * The sessions whose journals a fleet idle proof claims to be following.
+   *
+   * An indexed session missing from the on-disk survey, or one whose owed journal vanished, makes
+   * the whole answer unavailable. Counting only the readable survivors would turn damaged state into
+   * a smaller, apparently healthy fleet.
+   */
+  async fleetSessionIds(): Promise<readonly SessionId[]> {
+    this.assertOpen();
+    return await this.serial.runExclusive(async () => await this.synchronizeFleetSessionsUnlocked());
   }
 
   findSession(id: SessionId): IndexedSession | undefined {
@@ -1065,6 +1168,7 @@ export class DaemonStorage {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.eventListeners.clear();
     await this.serial.runExclusive(async () => {
       try {
         this.index.close();

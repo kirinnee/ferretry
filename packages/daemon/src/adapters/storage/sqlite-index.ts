@@ -226,6 +226,21 @@ export class BunSqliteIndex implements SessionIndex {
       .map(eventFromRow);
   }
 
+  fleetEventPointers(limit: number): readonly EventPointer[] {
+    // Bounded in SQLite, before one journal byte is read. Loading every event and slicing in memory
+    // made one fleet socket proportional to the lifetime of the whole daemon.
+    return this.database
+      .query<EventRow, [number]>(
+        `SELECT session_id, sequence, time, type, byte_offset, byte_length
+           FROM events
+           ORDER BY time DESC, session_id DESC, sequence DESC
+           LIMIT ?`,
+      )
+      .all(limit)
+      .map(eventFromRow)
+      .reverse();
+  }
+
   /** Exact number of event pointers currently stored for the session; zero when it is absent. */
   countEvents(id: SessionId): number {
     return (
@@ -281,6 +296,8 @@ function configure(database: Database): void {
     );
     CREATE INDEX IF NOT EXISTS sessions_activity_idx
       ON sessions(COALESCE(updated_at, created_at, id) DESC, id ASC);
+    CREATE INDEX IF NOT EXISTS events_time_idx
+      ON events(time DESC, session_id DESC, sequence DESC);
     PRAGMA user_version = ${CURRENT_INDEX_SCHEMA_VERSION};
   `);
 }

@@ -44,7 +44,9 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
 
     // Assert
     should(stream.code).equal(0);
-    should(stream.out).containEql('--interval');
+    should(stream.out).containEql('stream [options] [id]');
+    should(stream.out).containEql("daemon's whole fleet");
+    should(stream.out).not.containEql('--interval');
     should(stream.out).containEql('until interrupted');
     should(wait.code).equal(0);
     should(wait.out).containEql('--timeout');

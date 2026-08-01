@@ -45,18 +45,40 @@ export class DaemonEventTransport implements IFyEventTransport {
     private readonly socket: DaemonEventSocketFactory = browserSocket,
   ) {}
 
-  async stream(input: { url: string; token: string; onMessage(value: unknown): void }): Promise<void> {
+  async stream(input: {
+    url: string;
+    token: string;
+    signal?: AbortSignal;
+    onMessage(value: unknown): void;
+  }): Promise<void> {
+    const aborted = (): boolean => input.signal?.aborted === true;
+    if (aborted()) return;
     const ticket = await this.issueTicket(this.daemon);
+    if (aborted()) return;
     const url = eventUrl(this.daemon, input.url, ticket);
 
     return new Promise((resolve, reject) => {
       let settled = false;
       const connection = this.socket(url);
+      const cleanup = (): void => {
+        input.signal?.removeEventListener('abort', cancel);
+        connection.onmessage = null;
+        connection.onclose = null;
+        connection.onerror = null;
+      };
       const fail = (error: unknown): void => {
         if (settled) return;
         settled = true;
+        cleanup();
         connection.close();
         reject(error instanceof Error ? error : new Error('daemon event stream failed'));
+      };
+      const cancel = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        connection.close();
+        resolve();
       };
 
       connection.onmessage = event => {
@@ -69,9 +91,12 @@ export class DaemonEventTransport implements IFyEventTransport {
       connection.onclose = () => {
         if (settled) return;
         settled = true;
-        resolve();
+        cleanup();
+        reject(new Error('daemon event stream closed unexpectedly'));
       };
       connection.onerror = () => fail(new Error('daemon event stream failed'));
+      input.signal?.addEventListener('abort', cancel, { once: true });
+      if (input.signal?.aborted === true) cancel();
     });
   }
 }

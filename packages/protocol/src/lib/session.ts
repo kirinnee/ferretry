@@ -372,6 +372,25 @@ export type SessionView = z.infer<typeof SessionViewSchema>;
 export const SessionListSchema = z.array(SessionViewSchema);
 export type SessionList = z.infer<typeof SessionListSchema>;
 
+/**
+ * The exact tmux process a daemon proved belongs to one managed session.
+ *
+ * This is deliberately separate from {@link SessionConfigSchema}. A public session view describes
+ * the work; it is not authority to address a host runtime. The attach route returns this short-lived
+ * proof only after matching the daemon's durable pane registration against a fresh observation, and
+ * the CLI checks the same identity once more immediately before it asks tmux to attach.
+ */
+export const SessionAttachTargetSchema = z.strictObject({
+  /** The private tmux server owned by the daemon that answered the request. */
+  socketPath: z.string().min(1).regex(/^\//u, 'the tmux socket path must be absolute'),
+  tmuxSession: z.string().min(1),
+  paneId: z.string().regex(/^%[1-9][0-9]*$/u),
+  pid: PositiveIntegerSchema.refine(value => value > 1, 'the pane pid must be greater than one'),
+  /** Linux `/proc/<pid>/stat` start ticks, which distinguish a reused PID. */
+  processStartTicks: PositiveIntegerSchema,
+});
+export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;
+
 export const NameSuggestionsSchema = z.array(z.string().min(1));
 export type NameSuggestions = z.infer<typeof NameSuggestionsSchema>;
 
@@ -402,6 +421,40 @@ export type FyEvent = z.infer<typeof FyEventSchema>;
 
 export const FyEventListSchema = z.array(FyEventSchema);
 export type FyEventList = z.infer<typeof FyEventListSchema>;
+
+/** Proof that a live event socket is quiet rather than broken. */
+export const FyEventStreamIdleScopeSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('session'),
+    sessionId: z.string().min(1),
+    /** This session's own last delivered sequence. */
+    after: NonNegativeIntegerSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('fleet'),
+    /** Sessions in the daemon-local fleet at the instant the proof was emitted. */
+    followedSessions: NonNegativeIntegerSchema,
+  }),
+]);
+export type FyEventStreamIdleScope = z.infer<typeof FyEventStreamIdleScopeSchema>;
+
+/**
+ * One frame on `/v1/events`.
+ *
+ * The wrapper keeps a heartbeat from masquerading as a session event: an idle proof has no invented
+ * session id, sequence, or lifecycle type, while an event still passes through the exact envelope
+ * every replay and history reader uses.
+ */
+export const FyEventStreamFrameSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('event'), event: FyEventSchema }),
+  z.strictObject({
+    kind: z.literal('idle'),
+    idleSeconds: PositiveIntegerSchema,
+    scope: FyEventStreamIdleScopeSchema,
+  }),
+]);
+export type FyEventStreamFrame = z.infer<typeof FyEventStreamFrameSchema>;
+export type FyEventStreamIdle = Extract<FyEventStreamFrame, { readonly kind: 'idle' }>;
 
 const StartSessionBaseSchema = z.strictObject({
   agent: z.string().min(1),

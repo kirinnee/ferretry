@@ -1,10 +1,18 @@
-import type { FyEvent, SessionState, SessionView } from '@ferretry/protocol';
+import type {
+  FyEvent,
+  FyEventStreamFrame,
+  FyEventStreamIdle,
+  SessionAttachTarget,
+  SessionState,
+  SessionView,
+} from '@ferretry/protocol';
 import type {
   IMarkerProbe,
   IReadsClock,
   IReadsDeadline,
   IReadsGateway,
   IReadsIo,
+  ITerminalAttacher,
 } from '../../../src/lib/reads/ports.ts';
 
 export const INSTANT = '2026-02-01T09:08:07.000Z';
@@ -31,12 +39,11 @@ export class CapturingReadsIo implements IReadsIo {
 /**
  * A clock that never actually waits.
  *
- * Every sleep ADVANCES the clock by its own duration, which is what makes a timeout and an idle notice
- * testable: the loop believes the requested time passed, and the suite runs in microseconds.
+ * Every sleep ADVANCES the clock by its own duration, which is what makes a wait timeout testable:
+ * the loop believes the requested time passed, and the suite runs in microseconds.
  */
 export class FakeClock implements IReadsClock {
   readonly sleeps: number[] = [];
-  afterSleep: (() => void) | undefined;
   readonly #deadlines: Array<{
     readonly at: number;
     readonly controller: AbortController;
@@ -60,7 +67,6 @@ export class FakeClock implements IReadsClock {
     if (signal?.aborted === true) return;
     this.sleeps.push(milliseconds);
     this.advance(milliseconds);
-    this.afterSleep?.();
   }
 
   startDeadline(milliseconds: number): IReadsDeadline {
@@ -111,26 +117,76 @@ export const fyEvent = (sequence: number, overrides: Partial<FyEvent> = {}): FyE
   ...overrides,
 });
 
-/** The daemon reads, scripted per call so a poll loop can be walked one answer at a time. */
+/** An event as the socket wraps it. */
+export const eventFrame = (sequence: number, overrides: Partial<FyEvent> = {}): FyEventStreamFrame => ({
+  kind: 'event',
+  event: fyEvent(sequence, overrides),
+});
+
+/** The daemon's proof that a scoped follow is quiet rather than broken. */
+export const sessionIdleFrame = (sessionId: string, after: number, idleSeconds = 30): FyEventStreamIdle => ({
+  kind: 'idle',
+  idleSeconds,
+  scope: { kind: 'session', sessionId, after },
+});
+
+/** The fleet form, which names a population instead of a cursor. */
+export const fleetIdleFrame = (followedSessions: number, idleSeconds = 30): FyEventStreamIdle => ({
+  kind: 'idle',
+  idleSeconds,
+  scope: { kind: 'fleet', followedSessions },
+});
+
+export const attachTarget = (overrides: Partial<SessionAttachTarget> = {}): SessionAttachTarget => ({
+  socketPath: '/run/user/1000/fy/tmux.sock',
+  tmuxSession: 'fy-s1',
+  paneId: '%7',
+  pid: 4_242,
+  processStartTicks: 987_654,
+  ...overrides,
+});
+
+/** The host handover behind `fy attach`, recorded rather than performed. */
+export class RecordingAttacher implements ITerminalAttacher {
+  readonly targets: SessionAttachTarget[] = [];
+
+  constructor(
+    private readonly code = 0,
+    private readonly failure?: Error,
+  ) {}
+
+  async attach(target: SessionAttachTarget): Promise<number> {
+    this.targets.push(target);
+    if (this.failure !== undefined) throw this.failure;
+    return this.code;
+  }
+}
+
+/** The daemon reads, scripted per call so a loop can be walked one answer at a time. */
 export class ScriptedReadsGateway implements IReadsGateway {
   readonly eventCalls: Array<{ id: string; after?: number; limit?: number }> = [];
   readonly historyCalls: Array<{ id: string; after?: number; limit?: number }> = [];
   readonly getCalls: string[] = [];
   readonly getSignals: Array<AbortSignal | undefined> = [];
   readonly logCalls: Array<{ id: string; turn?: number }> = [];
-  readonly eventSignals: Array<AbortSignal | undefined> = [];
+  readonly attachCalls: string[] = [];
+  readonly streamCalls: Array<{ sessionId: string | undefined; after: number }> = [];
+  readonly streamSignals: Array<AbortSignal | undefined> = [];
 
   constructor(
     private readonly script: {
       readonly views?: SessionView[];
       readonly pages?: FyEvent[][];
+      readonly frames?: FyEventStreamFrame[];
       readonly history?: FyEvent[];
       readonly screen?: string;
       readonly transcript?: string;
+      readonly target?: SessionAttachTarget;
       readonly getError?: Error;
-      readonly eventError?: Error;
+      readonly attachError?: Error;
+      readonly streamError?: Error;
       readonly blockGetUntilAbort?: boolean;
-      readonly blockEventsUntilAbort?: boolean;
+      readonly blockStreamUntilAbort?: boolean;
     } = {},
   ) {}
 
@@ -150,6 +206,12 @@ export class ScriptedReadsGateway implements IReadsGateway {
     return views.length > 1 ? (views.shift() as SessionView) : (views[0] ?? sessionView(sessionState()));
   }
 
+  async attachTarget(id: string): Promise<SessionAttachTarget> {
+    this.attachCalls.push(id);
+    if (this.script.attachError !== undefined) throw this.script.attachError;
+    return this.script.target ?? attachTarget();
+  }
+
   async snapshot(_id: string): Promise<string> {
     return this.script.screen ?? '';
   }
@@ -159,18 +221,8 @@ export class ScriptedReadsGateway implements IReadsGateway {
     return this.script.transcript ?? '';
   }
 
-  async events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]> {
+  async events(id: string, after?: number, limit?: number): Promise<FyEvent[]> {
     this.eventCalls.push({ id, ...(after === undefined ? {} : { after }), ...(limit === undefined ? {} : { limit }) });
-    this.eventSignals.push(signal);
-    if (this.script.eventError !== undefined) throw this.script.eventError;
-    if (this.script.blockEventsUntilAbort === true) {
-      if (signal === undefined) throw new Error('the blocking event read needs a cancellation signal');
-      await new Promise<never>((_resolve, reject) => {
-        const cancel = (): void => reject(new Error('event read cancelled'));
-        if (signal.aborted) cancel();
-        else signal.addEventListener('abort', cancel, { once: true });
-      });
-    }
     return this.script.pages?.shift() ?? [];
   }
 
@@ -181,5 +233,32 @@ export class ScriptedReadsGateway implements IReadsGateway {
       ...(limit === undefined ? {} : { limit }),
     });
     return this.script.history ?? [];
+  }
+
+  /**
+   * Replays the scripted frames the way the socket would: events through `onEvent`, idle proofs
+   * through `onIdle`, and — when asked — a feed that only ends because the caller cancelled it.
+   */
+  async stream(
+    sessionId: string | undefined,
+    after: number,
+    onEvent: (event: FyEvent) => void,
+    signal?: AbortSignal,
+    onIdle?: (idle: FyEventStreamIdle) => void,
+  ): Promise<void> {
+    this.streamCalls.push({ sessionId, after });
+    this.streamSignals.push(signal);
+    if (this.script.streamError !== undefined) throw this.script.streamError;
+    for (const frame of this.script.frames ?? []) {
+      if (signal?.aborted === true) return;
+      if (frame.kind === 'event') onEvent(frame.event);
+      else onIdle?.(frame);
+    }
+    if (this.script.blockStreamUntilAbort !== true) return;
+    if (signal === undefined) throw new Error('the blocking stream needs a cancellation signal');
+    await new Promise<void>(done => {
+      if (signal.aborted) done();
+      else signal.addEventListener('abort', () => done(), { once: true });
+    });
   }
 }

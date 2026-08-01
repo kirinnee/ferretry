@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonEventSocket } from '../../src/lib/event-transport.ts';
 import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 class FakeSocket implements DaemonEventSocket {
   static latest: FakeSocket | undefined;
@@ -41,6 +41,7 @@ describe('DaemonEventTransport', () => {
   it('should open a paired-daemon event URL with a short-lived ticket and no device token', async () => {
     // Arrange
     const received: unknown[] = [];
+    const abort = new AbortController();
     const transport = new DaemonEventTransport(
       daemon,
       async actual => {
@@ -51,17 +52,43 @@ describe('DaemonEventTransport', () => {
     );
 
     // Act
-    const streaming = transport.stream(streamInput(value => received.push(value)));
+    const streaming = transport.stream({
+      ...streamInput(value => received.push(value)),
+      signal: abort.signal,
+    });
     await Promise.resolve();
     const socket = FakeSocket.latest as FakeSocket;
     socket.message('{"sequence":12}');
-    socket.close();
+    abort.abort();
     await streaming;
 
     // Assert
     should(socket.url).equal('wss://daemon.example.test/v1/events?ticket=one-time-ticket&after=12&sessionId=session-1');
     should(socket.url).not.containEql('durable-device-token');
     should(received).deepEqual([{ sequence: 12 }]);
+  });
+
+  it('should reject when the peer closes a stream that was not cancelled', async () => {
+    // Arrange
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => 'one-time-ticket',
+      url => new FakeSocket(url),
+    );
+
+    // Act
+    const streaming = transport.stream(streamInput(() => undefined));
+    await Promise.resolve();
+    const socket = FakeSocket.latest as FakeSocket;
+    socket.close();
+    const outcome = await streaming.then(
+      () => undefined,
+      error => error,
+    );
+
+    // Assert
+    should(outcome).be.instanceOf(Error);
+    should((outcome as Error).message).equal('daemon event stream closed unexpectedly');
   });
 
   it('should reject a stream URL outside the paired daemon before opening a socket', async () => {
@@ -111,5 +138,82 @@ describe('DaemonEventTransport', () => {
     // Assert
     should(outcome).be.instanceOf(Error);
     should(socket.closes).equal(1);
+  });
+
+  it('should close the socket, clear listeners, and resolve when cancelled', async () => {
+    // Arrange
+    const abort = new AbortController();
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => 'one-time-ticket',
+      url => new FakeSocket(url),
+    );
+
+    // Act
+    const streaming = transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
+    await Promise.resolve();
+    const socket = FakeSocket.latest as FakeSocket;
+    abort.abort();
+    await streaming;
+
+    // Assert
+    should(socket.closes).equal(1);
+    should(socket.onmessage).be.null();
+    should(socket.onclose).be.null();
+    should(socket.onerror).be.null();
+  });
+
+  it('should not issue a ticket or open a socket when already cancelled', async () => {
+    // Arrange
+    const abort = new AbortController();
+    abort.abort();
+    let issued = 0;
+    let opened = 0;
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () => {
+        issued += 1;
+        return 'unused';
+      },
+      url => {
+        opened += 1;
+        return new FakeSocket(url);
+      },
+    );
+
+    // Act
+    await transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
+
+    // Assert
+    should(issued).equal(0);
+    should(opened).equal(0);
+  });
+
+  it('should not open a socket when cancellation arrives during ticket issuance', async () => {
+    // Arrange
+    const abort = new AbortController();
+    let release: ((ticket: string) => void) | undefined;
+    let opened = 0;
+    const transport = new DaemonEventTransport(
+      daemon,
+      async () =>
+        await new Promise<string>(resolve => {
+          release = resolve;
+        }),
+      url => {
+        opened += 1;
+        return new FakeSocket(url);
+      },
+    );
+
+    // Act
+    const streaming = transport.stream({ ...streamInput(() => undefined), signal: abort.signal });
+    await Promise.resolve();
+    abort.abort();
+    release?.('too-late-ticket');
+    await streaming;
+
+    // Assert
+    should(opened).equal(0);
   });
 });

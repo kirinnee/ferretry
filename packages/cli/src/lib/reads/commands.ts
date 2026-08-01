@@ -9,7 +9,10 @@ import type {
 } from './controller.ts';
 
 /** The controller surface command registration calls, narrow enough for a recording test double. */
-export type ReadsCommandController = Pick<ReadsController, 'snapshot' | 'logs' | 'events' | 'stream' | 'wait'>;
+export type ReadsCommandController = Pick<
+  ReadsController,
+  'attach' | 'snapshot' | 'logs' | 'events' | 'stream' | 'wait'
+>;
 
 /** The two process events that release a long-lived stream. */
 export interface StreamSignalSource {
@@ -20,7 +23,7 @@ export interface StreamSignalSource {
 /** Own the signal listeners for exactly as long as one stream command is alive. */
 export async function runCancellableStream(
   controller: ReadsCommandController,
-  id: string,
+  id: string | undefined,
   options: StreamOptions,
   signals: StreamSignalSource = process,
 ): Promise<void> {
@@ -44,10 +47,18 @@ export async function runCancellableStream(
  * cannot diverge are one command with two names, and saying so here means a future change to either
  * cannot silently apply to only one of them.
  *
- * `attach` is NOT registered. A `SessionView` carries no terminal address, so the CLI has nothing to
- * hand `tmux attach-session` — see `ports.ts` for the full statement of that gap.
+ * `attach` asks the daemon for a freshly validated pane proof; it never derives a tmux name from the
+ * public session view. `stream` takes an optional id because the socket itself is daemon-scoped.
  */
 export function registerReadsCommands(program: Command, controller: ReadsCommandController): void {
+  program
+    .command('attach')
+    .description('attach this terminal to the daemon-verified session pane (Ctrl-b d detaches)')
+    .argument('<id>', 'session id')
+    .action(async (id: string) => {
+      await controller.attach(id);
+    });
+
   program
     .command('snapshot')
     .description("capture the session's live screen (a dead pane is refused, never served as blank)")
@@ -80,12 +91,11 @@ export function registerReadsCommands(program: Command, controller: ReadsCommand
 
   program
     .command('stream')
-    .description("follow a session's events until interrupted (says so when nothing arrives)")
-    .argument('<id>', 'session id — there is no fleet-wide form; see the controller for why')
+    .description("follow one session or this daemon's whole fleet until interrupted")
+    .argument('[id]', 'optional session id; omitted follows the daemon-local fleet')
     .option('--after <sequence>', 'start after this sequence', Number)
-    .option('--interval <seconds>', 'how often to ask the daemon again', Number)
     .option('--json', 'print one protocol event per line')
-    .action(async (id: string, options: StreamOptions) => {
+    .action(async (id: string | undefined, options: StreamOptions) => {
       await runCancellableStream(controller, id, options);
     });
 
