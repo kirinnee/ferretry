@@ -1,11 +1,26 @@
-import { describe, expect, test } from 'bun:test';
-import { useRef, useState } from 'react';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { type ReactElement, useRef, useState } from 'react';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import {
   type ComposerAutocompleteProvider,
   useComposerAutocomplete,
 } from '../../src/components/composer-autocomplete.ts';
 import { interact, mount, must } from '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import { render as renderTree, run, runAsync } from '../support/react.ts';
+
+const renderers: ReactTestRenderer[] = [];
+
+const render = (element: ReactElement): ReactTestRenderer => {
+  const renderer = renderTree(element);
+  renderers.push(renderer);
+  return renderer;
+};
+
+afterEach(() => {
+  run(() => {
+    for (const renderer of renderers.splice(0)) renderer.unmount();
+  });
+});
 
 const providers: readonly ComposerAutocompleteProvider[] = [
   {
