@@ -16,14 +16,14 @@
  * HTTP, and only the live display waits for a ticket.
  */
 
+import { Monitor } from 'lucide-react';
 import type {
+  FormEvent,
   ClipboardEvent as ReactClipboardEvent,
   CompositionEvent as ReactCompositionEvent,
-  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Monitor } from 'lucide-react';
 
 import {
   type RemoteBrowserScheduler,
@@ -32,15 +32,15 @@ import {
 } from '../../hooks/use-remote-browser.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { type RemoteViewportMode, remoteViewportForContainer } from '../../lib/remote-browser.ts';
+import { isLocalPasteChord, type RemoteViewportMode, remoteViewportForContainer } from '../../lib/remote-browser.ts';
 import {
   type RemoteBrowserConnection,
   RemoteBrowserControls,
   RemoteBrowserGovernor,
   RemoteBrowserNavigation,
-  remoteBrowserPage,
   RemoteBrowserPageTabs,
   RemoteBrowserStatusBar,
+  remoteBrowserPage,
 } from './remote-browser-chrome.tsx';
 import {
   type RemoteBrowserDisplayState,
@@ -273,6 +273,12 @@ export function RemoteBrowserPane({
 
   const onTextKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>, type: 'keyDown' | 'keyUp') => {
     if (event.nativeEvent.isComposing) return;
+    // The LOCAL paste chord must reach this field's own `paste` handler, not be
+    // forwarded as a keystroke: preventDefault would cancel the native paste, and
+    // sending the chord would make the remote Chrome paste the REMOTE clipboard.
+    // keyUp is held to the same rule so the page never sees a release for a key
+    // it never saw go down.
+    if (isLocalPasteChord(event)) return;
     // Printable text is committed by the input and composition paths, which are
     // what virtual keyboards and IMEs reliably expose. Forwarding the key event
     // as well would type every character into the page twice. Editing keys,

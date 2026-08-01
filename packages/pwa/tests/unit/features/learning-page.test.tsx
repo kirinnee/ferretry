@@ -484,6 +484,61 @@ describe('LearningReview', () => {
   const acceptButton = (renderer: ReturnType<typeof render>) =>
     renderer.root.findByProps({ 'aria-label': 'Accept Use the paired daemon' });
 
+  it('drops an older same-daemon load error after a newer scan reload publishes', async () => {
+    const parked = installParkedFetch();
+    const manifest = {
+      runId: 'run-a',
+      startedAt: '2026-07-31T12:00:00.000Z',
+      sessionsScanned: 1,
+      sessionsWithSignal: 1,
+      minerSessions: [],
+      observationsProposed: 1,
+      observationsVerified: 1,
+      rejectedQuotes: 0,
+      malformedFiles: 0,
+      proposalsCreated: 1,
+      proposalsStrengthened: 0,
+      proposalsSuppressedByTombstone: 0,
+      perHarness: { claude: 0, codex: 1 },
+    };
+    try {
+      const renderer = render(<LearningPage connection={connection} now={0} />);
+      await runAsync(async () => {
+        await Promise.resolve();
+      });
+      // The initial status/proposals load remains parked while a manual scan
+      // starts a later reload in the same daemon scope.
+      await runAsync(async () => {
+        runButton(renderer).props.onClick();
+        await Promise.resolve();
+      });
+      await runAsync(async () => {
+        parked.nth(runUrl(connection), 0).resolve(json(manifest));
+        await drain();
+      });
+      await runAsync(async () => {
+        parked.nth(statusUrl(connection), 1).resolve(json(status));
+        parked
+          .nth(proposalsUrl(connection), 1)
+          .resolve(json([{ ...proposal, id: 'proposal/new', title: 'Newer scan reload' }]));
+        await drain();
+      });
+      expect(JSON.stringify(renderer.toJSON())).toContain('Newer scan reload');
+      // The original load settles last. Its error must not cover the newer
+      // result merely because both loads belong to the same daemon epoch.
+      await runAsync(async () => {
+        parked.nth(statusUrl(connection), 0).reject(new Error('initial load failed'));
+        await drain();
+      });
+      const after = JSON.stringify(renderer.toJSON());
+      expect(after).toContain('Newer scan reload');
+      expect(after).not.toContain('initial load failed');
+      expect(after).not.toContain('"role":"alert"');
+    } finally {
+      parked.restore();
+    }
+  });
+
   it('keeps the new daemon visible when a superseded daemon load resolves late', async () => {
     const parked = installParkedFetch();
     try {

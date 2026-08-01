@@ -38,6 +38,40 @@ describe('analytics query language', () => {
     should(globId.matchers).deepEqual([{ label: 'id', op: '=', value: 'one', wildcard: false }]);
   });
 
+  it('should preserve leading/trailing whitespace and escaped control chars through the scope round trip', () => {
+    // Arrange — trim must gate all-whitespace ids only; the exact bytes must survive unchanged
+    const spaced = '  session-1  ';
+    const control = 'line\nnext\tvalue';
+
+    // Act
+    const spacedRound = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, spaced));
+    const controlRound = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, control));
+    const controlCanonical = scopeAnalyticsQuery(undefined, control);
+
+    // Assert — exact bytes round-trip through the canonical form
+    should(spacedRound.matchers[0]).deepEqual({ label: 'id', op: '=', value: spaced, wildcard: false });
+    should(controlRound.matchers[0]).deepEqual({ label: 'id', op: '=', value: control, wildcard: false });
+    should(controlCanonical).equal(`${DEFAULT_SESSION_ANALYTICS_QUERY} {id="line\\nnext\\tvalue"}`);
+  });
+
+  it('should reject all-whitespace session ids regardless of whitespace kind', () => {
+    // Arrange
+    const whitespaces = ['   ', '\t\t', '\n \t', ' \r\n '];
+
+    // Act / Assert
+    for (const ws of whitespaces) {
+      let actual: unknown;
+      try {
+        scopeAnalyticsQuery(undefined, ws);
+      } catch (error) {
+        actual = error;
+      }
+
+      should(actual).be.instanceof(AnalyticsQueryError);
+      should((actual as Error).message).containEql('exact session id');
+    }
+  });
+
   it('should parse aggregation, grouping, aliases, and quoted matcher values', () => {
     // Act
     const actual = parseAnalyticsQuery(

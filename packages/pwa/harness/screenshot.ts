@@ -133,10 +133,30 @@ try {
       await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
       process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
       const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
+      const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
+      // The production shell correctly locks html/body to one viewport and
+      // gives route pages their own scroller. In this harness the route is far
+      // down a stacked review page, so Chrome cannot stitch its full scroll
+      // area in place on a phone: the top is blank and the tail is clipped.
+      // Clone the already-rendered route into the viewport for this one shot.
+      // It keeps the exact component DOM/styles while removing only the
+      // harness stacking context that no production route has.
+      await globalAnalytics.evaluate(element => {
+        document.documentElement.style.height = 'auto';
+        document.documentElement.style.overflow = 'auto';
+        document.body.style.height = 'auto';
+        document.body.style.overflow = 'auto';
+        document.body.replaceChildren(element.cloneNode(true));
+      });
       await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
       process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
+      // Restore the live React fixture after the static clone; later shots
+      // still exercise their real components, refs and async state.
+      await page.goto(server.url.toString());
       const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
-      await page.getByLabel('Session analytics', { exact: true }).screenshot({ path: sessionAnalyticsTarget });
+      const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
+      await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
+      await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
       process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
       const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
       await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });

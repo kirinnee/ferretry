@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
 import type { LearningActionRequest, LearningStatus, ProposalView } from '@ferretry/protocol';
+import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { displayCallsign } from '../../lib/callsign.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -87,6 +87,11 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
   // pattern), so the new daemon's render never briefly paints the old daemon's
   // data: the clear is committed before paint, not deferred to an effect.
   const scopeRef = useRef(0);
+  // Loads can also overlap without a daemon switch: a slow initial read may
+  // still be pending when an accept or scan finishes and asks for a refresh.
+  // This serial is never reset, so the newest load within the current scope is
+  // the only one allowed to publish data or an error.
+  const loadSerialRef = useRef(0);
   const [scopedDaemonId, setScopedDaemonId] = useState(connection.daemonId);
   if (scopedDaemonId !== connection.daemonId) {
     setScopedDaemonId(connection.daemonId);
@@ -105,17 +110,22 @@ export function LearningPage({ connection, now = Date.now() }: LearningPageProps
   const scope = scopeRef.current;
 
   const load = useCallback(async () => {
+    // A stale callback still makes its request so its operation can complete
+    // normally, but it must not advance the current scope's load generation.
+    const loadSerial = scopeRef.current === scope ? ++loadSerialRef.current : undefined;
+    const canPublish = () =>
+      scopeRef.current === scope && loadSerial !== undefined && loadSerialRef.current === loadSerial;
     try {
       const [nextStatus, nextProposals] = await Promise.all([
         fetchLearningStatus(connection),
         fetchLearningProposals(connection),
       ]);
-      if (scopeRef.current !== scope) return;
+      if (!canPublish()) return;
       setStatus(nextStatus);
       setProposals(nextProposals);
       setError(null);
     } catch (reason) {
-      if (scopeRef.current !== scope) return;
+      if (!canPublish()) return;
       setError(learningErrorMessage(reason));
     }
   }, [connection, scope]);

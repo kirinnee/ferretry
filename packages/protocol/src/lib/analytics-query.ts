@@ -132,15 +132,15 @@ function canonical(parsed: Omit<ParsedAnalyticsQuery, 'source' | 'canonical'>): 
 
 /** Force a query onto one exact session and expose the enforced scope canonically. */
 export function scopeAnalyticsQuery(input: string | undefined, sessionId: string): string {
-  const id = sessionId.trim();
-  if (id === '') throw new AnalyticsQueryError('session analytics scope needs an exact session id');
+  // trim only gates an all-whitespace id; the exact bytes must survive into the mandatory matcher
+  if (sessionId.trim() === '') throw new AnalyticsQueryError('session analytics scope needs an exact session id');
   const parsed = parseAnalyticsQuery((input ?? '').trim() || DEFAULT_SESSION_ANALYTICS_QUERY);
   return canonical({
     aggregation: parsed.aggregation,
     groupBy: parsed.groupBy,
     matchers: [
       ...parsed.matchers.filter(matcher => matcher.label !== 'id'),
-      { label: 'id', op: '=', value: id, wildcard: false },
+      { label: 'id', op: '=', value: sessionId, wildcard: false },
     ],
   });
 }

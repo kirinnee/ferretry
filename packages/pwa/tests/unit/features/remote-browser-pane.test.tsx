@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import type { BrowserAction, BrowserActionResult, BrowserInputEvent, BrowserStatus } from '@ferretry/protocol';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
-  RemoteBrowserPane,
   type RemoteBrowserDelay,
+  RemoteBrowserPane,
   type RemoteBrowserSizeObserver,
   type RemoteContainerSize,
 } from '../../../src/features/browser/remote-browser-pane.tsx';
@@ -792,6 +792,53 @@ describe('RemoteBrowserPane text entry', () => {
       }),
     );
     expect(socket.inputs()).toHaveLength(1);
+  });
+
+  it('lets the local paste chord reach the native paste handler instead of forwarding it', async () => {
+    const { socket, field: textarea } = await mountLive();
+    const pressPasteChord = (key: string, ctrlKey: boolean, metaKey: boolean) => {
+      let prevented = 0;
+      const event = {
+        key,
+        code: 'KeyV',
+        keyCode: 86,
+        location: 0,
+        repeat: false,
+        altKey: false,
+        ctrlKey,
+        metaKey,
+        shiftKey: false,
+        nativeEvent: { isComposing: false },
+        preventDefault: () => {
+          prevented += 1;
+        },
+      };
+      run(() => textarea.props.onKeyDown(event));
+      run(() => textarea.props.onKeyUp(event));
+      return prevented;
+    };
+    const paste = (text: string) =>
+      run(() =>
+        textarea.props.onPaste({
+          clipboardData: { getData: () => text },
+          currentTarget: { value: text },
+          preventDefault: () => undefined,
+          stopPropagation: () => undefined,
+        }),
+      );
+
+    // Neither Ctrl-V nor Meta-V is cancelled or sent to remote Chrome; each
+    // reaches the native paste handler and inserts the LOCAL clipboard once.
+    expect(pressPasteChord('v', true, false)).toBe(0);
+    expect(socket.inputs()).toEqual([]);
+    paste('local clipboard');
+    expect(pressPasteChord('V', false, true)).toBe(0);
+    expect(socket.inputs()).toEqual([{ kind: 'insertText', text: 'local clipboard' }]);
+    paste('meta clipboard');
+    expect(socket.inputs()).toEqual([
+      { kind: 'insertText', text: 'local clipboard' },
+      { kind: 'insertText', text: 'meta clipboard' },
+    ]);
   });
 
   it('falls back to the field value when the composition event carries no data', async () => {
