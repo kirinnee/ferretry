@@ -377,12 +377,21 @@ export type NameSuggestions = z.infer<typeof NameSuggestionsSchema>;
 
 export const FyEventSourceSchema = z.string().min(1);
 
-/** Generic event envelope. Event-specific payload schemas parse `data` after dispatch. */
+/**
+ * Generic event envelope. Event-specific payload schemas parse `data` after dispatch.
+ *
+ * WHY `turn` IS OPTIONAL. The daemon's durable session journal records exactly four things about an
+ * event — its sequence, its time, its type and its data — and nothing about the turn it happened
+ * during. A required `turn` therefore forced the only mounted producer to invent one, and `turn: 0`
+ * on every replayed event is not a missing number, it is a WRONG one: a reader grouping by turn
+ * would render a session's whole history as a single opening turn. Absent says "the daemon does not
+ * record this", which is the truth, and it is the shape every consumer can act on honestly.
+ */
 export const FyEventSchema = z.object({
   sequence: NonNegativeIntegerSchema,
   time: InstantSchema,
   sessionId: z.string().min(1),
-  turn: NonNegativeIntegerSchema,
+  turn: NonNegativeIntegerSchema.optional(),
   type: z.string().min(1),
   source: FyEventSourceSchema,
   data: z.unknown(),

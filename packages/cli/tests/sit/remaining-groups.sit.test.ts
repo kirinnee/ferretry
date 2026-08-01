@@ -32,9 +32,24 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
 
     // Assert — the composition root actually constructs each group, not just its tests
     should(actual.code).equal(0);
-    for (const group of ['learning', 'stt', 'worktree', 'fleet', 'fs', 'migrate', 'gc', 'signal']) {
+    for (const group of ['learning', 'stt', 'worktree', 'fleet', 'fs', 'migrate', 'gc', 'signal', 'stream', 'wait']) {
       should(actual.out).containEql(group);
     }
+  });
+
+  it('documents the operator-read failure and cancellation controls', async () => {
+    // Act
+    const stream = await cli(['stream', '--help']);
+    const wait = await cli(['wait', '--help']);
+
+    // Assert
+    should(stream.code).equal(0);
+    should(stream.out).containEql('--interval');
+    should(stream.out).containEql('until interrupted');
+    should(wait.code).equal(0);
+    should(wait.out).containEql('--timeout');
+    should(wait.out).containEql('--until-marker');
+    should(wait.out).match(/69\s+daemon lost/);
   });
 
   it('uses the injected session environment instead of an ambient live session', async () => {

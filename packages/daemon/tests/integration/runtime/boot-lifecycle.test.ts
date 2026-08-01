@@ -2333,12 +2333,12 @@ describe('daemon boot lifecycle', () => {
     const home = await tempDirectory('fyd-health');
     const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
-    let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
-      await new Promise<void>(resolve => {
-        release = resolve;
-      });
-    });
+    // Register the shutdown latch before boot starts. The server binds before the monitor and warden
+    // loops finish arming, so `/healthz` can answer before `start` reaches `untilShutdown`; assigning a
+    // release callback inside that late call races the request below and intermittently leaves `exit`
+    // waiting forever.
+    const shutdown = Promise.withResolvers<void>();
+    const world = await worldAt(home, port, () => shutdown.promise);
     await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
     await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-done', {
       status: 'completed',
@@ -2356,13 +2356,22 @@ describe('daemon boot lifecycle', () => {
     // No token, because the daemon commands must answer "is it up" before one exists — the state a
     // fresh `fy daemon install` leaves a host in.
     const anonymous = await fetch(`http://127.0.0.1:${port}/v1/health`);
-    const answered = await fetch(`http://127.0.0.1:${port}/v1/health`, {
+    let answered = await fetch(`http://127.0.0.1:${port}/v1/health`, {
       headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
     });
     // Parsed exactly as `ProtocolDaemonHealth` parses it; a body this schema refuses is a daemon the
     // CLI reports as unreachable.
-    const view = HealthViewSchema.parse(await answered.json());
-    release();
+    let view = HealthViewSchema.parse(await answered.json());
+    // `/healthz` proves the socket is live, not that every post-bind loop is armed. Wait for the
+    // supervision fact this journey asserts so the request cannot race the final boot step.
+    for (let attempt = 0; attempt < 100 && !view.wardenTimerArmed; attempt += 1) {
+      await Bun.sleep(10);
+      answered = await fetch(`http://127.0.0.1:${port}/v1/health`, {
+        headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
+      });
+      view = HealthViewSchema.parse(await answered.json());
+    }
+    shutdown.resolve();
     const code = await exit;
     await runCleanups(cleanups);
 

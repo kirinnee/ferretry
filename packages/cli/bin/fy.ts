@@ -54,6 +54,9 @@ import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerPinCommands } from '../src/lib/pins/commands';
+import { registerReadsCommands } from '../src/lib/reads/commands';
+import { ReadsController } from '../src/lib/reads/controller';
+import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSttCommands } from '../src/lib/stt/commands';
@@ -159,7 +162,18 @@ function lazyDaemonConnection(environment: Record<string, string | undefined>): 
  */
 type SharedDaemonClient = Pick<
   IFyApiClient,
-  'request' | 'analytics' | 'list' | 'get' | 'stop' | 'migrate' | 'scratchPlan' | 'scratchSweep'
+  | 'request'
+  | 'analytics'
+  | 'list'
+  | 'get'
+  | 'stop'
+  | 'migrate'
+  | 'scratchPlan'
+  | 'scratchSweep'
+  | 'snapshot'
+  | 'logs'
+  | 'events'
+  | 'history'
 >;
 
 /** The deferred connection as the client object every command group is wired with. */
@@ -171,12 +185,17 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     },
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
     list: async (): Promise<SessionView[]> => (await client()).list(),
-    get: async (id: string): Promise<SessionView> => (await client()).get(id),
+    get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
     migrate: async (id, agent, model, allowContextDowngrade, requestId) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
+    snapshot: async (id: string) => (await client()).snapshot(id),
+    logs: async (id: string, turn?: number) => (await client()).logs(id, turn),
+    events: async (id: string, after?: number, limit?: number, signal?: AbortSignal) =>
+      (await client()).events(id, after, limit, signal),
+    history: async (id: string, after?: number, limit?: number) => (await client()).history(id, after, limit),
   };
 }
 
@@ -339,6 +358,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new WorktreeController(new ProtocolWorktreeGateway(client), world.io, world.prompt, world.interactive),
     ),
   ({ program, world, client }) => registerFleetCommands(program, buildFleetController(world, client)),
+  // The operator reads. The marker probe takes the INVOCATION cwd rather than reading `process.cwd()`,
+  // so a relative `--until-marker` resolves against the directory the human was in.
+  ({ program, world, client }) =>
+    registerReadsCommands(
+      program,
+      new ReadsController(client, world.io, new SystemPollClock(), new FileMarkerProbe(world.cwd)),
+    ),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),

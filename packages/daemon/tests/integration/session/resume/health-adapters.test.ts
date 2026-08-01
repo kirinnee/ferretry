@@ -91,6 +91,7 @@ function capabilities(overrides: Partial<SupervisionCapabilities> = {}): Supervi
     warden: false,
     monitored: () => false,
     sweepIntervalMs: 0,
+    armedAtMs: () => undefined,
     lastSweepAt: () => undefined,
     bootstrapFinished: () => true,
     bootstrapErrors: () => [],
@@ -236,6 +237,7 @@ describe('storage health inventory', () => {
     const home = await temporaryHome();
     const opened = await openStorage(home);
     await opened.storage.writeState(parseSessionId('watched'), { id: 'watched', status: 'running' });
+    const armedAtMs = Date.parse(NOW) - 45_000;
     const sweptAt = new Date(Date.parse(NOW) - 30_000).toISOString();
 
     // Act
@@ -246,6 +248,7 @@ describe('storage health inventory', () => {
         warden: true,
         monitored: (id: string) => id === 'watched',
         sweepIntervalMs: 60_000,
+        armedAtMs: () => armedAtMs,
         lastSweepAt: () => sweptAt,
         bootstrapErrors: () => ['one import timed out'],
       }),
@@ -253,7 +256,7 @@ describe('storage health inventory', () => {
 
     // Assert
     should(actual.sessions[0]?.monitored).be.true();
-    should(actual.sweep).deepEqual({ timerArmed: true, intervalMs: 60_000, lastSweepAt: sweptAt });
+    should(actual.sweep).deepEqual({ timerArmed: true, intervalMs: 60_000, armedAtMs, lastSweepAt: sweptAt });
     should(actual.bootstrapErrors).deepEqual(['one import timed out']);
     await opened.storage.close();
   });

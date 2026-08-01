@@ -382,8 +382,12 @@ export class FyApiClient implements IFyApiClient {
     return this.request(`/v1/names?count=${parsedCount}`, NameSuggestionsSchema);
   }
 
-  get(id: string): Promise<SessionView> {
-    return this.request(`/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}`, SessionViewSchema);
+  get(id: string, signal?: AbortSignal): Promise<SessionView> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}`,
+      SessionViewSchema,
+      signal === undefined ? {} : { signal },
+    );
   }
 
   async start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView> {
@@ -501,12 +505,13 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  events(id: string, after = 0, limit = 1_000): Promise<FyEvent[]> {
+  events(id: string, after = 0, limit = 1_000, signal?: AbortSignal): Promise<FyEvent[]> {
     const parsedAfter = NonNegativeIntegerSchema.parse(after);
     const parsedLimit = PositiveIntegerSchema.max(1_000).parse(limit);
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/events?after=${parsedAfter}&limit=${parsedLimit}`,
       FyEventListSchema,
+      signal === undefined ? {} : { signal },
     );
   }
 

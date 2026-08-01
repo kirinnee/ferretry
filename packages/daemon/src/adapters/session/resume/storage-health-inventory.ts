@@ -15,6 +15,8 @@ export interface SupervisionCapabilities {
   readonly monitored: (id: string) => boolean;
   /** How often the warden sweeps, in milliseconds. Only consulted when `warden` is true. */
   readonly sweepIntervalMs: number;
+  /** When the current timer was armed, so its pre-first-sweep grace is evidence rather than a guess. */
+  readonly armedAtMs: () => number | undefined;
   /** The last completed sweep, if any. */
   readonly lastSweepAt: () => string | undefined;
   readonly bootstrapFinished: () => boolean;
@@ -44,11 +46,13 @@ export class StorageSessionHealthInventory implements SessionHealthInventory {
       monitored: this.capabilities.monitors && this.capabilities.monitored(session.id),
     }));
     const lastSweepAt = this.capabilities.lastSweepAt();
+    const armedAtMs = this.capabilities.armedAtMs();
     return {
       sessions,
       sweep: {
         timerArmed: this.capabilities.warden,
         intervalMs: this.capabilities.sweepIntervalMs,
+        ...(armedAtMs === undefined ? {} : { armedAtMs }),
         ...(lastSweepAt === undefined ? {} : { lastSweepAt }),
       },
       bootstrapFinished: this.capabilities.bootstrapFinished(),
