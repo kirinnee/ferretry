@@ -10,9 +10,10 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useMemo, useSyncExternalStore } from 'react';
 
+import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import { cn } from '../../lib/class-names.ts';
-import type { DaemonControlsStore, Density } from '../../lib/controls.ts';
+import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -27,18 +28,7 @@ export const TEXT_SCALE_OPTIONS = [
   { id: 'larger', label: 'Larger', description: '125% of default.' },
 ] as const;
 
-export const DENSITY_OPTIONS: readonly {
-  readonly id: Density;
-  readonly label: string;
-  readonly description: string;
-}[] = [
-  { id: 'full', label: 'Full', description: 'Show the available session detail.' },
-  { id: 'compact', label: 'Compact', description: 'Keep rows easy to scan.' },
-  { id: 'minimal', label: 'Minimal', description: 'Prioritise the session names.' },
-] as const;
-
-const defaultDensity = (): Density =>
-  typeof window !== 'undefined' && window.matchMedia?.('(max-width: 768px)').matches ? 'compact' : 'full';
+export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
@@ -137,7 +127,8 @@ export function SettingsPage({
     () => controls.snapshot(),
   );
   const device = record.device;
-  const density = device.density ?? defaultDensity();
+  const densityState = useDensity(controls);
+  const density = densityState.density;
   const theme = useTheme();
 
   const controlsById = useMemo<Record<SettingId, ReactNode>>(
@@ -179,7 +170,7 @@ export function SettingsPage({
                     name="dashboard-density"
                     value={option.id}
                     checked={checked}
-                    onChange={() => controls.setDeviceControls({ density: option.id })}
+                    onChange={() => densityState.setDensity(option.id)}
                     className="sr-only"
                   />
                   <span className="text-ui font-semibold">{option.label}</span>
@@ -188,7 +179,7 @@ export function SettingsPage({
               );
             })}
           </fieldset>
-          {device.density === null && (
+          {densityState.explicit === null && (
             <p className="mt-2 text-meta leading-base text-faint">
               Using the device default. Picking a level saves an explicit choice.
             </p>
@@ -208,7 +199,16 @@ export function SettingsPage({
         </p>
       ),
     }),
-    [controls, density, device.chatWidth, device.density, dictation, notifications, theme],
+    [
+      controls,
+      density,
+      densityState.explicit,
+      densityState.setDensity,
+      device.chatWidth,
+      dictation,
+      notifications,
+      theme,
+    ],
   );
 
   return (
