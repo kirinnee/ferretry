@@ -124,6 +124,7 @@ export * from './ledger-placement.ts';
 export * from './md-compose.ts';
 export * from './notification-ledger.ts';
 export * from './notification-preferences.ts';
+export * from './orientation-lock.ts';
 export * from './pages/new-session.ts';
 export * from './pages/page-host.tsx';
 export * from './pages/routes.ts';
