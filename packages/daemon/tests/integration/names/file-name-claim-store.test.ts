@@ -11,8 +11,8 @@ import {
   createFoundationPaths,
   DEFAULT_CALLSIGN_POOL,
   NameAllocator,
-  resolveStateHome,
   type NameClaim,
+  resolveStateHome,
 } from '../../../src/lib/index.ts';
 
 /**
@@ -146,22 +146,51 @@ describe('FileNameClaimStore', () => {
     await subject.store.release('nobody-holds-this', 'session-z');
   });
 
-  it('should re-derive the pool from the fleet when the ledger on disk is damaged', async () => {
-    // Refusing every start over an unreadable reservation file would be worse than losing the
-    // reservations: the durable ownership is in the session documents either way.
+  it('should refuse a claim and preserve the evidence when the ledger JSON is damaged', async () => {
+    // A live session can be re-derived, but an in-flight reservation exists only in this file. If a
+    // damaged file read as empty, a second start could claim the first start's callsign.
     // Arrange
     const held = DEFAULT_CALLSIGN_POOL[0]!;
     const subject = await fixture([claim(held, 'session-live')]);
     await mkdir(dirname(subject.file), { recursive: true });
-    await writeFile(subject.file, 'not json at all', { mode: 0o600 });
+    const damaged = 'not json at all';
+    await writeFile(subject.file, damaged, { mode: 0o600 });
 
     // Act
-    const claims = await subject.store.listClaims();
-    const allocated = await subject.allocator.allocate({ ownerId: 'session-a', nowMs: NOW });
+    const allocated = await subject.allocator.allocate({
+      ownerId: 'session-a',
+      nowMs: NOW,
+      requested: DEFAULT_CALLSIGN_POOL[1],
+    });
 
     // Assert
-    should(claims.map(row => row.callsign)).deepEqual([held]);
-    // The live session's name is still not offered, which is the fact that actually matters.
-    should(allocated.ok ? allocated.claim.callsign : '').equal(DEFAULT_CALLSIGN_POOL[1]);
+    should(allocated.ok).be.false();
+    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
+    should(allocated.ok ? '' : allocated.error.message).containEql('invalid callsign claim ledger');
+    should(await readFile(subject.file, 'utf8')).equal(damaged);
+  });
+
+  it('should refuse the whole ledger rather than drop one malformed reservation', async () => {
+    // Arrange — the valid first row represents a start whose session document does not exist yet.
+    const subject = await fixture();
+    const pending = claim(DEFAULT_CALLSIGN_POOL[0]!, 'session-pending');
+    const damaged = JSON.stringify([
+      pending,
+      { callsign: 'NOT-CANONICAL', ownerId: 'session-damaged', claimedAtMs: NOW, expiresAtMs: NOW + 1 },
+    ]);
+    await mkdir(dirname(subject.file), { recursive: true });
+    await writeFile(subject.file, damaged, { mode: 0o600 });
+
+    // Act
+    const allocated = await subject.allocator.allocate({
+      ownerId: 'session-racing',
+      nowMs: NOW,
+      requested: pending.callsign,
+    });
+
+    // Assert — a partial decode must not make the valid in-flight reservation disappear.
+    should(allocated.ok).be.false();
+    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
+    should(await readFile(subject.file, 'utf8')).equal(damaged);
   });
 });
