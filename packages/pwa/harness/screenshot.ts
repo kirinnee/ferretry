@@ -98,6 +98,12 @@ try {
       await page.screenshot({ path: target });
       process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
 
+      if (viewport.name === 'desktop') {
+        const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
+        await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
+        process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
+      }
+
       const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
       await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
       process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
