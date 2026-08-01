@@ -103,6 +103,8 @@ export interface CliWorld {
   readonly spinner: ISpinner;
   readonly prompt: IPrompt;
   readonly interactive: boolean;
+  /** The invocation directory, injected alongside the environment for hermetic in-process journeys. */
+  readonly cwd: string;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
 }
@@ -115,6 +117,7 @@ export function buildWorld(): CliWorld {
     spinner: new OraSpinner(),
     prompt: new InquirerPrompt(),
     interactive: io.interactive(),
+    cwd: process.cwd(),
     environment: process.env,
   };
 }
@@ -380,16 +383,19 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
  * command actually runs.
  */
 function sessionCommands(world: CliWorld, ownSessionId: string | undefined): SessionCommandDeps {
+  const cliEnvironment = world.environment;
   const environment: SessionEnvironment = {
-    cwd: process.cwd(),
+    cwd: world.cwd,
     ...(ownSessionId === undefined ? {} : { callerSessionId: ownSessionId }),
-    ...(process.env.FY_BOARD_CAPABILITY === undefined ? {} : { boardCapability: process.env.FY_BOARD_CAPABILITY }),
+    ...(cliEnvironment.FY_BOARD_CAPABILITY === undefined
+      ? {}
+      : { boardCapability: cliEnvironment.FY_BOARD_CAPABILITY }),
   };
   const api = new FySessionApi(
     createFyClientConnector({
       version: assertSemver(pkg.version),
-      ...(process.env.FY_URL === undefined ? {} : { url: process.env.FY_URL }),
-      ...(process.env.FY_TOKEN === undefined ? {} : { token: process.env.FY_TOKEN }),
+      ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
+      ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
       ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
     }),
   );

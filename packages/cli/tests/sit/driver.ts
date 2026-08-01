@@ -38,7 +38,7 @@ export class BinaryCliDriver implements CliDriver {
 
 /** In-process driver: same journeys via the composition factory with captured IO — instrumentable full-system coverage. */
 export class InProcessCliDriver implements CliDriver {
-  async run(args: string[], _env: Record<string, string> = {}): Promise<CliResult> {
+  async run(args: string[], environment: Record<string, string> = {}): Promise<CliResult> {
     let out = '';
     let err = '';
     const io: ICliIo = {
@@ -90,9 +90,10 @@ export class InProcessCliDriver implements CliDriver {
       spinner,
       prompt,
       interactive: false,
-      // Hermetic: an in-process journey never inherits the operator's FY_* environment — with no
-      // FY_TOKEN the shared client refuses before it opens a socket, so no journey reaches a daemon.
-      environment: {},
+      cwd: process.cwd(),
+      // Hermetic: an in-process journey receives only its explicit FY_* environment. With no token
+      // the shared client refuses before it opens a socket, so no journey reaches a live daemon.
+      environment,
     });
 
     const previousExitCode = process.exitCode;

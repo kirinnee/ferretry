@@ -25,14 +25,25 @@ beforeAll(() => {
   driver = useInProcess ? new InProcessCliDriver() : new BinaryCliDriver(binaryPath);
 });
 
-describe(`learning, dictation, worktrees and fleet (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => {
+describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => {
   it('mounts every group on the program', async () => {
     // Act
     const actual = await cli(['--help']);
 
     // Assert — the composition root actually constructs each group, not just its tests
     should(actual.code).equal(0);
-    for (const group of ['learning', 'stt', 'worktree', 'fleet']) should(actual.out).containEql(group);
+    for (const group of ['learning', 'stt', 'worktree', 'fleet', 'fs', 'migrate', 'gc', 'signal']) {
+      should(actual.out).containEql(group);
+    }
+  });
+
+  it('uses the injected session environment instead of an ambient live session', async () => {
+    // Act
+    const actual = await cli(['signal', 'done']);
+
+    // Assert — OFFLINE supplies a blank FY_SESSION_ID, so no daemon client is reached.
+    should(actual.code).not.equal(0);
+    should(actual.err).containEql('FY_SESSION_ID is unset');
   });
 
   it('lists the learning verbs in its help', async () => {
