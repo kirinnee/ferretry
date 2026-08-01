@@ -69,6 +69,8 @@ import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
+import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
+import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
@@ -373,6 +375,37 @@ const PALETTE_SESSIONS = paletteSessionEntries([
   },
 ] as SessionView[]);
 
+/**
+ * A lead with a live child and grandchild — the smallest fleet that shows every
+ * bulk-stop warning: an included caller, a current-session ancestor, and
+ * descendants that an orphan stop would leave running.
+ */
+const stopLead = harnessSession;
+
+const stopChild = {
+  ...harnessSession,
+  config: {
+    ...harnessSession.config,
+    id: 'ms9hi4ts-b22751c4',
+    teammate: 'jessica',
+    name: 'Port the command palette',
+    parent: 'harness-session',
+  },
+} as SessionView;
+
+const stopGrandchild = {
+  ...harnessSession,
+  config: {
+    ...harnessSession.config,
+    id: 'kq21ffds-90ab12cd',
+    teammate: 'ms-98',
+    name: 'Wire the daemon picker',
+    parent: 'ms9hi4ts-b22751c4',
+  },
+} as SessionView;
+
+const STOP_FLEET: SessionView[] = [stopLead, stopChild, stopGrandchild];
+
 const PALETTE_COMMANDS = [
   {
     id: 'browser-login',
@@ -648,6 +681,9 @@ function Shell() {
   const phone = viewport.width <= PHONE_MAX;
   const menuOpen = window.location.hash === '#menu';
   const paletteOpen = window.location.hash === '#palette';
+  const rowMenuOpen = window.location.hash === '#row-menu';
+  const stopOpen = window.location.hash === '#stop';
+  const stopResultsOpen = window.location.hash === '#stop-results';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
   // The headless browser sizes its window after the first paint, so a viewport
@@ -1303,6 +1339,53 @@ function Shell() {
           commands={PALETTE_COMMANDS}
           settings={PALETTE_SETTINGS}
           touchAffected={phone}
+        />
+
+        {/* Only under `#row-menu`: the REAL sidebar row menu, so the screenshot
+            shows the entries the port actually builds rather than hand-written
+            stand-ins — the four explicit stop scopes and their target counts. */}
+        <SessionRowMenu
+          state={rowMenuOpen ? { view: stopLead, x: phone ? 40 : 420, y: 240 } : null}
+          sessions={STOP_FLEET}
+          canMutate
+          onClose={() => {}}
+          onRun={() => {}}
+          onBulkStop={() => {}}
+          touch={phone}
+        />
+
+        {/* Only under `#stop` / `#stop-results`: another fixed overlay, and the
+            two states are different screens — the confirmation lists what will
+            die, the report lists what did. */}
+        <BulkStopConfirmation
+          request={
+            stopOpen
+              ? {
+                  token: 1,
+                  selectedId: 'harness-session',
+                  scope: 'cascade',
+                  targets: STOP_FLEET,
+                }
+              : stopResultsOpen
+                ? {
+                    token: 2,
+                    selectedId: 'harness-session',
+                    scope: 'cascade',
+                    targets: STOP_FLEET,
+                    outcomes: [
+                      { id: stopLead.config.id, name: 'Fable', ok: true },
+                      { id: stopChild.config.id, name: 'Jessica', ok: true },
+                      { id: stopGrandchild.config.id, name: 'MS-98', ok: false, detail: 'already exited' },
+                    ],
+                    newTargets: [stopGrandchild],
+                  }
+                : null
+          }
+          activeId="ms9hi4ts-b22751c4"
+          sessions={STOP_FLEET}
+          onClose={() => {}}
+          onConfirm={() => {}}
+          onConfirmNew={() => {}}
         />
 
         <BottomSheet
