@@ -20,6 +20,7 @@
     "./features/dictation-shortcut": "./src/features/settings/dictation-shortcut.ts",
     "./features/dictation-shortcut-picker": "./src/features/settings/dictation-shortcut-picker.tsx",
     "./features/pins-trigger": "./src/features/pins/pins-trigger.tsx",
+    "./features/pairing-screen": "./src/features/pairing/pairing-screen.tsx",
     "./features/task-dag-graph": "./src/features/tasks/task-dag-graph.tsx",
     "./features/warden-config-card": "./src/features/warden/warden-config-card.tsx",
     "./session-screens.css": "./src/components/session-screens.css"
