@@ -20,10 +20,12 @@ type MediaListener = () => void;
 
 const listeners = new Set<MediaListener>();
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
 
 /**
  * Layout mode is read from `innerWidth`; the reduced-motion query the bottom
- * sheet asks for must keep answering too.
+ * sheet asks for must keep answering too. Both are process-wide globals, so
+ * both are handed back in teardown — see the `afterEach` below.
  */
 const setViewport = (width: number): void => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
@@ -59,10 +61,18 @@ const linksOf = (container: HTMLElement, navLabel: string): HTMLAnchorElement[] 
 
 const byLabel = (label: string): HTMLElement | null => document.querySelector(`[aria-label="${label}"]`);
 
+/**
+ * bun runs every suite in ONE process, so a width left behind here is a width
+ * the next file renders at. The last case in this file is a phone case; without
+ * this restore, the file that follows sees 390px and its desktop-only chrome
+ * (a dashboard view switch, a permanent sidebar) is simply absent.
+ */
 afterEach(() => {
   listeners.clear();
   if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia);
   else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+  else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'innerWidth');
 });
 
 describe('mobileDestinationMenuOpen', () => {
