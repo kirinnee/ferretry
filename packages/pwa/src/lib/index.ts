@@ -143,6 +143,7 @@ export * from './send-badge.ts';
 export * from './send-ledger.ts';
 export * from './send-ledger-join.ts';
 export * from './session-screens.ts';
+export * from './system-blocks.ts';
 export * from './side-pane-preferences.ts';
 export * from './stt/audio-capture.ts';
 export * from './stt/capabilities.ts';
