@@ -95,6 +95,10 @@ import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
+import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
+import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
+import { buildLineage } from '../src/lib/lineage.ts';
+import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
@@ -564,6 +568,64 @@ const stopGrandchild = {
 
 const STOP_FLEET: SessionView[] = [stopLead, stopChild, stopGrandchild];
 
+/** The same fleet as the sidebar draws it: one folder, lineage-nested. */
+const SIDEBAR_FLEET = {
+  groups: [{ name: 'ferretry', path: '/work/ferretry', rows: STOP_FLEET }],
+  lineage: buildLineage(STOP_FLEET),
+  byId: new Map(STOP_FLEET.map(view => [view.config.id, view])),
+  counts: { all: 3, auto: 2, interactive: 1 },
+  shown: 3,
+  total: 7,
+  scope: '/work/ferretry',
+};
+
+const SIDEBAR_FILTERS = { query: '', mode: 'all', rcOnly: false, includeFinished: false } as const;
+
+const RUNTIME_VIEW = {
+  ...harnessSession,
+  config: { ...harnessSession.config, harness: 'claude' },
+  state: { ...harnessSession.state, promptReady: true, observedModel: 'claude-opus-5' },
+} as SessionView;
+
+/** The harness never reaches a daemon; a runtime command resolves and stops there. */
+const HARNESS_RUNTIME_API = { runtime: async () => undefined };
+
+const HARNESS_CLAUDE_CATALOG = {
+  load: async () => ({
+    harness: 'claude' as const,
+    source: 'wrapper-inventory' as const,
+    choices: [
+      {
+        value: 'claude-opus-5',
+        label: 'Opus 5',
+        description: 'The deepest model this account advertises.',
+        isDefault: true as const,
+        reasoningEfforts: [],
+      },
+      { value: 'claude-sonnet-5', label: 'claude-sonnet-5', reasoningEfforts: [] },
+    ],
+  }),
+};
+
+const PENDING_ATTACHMENTS = [
+  {
+    localId: 'p-1',
+    file: { name: 'screenshot.png', type: 'image/png', size: 483_000 } as File,
+    status: 'ready' as const,
+  },
+  {
+    localId: 'p-2',
+    file: { name: 'design-brief.pdf', type: 'application/pdf', size: 1_204_000 } as File,
+    status: 'uploading' as const,
+  },
+  {
+    localId: 'p-3',
+    file: { name: 'archive.zip', type: 'application/zip', size: 92_000_000 } as File,
+    status: 'failed' as const,
+    error: 'This file is larger than the daemon accepts.',
+  },
+];
+
 const PALETTE_COMMANDS = [
   {
     id: 'browser-login',
@@ -888,6 +950,7 @@ function Shell() {
   const paletteOpen = window.location.hash === '#palette';
   const rowMenuOpen = window.location.hash === '#row-menu';
   const stopOpen = window.location.hash === '#stop';
+  const fleetDrawerOpen = window.location.hash === '#fleet-drawer';
   const stopResultsOpen = window.location.hash === '#stop-results';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
@@ -1771,6 +1834,89 @@ function Shell() {
           onRun={() => {}}
           onAction={() => {}}
         />
+      ),
+    },
+    {
+      label: 'Fleet sidebar',
+      render: () => (
+        <Card className="min-w-0 overflow-hidden" id="harness-fleet-sidebar">
+          <PanelHeader>
+            <Label>Fleet sidebar</Label>
+          </PanelHeader>
+          <div className="flex h-[420px] min-h-0">
+            <AgentSidebar
+              activeId={SIDEBAR_FLEET.groups[0]?.rows[1]?.config.id}
+              attentionCountFor={id => (id === SIDEBAR_FLEET.groups[0]?.rows[0]?.config.id ? 3 : 0)}
+              canMutate
+              collapsed={false}
+              daemonId={daemon.daemonId}
+              drawerOpen={fleetDrawerOpen}
+              filters={SIDEBAR_FILTERS}
+              fleet={SIDEBAR_FLEET}
+              onCloseDrawer={() => {}}
+              onCollapsedChange={() => {}}
+              onFilterChange={() => {}}
+              onFocusFolder={() => {}}
+            />
+            <div className="min-w-0 flex-1 p-panel text-meta text-muted">
+              The transcript sits here. The column beside it is the sidebar under test.
+            </div>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Runtime controls',
+      render: () => (
+        <Card className="min-w-0" id="harness-runtime-controls">
+          <PanelHeader>
+            <Label>Runtime controls</Label>
+          </PanelHeader>
+          <PanelBody className="flex flex-col gap-sm">
+            <RuntimeModelControls
+              api={HARNESS_RUNTIME_API}
+              canControl
+              catalogs={HARNESS_CLAUDE_CATALOG}
+              daemon={daemon}
+              onClose={() => {}}
+              open
+              view={RUNTIME_VIEW}
+            />
+            <RuntimeEffortControls
+              api={HARNESS_RUNTIME_API}
+              canControl
+              catalogs={HARNESS_CLAUDE_CATALOG}
+              daemon={daemon}
+              onClose={() => {}}
+              view={RUNTIME_VIEW}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Pending sends',
+      render: () => (
+        <Card className="min-w-0" id="harness-pending-sends">
+          <PanelHeader>
+            <Label>Pending sends</Label>
+          </PanelHeader>
+          <PanelBody className="flex flex-col gap-sm">
+            <PendingAttachmentStrip
+              entries={PENDING_ATTACHMENTS}
+              onForget={() => {}}
+              onRemove={() => {}}
+              onRetry={() => {}}
+              onUnlock={() => {}}
+            />
+            <PendingMessage attachments={[]} status="sending" text="Ship the sidebar port." />
+            <PendingMessage attachments={[]} status="delivered" text="Ship the sidebar port." />
+            <PendingMessage attachments={[]} onDismiss={() => {}} onRetry={() => {}} status="error" text="Ship it." />
+            <div className="h-40">
+              <ThreadSkeleton />
+            </div>
+          </PanelBody>
+        </Card>
       ),
     },
   ];

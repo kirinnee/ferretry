@@ -39,6 +39,9 @@ const SECTIONS = [
   'harness-marks',
   'harness-chat-width',
   'harness-dead-pane',
+  'harness-fleet-sidebar',
+  'harness-runtime-controls',
+  'harness-pending-sends',
 ] as const;
 
 function fail(message: string): never {
@@ -292,6 +295,17 @@ try {
         await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
         await page.screenshot({ path: stopTarget });
         process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
+      }
+
+      // The fleet drawer only exists below the drawer breakpoint, and only while
+      // it is open, so a page-flow capture at 390px correctly shows nothing.
+      const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
+      await page.goto(`${server.url}#fleet-drawer`);
+      await page.reload();
+      const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
+      if (await drawer.isVisible().catch(() => false)) {
+        await page.screenshot({ path: drawerTarget });
+        process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
       }
 
       await context.close();
