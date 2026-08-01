@@ -35,6 +35,7 @@ const SECTIONS = [
   'harness-new-session',
   'harness-session-screen',
   'harness-composer-markdown',
+  'harness-lineage',
   'harness-marks',
   'harness-chat-width',
   'harness-dead-pane',

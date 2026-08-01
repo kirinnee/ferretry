@@ -40,6 +40,9 @@ export {
   learningStrength,
   ProposalCard,
 } from '../features/learning/learning-page.tsx';
+export * from '../features/lineage/lineage-name.tsx';
+export * from '../features/lineage/lineage-surface-model.ts';
+export * from '../features/lineage/lineage-surface.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
@@ -162,6 +165,7 @@ export * from './pin-store.ts';
 export * from './push-subscriptions.ts';
 export * from './quote.ts';
 export * from './references.ts';
+export * from './reference-host.ts';
 export * from './remark-table-labels.ts';
 export * from './remote-browser.ts';
 export * from './runtime-models.ts';
@@ -186,6 +190,7 @@ export * from './stt/utterance.ts';
 export * from './stt/word-only-verifier.ts';
 export * from './system-blocks.ts';
 export * from './theme-preferences.ts';
+export * from './task-reference-context.tsx';
 export * from './tool-extract.ts';
 export * from './usage.ts';
 export * from './web-terminals.ts';

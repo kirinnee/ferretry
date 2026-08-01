@@ -53,6 +53,7 @@ import { RemoteBrowserPane } from '../src/features/browser/remote-browser-pane.t
 import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
+import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
@@ -279,6 +280,30 @@ const MARK_SESSIONS: readonly (readonly [string, SessionView])[] = [
   ],
   ['completed', { ...harnessSession, state: { ...harnessSession.state, status: 'completed' } } as SessionView],
   ['failed', { ...harnessSession, state: { ...harnessSession.state, status: 'failed' } } as SessionView],
+];
+
+/** A local family keeps the Tree card readable at both required widths. */
+const LINEAGE_SESSIONS: readonly SessionView[] = [
+  {
+    ...harnessSession,
+    config: { ...harnessSession.config, id: 'lineage-parent', teammate: 'Fable', name: 'Plan the surface port' },
+    state: { ...harnessSession.state, id: 'lineage-parent', status: 'waiting' },
+  } as SessionView,
+  {
+    ...harnessSession,
+    config: { ...harnessSession.config, id: 'harness-session', parent: 'lineage-parent' },
+  } as SessionView,
+  {
+    ...harnessSession,
+    config: {
+      ...harnessSession.config,
+      id: 'lineage-child',
+      teammate: 'Mira',
+      name: 'Render the Lineage tree',
+      parent: 'harness-session',
+    },
+    state: { ...harnessSession.state, id: 'lineage-child', status: 'completed' },
+  } as SessionView,
 ];
 
 const QUOTA_CALM = { fiveHourPercent: 31, weeklyPercent: 58 } as Quota;
@@ -1178,6 +1203,16 @@ function Shell() {
             <TaskName name="[Hayden] Port the remaining PWA feature components" />
           </PanelBody>
         </Card>
+      ),
+    },
+    {
+      label: 'Lineage tree',
+      render: () => (
+        <section aria-label="Lineage tree preview" className="min-h-[360px]" id="harness-lineage">
+          <Card className="h-full overflow-hidden">
+            <LineageSurfaceContent daemonId={daemon.daemonId} sessionId="harness-session" sessions={LINEAGE_SESSIONS} />
+          </Card>
+        </section>
       ),
     },
     {

@@ -71,10 +71,11 @@ describe('session analytics transport', () => {
   const scopeA = daemonSessionScope(daemon, 'ms59');
   const scopeB = daemonSessionScope(daemonB, 'ms59');
 
-  // Echo the enforced canonical `q` straight back as the response query, so the
-  // "the box shows what actually ran" property is observable from the return value.
+  // The daemon echoes the enforced canonical query; a transport test supplies
+  // that result while asserting the separate session scope request.
   const echoScoped = async (url: string | URL | Request): Promise<Response> => {
-    const q = new URL(String(url), 'https://x.test').searchParams.get('q') ?? '';
+    const search = new URL(String(url), 'https://x.test').searchParams;
+    const q = search.get('q') ?? `sum by (model) {id=${search.get('session')}}`;
     return new Response(JSON.stringify(empty(q)));
   };
 
@@ -84,9 +85,8 @@ describe('session analytics transport', () => {
     );
   });
 
-  it('replaces any caller-supplied id with the scope id and never sends session=', async () => {
-    // Arrange — capture every URL so both the enforced `q` and the absence of a
-    // `session` parameter are observable.
+  it('sends an exact session separately from editable query text', async () => {
+    // Arrange — capture every URL so the transport's server-enforced scope is observable.
     const urls: string[] = [];
     const fetcher = async (url: string | URL | Request): Promise<Response> => {
       const href = String(url);
@@ -94,20 +94,19 @@ describe('session analytics transport', () => {
       return echoScoped(href);
     };
 
-    // Act — a blank default, then a query whose id names a different session.
+    // Act — a blank default, then a query whose visible id names a different session.
     await fetchSessionAnalytics(daemon, scopeA, undefined, fetcher);
     await fetchSessionAnalytics(daemon, scopeA, 'sum by (model) {id=someone-else}', fetcher);
 
-    // Assert — both requests carry ONLY the scope's exact id, unquoted as the
-    // canonical bareword; the caller's id is gone, and no `session` parameter is
-    // sent (the daemon would reject it with 400 `unknown_parameter`).
-    const qs = urls.map(href => new URL(href, 'https://x.test').searchParams.get('q'));
-    expect(qs).toEqual(['sum by (model) {id=ms59}', 'sum by (model) {id=ms59}']);
-    for (const href of urls) expect(new URL(href, 'https://x.test').searchParams.has('session')).toBe(false);
+    // Assert — the untrusted visible id is preserved as text, while every request
+    // independently names the exact session the daemon must enforce.
+    const searches = urls.map(href => new URL(href, 'https://x.test').searchParams);
+    expect(searches.map(search => search.get('q'))).toEqual([null, 'sum by (model) {id=someone-else}']);
+    expect(searches.map(search => search.get('session'))).toEqual(['ms59', 'ms59']);
   });
 
-  it('defaults a blank query to the scoped sum-by-model default', async () => {
-    // Act + Assert — whitespace-only collapses to the language default, scoped.
+  it('leaves the server to select the canonical scoped default for a blank query', async () => {
+    // Act + Assert — whitespace-only is omitted, with scope still explicit.
     expect(await fetchSessionAnalytics(daemon, scopeA, '   ', echoScoped)).toMatchObject({
       query: 'sum by (model) {id=ms59}',
     });
