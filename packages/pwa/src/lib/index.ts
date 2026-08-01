@@ -4,6 +4,7 @@ export const packageRole = 'pwa' as const;
 export * from '../components/attachment-gallery.tsx';
 export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/composer-autocomplete.ts';
+export * from '../components/composer.tsx';
 export * from '../components/composer-runtime.tsx';
 export * from '../components/dictation-control.tsx';
 export * from '../components/dictation-sheet.tsx';
