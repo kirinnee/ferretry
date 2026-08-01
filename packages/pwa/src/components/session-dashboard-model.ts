@@ -10,7 +10,7 @@ import type { SessionView } from '@ferretry/protocol';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { BadgeTone } from '../shell/primitives.tsx';
-import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
   full: ['Teammate', 'Task', 'Status', 'Runtime', 'Activity', 'Signals'],
@@ -18,9 +18,9 @@ export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>>
   minimal: ['Teammate', 'Task'],
 };
 
-/** Percentage widths from the original fixed tables; no horizontal scroller. */
+/** Percentage widths for the fixed table within its own horizontal scroller. */
 export const DENSITY_COLUMN_WIDTHS: Readonly<Record<Density, readonly string[]>> = {
-  full: ['w-[16%]', 'w-[22%]', 'w-[9%]', 'w-[14%]', 'w-[26%]', 'w-[13%]'],
+  full: ['w-[16%]', 'w-[22%]', 'w-[11%]', 'w-[14%]', 'w-[24%]', 'w-[13%]'],
   compact: ['w-[28%]', 'w-[44%]', 'w-[28%]'],
   minimal: ['w-[38%]', 'w-[62%]'],
 };
@@ -156,9 +156,4 @@ export function activityLine(view: SessionView): ActivityLine {
     text: TERMINAL_STATUSES.has(view.state.status) ? 'no activity recorded' : 'awaiting activity',
     live: false,
   };
-}
-
-/** The dashboard's busy projection reuses the canonical status classifier. */
-export function isBusy(view: SessionView): boolean {
-  return statusMark(view).klass === 'active';
 }

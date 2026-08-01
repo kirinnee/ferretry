@@ -4,7 +4,6 @@ import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
-import { DEFAULT_DEVICE_CONTROLS } from '../../src/lib/controls.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
 import { render, run } from '../support/react.ts';
@@ -28,7 +27,7 @@ const groups: readonly SessionGroup[] = [{ name: 'ferretry', path: '/work/ferret
 
 const props = (overrides: Partial<SessionDashboardProps> = {}): SessionDashboardProps => ({
   connection,
-  controls: { ...DEFAULT_DEVICE_CONTROLS, projectScope: null },
+  dashboardView: null,
   density: 'full',
   error: null,
   groups,
@@ -103,7 +102,7 @@ describe('SessionDashboard', () => {
       view.update(
         <SessionDashboard
           {...props({
-            controls: { ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'table', projectScope: null },
+            dashboardView: 'table',
             narrow: true,
           })}
         />,
@@ -118,7 +117,7 @@ describe('SessionDashboard', () => {
     const view = render(
       <SessionDashboard
         {...props({
-          controls: { ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: '/work/ferretry' },
+          dashboardView: 'cards',
           density: 'compact',
           narrow: true,
           onExitScope: () => events.push('exit'),
@@ -169,7 +168,7 @@ describe('SessionDashboard', () => {
     const view = render(
       <SessionDashboard
         {...props({
-          controls: { ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: null },
+          dashboardView: 'cards',
           density: 'minimal',
         })}
       />,

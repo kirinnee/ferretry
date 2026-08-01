@@ -12,7 +12,6 @@ import {
   groupHueVar,
   groupHueVars,
   hoistedStatus,
-  isBusy,
   SCOPE_RECOVERY_MESSAGE,
   sessionAge,
   sessionCountLabel,
@@ -36,7 +35,7 @@ describe('session dashboard model', () => {
       compact: ['Teammate', 'Task', 'Status'],
       minimal: ['Teammate', 'Task'],
     });
-    expect(DENSITY_COLUMN_WIDTHS.full).toEqual(['w-[16%]', 'w-[22%]', 'w-[9%]', 'w-[14%]', 'w-[26%]', 'w-[13%]']);
+    expect(DENSITY_COLUMN_WIDTHS.full).toEqual(['w-[16%]', 'w-[22%]', 'w-[11%]', 'w-[14%]', 'w-[24%]', 'w-[13%]']);
     expect(DENSITY_COLUMN_WIDTHS.compact).toEqual(['w-[28%]', 'w-[44%]', 'w-[28%]']);
     expect(DENSITY_COLUMN_WIDTHS.minimal).toEqual(['w-[38%]', 'w-[62%]']);
   });
@@ -134,12 +133,5 @@ describe('session dashboard model', () => {
     });
     expect(activityLine(view('idle', 'running'))).toEqual({ text: 'awaiting activity', live: false });
     expect(activityLine(view('done', 'completed'))).toEqual({ text: 'no activity recorded', live: false });
-  });
-
-  it('derives busy state from the canonical status classifier', () => {
-    expect(isBusy(view('active', 'running'))).toBe(true);
-    expect(isBusy(view('question', 'awaiting_user'))).toBe(false);
-    expect(isBusy(view('parked', 'running', { waiting: { since: '2026-08-01T10:00:00.000Z' } }))).toBe(false);
-    expect(isBusy(view('finished', 'failed'))).toBe(false);
   });
 });

@@ -53,7 +53,10 @@ describe('session dashboard groups', () => {
       />,
     );
 
-    expect(tree.root.findByType('table').props.className).toContain('table-fixed');
+    const table = tree.root.findByType('table');
+    expect(table.props.className).toContain('table-fixed');
+    expect(table.props.className).toContain('min-w-[900px]');
+    expect(table.parent?.props.className).toContain('overflow-x-auto');
     expect(tree.root.findAllByType('th').map(header => text(header))).toEqual([
       'Teammate',
       'Task',
@@ -65,7 +68,7 @@ describe('session dashboard groups', () => {
     expect(tree.root.findAllByType('th').map(header => header.props.className)).toEqual(
       expect.arrayContaining([
         expect.stringContaining('w-[16%]'),
-        expect.stringContaining('w-[26%]'),
+        expect.stringContaining('w-[24%]'),
         expect.stringContaining('w-[13%]'),
       ]),
     );

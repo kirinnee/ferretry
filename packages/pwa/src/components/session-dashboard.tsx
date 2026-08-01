@@ -4,6 +4,10 @@
  * There is deliberately no fetch, store subscription, history singleton, or
  * page-origin fallback here. The future app root owns those lifecycles and
  * hands this screen one paired daemon's already-projected fleet.
+ *
+ * TranscriptResults/highlight is NOT PORTED: IFyApiClient has no
+ * transcript-search route and this PWA has no results-panel owner. Keeping the
+ * omission explicit prevents a search gesture from implying unavailable data.
  */
 
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
@@ -18,7 +22,7 @@ import {
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
 import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { cn } from '../lib/class-names.ts';
-import type { DashboardView, Density, UiControls } from '../lib/controls.ts';
+import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
@@ -49,8 +53,13 @@ export interface SessionDashboardProps {
   readonly scopeName: string;
   readonly scopeRecovered: boolean;
   readonly error: string | null;
-  readonly controls: UiControls;
+  readonly dashboardView: DashboardView | null;
   readonly density: Density;
+  /**
+   * Full density only: hosts must subscribe to and pass daemon usage for full
+   * rows. Compact and minimal do not render quota data and must not subscribe
+   * or join usage merely to supply this prop.
+   */
   readonly usage: DaemonUsageIndex | null;
   readonly wardenStatus: WardenStatusView | null;
   readonly wardenVerdicts: readonly WardenVerdictView[];
@@ -72,7 +81,7 @@ export function SessionDashboard({
   scopeName,
   scopeRecovered,
   error,
-  controls,
+  dashboardView,
   density,
   usage,
   wardenStatus,
@@ -88,7 +97,7 @@ export function SessionDashboard({
   const headingId = useId();
   const viewportNarrow = useDashboardNarrow();
   const narrow = narrowOverride ?? viewportNarrow;
-  const mode = dashboardMode(controls.dashboardView, narrow);
+  const mode = dashboardMode(dashboardView, narrow);
   const visibleCount = groups.reduce((count, group) => count + group.rows.length, 0);
   const totalCount = sessions?.length ?? 0;
   const pullMarker = { [PULL_TO_PALETTE_ATTR]: '' };

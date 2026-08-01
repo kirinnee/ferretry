@@ -71,8 +71,8 @@ export function FullDensityGroups({
               ))}
             </div>
           ) : (
-            <div className="kt-panel">
-              <table className="w-full table-fixed border-collapse">
+            <div className="kt-panel overflow-x-auto">
+              <table className="min-w-[900px] w-full table-fixed border-collapse">
                 <caption className="sr-only">Sessions in {group.name}</caption>
                 <thead>
                   <tr>

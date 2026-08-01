@@ -92,7 +92,7 @@ import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
-import { DaemonControlsStore, DEFAULT_DEVICE_CONTROLS } from '../src/lib/controls.ts';
+import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
@@ -276,7 +276,7 @@ const harnessSession = {
   config: {
     id: 'harness-session',
     name: 'Transcript scrolling',
-    teammate: 'Fable',
+    teammate: 'fable',
     label: 'Port the session screen',
     model: 'gpt-5.6-sol',
     modelHint: 'gpt-5.6',
@@ -729,21 +729,23 @@ const DASHBOARD_SESSIONS: readonly SessionView[] = [
   dashboardSession('ms9lina-f6', 'lina', 'Verify daemon isolation', '/work/home-manager', {
     contextPercent: 96,
   }),
+  dashboardSession('ms9mira-g7', 'mira', 'Trace protocol compatibility', '/work/protocol', {
+    status: 'completed',
+    activity: undefined,
+    contextPercent: 18,
+  }),
 ];
 
 const DASHBOARD_GROUPS: readonly SessionGroup[] = [
   { name: 'ferretry', path: '/work/ferretry', rows: DASHBOARD_SESSIONS.slice(0, 3) },
-  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3) },
+  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3, 6) },
+  { name: 'protocol', path: '/work/protocol', rows: DASHBOARD_SESSIONS.slice(6) },
 ];
 
 const DASHBOARD_COMPACT_GROUPS: readonly SessionGroup[] = [
-  {
-    name: 'ferretry',
-    path: '/work/ferretry',
-    rows: [...DASHBOARD_SESSIONS.slice(0, 1), ...DASHBOARD_SESSIONS.slice(5, 6), ...DASHBOARD_SESSIONS.slice(2, 3)],
-  },
-  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3, 5) },
-  { name: 'protocol', path: '/work/protocol', rows: DASHBOARD_SESSIONS.slice(5) },
+  { name: 'ferretry', path: '/work/ferretry', rows: DASHBOARD_SESSIONS.slice(0, 3) },
+  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3, 6) },
+  { name: 'protocol', path: '/work/protocol', rows: DASHBOARD_SESSIONS.slice(6) },
 ];
 
 const DASHBOARD_USAGE = new DaemonUsageIndex();
@@ -1247,7 +1249,7 @@ function Shell() {
         >
           <SessionDashboard
             connection={daemon}
-            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'table', projectScope: null }}
+            dashboardView="table"
             density="full"
             error={null}
             groups={DASHBOARD_GROUPS}
@@ -1277,7 +1279,7 @@ function Shell() {
         >
           <SessionDashboard
             connection={daemon}
-            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: null }}
+            dashboardView="cards"
             density="full"
             error={null}
             groups={DASHBOARD_GROUPS}
@@ -1307,7 +1309,7 @@ function Shell() {
         >
           <SessionDashboard
             connection={daemon}
-            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: null }}
+            dashboardView="cards"
             density="compact"
             error={null}
             groups={DASHBOARD_COMPACT_GROUPS}
@@ -1337,7 +1339,7 @@ function Shell() {
         >
           <SessionDashboard
             connection={daemon}
-            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: null, projectScope: '/work/ferretry' }}
+            dashboardView={null}
             density="full"
             error={null}
             groups={DASHBOARD_GROUPS.slice(0, 1)}
