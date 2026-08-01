@@ -1465,6 +1465,7 @@ function createSessionSignalSubsystem(
  */
 interface WardenSupervisionState {
   armed: boolean;
+  armedAtMs: number | undefined;
   intervalMs: number;
   lastSweepAt: string | undefined;
 }
@@ -1605,10 +1606,14 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     intervalMs: async () => await service.intervalMs(),
     arm: async () => {
       parts.supervision.intervalMs = await service.intervalMs();
-      parts.supervision.armed = true;
       const disarm = await loop.arm();
+      // The timer is evidence only after the scheduler accepted it. The instant lets health classify
+      // the deliberate pre-first-sweep window as grace rather than as unknown supervision.
+      parts.supervision.armedAtMs = Date.now();
+      parts.supervision.armed = true;
       return () => {
         parts.supervision.armed = false;
+        parts.supervision.armedAtMs = undefined;
         disarm();
       };
     },
@@ -2376,7 +2381,12 @@ export function buildWorld(): DaemonWorld {
    * in different shapes — see `WardenSupervisionState`. It starts unarmed, so a boot that fails
    * before the timer is armed reports a daemon that supervises nothing, which is what it is.
    */
-  const wardenSupervision: WardenSupervisionState = { armed: false, intervalMs: 0, lastSweepAt: undefined };
+  const wardenSupervision: WardenSupervisionState = {
+    armed: false,
+    armedAtMs: undefined,
+    intervalMs: 0,
+    lastSweepAt: undefined,
+  };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
   const sttModels = new SttModelStore({
@@ -2715,6 +2725,7 @@ export function buildWorld(): DaemonWorld {
             get sweepIntervalMs() {
               return wardenSupervision.intervalMs;
             },
+            armedAtMs: () => wardenSupervision.armedAtMs,
             lastSweepAt: () => wardenSupervision.lastSweepAt,
             // Boot state is owned by `start`; until it reports otherwise a booted daemon that
             // reached this point has finished the storage bootstrap it does have.
