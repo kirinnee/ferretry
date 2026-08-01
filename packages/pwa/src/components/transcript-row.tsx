@@ -1,4 +1,6 @@
+import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { LedgerMessage } from './ledger-message.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -8,6 +10,10 @@ export interface TranscriptRowProps {
   readonly live?: boolean;
   /** This row is the final block in the transcript. */
   readonly isLast?: boolean;
+  /** The instant the row reads its badges against; injectable for tests. */
+  readonly asOf?: number;
+  /** Offered on a ledger row, and only when a resend is possible at all. */
+  readonly onResend?: (record: LedgerSendRecord) => Promise<boolean>;
 }
 
 /**
@@ -16,7 +22,14 @@ export interface TranscriptRowProps {
  * that carries calls renders as the collapsed tool group; richer Markdown and
  * attachments remain owned by later ports.
  */
-export function TranscriptRow({ entry, live = false, isLast = false }: TranscriptRowProps) {
+export function TranscriptRow({ entry, live = false, isLast = false, asOf, onResend }: TranscriptRowProps) {
+  if (entry.kind === 'ledger' && entry.ledger !== undefined) {
+    return (
+      <div className="fy-message fy-message-ledger" data-transcript-kind="ledger">
+        <LedgerMessage asOf={asOf} onResend={onResend} placement={entry.placement} record={entry.ledger} />
+      </div>
+    );
+  }
   if (entry.kind === 'tool' && entry.tools !== undefined && entry.tools.length > 0) {
     return (
       <div className="fy-message fy-message-tool fy-message-tools" data-transcript-kind="tool">
@@ -57,5 +70,7 @@ const defaultLabel = (kind: TranscriptEntry['kind']): string => {
       return 'Tool';
     case 'notice':
       return 'Daemon';
+    case 'ledger':
+      return 'Send ledger';
   }
 };

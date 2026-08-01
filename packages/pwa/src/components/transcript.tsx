@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import { type TranscriptEntry, transcriptIsFollowing } from '../lib/session-screens.ts';
 import { TranscriptRow } from './transcript-row.tsx';
 
@@ -8,6 +9,10 @@ export interface TranscriptProps {
   readonly entries: readonly TranscriptEntry[];
   readonly busy?: boolean;
   readonly label?: string;
+  /** The instant ledger rows read their badges against; injectable for tests. */
+  readonly asOf?: number;
+  /** Offered on ledger rows. Absent means resend is not available here. */
+  readonly onResend?: (record: LedgerSendRecord) => Promise<boolean>;
 }
 
 type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: number };
@@ -17,7 +22,15 @@ type ScrollPort = { scrollHeight: number; scrollTop: number; clientHeight: numbe
  * daemon and session so a same-named session cannot retain another daemon's
  * scroll/follow state when its host switches connection.
  */
-export function Transcript({ daemonId, sessionId, entries, busy = false, label = 'Transcript' }: TranscriptProps) {
+export function Transcript({
+  daemonId,
+  sessionId,
+  entries,
+  busy = false,
+  label = 'Transcript',
+  asOf,
+  onResend,
+}: TranscriptProps) {
   const viewport = useRef<ScrollPort | null>(null);
   const following = useRef(true);
   const [newCount, setNewCount] = useState(0);
@@ -81,7 +94,14 @@ export function Transcript({ daemonId, sessionId, entries, busy = false, label =
         aria-live="polite"
       >
         {entries.map((entry, index) => (
-          <TranscriptRow entry={entry} isLast={index === entries.length - 1} key={entry.id} live={busy} />
+          <TranscriptRow
+            asOf={asOf}
+            entry={entry}
+            isLast={index === entries.length - 1}
+            key={entry.id}
+            live={busy}
+            onResend={onResend}
+          />
         ))}
         {busy ? <p className="fy-thinking">Working…</p> : null}
       </div>

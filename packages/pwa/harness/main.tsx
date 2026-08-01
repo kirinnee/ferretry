@@ -26,6 +26,7 @@ import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
+import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
@@ -37,8 +38,8 @@ import { AnalyticsResponseView } from '../src/features/analytics/analytics-respo
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsTimeSeries } from '../src/features/analytics/analytics-time-series.tsx';
-import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
+import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import {
   RemoteBrowserControls,
   RemoteBrowserGovernor,
@@ -49,9 +50,9 @@ import {
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
-import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
-import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
+import { PinsBoard } from '../src/features/pins/pins-board.tsx';
+import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
@@ -72,16 +73,18 @@ import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
-import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
+import { CommandPalette } from '../src/shell/command-palette.tsx';
 import { ContextMenu } from '../src/shell/context-menu.tsx';
 import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
+import { paletteSessionEntries } from '../src/shell/palette-model.ts';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
+import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
 import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
 import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
@@ -94,8 +97,6 @@ import {
   type SidePaneTabDefinition,
 } from '../src/shell/side-pane-tab-model.ts';
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
-import { CommandPalette } from '../src/shell/command-palette.tsx';
-import { paletteSessionEntries } from '../src/shell/palette-model.ts';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 
@@ -134,6 +135,9 @@ const harnessSession = {
 openSidePaneTab(scope, 'pins');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
+
+/** Fixed reading instant, so ledger badges and timestamps are stable shots. */
+const LEDGER_AS_OF = Date.parse('2026-07-31T10:00:30.000Z');
 
 /** Phone below this width, exactly as the app decides its presentation. */
 const PHONE_MAX = 768;
@@ -793,6 +797,7 @@ function Shell() {
             <Transcript
               busy
               daemonId={daemon.daemonId}
+              asOf={LEDGER_AS_OF}
               entries={[
                 { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
                 { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
@@ -825,6 +830,20 @@ function Shell() {
                 },
                 { id: 'notice', kind: 'notice', text: 'Drafts remain scoped to this paired daemon.' },
                 {
+                  id: 'ledger-row',
+                  kind: 'ledger',
+                  text: 'a durable send attempt',
+                  placement: 'after-loaded',
+                  ledger: {
+                    sendId: 'send-in-transcript',
+                    acceptedAt: '2026-07-31T09:58:00.000Z',
+                    message: 'Remember to attach both screenshots.',
+                    attachmentIds: [],
+                    fate: 'unaccounted',
+                    unaccountedReason: 'timeout',
+                  },
+                },
+                {
                   id: 'tools-live',
                   kind: 'tool',
                   text: 'running a tool',
@@ -847,8 +866,45 @@ function Shell() {
                   ],
                 },
               ]}
+              onResend={async () => true}
               sessionId="harness-session"
             />
+            <section aria-label="Send ledger rows" className="flex flex-col gap-2">
+              <LedgerMessage
+                asOf={LEDGER_AS_OF}
+                record={{
+                  sendId: 'send-queued',
+                  acceptedAt: '2026-07-31T10:00:00.000Z',
+                  message: 'Please run the full gate before pushing.',
+                  attachmentIds: [],
+                  fate: 'accepted',
+                  path: 'native-inline',
+                }}
+              />
+              <LedgerMessage
+                asOf={LEDGER_AS_OF}
+                placement="before-loaded"
+                onResend={async () => true}
+                record={{
+                  sendId: 'send-unconfirmed',
+                  acceptedAt: '2026-07-31T09:41:00.000Z',
+                  message: '[peer message from teammate freddie]\nPARKED until 30m\n\nis CI green on your branch?',
+                  attachmentIds: [],
+                  fate: 'unaccounted',
+                  unaccountedReason: 'timeout',
+                }}
+              />
+              <LedgerMessage
+                asOf={LEDGER_AS_OF}
+                record={{
+                  sendId: 'send-delivered',
+                  acceptedAt: '2026-07-31T09:12:00.000Z',
+                  message: 'The tool group is in.',
+                  attachmentIds: [],
+                  fate: 'delivered',
+                }}
+              />
+            </section>
             <Composer
               api={{ send: async () => ({}) as never }}
               daemon={daemon}
