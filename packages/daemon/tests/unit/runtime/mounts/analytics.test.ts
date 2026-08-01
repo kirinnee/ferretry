@@ -253,7 +253,68 @@ describe('the analytics mount', () => {
     });
   });
 
+  describe('server-enforced session scope', () => {
+    const sessions = [
+      finishedSession({ id: 'mine', status: 'completed', completed: true }),
+      finishedSession({ id: 'theirs', status: 'completed', completed: true }),
+    ];
+
+    async function sessionAnswer(session: string, query?: string): Promise<AnalyticsResponse> {
+      const response = await dispatcher(sessions).dispatch(
+        request({
+          path: '/v1/analytics',
+          headers: human,
+          query: [...(query === undefined ? [] : ([['q', query]] as const)), ['session', session]],
+        }),
+      );
+      should(response.status).equal(200);
+      return AnalyticsResponseSchema.parse(jsonBody(response));
+    }
+
+    it('should narrow a blank side-pane read to exactly its session', async () => {
+      const response = await sessionAnswer('mine');
+
+      should(response.query).equal('sum by (model) {id=mine}');
+      should(response.scope).deepEqual({ allSessions: true, indexed: 2, matched: 1 });
+    });
+
+    it('should replace a visible id aimed at another session', async () => {
+      const response = await sessionAnswer('mine', 'sum by (id) {id=theirs}');
+
+      should(response.query).equal('sum by (id) {id=mine}');
+      should(priced(response).map(row => row.labels.id)).deepEqual(['mine']);
+    });
+
+    it('should keep other caller filters while forcing the exact session', async () => {
+      const response = await sessionAnswer('mine', 'sum by (id) {status=failed}');
+
+      should(response.query).equal('sum by (id) {status=failed, id=mine}');
+      should(priced(response)).be.empty();
+    });
+  });
+
   describe('refusals', () => {
+    it('should refuse an empty or repeated session scope', async () => {
+      const empty = await dispatcher().dispatch(
+        request({ path: '/v1/analytics', headers: human, query: [['session', ' ']] }),
+      );
+      const repeated = await dispatcher().dispatch(
+        request({
+          path: '/v1/analytics',
+          headers: human,
+          query: [
+            ['session', 'mine'],
+            ['session', 'theirs'],
+          ],
+        }),
+      );
+
+      should(empty.status).equal(400);
+      should(jsonBody(empty)).have.property('code', 'invalid_query');
+      should(repeated.status).equal(400);
+      should(jsonBody(repeated)).have.property('code', 'repeated_parameter');
+    });
+
     it('should refuse a query the parser cannot read, as the caller‘s mistake', async () => {
       // Arrange / Act
       const response = await dispatcher().dispatch(

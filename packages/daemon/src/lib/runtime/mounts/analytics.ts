@@ -4,7 +4,7 @@ import { type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { AnalyticsPricingRate } from '../../analytics/pricing.ts';
-import { AnalyticsQueryError, parseAnalyticsQuery } from '../../analytics/query.ts';
+import { AnalyticsQueryError, parseAnalyticsQuery, scopeAnalyticsQuery } from '../../analytics/query.ts';
 import { queryAnalyticsRecords } from '../../analytics/results.ts';
 import { rebuildAnalyticsSessionIndex, type FinishedAnalyticsSession } from '../../analytics/session-record.ts';
 
@@ -48,8 +48,8 @@ import { rebuildAnalyticsSessionIndex, type FinishedAnalyticsSession } from '../
  */
 const ANALYTICS_INDEX_SCHEMA_VERSION = 1;
 
-/** The only parameter this route takes. See `analyticsQuery` for why an unknown one is refused. */
-const ANALYTICS_PARAMETERS = ['q'] as const;
+/** The parameters this route takes. `session` is the server-enforced side-pane scope. */
+const ANALYTICS_PARAMETERS = ['q', 'session'] as const;
 
 /**
  * The analytics subsystem as the route needs it.
@@ -81,7 +81,14 @@ function analyticsQuery(request: ApiRequest): string | undefined {
     if (!ANALYTICS_PARAMETERS.some(known => known === name))
       throw new ApiError(400, `unknown analytics parameter ${name}`, 'unknown_parameter');
   }
-  return request.query.get('q')?.[0];
+  const source = request.query.get('q')?.[0];
+  const scopes = request.query.get('session');
+  if (scopes !== undefined && scopes.length > 1)
+    throw new ApiError(400, 'analytics parameter session may be given once', 'repeated_parameter');
+  const session = scopes?.[0];
+  if (session === undefined) return source;
+  if (session.trim() === '') throw new ApiError(400, 'analytics session must name one session', 'invalid_query');
+  return scopeAnalyticsQuery(source, session);
 }
 
 /**
