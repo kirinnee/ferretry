@@ -87,8 +87,9 @@ class FakePinnedTarget implements PinnedTarget {
 export interface FakeRootOptions {
   readonly rootReal?: string;
   readonly tree?: FakeTree;
-  /** Raised by `pin`, for the denied-root and missing-cwd cases. */
-  readonly pinError?: FsError;
+  /** Raised by `pin`. Typed as `Error` so a test can also stage a NON-domain failure and prove a route
+   *  reports it as a server fault rather than as the client's mistake. */
+  readonly pinError?: Error;
   /**
    * Called before each `open` resolves, with the path and how many times it has now been opened.
    *

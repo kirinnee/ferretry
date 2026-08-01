@@ -10,6 +10,7 @@ export * from './mounts/names.ts';
 export * from './mounts/pins.ts';
 export * from './mounts/recommend.ts';
 export * from './mounts/session-control.ts';
+export * from './mounts/session-filesystem.ts';
 export * from './mounts/session-migrate.ts';
 export * from './mounts/session-resume.ts';
 export * from './mounts/session-send.ts';
