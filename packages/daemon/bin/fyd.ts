@@ -166,6 +166,8 @@ import {
   type SessionIdFactory,
   type SessionLifecycleLauncher,
   TaskError,
+  exactWorkerAssignee,
+  type TaskAssigneeCandidate,
   tryParseSessionId,
   type AnalyticsSubsystem,
   type AssigneeObservation,
@@ -551,18 +553,71 @@ function createTaskSubsystem(
     },
     sessionIds: async () => storage.listSessions().map(session => session.id),
     /**
-     * An assignee is matched against SESSION IDS only.
+     * An assignee is a TEAMMATE, and this is where the name a human typed becomes a session.
      *
-     * Resolving a teammate NAME would mean reading every session's configuration on every list row,
-     * and the daemon has no fleet directory mounted to index them. An assignee that names something
-     * else is honestly unknown rather than guessed at.
+     * `fy task create --assignee <who>` documents its argument as "the teammate who owns it", so a
+     * session id is the exception rather than the rule. This used to match ids only — every task a
+     * person assigned by callsign reported a null live column — and the recorded reason was the cost:
+     * resolving a name means reading the documents that carry names. The mount asks for the DISTINCT
+     * assignees of one response instead of one row at a time, so that cost is one fan-out per request
+     * rather than one per task, which is the same fan-out `/v1/names` already performs.
+     *
+     * A KNOWN SESSION ID SHORT-CIRCUITS, so the common single-task read stays two document reads: an
+     * assignee the index already holds needs no directory at all.
+     *
+     * `exactWorkerAssignee` is the DOMAIN's resolution rule, not a second one written here — an exact
+     * id, then a callsign, then a display name only for a session with no callsign of its own, and
+     * `null` whenever two sessions answer to one name. Ambiguity reported as unknown is the point: the
+     * alternative attributes a task to whichever session the index happened to list first.
      */
-    observe: async assignee => {
-      const id = tryParseSessionId(assignee);
-      return id === undefined || storage.findSession(id) === undefined ? undefined : await observed(id);
+    observe: async assignees => {
+      const resolved = new Map<string, AssigneeObservation>();
+      const unresolved: string[] = [];
+      for (const assignee of assignees) {
+        const id = tryParseSessionId(assignee);
+        if (id !== undefined && storage.findSession(id) !== undefined) {
+          const observation = await observed(id);
+          if (observation !== undefined) resolved.set(assignee, observation);
+        } else unresolved.push(assignee);
+      }
+      if (unresolved.length === 0) return resolved;
+      const candidates = await assigneeCandidates(storage);
+      for (const assignee of unresolved) {
+        const named = exactWorkerAssignee({ assignee }, candidates);
+        const id = named === null ? undefined : tryParseSessionId(named);
+        const observation = id === undefined ? undefined : await observed(id);
+        if (observation !== undefined) resolved.set(assignee, observation);
+      }
+      return resolved;
     },
     now: () => clock.now(),
   };
+}
+
+/**
+ * Every session an assignee could name, as the three fields the resolution rule reads.
+ *
+ * The BOARD's own session directory is deliberately not reused, however similar it looks: it omits
+ * every session without a `sessionCapabilityHash`, because a session that cannot hold a capability
+ * cannot be a member of a board. That is right for authorization and wrong here — a task assigned to
+ * a teammate whose session predates the credential would read as unknown — and this is a display
+ * question, so it answers over every session the index holds.
+ *
+ * A session whose configuration document does not parse is LEFT OUT rather than guessed at, matching
+ * every other reader in this root: a candidate assembled from a document the protocol schema rejected
+ * is a candidate whose name nobody can vouch for, and matching a task against one would attribute it
+ * to a session the daemon cannot describe.
+ */
+async function assigneeCandidates(storage: DaemonStorage): Promise<readonly TaskAssigneeCandidate[]> {
+  const candidates = await Promise.all(
+    storage.listSessions().map(async (session): Promise<TaskAssigneeCandidate | undefined> => {
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(session.id));
+      return config.success
+        ? { id: config.data.id, name: config.data.name, teammate: config.data.teammate ?? null }
+        : undefined;
+    }),
+  );
+  return candidates.filter((candidate): candidate is TaskAssigneeCandidate => candidate !== undefined);
 }
 
 /**
