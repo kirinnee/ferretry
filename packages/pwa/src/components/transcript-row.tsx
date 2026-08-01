@@ -19,7 +19,7 @@ export interface TranscriptRowProps {
 export function TranscriptRow({ entry, live = false, isLast = false }: TranscriptRowProps) {
   if (entry.kind === 'tool' && entry.tools !== undefined && entry.tools.length > 0) {
     return (
-      <div className="fy-message fy-message-tool fy-message-chrome" data-transcript-kind="tool">
+      <div className="fy-message fy-message-tool fy-message-tools" data-transcript-kind="tool">
         <ToolGroup calls={entry.tools} isLast={isLast} live={live} />
       </div>
     );
