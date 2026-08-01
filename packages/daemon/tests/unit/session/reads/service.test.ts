@@ -114,6 +114,20 @@ describe('OperatorReadService.events', () => {
     should(page).eql([]);
   });
 
+  it('should refuse a page carrying another session or a non-advancing cursor', async () => {
+    // Arrange
+    const wrongSession = service({ events: [{ ...stored(4), sessionId: 's2' }] });
+    const staleCursor = service({ events: [stored(3)] });
+
+    // Act
+    const crossed = await wrongSession.events('s1', 3, 10).catch((error: unknown) => error);
+    const stale = await staleCursor.events('s1', 3, 10).catch((error: unknown) => error);
+
+    // Assert — neither contradiction may be rendered as this session's history.
+    should(crossed).be.instanceof(OperatorReadError).and.have.property('failure', 'event_evidence_mismatch');
+    should(stale).be.instanceof(OperatorReadError).and.have.property('failure', 'event_evidence_mismatch');
+  });
+
   it('should refuse a cursor that is not a whole non-negative number', async () => {
     // Arrange
     const reads = service({});
@@ -228,6 +242,17 @@ describe('OperatorReadService.logs', () => {
     // Assert — a blank page would tell the operator the agent said nothing, which is a claim the
     // daemon has no evidence for. The watcher's empty projection is right for the watcher only.
     should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'no_transcript');
+  });
+
+  it('should refuse a transcript that was proved but could not be read', async () => {
+    // Arrange
+    const reads = service({ tail: { kind: 'unreadable' } });
+
+    // Act
+    const refusal = await reads.logs('s1', undefined).catch((error: unknown) => error);
+
+    // Assert — a vanished or malformed file is damaged evidence, not an honestly empty transcript.
+    should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'transcript_unreadable');
   });
 
   it('should serve an empty read of a file it did resolve', async () => {

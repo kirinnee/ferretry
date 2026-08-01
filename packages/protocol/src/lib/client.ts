@@ -75,7 +75,7 @@ export interface IFyApiClient {
   scratchSweep(force?: boolean): Promise<ScratchSweepView>;
   list(): Promise<SessionView[]>;
   suggestNames(count?: number): Promise<string[]>;
-  get(id: string): Promise<SessionView>;
+  get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
   send(id: string, input: SendRequest): Promise<SendResult>;
   answer(id: string, toolUseId: string, labels: string[], other?: string, responses?: string[]): Promise<SessionView>;
@@ -101,7 +101,7 @@ export interface IFyApiClient {
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
   snapshot(id: string): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
-  events(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
+  events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
   history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
   upload(id: string, file: string | Blob, filename?: string): Promise<AttachmentView>;
   stream(sessionId: string | undefined, after: number, onEvent: (event: FyEvent) => void): Promise<void>;

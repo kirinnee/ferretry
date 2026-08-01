@@ -36,6 +36,8 @@ const REFUSALS: Readonly<Record<OperatorReadFailure, { readonly status: number; 
   no_terminal: { status: 409, code: 'no_terminal' },
   pane_dead: { status: 409, code: 'pane_dead' },
   no_transcript: { status: 409, code: 'no_transcript' },
+  transcript_unreadable: { status: 409, code: 'transcript_unreadable' },
+  event_evidence_mismatch: { status: 500, code: 'event_evidence_mismatch' },
 };
 
 /** The path parameter, decoded. A parameter that regains a separator never reaches the subsystem. */

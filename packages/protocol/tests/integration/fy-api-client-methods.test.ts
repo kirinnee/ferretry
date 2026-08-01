@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import type { FyApiClient } from '../../src/adapters/fy-api-client.ts';
+import { FyTransportError, type FyApiClient } from '../../src/adapters/fy-api-client.ts';
 import {
   analyticsResponse,
   cgroupConfigView,
@@ -486,6 +486,46 @@ describe('FyApiClient typed method delegation', () => {
       should(transport.calls).have.length(1);
     });
   }
+
+  it('should pass a caller cancellation through an event read', async () => {
+    // Arrange
+    const cancelled = new Error('operator left');
+    const transport = new QueuedHttpTransport(
+      call =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = call.init.signal;
+          if (signal === undefined || signal === null) throw new Error('event request had no signal');
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+    );
+    const client = await connectClient(transport);
+    const controller = new AbortController();
+
+    // Act
+    const reading = client.events(SESSION_ID, 0, 1_000, controller.signal);
+    controller.abort(cancelled);
+    const failure = await captureError(() => reading);
+
+    // Assert — request() classifies a caller abort and does not retry it.
+    should(failure).be.instanceof(FyTransportError);
+    should((failure as FyTransportError).message).match(/was cancelled/);
+    should(transport.calls).have.length(1);
+    should(transport.calls[0]?.init.signal?.aborted).be.true();
+  });
+
+  it('should make a wait-style session read cancellable too', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(sessionResponse());
+    const client = await connectClient(transport);
+    const controller = new AbortController();
+
+    // Act
+    const actual = await client.get(SESSION_ID, controller.signal);
+
+    // Assert
+    should(actual).deepEqual(sessionView);
+    should(transport.calls[0]?.init.signal).not.be.undefined();
+  });
 });
 
 describe('FyApiClient typed method input validation', () => {

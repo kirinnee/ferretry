@@ -34,7 +34,11 @@ export type OperatorReadFailure =
   /** The terminal address exists and the pane behind it is gone. */
   | 'pane_dead'
   /** The daemon cannot prove which transcript file is this session's. */
-  | 'no_transcript';
+  | 'no_transcript'
+  /** A transcript was proved, but it could not be read as evidence. */
+  | 'transcript_unreadable'
+  /** A journal page contradicted the requested session or cursor. */
+  | 'event_evidence_mismatch';
 
 export class OperatorReadError extends Error {
   constructor(
@@ -89,6 +93,8 @@ export interface SessionPaneReader {
 export type TranscriptTailResult =
   /** The daemon cannot prove which transcript file belongs to this session. */
   | { readonly kind: 'unresolved' }
+  /** The exact file was proved, but it disappeared or could not be parsed when it was read. */
+  | { readonly kind: 'unreadable' }
   /** A file was resolved and read. `events` may legitimately be empty — the agent has not spoken yet. */
   | { readonly kind: 'read'; readonly events: readonly TranscriptEvent[] };
 
@@ -215,7 +221,21 @@ export class OperatorReadService {
       throw new OperatorReadError('invalid_query', 'after must be a non-negative integer');
     const page = boundedLimit(limit, MAX_EVENT_PAGE, MAX_EVENT_PAGE, 'limit');
     const stored = await this.journal.replay(sessionId, afterSequence, page);
-    return stored.map(toFyEvent);
+    let cursor = afterSequence;
+    return stored.map(event => {
+      if (event.sessionId !== sessionId)
+        throw new OperatorReadError(
+          'event_evidence_mismatch',
+          `journal page for ${sessionId} contained evidence for ${event.sessionId}`,
+        );
+      if (event.sequence <= cursor)
+        throw new OperatorReadError(
+          'event_evidence_mismatch',
+          `journal page for ${sessionId} did not advance after sequence ${cursor}`,
+        );
+      cursor = event.sequence;
+      return toFyEvent(event);
+    });
   }
 
   /**
@@ -251,6 +271,11 @@ export class OperatorReadService {
       throw new OperatorReadError(
         'no_transcript',
         `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (result.kind === 'unreadable')
+      throw new OperatorReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
     return renderTranscript(result.events);
   }

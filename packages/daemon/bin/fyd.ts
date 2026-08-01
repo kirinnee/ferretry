@@ -2529,16 +2529,20 @@ export function buildWorld(): DaemonWorld {
    */
   const createSessionTranscriptTail = (storage: DaemonStorage): SessionTranscriptTail => {
     const resolver = createTranscriptFileResolver(storage);
-    const reader = new SessionTranscriptReader(transcriptSources, resolver);
     return {
       tail: async (sessionId, limit) => {
-        if ((await resolver.file(sessionId).catch(() => undefined)) === undefined) return { kind: 'unresolved' };
+        const file = await resolver.file(sessionId).catch(() => undefined);
+        if (file === undefined) return { kind: 'unresolved' };
         const id = tryParseSessionId(sessionId);
         if (id === undefined) return { kind: 'unresolved' };
         const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
         if (!config.success) return { kind: 'unresolved' };
         const harness = config.data.harness === 'codex' ? 'codex' : 'claude';
-        return { kind: 'read', events: await reader.tail({ sessionId, harness }, limit) };
+        const source = transcriptSources.find(candidate => candidate.harness === harness);
+        if (source === undefined) return { kind: 'unreadable' };
+        const batch = await source.read(file, { sessionId }).catch(() => undefined);
+        if (batch === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', events: batch.events.slice(-limit) };
       },
     };
   };

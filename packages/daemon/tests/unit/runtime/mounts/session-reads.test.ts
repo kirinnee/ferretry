@@ -108,6 +108,18 @@ describe('the session event replay route', () => {
     should(jsonBody(response)).have.property('code', 'invalid_query');
   });
 
+  it('should fail closed when journal evidence crosses a session boundary', async () => {
+    // Arrange
+    const dispatch = fixture({ events: [{ ...event(1), sessionId: 's2' }] });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/events', headers: human });
+
+    // Assert
+    should(response.status).equal(500);
+    should(jsonBody(response)).have.property('code', 'event_evidence_mismatch');
+  });
+
   it('should treat an empty query value as absent', async () => {
     // Arrange
     const dispatch = fixture({ events: [event(1)] });
@@ -245,6 +257,18 @@ describe('the session transcript route', () => {
     // Assert
     should(response.status).equal(409);
     should(jsonBody(response)).have.property('code', 'no_transcript');
+  });
+
+  it('should refuse a proved transcript that became unreadable', async () => {
+    // Arrange
+    const dispatch = fixture({ tail: { kind: 'unreadable' } });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/logs', headers: human });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'transcript_unreadable');
   });
 
   it('should answer 404 for a session the daemon does not hold', async () => {
