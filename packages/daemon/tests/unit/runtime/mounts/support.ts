@@ -43,6 +43,7 @@ import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learn
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { TaskBoardSubsystem } from '../../../../src/lib/runtime/mounts/task-boards.ts';
+import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import {
   EMPTY_TASK_BOARD_REPOSITORY_STATE,
   type TaskBoardCredentialIssuer,
@@ -683,6 +684,12 @@ export class FakeSessionControl implements SessionControlSubsystem {
   readonly requested: Array<readonly [string, boolean]> = [];
   /** The inline attachments each start carried, so a mount that dropped them is visible. */
   readonly attached: Array<StartSessionRequest['initialAttachments']> = [];
+  /** The board access each start asked for and the capability it presented, as the mount passed
+   *  them down. A mount that read the capability from the body instead of the header, or dropped it,
+   *  is visible here. */
+  readonly boardAsks: Array<readonly [StartSessionRequest['boardAccess'], string | undefined]> = [];
+  /** Board access the fake refuses, as the domain would: the role that is refused, and why. */
+  boardRefusal: { readonly role: string; readonly error: TaskBoardError } | undefined;
   private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
   private minted = 0;
 
@@ -693,9 +700,17 @@ export class FakeSessionControl implements SessionControlSubsystem {
     private readonly unknownAgents: readonly string[] = [],
   ) {}
 
-  async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
+  async start(
+    request: StartSessionRequest,
+    requestId: string,
+    payload: string,
+    boardCapability?: string,
+  ): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
     this.attached.push(request.initialAttachments);
+    this.boardAsks.push([request.boardAccess, boardCapability]);
+    if (this.boardRefusal !== undefined && this.boardRefusal.role === request.boardAccess)
+      throw this.boardRefusal.error;
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {

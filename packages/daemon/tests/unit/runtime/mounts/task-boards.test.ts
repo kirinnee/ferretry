@@ -13,8 +13,10 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import {
   BOARD_CAPABILITY_VARIABLE,
   BOARD_INVITATION_CAPABILITY_VARIABLE,
+  childGrantRequester,
   taskBoardRoutes,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
+import { isTaskBoardError, type TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { boardSession, CREDENTIALS, FakeTaskBoards, human } from './support.ts';
 
@@ -296,6 +298,54 @@ describe('the task board membership mount', () => {
       jsonBody(await get(world, '/membership', peer(world.capabilityFor('grandchild') ?? ''))),
     );
     should(membership.role).equal('worker');
+  });
+
+  it('should give a start the same child grant the route would have made', async () => {
+    // `POST /v1/sessions` with a `--board-access` other than `none` reaches the board through this
+    // seam rather than through the route, and the two must converge: the request id is DERIVED from
+    // the operation's own identity, so the protocol client's recovery re-ask replays the intent the
+    // start created instead of opening a second one. A seam with its own id would make every
+    // recovered start request a duplicate grant.
+    // Arrange
+    const world = await withBoard();
+    const requester = childGrantRequester(world);
+
+    // Act — the start's ask, then the recovery re-ask the client makes over the route.
+    const atStart = await requester(world.capabilityFor('root') ?? '', 'grandchild', 'worker');
+    const reAsked = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'grandchild', role: 'worker' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+
+    // Assert
+    should(atStart.status).equal('pending');
+    should(atStart.requestedRole).equal('worker');
+    // One intent, not two: the second ask replayed the first.
+    should(reAsked.requestId).equal(atStart.requestId);
+    should(world.state.boards.flatMap(board => board.childGrantIntents)).have.length(1);
+  });
+
+  it('should raise the board’s own refusal when a start presents a capability naming no membership', async () => {
+    // The composition root catches this to retire the session it had just created, and the mount
+    // restates it through the same status table the route uses — neither can happen if the seam
+    // swallows it.
+    // Arrange
+    const world = await withBoard();
+    const requester = childGrantRequester(world);
+
+    // Act
+    const refused = await requester('not-anybody-s-capability', 'grandchild', 'worker').catch(error => error);
+
+    // Assert
+    should(isTaskBoardError(refused)).be.true();
+    should((refused as TaskBoardError).code).equal('forbidden');
+    should(world.state.boards.flatMap(board => board.childGrantIntents)).be.empty();
   });
 
   it('should refuse a child grant approval from a member who is not the coordinator', async () => {

@@ -9,6 +9,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError } from './task-boards.ts';
 
 /**
  * The session WRITE surface: starting one, stopping it, and recovering a start whose answer was lost.
@@ -23,23 +24,32 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * it only after both its POST attempts failed in transport. See `recover` below for why the payload
  * digest is mandatory.
  *
- * WHAT THIS MOUNT REFUSES, AND WHY THE REFUSAL IS BETTER THAN A GUESS. `StartSessionRequest` carries
- * one option this daemon cannot honour yet, answered with `501` and a code naming the missing unit
- * rather than accepted and dropped:
+ * `boardAccess` IS SERVED NOW, AND THE 501 IT USED TO ANSWER WAS WRONG ABOUT THE WIRE. The recorded
+ * reason said a start "would launch a pane holding a capability that authorizes nothing until a third
+ * party acts". A start hands the pane no capability at all: `--board-access worker` asks for a child
+ * grant, and a child grant is a PENDING INTENT by construction — `TaskBoardChildGrantService.request`
+ * has no approval branch for any requester, coordinator included. So the pending state this refused
+ * to produce is the only state the domain can produce, and refusing it meant `fy start --board-access`
+ * could not be run at all.
  *
- *   * `boardAccess` other than `none` — and the recorded reason for this has CHANGED, because the two
- *     things it used to name both exist now. The per-session capability is minted for every session,
- *     and the parent's own board capability travels on this very request as `x-fy-board-capability`
- *     (see `IFyApiClient.start`), so the daemon holds everything it needs to identify the requester.
- *     What it cannot do is finish the grant: `/v1/task-boards` is mounted, and a child grant there is
- *     PENDING until the current coordinator approves it. A start that requested one would launch a
- *     pane holding a capability that authorizes nothing until a third party acts, which is worse than
- *     refusing — the session would believe it had board access. Deciding whether a start may
- *     auto-approve its own child grant is an authorization decision about the coordinator's role, so
- *     it belongs to a unit that makes it deliberately.
+ * WHAT THE WIRE SAYS, read rather than inferred. `IFyApiClient.start` sends the parent's own board
+ * capability on `x-fy-board-capability` with THIS request — the header has no other purpose on this
+ * surface — and its happy path returns the session without asking the board for anything. It requests
+ * the grant itself on exactly one path: after both POSTs died in transport and the recovery read
+ * found the session, because there it cannot know how far the daemon got. Those two facts only fit
+ * together one way: the daemon owns the grant, and the recovery re-ask is a repair. It is safe to
+ * repeat because the board derives the request id from the operation's own identity, so both asks
+ * hash to one id and the second replays.
  *
- * `initialAttachments` USED TO BE THE SECOND, and it is served now. It is not the multipart upload
- * route and never needed one: the bytes travel INLINE as base64 in this very body, and the only
+ * WHEN THE BOARD REFUSES, THE SESSION IS RETIRED RATHER THAN LEFT RUNNING. The grant is requested
+ * after the session record exists — the board must be able to see the target — and BEFORE the pane is
+ * launched, so a refusal costs no agent. The record is then stopped with the board's own reason in
+ * it, and the refusal is restated with the same status the standalone grant route would have given.
+ * The alternative, answering `201` with a session whose grant was refused, would tell the caller it
+ * had board access pending when nothing is pending at all.
+ *
+ * `initialAttachments` USED TO BE THE SECOND REFUSAL, and it is served now. It is not the multipart
+ * upload route and never needed one: the bytes travel INLINE as base64 in this very body, and the only
  * place they are spent is the turn-one document this start writes. The composition root stores each
  * file in the session's own directory, extracts a DOCX into text beside it, and names both in the
  * opening message — so `fy start -f report.docx` hands the agent the file its task refers to.
@@ -94,7 +104,18 @@ export class SessionControlError extends Error {
  * would compare something neither side ever put on the wire.
  */
 export interface SessionControlSubsystem {
-  start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView>;
+  /**
+   * `boardCapability` is the REQUESTING session's own board secret, present exactly when the start
+   * asks for board access. It is what the child grant is authorized by, so it travels to the
+   * subsystem rather than being read from anything the start's body could name: a body field would
+   * be a caller-controlled claim about who is asking, and on a board that is a privilege escalation.
+   */
+  start(
+    request: StartSessionRequest,
+    requestId: string,
+    payload: string,
+    boardCapability?: string,
+  ): Promise<SessionView>;
   stop(sessionId: string, reason: string | undefined): Promise<SessionView>;
   /**
    * The session this request id started, for a caller that can prove it sent the same body.
@@ -117,13 +138,21 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   failed: { status: 500, code: 'session_launch_failed' },
 };
 
-/** Restates a control refusal in the HTTP vocabulary. */
+/**
+ * Restates a control refusal in the HTTP vocabulary.
+ *
+ * A BOARD refusal passes through the board's own table rather than being folded into one of the
+ * failures above. A start that asked for board access and was refused it failed for a board reason —
+ * "you are not a membership root", "the board has no live coordinator" — and the caller must be able
+ * to read that answer the same way it reads the standalone grant route's, which is the route it will
+ * retry on. Flattening every one of them into `session_launch_failed` would hide which.
+ */
 function refuse(error: unknown): never {
   if (error instanceof SessionControlError) {
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
-  throw error;
+  reraiseTaskBoardError(error);
 }
 
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
@@ -166,19 +195,31 @@ function issueDetail(issues: ReadonlyArray<{ readonly path: ReadonlyArray<Proper
     .join('; ');
 }
 
-/** The start request, validated at the boundary and checked against what this daemon mounts. */
+/** The start request, validated at the boundary. */
 function parseStart(text: string): StartSessionRequest {
   const parsed = StartSessionRequestSchema.safeParse(bodyJson(text));
   if (!parsed.success)
     throw new ApiError(400, `the request body is invalid — ${issueDetail(parsed.error.issues)}`, 'invalid_request');
-  const start = parsed.data;
-  if (start.boardAccess !== 'none')
+  return parsed.data;
+}
+
+/**
+ * The parent's own board capability, required exactly when the start asks for board access.
+ *
+ * `401` rather than `400` because it is a missing SECRET, which is how every other board route reports
+ * the same absence — a caller that reads one of them can read this one. A `none` start never reads the
+ * header at all, so an operator's ordinary `fy start` is unaffected by whether one is set.
+ */
+function boardCapability(request: ApiRequest, start: StartSessionRequest): string | undefined {
+  if (start.boardAccess === 'none') return undefined;
+  const value = headerValue(request, BOARD_CAPABILITY_HEADER)?.trim();
+  if (value === undefined || value === '')
     throw new ApiError(
-      501,
-      'task board access at start is not mounted: a child grant is pending until the coordinator approves it, so a start cannot hand the new pane a capability that authorizes anything',
-      'board_access_not_mounted',
+      401,
+      `a start asking for ${start.boardAccess} board access must present the requesting session's own board capability on ${BOARD_CAPABILITY_HEADER}`,
+      'missing_capability',
     );
-  return start;
+  return value;
 }
 
 /** The logical request id the retry contract is built on. */
@@ -200,8 +241,9 @@ async function start(subsystem: SessionControlSubsystem, context: RouteContext):
   // not necessarily hash to the same thing the client hashed.
   const payload = await bodyText(context.request);
   const request = parseStart(payload);
+  const capability = boardCapability(context.request, request);
   const id = requestId(context.request);
-  const view = await subsystem.start(request, id, payload).catch(refuse);
+  const view = await subsystem.start(request, id, payload, capability).catch(refuse);
   return jsonResponse(view, 201);
 }
 

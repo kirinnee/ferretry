@@ -233,9 +233,31 @@
 # `FY_SESSION_BOARD_CAPABILITY` — and a pane reads its environment AT LAUNCH. So a session already
 # running when its grant is issued picks `FY_BOARD_CAPABILITY` up on its next launch rather than
 # immediately. The alternative, typing an export into a live pane, would write the secret into the
-# transcript the agent later quotes back. Closing this properly means honouring `--board-access` at
-# session START, where the launch environment is written anyway: `POST /v1/sessions` still answers 501
-# for a non-`none` `boardAccess`, and that is the next unit's door.
+# transcript the agent later quotes back.
+#
+# `--board-access` AT SESSION START IS SERVED NOW, and the 501 it used to answer was wrong about the
+# wire rather than merely unimplemented. The recorded reason said a start "would launch a pane holding
+# a capability that authorizes nothing until a third party acts". A start hands the pane no capability
+# at all: `TaskBoardChildGrantService.request` has no approval branch for ANY requester, coordinator
+# included, so a pending intent is the only thing the domain can produce and refusing it meant
+# `fy start --board-access` could not be run.
+#
+# The wire says which side owns the grant, and it took reading `IFyApiClient.start` rather than the
+# route: it sends the parent's board capability on `x-fy-board-capability` with the START — the header
+# has no other purpose on that surface — and its happy path returns the session without asking the
+# board for anything, re-requesting the grant on exactly one path, after both POSTs died in transport.
+# Those two facts only fit together if the daemon owns the grant and the recovery ask is a repair.
+#
+# WHAT MOUNTING IT FOUND: the client's repair could never have worked. It posted
+# `/v1/task-board/child-grants/request` — SINGULAR — which no daemon serves, so the one call that
+# exists to make a recovered `--board-access` start whole answered `unknown_route`. Both asks now
+# derive the same request id from the operation's own identity, so the repair replays instead of
+# opening a second intent.
+#
+# The start also recorded `boardAccess: 'none'` on the session document for every session, whatever
+# the caller asked for. A refused grant now retires its session with the board's own reason rather
+# than leaving one that will never run: the grant is requested after the record exists and before the
+# launch, which is the only window in which the board can see the target and a refusal costs no agent.
 #
 # THE LAST TWO LINES ARE GONE, AND THE REASON RECORDED FOR THEM WAS WRONG. They read "a board-scoped
 # task mutation is `exact-worker-assignee`'s only possible caller, and the task routes resolve no board
