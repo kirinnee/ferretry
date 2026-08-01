@@ -109,6 +109,94 @@ describe('the task board mount', () => {
     });
   });
 
+  describe('resolving assignees', () => {
+    it('should ask once per response, for the distinct assignees of the rows it will show', async () => {
+      // An assignee is a teammate name far more often than a session id, and resolving a name means
+      // reading the documents that carry names. Asked per row, a board of two hundred tasks would fan
+      // out over the whole fleet two hundred times — so the batch, and its distinctness, ARE the
+      // contract rather than an implementation detail.
+      // Arrange
+      const observed: string[][] = [];
+      const dispatch = dispatcher({ observed });
+      // Two tasks owned by `ossy` and one by `hobbes`, so a per-row lookup would show up as three.
+      for (const [index, assignee] of ['ossy', 'ossy', 'hobbes'].entries()) {
+        await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: `Task ${index}`, assignee }));
+      }
+      observed.length = 0;
+
+      // Act
+      await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
+
+      // Assert
+      should(observed).have.length(1);
+      should([...(observed[0] ?? [])].sort()).deepEqual(['hobbes', 'ossy']);
+    });
+
+    it('should not ask the fleet about rows a filter discarded, or about nobody at all', async () => {
+      // A narrowed list must not fan out on behalf of tasks it is about to throw away, and a board
+      // where nothing is assigned must not ask at all.
+      // Arrange
+      const observed: string[][] = [];
+      const dispatch = dispatcher({ observed });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, assignee: 'ossy', kind: 'feature' }));
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, assignee: 'hobbes', kind: 'bug' }));
+      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, assignee: null }));
+      observed.length = 0;
+
+      // Act
+      await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human, query: [['kind', 'bug']] }));
+      const afterFilter = observed.map(batch => [...batch]);
+      observed.length = 0;
+      await dispatch.dispatch(request({ path: '/v1/sessions/s2/tasks', headers: human }));
+
+      // Assert
+      should(afterFilter).deepEqual([['hobbes']]);
+      // Nothing is assigned on s2's board, so there is nobody to ask about.
+      should(observed).be.empty();
+    });
+
+    it('should resolve the whole fleet read in one batch rather than one per session', async () => {
+      // Arrange
+      const observed: string[][] = [];
+      const dispatch = dispatcher({ observed, sessionIds: ['s1', 's2'] });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, assignee: 'ossy' }));
+      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, assignee: 'hobbes' }));
+      observed.length = 0;
+
+      // Act
+      await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert
+      should(observed).have.length(1);
+      should([...(observed[0] ?? [])].sort()).deepEqual(['hobbes', 'ossy']);
+    });
+
+    it('should report an assignee nothing resolves as unknown rather than as a hole', async () => {
+      // Arrange
+      const world: TaskWorld = {
+        observations: { ossy: { sessionId: 's9', name: 'Ossy', status: 'running', lastActivityAt: AT } },
+      };
+      const dispatch = dispatcher(world);
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, assignee: 'ossy' }));
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', { ...CREATE, title: 'Other', assignee: 'nobody' }));
+
+      // Act
+      const listed = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
+      const rows = (jsonBody(listed) as unknown as SessionTaskListResponse).tasks;
+
+      // Assert
+      // The teammate NAME resolved to the session that answers to it, which is what the whole batch
+      // exists for: `--assignee <who>` names a teammate, not a session id.
+      should(rows.find(row => row.assignee === 'ossy')?.live.assigneeSessionId).equal('s9');
+      should(rows.find(row => row.assignee === 'ossy')?.live.assigneeName).equal('Ossy');
+      // An assignee the daemon has never seen is honestly null in every field, not omitted.
+      const unknown = rows.find(row => row.assignee === 'nobody')?.live;
+      should(unknown?.assigneeSessionId).be.null();
+      should(unknown?.assigneeName).be.null();
+      should(unknown?.assigneeStatus).be.null();
+    });
+  });
+
   describe('creating a task', () => {
     it('should create the task, answer 201, and enrich it from the session index', async () => {
       // Arrange

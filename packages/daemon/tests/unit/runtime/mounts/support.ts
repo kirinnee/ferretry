@@ -232,6 +232,9 @@ export interface TaskWorld {
   readonly boards?: Readonly<Record<string, FakeTaskBoard>>;
   readonly sessionIds?: readonly string[];
   readonly observations?: Readonly<Record<string, AssigneeObservation>>;
+  /** Every batch of assignees the mount asked about, appended in order. Supply an array to observe
+   *  the mount's resolution behaviour; leave it out and the calls go unrecorded. */
+  readonly observed?: string[][];
   /** Session ids the layout refuses, so the mount's bad-request path can be driven. */
   readonly unusable?: readonly string[];
 }
@@ -250,7 +253,17 @@ export function taskSubsystem(world: TaskWorld = {}): TaskSubsystem {
       return fresh;
     },
     sessionIds: async () => world.sessionIds ?? [],
-    observe: async assignee => (world.observations ?? {})[assignee],
+    /** Records every batch it was asked for, so a test can assert the mount asks ONCE per response
+     *  for the distinct assignees rather than once per row. */
+    observe: async assignees => {
+      const known = world.observations ?? {};
+      (world.observed ?? []).push([...assignees]);
+      return new Map(
+        assignees
+          .map(assignee => [assignee, known[assignee]] as const)
+          .filter((pair): pair is readonly [string, AssigneeObservation] => pair[1] !== undefined),
+      );
+    },
     now: () => AT,
   };
 }

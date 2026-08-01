@@ -138,7 +138,7 @@
 #     whether the branch pre-existed — none of it derivable from Git.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-# PR #5 — complete task board membership lifecycle
+# PR #5 — complete task board membership lifecycle: FULLY MOUNTED, nothing to list.
 # BLOCKED ON AN ADAPTER THAT DOES NOT EXIST. Every service here is a pure reducer over a
 # TaskBoardRepository whose `transaction` must be atomic, plus a TaskBoardCredentialIssuer that mints
 # and hashes board capabilities, plus a TaskBoardSessionDirectory. There is no src/adapters/task-boards
@@ -237,9 +237,27 @@
 # session START, where the launch environment is written anyway: `POST /v1/sessions` still answers 501
 # for a non-`none` `boardAccess`, and that is the next unit's door.
 #
-# The two lines left are the barrel and the one module only the barrel reaches.
-packages/daemon/src/lib/task-boards/exact-worker-assignee.ts # PR #5: a board-scoped task mutation is its only possible caller, and the task routes resolve no board scope yet
-packages/daemon/src/lib/task-boards/index.ts # PR #5: the mount imports the modules it calls by name rather than the barrel, so the barrel has no importer; importing it would make exact-worker-assignee reachable while leaving it uncalled
+# THE LAST TWO LINES ARE GONE, AND THE REASON RECORDED FOR THEM WAS WRONG. They read "a board-scoped
+# task mutation is `exact-worker-assignee`'s only possible caller, and the task routes resolve no board
+# scope yet". The caller it was actually waiting for is a READ, and it was already mounted:
+# `TaskSubsystem.observe` turns a task's `assignee` into the session the live view reports, and it
+# matched SESSION IDS ONLY. `fy task create --assignee <who>` documents its argument as "the teammate
+# who owns it", so every task a person assigned — the normal case — reported `assigneeSessionId`,
+# `assigneeName` and `assigneeStatus` as null. `exactWorkerAssignee` is exactly that resolution rule,
+# at 100% coverage, called by nothing.
+#
+# The recorded cost was real and it is what the fix is about: resolving a NAME means reading the
+# documents that carry names. So the mount now asks for the DISTINCT assignees of one response instead
+# of one row at a time — one fan-out per request however many rows there are, the same fan-out
+# `/v1/names` already performs — and a known session id still short-circuits without a directory read.
+#
+# THE BOARD'S OWN SESSION DIRECTORY IS DELIBERATELY NOT REUSED, which is the trap here. It omits every
+# session without a `sessionCapabilityHash`, because a session that cannot hold a capability cannot be
+# a board member; right for authorization, wrong for a display read, where it would silently drop every
+# session started before the credential existed. `exactWorkerAssignee` reads three fields, so its
+# parameter is narrowed to those three — satisfying the wide type with a projection would have meant
+# fabricating an authorization field, and an array of those is one careless call away from an
+# authorization path.
 
 
 # PR #9 — add the callsign name pool, managed worktrees, and the Git adapter

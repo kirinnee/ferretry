@@ -579,6 +579,33 @@ describe('daemon boot lifecycle', () => {
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'status', status: 'in_progress', reason: 'wiring it' }),
     });
+    // Assigned by CALLSIGN, which is what `fy task create --assignee <who>` documents its argument as,
+    // and by a name nothing answers to.
+    const byCallsign = await fetch(base, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'chore',
+        title: 'Resolve the assignee',
+        ask: { text: 'a teammate owns it', source: 'human' },
+        assignee: SEEDED_CALLSIGN,
+      }),
+    });
+    const byCallsignBody = (await byCallsign.json()) as {
+      id: string;
+      live: { assigneeSessionId: string | null; assigneeName: string | null; assigneeStatus: string | null };
+    };
+    const byStranger = await fetch(base, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'chore',
+        title: 'Owned by nobody here',
+        ask: { text: 'nothing answers to this', source: 'human' },
+        assignee: 'not-a-teammate',
+      }),
+    });
+    const byStrangerBody = (await byStranger.json()) as { live: { assigneeSessionId: string | null } };
     const listed = await fetch(base, { headers });
     const detail = await fetch(`${base}/${createdBody.id}`, { headers });
     const fleet = await fetch(`http://127.0.0.1:${port}/v1/tasks`, { headers });
@@ -599,17 +626,36 @@ describe('daemon boot lifecycle', () => {
     should(createdBody.assignee).equal(SESSION_ID);
     // Enrichment came from the real session index, not from anything the request carried.
     should(createdBody.live.assigneeName).equal('Wire Subsystems');
+    // A teammate CALLSIGN resolved to the session that answers to it, over the real session
+    // documents. This is the capability `exactWorkerAssignee` was built for and nothing called: the
+    // daemon matched session ids only, so every task a person assigned by name reported a null live
+    // column.
+    should(byCallsign.status).equal(201);
+    should(byCallsignBody.live.assigneeSessionId).equal(SESSION_ID);
+    should(byCallsignBody.live.assigneeName).equal('Wire Subsystems');
+    should(byCallsignBody.live.assigneeStatus).equal('running');
+    // A name nothing answers to stays honestly unknown rather than being attached to whoever was
+    // nearest in the index.
+    should(byStrangerBody.live.assigneeSessionId).be.null();
     should(advanced.status).equal(200);
     should(listed.status).equal(200);
     should(listedBody.parseErrors).equal(0);
-    should(listedBody.tasks.map(task => [task.id, task.status])).deepEqual([['F1', 'in_progress']]);
+    should(listedBody.tasks.map(task => [task.id, task.status])).deepEqual([
+      ['F1', 'in_progress'],
+      ['C1', 'todo'],
+      ['C2', 'todo'],
+    ]);
     // The history survived the second request, which only a durable board can do.
     should(detailBody.activity.map(event => event.type)).deepEqual(['created', 'status']);
     should(fleetBody.sessionId).be.null();
-    should(fleetBody.tasks.map(task => [task.sessionId, task.id])).deepEqual([[SESSION_ID, 'F1']]);
+    should(fleetBody.tasks.map(task => [task.sessionId, task.id])).deepEqual([
+      [SESSION_ID, 'F1'],
+      [SESSION_ID, 'C1'],
+      [SESSION_ID, 'C2'],
+    ]);
     should(JSON.parse(snapshot) as { tasks: unknown[] })
       .have.property('tasks')
-      .with.length(1);
+      .with.length(3);
   });
 
   /**

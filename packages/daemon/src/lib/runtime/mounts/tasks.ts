@@ -73,8 +73,17 @@ export interface TaskSubsystem {
   board(sessionId: string): TaskBoardPort;
   /** Every session the daemon knows of, for the fleet-wide read. */
   sessionIds(): Promise<readonly string[]>;
-  /** The session an assignee names, or `undefined` when the daemon has never seen it. */
-  observe(assignee: string): Promise<AssigneeObservation | undefined>;
+  /**
+   * The sessions a set of assignees name, keyed by the assignee string that named each one. An
+   * assignee absent from the answer names nothing the daemon has ever seen.
+   *
+   * A BATCH, not one call per row, because an assignee is a teammate CALLSIGN far more often than a
+   * session id — `fy task create --assignee <who>` documents it as "the teammate who owns it" — and
+   * resolving a callsign means reading the session documents that carry callsigns. Asked per row, a
+   * board of two hundred tasks would fan out over the whole fleet two hundred times; asked once for
+   * the distinct assignees a response is about, it fans out once however many rows there are.
+   */
+  observe(assignees: readonly string[]): Promise<ReadonlyMap<string, AssigneeObservation>>;
   /** The instant a list response is stamped with, so an empty board still reports a real time. */
   now(): string;
 }
@@ -236,34 +245,55 @@ function blockage(
   };
 }
 
-/** One task as the wire sees it, scoped to the session whose board holds it. */
-async function scopedView(
+/**
+ * The sessions every assignee on these tasks names, resolved in one pass.
+ *
+ * DISTINCT, because a board where ten tasks share one owner is one question, not ten. Empty when
+ * nothing is assigned, which skips the fan-out entirely rather than asking the fleet about nobody.
+ */
+async function observeAssignees(
   subsystem: TaskSubsystem,
+  tasks: readonly Pick<Task, 'assignee'>[],
+): Promise<ReadonlyMap<string, AssigneeObservation>> {
+  const assignees = [
+    ...new Set(tasks.map(task => task.assignee).filter((assignee): assignee is string => assignee !== null)),
+  ];
+  return assignees.length === 0 ? new Map() : await subsystem.observe(assignees);
+}
+
+/** The live view for one task, from an already-resolved batch. */
+function liveFor(task: Pick<Task, 'assignee'>, observations: ReadonlyMap<string, AssigneeObservation>): TaskLive {
+  return taskLive(task.assignee === null ? undefined : observations.get(task.assignee));
+}
+
+/** One task as the wire sees it, scoped to the session whose board holds it. */
+function scopedView(
   sessionId: string,
   task: Task,
   board: readonly Task[],
-): Promise<ScopedTaskView> {
+  observations: ReadonlyMap<string, AssigneeObservation>,
+): ScopedTaskView {
   return {
     ...task,
     ...blockage(task, board),
-    live: taskLive(task.assignee === null ? undefined : await subsystem.observe(task.assignee)),
+    live: liveFor(task, observations),
     sessionId,
   };
 }
 
 /** One task as a list row: the heavy prose is replaced by its size, so a board of 200 tasks is not a
  *  megabyte of description the caller did not ask for. */
-async function scopedSummary(
-  subsystem: TaskSubsystem,
+function scopedSummary(
   sessionId: string | null,
   task: Task,
   board: readonly Task[],
-): Promise<ScopedTaskSummary> {
+  observations: ReadonlyMap<string, AssigneeObservation>,
+): ScopedTaskSummary {
   const { description, ask, clarifications, ...rest } = task;
   return {
     ...rest,
     ...blockage(task, board),
-    live: taskLive(task.assignee === null ? undefined : await subsystem.observe(task.assignee)),
+    live: liveFor(task, observations),
     descriptionChars: description.length,
     askChars: ask.text.length,
     askSource: ask.source,
@@ -285,12 +315,14 @@ async function listSession(subsystem: TaskSubsystem, sessionId: string, context:
   const read = await boardFor(subsystem, sessionId).list().catch(reraise);
   const board = read.entries.map(entry => entry.task);
   const damaged = parseErrorIds(read.parseErrors);
+  const shown = board.filter(task => matchesFilters(task, filters));
+  // Resolved for the rows the caller will actually see, not for the whole board: a filtered list must
+  // not fan out over the fleet on behalf of tasks it is about to discard.
+  const observations = await observeAssignees(subsystem, shown);
   const response: SessionTaskListResponse = {
     v: TASK_SCHEMA_VERSION,
     sessionId,
-    tasks: await Promise.all(
-      board.filter(task => matchesFilters(task, filters)).map(task => scopedSummary(subsystem, sessionId, task, board)),
-    ),
+    tasks: shown.map(task => scopedSummary(sessionId, task, board, observations)),
     parseErrors: read.parseErrors.length,
     ...(damaged === undefined ? {} : { parseErrorIds: damaged }),
     updatedAt: subsystem.now(),
@@ -308,7 +340,9 @@ async function listSession(subsystem: TaskSubsystem, sessionId: string, context:
  */
 async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
-  const rows: ScopedTaskSummary[] = [];
+  // Gathered before any assignee is resolved, so ONE batch answers for the whole fleet: resolving
+  // inside the loop would fan out over every session once per session's board.
+  const gathered: { readonly sessionId: string; readonly task: Task; readonly board: readonly Task[] }[] = [];
   let parseErrors = 0;
   const damaged: string[] = [];
   for (const sessionId of await subsystem.sessionIds()) {
@@ -326,13 +360,17 @@ async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promi
     parseErrors += read.parseErrors.length;
     damaged.push(...(parseErrorIds(read.parseErrors) ?? []));
     for (const task of board.filter(candidate => matchesFilters(candidate, filters))) {
-      rows.push(await scopedSummary(subsystem, sessionId, task, board));
+      gathered.push({ sessionId, task, board });
     }
   }
+  const observations = await observeAssignees(
+    subsystem,
+    gathered.map(row => row.task),
+  );
   const response: FleetTaskListResponse = {
     v: TASK_SCHEMA_VERSION,
     sessionId: null,
-    tasks: rows,
+    tasks: gathered.map(row => scopedSummary(row.sessionId, row.task, row.board, observations)),
     parseErrors,
     ...(damaged.length === 0 ? {} : { parseErrorIds: damaged }),
     updatedAt: subsystem.now(),
@@ -351,11 +389,11 @@ async function detail(subsystem: TaskSubsystem, context: RouteContext): Promise<
   const activity: readonly TaskActivity[] = entry.activity.filter(event => event.seq > after);
   const response: ScopedTaskDetailResponse = {
     sessionId,
-    task: await scopedView(
-      subsystem,
+    task: scopedView(
       sessionId,
       entry.task,
       read.entries.map(other => other.task),
+      await observeAssignees(subsystem, [entry.task]),
     ),
     activity: [...activity],
   };
@@ -405,11 +443,11 @@ async function create(subsystem: TaskSubsystem, context: RouteContext): Promise<
   const entry = await board.create(request, taskActor(context.actor)).catch(reraise);
   const read = await board.list().catch(reraise);
   return jsonResponse(
-    await scopedView(
-      subsystem,
+    scopedView(
       sessionId,
       entry.task,
       read.entries.map(other => other.task),
+      await observeAssignees(subsystem, [entry.task]),
     ),
     201,
   );
@@ -424,11 +462,11 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
   const entry = await board.act(taskId, request, taskActor(context.actor)).catch(reraise);
   const read = await board.list().catch(reraise);
   return jsonResponse(
-    await scopedView(
-      subsystem,
+    scopedView(
       sessionId,
       entry.task,
       read.entries.map(other => other.task),
+      await observeAssignees(subsystem, [entry.task]),
     ),
   );
 }
