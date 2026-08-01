@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { chmod, mkdir, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import { NodeWardenReportFileSystem, WardenReportReader } from '../../../src/adapters/warden/index.ts';
@@ -58,6 +58,30 @@ describe('NodeWardenReportFileSystem', () => {
 
     // Assert
     should(files).be.empty();
+  });
+
+  it('should atomically write a first report beneath an owner-only reports directory', async () => {
+    const home = await tempDirectory('warden-write');
+    const report = path.join(home, 'state', 'warden', 'reports', 'sweep.md');
+    const subject = new NodeWardenReportFileSystem();
+
+    await subject.writeTextAtomic(report, 'Verdict: LEAVE\n');
+
+    should(await readFile(report, 'utf8')).equal('Verdict: LEAVE\n');
+    should((await stat(path.dirname(report))).isDirectory()).be.true();
+  });
+
+  it('should remove its temporary file when the final replace fails', async () => {
+    const home = await tempDirectory('warden-write-failure');
+    const reports = path.join(home, 'state', 'warden', 'reports');
+    const target = path.join(reports, 'already-a-directory.md');
+    await mkdir(target, { recursive: true });
+    const subject = new NodeWardenReportFileSystem();
+
+    await should(subject.writeTextAtomic(target, 'Verdict: LEAVE\n')).be.rejected();
+
+    should((await readdir(reports)).filter(name => name.endsWith('.tmp'))).be.empty();
+    should((await stat(target)).isDirectory()).be.true();
   });
 
   it('should list files with their modification times and skip nested directories', async () => {

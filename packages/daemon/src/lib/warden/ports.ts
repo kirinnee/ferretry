@@ -15,4 +15,9 @@ export interface WardenReportFileSystem {
   listFiles(directory: string): Promise<readonly WardenFileInfo[]>;
   /** File text, or `undefined` when the file does not exist. */
   readText(path: string): Promise<string | undefined>;
+  /**
+   * Persist one report artefact atomically, creating its parent directory with
+   * owner-only permissions when this is the first warden sweep in a state home.
+   */
+  writeTextAtomic(path: string, text: string): Promise<void>;
 }

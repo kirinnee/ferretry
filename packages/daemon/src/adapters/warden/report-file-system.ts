@@ -1,5 +1,5 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { mapWithConcurrency } from './concurrent.ts';
 import type { WardenFileInfo, WardenReportFileSystem } from '../../lib/warden/index.ts';
 
@@ -41,6 +41,21 @@ export class NodeWardenReportFileSystem implements WardenReportFileSystem {
       return await readFile(path, 'utf8');
     } catch (error) {
       if (isMissing(error)) return undefined;
+      throw error;
+    }
+  }
+
+  async writeTextAtomic(path: string, text: string): Promise<void> {
+    const directory = dirname(path);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const temporary = join(directory, `.${crypto.randomUUID()}.tmp`);
+    try {
+      await writeFile(temporary, text, { encoding: 'utf8', mode: 0o600 });
+      await rename(temporary, path);
+    } catch (error) {
+      // A failed atomic replace must not leave a report-shaped temporary file
+      // among the evidence a later sweep lists.
+      await rm(temporary, { force: true }).catch(() => undefined);
       throw error;
     }
   }
