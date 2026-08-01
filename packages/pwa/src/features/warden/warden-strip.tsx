@@ -48,6 +48,10 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   if (status === null) return null;
 
   const digest = wardenAnomalyDigest(status.anomalies);
+  // An empty persisted report set is not a clean sweep.  The supervisor has
+  // not reported yet, so it cannot support an all-clear claim.
+  const reporting = status.lastSweepAt !== undefined;
+  const healthy = reporting && digest.clean;
   const interval = status.config.intervalMinutes;
   const exhaustion = wardenExhaustionLabel(status.failover);
   const accounts = status.failover?.accounts ?? [];
@@ -55,7 +59,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-soft bg-surface-2 px-3 py-2 text-[12px]">
       <span className="inline-flex items-center gap-1.5 font-medium text-fg-soft">
-        {digest.clean ? (
+        {healthy ? (
           <ShieldCheck size={14} className="text-ok" aria-hidden="true" />
         ) : (
           <ShieldAlert size={14} className="text-warn" aria-hidden="true" />
@@ -64,11 +68,11 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
       </span>
       <Dot />
       <span className="mono text-muted">
-        last sweep {status.lastSweepAt === undefined ? '—' : relativeTime(status.lastSweepAt, now)}
+        {reporting ? `last sweep ${relativeTime(status.lastSweepAt, now)}` : 'not reporting'}
       </span>
       <Dot />
-      <span className={cn('mono', digest.clean ? 'text-ok' : 'font-medium text-warn')}>
-        {wardenAnomalyCountLabel(digest.count)}
+      <span className={cn('mono', healthy ? 'text-ok' : 'font-medium text-warn')}>
+        {reporting || !digest.clean ? wardenAnomalyCountLabel(digest.count) : 'no evidence'}
       </span>
       <Dot />
       <span className="mono text-faint">every {interval}m</span>

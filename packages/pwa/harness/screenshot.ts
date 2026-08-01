@@ -204,6 +204,9 @@ try {
       const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
       await page.locator('[aria-labelledby="warden-attention-heading"]').screenshot({ path: wardenAttentionTarget });
       process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
+      const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
+      await page.locator('[data-harness="warden-strip"]').screenshot({ path: wardenStripTarget });
+      process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);

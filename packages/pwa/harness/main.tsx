@@ -426,6 +426,15 @@ const WARDEN: WardenStatusView = {
   },
 };
 
+/** A daemon that has its configuration but has never produced a report. */
+const WARDEN_NOT_REPORTING: WardenStatusView = {
+  ...WARDEN,
+  anomalies: [],
+  failover: undefined,
+  lastSweepAt: undefined,
+  liveWarden: undefined,
+};
+
 const WARDEN_CONFIG: WardenConfigView = {
   config: WARDEN.config,
   accounts: WARDEN.config.accounts,
@@ -1270,7 +1279,9 @@ function Shell() {
             <Label>Warden — fleet checks</Label>
           </PanelHeader>
           <PanelBody>
-            <WardenStrip status={WARDEN} now={HARNESS_NOW} />
+            <div data-harness="warden-strip">
+              <WardenStrip status={WARDEN_NOT_REPORTING} now={HARNESS_NOW} />
+            </div>
           </PanelBody>
         </Card>
       ),
