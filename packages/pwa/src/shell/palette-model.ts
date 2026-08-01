@@ -19,11 +19,15 @@
 import type { SessionView } from '@ferretry/protocol';
 import { displayCallsign, shortSessionId } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
+// The palette names a folder exactly as the sidebar and dashboard do. Sharing
+// `fleet-grouping`'s `baseName` is what keeps a session searchable under the
+// same folder name the group header shows it under.
+import { baseName } from '../lib/fleet-grouping.ts';
 import { daemonSettingsPath } from '../lib/pages/routes.ts';
 import {
   type AppBarDestinationLike,
-  destinationPaletteEntries,
   type DestinationPaletteEntry,
+  destinationPaletteEntries,
 } from './palette-destinations.ts';
 import { MAX_SESSION_RESULTS, rankSessions, recentSessions, type SessionEntry } from './palette-ranking.ts';
 import { statusMark, TERMINAL_STATUSES } from './status-mark.tsx';
@@ -137,17 +141,6 @@ const GROUP_HEADINGS: Readonly<Record<PaletteGroup, { readonly resting: string; 
 /** The heading one group shows, given whether the reader has typed anything. */
 export const paletteGroupHeading = (group: PaletteGroup, searching: boolean): string =>
   searching ? GROUP_HEADINGS[group].searching : GROUP_HEADINGS[group].resting;
-
-/**
- * The last path segment, which is what a project is called when nothing has
- * named it. Trailing separators are ignored so `/home/k/ferretry/` and
- * `/home/k/ferretry` read the same.
- */
-export const baseName = (path: string): string => {
-  const trimmed = path.replace(/\/+$/, '');
-  const at = trimmed.lastIndexOf('/');
-  return at === -1 ? trimmed : trimmed.slice(at + 1);
-};
 
 /**
  * Flattens one daemon's session views into rankable entries.
