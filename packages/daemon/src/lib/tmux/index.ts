@@ -5,5 +5,6 @@ export * from './contracts.ts';
 export * from './controller.ts';
 export * from './delivery.ts';
 export * from './pane.ts';
+export * from './queue.ts';
 export * from './retry.ts';
 export * from './startup.ts';

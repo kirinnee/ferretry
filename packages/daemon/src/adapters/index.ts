@@ -14,6 +14,7 @@ export * from './runtime/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/resume/index.ts';
+export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './storage/home-lock.ts';
 export * from './storage/session-storage.ts';

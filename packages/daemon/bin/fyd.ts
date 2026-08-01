@@ -113,6 +113,14 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
+  FileSendChannel,
+  FileSendLedger,
+  FileSendTurnStore,
+  ResumeSendReviver,
+  StorageSendRepository,
+  TmuxSendTerminal,
+} from '../src/adapters/session/send/index.ts';
+import {
   FileSignalArtifacts,
   LauncherSignalTerminal,
   StorageSignalRepository,
@@ -125,7 +133,7 @@ import {
   TmuxTerminalRuntime,
   type TerminalStreamScheduler,
 } from '../src/adapters/terminal/index.ts';
-import { BunTmuxProcess, TmuxPaneDelivery } from '../src/adapters/tmux/index.ts';
+import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import {
   FileTaskStore,
   KeyedSerialExecutor as TaskBoardSerialExecutor,
@@ -211,6 +219,12 @@ import {
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
+  defaultSessionSendSettings,
+  SendPending,
+  SendRefused,
+  SessionSendError,
+  SessionSendService,
+  type SessionSendSubsystem,
   InvalidDeadlineRefused,
   SessionSignalError,
   SessionSignalService,
@@ -1198,6 +1212,76 @@ function createSessionResumeSubsystem(
   };
 }
 
+/**
+ * How each send refusal the domain raises is answered.
+ *
+ * `pending` is kept apart from `refused` because the two ask the caller for different things: a
+ * launch still in flight becomes a retry, while a quarantine or an open question becomes a change of
+ * plan. Collapsing them would tell an operator to fix something that is merely not ready yet.
+ */
+function sendRefusal(error: unknown): never {
+  // The subclasses first: both extend `SendRefused`, and a plain refusal is the base.
+  if (error instanceof SendPending) throw new SessionSendError('pending', error.message);
+  if (error instanceof SendRefused) throw new SessionSendError('refused', error.message);
+  // Acted on and failed: the keystroke, the relaunch or a document write. Whatever got as far as
+  // being recorded is in the session's own journal and its send ledger.
+  throw new SessionSendError('failed', error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * Handing a running session its next turn, and stopping the turn it is on.
+ *
+ * THE ID IS PARSED AND LOOKED UP HERE, before the service is asked, for the reason the stop, the
+ * revive and the signal all do it: the repository answers `undefined` for a session that does not
+ * exist and the service turns that into a refusal, which would surface as a 409 about a session the
+ * caller should simply be told is not here.
+ *
+ * THE ANSWER IS READ BACK through the same reader the list and the single read serve, so a send
+ * answers with the view those surfaces will show rather than a projection of its own outcome. The
+ * disposition is the one thing the view cannot carry, because it describes what the TRANSPORT did.
+ */
+function createSessionSendSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  service: SessionSendService,
+): SessionSendSubsystem {
+  const require = (reference: string): SessionId => {
+    const id = tryParseSessionId(reference);
+    if (id === undefined)
+      throw new SessionSendError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+    if (storage.findSession(id) === undefined) throw new SessionSendError('not_found', `no session ${reference}`);
+    return id;
+  };
+  const view = async (id: SessionId, what: string): Promise<SessionView> => {
+    const current = await sessions.get(id).catch(() => undefined);
+    if (current === undefined)
+      throw new SessionSendError('failed', `session ${id} ${what} but its documents do not satisfy the protocol`);
+    return current;
+  };
+  return {
+    send: async (reference, request) => {
+      const id = require(reference);
+      const outcome = await service
+        .send({
+          id,
+          sendId: request.sendId,
+          message: request.message,
+          ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+          ...(request.now === undefined ? {} : { now: request.now }),
+          ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+          ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
+        })
+        .catch((error: unknown) => sendRefusal(error));
+      return { ...(await view(id, 'took the message')), disposition: outcome.disposition };
+    },
+    interrupt: async reference => {
+      const id = require(reference);
+      await service.interrupt(id).catch((error: unknown) => sendRefusal(error));
+      return await view(id, 'was interrupted');
+    },
+  };
+}
+
 /** How each signal refusal the domain raises is answered. The three are genuinely different next
  *  actions — fix the request, revive the session, name a peer that exists — so they are not collapsed
  *  into one conflict. */
@@ -2106,6 +2190,17 @@ export function buildWorld(): DaemonWorld {
    * impossible for a future edit to point delivery at a different pane than the launch created.
    */
   const launchTmux = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
+  /**
+   * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
+   *
+   * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
+   * arriving mid-bootstrap WAITS instead of fighting for the same terminal name — which a second gate
+   * would not know to do, because it would see no launches at all. The turn store owns the numbered
+   * turn document and the exact set of markers a relaunch clears; a second one is how the revive and
+   * the send drift until a marker one writes is one the other does not clear.
+   */
+  const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
+  const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
   const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher) =>
@@ -2113,9 +2208,9 @@ export function buildWorld(): DaemonWorld {
       {
         repository: new StorageResumeRepository(storage),
         launcher,
-        turns: new FileResumeTurnStore(id => createSessionPaths(paths, id).directory),
+        turns: resumeTurns,
         monitors: new NoMonitorSupervision(),
-        gate: new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds)),
+        gate: launchGate,
         // Its own queue: a revive must not serialize behind storage-wide work while it holds a
         // half-replaced terminal.
         serial: new KeyedSerialExecutor(),
@@ -2281,6 +2376,46 @@ export function buildWorld(): DaemonWorld {
         serial: new KeyedSerialExecutor(),
         clock,
       });
+      /**
+       * Talking to a session that is already running.
+       *
+       * THE REVIVER IS THE SAME RESUME SERVICE the revive and the migration hold, not a second one:
+       * see `ResumeSendReviver` for why a private copy would be a second launch gate and a second
+       * per-session executor, so a send-triggered revive could replace a pane an operator's revive was
+       * already replacing.
+       *
+       * THE PEER-WAIT ENDER IS THE SIGNAL SERVICE ITSELF. Ending a park credits the parked time back
+       * against the turn ceiling and re-anchors the activity ledger, which is that slice's own
+       * arithmetic; this one only reports that a reply arrived. It is reached AFTER the send releases
+       * its own lock, so the two per-session queues can never wait on each other.
+       */
+      const sends = new SessionSendService(
+        {
+          repository: new StorageSendRepository(storage, clock),
+          ledger: new FileSendLedger(id => createSessionPaths(paths, id).directory, clock),
+          terminal: new TmuxSendTerminal(
+            launchTmux,
+            // PARSED, not asserted: a send types into a real terminal, so a configuration document
+            // that no longer validates must refuse rather than address whatever pane it names.
+            async id =>
+              SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
+            new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+            new TmuxPaneQueue(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+          ),
+          turns: new FileSendTurnStore(resumeTurns, id => createSessionPaths(paths, id).directory),
+          channel: new FileSendChannel(id => createSessionPaths(paths, id).directory),
+          gate: launchGate,
+          reviver: new ResumeSendReviver(resume),
+          peerWaits: signals,
+          // Its own queue: a send holds its lock across proving a prompt landed, and must not make
+          // every unrelated document write in the process wait behind a live terminal.
+          serial: new KeyedSerialExecutor(),
+          clock,
+        },
+        // The receiving agent is told the CLI a human types, not this daemon — `fyd send` is not a
+        // command, exactly as the harness quirk service already reasons about `fyd resume`.
+        { ...defaultSessionSendSettings, clientName: CLIENT_NAME },
+      );
       // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
       // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
       // its own repository handle over the same document, and the atomicity of `transaction` is what
@@ -2334,6 +2469,7 @@ export function buildWorld(): DaemonWorld {
           childGrantRequester(boards),
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
+        sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionMigrate: createSessionMigrateSubsystem({
           storage,

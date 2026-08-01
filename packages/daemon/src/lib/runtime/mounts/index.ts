@@ -19,6 +19,7 @@ import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
 import { sessionControlRoutes, type SessionControlSubsystem } from './session-control.ts';
 import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
+import { sessionSendRoutes, type SessionSendSubsystem } from './session-send.ts';
 import { sessionSignalRoutes, type SessionSignalSubsystem } from './session-signal.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { sttRawRoutes, type SttSubsystem } from './stt.ts';
@@ -53,9 +54,12 @@ export interface MountedSubsystems {
   readonly sessions: SessionDirectorySubsystem;
   /** Daemon-local project and per-session skill catalogs. */
   readonly catalogs: CatalogSubsystem;
-  /** The session write: starting one agent and stopping it. A SEND is not here — the lifecycle
-   *  delivers turn one and has no method for a later turn. */
+  /** The session write: starting one agent and stopping it. */
   readonly sessionControl: SessionControlSubsystem;
+  /** Talking to a session that is already running: handing it a later turn, and stopping the turn it
+   *  is on. The verb the client has always posted and the daemon has never answered — and the one a
+   *  declared wait on a peer needs, because the reply that ends such a wait IS a send. */
+  readonly sessionSend: SessionSendSubsystem;
   /** Reviving a stopped or dead session with its conversation intact, and typing a next turn into a
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
@@ -129,6 +133,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above
     // the deeper per-session subsystems.
     ...sessionSignalRoutes(subsystems.sessionSignal),
+    // The send and the interrupt register with the rest of the write surface, for the reason the
+    // revive, the migration and the signal all do: each is a one-segment pattern under
+    // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
+    // shadowed, and all belong above the deeper per-session subsystems.
+    ...sessionSendRoutes(subsystems.sessionSend),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),

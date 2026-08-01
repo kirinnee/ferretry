@@ -9,6 +9,7 @@ import {
   type LearningConfig,
   type Pin,
   type PinSnapshot,
+  type SendResult,
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
@@ -64,6 +65,11 @@ import {
   type SessionMigrateSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
+import {
+  SessionSendError,
+  type SendInput,
+  type SessionSendSubsystem,
+} from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
 import type { SttSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
@@ -967,6 +973,42 @@ export class FakeSessionSignal implements SessionSignalSubsystem {
     // completion from a read.
     const status = request.kind === 'done' ? 'completed' : request.kind === 'working' ? 'running' : 'waiting';
     return sessionView(sessionId, {}, { status });
+  }
+}
+
+/**
+ * A send surface that records instead of typing into a terminal.
+ *
+ * The REQUEST is what this fake exists to capture. Two of its fields never appear in the body — the
+ * idempotency key comes from a header and the SENDER comes from the caller's own credential — so
+ * proving they arrive is the only way to know a retry cannot become a second message and a caller
+ * cannot claim to be somebody else.
+ */
+export class FakeSessionSend implements SessionSendSubsystem {
+  readonly sends: Array<readonly [string, SendInput]> = [];
+  readonly interrupts: string[] = [];
+
+  constructor(
+    private readonly known: readonly string[] = ['s1'],
+    private readonly refusals: Readonly<Record<string, SessionSendError>> = {},
+  ) {}
+
+  async send(sessionId: string, request: SendInput): Promise<SendResult> {
+    this.sends.push([sessionId, request]);
+    this.refuse(sessionId);
+    return { ...sessionView(sessionId, {}, { status: 'running' }), disposition: 'delivered' };
+  }
+
+  async interrupt(sessionId: string): Promise<SessionView> {
+    this.interrupts.push(sessionId);
+    this.refuse(sessionId);
+    return sessionView(sessionId, {}, { status: 'interrupted' });
+  }
+
+  private refuse(sessionId: string): void {
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionSendError('not_found', `no session ${sessionId}`);
   }
 }
 
