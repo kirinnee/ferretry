@@ -121,10 +121,16 @@ describe('analytics query language', () => {
 
   it('should decode quoted escapes and omit empty matcher segments', () => {
     // Act
-    const actual = parseAnalyticsQuery(`{label="line\\nnext\\tvalue\\"",, status=completed,}`);
+    const actual = parseAnalyticsQuery(
+      `{label="line\\nnext\\tvalue\\"", mode='single\\nnext\\tvalue\\q',, status=completed,}`,
+    );
 
     // Assert
-    should(actual.matchers.map(matcher => matcher.value)).deepEqual(['line\nnext\tvalue"', 'completed']);
+    should(actual.matchers.map(matcher => matcher.value)).deepEqual([
+      'line\nnext\tvalue"',
+      'single\nnext\tvalueq',
+      'completed',
+    ]);
   });
 
   it('should preserve exact wildcard characters through canonical round trips', () => {
