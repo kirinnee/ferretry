@@ -45,6 +45,9 @@ import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
+import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
+import { FilesystemController } from '../src/lib/filesystem/controller';
+import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
@@ -281,6 +284,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, client }) =>
+    registerFilesystemCommands(program, new FilesystemController(new ProtocolFilesystemGateway(client), world.io)),
   ({ program, world, client }) =>
     registerMigrationCommands(
       program,
