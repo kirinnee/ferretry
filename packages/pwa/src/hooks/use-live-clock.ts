@@ -34,6 +34,20 @@ export interface TranscriptHoldController {
   snapshot(): boolean;
 }
 
+/** Adapt browser globals at the composition seam without making them controller state. */
+export const createBrowserTranscriptHoldPort = (
+  documentLike: Pick<Document, 'addEventListener' | 'getSelection'> | undefined,
+  windowLike: Pick<Window, 'addEventListener'> | undefined,
+): TranscriptHoldDocument | undefined => {
+  if (documentLike === undefined || windowLike === undefined) return undefined;
+  return {
+    getSelection: (): TickSelectionLike | null => documentLike.getSelection(),
+    addEventListener: (type: string, listener: (event: { readonly pointerType?: string }) => void): void =>
+      documentLike.addEventListener(type, event => listener(event as PointerEvent)),
+    addWindowEventListener: (type: 'blur', listener: () => void): void => windowLike.addEventListener(type, listener),
+  };
+};
+
 /**
  * Creates one document-level hold controller. Keeping its mutable gesture
  * state inside this closure makes the browser document an explicit dependency
@@ -108,18 +122,10 @@ export const createTranscriptHoldController = (port: TranscriptHoldDocument | un
   };
 };
 
-const browserTranscriptHoldPort =
-  typeof document === 'undefined'
-    ? undefined
-    : {
-        getSelection: (): TickSelectionLike | null => document.getSelection(),
-        addEventListener: (type: string, listener: (event: { readonly pointerType?: string }) => void): void =>
-          document.addEventListener(type, event => listener(event as PointerEvent)),
-        addWindowEventListener: (type: 'blur', listener: () => void): void => window.addEventListener(type, listener),
-      };
-
 // Production composition seam: browser globals are adapted once here.
-const browserTranscriptHold = createTranscriptHoldController(browserTranscriptHoldPort);
+const browserTranscriptHold = createTranscriptHoldController(
+  createBrowserTranscriptHoldPort(globalThis.document, globalThis.window),
+);
 
 /** Subscribe without React; kept public for DOM-free controller tests. */
 export const subscribeTranscriptHold = browserTranscriptHold.subscribe;
