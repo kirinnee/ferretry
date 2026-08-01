@@ -125,7 +125,7 @@ import {
   TmuxTerminalRuntime,
   type TerminalStreamScheduler,
 } from '../src/adapters/terminal/index.ts';
-import { BunTmuxProcess } from '../src/adapters/tmux/index.ts';
+import { BunTmuxProcess, TmuxPaneDelivery } from '../src/adapters/tmux/index.ts';
 import {
   FileTaskStore,
   KeyedSerialExecutor as TaskBoardSerialExecutor,
@@ -2077,15 +2077,23 @@ export function buildWorld(): DaemonWorld {
    * something else. It travels through the same document mapping the lifecycle repository writes, so
    * the executable is recovered from the argv the start recorded.
    */
-  const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher =>
-    new TmuxResumeLauncher(
-      new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
+  const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher => {
+    const controller = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
+    return new TmuxResumeLauncher(
+      controller,
       async id => {
         const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id)));
         return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
       },
-      milliseconds => Bun.sleep(milliseconds),
+      new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
     );
+  };
+  /**
+   * The launch path's controller, held as a local so the launcher and its delivery adapter address
+   * the SAME tmux server. Two controllers over the same socket would work; one is what makes it
+   * impossible for a future edit to point delivery at a different pane than the launch created.
+   */
+  const launchTmux = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
   const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher) =>
@@ -2148,9 +2156,8 @@ export function buildWorld(): DaemonWorld {
     sessionLauncher: new TmuxSessionLifecycleLauncher(
       // A private absolute socket inside the state home is what keeps managed panes off any
       // tmux server the host already runs.
-      new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'))),
-      milliseconds => Bun.sleep(milliseconds),
-      undefined,
+      launchTmux,
+      new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
       // The pane is handed its own credential through `tmux -e`, never through argv: argv is
       // world-readable on this host through /proc, and the fleet wrappers read the value from their
       // environment anyway.

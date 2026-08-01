@@ -7,7 +7,14 @@ export interface TmuxCommandResult {
 
 /** Implemented by the process adapter; every command excludes the executable and socket flags. */
 export interface TmuxCommandPort {
-  execute(arguments_: readonly string[]): Promise<TmuxCommandResult>;
+  /**
+   * Run one tmux command.
+   *
+   * `stdin` exists for `load-buffer -`, the only command here that carries a payload rather than a
+   * target: a turn brief is longer than any argv limit and would be world-readable through `/proc`
+   * if it were passed as an argument.
+   */
+  execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult>;
 }
 
 export interface PaneMetadata {

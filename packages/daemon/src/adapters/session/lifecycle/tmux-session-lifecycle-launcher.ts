@@ -3,10 +3,8 @@ import type {
   SessionLifecycleLauncher,
   SessionLifecycleRecord,
 } from '../../../lib/session/lifecycle/index.ts';
-import { retryDelays, type TmuxController } from '../../../lib/tmux/index.ts';
-
-/** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
-export type LauncherSleep = (milliseconds: number) => Promise<void>;
+import type { TmuxController } from '../../../lib/tmux/index.ts';
+import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 
 /** A session with no stored environment launches with none, which is the pre-credential behaviour. */
 const NO_ENVIRONMENT: SessionEnvironmentStore = {
@@ -18,8 +16,7 @@ const NO_ENVIRONMENT: SessionEnvironmentStore = {
 export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
   constructor(
     private readonly tmux: TmuxController,
-    private readonly sleep: LauncherSleep,
-    private readonly readinessAttempts = 30,
+    private readonly delivery: TmuxPaneDelivery,
     private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
   ) {}
 
@@ -42,23 +39,15 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
   }
 
   /**
-   * Types an instruction into the pane, but only once the agent is at a prompt that can accept it.
-   * A payload sent into a still-booting terminal is swallowed by the startup repaint, which reads
-   * exactly like an agent that was never given any work.
+   * Hands the pane its first turn, once the harness is provably able to take it.
+   *
+   * The whole act — waiting out the boot, answering the trust prompt a first launch in a new
+   * directory always shows, choosing the transport, and proving the payload reached the composer
+   * before submitting — belongs to the delivery adapter, so the launch path and the revive path
+   * cannot drift apart on any of it.
    */
   async deliver(record: SessionLifecycleRecord, instruction: string): Promise<void> {
-    const session = record.config.tmuxSession;
-    for (const delay of [0, ...retryDelays(this.readinessAttempts)]) {
-      if (delay > 0) await this.sleep(delay);
-      const state = await this.tmux.state(session);
-      if (!state.alive || state.dead)
-        throw new Error(`tmux session ${session} is not running; its first turn cannot be delivered`);
-      if (!state.promptReady) continue;
-      await this.tmux.sendLiteral(session, instruction);
-      await this.tmux.sendKey(session, 'Enter');
-      return;
-    }
-    throw new Error(`tmux session ${session} did not become ready to accept its first turn`);
+    await this.delivery.deliver(record.config.tmuxSession, instruction);
   }
 
   async stop(record: SessionLifecycleRecord): Promise<void> {

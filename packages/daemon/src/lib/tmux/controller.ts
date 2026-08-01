@@ -1,10 +1,13 @@
 import {
   capturePaneArguments,
+  deleteBufferArguments,
   hasSessionArguments,
   killSessionArguments,
   listSessionsArguments,
+  loadBufferArguments,
   newSessionArguments,
   paneMetadataArguments,
+  pasteBufferArguments,
   remainOnExitArguments,
   sendKeyArguments,
   sendLiteralArguments,
@@ -68,6 +71,24 @@ export class TmuxController {
   async sendKey(session: string, key: string): Promise<void> {
     const result = await this.commands.execute(sendKeyArguments(session, key));
     if (result.code !== 0) throw new Error(result.stderr.trim() || 'tmux could not send key');
+  }
+
+  /**
+   * Deliver text to the pane as one bracketed-paste event.
+   *
+   * The buffer is deleted on the way out of BOTH paths. `paste-buffer -d` does it on success; the
+   * failure path does it explicitly, because a load that pasted into nothing would otherwise leave
+   * the payload sitting in the tmux server until the daemon is restarted.
+   */
+  async paste(session: string, text: string): Promise<void> {
+    if (text.length === 0) throw new Error('paste text must not be empty');
+    const loaded = await this.commands.execute(loadBufferArguments(session), text);
+    if (loaded.code !== 0) throw new Error(loaded.stderr.trim() || 'tmux could not load the paste buffer');
+    const pasted = await this.commands.execute(pasteBufferArguments(session));
+    if (pasted.code !== 0) {
+      await this.commands.execute(deleteBufferArguments(session));
+      throw new Error(pasted.stderr.trim() || 'tmux could not paste into the pane');
+    }
   }
 
   async stop(session: string): Promise<void> {

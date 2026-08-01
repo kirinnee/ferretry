@@ -1,9 +1,7 @@
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { PaneObservation, ResumeLauncher } from '../../../lib/session/resume/types.ts';
-import { retryDelays, type TmuxController } from '../../../lib/tmux/index.ts';
-
-/** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
-export type ResumeSleep = (milliseconds: number) => Promise<void>;
+import type { TmuxController } from '../../../lib/tmux/index.ts';
+import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 
 /** What a resume needs to know about a session before it can address its terminal. */
 export interface ResumeLaunchSpec {
@@ -25,8 +23,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
   constructor(
     private readonly tmux: TmuxController,
     private readonly spec: (id: SessionId) => Promise<ResumeLaunchSpec>,
-    private readonly sleep: ResumeSleep,
-    private readonly readinessAttempts = 30,
+    private readonly delivery: TmuxPaneDelivery,
   ) {}
 
   /** The final frame captured before a pane was destroyed, so discarded composer text is recoverable. */
@@ -56,23 +53,14 @@ export class TmuxResumeLauncher implements ResumeLauncher {
   }
 
   /**
-   * Types into the replacement pane, but only once the harness is at a prompt. A payload sent into
-   * a still-booting terminal is swallowed by the startup repaint, which reads exactly like an agent
-   * that was revived and then given no work at all.
+   * Hands the replacement pane its turn, through the same delivery adapter the launch path uses.
+   *
+   * A revive has one dialog a first launch does not: Claude Code gates the resume of a large session
+   * behind a menu that never becomes a prompt, so a revive that could not answer it could not revive
+   * a long-running agent at all — which is precisely the agent worth reviving.
    */
   async deliver(id: SessionId, instruction: string): Promise<void> {
-    const session = (await this.spec(id)).tmuxSession;
-    for (const delay of [0, ...retryDelays(this.readinessAttempts)]) {
-      if (delay > 0) await this.sleep(delay);
-      const state = await this.tmux.state(session);
-      if (!state.alive || state.dead)
-        throw new Error(`tmux session ${session} is not running; the resumed turn cannot be delivered`);
-      if (!state.promptReady) continue;
-      await this.tmux.sendLiteral(session, instruction);
-      await this.tmux.sendKey(session, 'Enter');
-      return;
-    }
-    throw new Error(`tmux session ${session} did not become ready to accept its resumed turn`);
+    await this.delivery.deliver((await this.spec(id)).tmuxSession, instruction);
   }
 
   /**

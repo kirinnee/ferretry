@@ -16,9 +16,12 @@ import {
   StateHomeLayout,
   StorageResumeRepository,
   SystemClock,
+  TmuxPaneDelivery,
   TmuxResumeLauncher,
+  type PaneDeliveryOptions,
 } from '../../../../src/adapters/index.ts';
 import { parseSessionId, TmuxController, type TmuxCommandPort } from '../../../../src/lib/index.ts';
+import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';
@@ -296,12 +299,12 @@ describe('storage resume repository', () => {
 });
 
 describe('tmux resume launcher', () => {
-  function launcher(port: RecordingTmuxPort) {
+  function launcher(port: TmuxCommandPort, options: PaneDeliveryOptions = {}) {
+    const controller = new TmuxController(port);
     return new TmuxResumeLauncher(
-      new TmuxController(port),
+      controller,
       async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
-      async () => {},
-      3,
+      new TmuxPaneDelivery(controller, async () => {}, options),
     );
   }
 
@@ -349,51 +352,54 @@ describe('tmux resume launcher', () => {
     const subject = new TmuxResumeLauncher(
       new TmuxController(new RecordingTmuxPort()),
       async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: [] }),
-      async () => {},
+      new TmuxPaneDelivery(new TmuxController(new RecordingTmuxPort()), async () => {}),
     );
 
     // Act / Assert
     await should(subject.relaunch(ID)).be.rejectedWith(/empty command/u);
   });
 
-  it('should wait for the prompt before typing the resumed turn', async () => {
-    // Arrange
-    const port = new RecordingTmuxPort();
-    port.promptReady = false;
-    let polls = 0;
-    const subject = new TmuxResumeLauncher(
-      new TmuxController(port),
-      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
-      async () => {
-        polls += 1;
-        if (polls >= 2) port.promptReady = true;
-      },
-      5,
-    );
+  it('should answer the resume gate a large session comes back on before typing the turn', async () => {
+    // Arrange — the menu a revive of a long-running session always lands on.
+    const server = new FakeTmuxServer();
+    server.bootCaptures = 2;
+    server.modal = [
+      'This session is 2h 45m old and 382k tokens.',
+      '❯ 1. Resume from summary (recommended)',
+      '  2. Resume full session as-is',
+      "  3. Don't ask me again",
+    ].join('\n');
 
     // Act
-    await subject.deliver(ID, 'read your new turn');
+    await launcher(server).deliver(ID, 'read your new turn');
 
-    // Assert
-    should(port.calls.some(call => call.includes('read your new turn'))).be.true();
+    // Assert — the menu was walked to "Resume full session", then the turn was delivered.
+    should(server.calls.filter(call => call[0] === 'send-keys').map(call => call.at(-1))).containDeep([
+      'Down',
+      'Enter',
+    ]);
+    should(server.submitted).deepEqual(['read your new turn']);
   });
 
   it('should refuse to type into a pane whose harness is gone', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    port.dead = true;
+    const server = new FakeTmuxServer();
+    server.dead = true;
 
     // Act / Assert
-    await should(launcher(port).deliver(ID, 'anything')).be.rejectedWith(/is not running/u);
+    await should(launcher(server).deliver(ID, 'anything')).be.rejectedWith(/harness exited/u);
   });
 
   it('should give up rather than type into a terminal that never becomes ready', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    port.promptReady = false;
+    const server = new FakeTmuxServer();
+    server.bootCaptures = Number.MAX_SAFE_INTEGER;
 
     // Act / Assert
-    await should(launcher(port).deliver(ID, 'anything')).be.rejectedWith(/did not become ready/u);
+    await should(launcher(server, { readinessAttempts: 2 }).deliver(ID, 'anything')).be.rejectedWith(
+      /did not become ready/u,
+    );
+    should(server.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
   it('should confirm an exit only when the pane itself agrees the harness is gone', async () => {
@@ -418,7 +424,7 @@ describe('tmux resume launcher', () => {
       async () => {
         throw new Error('config is unreadable');
       },
-      async () => {},
+      new TmuxPaneDelivery(new TmuxController(new RecordingTmuxPort()), async () => {}),
     );
 
     // Act

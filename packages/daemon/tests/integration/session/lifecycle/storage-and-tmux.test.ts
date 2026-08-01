@@ -19,9 +19,12 @@ import {
   StorageSessionLifecycleRepository,
   SystemClock,
   TimeSessionIdFactory,
+  TmuxPaneDelivery,
   TmuxSessionLifecycleLauncher,
   UnusableSessionRecordError,
+  type PaneDeliveryOptions,
 } from '../../../../src/adapters/index.ts';
+import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 import {
   createSessionPaths,
   createSessionRecord,
@@ -97,14 +100,18 @@ class RecordingTmuxPort implements TmuxCommandPort {
   }
 }
 
-function launcher(port: RecordingTmuxPort, readinessAttempts?: number, environment?: SessionEnvironmentStore) {
+function launcher(port: TmuxCommandPort, options: PaneDeliveryOptions = {}, environment?: SessionEnvironmentStore) {
   const slept: number[] = [];
+  const controller = new TmuxController(port);
   const instance = new TmuxSessionLifecycleLauncher(
-    new TmuxController(port),
-    async milliseconds => {
-      slept.push(milliseconds);
-    },
-    readinessAttempts,
+    controller,
+    new TmuxPaneDelivery(
+      controller,
+      async milliseconds => {
+        slept.push(milliseconds);
+      },
+      options,
+    ),
     environment,
   );
   return { instance, slept };
@@ -250,74 +257,56 @@ describe('TmuxSessionLifecycleLauncher', () => {
   });
 
   it('should wait for a ready prompt before typing the first turn into the pane', async () => {
-    // Arrange
-    const port = new RecordingTmuxPort();
-    port.pollsBeforeReady = 2;
-    const { instance: subject, slept } = launcher(port);
+    // Arrange — the harness is still drawing itself for the first two `state` polls.
+    const server = new FakeTmuxServer();
+    server.alive = false;
+    server.bootCaptures = 4;
+    const { instance: subject } = launcher(server);
     const input = record('deliver-session');
     await subject.launch(input);
-    port.calls.length = 0;
+    server.calls.length = 0;
 
     // Act
     await subject.deliver(input, 'Read the file /turns/turn-001.md now');
 
-    // Assert — nothing is typed until the third poll reports a prompt.
-    should(port.commands()).deepEqual([
-      'has-session',
-      'display-message',
-      'capture-pane',
-      'capture-pane',
-      'has-session',
-      'display-message',
-      'capture-pane',
-      'capture-pane',
-      'has-session',
-      'display-message',
-      'capture-pane',
-      'capture-pane',
-      'send-keys',
-      'send-keys',
-    ]);
-    should(port.calls.at(-2)).deepEqual([
-      'send-keys',
-      '-t',
-      'fy-deliver-session',
-      '-l',
-      'Read the file /turns/turn-001.md now',
-    ]);
-    should(port.calls.at(-1)).deepEqual(['send-keys', '-t', 'fy-deliver-session', 'Enter']);
-    should(slept).deepEqual([100, 200]);
+    // Assert — nothing is typed while the pane is booting, and the pane received the whole turn.
+    const firstKey = server.commands().indexOf('send-keys');
+    should(server.commands().slice(0, firstKey)).not.containEql('send-keys');
+    should(firstKey).be.greaterThan(6, 'the boot frames are polled before anything is typed');
+    should(server.submitted).deepEqual(['Read the file /turns/turn-001.md now']);
   });
 
   it('should refuse to deliver into a pane that is gone or already dead', async () => {
     // Arrange
-    const missing = new RecordingTmuxPort();
-    const died = new RecordingTmuxPort();
-    died.alive = true;
+    const missing = new FakeTmuxServer();
+    missing.alive = false;
+    const died = new FakeTmuxServer();
     died.dead = true;
     const input = record('gone-session');
 
     // Act + Assert
     await should(launcher(missing).instance.deliver(input, 'anything')).be.rejectedWith(
-      'tmux session fy-gone-session is not running; its first turn cannot be delivered',
+      /the interactive harness exited; tmux reported no exit code/u,
     );
-    await should(launcher(died).instance.deliver(input, 'anything')).be.rejectedWith(/is not running/u);
+    await should(launcher(died).instance.deliver(input, 'anything')).be.rejectedWith(/harness exited/u);
+    should(died.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
   it('should give up on a pane that never becomes ready instead of typing into a booting terminal', async () => {
     // Arrange
-    const port = new RecordingTmuxPort();
-    port.pollsBeforeReady = Number.MAX_SAFE_INTEGER;
-    const { instance: subject, slept } = launcher(port, 2);
+    const server = new FakeTmuxServer();
+    server.alive = false;
+    server.bootCaptures = Number.MAX_SAFE_INTEGER;
+    const { instance: subject, slept } = launcher(server, { readinessAttempts: 2 });
     const input = record('wedged-session');
     await subject.launch(input);
 
     // Act + Assert
     await should(subject.deliver(input, 'anything')).be.rejectedWith(
-      'tmux session fy-wedged-session did not become ready to accept its first turn',
+      'tmux session fy-wedged-session did not become ready to accept a turn',
     );
     should(slept).deepEqual([100, 200]);
-    should(port.commands().filter(command => command === 'send-keys')).deepEqual([]);
+    should(server.commands().filter(command => command === 'send-keys')).deepEqual([]);
   });
 
   it('should surface a tmux failure rather than reporting a launch or stop that did not happen', async () => {
@@ -429,13 +418,14 @@ describe('the composed session lifecycle', () => {
   it('should give a started auto session its task through real storage and a real turn file', async () => {
     // Arrange — every adapter is the production one; only the tmux process boundary is a double.
     const opened = await openTemporaryStorage();
-    const port = new RecordingTmuxPort();
+    const server = new FakeTmuxServer();
+    server.alive = false;
     const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
     homes.add(cwd);
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(opened.storage),
-        launcher: launcher(port).instance,
+        launcher: launcher(server).instance,
         tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
         directories: new NodeWorkingDirectoryResolver(),
         ids: new TimeSessionIdFactory(
@@ -457,7 +447,7 @@ describe('the composed session lifecycle', () => {
       prompt: 'Finish the lifecycle unit',
     });
     const taskFile = join(createSessionPaths(opened.paths, running.config.id).directory, 'turns', 'turn-001.md');
-    const typed = port.calls.find(call => call[0] === 'send-keys' && call[3] === '-l');
+    const typed = server.calls.find(call => call[0] === 'send-keys' && call[3] === '-l');
     const stopped = await subject.stop(running.config.id, 'work complete');
 
     // Assert — the agent was told to read the file that exists and holds its assignment.
@@ -467,9 +457,9 @@ describe('the composed session lifecycle', () => {
     should(typed?.at(-1)).equal(
       `Read the file ${taskFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`,
     );
-    should(port.commands()).containDeep(['new-session', 'set-option']);
+    should(server.commands()).containDeep(['new-session', 'set-option']);
     should(stopped.state).containDeep({ status: 'stopped', reason: 'work complete' });
-    should(port.commands().at(-1)).equal('kill-session');
+    should(server.commands().at(-1)).equal('kill-session');
     should(
       (await readFile(createSessionPaths(opened.paths, running.config.id).events, 'utf8'))
         .trim()
@@ -485,12 +475,13 @@ describe('the composed session lifecycle', () => {
     const opened = await openTemporaryStorage();
     const cwd = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-cwd-'));
     homes.add(cwd);
-    const port = new RecordingTmuxPort();
+    const server = new FakeTmuxServer();
+    server.alive = false;
     const environment = new FileSessionEnvironmentStore(id => createSessionPaths(opened.paths, id).directory);
     const subject = new SessionLifecycleService(
       {
         repository: new StorageSessionLifecycleRepository(opened.storage),
-        launcher: launcher(port, undefined, environment).instance,
+        launcher: launcher(server, {}, environment).instance,
         tasks: new FileSessionTaskStore(id => createSessionPaths(opened.paths, id).directory),
         directories: new NodeWorkingDirectoryResolver(),
         ids: new TimeSessionIdFactory(
@@ -515,7 +506,7 @@ describe('the composed session lifecycle', () => {
     });
     const id = running.config.id;
     const capability = (await environment.read(id)).FY_SESSION_BOARD_CAPABILITY;
-    const newSession = port.calls.find(call => call[0] === 'new-session');
+    const newSession = server.calls.find(call => call[0] === 'new-session');
 
     // Assert — the pane really was launched carrying the secret, under the name the CLI reads.
     should(capability).be.a.String().and.not.be.empty();
