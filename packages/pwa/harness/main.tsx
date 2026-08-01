@@ -27,6 +27,7 @@ import { createRoot } from 'react-dom/client';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
+import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
@@ -742,6 +743,18 @@ function Shell() {
   // Keep feature surfaces append-only. PWA units add one entry instead of
   // competing to edit the gallery's JSX body during integration.
   const HARNESS_CARDS: ReadonlyArray<{ label: string; render: () => ReactNode }> = [
+    {
+      label: 'New session',
+      render: () => (
+        <section aria-label="New session" id="harness-new-session">
+          <NewSessionPage
+            connection={daemon}
+            onNavigate={() => {}}
+            startSession={async () => ({ config: { id: 'harness-created-session' } })}
+          />
+        </section>
+      ),
+    },
     {
       label: 'Daemon pairing',
       render: () => (
