@@ -2,33 +2,34 @@ import { ApiDispatcher } from '../../api/dispatcher.ts';
 import { ApiRawDispatcher, type RawRoute } from '../../api/raw.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
-import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
+import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
-import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
-import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
+import type { MonitorLoop } from '../../session/monitor/types.ts';
+import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
-import { catalogRoutes, type CatalogSubsystem } from './catalogs.ts';
-import { daemonHealthRoutes, type DaemonHealthSubsystem } from './health.ts';
-import { learningRoutes, type LearningSubsystem } from './learning.ts';
-import { nameRoutes, type NameSubsystem } from './names.ts';
+import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
+import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
+import { type LearningSubsystem, learningRoutes } from './learning.ts';
+import { type NameSubsystem, nameRoutes } from './names.ts';
 import { pinRoutes } from './pins.ts';
-import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
-import { sessionControlRoutes, type SessionControlSubsystem } from './session-control.ts';
-import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
-import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
-import { sessionSendRoutes, type SessionSendSubsystem } from './session-send.ts';
-import { sessionSignalRoutes, type SessionSignalSubsystem } from './session-signal.ts';
+import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
+import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
+import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
-import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
-import { sttRawRoutes, type SttSubsystem } from './stt.ts';
-import { taskBoardRoutes, type TaskBoardSubsystem } from './task-boards.ts';
-import { taskRoutes, type TaskSubsystem } from './tasks.ts';
-import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
+import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
+import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
+import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
+import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
+import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { type SttSubsystem, sttRawRoutes } from './stt.ts';
+import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
+import { type TaskSubsystem, taskRoutes } from './tasks.ts';
+import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -107,6 +108,8 @@ export interface MountedSubsystems {
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
+  /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
+  readonly scratchGc: ScratchGcSubsystem;
 }
 
 /**
@@ -122,6 +125,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
     ...daemonHealthRoutes(subsystems.health),
+    ...scratchGcRoutes(subsystems.scratchGc),
     // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
     // deeper per-session routes that follow.

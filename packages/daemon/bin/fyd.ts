@@ -6,107 +6,91 @@ import {
   type LearningConfig,
   type MigrateSessionRequest,
   SessionConfigSchema,
-  type StartSessionRequest,
   SessionStateSchema,
   type SessionView,
   type SignalSessionRequest,
+  type StartSessionRequest,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
-import { startSttWorker } from './stt-worker.ts';
+import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
+import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { BunGitRunner } from '../src/adapters/git/index.ts';
 import {
   BrowserLoginWindowService,
   BrowserProfileStore,
   BrowserWorkerClient,
-  NodeBrowserLoginRuntime,
-  NodeCatalog,
-  XvfbDisplay,
   BunApiServer,
-  BunProcessProbe,
   BunCommandRunner,
+  BunProcessProbe,
+  BunSecretShell,
+  BunSqliteIndexFactory,
   BunSttCommandRunner,
   BunSttWorkerSpawner,
-  BunSqliteIndexFactory,
   CachedUsageFeed,
   CommandUsageSource,
   DaemonBinder,
   DaemonHealthProbe,
-  DaemonStorageFactory,
   DaemonSecretsLoader,
-  FetchEnhancementTransport,
-  StateHomeLockedError,
-  type OpenedDaemonStorage,
-  BunSecretShell,
+  DaemonStorageFactory,
   daemonSecretSourceProgram,
+  FetchEnhancementTransport,
   FileDaemonConfig,
   FileRoutingCatalog,
+  FileScratchCollector,
   HttpUsageSource,
   KeyedSerialExecutor,
   ManifestAccountInventory,
+  NodeBrowserLoginRuntime,
+  NodeCatalog,
+  type OpenedDaemonStorage,
+  PaneProcessInventory,
   PerformanceStopwatch,
   ProcessSecretReader,
   RuntimeEnvironment,
   SocketViewerDownstream,
-  PaneProcessInventory,
-  TmuxPaneSnapshot,
   SqliteHomeLockFactory,
   StateApiCredentials,
+  StateFileSystem,
   StateFileSystemFactory,
   StateHomeLayout,
-  StateFileSystem,
+  StateHomeLockedError,
   SttModelStore,
   SttService,
   SttWorkerClient,
   SystemClock,
   SystemFrameClock,
+  TmuxPaneSnapshot,
   type ViewerSocket,
   type WorkerClientOptions,
+  XvfbDisplay,
 } from '../src/adapters/index.ts';
-import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
-import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
-import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileLearningStore } from '../src/adapters/learning/index.ts';
+import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
-import {
-  FileTaskBoardRepository,
-  NodeTaskBoardCredentialIssuer,
-  StateBoardAdminCapability,
-  StorageTaskBoardSessionDirectory,
-} from '../src/adapters/task-boards/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
-import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
-import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
-import {
-  GitWorktreeGateway,
-  ManagedWorktreeAdapter,
-  NodeWorktreeFileSystem,
-  SystemWorktreeClock,
-  WorktreeOperationQueue,
-} from '../src/adapters/worktrees/index.ts';
-import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
+import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
   FileSessionEnvironmentStore,
   FileSessionTaskStore,
-  NodeSessionCredentialIssuer,
   lifecycleConfigDocument,
+  NodeSessionCredentialIssuer,
   NodeWorkingDirectoryResolver,
+  type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
   TimeSessionIdFactory,
   TmuxSessionLifecycleLauncher,
-  type SessionProtocolEnvelope,
 } from '../src/adapters/session/lifecycle/index.ts';
-import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
-  FileHarnessWrapperSource,
-  NodeCodexRolloutIndex,
-  StorageTranscriptClaims,
-  StorageTranscriptProvenanceStore,
-  storedTranscriptProvenance,
-} from '../src/adapters/session/transcript/index.ts';
+  FileWaitHeartbeat,
+  MonitorTickRunner,
+  SendMonitorNudge,
+  StorageMonitorWaits,
+} from '../src/adapters/session/monitor/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -121,12 +105,6 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
-  FileWaitHeartbeat,
-  MonitorTickRunner,
-  SendMonitorNudge,
-  StorageMonitorWaits,
-} from '../src/adapters/session/monitor/index.ts';
-import {
   FileSendChannel,
   FileSendLedger,
   FileSendTurnStore,
@@ -140,155 +118,178 @@ import {
   StorageSignalRepository,
 } from '../src/adapters/session/signal/index.ts';
 import {
-  ManagedTerminalService,
-  TerminalRuntimeError,
-  TerminalServiceError,
-  TerminalStreamBridge,
-  TmuxTerminalRuntime,
-  type TerminalStreamScheduler,
-} from '../src/adapters/terminal/index.ts';
-import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
+  FileHarnessWrapperSource,
+  NodeCodexRolloutIndex,
+  StorageTranscriptClaims,
+  StorageTranscriptProvenanceStore,
+  storedTranscriptProvenance,
+} from '../src/adapters/session/transcript/index.ts';
+import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
+import {
+  FileTaskBoardRepository,
+  NodeTaskBoardCredentialIssuer,
+  StateBoardAdminCapability,
+  StorageTaskBoardSessionDirectory,
+} from '../src/adapters/task-boards/index.ts';
 import {
   FileTaskStore,
   KeyedSerialExecutor as TaskBoardSerialExecutor,
   TaskRecordService,
 } from '../src/adapters/tasks/index.ts';
-import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import {
+  ManagedTerminalService,
+  TerminalRuntimeError,
+  TerminalServiceError,
+  TerminalStreamBridge,
+  type TerminalStreamScheduler,
+  TmuxTerminalRuntime,
+} from '../src/adapters/terminal/index.ts';
+import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
+import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
+import {
+  GitWorktreeGateway,
+  ManagedWorktreeAdapter,
+  NodeWorktreeFileSystem,
+  SystemWorktreeClock,
+  WorktreeOperationQueue,
+} from '../src/adapters/worktrees/index.ts';
+import {
+  type AccountInventoryPort,
+  type AnalyticsSubsystem,
+  type ApiServerHandle,
+  type ApiServerPort,
+  type AssigneeObservation,
   AttentionService,
+  authorizeSessionCommand,
+  type BrowserLoginLifecycle,
+  type BrowserViewerHost,
   BrowserViewerStream,
-  decodeInitialAttachments,
-  InitialAttachmentError,
-  planInitialAttachments,
-  renderInitialAttachmentSection,
-  type DecodedInitialAttachment,
-  type PlannedAttachmentFile,
-  type PlannedInitialAttachments,
-  EXIT_ALREADY_RUNNING,
+  CALLSIGN_WINDOW_MS,
+  type CatalogSubsystem,
+  type ChildGrantRequester,
+  ClaudeTranscriptParser,
+  type ClockPort,
+  CodexPickerCleanup,
+  CodexTranscriptParser,
+  type CoreAccount,
+  childGrantRequester,
+  contextWindowForSession,
+  createFoundationPaths,
   createMountedDispatcher,
   createMountedRawDispatcher,
   createMountedSocketDispatcher,
-  PinService,
-  SessionPlanner,
-  SessionFilesystem,
-  SttEnhancementService,
-  TeamAdvisor,
-  createFoundationPaths,
   createSessionPaths,
   createSttPaths,
   createWardenPaths,
-  authorizeSessionCommand,
+  type DaemonConfig,
+  type DaemonHealthSubsystem,
+  type DecodedInitialAttachment,
+  decodeInitialAttachments,
   defaultSessionLifecycleSettings,
+  defaultSessionMonitorSettings,
+  defaultSessionResumeSettings,
+  defaultSessionSendSettings,
   defaultStartWaitPolicy,
+  EXIT_ALREADY_RUNNING,
+  exactWorkerAssignee,
+  type FinishedAnalyticsSession,
+  type FoundationPaths,
+  HarnessQuirkService,
+  InitialAttachmentError,
+  InvalidDeadlineRefused,
+  isTaskBoardError,
+  jsonObject,
+  type LearningSubsystem,
+  MigrationPreflight,
+  type MigrationReportStore,
+  type MillisecondClockPort,
+  type MountedSubsystems,
+  type NameAllocationErrorCode,
+  type NameAllocationRequest,
+  type NameAllocationResult,
+  NameAllocator,
+  type NameClaim,
+  type NameSubsystem,
+  normalizeCallsign,
+  type ObservedSession,
+  PinService,
+  type PlannedAttachmentFile,
+  type PlannedInitialAttachments,
   packageRole,
   parseSessionId,
-  resolveStateHome,
-  SelfRestartCoordinator,
-  SessionHealthService,
-  SessionLifecycleConfigSchema,
+  planInitialAttachments,
   RecommendError,
   type RecommendSubsystem,
+  ResumeCancelled,
+  type ResumeLauncher,
+  ResumeRefused,
+  ReviveDedupeConflict,
   type RoutingCatalogPort,
+  relaunchCommand,
+  renderInitialAttachmentSection,
+  resolveStateHome,
+  type ScratchReclamation,
+  SelfRestartCoordinator,
+  SendPending,
+  SendRefused,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
-  SessionReadError,
-  type AccountInventoryPort,
-  type CoreAccount,
   type SessionDirectorySubsystem,
+  SessionFilesystem,
+  SessionHealthService,
+  type SessionHealthSettings,
+  type SessionId,
   type SessionIdFactory,
+  SessionLifecycleConfigSchema,
   type SessionLifecycleLauncher,
+  SessionLifecycleService,
+  SessionMigrateError,
+  type SessionMigrateFailure,
+  type SessionMigrateSubsystem,
+  SessionMonitorService,
+  SessionPlanner,
+  SessionProvenanceStamper,
+  SessionReadError,
+  SessionResumeError,
+  SessionResumeService,
+  type SessionResumeSubsystem,
+  SessionSendError,
+  SessionSendService,
+  type SessionSendSubsystem,
+  SessionSignalError,
+  SessionSignalService,
+  type SessionSignalSubsystem,
   SessionTranscriptReader,
   SessionTranscriptResolver,
-  TranscriptProvenanceCapture,
-  relaunchCommand,
-  type ClockPort,
-  type WorkingDirectoryResolver,
-  TaskError,
-  exactWorkerAssignee,
+  SignalRefused,
+  SttEnhancementService,
+  type SttSubsystem,
+  searchTranscript,
+  sessionHealthSettingsAt,
   type TaskAssigneeCandidate,
-  tryParseSessionId,
-  type AnalyticsSubsystem,
-  type AssigneeObservation,
-  type DaemonHealthSubsystem,
-  type FinishedAnalyticsSession,
-  type FoundationPaths,
-  type LearningSubsystem,
-  type ScratchReclamation,
-  type ChildGrantRequester,
-  childGrantRequester,
-  isTaskBoardError,
   type TaskBoardSubsystem,
+  TaskError,
   type TaskSubsystem,
+  TeamAdvisor,
   TerminalMountError,
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
-  NameAllocator,
-  type NameAllocationErrorCode,
-  type NameAllocationRequest,
-  type NameAllocationResult,
-  type NameClaim,
-  type NameSubsystem,
-  normalizeCallsign,
-  CALLSIGN_WINDOW_MS,
-  SessionLifecycleService,
-  ResumeCancelled,
-  ResumeRefused,
-  type ResumeLauncher,
-  ReviveDedupeConflict,
-  SessionResumeError,
-  SessionResumeService,
-  type SessionResumeSubsystem,
-  defaultSessionSendSettings,
-  SendPending,
-  SendRefused,
-  SessionSendError,
-  SessionSendService,
-  type SessionSendSubsystem,
-  SessionMonitorService,
-  defaultSessionMonitorSettings,
-  InvalidDeadlineRefused,
-  SessionSignalError,
-  SessionSignalService,
-  type SessionSignalSubsystem,
-  SignalRefused,
-  UnknownPeerRefused,
-  sessionHealthSettingsAt,
-  type SessionHealthSettings,
-  defaultSessionResumeSettings,
-  CodexPickerCleanup,
-  HarnessQuirkService,
-  SessionProvenanceStamper,
   TmuxController,
-  type BrowserLoginLifecycle,
-  type BrowserViewerHost,
-  MigrationPreflight,
-  type MigrationReportStore,
-  type ObservedSession,
-  contextWindowForSession,
-  jsonObject,
-  SessionMigrateError,
-  type SessionMigrateFailure,
-  type SessionMigrateSubsystem,
-  usageProbeCommand,
-  type ApiServerHandle,
-  type ApiServerPort,
-  type DaemonConfig,
-  type CatalogSubsystem,
-  type MillisecondClockPort,
-  type MountedSubsystems,
-  type SttSubsystem,
-  type SessionId,
-  type UsageFeedPort,
-  ClaudeTranscriptParser,
-  CodexTranscriptParser,
-  searchTranscript,
   type TranscriptEvent,
+  TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   type TranscriptSource,
+  tryParseSessionId,
+  UnknownPeerRefused,
+  type UsageFeedPort,
+  usageProbeCommand,
+  type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
+import { startSttWorker } from './stt-worker.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
@@ -2097,32 +2098,17 @@ function createLearningSubsystem(
 }
 
 /**
- * Scratch reclamation this daemon does not perform.
- *
- * `enabled` is FALSE and is not configurable, for the same reason `LEARNING_CONFIG.enabled` is: it
- * is a fact about this build rather than a setting. No scratch garbage collector is mounted — the
- * `/v1/gc` route the CLI speaks is not served — so the two counters beside it are zero because
- * nothing reclaims, not because a reclaimer found nothing. The unit that mounts the collector
- * replaces this with the collector's own totals.
- */
-const SCRATCH_UNMOUNTED: ScratchReclamation = {
-  enabled: false,
-  reclaimedSessions: 0,
-  reclaimedBytes: 0,
-};
-
-/**
  * The daemon's own health, over the self-check `start` ticks.
  *
  * The process id is read HERE rather than in the route, because `src/lib` may not touch `process`:
  * a domain that read its own pid could not be driven from a test, and the whole point of the field
  * is that an operator can signal the process that is actually serving.
  */
-function createHealthSubsystem(health: SessionHealthService): DaemonHealthSubsystem {
+function createHealthSubsystem(health: SessionHealthService, scratch: ScratchReclamation): DaemonHealthSubsystem {
   return {
     report: async () => await health.report(),
     pid: process.pid,
-    scratch: SCRATCH_UNMOUNTED,
+    scratch,
   };
 }
 
@@ -2619,13 +2605,36 @@ export function buildWorld(): DaemonWorld {
         },
         defaultSessionMonitorSettings,
       );
+      // One collector owns the lifetime counters health reports and the explicit `/v1/gc` surface.
+      // It reads through opened storage and observes through the same revive adapter that would
+      // replace a pane, so a scratch sweep cannot mistake another tmux server for ours.
+      const scratchGc = new FileScratchCollector(
+        {
+          list: () => storage.listSessions(),
+          config: async id => await storage.readConfig(parseSessionId(id)),
+          state: async id => await storage.readState(parseSessionId(id)),
+          directory: id => createSessionPaths(paths, parseSessionId(id)).directory,
+        },
+        { alive: async id => (await reviver.observe(parseSessionId(id))).alive },
+      );
+      const scratch: ScratchReclamation = {
+        get enabled() {
+          return scratchGc.totals().enabled;
+        },
+        get reclaimedSessions() {
+          return scratchGc.totals().reclaimedSessions;
+        },
+        get reclaimedBytes() {
+          return scratchGc.totals().reclaimedBytes;
+        },
+      };
       // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
       // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
       // its own repository handle over the same document, and the atomicity of `transaction` is what
       // the whole authorization model rests on.
       const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
       return {
-        health: createHealthSubsystem(health),
+        health: createHealthSubsystem(health, scratch),
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory
@@ -2715,6 +2724,7 @@ export function buildWorld(): DaemonWorld {
           new ProcfsSessionRootPinner(),
           new RunnerSessionGit(new BunGitRunner()),
         ),
+        scratchGc,
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
