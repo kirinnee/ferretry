@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { daemonId } from '../../../../src/lib/daemon-connection.ts';
 import {
+  isSettingId,
   SETTINGS_DEFINITIONS,
   SETTINGS_LINKS,
-  isSettingId,
   settingsHref,
   settingsPaletteEntries,
 } from '../../../../src/features/settings/settings-catalog.ts';
+import { daemonId } from '../../../../src/lib/daemon-connection.ts';
 
 const alpha = daemonId('daemon-alpha');
 const beta = daemonId('daemon-beta');

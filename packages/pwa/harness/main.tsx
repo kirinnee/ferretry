@@ -58,17 +58,19 @@ import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-s
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
+import { SettingsPage } from '../src/features/settings/settings-page.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
 import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
+import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
+import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
@@ -110,6 +112,7 @@ const daemon = daemonConnection({
   deviceToken: 'harness-token',
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
+const settingsControls = new DaemonControlsStore();
 
 /**
  * The markdown composer preference is a single reader-wide setting, so the
@@ -1287,6 +1290,33 @@ function Shell() {
               onRevokeDevice={() => {}}
             />
           </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Settings page preview',
+      render: () => (
+        <Card aria-label="Settings page preview" className="h-[800px] overflow-hidden sm:h-[760px]">
+          <SettingsPage
+            daemonId={daemon.daemonId}
+            controls={settingsControls}
+            dictation={{ binding: DEFAULT_DICTATION_SHORTCUT, onChange: () => {} }}
+            notifications={
+              <NotificationSettingsView
+                permission="granted"
+                enabled
+                preferences={{
+                  events: { attention: true, question: true, failed: true, completed: false },
+                  interactiveOnly: false,
+                }}
+                delivery="active"
+                devices={[]}
+                onEnabled={() => {}}
+                onPreferences={() => {}}
+                onRevokeDevice={() => {}}
+              />
+            }
+          />
         </Card>
       ),
     },
