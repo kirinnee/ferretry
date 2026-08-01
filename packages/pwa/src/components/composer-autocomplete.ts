@@ -18,6 +18,8 @@
  */
 
 import {
+  type KeyboardEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useId,
@@ -25,8 +27,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
-  type RefObject,
 } from 'react';
 import { fieldScore } from '../shell/palette-ranking.ts';
 
@@ -404,7 +404,12 @@ export function useComposerAutocomplete({
     null,
   );
 
-  const match = useMemo(() => detectComposerTrigger(value, selection), [selection, value]);
+  const selectionStart = selection.start;
+  const selectionEnd = selection.end;
+  const match = useMemo(
+    () => detectComposerTrigger(value, { start: selectionStart, end: selectionEnd }),
+    [selectionEnd, selectionStart, value],
+  );
   const provider = match ? (providers.find(item => item.trigger === match.trigger) ?? null) : null;
   const matchTriggerText = match?.triggerText ?? match?.trigger;
   const tokenDismissed =
