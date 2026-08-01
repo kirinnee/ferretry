@@ -31,7 +31,13 @@ const VIEWPORTS = [
 ] as const;
 
 /** Harness sections that live below the fold and are captured element by element. */
-const SECTIONS = ['harness-session-screen', 'harness-marks', 'harness-chat-width', 'harness-dead-pane'] as const;
+const SECTIONS = [
+  'harness-session-screen',
+  'harness-composer-markdown',
+  'harness-marks',
+  'harness-chat-width',
+  'harness-dead-pane',
+] as const;
 
 function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);

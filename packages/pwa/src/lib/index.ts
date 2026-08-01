@@ -2,6 +2,7 @@
 export const packageRole = 'pwa' as const;
 
 export * from '../components/attachment-unlock-prompt.tsx';
+export * from '../components/composer-autocomplete.ts';
 export * from '../components/question-form.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
@@ -88,6 +89,7 @@ export * from './attention-store.ts';
 export * from './browser-login.ts';
 export * from './callsign.ts';
 export * from './class-names.ts';
+export * from './composer-markdown.ts';
 export * from './connections.ts';
 export * from './controls.ts';
 export * from './daemon-connection.ts';
@@ -112,6 +114,7 @@ export * from './peer-message.ts';
 export * from './pin-client.ts';
 export * from './pin-store.ts';
 export * from './push-subscriptions.ts';
+export * from './references.ts';
 export * from './remote-browser.ts';
 export * from './runtime-models.ts';
 export * from './send-badge.ts';

@@ -1,9 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { IFyApiClient } from '@ferretry/protocol';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../lib/drafts.ts';
+import { useMdComposePref } from '../lib/md-compose.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
+import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 
 export interface ComposerProps {
@@ -43,6 +45,13 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const submitLock = useRef(false);
   const hintId = useId();
+  // A reader preference, not daemon data: it changes only how this browser
+  // paints a textarea, so a daemon switch must not change the editor chrome.
+  const highlighted = useMdComposePref() === 'on';
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const syncHighlight = useCallback((input: HTMLTextAreaElement) => {
+    syncComposerHighlightViewport(input, overlayRef.current);
+  }, []);
 
   // `scope` already carries the daemon identity, so it changes whenever the daemon does; listing
   // daemon.daemonId as well only re-ran this redundantly.
@@ -86,24 +95,32 @@ export function Composer({
       <label className="sr-only" htmlFor={`${hintId}-input`}>
         Message
       </label>
-      <textarea
-        disabled={disabled || sending}
-        id={`${hintId}-input`}
-        onChange={event => setDraft((event.currentTarget as unknown as { value: string }).value)}
-        onKeyDown={event => {
-          if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
-            return;
-          const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
-          const pointerFine = matchMedia?.('(pointer: fine)').matches ?? false;
-          const canHover = matchMedia?.('(hover: hover)').matches ?? false;
-          if (!composerUsesEnterToSend(pointerFine, canHover)) return;
-          event.preventDefault();
-          void submit();
-        }}
-        placeholder={placeholder}
-        rows={1}
-        value={draft}
-      />
+      <div className="fy-composer-input-layer" data-highlighted={String(highlighted)}>
+        <ComposerHighlight enabled={highlighted} overlayRef={overlayRef} text={draft} />
+        <textarea
+          disabled={disabled || sending}
+          id={`${hintId}-input`}
+          onChange={event => {
+            const input = event.currentTarget as unknown as HTMLTextAreaElement;
+            setDraft(input.value);
+            syncHighlight(input);
+          }}
+          onKeyDown={event => {
+            if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
+              return;
+            const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
+            const pointerFine = matchMedia?.('(pointer: fine)').matches ?? false;
+            const canHover = matchMedia?.('(hover: hover)').matches ?? false;
+            if (!composerUsesEnterToSend(pointerFine, canHover)) return;
+            event.preventDefault();
+            void submit();
+          }}
+          onScroll={event => syncHighlight(event.currentTarget as unknown as HTMLTextAreaElement)}
+          placeholder={placeholder}
+          rows={1}
+          value={draft}
+        />
+      </div>
       <div className="fy-composer-actions">
         <p id={hintId}>{busy ? 'Queue for the next turn' : 'Enter to send · Shift+Enter for a new line'}</p>
         <ComposerQuota quota={quota} />
