@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import type { PinSnapshot } from '@ferretry/protocol';
-import { PinsBoard, pinMessageLabel, pinProvenanceLabel } from '../../../src/features/pins/pins-board.tsx';
+import {
+  DaemonPinsBoard,
+  PinsBoard,
+  pinMessageLabel,
+  pinProvenanceLabel,
+} from '../../../src/features/pins/pins-board.tsx';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { DaemonPinClient } from '../../../src/lib/pin-client.ts';
 import { interact, mount } from '../../support/dom.ts';
 
 const noteId = '00000000-0000-4000-8000-000000000001';
@@ -11,6 +19,14 @@ const snapshot = (pins: PinSnapshot['pins']): PinSnapshot => ({
   pins,
   updatedAt: '2026-08-01T00:00:00.000Z',
 });
+const connection = daemonConnection({
+  daemonId: 'pins-daemon',
+  baseUrl: 'https://pins.example.test',
+  deviceToken: 'token',
+});
+const scope = daemonSessionScope(connection, 'session-a');
+const response = (value: unknown, status = 200): Response =>
+  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
 describe('PinsBoard', () => {
   it('renders daemon-backed note and message pins with visible agent provenance and an exact message action', async () => {
@@ -148,5 +164,71 @@ describe('PinsBoard', () => {
         createdByName: null,
       }),
     ).toBe('Assistant message');
+  });
+
+  it('hydrates and mutates only the matching daemon/session board, surfacing client failures honestly', async () => {
+    const actions: string[] = [];
+    const live = new DaemonPinClient(undefined, async (_input, init) => {
+      if (init?.body) actions.push(JSON.parse(String(init.body)).action);
+      return response(
+        snapshot([
+          { id: noteId, at: 1, kind: 'note', text: 'Server note', by: 'human', createdBy: null, createdByName: null },
+        ]),
+      );
+    });
+    const board = await mount(<DaemonPinsBoard connection={connection} scope={scope} client={live} />);
+    await interact(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(board.container.textContent).toContain('Server note');
+    const input = board.container.querySelector('textarea[aria-label="New pin note"]') as HTMLTextAreaElement;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'Client note');
+    await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
+    await interact(() =>
+      board.container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+    await interact(() =>
+      Array.from(board.container.querySelectorAll('button'))
+        .find(button => button.textContent?.includes('Edit'))
+        ?.click(),
+    );
+    const edit = board.container.querySelector('textarea[aria-label="Edit pin note"]') as HTMLTextAreaElement;
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(edit, 'Edited');
+    await interact(() => edit.dispatchEvent(new Event('input', { bubbles: true })));
+    await interact(() =>
+      Array.from(board.container.querySelectorAll('button'))
+        .find(button => button.textContent === 'Save')
+        ?.click(),
+    );
+    await interact(() =>
+      Array.from(board.container.querySelectorAll('button'))
+        .find(button => button.textContent?.includes('Remove'))
+        ?.click(),
+    );
+    await interact(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(actions).toEqual(['add', 'edit', 'remove']);
+
+    const offline = new DaemonPinClient(undefined, async () => response({ error: 'offline' }, 503));
+    const unavailable = await mount(<DaemonPinsBoard connection={connection} scope={scope} client={offline} />);
+    await interact(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(unavailable.container.textContent).toContain('offline');
+  });
+
+  it('refuses a crossed daemon scope before subscribing or fetching', async () => {
+    const other = daemonConnection({
+      daemonId: 'other-daemon',
+      baseUrl: 'https://other.example.test',
+      deviceToken: 'token',
+    });
+    await expect(
+      mount(<DaemonPinsBoard connection={other} scope={scope} client={new DaemonPinClient()} />),
+    ).rejects.toThrow('pin board scope');
   });
 });
