@@ -274,6 +274,7 @@ import {
   type TaskSubsystem,
   TeamAdvisor,
   TerminalMountError,
+  TerminalReapService,
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
@@ -2883,6 +2884,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(waitTicks);
     await subsystems.monitor.close();
   });
+  // The sweep is intentionally live before terminal-pane registration lands. Its empty durable
+  // registry is the safe state: a daemon with no exact registrations must never infer targets from
+  // tmux names, a process list, or an idle-looking pane. The next increment supplies the registry,
+  // durable session reader, exact observer, and exact reaper through these same four ports.
+  const terminalReaper = new TerminalReapService(
+    opened.storage.paths.home,
+    { list: async () => [] },
+    { list: async () => [] },
+    { observe: async () => undefined },
+    { reap: async () => undefined },
+  );
+  const terminalReapTicks = setInterval(() => {
+    void terminalReaper.sweep().catch(() => undefined);
+  }, 5_000);
+  cleanups.push(() => clearInterval(terminalReapTicks));
   await world.untilShutdown();
   return 0;
 }
