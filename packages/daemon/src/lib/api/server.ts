@@ -1,6 +1,7 @@
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
 import { ApiDispatcher } from './dispatcher.ts';
+import type { ApiRawDispatcher } from './raw.ts';
 import type { ApiRoute } from './route.ts';
 import type { ApiSocketDispatcher } from './socket.ts';
 import type { MillisecondClockPort } from '../runtime/boot.ts';
@@ -36,15 +37,19 @@ export interface ApiServerHandle {
 }
 
 /**
- * Both halves of the surface one adapter serves: request/response routes and protocol switches.
+ * Every part of the surface one adapter serves: request/response routes, protocol switches, and the
+ * byte-shaped routes that own the transport's own request and response.
  *
- * They travel together because they share credentials and a peer. A socket dispatcher built from
- * different credentials than the HTTP one is a second, quieter authorization boundary, and the two
- * would drift.
+ * They travel together because they share credentials and a peer. A dispatcher built from different
+ * credentials than the HTTP one is a second, quieter authorization boundary, and the two would
+ * drift.
  */
 export interface ApiSurface {
   readonly http: ApiDispatcher;
   readonly sockets: ApiSocketDispatcher;
+  /** Routes whose request or response cannot be a string — audio in, a ranged model file out. See
+   *  `api/raw.ts`. */
+  readonly raw: ApiRawDispatcher;
 }
 
 /** The transport seam. Implemented by an adapter around whatever server the runtime offers. */

@@ -21,6 +21,7 @@ import {
 import should from 'should';
 import { z } from 'zod';
 import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
+import { daemonVersion } from '../../../src/lib/version.ts';
 import {
   EXIT_ALREADY_RUNNING,
   MigrationPreflight,
@@ -461,6 +462,31 @@ class RecordingLoginRuntime implements BrowserLoginRuntime {
 
   advance(milliseconds: number): void {
     this.clock += milliseconds;
+  }
+}
+
+/**
+ * A dictation surface that records what it was handed and answers from memory.
+ *
+ * It stands in for `SttService` for one reason: the real one spawns a Whisper worker and downloads
+ * model files. Everything the mount is responsible for stays production — the route table, the
+ * credentials, the dispatcher and the transport.
+ */
+class RecordingSttSurface {
+  readonly seen: string[] = [];
+  closed = 0;
+
+  async handle(request: Request): Promise<Response | undefined> {
+    const path = new URL(request.url).pathname;
+    this.seen.push(`${request.method} ${path}`);
+    if (path.endsWith('/transcribe')) {
+      return Response.json({ bytes: [...new Uint8Array(await request.arrayBuffer())] });
+    }
+    return Response.json({ available: false });
+  }
+
+  async close(): Promise<void> {
+    this.closed += 1;
   }
 }
 
@@ -2067,6 +2093,79 @@ describe('daemon boot lifecycle', () => {
     // lets `fy daemon status` work on a host where no token has been minted yet.
     should(anonymous.status).equal(200);
     should(HealthViewSchema.parse(await anonymous.json()).pid).equal(view.pid);
+  });
+
+  /**
+   * Dictation, driven through the production composition root over a real socket.
+   *
+   * The subsystem was CONSTRUCTED by the composition root and called by nothing for five wiring
+   * units: `fy stt status`, `models`, `install`, `transcribe` and `enhance` are shipped commands
+   * whose gateway spoke these exact paths to a daemon that answered `unknown_route`.
+   *
+   * The SURFACE is substituted and everything else is real — the boot, the credentials, the raw
+   * route table, the dispatcher and the transport. It has to be: the production one spawns a Whisper
+   * worker that loads a multi-gigabyte model, and a test suite must never put that on the host. What
+   * is proved here is therefore the wiring the fake cannot fake — that a request reaches the surface
+   * at all, that the BYTES arrive unmangled, that the token is demanded, and that shutdown releases
+   * the worker.
+   */
+  it('should reach the dictation surface with its bytes intact and release it on shutdown', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-stt');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const base = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const surface = new RecordingSttSurface();
+    const exit = start({ ...base, stt: surface }, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    // A NUL and a lone 0xFF: neither survives a round trip through a string body, so decoding these
+    // back out is what proves the request reached the surface over the RAW seam rather than through
+    // `ApiRequest.text()`.
+    const audio = new Uint8Array([0x00, 0xff, 0x10, 0x00]);
+
+    // Act
+    const status = await fetch(`http://127.0.0.1:${port}/v1/stt/status`, { headers });
+    const anonymous = await fetch(`http://127.0.0.1:${port}/v1/stt/status`);
+    const transcribed = await fetch(`http://127.0.0.1:${port}/v1/stt/transcribe`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'audio/L16; rate=16000; channels=1' },
+      body: audio,
+    });
+    // The public model-file prefix is deliberately NOT mounted: it exists to hand a browser the
+    // weights and nothing in this repository mints such a URL yet. It must fall through to the HTTP
+    // table rather than be served by a raw route nobody asked for.
+    const publicFile = await fetch(`http://127.0.0.1:${port}/stt-models/base.en/model.bin`, { headers });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // Reached: an unmounted surface answers `unknown_route`, not the surface's own body.
+    should(status.status).equal(200);
+    should((await status.json()) as { available: boolean }).have.property('available', false);
+    // The daemon version travels on a response the surface built for itself, like every other.
+    should(status.headers.get('x-ferretry-version')).equal(daemonVersion);
+    // The raw table is behind the SAME authorization boundary as the rest of the surface.
+    should(anonymous.status).equal(401);
+    should(transcribed.status).equal(200);
+    should((await transcribed.json()) as { bytes: number[] }).have.property('bytes', [0, 255, 16, 0]);
+    should(surface.seen).deepEqual(['GET /v1/stt/status', 'POST /v1/stt/transcribe']);
+    should(publicFile.status).equal(404);
+    should((await publicFile.json()) as { code: string }).have.property('code', 'unknown_route');
+    // The worker is released with the rest of the host acquisitions: a daemon that exited holding it
+    // would leave a process with a multi-gigabyte model loaded and nothing left to reap it.
+    should(surface.closed).equal(1);
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

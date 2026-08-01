@@ -5,6 +5,7 @@ import {
   ApiDispatcher,
   ApiError,
   ApiRouter,
+  ApiRawDispatcher,
   ApiSocketDispatcher,
   jsonResponse,
   SOCKET_MAX_PENDING_FRAMES,
@@ -13,6 +14,7 @@ import {
   type ApiServerHandle,
   type SocketDownstream,
   type SocketHandler,
+  type RawRoute,
   type SocketRoute,
 } from '../../../src/lib/api/index.ts';
 
@@ -35,10 +37,11 @@ afterEach(async () => {
   }
 });
 
-function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = []) {
+function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = [], raw: readonly RawRoute[] = []) {
   return {
     http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
     sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS),
+    raw: new ApiRawDispatcher(new ApiRouter(raw), CREDENTIALS),
   };
 }
 

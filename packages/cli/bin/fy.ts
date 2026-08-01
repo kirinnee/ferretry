@@ -21,7 +21,6 @@ import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunAudioFileReader } from '../src/adapters/stt/audio-file';
 import { TimerDelay } from '../src/adapters/stt/delay';
-import { BunShell, type IShellRunner } from '../src/adapters/system/shell';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
@@ -29,7 +28,6 @@ import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
 import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
-import { CliProgressBar, type IProgressBar } from '../src/adapters/terminal/progress';
 import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
@@ -95,9 +93,7 @@ export function createProgram(): Command {
 export interface CliWorld {
   readonly io: ICliIo;
   readonly spinner: ISpinner;
-  readonly progress: IProgressBar;
   readonly prompt: IPrompt;
-  readonly shell: IShellRunner;
   readonly interactive: boolean;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
@@ -109,9 +105,7 @@ export function buildWorld(): CliWorld {
   return {
     io,
     spinner: new OraSpinner(),
-    progress: new CliProgressBar(),
     prompt: new InquirerPrompt(),
-    shell: new BunShell(),
     interactive: io.interactive(),
     environment: process.env,
   };

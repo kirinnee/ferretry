@@ -1,8 +1,6 @@
 import { CommanderError } from 'commander';
 import { createProgram, registerDomain } from '../../bin/fy';
-import { BunShell } from '../../src/adapters/system/shell';
 import type { ICliIo } from '../../src/adapters/terminal/console-io';
-import type { IProgressBar } from '../../src/adapters/terminal/progress';
 import type { IPrompt } from '../../src/adapters/terminal/prompt';
 import type { ISpinner } from '../../src/adapters/terminal/spinner';
 
@@ -70,7 +68,6 @@ export class InProcessCliDriver implements CliDriver {
         err += `${text}\n`;
       },
     };
-    const progress: IProgressBar = { start: () => {}, tick: () => {}, stop: () => {} };
     const prompt: IPrompt = {
       ask: () => Promise.reject(new Error('interactive prompt is unavailable in-process')),
     };
@@ -91,9 +88,7 @@ export class InProcessCliDriver implements CliDriver {
     registerDomain(program, {
       io,
       spinner,
-      progress,
       prompt,
-      shell: new BunShell(),
       interactive: false,
       // Hermetic: an in-process journey never inherits the operator's FY_* environment — with no
       // FY_TOKEN the shared client refuses before it opens a socket, so no journey reaches a daemon.

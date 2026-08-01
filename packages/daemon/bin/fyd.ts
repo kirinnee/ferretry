@@ -135,6 +135,7 @@ import {
   type PlannedInitialAttachments,
   EXIT_ALREADY_RUNNING,
   createMountedDispatcher,
+  createMountedRawDispatcher,
   createMountedSocketDispatcher,
   PinService,
   SessionPlanner,
@@ -221,6 +222,7 @@ import {
   type DaemonConfig,
   type MillisecondClockPort,
   type MountedSubsystems,
+  type SttSubsystem,
   type SessionId,
   type UsageFeedPort,
   ClaudeTranscriptParser,
@@ -454,14 +456,27 @@ export interface DaemonWorld {
      * supplied.
      */
     browserLogin: BrowserLoginLifecycle,
+    /**
+     * Dictation, passed IN for the same reason as every other host adapter here: transcribing spawns
+     * a worker process that loads a multi-gigabyte model, and installing one downloads it. A test
+     * substitutes this and keeps the raw route table, the credentials and the dispatcher exactly as
+     * production builds them.
+     */
+    stt: SttSubsystem,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
   /** Wall-clock milliseconds. Injected rather than read from `Date.now()` at the point of use so
    *  the uptime and freshness the API reports are drivable from a test. */
   readonly clock: MillisecondClockPort;
-  /** The speech-to-text surface and its on-demand worker supervisor. */
-  readonly stt: SttService;
+  /**
+   * The speech-to-text surface and its on-demand worker supervisor.
+   *
+   * Typed as the MOUNT's narrow interface rather than as `SttService`, so a test can supply a
+   * surface without a model store, a Whisper worker and an enhancement transport behind it. The
+   * production service satisfies it structurally.
+   */
+  readonly stt: SttSubsystem;
   /** Resolves when the process should shut down. Injected so a test can drive a
    *  full boot without the daemon running forever. */
   readonly untilShutdown: () => Promise<void>;
@@ -2092,7 +2107,7 @@ export function buildWorld(): DaemonWorld {
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     browserLogin: createBrowserLoginWorld(paths),
-    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight, browserLogin) => {
+    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight, browserLogin, stt) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
@@ -2166,6 +2181,7 @@ export function buildWorld(): DaemonWorld {
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
         recommend: createRecommendSubsystem(advisorOver, usage),
+        stt,
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -2242,7 +2258,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.createResumeLauncher(opened.storage),
     world.migratePreflight,
     world.browserLogin.window,
+    world.stt,
   );
+  // Registered with the other host acquisitions: the dictation surface spawns a Whisper worker on
+  // the first transcription and holds it loaded for the next one, so a daemon that exited without
+  // closing it would leave a process holding a multi-gigabyte model with nothing left to reap it.
+  // Closing is idempotent and costs nothing when no transcription ever ran.
+  cleanups.push(async () => await world.stt.close());
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.
@@ -2261,14 +2283,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
   // window routinely and reported a permanent failure for a condition that clears in a second.
   //
-  // BOTH halves of the surface are served by the one host, from the one credential set: the
-  // request/response routes and the protocol switches that carry terminal streams.
+  // ALL THREE parts of the surface are served by the one host, from the one credential set: the
+  // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
+  // routes that carry dictation audio.
   const server: ApiServerHandle = await world.boot.binder.bind(
     async () =>
       await world.api.listen(
         {
           http: createMountedDispatcher(base, subsystems),
           sockets: createMountedSocketDispatcher(base, subsystems),
+          raw: createMountedRawDispatcher(base, subsystems),
         },
         { host: config.host, port: config.port },
       ),
