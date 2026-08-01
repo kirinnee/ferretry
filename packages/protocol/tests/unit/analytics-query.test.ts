@@ -9,7 +9,7 @@ import {
   matcherLikePattern,
   parseAnalyticsQuery,
   scopeAnalyticsQuery,
-} from '../../../src/lib/analytics/query.ts';
+} from '../../src/lib/analytics-query.ts';
 
 describe('analytics query language', () => {
   it('should default to a daily fleet aggregate', () => {
