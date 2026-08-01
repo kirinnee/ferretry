@@ -37,6 +37,42 @@ export function sendKeyArguments(session: string, key: string): readonly string[
 }
 
 /**
+ * The paste buffer one session's deliveries use.
+ *
+ * Derived from the session name rather than randomised so that a crashed delivery leaves at most one
+ * stale buffer per session instead of one per attempt — a tmux buffer holds the payload in the
+ * server's memory, and a turn brief is not something to leave lying there.
+ */
+export function pasteBufferName(session: string): string {
+  return `fy-paste-${sessionTarget(session)}`;
+}
+
+/**
+ * Load a payload into that buffer from stdin.
+ *
+ * Stdin, not an argument: a turn brief is far past any argv limit, and a value on the command line
+ * would be visible in `/proc` to every user on the box.
+ */
+export function loadBufferArguments(session: string): readonly string[] {
+  return ['load-buffer', '-b', pasteBufferName(session), '-'];
+}
+
+/**
+ * Paste it into the pane as ONE bracketed-paste event (`-p`), deleting the buffer afterwards (`-d`).
+ *
+ * Bracketed paste is what tells the TUI these characters are data rather than typing, so a payload
+ * containing a newline arrives as one message instead of submitting itself half-written.
+ */
+export function pasteBufferArguments(session: string): readonly string[] {
+  return ['paste-buffer', '-p', '-d', '-b', pasteBufferName(session), '-t', sessionTarget(session)];
+}
+
+/** Drop the buffer when a paste never happened, so a failed delivery leaves no payload behind. */
+export function deleteBufferArguments(session: string): readonly string[] {
+  return ['delete-buffer', '-b', pasteBufferName(session)];
+}
+
+/**
  * A POSIX environment name. The bound is what keeps `-e NAME=VALUE` unambiguous: tmux splits that
  * argument on the FIRST `=`, so a name containing one would silently rename the variable and hand
  * the program a value it never asked for — and a per-session secret delivered under the wrong name

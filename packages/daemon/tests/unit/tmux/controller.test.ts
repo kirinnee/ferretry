@@ -2,10 +2,13 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   capturePaneArguments,
+  deleteBufferArguments,
   hasSessionArguments,
   killSessionArguments,
   listSessionsArguments,
+  loadBufferArguments,
   newSessionArguments,
+  pasteBufferName,
   paneMetadataArguments,
   panePidArguments,
   paneTarget,
@@ -290,5 +293,53 @@ describe('TmuxController', () => {
     await should(sendFailure.sendLiteral('work', 'hello')).rejectedWith('tmux could not send literal text');
     await should(keyFailure.sendKey('work', 'Enter')).rejectedWith('tmux could not send key');
     await should(stopFailure.stop('work')).rejectedWith('tmux could not stop the session');
+  });
+});
+
+describe('tmux bracketed paste', () => {
+  it('should load the payload over stdin and paste it as one bracketed event', async () => {
+    // Arrange
+    const port = new FakeTmux([]);
+    const stdins: (string | undefined)[] = [];
+    const recording: TmuxCommandPort = {
+      execute: async (arguments_, stdin) => {
+        stdins.push(stdin);
+        return await port.execute(arguments_);
+      },
+    };
+
+    // Act
+    await new TmuxController(recording).paste('work-1', 'first line\nsecond line');
+
+    // Assert — the payload never appears in an argument vector, only on stdin.
+    should(port.received).deepEqual([
+      ['load-buffer', '-b', 'fy-paste-work-1', '-'],
+      ['paste-buffer', '-p', '-d', '-b', 'fy-paste-work-1', '-t', 'work-1'],
+    ]);
+    should(stdins).deepEqual(['first line\nsecond line', undefined]);
+    should(pasteBufferName('work-1')).equal('fy-paste-work-1');
+    should(loadBufferArguments('work-1')).deepEqual(['load-buffer', '-b', 'fy-paste-work-1', '-']);
+    should(deleteBufferArguments('work-1')).deepEqual(['delete-buffer', '-b', 'fy-paste-work-1']);
+  });
+
+  it('should refuse an empty payload and drop the buffer when the paste itself fails', async () => {
+    // Arrange
+    const empty = new TmuxController(new FakeTmux([]));
+    const failing = new FakeTmux([ok(), { code: 1, stdout: '', stderr: 'no client' }]);
+    const noMessage = new FakeTmux([ok(), { code: 1, stdout: '', stderr: '' }]);
+    const loadFailure = new FakeTmux([{ code: 1, stdout: '', stderr: 'buffer too large' }]);
+
+    // Act + Assert
+    await should(empty.paste('work-1', '')).rejectedWith('paste text must not be empty');
+    await should(new TmuxController(failing).paste('work-1', 'a\nb')).rejectedWith('no client');
+    should(failing.received.at(-1)).deepEqual(['delete-buffer', '-b', 'fy-paste-work-1']);
+    await should(new TmuxController(noMessage).paste('work-1', 'a\nb')).rejectedWith(
+      'tmux could not paste into the pane',
+    );
+    await should(new TmuxController(loadFailure).paste('work-1', 'a\nb')).rejectedWith('buffer too large');
+    should(loadFailure.received.map(call => call[0])).deepEqual(['load-buffer']);
+    await should(
+      new TmuxController(new FakeTmux([{ code: 1, stdout: '', stderr: '' }])).paste('work-1', 'a\nb'),
+    ).rejectedWith('tmux could not load the paste buffer');
   });
 });
