@@ -432,7 +432,7 @@ describe('RemoteBrowserViewer input', () => {
 
   it('captures each pointer through release/cancel and requests mobile text focus on touch', () => {
     const focusRequests: string[] = [];
-    const { canvas } = interactive({ onTouchInputFocus: () => focusRequests.push('focus') });
+    const { canvas, socket } = interactive({ onTouchInputFocus: () => focusRequests.push('focus') });
     const captured = new Set<number>();
     const released: number[] = [];
     const target = {
@@ -463,10 +463,13 @@ describe('RemoteBrowserViewer input', () => {
     run(() => canvas.props.onPointerUp(pointerEvent({ currentTarget: target, pointerId: 7, buttons: 0 })));
     expect(captured.has(7)).toBe(false);
 
-    run(() => canvas.props.onPointerDown(pointerEvent({ currentTarget: target, pointerId: 8 })));
-    run(() => canvas.props.onPointerCancel(pointerEvent({ currentTarget: target, pointerId: 8, buttons: 0 })));
+    run(() => canvas.props.onPointerDown(pointerEvent({ button: 2, buttons: 2, currentTarget: target, pointerId: 8 })));
+    run(() =>
+      canvas.props.onPointerCancel(pointerEvent({ button: -1, buttons: 0, currentTarget: target, pointerId: 8 })),
+    );
     expect(released).toEqual([7, 8]);
     expect(focusRequests).toEqual(['focus']);
+    expect(socket.inputs().at(-1)).toMatchObject({ type: 'mouseReleased', button: 'right' });
   });
 
   it('releases every held key when the frame loses focus', () => {
@@ -614,15 +617,12 @@ describe('RemoteBrowserViewer input', () => {
     const surface = mounted.container.querySelector<HTMLCanvasElement>('.fy-remote-browser-input');
     if (container === null || image === null || surface === null) throw new Error('the fitted frame was not mounted');
 
-    // Both replaced elements carry the same intrinsic viewport and the same
-    // contain constraints, so flex centers one shared 320x240 frame rather than
-    // stretching the transparent surface across this wider 800x400 container.
+    // A real layout reports a 320x240 image centered inside an 800x400 box.
+    // Drive the image's load seam after installing those DOM facts so the
+    // transparent surface is positioned from the actual letterboxed rectangle.
     expect(container.style.display).toBe('flex');
     expect(surface.width).toBe(640);
     expect(surface.height).toBe(480);
-    expect(surface.style.inset).toBe('auto');
-    expect(surface.style.maxWidth).toBe('100%');
-    expect(surface.style.maxHeight).toBe('100%');
 
     const rect = (left: number, top: number, width: number, height: number): DOMRect =>
       ({
@@ -636,7 +636,18 @@ describe('RemoteBrowserViewer input', () => {
         y: top,
         toJSON: () => ({}),
       }) as DOMRect;
+    container.getBoundingClientRect = () => rect(0, 0, 800, 400);
     image.getBoundingClientRect = () => rect(240, 80, 320, 240);
+    await interact(() => image.dispatchEvent(new Event('load')));
+    expect(surface.style.inset).toBe('auto');
+    expect(surface.style.left).toBe('240px');
+    expect(surface.style.top).toBe('80px');
+    expect(surface.style.width).toBe('320px');
+    expect(surface.style.height).toBe('240px');
+
+    // Keep coordinate conversion independently defensive: if a host stylesheet
+    // regressed the canvas to the container, this off-centre point would map to
+    // (256, 168), not the image-relative (160, 120).
     surface.getBoundingClientRect = () => rect(0, 0, 800, 400);
     surface.setPointerCapture = () => undefined;
     surface.hasPointerCapture = () => false;
@@ -648,14 +659,14 @@ describe('RemoteBrowserViewer input', () => {
           bubbles: true,
           button: 0,
           buttons: 1,
-          clientX: 400,
-          clientY: 200,
+          clientX: 320,
+          clientY: 140,
           pointerId: 9,
           pointerType: 'mouse',
         }),
       ),
     );
-    expect(socket.inputs().at(-1)).toMatchObject({ type: 'mousePressed', x: 320, y: 240 });
+    expect(socket.inputs().at(-1)).toMatchObject({ type: 'mousePressed', x: 160, y: 120 });
     await mounted.unmount();
   });
 });

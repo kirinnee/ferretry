@@ -14,7 +14,7 @@ import type {
   WheelEvent as ReactWheelEvent,
   Ref,
 } from 'react';
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import {
@@ -23,6 +23,7 @@ import {
   nextRemoteClickRun,
   type RemoteClickRun,
   type RemoteKeyEvent,
+  type RemotePointerButton,
   remoteBrowserStreamUrl,
   remoteCanvasPoint,
   remoteInputModifiers,
@@ -142,11 +143,14 @@ export function RemoteBrowserViewer({
   const previousPageRef = useRef<string | undefined>(undefined);
   const identityRef = useRef<string | null>(null);
   const activePageRef = useRef<string | undefined>(undefined);
+  const frameContainerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef<HTMLCanvasElement | null>(null);
   const socketRef = useRef<RemoteBrowserSocket | null>(null);
   const pressedKeysRef = useRef(new Map<string, BrowserInputEvent>());
+  const pressedPointersRef = useRef(new Map<number, RemotePointerButton>());
   const clickRunRef = useRef<RemoteClickRun | null>(null);
+  const [inputRect, setInputRect] = useState<RemoteFrameRect | null>(null);
 
   const running = status?.state === 'running';
   const currentPageId = activePageId(status);
@@ -243,6 +247,55 @@ export function RemoteBrowserViewer({
     [onHumanActivity, sendInput],
   );
 
+  /** Pins the transparent surface to the image's actual letterboxed DOM box. */
+  const measureInputSurface = useCallback(() => {
+    const container = frameContainerRef.current;
+    const image = imageRef.current;
+    if (container === null || image === null) return;
+    const containerRect = container.getBoundingClientRect();
+    const imageRect = image.getBoundingClientRect();
+    if (imageRect.width <= 0 || imageRect.height <= 0) {
+      setInputRect(current => (current === null ? current : null));
+      return;
+    }
+    const next: RemoteFrameRect = {
+      left: imageRect.left - containerRect.left - container.clientLeft + container.scrollLeft,
+      top: imageRect.top - containerRect.top - container.clientTop + container.scrollTop,
+      width: imageRect.width,
+      height: imageRect.height,
+    };
+    setInputRect(current =>
+      current?.left === next.left &&
+      current.top === next.top &&
+      current.width === next.width &&
+      current.height === next.height
+        ? current
+        : next,
+    );
+  }, []);
+
+  const frameVisible = frameUrl !== null;
+  useLayoutEffect(() => {
+    if (!fit || !frameVisible) return;
+    measureInputSurface();
+    const container = frameContainerRef.current;
+    const image = imageRef.current;
+    if (container === null || image === null) return;
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => {
+            measureInputSurface();
+          });
+    observer?.observe(container);
+    observer?.observe(image);
+    window.addEventListener('resize', measureInputSurface);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', measureInputSurface);
+    };
+  }, [fit, frameVisible, measureInputSurface]);
+
   useImperativeHandle(ref, () => ({ insertText, sendKey: pressKey, releaseKeys: releasePressedKeys }), [
     insertText,
     pressKey,
@@ -280,6 +333,7 @@ export function RemoteBrowserViewer({
     previousUrlRef.current = null;
     previousPageRef.current = currentPageId;
     pressedKeysRef.current.clear();
+    pressedPointersRef.current.clear();
     clickRunRef.current = null;
   }, [currentPageId, revokeObjectUrl, transportIdentity]);
 
@@ -292,6 +346,7 @@ export function RemoteBrowserViewer({
     previousUrlRef.current = null;
     previousPageRef.current = currentPageId;
     pressedKeysRef.current.clear();
+    pressedPointersRef.current.clear();
     clickRunRef.current = null;
   }, [currentPageId, revokeObjectUrl]);
 
@@ -357,6 +412,7 @@ export function RemoteBrowserViewer({
       disposed = true;
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       if (socket.readyState === 1) releasePressedKeys();
+      pressedPointersRef.current.clear();
       if (socketRef.current === socket) socketRef.current = null;
       socket.close(1000, 'viewer detached');
     };
@@ -401,6 +457,7 @@ export function RemoteBrowserViewer({
   const sendPointer = (
     event: ReactPointerEvent<HTMLElement>,
     type: 'mouseMoved' | 'mousePressed' | 'mouseReleased',
+    releasedButton?: RemotePointerButton,
   ) => {
     const point = framePoint(event);
     // PointerEvent.detail is always 0, so the click run is tracked here from
@@ -417,7 +474,7 @@ export function RemoteBrowserViewer({
       kind: 'mouse',
       type,
       ...point,
-      button: type === 'mouseMoved' ? 'none' : remotePointerButton(event.button),
+      button: type === 'mouseMoved' ? 'none' : (releasedButton ?? remotePointerButton(event.button)),
       buttons: event.buttons,
       clickCount,
       modifiers: remoteInputModifiers(event),
@@ -426,6 +483,7 @@ export function RemoteBrowserViewer({
   };
 
   const beginPointer = (event: ReactPointerEvent<HTMLCanvasElement>) => {
+    pressedPointersRef.current.set(event.pointerId, remotePointerButton(event.button));
     event.currentTarget.setPointerCapture(event.pointerId);
     if (event.pointerType === 'touch') {
       // Prevent the canvas's compatibility focus from stealing focus back after
@@ -437,7 +495,9 @@ export function RemoteBrowserViewer({
   };
 
   const finishPointer = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    sendPointer(event, 'mouseReleased');
+    const pressedButton = pressedPointersRef.current.get(event.pointerId);
+    pressedPointersRef.current.delete(event.pointerId);
+    sendPointer(event, 'mouseReleased', pressedButton);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
   };
@@ -520,6 +580,7 @@ export function RemoteBrowserViewer({
           has to lift that cap explicitly — without this the mode toggles its
           label and changes nothing on screen. */}
       <div
+        ref={frameContainerRef}
         className="fy-remote-browser-canvas"
         data-fit={fit ? true : undefined}
         style={{
@@ -535,6 +596,7 @@ export function RemoteBrowserViewer({
             ref={imageRef}
             src={frameUrl}
             alt="Live remote browser frame"
+            onLoad={measureInputSurface}
             style={
               fit
                 ? { flex: '0 1 auto', minHeight: 0, minWidth: 0 }
@@ -551,23 +613,24 @@ export function RemoteBrowserViewer({
           <canvas
             ref={frameRef}
             className="fy-remote-browser-input"
-            // In Fit, image and canvas are replaced elements with the same
-            // intrinsic viewport and contain limits, so flex centers the exact
-            // same letterboxed rectangle. At 1:1, both stay at the negotiated
-            // pixel size at the scroll box's top-left.
+            // In Fit, layout measurement pins this surface to the image's exact
+            // letterboxed rectangle. At 1:1, both stay at the negotiated pixel
+            // size at the scroll box's top-left.
             width={viewport.width}
             height={viewport.height}
             style={
               fit
-                ? {
-                    height: 'auto',
-                    inset: 'auto',
-                    maxHeight: '100%',
-                    maxWidth: '100%',
-                    minHeight: 0,
-                    minWidth: 0,
-                    width: 'auto',
-                  }
+                ? inputRect === null
+                  ? { height: 0, inset: 'auto', visibility: 'hidden', width: 0 }
+                  : {
+                      height: inputRect.height,
+                      inset: 'auto',
+                      left: inputRect.left,
+                      maxHeight: 'none',
+                      maxWidth: 'none',
+                      top: inputRect.top,
+                      width: inputRect.width,
+                    }
                 : { height: viewport.height, maxHeight: 'none', maxWidth: 'none', width: viewport.width }
             }
             tabIndex={0}

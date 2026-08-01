@@ -532,9 +532,12 @@ describe('RemoteBrowserPane viewport', () => {
       justifyContent: 'center',
       overflow: 'hidden',
     });
-    // Fitted, the frame and hitbox shrink together inside the letterboxed box.
+    // The viewer waits for the image's measured letterbox before exposing a
+    // pointer surface; until then, an invisible zero-sized canvas cannot send
+    // a click against the surrounding container. Its DOM-level viewer test
+    // asserts the measured overlay after image load.
     expect(image().props.style).toMatchObject({ flex: '0 1 auto', minHeight: 0, minWidth: 0 });
-    expect(hitbox().props.style).toMatchObject({ maxHeight: '100%', maxWidth: '100%' });
+    expect(hitbox().props.style).toMatchObject({ height: 0, visibility: 'hidden', width: 0 });
 
     await runAsync(async () => control(renderer, 'Fit').props.onClick());
     expect(box().props['data-fit']).toBeUndefined();
