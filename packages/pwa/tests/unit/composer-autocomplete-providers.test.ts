@@ -177,6 +177,22 @@ describe('composer skills provider', () => {
     await second;
     expect(requests).toBe(2);
   });
+
+  it.each([
+    [403, 'this paired device may not enumerate session skills'],
+    [404, 'skill suggestions are unavailable on this daemon'],
+  ] as const)('explains an empty daemon response with its status-specific fallback (%i)', async (status, message) => {
+    const provider = createSkillsProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json({}, status),
+    });
+
+    const result = await provider.candidates(context('/', ''));
+
+    expect(result.notice).toContain(message);
+    expect(result.notice).toContain('Built-in commands still work');
+  });
 });
 
 describe('composer files provider', () => {
