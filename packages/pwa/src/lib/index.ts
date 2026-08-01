@@ -47,6 +47,7 @@ export * from '../features/warden/warden-status-model.ts';
 export * from '../features/warden/warden-strip.tsx';
 export * from '../features/warden/warden-verdicts.tsx';
 export * from '../hooks/use-attention.ts';
+export * from '../hooks/use-debounce.ts';
 export * from '../hooks/use-details-tab.ts';
 export * from '../hooks/use-dialog-focus.ts';
 export * from '../hooks/use-fleet-view.ts';
