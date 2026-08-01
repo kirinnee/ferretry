@@ -30,6 +30,7 @@ import { type SttSubsystem, sttRawRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
+import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 
 /**
  * The subsystems the daemon process mounts on top of its base API surface, and the complete route
@@ -110,6 +111,11 @@ export interface MountedSubsystems {
   readonly sessionFilesystem: SessionFilesystem;
   /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
   readonly scratchGc: ScratchGcSubsystem;
+  /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
+   *  session, and the operator configuration that decides whether it may spend a session at all. The
+   *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
+   *  invisible to the reachability gate, which is how a background subsystem ships unmounted. */
+  readonly warden: WardenSubsystem;
 }
 
 /**
@@ -173,6 +179,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
     // its one-segment `fs`, so nothing here can shadow or be shadowed.
     ...sessionFilesystemRoutes(subsystems.sessionFilesystem, subsystems.sessions),
+    // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
+    // neither shadow nor be shadowed by anything above it.
+    ...wardenRoutes(subsystems.warden),
   ];
 }
 

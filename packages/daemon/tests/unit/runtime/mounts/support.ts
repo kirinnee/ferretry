@@ -17,6 +17,9 @@ import {
   type TaskCreateRequestInput,
   type TerminalListView,
   type TerminalView,
+  type WardenConfigView,
+  type WardenRunView,
+  type WardenStatusView,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
@@ -43,6 +46,8 @@ import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/in
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
+import { WardenError, type WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
+import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
 import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { TaskBoardSubsystem } from '../../../../src/lib/runtime/mounts/task-boards.ts';
 import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
@@ -1253,3 +1258,65 @@ export class FakeStt implements SttSubsystem {
     this.closed += 1;
   }
 }
+
+/**
+ * Warden supervision that records what it was asked and answers whatever it was told to.
+ *
+ * The real subsystem reads the whole fleet, spawns agent sessions and arms a timer, so nothing about
+ * the routes could be exercised against it. This keeps the route table, the scopes and the dispatcher
+ * exactly as production builds them and substitutes only the sweeping half.
+ */
+export class FakeWarden implements WardenSubsystem {
+  readonly runs: boolean[] = [];
+  readonly patches: unknown[] = [];
+  armed = 0;
+  disarmed = 0;
+
+  constructor(private readonly failure?: WardenError) {}
+
+  async status(): Promise<WardenStatusView> {
+    if (this.failure !== undefined) throw this.failure;
+    // No `lastSweepAt`: "nothing has run yet" is a distinct answer from "a sweep found nothing", and
+    // the fixture defaults to the one that claims less.
+    return { config: defaultWardenConfig, anomalies: [], fingerprint: '', failover: FAKE_FAILOVER };
+  }
+
+  async run(force: boolean): Promise<WardenRunView> {
+    if (this.failure !== undefined) throw this.failure;
+    this.runs.push(force);
+    return { sweptAt: '2026-07-31T00:00:00.000Z', anomalies: [], message: 'no anomalies to escalate' };
+  }
+
+  async config(): Promise<WardenConfigView> {
+    if (this.failure !== undefined) throw this.failure;
+    return { config: defaultWardenConfig, accounts: [...defaultWardenConfig.accounts], warnings: [] };
+  }
+
+  async updateConfig(patch: unknown): Promise<WardenConfigView> {
+    if (this.failure !== undefined) throw this.failure;
+    this.patches.push(patch);
+    return { config: defaultWardenConfig, accounts: [...defaultWardenConfig.accounts], warnings: [] };
+  }
+
+  async lastSweepAt(): Promise<string | undefined> {
+    return undefined;
+  }
+
+  async intervalMs(): Promise<number> {
+    return 300_000;
+  }
+
+  async arm(): Promise<() => void> {
+    this.armed += 1;
+    return () => {
+      this.disarmed += 1;
+    };
+  }
+}
+
+const FAKE_FAILOVER: WardenStatusView['failover'] = {
+  policy: 'fallback',
+  failureThreshold: 2,
+  cooldownMinutes: 30,
+  accounts: [],
+};

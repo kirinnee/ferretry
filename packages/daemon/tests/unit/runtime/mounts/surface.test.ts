@@ -26,6 +26,7 @@ import {
   FakeSessionSignal,
   FakeStt,
   FakeTaskBoards,
+  FakeWarden,
   FakeTerminals,
   healthSubsystem,
   human,
@@ -76,6 +77,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   stt: new FakeStt(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
+  warden: new FakeWarden(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -152,6 +154,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/fs/changes',
       'GET /v1/sessions/:sessionId/fs/diff',
       'GET /v1/sessions/:sessionId/fs',
+      // Fleet supervision. Every path is under `/v1/warden`, which no other subsystem uses, and the
+      // subsystem also owns the sweep TIMER — a supervision loop with no route would be invisible to
+      // the reachability gate, which is how a background subsystem ships unmounted.
+      'GET /v1/warden/status',
+      'POST /v1/warden/run',
+      'GET /v1/warden/config',
+      'PATCH /v1/warden/config',
     ]);
   });
 

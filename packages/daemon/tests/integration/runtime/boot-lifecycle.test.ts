@@ -2378,9 +2378,14 @@ describe('daemon boot lifecycle', () => {
     // The boot ran a self-check BEFORE binding, so the very first answer is a measurement rather than
     // an empty ledger.
     should(view.lastSelfCheckAt).not.be.null();
-    // The warden sweep is not mounted, so the daemon says so instead of reporting a broken one.
-    should(view.wardenTimerArmed).be.false();
-    should(view.wardenLastSweepSeconds).be.null();
+    // The warden sweep timer IS armed now, and the report says so rather than making a running
+    // supervisor look absent — the distinction this flag exists to draw.
+    should(view.wardenTimerArmed).be.true();
+    // Not asserted precisely: arming fires a boot sweep that is deliberately NOT awaited, so whether
+    // it has completed by the time this request lands is a race. Either answer is correct — `null`
+    // means "no sweep has finished yet", a number means one has — and the assertion is that it is one
+    // of exactly those two rather than a fabricated zero.
+    should(view.wardenLastSweepSeconds === null || view.wardenLastSweepSeconds >= 0).be.true();
     // Scratch GC IS mounted now. Enabled means the collector runs, not that it deletes: the policy
     // refuses anything that is not a daemon-owned entry, not terminal, or under the TTL, and refuses
     // outright when there is no finishedAt and no mtime to age from.
