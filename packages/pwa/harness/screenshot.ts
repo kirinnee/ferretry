@@ -154,6 +154,9 @@ try {
       const pairingTarget = join(outDir, `pairing-${viewport.name}.png`);
       await page.getByLabel('Daemon pairing').screenshot({ path: pairingTarget });
       process.stdout.write(`📸 pairing ${viewport.name} -> ${pairingTarget}\n`);
+      const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
+      await page.locator('[aria-labelledby="warden-attention-heading"]').screenshot({ path: wardenAttentionTarget });
+      process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
