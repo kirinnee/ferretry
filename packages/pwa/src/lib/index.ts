@@ -3,6 +3,7 @@ export const packageRole = 'pwa' as const;
 
 export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/composer-autocomplete.ts';
+export * from '../components/composer-runtime.tsx';
 export * from '../components/file-tree.tsx';
 export * from '../components/markdown.tsx';
 export * as fileTreeModel from '../components/file-tree-model.ts';
