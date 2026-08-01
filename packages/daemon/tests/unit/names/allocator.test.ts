@@ -101,6 +101,31 @@ describe('NameAllocator', () => {
     }
   });
 
+  it('should draw uniformly from the unused callsigns, not from a random pool position', async () => {
+    // Arrange — bert is occupied, so the source's index 2 must mean dora: the third of the
+    // three unused callsigns. A pool-position scan would incorrectly hand back cleo instead.
+    const active = { callsign: 'bert', ownerId: 'existing', claimedAtMs: 0, expiresAtMs: 100 };
+    let upperExclusive: number | undefined;
+    const random: NameRandomSource = {
+      nextIndex: upper => {
+        upperExclusive = upper;
+        return 2;
+      },
+    };
+    const subject = new NameAllocator(new MemoryClaimStore([active]), random, ['ada', 'bert', 'cleo', 'dora']);
+
+    // Act
+    const actual = await subject.allocate({ ownerId: 'new', nowMs: 50 });
+
+    // Assert
+    should(upperExclusive).equal(3);
+    should(actual).deepEqual({
+      ok: true,
+      source: 'automatic',
+      claim: { callsign: 'dora', ownerId: 'new', claimedAtMs: 50, expiresAtMs: 50 + 5 * 24 * 60 * 60 * 1_000 },
+    });
+  });
+
   it('should give concurrent automatic allocations distinct callsigns after an atomic race', async () => {
     // Arrange
     const store = new MemoryClaimStore();

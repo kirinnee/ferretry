@@ -84,9 +84,22 @@ export class NameAllocator {
       return { ok: false, error: { code: 'pool_exhausted', message: 'no callsigns are configured' } };
     }
 
-    let startIndex: number;
+    const available = availableCallsigns(this.pool, claims, request.nowMs, 0);
+    if (available.length === 0) {
+      return {
+        ok: false,
+        error: {
+          code: 'pool_exhausted',
+          message: 'every callsign is claimed in the active resolution window',
+        },
+      };
+    }
+
+    let availableIndex: number;
     try {
-      startIndex = this.random.nextIndex(this.pool.length);
+      // Match kteam's pickTeammateName: choose uniformly from the names that are unused now.
+      // A random pool start plus a circular scan weights names by the occupied gaps before them.
+      availableIndex = this.random.nextIndex(available.length);
     } catch (error) {
       return {
         ok: false,
@@ -96,7 +109,7 @@ export class NameAllocator {
         },
       };
     }
-    if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex >= this.pool.length) {
+    if (!Number.isInteger(availableIndex) || availableIndex < 0 || availableIndex >= available.length) {
       return {
         ok: false,
         error: { code: 'random_source_failed', message: 'callsign random source returned an invalid index' },
@@ -104,6 +117,14 @@ export class NameAllocator {
     }
 
     const source = requested ? ('fallback' as const) : ('automatic' as const);
+    const selected = available[availableIndex];
+    if (selected === undefined) {
+      return {
+        ok: false,
+        error: { code: 'random_source_failed', message: 'callsign random source returned an invalid index' },
+      };
+    }
+    const startIndex = this.pool.indexOf(selected);
     for (const callsign of availableCallsigns(this.pool, claims, request.nowMs, startIndex)) {
       const claim: NameClaim = {
         callsign,
