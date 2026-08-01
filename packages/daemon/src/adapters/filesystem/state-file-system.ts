@@ -1,19 +1,35 @@
 import { randomUUID } from 'node:crypto';
+import { constants, type Stats } from 'node:fs';
 import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import {
   type DirectoryEntry,
   type DurableAppend,
+  type DurableAppendOutcome,
   type FileInformation,
   type FileSystemFactory,
   type FileSystemPort,
   type FoundationPaths,
   isPathInside,
+  type JournalFingerprint,
   temporaryFilePath,
 } from '../../lib/index.ts';
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function namesSameFile(information: Stats, expected: JournalFingerprint): boolean {
+  return information.dev.toString() === expected.device && information.ino.toString() === expected.inode;
+}
+
+function fingerprintOf(information: Stats): JournalFingerprint {
+  return {
+    device: information.dev.toString(),
+    inode: information.ino.toString(),
+    size: information.size,
+    modifiedAtMs: Math.trunc(information.mtimeMs),
+  };
 }
 
 export class StateFileSystem implements FileSystemPort {
@@ -133,13 +149,7 @@ export class StateFileSystem implements FileSystemPort {
   async information(path: string): Promise<FileInformation | undefined> {
     try {
       const info = await stat(await this.checked(path));
-      return {
-        device: info.dev.toString(),
-        inode: info.ino.toString(),
-        size: info.size,
-        modifiedAtMs: Math.trunc(info.mtimeMs),
-        mode: info.mode & 0o777,
-      };
+      return { ...fingerprintOf(info), mode: info.mode & 0o777 };
     } catch (error) {
       if (isMissing(error)) return undefined;
       throw error;
@@ -181,6 +191,22 @@ export class StateFileSystem implements FileSystemPort {
     }
   }
 
+  async createFileExclusive(path: string, mode: number): Promise<JournalFingerprint> {
+    const target = await this.checked(path);
+    await this.ensureDirectory(dirname(target), 0o700);
+    const handle = await open(target, 'wx', mode);
+    let information: Stats;
+    try {
+      await handle.sync();
+      information = await handle.stat();
+    } finally {
+      await handle.close();
+    }
+    // The directory entry is the whole point of this call, so it has to be durable too.
+    await this.syncDirectory(dirname(target));
+    return fingerprintOf(information);
+  }
+
   async appendLineDurable(path: string, line: string): Promise<DurableAppend> {
     const target = await this.checked(path);
     await this.ensureDirectory(dirname(target), 0o700);
@@ -203,11 +229,60 @@ export class StateFileSystem implements FileSystemPort {
       return {
         byteOffset: before.size + (needsSeparator ? 1 : 0),
         byteLength: Buffer.byteLength(line, 'utf8'),
-        fingerprint: {
-          device: after.dev.toString(),
-          inode: after.ino.toString(),
-          size: after.size,
-          modifiedAtMs: Math.trunc(after.mtimeMs),
+        fingerprint: fingerprintOf(after),
+      };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async appendLineToExisting(path: string, line: string, expect: JournalFingerprint): Promise<DurableAppendOutcome> {
+    const target = await this.checked(path);
+    let handle: FileHandle;
+    try {
+      // No O_CREAT. Creation belongs to createFileExclusive alone, so the call that would write the
+      // next event can never be the call that resurrects a journal somebody deleted.
+      handle = await open(target, constants.O_RDWR | constants.O_APPEND);
+    } catch (error) {
+      if (isMissing(error)) return { kind: 'absent' };
+      throw error;
+    }
+    try {
+      const before = await handle.stat();
+      if (!namesSameFile(before, expect) || before.size !== expect.size) return { kind: 'replaced' };
+      let needsSeparator = false;
+      if (before.size > 0) {
+        const last = new Uint8Array(1);
+        await handle.read(last, 0, 1, before.size - 1);
+        needsSeparator = last[0] !== 0x0a;
+      }
+      const encoded = Buffer.from(`${needsSeparator ? '\n' : ''}${line}\n`, 'utf8');
+      await handle.writeFile(encoded);
+      await handle.chmod(0o600);
+      await handle.sync();
+      // The bytes are durable in an inode. Re-stat the PATHNAME to prove it still names THAT inode
+      // and grew by exactly this record: an impostor swapped in mid-write, or a foreign appender
+      // interleaving with it, would each make the byte offset reported below a lie.
+      const named = await this.information(target);
+      if (
+        named === undefined ||
+        named.device !== expect.device ||
+        named.inode !== expect.inode ||
+        named.size !== before.size + encoded.byteLength
+      ) {
+        return { kind: 'replaced' };
+      }
+      return {
+        kind: 'appended',
+        append: {
+          byteOffset: before.size + (needsSeparator ? 1 : 0),
+          byteLength: Buffer.byteLength(line, 'utf8'),
+          fingerprint: {
+            device: named.device,
+            inode: named.inode,
+            size: named.size,
+            modifiedAtMs: named.modifiedAtMs,
+          },
         },
       };
     } finally {

@@ -14,9 +14,10 @@ export type NameClaimAttempt =
   | { readonly claimed: false; readonly conflict: NameClaim };
 
 /**
- * Persistence must make `tryClaim` atomic across daemon requests. Historical
- * claims remain available from `listClaims` after expiry so reuse policy never
- * depends on mutable session metadata.
+ * Persistence must make `tryClaim` atomic across daemon requests. Expired claims
+ * need not be retained, but compaction is not guaranteed on any schedule: an
+ * aged-out reservation may still appear in `listClaims` until a later claim
+ * rewrites the ledger, so callers must inspect `expiresAtMs`.
  */
 export interface NameClaimStore {
   listClaims(): Promise<readonly NameClaim[]>;

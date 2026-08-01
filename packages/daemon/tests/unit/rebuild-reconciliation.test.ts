@@ -74,7 +74,7 @@ describe('index rebuild planning', () => {
     const input: SessionSource[] = [
       {
         id: parseSessionId('a-session'),
-        marker: { file: '/sessions/a/session-version', text: '2' },
+        marker: { file: '/sessions/a/session-version', text: '3' },
       },
       {
         id: parseSessionId('b-session'),

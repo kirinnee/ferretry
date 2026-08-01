@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   type ClockPort,
   CURRENT_SESSION_VERSION,
@@ -7,6 +7,7 @@ import {
   createSessionEvent,
   createSessionPaths,
   decideSessionMarker,
+  type DirectoryEntry,
   type EventPointer,
   encodeSessionEvent,
   type FileSystemPort,
@@ -26,9 +27,12 @@ import {
   type SessionEvent,
   type SessionId,
   type SessionIndex,
+  type SessionPaths,
   type SessionSource,
   scanJournalChunk,
   serializeJsonDocument,
+  sessionJournalRequired,
+  sessionMarkerNeedsUpgrade,
   tryParseSessionId,
 } from '../../lib/index.ts';
 
@@ -56,6 +60,27 @@ export class SessionLayoutError extends Error {
   }
 }
 
+export class MissingSessionJournalError extends Error {
+  constructor(
+    readonly sessionId: SessionId,
+    readonly file: string,
+  ) {
+    // Not "indexed": under the current marker this is proved from disk, long after the index is gone.
+    super(`session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
+    this.name = 'MissingSessionJournalError';
+  }
+}
+
+export class JournalReplacedError extends Error {
+  constructor(
+    readonly sessionId: SessionId,
+    readonly file: string,
+  ) {
+    super(`session ${sessionId} journal ${file} was replaced while appending; refusing to write into it`);
+    this.name = 'JournalReplacedError';
+  }
+}
+
 export class DurableEventIndexError extends Error {
   readonly durable = true;
 
@@ -72,12 +97,24 @@ interface SourceCollection {
   readonly sources: readonly SessionSource[];
   readonly problems: readonly JournalProblem[];
   readonly failedSessionIds: readonly string[];
+  readonly lostJournalSessionIds: readonly string[];
 }
 
 interface ObservationCollection {
   readonly observations: readonly SessionObservation[];
   readonly problems: readonly JournalProblem[];
   readonly failedSessionIds: readonly string[];
+}
+
+/** One session directory as a health tick sees it: cheap to obtain, enough to spot lost history. */
+export interface SessionDirectorySurvey {
+  readonly id: SessionId;
+  /**
+   * True when the journal file is gone from a session that owes one — either because its marker is
+   * the current version, or because an unmigrated legacy session still has an index fingerprint
+   * witnessing the journal it used to have.
+   */
+  readonly journalLost: boolean;
 }
 
 interface JournalObservation {
@@ -131,19 +168,112 @@ export class DaemonStorage {
     if (this.closed) throw new Error('daemon storage is closed');
   }
 
-  private async ensureSessionDirectory(id: SessionId): Promise<void> {
+  /**
+   * Refuses to read a session whose journal has vanished.
+   *
+   * The marker is the authoritative witness: it is on disk, written durably, and unlike the SQLite
+   * index it is never dropped and rebuilt — so it still answers after the index has been deleted,
+   * which is the case that used to fabricate an empty session. A version-1 directory predates the
+   * contract, so there the disposable index is the only evidence left.
+   */
+  private assertExpectedJournal(
+    id: SessionId,
+    marker: string | undefined,
+    indexed: IndexedSession | undefined,
+    present: boolean,
+  ): void {
+    if (present) return;
+    if (sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null)) {
+      throw new MissingSessionJournalError(id, createSessionPaths(this.paths, id).events);
+    }
+  }
+
+  /**
+   * Whether an unmarked directory is a creation that was interrupted before its marker landed.
+   *
+   * Creation writes the marker LAST, so the only prefix it can leave behind is a zero-length
+   * journal — provably lossless to complete. Marker-first would instead leave a marker without a
+   * journal, which is a FALSE data-loss claim that quarantines a brand-new session forever.
+   */
+  private async recoverableCreation(paths: SessionPaths, entries: readonly DirectoryEntry[]): Promise<boolean> {
+    if (entries.length === 0) return true;
+    const only = entries[0];
+    if (entries.length > 1 || only === undefined || only.directory || only.name !== basename(paths.events))
+      return false;
+    return (await this.fileSystem.information(paths.events))?.size === 0;
+  }
+
+  /**
+   * The journal a session must have, creating an empty one only where that is provably lossless.
+   *
+   * Answers undefined when the file is absent but the index still holds a fingerprint for it: that
+   * session demonstrably HAD a journal, and laying down an empty one would destroy the only evidence
+   * left that its history is gone. Callers turn that into a refusal, never into a repair.
+   */
+  private async ensureJournalFile(id: SessionId, paths: SessionPaths): Promise<JournalFingerprint | undefined> {
+    const existing = await this.fileSystem.information(paths.events);
+    if (existing !== undefined) return existing;
+    const indexed = this.index.findSession(id);
+    if (indexed !== undefined && indexed.journal !== null) return undefined;
+    return await this.fileSystem.createFileExclusive(paths.events, 0o600);
+  }
+
+  /** Gives the directory a journal and the current marker — marker LAST — or refuses to fabricate one. */
+  private async completeSessionUpgrade(id: SessionId, paths: SessionPaths): Promise<JournalFingerprint> {
+    const journal = await this.ensureJournalFile(id, paths);
+    if (journal === undefined) throw new MissingSessionJournalError(id, paths.events);
+    await this.fileSystem.writeTextAtomic(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
+    return journal;
+  }
+
+  /**
+   * Brings the session directory up to the current contract and answers with its journal.
+   *
+   * This is the ONLY place a journal is ever created. A version-2 directory whose journal is gone is
+   * refused rather than repaired: recreating it here would reopen exactly the hole this contract
+   * closes, one call before the append.
+   */
+  private async ensureSessionDirectory(id: SessionId): Promise<JournalFingerprint> {
     const paths = createSessionPaths(this.paths, id);
     const marker = await this.fileSystem.readText(paths.marker);
     if (marker === undefined) {
       const entries = await this.fileSystem.listDirectory(paths.directory);
-      if (entries.length > 0) throw new SessionLayoutError(id, undefined);
+      if (!(await this.recoverableCreation(paths, entries))) throw new SessionLayoutError(id, undefined);
       await this.fileSystem.ensureDirectory(paths.directory, 0o700);
-      await this.fileSystem.writeTextAtomic(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
-      return;
+      return await this.completeSessionUpgrade(id, paths);
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
     await this.fileSystem.ensureDirectory(paths.directory, 0o700);
+    if (sessionMarkerNeedsUpgrade(marker)) return await this.completeSessionUpgrade(id, paths);
+    const journal = await this.fileSystem.information(paths.events);
+    if (journal === undefined) throw new MissingSessionJournalError(id, paths.events);
     await this.fileSystem.setMode(paths.marker, 0o600);
+    return journal;
+  }
+
+  /**
+   * Gives every version-1 session directory a journal and the current marker, in place.
+   *
+   * Only version 1 is touched, and only where a journal can be created without destroying evidence.
+   * Nothing here refuses: a session whose journal is already lost must still let the home open, and
+   * quarantining it is the job of rebuild and the health pass, not of boot.
+   */
+  async upgradeLegacySessions(): Promise<readonly SessionId[]> {
+    this.assertOpen();
+    return await this.serial.runExclusive(async () => {
+      const upgraded: SessionId[] = [];
+      for (const entry of await this.fileSystem.listDirectory(this.paths.sessions)) {
+        if (!entry.directory) continue;
+        const id = tryParseSessionId(entry.name);
+        if (id === undefined) continue;
+        const paths = createSessionPaths(this.paths, id);
+        if (!sessionMarkerNeedsUpgrade(await this.fileSystem.readText(paths.marker))) continue;
+        if ((await this.ensureJournalFile(id, paths)) === undefined) continue;
+        await this.fileSystem.writeTextAtomic(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
+        upgraded.push(id);
+      }
+      return upgraded;
+    });
   }
 
   private async refuseNonEmptyUnmarkedSession(id: SessionId): Promise<void> {
@@ -285,6 +415,7 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { eventCount: 0, problems: [] };
     }
+    this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
     return this.applySource(source);
   }
 
@@ -305,6 +436,7 @@ export class DaemonStorage {
     const sources: SessionSource[] = [];
     const problems: JournalProblem[] = [];
     const failedSessionIds: string[] = [];
+    const lostJournalSessionIds: string[] = [];
     for (const entry of [...entries].sort((left, right) => left.name.localeCompare(right.name))) {
       if (!entry.directory) continue;
       const id = tryParseSessionId(entry.name);
@@ -319,8 +451,14 @@ export class DaemonStorage {
       }
       try {
         const source = await this.readSource(id, true);
-        if (source) sources.push(source);
+        if (source) {
+          this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
+          sources.push(source);
+        }
       } catch (error) {
+        // Quarantine, never abort: re-throwing here made one deleted journal unbuild the whole
+        // index, so every other session in the home vanished from every listing.
+        if (error instanceof MissingSessionJournalError) lostJournalSessionIds.push(id);
         failedSessionIds.push(id);
         problems.push({
           file: createSessionPaths(this.paths, id).directory,
@@ -330,7 +468,7 @@ export class DaemonStorage {
         });
       }
     }
-    return { sources, problems, failedSessionIds };
+    return { sources, problems, failedSessionIds, lostJournalSessionIds };
   }
 
   private async collectObservations(): Promise<ObservationCollection> {
@@ -378,6 +516,7 @@ export class DaemonStorage {
         eventCount: plan.events.length,
         problems,
         ...(collected.failedSessionIds.length ? { failedSessionIds: collected.failedSessionIds } : {}),
+        ...(collected.lostJournalSessionIds.length ? { lostJournalSessionIds: collected.lostJournalSessionIds } : {}),
       };
     });
   }
@@ -460,6 +599,7 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { problems: [] };
     }
+    this.assertExpectedJournal(id, source.marker.text, this.index.findSession(id), source.journal !== undefined);
     const result = this.applySource(source);
     return { session: result.session, problems: result.problems };
   }
@@ -536,11 +676,18 @@ export class DaemonStorage {
       const indexed = this.index.listSessions();
       const indexedById = new Map(indexed.map(session => [session.id, session]));
       const failedSessionIds = new Set(collected.failedSessionIds);
+      const lostJournalSessionIds = new Set<string>();
       const problems: JournalProblem[] = [...collected.problems];
       const observations = [];
       for (const observation of observationById.values()) {
         const current = indexedById.get(observation.id);
         try {
+          this.assertExpectedJournal(
+            observation.id,
+            observation.marker.text,
+            current,
+            observation.journal !== undefined,
+          );
           const journal = observation.journal?.fingerprint ?? null;
           const lastIndexedEventMatches =
             current === undefined
@@ -555,6 +702,7 @@ export class DaemonStorage {
           observations.push({ id: observation.id, journal, lastIndexedEventMatches });
         } catch (error) {
           failedSessionIds.add(observation.id);
+          if (error instanceof MissingSessionJournalError) lostJournalSessionIds.add(observation.id);
           problems.push({
             file: createSessionPaths(this.paths, observation.id).directory,
             line: 0,
@@ -591,6 +739,7 @@ export class DaemonStorage {
           }
         } catch (error) {
           failedSessionIds.add(action.id);
+          if (error instanceof MissingSessionJournalError) lostJournalSessionIds.add(action.id);
           problems.push({
             file: createSessionPaths(this.paths, action.id).directory,
             line: 0,
@@ -609,6 +758,7 @@ export class DaemonStorage {
         eventCount,
         problems,
         ...(failedSessionIds.size ? { failedSessionIds: [...failedSessionIds] } : {}),
+        ...(lostJournalSessionIds.size ? { lostJournalSessionIds: [...lostJournalSessionIds] } : {}),
       };
     });
   }
@@ -621,6 +771,7 @@ export class DaemonStorage {
     }
     if (decideSessionMarker(observation.marker.text) === 'refuse')
       throw new SessionLayoutError(id, observation.marker.text);
+    this.assertExpectedJournal(id, observation.marker.text, current, observation.journal !== undefined);
     const fingerprint = observation.journal?.fingerprint ?? null;
     const currentPointerMatches =
       current === undefined
@@ -707,6 +858,10 @@ export class DaemonStorage {
       const paths = createSessionPaths(this.paths, id);
       const current = await this.readDocument(id, kind);
       if (current === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+      // The journal contract is settled BEFORE the transform runs and before any byte is written,
+      // so a session that has lost its journal keeps its documents exactly as they were. The write
+      // paths get the same gate from their own ensureSessionDirectory call.
+      await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await transform(current));
       await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);
@@ -741,10 +896,17 @@ export class DaemonStorage {
         validated.data,
       );
       const encoded = encodeSessionEvent(event);
-      await this.ensureSessionDirectory(id);
+      const paths = createSessionPaths(this.paths, id);
+      const ensured = await this.ensureSessionDirectory(id);
       if (inspection.kind === 'repair' && inspection.source === null) this.index.removeSession(id);
       const current = this.applySessionInspection(inspection);
-      const appended = await this.fileSystem.appendLineDurable(createSessionPaths(this.paths, id).events, encoded);
+      const outcome = await this.fileSystem.appendLineToExisting(paths.events, encoded, current?.journal ?? ensured);
+      // Both refusals are terminal on purpose. Retrying would mean deciding, without evidence,
+      // which of two files is the real journal — and getting that wrong writes history into an
+      // impostor and reports success.
+      if (outcome.kind === 'absent') throw new MissingSessionJournalError(id, paths.events);
+      if (outcome.kind === 'replaced') throw new JournalReplacedError(id, paths.events);
+      const appended = outcome.append;
       const insertedSeparator =
         current?.journal !== null && current?.journal !== undefined && appended.byteOffset === current.journal.size + 1;
       const session: IndexedSession = {
@@ -864,18 +1026,35 @@ export class DaemonStorage {
     });
   }
 
-  async sessionIdsOnDisk(): Promise<readonly SessionId[]> {
+  /**
+   * The readable session directories and, for each, whether its journal has vanished.
+   *
+   * One `readText` per directory plus one `stat` for each directory that owes a journal. No journal
+   * bytes are read and nothing is reconciled, so a health tick can afford this on every pass. Loss
+   * is decided exactly as the read paths decide it — current marker OR a surviving index witness —
+   * so a legacy session that has not been migrated is not silently reported as healthy.
+   */
+  async surveySessionDirectories(): Promise<readonly SessionDirectorySurvey[]> {
     this.assertOpen();
     const entries = await this.fileSystem.listDirectory(this.paths.sessions);
-    const ids: SessionId[] = [];
+    const survey: SessionDirectorySurvey[] = [];
     for (const entry of entries) {
       if (!entry.directory) continue;
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
-      const marker = await this.fileSystem.readText(createSessionPaths(this.paths, id).marker);
-      if (decideSessionMarker(marker) === 'proceed') ids.push(id);
+      const paths = createSessionPaths(this.paths, id);
+      const marker = await this.fileSystem.readText(paths.marker);
+      if (decideSessionMarker(marker) === 'refuse') continue;
+      const indexed = this.index.findSession(id);
+      const owesJournal = sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null);
+      const journalLost = owesJournal && (await this.fileSystem.information(paths.events)) === undefined;
+      survey.push({ id, journalLost });
     }
-    return ids.sort();
+    return survey.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async sessionIdsOnDisk(): Promise<readonly SessionId[]> {
+    return (await this.surveySessionDirectories()).map(session => session.id);
   }
 
   forgetFromIndex(id: SessionId): void {

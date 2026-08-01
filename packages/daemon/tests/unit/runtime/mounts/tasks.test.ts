@@ -3,10 +3,19 @@ import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse 
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { taskActor, taskLive, taskRoutes } from '../../../../src/lib/runtime/mounts/tasks.ts';
-import { TaskError } from '../../../../src/lib/tasks/index.ts';
+import { taskActor, taskLive, taskRoutes, type TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
+import { TASK_UNAVAILABLE_MESSAGE, TaskError } from '../../../../src/lib/tasks/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, AT, CREDENTIALS, FakeTaskBoard, human, taskSubsystem, type TaskWorld } from './support.ts';
+import {
+  agentIn,
+  AT,
+  BOARD_UNREADABLE_DETAIL,
+  CREDENTIALS,
+  FakeTaskBoard,
+  human,
+  taskSubsystem,
+  type TaskWorld,
+} from './support.ts';
 
 /**
  * The task board's HTTP surface, driven through the real router and the real reducer.
@@ -353,25 +362,25 @@ describe('the task board mount', () => {
       should(jsonBody(response)).have.property('code', 'unknown_filter');
     });
 
-    it('should report the records the decoder discarded, by id where it knows one', async () => {
+    it('should report a served board as having discarded nothing, because it never discards', async () => {
+      // The board either decodes whole or it is refused, so this counter can only ever be zero — it
+      // stays on the wire because the protocol requires it and both clients warn from it.
       // Arrange
-      const board = new FakeTaskBoard('s1', undefined, [
-        { scope: 'task', taskId: 'F7', detail: 'unreadable' },
-        { scope: 'snapshot', taskId: null, detail: 'trailing bytes' },
-      ]);
-      const dispatch = dispatcher({ boards: { s1: board } });
+      const { dispatch } = await withTask();
 
       // Act
       const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
       const body = jsonBody(response) as unknown as SessionTaskListResponse;
 
       // Assert
-      should(body.parseErrors).equal(2);
-      should(body.parseErrorIds).deepEqual(['F7']);
+      should(response.status).equal(200);
+      should(body.parseErrors).equal(0);
+      should(body).not.have.property('parseErrorIds');
     });
 
-    it('should report an unreadable board as a refusal rather than an empty one', async () => {
-      // Replacing a corrupt board with an apparently empty one destroys the evidence.
+    it('should report an unreadable board as the daemon’s own state, not the caller’s request', async () => {
+      // Replacing a corrupt board with an apparently empty one destroys the evidence, and answering
+      // 400 sends an operator to audit a request that was perfectly well formed.
       // Arrange
       const dispatch = dispatcher({ boards: { s1: new FakeTaskBoard('s1', undefined, [], true) } });
 
@@ -379,8 +388,12 @@ describe('the task board mount', () => {
       const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
 
       // Assert
-      should(response.status).equal(400);
-      should(jsonBody(response)).have.property('code', 'invalid');
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+      // The body is the fixed message, not whatever the store was looking at when it refused: a
+      // damaged board's detail is an absolute path under the operator's state home.
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      should(response.body).not.containEql(BOARD_UNREADABLE_DETAIL);
     });
   });
 
@@ -406,7 +419,10 @@ describe('the task board mount', () => {
       ]);
     });
 
-    it('should let one damaged board contribute a parse error instead of hiding every healthy one', async () => {
+    it('should fail the whole fleet answer when one board is damaged, rather than answering short', async () => {
+      // A fleet board silently missing one session's tasks is what an operator plans against, so the
+      // missing work stops existing as far as anyone reading it is concerned. Refusing costs the
+      // healthy boards their answer, and that is the accepted price of never lying about the fleet.
       // Arrange
       const boards = {
         good: new FakeTaskBoard('good'),
@@ -417,12 +433,53 @@ describe('the task board mount', () => {
 
       // Act
       const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
-      const body = jsonBody(response) as unknown as { tasks: unknown[]; parseErrors: number; parseErrorIds: string[] };
 
       // Assert
-      should(body.tasks).have.length(1);
-      should(body.parseErrors).equal(1);
-      should(body.parseErrorIds).deepEqual(['broken']);
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      should(response.body).not.containEql(BOARD_UNREADABLE_DETAIL);
+    });
+
+    it('should let a defect in a fleet board stay a defect rather than call it unavailable', async () => {
+      // Only a domain refusal means "damaged state". A TypeError is a bug in the daemon, and calling
+      // it 503 would file it under conditions an operator is told to repair a file for.
+      // Arrange
+      const subsystem: TaskSubsystem = {
+        board: () => {
+          throw new TypeError('board is not a function');
+        },
+        sessionIds: async () => ['s1'],
+        observe: async () => new Map(),
+        now: () => AT,
+      };
+      const dispatch = new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert
+      should(response.status).equal(500);
+      should(jsonBody(response)).have.property('code', 'internal_error');
+      // The dispatcher replaces an unexpected message, which is what keeps a defect's internals in.
+      should(response.body).not.containEql('board is not a function');
+    });
+
+    it('should call a session the layout refuses damaged state, not the caller’s bad request', async () => {
+      // Nobody named this session — the daemon's own index did — so 400 would blame a caller who
+      // asked for the fleet and nothing else.
+      // Arrange
+      const dispatch = dispatcher({ sessionIds: ['NOPE'], unusable: ['NOPE'] });
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      // The refusal named the session in its detail; the body must not carry it.
+      should(response.body).not.containEql('NOPE');
     });
 
     it('should apply filters across the fleet and report an empty fleet honestly', async () => {

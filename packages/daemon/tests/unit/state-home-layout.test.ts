@@ -13,6 +13,8 @@ import {
   parseSessionId,
   requiredLayoutDirectories,
   resolveStateHome,
+  sessionJournalRequired,
+  sessionMarkerNeedsUpgrade,
   StateHomeLayoutError,
   temporaryFilePath,
   tryParseSessionId,
@@ -187,16 +189,31 @@ describe('layout decisions', () => {
     should(actual).equal(expected);
   });
 
-  it('should distinguish current and unsupported session markers', () => {
+  it('should accept both supported session markers and refuse anything else', () => {
     // Act
-    const current = decideSessionMarker('1\n');
+    const legacy = decideSessionMarker('1\n');
+    const current = decideSessionMarker('2\n');
     const missing = decideSessionMarker(undefined);
-    const future = decideSessionMarker('2');
+    const blank = decideSessionMarker('');
+    const future = decideSessionMarker('3');
 
     // Assert
+    should(legacy).equal('proceed');
     should(current).equal('proceed');
     should(missing).equal('refuse');
+    should(blank).equal('refuse');
     should(future).equal('refuse');
+  });
+
+  it('should require a journal only under the current marker and upgrade only the legacy one', () => {
+    // Act
+    const required = [undefined, '1\n', '2\n', '3'].map(marker => sessionJournalRequired(marker));
+    const upgradable = [undefined, '1\n', '2\n', '3'].map(marker => sessionMarkerNeedsUpgrade(marker));
+
+    // Assert — a version-1 directory predates the contract, so its missing journal is still
+    // ambiguous; a version-2 one created its journal with itself, so absence is loss.
+    should(required).deepEqual([false, false, true, false]);
+    should(upgradable).deepEqual([false, true, false, false]);
   });
 
   it('should describe missing and unsupported home markers distinctly', () => {

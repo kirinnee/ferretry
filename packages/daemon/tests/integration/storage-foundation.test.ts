@@ -23,6 +23,7 @@ import {
   DurableEventIndexError,
   InvalidStateDocumentError,
   KeyedSerialExecutor,
+  MissingSessionJournalError,
   type OpenedDaemonStorage,
   RuntimeEnvironment,
   SessionLayoutError,
@@ -35,8 +36,14 @@ import {
 } from '../../src/adapters/index.ts';
 import {
   createSessionPaths,
+  type DurableAppendOutcome,
   encodeSessionEvent,
+  type FileInformation,
+  type FileSystemFactory,
+  type FileSystemPort,
+  type FoundationPaths,
   indexFiles,
+  type JournalFingerprint,
   type JsonValue,
   jsonObject,
   parseSessionId,
@@ -55,6 +62,59 @@ class MarkerFailingStateFileSystem extends StateFileSystem {
   }
 }
 
+/**
+ * Disturbs a journal exactly once, on the next `information` call.
+ *
+ * The durable append verifies the pathname after its bytes are on disk, and that verification is
+ * its only `information` call — so this is where a swap or a foreign write has to land to be
+ * observed at all.
+ */
+class RepointingStateFileSystem extends StateFileSystem {
+  disturbOnNextInformation: 'delete' | 'replace' | 'foreign-append' | undefined;
+
+  override async information(path: string): Promise<FileInformation | undefined> {
+    const disturb = this.disturbOnNextInformation;
+    if (disturb !== undefined && path.endsWith('/events.jsonl')) {
+      this.disturbOnNextInformation = undefined;
+      if (disturb === 'foreign-append') await appendFile(path, 'foreign\n');
+      else {
+        await rm(path, { force: true });
+        if (disturb === 'replace') await writeFile(path, '');
+      }
+    }
+    return await super.information(path);
+  }
+}
+
+/** Deletes or swaps a journal in the instant between the caller's check and the real append. */
+class TearingStateFileSystem extends StateFileSystem {
+  tearOnNextAppend: 'delete' | 'replace' | undefined;
+
+  override async appendLineToExisting(
+    path: string,
+    line: string,
+    expect: JournalFingerprint,
+  ): Promise<DurableAppendOutcome> {
+    const tear = this.tearOnNextAppend;
+    if (tear !== undefined && path.endsWith('/events.jsonl')) {
+      this.tearOnNextAppend = undefined;
+      await rm(path, { force: true });
+      if (tear === 'replace') await writeFile(path, '');
+    }
+    return await super.appendLineToExisting(path, line, expect);
+  }
+}
+
+class TearingFileSystemFactory implements FileSystemFactory {
+  instance: TearingStateFileSystem | undefined;
+
+  create(paths: FoundationPaths): FileSystemPort {
+    const fileSystem = new TearingStateFileSystem(paths);
+    this.instance = fileSystem;
+    return fileSystem;
+  }
+}
+
 async function createTemporaryHome(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-daemon-test-'));
   homes.add(home);
@@ -67,10 +127,14 @@ function clockStartingAt(instant = '2026-07-30T12:00:00.000Z'): SystemClock {
   return new SystemClock(() => new Date(start + tick++ * 1_000));
 }
 
-async function openStorage(home: string, clock = clockStartingAt()): Promise<OpenedDaemonStorage> {
+async function openStorage(
+  home: string,
+  clock = clockStartingAt(),
+  fileSystems: FileSystemFactory = new StateFileSystemFactory(),
+): Promise<OpenedDaemonStorage> {
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
+    fileSystems,
     new StateHomeLayout(),
     new SqliteHomeLockFactory(),
     new BunSqliteIndexFactory(),
@@ -323,6 +387,46 @@ describe('session documents', () => {
     should(await readdir(opened.paths.temporary)).deepEqual([]);
   });
 
+  it('should leave every document byte-for-byte unchanged when the journal is missing', async () => {
+    // Arrange — the observed repro persisted config version 2 and then failed on the journal
+    // append, leaving the documents a transition ahead of the history that justifies them.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('gated-documents');
+    await opened.storage.writeConfig(id, { generation: 1 });
+    await opened.storage.writeState(id, { status: 'running' });
+    await opened.storage.append(id, 'durable', {});
+    const paths = createSessionPaths(opened.paths, id);
+    const before = { config: await readFile(paths.config, 'utf8'), state: await readFile(paths.state, 'utf8') };
+    await rm(paths.events);
+    let transforms = 0;
+    const bump = (): JsonValue => {
+      transforms += 1;
+      return { generation: 2 };
+    };
+
+    // Act
+    const failures = [
+      await capturedError(async () => await opened.storage.writeConfig(id, { generation: 2 })),
+      await capturedError(async () => await opened.storage.writeState(id, { status: 'claimed' })),
+      await capturedError(async () => await opened.storage.updateConfig(id, bump)),
+      await capturedError(async () => await opened.storage.updateState(id, bump)),
+    ];
+
+    // Assert — the refusal lands before the transform, so nothing was even computed to write.
+    should(failures.map(failure => (failure as Error).name)).deepEqual([
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+    ]);
+    should(transforms).equal(0);
+    should(await readFile(paths.config, 'utf8')).equal(before.config);
+    should(await readFile(paths.state, 'utf8')).equal(before.state);
+    should(await exists(paths.events)).be.false();
+    should(await readdir(opened.paths.temporary)).deepEqual([]);
+  });
+
   it('should report malformed documents with their file boundary', async () => {
     // Arrange
     const home = await createTemporaryHome();
@@ -543,6 +647,202 @@ describe('journal storage', () => {
     should(finalReplay.events.map(event => event.type)).deepEqual(['first', 'replacement-second']);
   });
 
+  it('should quarantine a session whose journal disappeared and refuse every empty fallback', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('missing-journal');
+    await opened.storage.append(id, 'preserved', { value: true });
+    const eventsFile = createSessionPaths(opened.paths, id).events;
+    await rm(eventsFile);
+
+    // Act — each path used to accept the missing file as a legitimate zero-event journal.
+    const syncError = await capturedError(async () => await opened.storage.syncSession(id));
+    const rebuild = await opened.storage.rebuildIndex();
+    const reconciliation = await opened.storage.reconcile();
+    const replayError = await capturedError(async () => await opened.storage.replay(id));
+    const appendError = await capturedError(async () => await opened.storage.append(id, 'replacement', {}));
+
+    // Assert — the durable marker, not the index row, is what still refuses: the rebuild has
+    // already dropped the row, and every read path keeps refusing anyway.
+    should(syncError instanceof MissingSessionJournalError).be.true();
+    should(replayError instanceof MissingSessionJournalError).be.true();
+    should(appendError instanceof MissingSessionJournalError).be.true();
+    should(rebuild.lostJournalSessionIds).deepEqual([id]);
+    should(rebuild.sessionCount).equal(0);
+    should(reconciliation.lostJournalSessionIds).deepEqual([id]);
+    should(reconciliation.failedSessionIds).deepEqual([id]);
+    should(reconciliation.problems[0]?.message).containEql('has lost its durable journal');
+    should(opened.storage.findSession(id)).be.undefined();
+    should(await exists(eventsFile)).be.false();
+  });
+
+  it('should survive losing a journal and every index file without fabricating an empty session', async () => {
+    // Arrange — the disposable index is deleted along with the journal, so nothing but the durable
+    // session marker is left to say the lost session ever had events.
+    const home = await createTemporaryHome();
+    const first = await openStorage(home);
+    const lost = parseSessionId('lost-session');
+    const healthy = parseSessionId('healthy-session');
+    await first.storage.append(lost, 'durable', { value: true });
+    await first.storage.append(healthy, 'durable', { value: true });
+    const paths = first.paths;
+    await closeStorage(first.storage);
+    await rm(createSessionPaths(paths, lost).events);
+    for (const file of indexFiles(paths)) await rm(file, { force: true });
+
+    // Act
+    const second = await openStorage(home);
+    const rebuild = await second.storage.rebuildIndex();
+    const replayError = await capturedError(async () => await second.storage.replay(lost));
+    const appendError = await capturedError(async () => await second.storage.append(lost, 'replacement', {}));
+
+    // Assert — one lost journal quarantines one session; it does not brick the whole home.
+    should(rebuild.lostJournalSessionIds).deepEqual([lost]);
+    should(rebuild.sessionCount).equal(1);
+    should(second.storage.listSessions().map(session => session.id)).deepEqual([healthy]);
+    should((await second.storage.replay(healthy)).events.map(event => event.type)).deepEqual(['durable']);
+    should(replayError instanceof MissingSessionJournalError).be.true();
+    should(appendError instanceof MissingSessionJournalError).be.true();
+    should(await exists(createSessionPaths(paths, lost).events)).be.false();
+  });
+
+  it('should create a real empty journal for a session that has recorded no events', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('eventless-session');
+
+    // Act
+    await opened.storage.writeConfig(id, { label: 'quiet' });
+    const paths = createSessionPaths(opened.paths, id);
+    const replay = await opened.storage.replay(id);
+
+    // Assert — emptiness is a real zero-length file, so a later absence can only mean loss.
+    should(await readFile(paths.marker, 'utf8')).equal('2\n');
+    should((await stat(paths.events)).size).equal(0);
+    should(replay.events).deepEqual([]);
+    should(opened.storage.findSession(id)?.journal?.size).equal(0);
+  });
+
+  it('should complete a creation torn before its marker, and still refuse a foreign directory', async () => {
+    // Arrange — creation writes the marker last, so a zero-length journal is its only tear.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const torn = parseSessionId('torn-creation');
+    const foreign = parseSessionId('foreign-creation');
+    const tornPaths = createSessionPaths(opened.paths, torn);
+    const foreignPaths = createSessionPaths(opened.paths, foreign);
+    await mkdir(tornPaths.directory, { recursive: true });
+    await writeFile(tornPaths.events, '');
+    await mkdir(foreignPaths.directory, { recursive: true });
+    await writeFile(foreignPaths.events, '{"foreign":true}\n');
+
+    // Act
+    await opened.storage.writeConfig(torn, { adopted: true });
+    const error = await capturedError(async () => await opened.storage.writeConfig(foreign, { adopted: true }));
+
+    // Assert
+    should(await readFile(tornPaths.marker, 'utf8')).equal('2\n');
+    should(await opened.storage.readConfig(torn)).deepEqual({ adopted: true });
+    should(error instanceof SessionLayoutError).be.true();
+    should(await exists(foreignPaths.marker)).be.false();
+    should(await readFile(foreignPaths.events, 'utf8')).equal('{"foreign":true}\n');
+  });
+
+  it('should migrate a legacy session with a journal and one without, then detect a later loss', async () => {
+    // Arrange — hand-built version-1 directories, exactly as an older daemon left them.
+    const home = await createTemporaryHome();
+    const first = await openStorage(home);
+    const withJournal = parseSessionId('legacy-with-journal');
+    const withoutJournal = parseSessionId('legacy-without-journal');
+    const paths = first.paths;
+    await closeStorage(first.storage);
+    const journaled = createSessionPaths(paths, withJournal);
+    const eventless = createSessionPaths(paths, withoutJournal);
+    for (const session of [journaled, eventless]) {
+      await mkdir(session.directory, { recursive: true, mode: 0o700 });
+      await writeFile(session.marker, '1\n', { mode: 0o600 });
+      await writeFile(session.state, '{"status":"running"}\n', { mode: 0o600 });
+    }
+    const legacyEvent = {
+      schemaVersion: 1,
+      sequence: 1,
+      sessionId: withJournal,
+      time: '2026-07-30T10:00:00.000Z',
+      type: 'legacy',
+      data: {},
+    };
+    await writeFile(journaled.events, `${JSON.stringify(legacyEvent)}\n`, { mode: 0o600 });
+
+    // Act
+    const second = await openStorage(home);
+    const rebuild = await second.storage.rebuildIndex();
+    const migrated = await stat(eventless.events);
+    await rm(eventless.events);
+    const lossError = await capturedError(async () => await second.storage.replay(withoutJournal));
+
+    // Assert — both are now version 2, and the one that was legitimately empty has acquired the
+    // ability to tell emptiness from loss.
+    should(await readFile(journaled.marker, 'utf8')).equal('2\n');
+    should(await readFile(eventless.marker, 'utf8')).equal('2\n');
+    should(migrated.size).equal(0);
+    should(rebuild.sessionCount).equal(2);
+    should(second.storage.findSession(withJournal)?.lastSequence).equal(1);
+    should(second.storage.findSession(withoutJournal)?.lastSequence).equal(0);
+    should(lossError instanceof MissingSessionJournalError).be.true();
+  });
+
+  it('should refuse to fabricate a journal for a legacy session the index still witnesses', async () => {
+    // Arrange — a version-1 marker with no journal but a live index fingerprint is lost history,
+    // not emptiness; migrating it would destroy the last evidence of that.
+    const home = await createTemporaryHome();
+    const first = await openStorage(home);
+    const id = parseSessionId('legacy-witnessed');
+    await first.storage.append(id, 'durable', { value: true });
+    const paths = createSessionPaths(first.paths, id);
+    await closeStorage(first.storage);
+    await writeFile(paths.marker, '1\n', { mode: 0o600 });
+    await rm(paths.events);
+
+    // Act — opening the home must still succeed; the refusal belongs to the mutation.
+    const second = await openStorage(home);
+    const writeError = await capturedError(async () => await second.storage.writeState(id, { status: 'claimed' }));
+
+    // Assert
+    should(await readFile(paths.marker, 'utf8')).equal('1\n');
+    should(await exists(paths.events)).be.false();
+    should(writeError instanceof MissingSessionJournalError).be.true();
+    should(await exists(paths.state)).be.false();
+  });
+
+  it.each([
+    { tear: 'delete' as const, error: 'MissingSessionJournalError' },
+    { tear: 'replace' as const, error: 'JournalReplacedError' },
+  ])('should refuse the second append when the journal is $tear-d just before it', async ({ tear, error }) => {
+    // Arrange — the exact repro: append #1, deletion, append #2 silently succeeding into a file the
+    // daemon had just recreated, and a replay that then contained only event #2.
+    const home = await createTemporaryHome();
+    const fileSystems = new TearingFileSystemFactory();
+    const opened = await openStorage(home, clockStartingAt(), fileSystems);
+    const id = parseSessionId('torn-append');
+    await opened.storage.append(id, 'first', { value: 1 });
+    const eventsFile = createSessionPaths(opened.paths, id).events;
+    const indexedBefore = opened.storage.findSession(id);
+    if (fileSystems.instance === undefined) throw new Error('test filesystem must be created');
+    fileSystems.instance.tearOnNextAppend = tear;
+
+    // Act
+    const failure = await capturedError(async () => await opened.storage.append(id, 'second', { value: 2 }));
+
+    // Assert — nothing recreates the journal, nothing is written into an impostor, and the index
+    // still holds the pre-deletion evidence.
+    should((failure as Error).name).equal(error);
+    should(await exists(eventsFile)).equal(tear === 'replace');
+    should(tear === 'delete' ? '' : await readFile(eventsFile, 'utf8')).equal('');
+    should(opened.storage.findSession(id)).deepEqual(indexedBefore);
+  });
+
   it('should report that a journaled event is durable when both index attempts fail', async () => {
     // Arrange
     const home = await createTemporaryHome();
@@ -610,6 +910,99 @@ describe('journal storage', () => {
     should(rebuild).deepEqual({ sessionCount: 1, eventCount: 1, problems: [] });
     should(jsonObject(replay.events[0]?.data)?.text).equal(text);
   });
+});
+
+describe('durable journal append', () => {
+  async function journalFor(id: string): Promise<{ fileSystem: RepointingStateFileSystem; file: string }> {
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const session = parseSessionId(id);
+    await opened.storage.append(session, 'first', { value: 1 });
+    return {
+      fileSystem: new RepointingStateFileSystem(opened.paths),
+      file: createSessionPaths(opened.paths, session).events,
+    };
+  }
+
+  it('should append to the exact file the caller named', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('exact-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome.kind).equal('appended');
+    should(outcome.kind === 'appended' && outcome.append.byteOffset).equal(expected.size);
+    should(await readFile(file, 'utf8')).containEql('{"second":true}\n');
+  });
+
+  it('should report an absent journal rather than creating one', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('absent-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await rm(file);
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'absent' });
+    should(await exists(file)).be.false();
+  });
+
+  it('should report a replacement when the pathname names a different file', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('swapped-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await rm(file);
+    await writeFile(file, '');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert — the impostor must not receive the record.
+    should(outcome).deepEqual({ kind: 'replaced' });
+    should(await readFile(file, 'utf8')).equal('');
+  });
+
+  it('should report a replacement when the file changed size under the caller', async () => {
+    // Arrange — a foreign appender, which the caller must re-inspect before trusting an offset.
+    const { fileSystem, file } = await journalFor('resized-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await appendFile(file, 'foreign\n');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'replaced' });
+    should(await readFile(file, 'utf8')).not.containEql('second');
+  });
+
+  it.each(['delete', 'replace', 'foreign-append'] as const)(
+    'should report a replacement when a %s disturbs the journal after the bytes land',
+    async disturb => {
+      // Arrange — the record is durable in some inode, but if the path no longer names it, or the
+      // file grew by more than this record, the byte offset the caller would index is a lie.
+      const { fileSystem, file } = await journalFor(`disturbed-${disturb}`);
+      const expected = await fileSystem.information(file);
+      if (expected === undefined) throw new Error('test journal must exist');
+      fileSystem.disturbOnNextInformation = disturb;
+
+      // Act
+      const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+      // Assert
+      should(outcome).deepEqual({ kind: 'replaced' });
+      should(await exists(file)).equal(disturb !== 'delete');
+    },
+  );
 });
 
 describe('disposable session index', () => {

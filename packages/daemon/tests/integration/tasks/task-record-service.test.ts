@@ -5,6 +5,7 @@ import type { TaskCreateRequestInput } from '@ferretry/protocol';
 import should from 'should';
 import { FileTaskStore } from '../../../src/adapters/tasks/file-task-store.ts';
 import { TaskRecordService } from '../../../src/adapters/tasks/task-record-service.ts';
+import { TASK_UNAVAILABLE_MESSAGE, TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskActor } from '../../../src/lib/tasks/task-policy.ts';
 import { INSTANT, LATER_INSTANT, shouldRefuse, shouldReject, withTempRoot } from './fixtures.ts';
 
@@ -95,24 +96,40 @@ describe('TaskRecordService', () => {
 
       // Assert — in_progress outranks todo regardless of insertion order
       should(listed.entries.map(entry => entry.task.id)).eql(['F2', 'F1']);
-      should(listed.parseErrors).be.empty();
     });
   });
 
-  it('should surface decode diagnostics alongside the entries it could read', async () => {
+  it('should refuse to list a board with one unreadable record, rather than list the rest', async () => {
+    // This used to answer with the entries it could decode and a count of what it dropped. A board
+    // one task short reads exactly like a board that is one task short — it is what a human plans
+    // against — so the whole list is refused and the damaged file is left for an operator to repair.
     await withService(async (service, path) => {
       // Arrange
       await service.create(request(), AGENT);
       const board = JSON.parse(await readFile(path, 'utf8')) as { v: number; tasks: unknown[] };
       board.tasks.push({ task: { id: 'nonsense' }, activity: [] });
-      await writeFile(path, JSON.stringify(board));
+      const damaged = JSON.stringify(board);
+      await writeFile(path, damaged);
 
       // Act
-      const listed = await service.list();
+      let thrown: unknown;
+      try {
+        await service.list();
+      } catch (error) {
+        thrown = error;
+      }
 
       // Assert
-      should(listed.entries).have.length(1);
-      should(listed.parseErrors.map(issue => issue.detail)).eql(['malformed task record']);
+      should(thrown).be.instanceof(TaskStateUnavailableError);
+      should((thrown as TaskStateUnavailableError).code).equal('unavailable');
+      // The client-facing message never names the file; the operator's evidence is on `detail`.
+      should((thrown as TaskStateUnavailableError).message).equal(TASK_UNAVAILABLE_MESSAGE);
+      should((thrown as TaskStateUnavailableError).detail).containEql(path);
+      // The decoder's partial view is still there for an operator, just not as an answer.
+      const decoded = await new FileTaskStore(path).readDecoded();
+      should(decoded.snapshot.tasks).have.length(1);
+      should(decoded.parseErrors.map(issue => issue.detail)).eql(['malformed task record']);
+      should(await readFile(path, 'utf8')).equal(damaged);
     });
   });
 

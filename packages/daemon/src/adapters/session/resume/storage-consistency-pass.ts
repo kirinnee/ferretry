@@ -27,19 +27,30 @@ export class StorageConsistencyPass implements ConsistencyPassPort {
   ) {}
 
   async run(deep: boolean): Promise<IncoherencePass> {
-    const onDisk = await this.storage.sessionIdsOnDisk();
+    const survey = await this.storage.surveySessionDirectories();
+    const onDisk = survey.map(session => session.id);
+    // Journal existence is established BEFORE the membership early return. Nothing a reconcile can
+    // do brings a deleted file back, so this is the one finding a normal tick must never miss:
+    // reporting it as unhealable is what stops the restart streak being reset by healthy ticks.
+    const lostJournals = survey.filter(session => session.journalLost).map(session => session.id);
+    const lost = new Set<string>(lostJournals);
     const indexed = new Set(this.storage.listSessions().map(session => session.id));
-    const missingFromIndex = onDisk.filter(id => !indexed.has(id));
+    // A quarantined session is deliberately absent from the index. Counting it as missing would
+    // make the early return unreachable and run a full reconcile every minute, forever.
+    const missingFromIndex = onDisk.filter(id => !indexed.has(id) && !lost.has(id));
     const staleRows = [...indexed].filter(id => !onDisk.includes(id));
     const zombies = deep ? detectZombies(await this.terminalActivity(), this.settings) : [];
     // A pass that found nothing and was not asked to verify deeply has nothing to reconcile, and
     // reindexing a healthy fleet once a minute is the steady file IO this check exists to avoid.
     if (!deep && missingFromIndex.length === 0 && staleRows.length === 0)
-      return { missingFromIndex, staleRows, zombies, repaired: [], unhealable: [] };
-    await this.storage.reconcile();
+      return { missingFromIndex, staleRows, zombies, repaired: [], unhealable: lostJournals };
+    const reconciliation = await this.storage.reconcile();
+    const failed = new Set(reconciliation.failedSessionIds ?? []);
     const afterDisk = await this.storage.sessionIdsOnDisk();
     const afterIndex = new Set(this.storage.listSessions().map(session => session.id));
-    const unhealable = afterDisk.filter(id => !afterIndex.has(id));
+    const unhealable = [
+      ...new Set([...afterDisk.filter(id => !afterIndex.has(id) || failed.has(id)), ...lostJournals]),
+    ];
     const repaired = missingFromIndex.filter(id => afterIndex.has(id));
     return { missingFromIndex, staleRows, zombies, repaired, unhealable };
   }

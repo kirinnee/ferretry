@@ -877,12 +877,14 @@ async function resolveStartAccount(
 }
 
 /** How each allocation refusal is answered. A taken callsign is a conflict a human can resolve by
- *  choosing another name; an exhausted pool is the daemon having nothing left to offer. */
+ *  choosing another name; an exhausted pool is the daemon having nothing left to offer; a claim store
+ *  the daemon cannot read or write is a server-side unavailable condition the caller may retry once it
+ *  is mended, never a launch defect. */
 const CALLSIGN_REFUSALS: Readonly<Record<NameAllocationErrorCode, SessionControlFailure>> = {
   invalid_callsign: 'invalid',
   callsign_taken: 'callsign_taken',
   pool_exhausted: 'unavailable',
-  claim_store_failed: 'failed',
+  claim_store_failed: 'callsign_unavailable',
   random_source_failed: 'failed',
 };
 

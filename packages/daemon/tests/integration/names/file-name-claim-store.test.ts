@@ -11,8 +11,8 @@ import {
   createFoundationPaths,
   DEFAULT_CALLSIGN_POOL,
   NameAllocator,
-  resolveStateHome,
   type NameClaim,
+  resolveStateHome,
 } from '../../../src/lib/index.ts';
 
 /**
@@ -146,22 +146,116 @@ describe('FileNameClaimStore', () => {
     await subject.store.release('nobody-holds-this', 'session-z');
   });
 
-  it('should re-derive the pool from the fleet when the ledger on disk is damaged', async () => {
-    // Refusing every start over an unreadable reservation file would be worse than losing the
-    // reservations: the durable ownership is in the session documents either way.
+  it('should refuse a claim and preserve the evidence when the ledger JSON is damaged', async () => {
+    // A live session can be re-derived, but an in-flight reservation exists only in this file. If a
+    // damaged file read as empty, a second start could claim the first start's callsign.
     // Arrange
     const held = DEFAULT_CALLSIGN_POOL[0]!;
     const subject = await fixture([claim(held, 'session-live')]);
     await mkdir(dirname(subject.file), { recursive: true });
-    await writeFile(subject.file, 'not json at all', { mode: 0o600 });
+    const damaged = 'not json at all';
+    await writeFile(subject.file, damaged, { mode: 0o600 });
 
     // Act
-    const claims = await subject.store.listClaims();
-    const allocated = await subject.allocator.allocate({ ownerId: 'session-a', nowMs: NOW });
+    const allocated = await subject.allocator.allocate({
+      ownerId: 'session-a',
+      nowMs: NOW,
+      requested: DEFAULT_CALLSIGN_POOL[1],
+    });
 
     // Assert
-    should(claims.map(row => row.callsign)).deepEqual([held]);
-    // The live session's name is still not offered, which is the fact that actually matters.
-    should(allocated.ok ? allocated.claim.callsign : '').equal(DEFAULT_CALLSIGN_POOL[1]);
+    should(allocated.ok).be.false();
+    const failure = allocated.ok ? null : allocated.error;
+    should(failure?.code).equal('claim_store_failed');
+    // The allocator's public message is fixed and path-free; the absolute ledger path never reaches it.
+    should(failure?.message).equal('callsign persistence failed');
+    should(failure?.message).not.containEql(subject.file);
+    // The adapter still carries the diagnostic internally — only the allocator's public message is scrubbed.
+    await should(subject.store.listClaims()).be.rejectedWith(/invalid callsign claim ledger/u);
+    should(await readFile(subject.file, 'utf8')).equal(damaged);
+  });
+
+  it('should refuse the whole ledger rather than drop one malformed reservation', async () => {
+    // Arrange — the valid first row represents a start whose session document does not exist yet.
+    const subject = await fixture();
+    const pending = claim(DEFAULT_CALLSIGN_POOL[0]!, 'session-pending');
+    const damaged = JSON.stringify([
+      pending,
+      { callsign: 'NOT-CANONICAL', ownerId: 'session-damaged', claimedAtMs: NOW, expiresAtMs: NOW + 1 },
+    ]);
+    await mkdir(dirname(subject.file), { recursive: true });
+    await writeFile(subject.file, damaged, { mode: 0o600 });
+
+    // Act
+    const allocated = await subject.allocator.allocate({
+      ownerId: 'session-racing',
+      nowMs: NOW,
+      requested: pending.callsign,
+    });
+
+    // Assert — a partial decode must not make the valid in-flight reservation disappear.
+    should(allocated.ok).be.false();
+    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
+    should(await readFile(subject.file, 'utf8')).equal(damaged);
+  });
+
+  it('should refuse a ledger row carrying an unknown field and leave the file unchanged', async () => {
+    // Zod's default strip mode would accept an unknown field, drop it, and rewrite the row on the next
+    // successful claim — silently reshaping a tampered or corrupted ledger. The schema is strict, so the
+    // row fails closed like any other malformed one and the bytes are left for diagnosis.
+    // Arrange — a row that is valid apart from the extra field strip mode would have tolerated.
+    const subject = await fixture();
+    const [pending, free] = DEFAULT_CALLSIGN_POOL;
+    if (pending === undefined || free === undefined)
+      throw new Error('DEFAULT_CALLSIGN_POOL must expose at least two entries');
+    const withExtra = JSON.stringify([
+      { ...claim(pending, 'session-pending'), unexpected: 'strip mode would drop me' },
+    ]);
+    await mkdir(dirname(subject.file), { recursive: true });
+    await writeFile(subject.file, withExtra, { mode: 0o600 });
+
+    // Act — claiming any name reads the ledger, which must reject the unknown field.
+    const allocated = await subject.allocator.allocate({ ownerId: 'session-racing', nowMs: NOW, requested: free });
+
+    // Assert — the whole ledger is refused, and nothing was rewritten.
+    should(allocated.ok).be.false();
+    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
+    should(await readFile(subject.file, 'utf8')).equal(withExtra);
+  });
+
+  it('should refuse a claim its own decoder would reject and leave the ledger untouched', async () => {
+    // tryClaim must not persist a caller-supplied NameClaim the store could not read back. The type
+    // system still admits claims the schema rejects — a non-canonical callsign, an empty owner id,
+    // an expiry at or before its creation — and writing one would poison every later read, so writes
+    // are guarded by the same decoder that guards reads.
+    // Arrange — a valid reservation already on disk, captured byte-for-byte.
+    const subject = await fixture();
+    // Three pool entries, guarded once so the case needs no non-null assertion: the seeded name plus
+    // two free ones the malformed claims target.
+    const [held, freeOne, freeTwo] = DEFAULT_CALLSIGN_POOL;
+    if (held === undefined || freeOne === undefined || freeTwo === undefined)
+      throw new Error('DEFAULT_CALLSIGN_POOL must expose at least three entries');
+    const seeded = await subject.allocator.allocate({ ownerId: 'session-a', nowMs: NOW, requested: held });
+    should(seeded.ok).be.true();
+    const before = await readFile(subject.file, 'utf8');
+
+    // Act + Assert — each malformed claim is refused before any write, and the valid ledger never moves.
+    const malformed: readonly NameClaim[] = [
+      // A free name whose expiry is at its creation: with no conflict this is exactly the row that,
+      // unguarded, would land on disk and throw on the next read.
+      { callsign: freeOne, ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW },
+      // A non-canonical callsign the decoder rejects.
+      { callsign: 'NOT-CANONICAL', ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
+      // An empty owner id, which the schema forbids.
+      { callsign: freeTwo, ownerId: '', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
+    ];
+    for (const bad of malformed) {
+      await should(subject.store.tryClaim(bad)).be.rejectedWith(/invalid callsign claim/u);
+      should(await readFile(subject.file, 'utf8')).equal(before);
+    }
+
+    // The store still reads back, and none of the bad claims reached the ledger.
+    const listed = await subject.store.listClaims();
+    should(listed.some(row => row.ownerId === 'session-b')).be.false();
   });
 });

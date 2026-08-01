@@ -10,14 +10,16 @@ import {
   type NameRandomSource,
 } from './types.ts';
 
-function storeFailure(error: unknown): NameAllocationResult {
-  return {
-    ok: false,
-    error: {
-      code: 'claim_store_failed',
-      message: `callsign persistence failed: ${error instanceof Error ? error.message : String(error)}`,
-    },
-  };
+/**
+ * A store failure becomes a FIXED, path-free public message.
+ *
+ * The adapter's own error carries the ledger path and the decode detail — exactly what an operator
+ * wants in a log and exactly what the API must not hand to every agent on the host. The allocator is
+ * the boundary that scrubs it: the diagnostic stays internal to the adapter, and the public result
+ * states only that persistence failed.
+ */
+function storeFailure(): NameAllocationResult {
+  return { ok: false, error: { code: 'claim_store_failed', message: 'callsign persistence failed' } };
 }
 
 export class NameAllocator {
@@ -53,8 +55,8 @@ export class NameAllocator {
       let attempt: NameClaimAttempt;
       try {
         attempt = await this.store.tryClaim(claim);
-      } catch (error) {
-        return storeFailure(error);
+      } catch {
+        return storeFailure();
       }
       if (attempt.claimed) return { ok: true, claim: attempt.claim, source: 'requested' };
       if (!request.fallback) {
@@ -74,8 +76,8 @@ export class NameAllocator {
     try {
       const stored = await this.store.listClaims();
       claims = extraConflict === undefined ? stored : [...stored, extraConflict];
-    } catch (error) {
-      return storeFailure(error);
+    } catch {
+      return storeFailure();
     }
 
     if (this.pool.length === 0) {
@@ -112,8 +114,8 @@ export class NameAllocator {
       let attempt: NameClaimAttempt;
       try {
         attempt = await this.store.tryClaim(claim);
-      } catch (error) {
-        return storeFailure(error);
+      } catch {
+        return storeFailure();
       }
       if (attempt.claimed) return { ok: true, claim: attempt.claim, source };
     }

@@ -80,6 +80,8 @@ export type SessionControlFailure =
   | 'conflict'
   /** Another session already answers to the callsign this start asked for. */
   | 'callsign_taken'
+  /** The callsign reservation store could not be read or written, so no name can be claimed safely. */
+  | 'callsign_unavailable'
   /** The launch itself failed, and the session records why. */
   | 'failed';
 
@@ -135,6 +137,7 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   not_found: { status: 404, code: 'not-found' },
   conflict: { status: 409, code: 'request_id_reused' },
   callsign_taken: { status: 409, code: 'callsign_taken' },
+  callsign_unavailable: { status: 503, code: 'callsign_unavailable' },
   failed: { status: 500, code: 'session_launch_failed' },
 };
 

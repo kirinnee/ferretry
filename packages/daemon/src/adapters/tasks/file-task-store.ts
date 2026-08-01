@@ -1,4 +1,4 @@
-import { TaskError } from '../../lib/tasks/task-error.ts';
+import { TaskStateUnavailableError } from '../../lib/tasks/task-error.ts';
 import type { DecodedTaskSnapshot, TaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
 import { emptyTaskSnapshot, parseTaskSnapshot, serializeTaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
 import type { TaskStoreMutation, TaskStorePort } from '../../lib/tasks/task-store-port.ts';
@@ -38,9 +38,12 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
     this.instants = options.instants ?? new SystemInstantSource();
   }
 
-  /** The readable board. A damaged entry is dropped rather than failing the whole read. */
+  /**
+   * The authoritative readable board. Diagnostic callers that can present partial state use
+   * `readDecoded`; a caller asking for the board itself must never confuse damage with absence.
+   */
   async read(): Promise<TaskSnapshot> {
-    return (await this.readDecoded()).snapshot;
+    return this.requireClean(await this.readDecoded());
   }
 
   /**
@@ -66,19 +69,32 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
     transform: (current: TaskSnapshot) => TaskStoreMutation<TaskSnapshot, TResult>,
   ): Promise<TResult> {
     return await this.executor.run(this.snapshotPath, async () => {
-      const decoded = await this.readDecoded();
-      if (decoded.fatal) {
-        throw new TaskError(
-          'invalid',
-          `refusing to mutate an unreadable task snapshot at ${this.snapshotPath}: ${
-            decoded.parseErrors[0]?.detail ?? 'unknown decode failure'
-          }`,
-        );
-      }
-      const mutation = transform(decoded.snapshot);
+      const current = this.requireClean(await this.readDecoded());
+      const mutation = transform(current);
       await this.writer.write(this.snapshotPath, serializeTaskSnapshot(mutation.container));
       return mutation.result;
     });
+  }
+
+  /**
+   * One malformed entry or activity is enough to make a whole-snapshot replacement destructive.
+   *
+   * The refusal is a PERSISTENCE failure, not a protocol one: whoever asked did nothing wrong, and
+   * this file is damaged until an operator repairs it. Raising it as `TaskError('invalid')` made the
+   * HTTP mount answer 400 and blame the caller for the daemon's own unreadable board.
+   *
+   * The path goes in the error's DETAIL, which stays inside the daemon. It is an absolute path under
+   * the operator's state home, so putting it in the error's message — which the mount answers with —
+   * would hand every agent on the host the operator's home directory for the price of a corrupt file.
+   */
+  private requireClean(decoded: DecodedTaskSnapshot): TaskSnapshot {
+    const first = decoded.parseErrors[0];
+    if (first !== undefined) {
+      throw new TaskStateUnavailableError(
+        `refusing to use a damaged task snapshot at ${this.snapshotPath}: ${first.detail}`,
+      );
+    }
+    return decoded.snapshot;
   }
 
   /** The instant a caller should stamp onto records it is about to commit. */

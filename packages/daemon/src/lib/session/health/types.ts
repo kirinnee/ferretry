@@ -107,7 +107,7 @@ export interface IncoherencePass {
   readonly staleRows: readonly string[];
   readonly zombies: readonly string[];
   readonly repaired: readonly string[];
-  /** On disk but still invisible to the index AFTER repair — the only evidence that matters. */
+  /** On disk but still invisible to the index or unreadable AFTER repair. */
   readonly unhealable: readonly string[];
 }
 

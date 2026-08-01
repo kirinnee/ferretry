@@ -5,20 +5,15 @@ import type { TaskActor } from '../../lib/tasks/task-policy.ts';
 import { assertActorCanWriteSession } from '../../lib/tasks/task-policy.ts';
 import type { TaskMutationContext } from '../../lib/tasks/task-reducer.ts';
 import { applyTaskAction, createTask, requireTaskEntry } from '../../lib/tasks/task-reducer.ts';
-import type { TaskEntry, TaskParseIssue, TaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
+import type { TaskEntry, TaskSnapshot } from '../../lib/tasks/task-snapshot.ts';
 import type { TaskStorePort } from '../../lib/tasks/task-store-port.ts';
 import type { InstantSource } from './file-operations.ts';
 import { SystemInstantSource } from './file-operations.ts';
 
-/** A board read: the entries in board order plus whatever the decoder had to discard. */
+/** A board read: the entries in board order. Whole, or it is not a read at all — see {@link
+ *  TaskRecordService.list}. */
 export interface TaskBoardRead {
   readonly entries: readonly TaskEntry[];
-  readonly parseErrors: readonly TaskParseIssue[];
-}
-
-/** The store surface this service needs beyond the port: the decoder's diagnostics. */
-export interface DecodingTaskStore extends TaskStorePort<TaskSnapshot> {
-  readDecoded(): Promise<{ readonly snapshot: TaskSnapshot; readonly parseErrors: readonly TaskParseIssue[] }>;
 }
 
 /**
@@ -31,22 +26,38 @@ export interface DecodingTaskStore extends TaskStorePort<TaskSnapshot> {
  */
 export class TaskRecordService {
   private readonly sessionId: string;
-  private readonly store: DecodingTaskStore;
+  private readonly store: TaskStorePort<TaskSnapshot>;
   private readonly instants: InstantSource;
 
-  constructor(sessionId: string, store: DecodingTaskStore, instants: InstantSource = new SystemInstantSource()) {
+  constructor(
+    sessionId: string,
+    store: TaskStorePort<TaskSnapshot>,
+    instants: InstantSource = new SystemInstantSource(),
+  ) {
     if (sessionId.trim().length === 0) throw new TaskError('invalid', 'a task board needs a session id');
     this.sessionId = sessionId;
     this.store = store;
     this.instants = instants;
   }
 
-  /** Every task on the board, in the deterministic board order, with decode diagnostics. */
+  /**
+   * Every task on the board, in the deterministic board order.
+   *
+   * AUTHORITATIVE, so it demands a whole snapshot: `read` refuses a damaged one instead of handing
+   * back the subset the decoder managed. This used to serve the partial board with a count of what
+   * it had dropped, and that is the one shape of answer a board must never give — a list three tasks
+   * short is indistinguishable from a board that has three tasks, and it is read by a human deciding
+   * what is left to do and by an agent deciding what to pick up. Detail, create and act already
+   * refused a damaged board; the list was the hole in that contract.
+   *
+   * The decoder's partial view is not lost, it is just not an ANSWER: the store's `readDecoded` still
+   * carries the valid subset and every parse issue, for an operator diagnosing the file.
+   */
   async list(): Promise<TaskBoardRead> {
-    const read = await this.store.readDecoded();
-    const byId = new Map(read.snapshot.tasks.map(entry => [entry.task.id, entry]));
-    const entries = sortTasks(read.snapshot.tasks.map(entry => entry.task)).map(task => byId.get(task.id) as TaskEntry);
-    return { entries, parseErrors: read.parseErrors };
+    const snapshot = await this.store.read();
+    const byId = new Map(snapshot.tasks.map(entry => [entry.task.id, entry]));
+    const entries = sortTasks(snapshot.tasks.map(entry => entry.task)).map(task => byId.get(task.id) as TaskEntry);
+    return { entries };
   }
 
   /** One task and its whole history, or a `not-found` refusal. */

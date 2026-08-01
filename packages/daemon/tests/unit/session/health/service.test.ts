@@ -213,6 +213,22 @@ describe('session health service', () => {
     should(harness.events.map(event => event.type)).containEql('fleet.daemon_self_restart');
   });
 
+  it('should advance the restart streak on shallow ticks that only found a lost journal', async () => {
+    // Arrange — a vanished journal is reported by an ordinary tick with nothing else to say, so the
+    // streak has to survive passes whose only finding is the loss itself.
+    const lost = pass({ unhealable: ['lost-journal'] });
+    const harness = new Harness(snapshot(), [lost, lost, lost]);
+    const service = harness.service();
+
+    // Act
+    const early = [await service.selfCheck(), await service.selfCheck()];
+    const escalated = await service.selfCheck();
+
+    // Assert
+    should(early.map(outcome => outcome.escalated)).deepEqual([false, false]);
+    should(escalated.escalated).be.true();
+  });
+
   it('should not advance the restart streak when the consistency pass itself could not run', async () => {
     // Arrange — an unreachable store proves nothing about the index and must not restart the daemon.
     const harness = new Harness(snapshot(), [new Error('store is locked')]);

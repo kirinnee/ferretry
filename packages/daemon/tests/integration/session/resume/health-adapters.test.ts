@@ -24,8 +24,12 @@ import {
 import {
   CURRENT_SESSION_VERSION,
   createFoundationPaths,
+  createSessionEvent,
   createSessionPaths,
   defaultSessionHealthSettings,
+  encodeSessionEvent,
+  type FileSystemFactory,
+  type FileSystemPort,
   parseSessionId,
   resolveStateHome,
 } from '../../../../src/lib/index.ts';
@@ -34,16 +38,38 @@ const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';
 const SETTINGS = defaultSessionHealthSettings;
 
+/** Counts journal byte reads, which is what separates a shallow tick from a full reconcile. */
+class CountingStateFileSystem extends StateFileSystem {
+  journalReads = 0;
+
+  override async *readChunks(path: string, chunkSize: number, offset = 0): AsyncIterable<Uint8Array> {
+    if (path.endsWith('/events.jsonl')) this.journalReads += 1;
+    yield* super.readChunks(path, chunkSize, offset);
+  }
+}
+
+/**
+ * Hands storage the very same counting filesystem the consistency pass holds. Counting only the
+ * pass's own filesystem proves nothing: the survey and the reconcile both run through storage's.
+ */
+class CountingStateFileSystemFactory implements FileSystemFactory {
+  constructor(private readonly fileSystem: CountingStateFileSystem) {}
+
+  create(): FileSystemPort {
+    return this.fileSystem;
+  }
+}
+
 async function temporaryHome() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-health-test-'));
   homes.add(home);
   return home;
 }
 
-async function openStorage(home: string) {
+async function openStorage(home: string, fileSystems: FileSystemFactory = new StateFileSystemFactory()) {
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
+    fileSystems,
     new StateHomeLayout(),
     new SqliteHomeLockFactory(),
     new BunSqliteIndexFactory(),
@@ -252,6 +278,7 @@ describe('storage consistency pass', () => {
       repaired: [],
       unhealable: [],
     });
+    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id: 'known', journalLost: false }]);
     await opened.storage.close();
   });
 
@@ -263,6 +290,8 @@ describe('storage consistency pass', () => {
     // directory is authoritative, and nothing in the index knows about it.
     const session = createSessionPaths(paths(home), parseSessionId('orphan'));
     await mkdir(session.directory, { recursive: true, mode: 0o700 });
+    // A current-version directory always carries its journal, so the fixture carries one too.
+    await writeFile(session.events, '', { mode: 0o600 });
     await writeFile(session.marker, `${CURRENT_SESSION_VERSION}\n`, { mode: 0o600 });
     await writeFile(session.state, JSON.stringify({ id: 'orphan', status: 'running' }), { mode: 0o600 });
     const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
@@ -317,6 +346,83 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
+  it('should report a vanished indexed journal as unhealable instead of healthy', async () => {
+    // Arrange
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('lost-journal');
+    await opened.storage.append(id, 'session.started', { durable: true });
+    await rm(createSessionPaths(paths(home), id).events);
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const actual = await pass.run(true);
+
+    // Assert — membership alone is not health evidence when reconciliation could not read the
+    // journal. The stale index row is deliberately retained so it cannot become an empty session.
+    should(actual.missingFromIndex).deepEqual([]);
+    should(actual.repaired).deepEqual([]);
+    should(actual.unhealable).deepEqual([id]);
+    should(opened.storage.findSession(id)?.lastSequence).equal(1);
+    await opened.storage.close();
+  });
+
+  it('should keep reporting a lost journal on every shallow tick without reconciling again', async () => {
+    // Arrange — a healthy deep pass first, so the finding can only come from the deletion.
+    const home = await temporaryHome();
+    const fileSystem = new CountingStateFileSystem(paths(home));
+    const opened = await openStorage(home, new CountingStateFileSystemFactory(fileSystem));
+    const lost = parseSessionId('lost-journal');
+    const healthy = parseSessionId('healthy-session');
+    await opened.storage.append(lost, 'session.started', { durable: true });
+    await opened.storage.append(healthy, 'session.started', { durable: true });
+    const pass = new StorageConsistencyPass(opened.storage, fileSystem, paths(home), SETTINGS);
+    const healthyPass = await pass.run(true);
+    await rm(createSessionPaths(paths(home), lost).events);
+    // The healthy journal grows behind the index's back. A reconcile has to read those bytes to
+    // catch its row up, so a tick that finishes at zero reads provably never reconciled — without
+    // this divergence the counter would read zero even for a full pass, and prove nothing.
+    await writeFile(
+      createSessionPaths(paths(home), healthy).events,
+      `${encodeSessionEvent(createSessionEvent(healthy, 1, NOW, 'session.behind_the_index', {}))}\n`,
+      { flag: 'a', mode: 0o600 },
+    );
+    fileSystem.journalReads = 0;
+
+    // Act
+    const shallow = [await pass.run(false), await pass.run(false), await pass.run(false)];
+
+    // Assert — the finding survives every ordinary tick, so the restart streak can never be reset
+    // by one, and no tick pays for a reconcile it cannot possibly heal.
+    should(healthyPass.unhealable).deepEqual([]);
+    should(shallow.map(tick => tick.unhealable)).deepEqual([[lost], [lost], [lost]]);
+    should(shallow.map(tick => tick.missingFromIndex)).deepEqual([[], [], []]);
+    should(fileSystem.journalReads).equal(0);
+    should(opened.storage.findSession(healthy)?.lastSequence).equal(1);
+    await opened.storage.close();
+  });
+
+  it('should report a legacy session whose only witness is the index as unhealable too', async () => {
+    // Arrange — a version-1 directory the boot sweep deliberately refused to migrate, because
+    // fabricating its journal would have destroyed the index fingerprint that proves the loss.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('legacy-witnessed');
+    await opened.storage.append(id, 'session.started', { durable: true });
+    const session = createSessionPaths(paths(home), id);
+    await writeFile(session.marker, '1\n', { mode: 0o600 });
+    await rm(session.events);
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const actual = await pass.run(false);
+
+    // Assert
+    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id, journalLost: true }]);
+    should(actual.unhealable).deepEqual([id]);
+    await opened.storage.close();
+  });
+
   it('should ignore a terminal session with no finish stamp rather than call it a zombie', async () => {
     // Arrange
     const home = await temporaryHome();
@@ -334,19 +440,21 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
-  it('should read the journal for a session whose events file does not exist yet', async () => {
-    // Arrange
+  it('should not call a finished session with an untouched empty journal a zombie', async () => {
+    // Arrange — a session that recorded no events still has a real, zero-length journal, and its
+    // creation timestamp must not read as activity outliving the session.
     const home = await temporaryHome();
     const opened = await openStorage(home);
     const id = parseSessionId('quiet');
-    await opened.storage.writeState(id, { id: 'quiet', status: 'stopped', finishedAt: NOW });
-    should(createSessionPaths(paths(home), id).events).be.a.String();
+    await opened.storage.writeState(id, { id: 'quiet', status: 'stopped', finishedAt: new Date().toISOString() });
+    const journal = await new StateFileSystem(paths(home)).information(createSessionPaths(paths(home), id).events);
     const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
 
     // Act
     const actual = await pass.run(true);
 
     // Assert
+    should(journal?.size).equal(0);
     should(actual.zombies).deepEqual([]);
     await opened.storage.close();
   });
