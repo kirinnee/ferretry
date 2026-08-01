@@ -444,15 +444,13 @@ describe('the learning review mount', () => {
   });
 
   describe('mining', () => {
-    it('should refuse a run with a stated reason instead of pretending to mine', async () => {
-      // A manifest reporting zero sessions would be indexed by the client as "there is nothing to
-      // learn", which is a wrong answer rather than a missing feature.
+    it('should run the mounted miner through the subsystem', async () => {
       // Arrange / Act
-      const refused = await post(new FakeLearningStore(), '/v1/learning/run', { spawn: false });
+      const run = await post(new FakeLearningStore(), '/v1/learning/run', { spawn: false });
 
       // Assert
-      should(refused.status).equal(501);
-      should(jsonBody(refused)).have.property('code', 'mining_not_mounted');
+      should(run.status).equal(200);
+      should(jsonBody(run)).have.property('runId', 'run-1');
     });
   });
 });

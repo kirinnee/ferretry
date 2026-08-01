@@ -9,6 +9,7 @@ import {
   type FyEventStreamFrame,
   HealthViewSchema,
   LearningConfigSchema,
+  RunManifestSchema,
   LearningPatchResponseSchema,
   LearningStatusSchema,
   NameSuggestionsSchema,
@@ -2377,9 +2378,10 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
-    // Mining is off because no miner is mounted, and the store held no run to report.
-    should(config.enabled).be.false();
-    should(status.enabled).be.false();
+    // Mining is mounted; an ingest-only request still leaves no run manifest when no miner has
+    // produced output, which is distinct from reporting the subsystem unavailable.
+    should(config.enabled).be.true();
+    should(status.enabled).be.true();
     should(status.running).be.false();
     should(status.lastRun).be.undefined();
     should(status.totals).deepEqual({ observations: 2, proposals: 2, tombstones: 0 });
@@ -2404,9 +2406,9 @@ describe('daemon boot lifecycle', () => {
     should(patch.contents).containEql('Run `task test`');
     // What the human agreed to was recorded INSIDE the state home and nowhere else.
     should(patchFiles.some(file => file.startsWith('always-run-the-repo-task-surface-'))).be.true();
-    // Mining refuses with a reason rather than answering with a manifest that scanned nothing.
-    should(run.status).equal(501);
-    should((await run.json()) as { code: string }).have.property('code', 'mining_not_mounted');
+    // An ingest-only run is mounted: with no miner output it reports an explicit empty manifest.
+    should(run.status).equal(200);
+    should(RunManifestSchema.parse(await run.json()).message).equal('ingest-only run (no spawn requested)');
   });
 
   /**

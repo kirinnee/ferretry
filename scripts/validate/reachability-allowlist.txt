@@ -379,18 +379,11 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9 GAP: kteam's worktrees.ts def
 # normalized events, and `world.transcripts` is called. `extractSession`'s `records` input can be
 # supplied today. Both lines below still stand, on what is left rather than on what was fixed:
 #
-#   * THE INBOX HAS NO PRODUCER, and this is not a shortfall the extractor tolerates. `humanMessages`
-#     is computed as `humanInbox.length` for an AUTO session — the only mode the daemon can start
-#     unattended — so with no inbox every auto session scores zero human messages and zero teammate
-#     steers by construction. `hasSignal` would then be decided by interrupts and tool failures
-#     alone. That is not a smaller sample of the same measurement; it is a different measurement
-#     reported under the same name. The inbox is the send ledger, and there is still no send.
-#   * NOTHING RUNS A MINER. `applyMinerOutput` applies the OUTPUT of a mining pass, and this daemon
-#     has no pass to run one: `POST /v1/learning/run` refuses with a stated reason, and neither a
-#     scheduler nor a model call exists behind it. A digest the daemon can now build is an input to
-#     a miner, not a substitute for one.
-packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; nothing in this daemon runs a mining pass — POST /v1/learning/run refuses, and no scheduler or model call exists behind it
-packages/daemon/src/lib/learning/extract.ts # PR #13: the transcript half is available now; the INBOX is not, and for an auto session humanMessages/teammateSteers are computed from the inbox alone — a digest built now would report zero human signal as a measurement rather than as a gap
+# `FileSendChannel` now records the inbox and the mounted learning miner reads that durable evidence
+# only for terminal sessions in this daemon's opened state home. Sessions with absent or unresolved
+# transcript provenance are skipped with a run-manifest reason; no partial conversation is mined.
+# Miner output is saved beside the verified digests and a later mounted run ingests it through
+# `applyMinerOutput`. Proposals remain pending until a human renders a verdict on the review board.
 
 
 # PR #15 — add browser session control: THE HUMAN LOGIN WINDOW IS MOUNTED, nothing to list.
