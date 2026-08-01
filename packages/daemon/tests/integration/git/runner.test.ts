@@ -21,8 +21,15 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
  * the failure reports a timeout that has nothing to do with the behaviour being asserted. The
  * runner's own timeout must always be the one that expires, which means every test here has to
  * outlast it.
+ *
+ * The slack is for the FIXTURES, and it has to be generous. Each test builds a real repository
+ * first — `git init`, a config write, an add and a commit — and none of that runs through the
+ * runner, so none of it is covered by `DEFAULT_GIT_TIMEOUT_MS`. A budget of runner + 10s assumed
+ * that setup was free; on a loaded CI runner it is not, and the whole budget expired during
+ * fixture work while the assertion never ran. The symptom is a test that fails at exactly its
+ * budget, which reads like a hang in the code under test and is not one.
  */
-const GIT_TEST_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_MS + 10_000;
+const GIT_TEST_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_MS + 50_000;
 
 describe('BunGitRunner', () => {
   afterAll(async () => {
