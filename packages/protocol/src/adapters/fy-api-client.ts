@@ -47,7 +47,8 @@ import {
   AnswerSessionRequestSchema,
   type FyEvent,
   FyEventListSchema,
-  FyEventSchema,
+  type FyEventStreamIdle,
+  FyEventStreamFrameSchema,
   InterruptSessionRequestSchema,
   MigrateSessionRequestSchema,
   NameSuggestionsSchema,
@@ -58,6 +59,8 @@ import {
   type SendResult,
   SendResultSchema,
   SessionListSchema,
+  type SessionAttachTarget,
+  SessionAttachTargetSchema,
   type SessionView,
   SessionViewSchema,
   type SignalKind,
@@ -146,7 +149,8 @@ export class FetchHttpTransport implements IFyHttpTransport {
 }
 
 export class WebSocketEventTransport implements IFyEventTransport {
-  stream(input: { url: string; token: string; onMessage(value: unknown): void }): Promise<void> {
+  stream(input: { url: string; token: string; signal?: AbortSignal; onMessage(value: unknown): void }): Promise<void> {
+    if (input.signal?.aborted === true) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const AuthenticatedWebSocket = WebSocket as unknown as {
         new (url: string | URL, options: { headers: RequestInit['headers'] }): WebSocket;
@@ -155,25 +159,46 @@ export class WebSocketEventTransport implements IFyEventTransport {
         headers: { authorization: `Bearer ${input.token}` },
       });
       let settled = false;
+      const cleanup = (): void => {
+        input.signal?.removeEventListener('abort', cancel);
+        socket.removeEventListener('message', message);
+        socket.removeEventListener('close', closed);
+        socket.removeEventListener('error', failed);
+      };
       const fail = (error: unknown): void => {
         if (settled) return;
         settled = true;
+        cleanup();
         socket.close();
         reject(error instanceof Error ? error : new Error('WebSocket stream failed'));
       };
-      socket.addEventListener('message', event => {
+      const message = (event: MessageEvent): void => {
         try {
           input.onMessage(JSON.parse(String(event.data)));
         } catch (error) {
           fail(error);
         }
-      });
-      socket.addEventListener('close', () => {
+      };
+      const closed = (event: CloseEvent): void => {
         if (settled) return;
         settled = true;
+        cleanup();
+        const detail = event.reason === '' ? `code ${event.code}` : `${event.reason} (code ${event.code})`;
+        reject(new Error(`WebSocket stream closed unexpectedly: ${detail}`));
+      };
+      const failed = (): void => fail(new Error('WebSocket stream failed'));
+      const cancel = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        socket.close(1000, 'event stream cancelled');
         resolve();
-      });
-      socket.addEventListener('error', () => fail(new Error('WebSocket stream failed')));
+      };
+      socket.addEventListener('message', message);
+      socket.addEventListener('close', closed);
+      socket.addEventListener('error', failed);
+      input.signal?.addEventListener('abort', cancel, { once: true });
+      if (input.signal?.aborted === true) cancel();
     });
   }
 }
@@ -490,6 +515,13 @@ export class FyApiClient implements IFyApiClient {
     });
   }
 
+  attachTarget(id: string): Promise<SessionAttachTarget> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/attach`,
+      SessionAttachTargetSchema,
+    );
+  }
+
   snapshot(id: string): Promise<string> {
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/snapshot?live=true`,
@@ -556,7 +588,13 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  stream(sessionId: string | undefined, after: number, onEvent: (event: FyEvent) => void): Promise<void> {
+  stream(
+    sessionId: string | undefined,
+    after: number,
+    onEvent: (event: FyEvent) => void,
+    signal?: AbortSignal,
+    onIdle?: (idle: FyEventStreamIdle) => void,
+  ): Promise<void> {
     const url = new URL(`${this.#baseUrl}/v1/events`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('after', String(NonNegativeIntegerSchema.parse(after)));
@@ -564,7 +602,12 @@ export class FyApiClient implements IFyApiClient {
     return this.#eventTransport.stream({
       url: url.toString(),
       token: this.#token,
-      onMessage: value => onEvent(FyEventSchema.parse(value)),
+      ...(signal === undefined ? {} : { signal }),
+      onMessage: value => {
+        const frame = FyEventStreamFrameSchema.parse(value);
+        if (frame.kind === 'event') onEvent(frame.event);
+        else onIdle?.(frame);
+      },
     });
   }
 

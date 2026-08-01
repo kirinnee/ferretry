@@ -1,19 +1,19 @@
 import { FyTransportError } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../session/errors.ts';
-import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo } from './ports.ts';
-import { renderEvent, renderStreamIdle } from './render.ts';
+import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo, ITerminalAttacher } from './ports.ts';
+import { renderEvent, renderFleetStreamIdle, renderStreamIdle } from './render.ts';
 import { decideWait, renderWaitOutcome, type WaitNotices, type WaitOutcome, waitExitCode } from './wait.ts';
 
 /**
  * The operator read commands: how a human watches a session that is already running.
  *
- * `snapshot`, `logs` and `events` are single reads over the routes the daemon now mounts. `stream` and
- * `wait` are LOOPS, and each of them carries a rule the legacy command did not:
+ * `attach`, `snapshot`, `logs` and `events` are single operations over routes the daemon now mounts.
+ * `stream` is a long-lived socket and `wait` is a polling loop; each carries a rule the legacy
+ * command did not:
  *
  * - A stream is a long-lived read. It must be cancellable, it must not hold anything after the caller
- *   goes away, and it must not stall silently. This one is a bounded poll over the event cursor with an
- *   `AbortSignal` checked between every step, so Ctrl-C ends it at the next boundary and nothing but a
- *   cursor survives the loop. Silence is REPORTED rather than implied — see `renderStreamIdle`.
+ *   goes away, and it must not stall silently. The AbortSignal closes its socket, while daemon idle
+ *   frames prove a quiet feed is still live. Silence is REPORTED rather than implied.
  * - A wait must be able to fail, and its outcomes are decided by `decideWait` rather than by the shape
  *   of this loop. See that module for why every terminal status used to exit 0.
  */
@@ -39,7 +39,6 @@ export interface EventsOptions {
 export interface StreamOptions {
   readonly after?: number;
   readonly json?: boolean;
-  readonly interval?: number;
 }
 
 /** Flags accepted by `fy wait`. */
@@ -50,11 +49,8 @@ export interface WaitOptions {
   readonly interval?: number;
 }
 
-/** How often a follow or a wait asks the daemon again, when the caller names nothing. */
+/** How often a wait asks the daemon again, when the caller names nothing. */
 const DEFAULT_POLL_SECONDS = 1;
-
-/** How long a stream stays silent before it says so. */
-export const IDLE_NOTICE_SECONDS = 30;
 
 /** A caller-supplied number that must be a whole positive one. */
 function positive(value: number | undefined, flag: string): number | undefined {
@@ -77,7 +73,14 @@ export class ReadsController {
     private readonly out: IReadsIo,
     private readonly clock: IReadsClock,
     private readonly marker: IMarkerProbe,
+    private readonly attacher: ITerminalAttacher,
   ) {}
+
+  /** Attach only after both daemon and client proved the complete tmux process incarnation. */
+  async attach(sessionId: string): Promise<void> {
+    const target = await this.gateway.attachTarget(sessionId);
+    this.out.setExitCode(await this.attacher.attach(target));
+  }
 
   /** The session's live screen. A dead pane is a daemon refusal, and it surfaces as one. */
   async snapshot(sessionId: string, options: SnapshotOptions): Promise<void> {
@@ -107,54 +110,46 @@ export class ReadsController {
   }
 
   /**
-   * Follow one session's events until the caller stops it.
+   * Follow one session, or this daemon's whole fleet, over the mounted event socket.
    *
-   * KEYED BY SESSION, DELIBERATELY. There is no fleet-wide form: the daemon mounts no event socket, so a
-   * fleet follow would have to poll every session and merge them, and the merged cursor would be a
-   * number this daemon never issued. A stream that reports positions the server does not recognise is
-   * worse than one that is absent.
-   *
-   * The signal is checked BEFORE the read, BETWEEN the read and the sleep, and by the sleep itself, so a
-   * cancelled follow stops at the next boundary rather than after one more full poll interval.
+   * Sequences remain per-session even in the fleet form, so every session owns its own cursor. A
+   * fleet socket starts with the daemon's bounded recent tail and therefore refuses a non-zero
+   * `--after`; only a scoped stream can honestly resume one numeric cursor.
    */
-  async stream(sessionId: string, options: StreamOptions, signal: AbortSignal): Promise<void> {
-    let position = cursor(options.after, '--after');
-    const intervalMs = (positive(options.interval, '--interval') ?? DEFAULT_POLL_SECONDS) * 1_000;
-    let silentSinceMs = this.clock.nowMs();
-    let noted = false;
-    while (!signal.aborted) {
-      let page: Awaited<ReturnType<IReadsGateway['events']>>;
-      try {
-        page = await this.gateway.events(sessionId, position, undefined, signal);
-      } catch (error) {
-        // The caller leaving is a successful release, not a failed stream. Any other transport or
-        // daemon error must surface, because swallowing it would make a broken stream look quiet.
-        if (signal.aborted) return;
-        throw error;
-      }
-      if (page.length > 0) {
-        let next = position;
-        for (const event of page) {
-          if (event.sessionId !== sessionId)
-            throw new Error(`fyd returned an event for ${event.sessionId} while following ${sessionId}`);
-          if (event.sequence <= next)
-            throw new Error(`fyd returned a non-advancing event sequence #${event.sequence} after #${next}`);
-          this.out.success(options.json === true ? JSON.stringify(event) : renderEvent(event));
-          next = event.sequence;
+  async stream(sessionId: string | undefined, options: StreamOptions, signal: AbortSignal): Promise<void> {
+    const after = cursor(options.after, '--after');
+    if (sessionId === undefined && after !== 0)
+      throw new SessionCommandError('a fleet stream has no global cursor; omit --after or name one session');
+    if (signal.aborted) return;
+    const positions = new Map<string, number>();
+    if (sessionId !== undefined) positions.set(sessionId, after);
+    await this.gateway.stream(
+      sessionId,
+      after,
+      event => {
+        if (sessionId !== undefined && event.sessionId !== sessionId)
+          throw new Error(`fyd returned an event for ${event.sessionId} while following ${sessionId}`);
+        const previous = positions.get(event.sessionId) ?? after;
+        if (event.sequence <= previous)
+          throw new Error(
+            `fyd returned a non-advancing event sequence #${event.sequence} for ${event.sessionId} after #${previous}`,
+          );
+        positions.set(event.sessionId, event.sequence);
+        this.out.success(options.json === true ? JSON.stringify(event) : renderEvent(event));
+      },
+      signal,
+      idle => {
+        if (sessionId === undefined) {
+          if (idle.scope.kind !== 'fleet') throw new Error('fyd returned a session idle proof for a fleet stream');
+          this.out.error(renderFleetStreamIdle(idle.scope.followedSessions, idle.idleSeconds));
+          return;
         }
-        position = next;
-        silentSinceMs = this.clock.nowMs();
-        noted = false;
-      } else if (!noted && this.clock.nowMs() - silentSinceMs >= IDLE_NOTICE_SECONDS * 1_000) {
-        // Said ONCE per silent stretch: repeating it every interval would bury the events it exists to
-        // distinguish itself from.
-        const silentSeconds = Math.floor((this.clock.nowMs() - silentSinceMs) / 1_000);
-        this.out.error(renderStreamIdle(sessionId, position, silentSeconds));
-        noted = true;
-      }
-      if (signal.aborted) return;
-      await this.clock.sleep(intervalMs, signal);
-    }
+        const position = positions.get(sessionId) ?? after;
+        if (idle.scope.kind !== 'session' || idle.scope.sessionId !== sessionId || idle.scope.after !== position)
+          throw new Error('fyd returned an idle proof that contradicted the followed session cursor');
+        this.out.error(renderStreamIdle(sessionId, position, idle.idleSeconds));
+      },
+    );
   }
 
   /** End one wait, preserving stdout as a state channel and stderr as an outcome channel. */

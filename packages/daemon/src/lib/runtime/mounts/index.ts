@@ -15,12 +15,14 @@ import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
+import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { pinRoutes } from './pins.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
+import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
@@ -122,6 +124,10 @@ export interface MountedSubsystems {
    *  agent itself wrote. Every one of these refuses rather than answering blank — see the domain's own
    *  header for why a dead pane and an unresolved transcript are errors and an empty event page is not. */
   readonly sessionReads: OperatorReadService;
+  /** A short-lived, freshly validated tmux identity for a local human attach. */
+  readonly sessionAttach: SessionAttachSubsystem;
+  /** This daemon's bounded recent event tail followed by its own live journal appends. */
+  readonly fleetEvents: FleetEventStreamSubsystem;
 }
 
 /**
@@ -192,6 +198,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // one-segment patterns under `/v1/sessions/:sessionId` whose final literals (`events`, `snapshot`,
     // `logs`) no other route uses, so they can neither shadow nor be shadowed by anything above.
     ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions),
+    // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
+    // transcript it authorizes a local process action, and its mount revalidates the pane identity.
+    ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
   ];
 }
 
@@ -209,7 +218,12 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
  * sessions.
  */
 export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly SocketRoute[] {
-  return [...terminalSocketRoutes(subsystems.terminals)];
+  return [
+    // Fixed literal first; it cannot shadow the deeper terminal pattern and makes the fleet feed's
+    // optional session filter one route rather than a second dispatcher.
+    ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions),
+    ...terminalSocketRoutes(subsystems.terminals),
+  ];
 }
 
 /** The socket dispatcher the transport adapter serves, over the same credentials as the HTTP one. */

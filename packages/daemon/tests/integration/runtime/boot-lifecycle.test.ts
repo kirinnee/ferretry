@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
+  FyEventStreamFrameSchema,
+  type FyEventStreamFrame,
   HealthViewSchema,
   LearningConfigSchema,
   LearningPatchResponseSchema,
@@ -137,6 +139,21 @@ async function seedSession(
     id,
     SessionStateSchema.parse({ id: sessionId, status: 'running', turn: 1, lastActivityAt: at, ...state }),
   );
+  await opened.storage.close();
+}
+
+/**
+ * Real journal history for a seeded session, written through the daemon's own storage.
+ *
+ * The event feed answers from the durable journal, so a fixture that hand-wrote `events.jsonl` would
+ * be proving the socket against bytes the daemon would refuse. This uses the same append the daemon
+ * itself uses, which is what makes the byte offsets its index resolves against true.
+ */
+async function seedEvents(home: string, sessionId: string, types: readonly string[]): Promise<void> {
+  process.env.FY_HOME = home;
+  const opened = await buildWorld().storage.open();
+  const id = parseSessionId(sessionId);
+  for (const type of types) await opened.storage.append(id, type, { seeded: type });
   await opened.storage.close();
 }
 
@@ -1995,6 +2012,191 @@ describe('daemon boot lifecycle', () => {
     should(absent?.status).equal(404);
     // Shutdown ended the stream rather than leaving a redraw timer firing at a dead socket.
     should(closes).deepEqual([1000]);
+  });
+
+  /**
+   * The live event feed, driven through the production composition root over a real WebSocket.
+   *
+   * This is the case no unit test can be. Everything between the client and the journal is
+   * production: the bound host switches the protocol, `ApiSocketDispatcher` authenticates the upgrade
+   * off the loopback query-parameter token a browser is limited to, the mount settles the scope
+   * BEFORE the switch, and the events come out of the real durable journal through the real SQLite
+   * index — including the append the daemon itself makes while the socket is already open.
+   *
+   * The live half is the reason the whole feed exists. A socket that served only a backlog is a
+   * slower `GET /v1/sessions/:id/events`, and every reader would have to keep polling anyway.
+   */
+  it('should carry backlog and then live journal events over a real event socket', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-event-stream');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: new RecordingSessionLauncher(),
+    };
+    // A quiet session with real durable history and no lifecycle record: it never starts, never
+    // stops, and exists so the fleet form can be told apart from the per-session one.
+    await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-quiet');
+    await seedEvents(home, 'wire-quiet', ['session.created']);
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    // A real started session, so the live half has a lifecycle the daemon can actually transition.
+    const started = SessionViewSchema.parse(
+      await (
+        await fetch(`http://127.0.0.1:${port}/v1/sessions`, {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': 'req-events-1' },
+          body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'stream my events', cwd: home }),
+        })
+      ).json(),
+    );
+    const live = started.config.id;
+
+    /** Opens one real socket and records every frame the protocol accepts from it. */
+    const follow = async (query: string) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/events?token=${token}${query}`);
+      const frames: FyEventStreamFrame[] = [];
+      const closes: number[] = [];
+      socket.addEventListener('message', event => {
+        frames.push(FyEventStreamFrameSchema.parse(JSON.parse(String(event.data))));
+      });
+      socket.addEventListener('close', event => closes.push(event.code));
+      await new Promise<void>((resolve, reject) => {
+        socket.addEventListener('open', () => resolve());
+        socket.addEventListener('error', () => reject(new Error('the event socket never opened')));
+      });
+      return { frames, closes };
+    };
+    /** The events one socket was given, as `sessionId/sequence`. */
+    const delivered = (frames: readonly FyEventStreamFrame[]): string[] =>
+      frames.filter(frame => frame.kind === 'event').map(frame => `${frame.event.sessionId}/${frame.event.sequence}`);
+
+    // Act
+    // Every refusal a client can be told with a STATUS is settled on the handshake, so a failed
+    // upgrade is legible instead of a socket that dies for reasons it cannot name.
+    const handshake = async (query: string): Promise<number | undefined> =>
+      (
+        await fetch(`http://127.0.0.1:${port}/v1/events${query}`, {
+          headers: {
+            upgrade: 'websocket',
+            connection: 'upgrade',
+            'sec-websocket-version': '13',
+            'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
+          },
+        }).catch(() => undefined)
+      )?.status;
+    const anonymous = await handshake('');
+    const unknownSession = await handshake(`?token=${token}&sessionId=nobody`);
+    const fleetCursor = await handshake(`?token=${token}&after=5`);
+
+    const fleet = await follow('');
+    const follower = await follow(`&sessionId=${live}`);
+    for (let attempt = 0; attempt < 200 && fleet.frames.length < 2; attempt += 1) await Bun.sleep(10);
+    const fleetBacklog = delivered(fleet.frames);
+    const followerBacklog = delivered(follower.frames);
+    // A journal append the DAEMON makes, with both sockets already open.
+    const stopped = await fetch(`http://127.0.0.1:${port}/v1/sessions/${live}/stop`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'the stream has what it needs' }),
+    });
+    for (let attempt = 0; attempt < 200 && delivered(fleet.frames).length <= fleetBacklog.length; attempt += 1)
+      await Bun.sleep(10);
+    for (let attempt = 0; attempt < 200 && delivered(follower.frames).length <= followerBacklog.length; attempt += 1)
+      await Bun.sleep(10);
+    const fleetFinal = delivered(fleet.frames);
+    const followerFinal = delivered(follower.frames);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+    for (let attempt = 0; attempt < 200 && (fleet.closes.length === 0 || follower.closes.length === 0); attempt += 1)
+      await Bun.sleep(10);
+
+    // Assert
+    should(code).equal(0);
+    should(stopped.status).equal(200);
+    // The handshake refusals: no token at all, a session the index does not hold, and a fleet cursor
+    // there is no global sequence domain for.
+    should(anonymous).equal(401);
+    should(unknownSession).equal(404);
+    should(fleetCursor).equal(400);
+    // The fleet backlog is real durable history from MORE THAN ONE session, which is the capability
+    // the per-session replay route cannot provide at all.
+    should(fleetBacklog).containEql('wire-quiet/1');
+    should(new Set(fleetBacklog.map(entry => entry.split('/')[0])).size).be.above(1);
+    // The per-session socket carries that session and nothing else, from the same one feed.
+    should(followerBacklog.every(entry => entry.startsWith(`${live}/`))).be.true();
+    should(followerBacklog).not.containEql('wire-quiet/1');
+    // The live half. An append the daemon made after both sockets opened reached both of them —
+    // without it this feed would just be a slower `GET /v1/sessions/:id/events`.
+    should(fleetFinal.length).be.above(fleetBacklog.length);
+    should(followerFinal.length).be.above(followerBacklog.length);
+    should(followerFinal.every(entry => entry.startsWith(`${live}/`))).be.true();
+    // Nothing arrived twice and nothing went backwards on either socket.
+    for (const entries of [fleetFinal, followerFinal]) should(new Set(entries).size).equal(entries.length);
+    // Shutdown ended both feeds rather than leaving journal listeners attached to dead sockets.
+    should([fleet.closes, follower.closes]).deepEqual([[1000], [1000]]);
+  });
+
+  /**
+   * The attach proof, driven through the production composition root over a real socket.
+   *
+   * No tmux is involved and none may be: the daemon holds no pane registration for a seeded session,
+   * so the refusal is decided from the durable registry before anything is observed. That is exactly
+   * what makes this a reachability case — the route answered `unknown_route` before it was mounted,
+   * and a refusal proves the mount, its loopback rule and its scope are all really there.
+   */
+  it('should refuse an attach for a session with no proven pane, over the mounted route', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-attach');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await seedSession(home, '2026-07-31T09:00:00.000Z');
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const attach = `http://127.0.0.1:${port}/v1/sessions`;
+
+    // Act
+    const unproven = await fetch(`${attach}/${SESSION_ID}/attach`, { headers });
+    const unprovenBody = (await unproven.json()) as { code: string };
+    const absent = await fetch(`${attach}/nobody/attach`, { headers });
+    const unauthenticated = await fetch(`${attach}/${SESSION_ID}/attach`);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // Mounted and reached: an unmounted route answers `unknown_route`, never a named attach refusal.
+    should(unproven.status).equal(409);
+    should(unprovenBody.code).equal('attach_registration_missing');
+    should(unproven.headers.get('cache-control')).equal('no-store');
+    // The session's existence is still settled before any pane evidence is gathered.
+    should(absent.status).equal(404);
+    should(unauthenticated.status).equal(401);
   });
 
   /**

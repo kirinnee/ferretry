@@ -99,6 +99,10 @@ import {
   type TaskSnapshot,
 } from '../../../../src/lib/tasks/index.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
+import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
+import { FleetEventStreamService } from '../../../../src/lib/session/events/index.ts';
+import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
+import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
@@ -1312,6 +1316,67 @@ export class FakeWarden implements WardenSubsystem {
       this.disarmed += 1;
     };
   }
+}
+
+/** The private tmux server the attach fixtures speak for. Absolute, as the protocol schema demands. */
+export const ATTACH_SOCKET_PATH = '/state/fy/tmux.sock';
+/** The daemon that owns those registrations. An attach is authorized by this pairing, never by name. */
+const ATTACH_DAEMON_ID = 'daemon-mounted';
+
+/** One durable pane registration with a COMPLETE process incarnation, which is the only kind the
+ *  attach domain will act on. */
+export const ATTACH_PANE: RegisteredTerminalPane = {
+  daemonId: ATTACH_DAEMON_ID,
+  sessionId: 's1',
+  tmuxSession: 'fy-s1',
+  paneId: '%7',
+  pid: 4_242,
+  processStartTicks: 918_273,
+};
+
+/** How an attach fixture may be pointed at damaged, foreign or vanished pane evidence. */
+export interface AttachWorld {
+  readonly daemonId?: string;
+  readonly socketPath?: string;
+  readonly registrations?: readonly RegisteredTerminalPane[];
+  /** What a fresh observation of the registration reports. Set explicitly to `undefined` for a pane
+   *  the daemon's own tmux server no longer holds. */
+  readonly observation?: ObservedTerminalPane;
+}
+
+/**
+ * The REAL attach service over a registry and an observer the test owns.
+ *
+ * Only the durable store and the tmux read are replaced. Every identity rule — the exactly-one
+ * registration, the complete pane id / pid / start-ticks match, the absolute socket path — is
+ * production code, so a case that passes here is asserting the refusal the daemon would actually make.
+ */
+export function attachSubsystem(world: AttachWorld = {}): SessionAttachService {
+  const observation = Object.hasOwn(world, 'observation') ? world.observation : ATTACH_PANE;
+  return new SessionAttachService(
+    world.daemonId ?? ATTACH_DAEMON_ID,
+    world.socketPath ?? ATTACH_SOCKET_PATH,
+    { list: async () => world.registrations ?? [ATTACH_PANE] },
+    { observe: async () => observation },
+  );
+}
+
+/**
+ * The REAL fleet event stream service over a fixed backlog and a scheduler that never fires.
+ *
+ * The surface tests ask only whether the feed is mounted and authorized; the frame behaviour it
+ * produces has its own unit coverage, and a live idle timer in a route table test would outlive it.
+ */
+export function fleetEventSubsystem(events: readonly StoredSessionEvent[] = []): FleetEventStreamService {
+  return new FleetEventStreamService(
+    {
+      replay: async (sessionId, afterSequence) =>
+        events.filter(event => event.sessionId === sessionId && event.sequence > afterSequence),
+      fleetBacklog: async () => ({ sessionIds: [...new Set(events.map(event => event.sessionId))], events }),
+      subscribe: () => () => undefined,
+    },
+    { after: () => ({ cancel: () => undefined }) },
+  );
 }
 
 const FAKE_FAILOVER: WardenStatusView['failover'] = {

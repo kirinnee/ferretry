@@ -16,9 +16,11 @@ import { fixedClock, request } from '../../api/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   analyticsSubsystem,
+  attachSubsystem,
   attentionService,
   CREDENTIALS,
   emptyFeed,
+  fleetEventSubsystem,
   FakeBrowserLogin,
   FakeSessionControl,
   FakeSessionMigrate,
@@ -88,6 +90,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     { capture: async () => ({ alive: true, dead: false, text: 'screen' }) },
     { tail: async () => ({ kind: 'read', events: [] }) },
   ),
+  sessionAttach: attachSubsystem(),
+  fleetEvents: fleetEventSubsystem(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -177,6 +181,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/events',
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
+      // The attach proof. It sits with the operator reads but authorizes a local process action
+      // rather than answering a question, which is why it is its own mount and its own literal.
+      'GET /v1/sessions/:sessionId/attach',
     ]);
   });
 
@@ -245,6 +252,12 @@ describe('the mounted daemon surface', () => {
     const events = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/events', headers: human }));
     const screen = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/snapshot', headers: human }));
     const transcript = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/logs', headers: human }));
+    // The attach proof, over the same dispatcher and against the REAL attach service: a tmux address
+    // is only meaningful on the daemon's own host, so the mount demands loopback on top of `admin`.
+    const attach = await dispatcher.dispatch(
+      request({ path: '/v1/sessions/s1/attach', headers: human, loopback: true }),
+    );
+    const remoteAttach = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attach', headers: human }));
 
     // Assert
     should(health.status).equal(200);
@@ -272,6 +285,8 @@ describe('the mounted daemon surface', () => {
     should(events.status).equal(200);
     should(screen.status).equal(200);
     should(transcript.status).equal(200);
+    should(attach.status).equal(200);
+    should(remoteAttach.status).equal(403);
   });
 
   it('should validate the GC plan and force request before reaching the collector', async () => {
@@ -313,8 +328,9 @@ describe('the mounted daemon surface', () => {
     // Arrange / Act
     const routes = mountedSocketRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
 
-    // Assert
-    should(routes).deepEqual(['GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
+    // Assert — the fixed literal is registered FIRST, which is what keeps the deeper terminal pattern
+    // reachable: the router matches in registration order and neither path can shadow the other.
+    should(routes).deepEqual(['GET /v1/events', 'GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
   });
 
   it('should serve every byte-shaped route from one table too', () => {
@@ -368,9 +384,15 @@ describe('the mounted daemon surface', () => {
     // Act
     const anonymous = await dispatcher.upgrade(request({ path }));
     const authorized = await dispatcher.upgrade(request({ path, headers: human }));
+    // The event feed, over the SAME socket dispatcher: an anonymous peer never holds it, and the
+    // fleet form is accepted without naming a session at all.
+    const anonymousEvents = await dispatcher.upgrade(request({ path: '/v1/events' }));
+    const fleetEvents = await dispatcher.upgrade(request({ path: '/v1/events', headers: human }));
 
     // Assert
     should(anonymous.outcome === 'refused' ? anonymous.response.status : 0).equal(401);
+    should(anonymousEvents.outcome === 'refused' ? anonymousEvents.response.status : 0).equal(401);
+    should(fleetEvents.outcome).equal('accepted');
     // The terminal does not exist in this fixture, which still proves the route is mounted, reached,
     // and that existence is decided BEFORE any protocol switch.
     should(authorized.outcome === 'refused' ? authorized.response.status : 0).equal(404);

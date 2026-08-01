@@ -9,14 +9,19 @@ import {
 } from '../../../src/lib/reads/commands.ts';
 
 type Call = {
-  readonly method: 'snapshot' | 'logs' | 'events' | 'stream' | 'wait';
-  readonly id: string;
+  readonly method: 'attach' | 'snapshot' | 'logs' | 'events' | 'stream' | 'wait';
+  /** `stream` is the one command whose id may legitimately be absent. */
+  readonly id: string | undefined;
   readonly options: unknown;
 };
 
 class RecordingReadsController implements ReadsCommandController {
   readonly calls: Call[] = [];
   readonly streamSignals: AbortSignal[] = [];
+
+  async attach(id: string): Promise<void> {
+    this.calls.push({ method: 'attach', id, options: undefined });
+  }
 
   async snapshot(id: string, options: Parameters<ReadsCommandController['snapshot']>[1]): Promise<void> {
     this.calls.push({ method: 'snapshot', id, options });
@@ -31,7 +36,7 @@ class RecordingReadsController implements ReadsCommandController {
   }
 
   async stream(
-    id: string,
+    id: string | undefined,
     options: Parameters<ReadsCommandController['stream']>[1],
     signal: AbortSignal,
   ): Promise<void> {
@@ -96,23 +101,57 @@ describe('operator read command surface', () => {
     should(view.controller.calls[0]?.method).equal('events');
   });
 
-  it('should pass the actual --interval option into stream', async () => {
+  it('should route attach to the controller with the session id alone', async () => {
+    // Arrange + Act
+    const { parsed, controller } = run(['attach', 's1']);
+    await parsed;
+
+    // Assert — attach takes no flags; every attach decision belongs to the daemon and the attacher.
+    should(controller.calls[0]).eql({ method: 'attach', id: 's1', options: undefined });
+  });
+
+  it('should require a session id for attach', async () => {
+    // Arrange + Act
+    const { parsed, controller } = run(['attach']);
+    const refusal = await parsed.catch((error: unknown) => error);
+
+    // Assert — an attach with no target must fail loudly, never fall back to a fleet-wide guess.
+    should(refusal).be.instanceof(Error);
+    should(controller.calls).be.empty();
+  });
+
+  it('should pass the scoped stream flags through without rewriting them', async () => {
     // Arrange
     const beforeInt = process.listenerCount('SIGINT');
     const beforeTerm = process.listenerCount('SIGTERM');
-    const { parsed, controller } = run(['stream', 's1', '--after', '7', '--interval', '3', '--json']);
+    const { parsed, controller } = run(['stream', 's1', '--after', '7', '--json']);
 
     // Act
     await parsed;
 
-    // Assert
-    should(controller.calls[0]).eql({
-      method: 'stream',
-      id: 's1',
-      options: { after: 7, interval: 3, json: true },
-    });
+    // Assert — the listeners are released with the command, so a finished stream leaves nothing behind.
+    should(controller.calls[0]).eql({ method: 'stream', id: 's1', options: { after: 7, json: true } });
     should(process.listenerCount('SIGINT')).equal(beforeInt);
     should(process.listenerCount('SIGTERM')).equal(beforeTerm);
+  });
+
+  it('should follow the daemon-local fleet when stream is given no id', async () => {
+    // Arrange + Act
+    const { parsed, controller } = run(['stream', '--json']);
+    await parsed;
+
+    // Assert — the socket itself is daemon-scoped, so an absent id is a real form and not an error.
+    should(controller.calls[0]).eql({ method: 'stream', id: undefined, options: { json: true } });
+  });
+
+  it('should no longer accept the poll interval the old follow loop needed', async () => {
+    // Arrange + Act
+    const { parsed, controller } = run(['stream', 's1', '--interval', '3']);
+    const refusal = await parsed.catch((error: unknown) => error);
+
+    // Assert — there is no poll to pace; accepting the flag would imply a cadence nothing honours.
+    should(refusal).be.instanceof(Error).and.have.property('code', 'commander.unknownOption');
+    should(controller.calls).be.empty();
   });
 
   it('should pass the timeout, interval, and marker into wait', async () => {

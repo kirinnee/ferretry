@@ -106,7 +106,9 @@ describe('ApiSocketDispatcher', () => {
     const dispatcher = dispatcherFor(streamRoute());
     const sent: string[] = [];
     const downstream: SocketDownstream = {
-      send: bytes => sent.push(new TextDecoder().decode(bytes)),
+      // The downstream carries text frames as well as bytes now, so a recorder that only decoded
+      // bytes would no longer compile against the port the fleet event feed writes through.
+      send: frame => sent.push(typeof frame === 'string' ? frame : new TextDecoder().decode(frame)),
       close: () => undefined,
       bufferedBytes: () => 0,
     };

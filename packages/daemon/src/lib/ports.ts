@@ -76,6 +76,8 @@ export interface SessionIndex {
   findSession(id: SessionId): IndexedSession | undefined;
   listSessions(): readonly IndexedSession[];
   eventPointers(id: SessionId, afterSequence: number, limit: number): readonly EventPointer[];
+  /** The newest pointers across this daemon's complete session index, bounded before bytes are read. */
+  fleetEventPointers(limit: number): readonly EventPointer[];
   countEvents(id: SessionId): number;
   removeSession(id: SessionId): void;
   close(): void;

@@ -5,13 +5,17 @@ import * as session from '../../src/lib/session.ts';
 import {
   attachmentView,
   cgroupConfigView,
+  fleetIdleFrame,
   fyEvent,
+  fyEventFrame,
   healthView,
   INSTANT,
   LATER_INSTANT,
   pwaConfigView,
   scratchPlanView,
   scratchSweepView,
+  sessionAttachTarget,
+  sessionIdleFrame,
   sessionView,
   usageFeedView,
   wardenConfig,
@@ -124,10 +128,16 @@ const sessionCases: SchemaCase[] = [
   { name: 'session state', schema: session.SessionStateSchema, value: sessionView.state },
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
+  { name: 'attach target', schema: session.SessionAttachTargetSchema, value: sessionAttachTarget },
   { name: 'name suggestions', schema: session.NameSuggestionsSchema, value: ['Ada'] },
   { name: 'event source', schema: session.FyEventSourceSchema, value: 'daemon' },
   { name: 'event', schema: session.FyEventSchema, value: fyEvent },
   { name: 'event list', schema: session.FyEventListSchema, value: [fyEvent] },
+  { name: 'session idle scope', schema: session.FyEventStreamIdleScopeSchema, value: sessionIdleFrame.scope },
+  { name: 'fleet idle scope', schema: session.FyEventStreamIdleScopeSchema, value: fleetIdleFrame.scope },
+  { name: 'event frame', schema: session.FyEventStreamFrameSchema, value: fyEventFrame },
+  { name: 'session idle frame', schema: session.FyEventStreamFrameSchema, value: sessionIdleFrame },
+  { name: 'fleet idle frame', schema: session.FyEventStreamFrameSchema, value: fleetIdleFrame },
   {
     name: 'start request',
     schema: session.StartSessionRequestSchema,
@@ -297,6 +307,91 @@ describe('session schemas', () => {
         name: 'undiscovered transcript naming a file anyway',
         schema: session.TranscriptProvenanceSchema,
         value: { v: 1, home: '/home/agent/.codex', identity: 'undiscovered', file: '/transcript.jsonl' },
+      },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
+  });
+
+  it('should reject attach evidence that cannot address exactly one live pane', () => {
+    // Arrange — every field here is what stops an attach landing on somebody else's terminal.
+    const cases: SchemaCase[] = [
+      {
+        name: 'a relative tmux socket',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, socketPath: 'tmux.sock' },
+      },
+      {
+        name: 'a session name instead of a pane id',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, paneId: 'fy-session-1' },
+      },
+      {
+        name: 'the zeroth pane, which tmux never issues',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, paneId: '%0' },
+      },
+      {
+        // pid 1 is init. Attaching to it would mean the pane process is already gone.
+        name: 'init as the pane process',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, pid: 1 },
+      },
+      {
+        name: 'a pane with no recorded start ticks',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, processStartTicks: 0 },
+      },
+      {
+        name: 'an unknown attach field',
+        schema: session.SessionAttachTargetSchema,
+        value: { ...sessionAttachTarget, windowId: '@1' },
+      },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
+  });
+
+  it('should reject stream frames that would let a heartbeat pass for an event', () => {
+    // Arrange
+    const cases: SchemaCase[] = [
+      {
+        name: 'a bare event outside the wrapper',
+        schema: session.FyEventStreamFrameSchema,
+        value: fyEvent,
+      },
+      {
+        name: 'an event frame carrying a malformed event',
+        schema: session.FyEventStreamFrameSchema,
+        value: { kind: 'event', event: { ...fyEvent, sequence: -1 } },
+      },
+      {
+        // Zero seconds of silence is not a proof of anything; it would print on every quiet tick.
+        name: 'an idle proof of no elapsed silence',
+        schema: session.FyEventStreamFrameSchema,
+        value: { ...sessionIdleFrame, idleSeconds: 0 },
+      },
+      {
+        name: 'an idle frame that also smuggles an event',
+        schema: session.FyEventStreamFrameSchema,
+        value: { ...sessionIdleFrame, event: fyEvent },
+      },
+      {
+        name: 'a fleet scope inventing a session id',
+        schema: session.FyEventStreamIdleScopeSchema,
+        value: { ...fleetIdleFrame.scope, sessionId: 'session-1' },
+      },
+      {
+        name: 'a session scope with no cursor',
+        schema: session.FyEventStreamIdleScopeSchema,
+        value: { kind: 'session', sessionId: 'session-1' },
+      },
+      {
+        name: 'a scope kind nobody emits',
+        schema: session.FyEventStreamIdleScopeSchema,
+        value: { kind: 'daemon', after: 0 },
       },
     ];
 

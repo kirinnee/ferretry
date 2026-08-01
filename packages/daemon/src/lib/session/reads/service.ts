@@ -129,7 +129,7 @@ export const MAX_LOG_TAIL = 2_000;
 export const JOURNAL_EVENT_SOURCE = 'daemon';
 
 /** A stored event in the protocol's envelope. */
-function toFyEvent(event: StoredSessionEvent): FyEvent {
+export function journalEventToFyEvent(event: StoredSessionEvent): FyEvent {
   return {
     sequence: event.sequence,
     time: event.time,
@@ -242,7 +242,7 @@ export class OperatorReadService {
           `journal page for ${sessionId} did not advance after sequence ${cursor}`,
         );
       cursor = event.sequence;
-      return toFyEvent(event);
+      return journalEventToFyEvent(event);
     });
   }
 

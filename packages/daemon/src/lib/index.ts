@@ -39,6 +39,8 @@ export * from './reconciliation.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';
 export * from './session/filesystem/index.ts';
+export * from './session/attach/index.ts';
+export * from './session/events/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';

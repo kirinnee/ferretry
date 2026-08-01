@@ -85,7 +85,7 @@ export function admitPendingSocketFrame(pending: number): SocketPendingDecision 
  */
 export interface SocketDownstream {
   /** A negative result means the peer has gone away even though nothing threw. */
-  send(bytes: Uint8Array): number | undefined;
+  send(frame: string | Uint8Array): number | undefined;
   close(code: number, reason: string): void;
   bufferedBytes(): number;
 }

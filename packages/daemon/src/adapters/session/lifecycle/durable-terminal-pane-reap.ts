@@ -1,18 +1,19 @@
-import type { ExactTerminalReaper, RegisteredPaneObserver } from '../../../lib/session/reap-service.ts';
+import {
+  createSessionPaths,
+  type FileSystemPort,
+  type FoundationPaths,
+  hasSafeTerminalPaneIdentity,
+  parseSessionId,
+  type SessionLifecycleRecord,
+  type TmuxController,
+} from '../../../lib/index.ts';
 import type {
   DurableTerminalSession,
   ObservedTerminalPane,
   RegisteredTerminalPane,
   TerminalReapTarget,
 } from '../../../lib/session/reap.ts';
-import {
-  createSessionPaths,
-  type FileSystemPort,
-  type FoundationPaths,
-  parseSessionId,
-  type SessionLifecycleRecord,
-  TmuxController,
-} from '../../../lib/index.ts';
+import type { ExactTerminalReaper, RegisteredPaneObserver } from '../../../lib/session/reap-service.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 
 function fields(value: unknown): Readonly<Record<string, unknown>> | undefined {
@@ -23,12 +24,13 @@ function fields(value: unknown): Readonly<Record<string, unknown>> | undefined {
 
 function startTicks(text: string): number | undefined {
   const close = text.lastIndexOf(')');
-  const value = Number(
-    text
-      .slice(close + 1)
-      .trim()
-      .split(/\s+/u)[19],
-  );
+  if (close < 1) return undefined;
+  const fields = text
+    .slice(close + 1)
+    .trim()
+    .split(/\s+/u);
+  if (fields.length < 20) return undefined;
+  const value = Number(fields[19]);
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
@@ -38,6 +40,39 @@ async function processStartTicks(pid: number): Promise<number | undefined> {
   } catch {
     return undefined;
   }
+}
+
+function durableRegistration(text: string, daemonId: string, sessionId: string): RegisteredTerminalPane | undefined {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`session ${sessionId} has an unreadable terminal pane registration`, { cause: error });
+  }
+  const value = fields(decoded);
+  if (value === undefined || typeof value.daemonId !== 'string' || typeof value.sessionId !== 'string')
+    throw new Error(`session ${sessionId} has a malformed terminal pane registration`);
+  // A copied or foreign record is not authority for this daemon/directory. Preserve the reap
+  // store's existing refusal semantics by ignoring it rather than treating it as a candidate.
+  if (value.daemonId !== daemonId || value.sessionId !== sessionId) return undefined;
+  if (
+    typeof value.tmuxSession !== 'string' ||
+    typeof value.paneId !== 'string' ||
+    typeof value.pid !== 'number' ||
+    typeof value.processStartTicks !== 'number'
+  )
+    throw new Error(`session ${sessionId} has an incomplete terminal pane registration`);
+  const registration: RegisteredTerminalPane = {
+    daemonId: value.daemonId,
+    sessionId: value.sessionId,
+    tmuxSession: value.tmuxSession,
+    paneId: value.paneId,
+    pid: value.pid,
+    processStartTicks: value.processStartTicks,
+  };
+  if (!hasSafeTerminalPaneIdentity(registration))
+    throw new Error(`session ${sessionId} has an invalid terminal pane registration`);
+  return registration;
 }
 
 /** Writes an identity only after tmux has created the daemon-owned pane. */
@@ -82,10 +117,8 @@ export class DurableTerminalPaneStore {
     for (const id of await this.storage.sessionIdsOnDisk()) {
       const text = await this.files.readText(createSessionPaths(this.paths, id).terminalPane);
       if (text === undefined) continue;
-      try {
-        const value = JSON.parse(text) as RegisteredTerminalPane;
-        if (value.daemonId === daemonId && value.sessionId === id) values.push(value);
-      } catch {}
+      const value = durableRegistration(text, daemonId, id);
+      if (value !== undefined) values.push(value);
     }
     return values;
   }

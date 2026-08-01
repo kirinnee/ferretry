@@ -865,6 +865,7 @@ describe('journal storage', () => {
       findSession: () => undefined,
       listSessions: () => [],
       eventPointers: () => [],
+      fleetEventPointers: () => [],
       countEvents: () => 0,
       removeSession: () => undefined,
       close: () => undefined,
@@ -1218,5 +1219,305 @@ describe('disposable session index', () => {
     should(String(error)).containEql('symbolic links are not allowed');
     should(await readFile(join(outside, 'sentinel'), 'utf8')).equal('must survive');
     should(await exists(join(outside, 'sessions.sqlite'))).be.false();
+  });
+});
+
+/**
+ * The live append edge a socket follows.
+ *
+ * A subscription is the ONE place a reader learns about history without asking for it, so two
+ * properties decide whether the feed can be trusted at all. It must publish only what is already
+ * durable — a listener told about an event whose journal write later failed would hand a follower a
+ * record no replay will ever produce — and it must never make the journal itself depend on a socket:
+ * a peer that throws is a peer to drop, not a reason to lose the daemon's history.
+ */
+describe('the durable event subscription', () => {
+  it('should publish appends that are already durable, in journal order', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const first = parseSessionId('feed-one');
+    const second = parseSessionId('feed-two');
+    const seen: string[] = [];
+    /** What the index already recorded at the instant each listener was called. */
+    const durableAtNotification: number[] = [];
+
+    // Act
+    const unsubscribe = opened.storage.subscribeEvents(event => {
+      seen.push(`${event.sessionId}/${event.sequence}`);
+      // Read back INSIDE the notification: publication happens after the bytes and their pointer
+      // agree, so what a listener is told must already be replayable.
+      durableAtNotification.push(opened.storage.findSession(event.sessionId)?.lastSequence ?? 0);
+    });
+    await opened.storage.append(first, 'started', { value: 1 });
+    await opened.storage.append(second, 'started', { value: 2 });
+    await opened.storage.append(first, 'progressed', { value: 3 });
+    unsubscribe();
+    await opened.storage.append(first, 'after-unsubscribe', {});
+
+    // Assert
+    should(seen).deepEqual(['feed-one/1', 'feed-two/1', 'feed-one/2']);
+    should(durableAtNotification).deepEqual([1, 1, 2]);
+    // The unsubscribe is what stops a closed socket from holding the whole daemon's event history.
+    should((await opened.storage.replay(first)).events.map(event => event.sequence)).deepEqual([1, 2, 3]);
+  });
+
+  it('should not let one broken listener cost the journal or the other listeners', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('broken-listener');
+    const survived: number[] = [];
+    opened.storage.subscribeEvents(() => {
+      throw new Error('this socket is gone');
+    });
+    opened.storage.subscribeEvents(event => survived.push(event.sequence));
+
+    // Act
+    const appended = await opened.storage.append(id, 'recorded', { value: true });
+    const replay = await opened.storage.replay(id);
+
+    // Assert — sockets are observers of the commit, never part of it.
+    should(appended.sequence).equal(1);
+    should(replay.events.map(event => event.type)).deepEqual(['recorded']);
+    should(survived).deepEqual([1]);
+  });
+
+  it('should never carry one opened storage appends to another', async () => {
+    // Arrange — two state homes, which is the only way two daemon storages coexist: the home lock
+    // makes a second opening of the SAME home impossible.
+    const first = await openStorage(await createTemporaryHome());
+    const second = await openStorage(await createTemporaryHome());
+    const seen: string[] = [];
+    first.storage.subscribeEvents(event => seen.push(`${event.sessionId}/${event.sequence}`));
+
+    // Act
+    await second.storage.append(parseSessionId('other-home'), 'elsewhere', {});
+    await first.storage.append(parseSessionId('own-home'), 'here', {});
+
+    // Assert — a process-global listener set would leak one daemon's fleet into another's socket.
+    should(seen).deepEqual(['own-home/1']);
+  });
+
+  it('should release every listener when the storage closes', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    let notified = 0;
+    opened.storage.subscribeEvents(() => {
+      notified += 1;
+    });
+
+    // Act
+    await closeStorage(opened.storage);
+    const error = await capturedError(async () => opened.storage.subscribeEvents(() => undefined));
+
+    // Assert — a listener outliving its storage is a socket the daemon can no longer feed or close.
+    should(notified).equal(0);
+    should(String(error)).containEql('daemon storage is closed');
+  });
+});
+
+/**
+ * The bounded recent fleet tail, and the survey an idle proof counts.
+ *
+ * Both answer about EVERY session at once, which is what makes their failure mode dangerous: the
+ * damaged states here — an index that lost rows, an index that was deleted outright, a journal with
+ * a hole in it — all have a plausible-looking smaller answer. A shorter tail reads as a quiet fleet
+ * and a shorter survey reads as a smaller one, so each of these either repairs itself from the
+ * durable journals or refuses; neither may quietly report less than the daemon actually holds.
+ */
+describe('the bounded fleet event tail', () => {
+  it('should merge every session into one global order, newest last', async () => {
+    // Arrange — the shared clock advances a second per write, so the interleaving is a real ordering
+    // rather than a tie broken by session id.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const first = parseSessionId('tail-one');
+    const second = parseSessionId('tail-two');
+    await opened.storage.append(first, 'a', {});
+    await opened.storage.append(second, 'b', {});
+    await opened.storage.append(first, 'c', {});
+
+    // Act
+    const tail = await opened.storage.tailEvents();
+
+    // Assert
+    should(tail.map(event => `${event.sessionId}/${event.sequence}`)).deepEqual([
+      'tail-one/1',
+      'tail-two/1',
+      'tail-one/2',
+    ]);
+    should(tail.map(event => event.type)).deepEqual(['a', 'b', 'c']);
+  });
+
+  it('should keep the newest events when the tail is bounded', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('bounded-tail');
+    for (let index = 1; index <= 5; index += 1) await opened.storage.append(id, `event-${index}`, {});
+
+    // Act
+    const tail = await opened.storage.tailEvents(2);
+
+    // Assert — a bound that kept the OLDEST records would make a new socket start in the distant past.
+    should(tail.map(event => event.sequence)).deepEqual([4, 5]);
+  });
+
+  it('should refuse a bound it cannot serve', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.append(parseSessionId('bounded'), 'a', {});
+
+    // Act
+    const failures = [];
+    for (const limit of [0, -1, 1.5, 10_001])
+      failures.push(String(await capturedError(async () => await opened.storage.tailEvents(limit))));
+
+    // Assert — an unbounded tail makes one socket proportional to the daemon's whole lifetime.
+    should(failures.every(failure => failure.includes('between 1 and 10000'))).be.true();
+  });
+
+  it('should rebuild a wholly lost index rather than reporting an empty fleet', async () => {
+    // Arrange — every index file deleted while the daemon was down. The journals are the authority;
+    // SQLite is disposable, and a tail that trusted it would report a live fleet as having no history.
+    const home = await createTemporaryHome();
+    const first = await openStorage(home);
+    const one = parseSessionId('rebuilt-one');
+    const two = parseSessionId('rebuilt-two');
+    await first.storage.append(one, 'a', {});
+    await first.storage.append(two, 'b', {});
+    const paths = first.paths;
+    await closeStorage(first.storage);
+    for (const file of indexFiles(paths)) await rm(file, { force: true });
+
+    // Act
+    const second = await openStorage(home);
+    const tail = await second.storage.tailEvents();
+    const sessions = await second.storage.fleetSessionIds();
+
+    // Assert — no explicit rebuild was asked for: the fleet reads reconcile the index they depend on.
+    should(tail.map(event => `${event.sessionId}/${event.sequence}`)).deepEqual(['rebuilt-one/1', 'rebuilt-two/1']);
+    // Both sessions are back, in the index's own newest-first activity order.
+    should([...sessions]).deepEqual([two, one]);
+  });
+
+  it('should refuse an index that lost pointers instead of serving a shorter tail', async () => {
+    // Arrange — a row deleted straight out of SQLite while the journals stay whole. This is the
+    // damage a resolving tail cannot notice on its own: every pointer the query returns resolves
+    // perfectly against real journal bytes, there are simply too few of them, and the fingerprint
+    // still matches so nothing re-indexes.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('holed-index');
+    for (let index = 1; index <= 3; index += 1) await opened.storage.append(id, `event-${index}`, {});
+    const database = new Database(opened.paths.sessionIndex, { strict: true });
+    database.run('DELETE FROM events WHERE sequence = 2');
+    const afterDeletion = database.query<{ total: number }, []>('SELECT COUNT(*) AS total FROM events').get()?.total;
+    database.close();
+
+    // Act
+    const error = await capturedError(async () => await opened.storage.tailEvents());
+    // The disposable index is rebuilt from the authoritative journals, which is the repair.
+    const rebuild = await opened.storage.rebuildIndex();
+    const tail = await opened.storage.tailEvents();
+
+    // Assert — the contiguity invariant is what catches it: the session's last sequence is three and
+    // only two pointers exist, so the fleet answer is unavailable rather than two events long.
+    should(afterDeletion).equal(2);
+    should(String(error)).containEql('does not completely represent its durable journal');
+    should(rebuild.eventCount).equal(3);
+    should(tail.map(event => event.sequence)).deepEqual([1, 2, 3]);
+  });
+
+  it('should refuse a journal that is missing a record its own sequence owes', async () => {
+    // Arrange — the middle record is gone from the JOURNAL, so no re-index can restore it: the
+    // session's last sequence is three and only two events exist.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('holed-journal');
+    for (let index = 1; index <= 3; index += 1) await opened.storage.append(id, `event-${index}`, {});
+    const journal = createSessionPaths(opened.paths, id).events;
+    const lines = (await readFile(journal, 'utf8')).split('\n').filter(line => line.length > 0);
+    await writeFile(journal, `${[lines[0], lines[2]].join('\n')}\n`);
+
+    // Act
+    const error = await capturedError(async () => await opened.storage.tailEvents());
+
+    // Assert — reporting the two survivors would present a fleet with a hole in it as a healthy one.
+    should(String(error)).containEql('does not completely represent its durable journal');
+  });
+
+  it('should refuse every fleet read once the storage is closed', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.append(parseSessionId('closed-fleet'), 'a', {});
+    await closeStorage(opened.storage);
+
+    // Act
+    const tailError = await capturedError(async () => await opened.storage.tailEvents());
+    const surveyError = await capturedError(async () => await opened.storage.fleetSessionIds());
+
+    // Assert
+    should(String(tailError)).containEql('daemon storage is closed');
+    should(String(surveyError)).containEql('daemon storage is closed');
+  });
+});
+
+describe('the fleet session survey', () => {
+  it('should report every durable session, including one that has recorded nothing', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const noisy = parseSessionId('survey-noisy');
+    const quiet = parseSessionId('survey-quiet');
+    await opened.storage.append(noisy, 'a', {});
+    await opened.storage.writeConfig(quiet, { label: 'has not spoken yet' });
+
+    // Act
+    const sessions = await opened.storage.fleetSessionIds();
+
+    // Assert — a socket following the fleet is following this session too; omitting it would make
+    // its first event look like a session appearing out of nowhere. The order is the index's own
+    // newest-first activity order, which the quiet session leads because it was written last.
+    should([...sessions]).deepEqual([quiet, noisy]);
+  });
+
+  it('should refuse when an indexed session has no durable directory left', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const kept = parseSessionId('survey-kept');
+    const vanished = parseSessionId('survey-vanished');
+    await opened.storage.append(kept, 'a', {});
+    await opened.storage.append(vanished, 'b', {});
+    await rm(createSessionPaths(opened.paths, vanished).directory, { recursive: true });
+
+    // Act
+    const error = await capturedError(async () => await opened.storage.fleetSessionIds());
+
+    // Assert — counting only the readable survivors would turn damaged state into a smaller,
+    // apparently healthy fleet, and the idle proof would report it as fact.
+    should(String(error)).containEql('no readable durable directory evidence');
+  });
+
+  it('should refuse when a session has lost the journal its marker owes', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('survey-lost-journal');
+    await opened.storage.append(id, 'a', {});
+    await rm(createSessionPaths(opened.paths, id).events);
+
+    // Act
+    const error = await capturedError(async () => await opened.storage.fleetSessionIds());
+    const tailError = await capturedError(async () => await opened.storage.tailEvents());
+
+    // Assert — the same refusal the per-session reads already make, applied to the whole-fleet answer.
+    should(error instanceof MissingSessionJournalError).be.true();
+    should(tailError instanceof MissingSessionJournalError).be.true();
   });
 });

@@ -205,6 +205,7 @@ import {
   doneMarkerCertifiesTurn,
   EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
+  FleetEventStreamService,
   type FinishedAnalyticsSession,
   type FoundationPaths,
   HarnessQuirkService,
@@ -252,6 +253,7 @@ import {
   type SessionControlSubsystem,
   type SessionDirectorySubsystem,
   SessionFilesystem,
+  SessionAttachService,
   SessionHealthService,
   type SessionHealthSettings,
   type SessionId,
@@ -3078,6 +3080,45 @@ export function buildWorld(): DaemonWorld {
           },
           createSessionTranscriptTail(storage),
           lastSnapshots,
+        ),
+        // A host attach is authorized by the durable pane registration, never by the session name.
+        // The observer reads the same private tmux server the launch registered, and the service
+        // compares pane id, pid and process-start incarnation before revealing its socket path.
+        sessionAttach: new SessionAttachService(
+          paths.home,
+          join(paths.home, 'tmux.sock'),
+          {
+            list: async daemonId =>
+              await new DurableTerminalPaneStore(storage, stateFiles, paths).registrations(daemonId),
+          },
+          new ExactTmuxPaneReaper(launchTmux),
+        ),
+        // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
+        // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
+        fleetEvents: new FleetEventStreamService(
+          {
+            replay: async (sessionId, afterSequence, limit, signal) => {
+              signal.throwIfAborted();
+              const page = await storage.replay(parseSessionId(sessionId), afterSequence, limit);
+              signal.throwIfAborted();
+              return page.events;
+            },
+            fleetBacklog: async (limit, signal) => {
+              signal.throwIfAborted();
+              const sessionIds = await storage.fleetSessionIds();
+              signal.throwIfAborted();
+              const events = await storage.tailEvents(limit);
+              signal.throwIfAborted();
+              return { sessionIds, events };
+            },
+            subscribe: listener => storage.subscribeEvents(listener),
+          },
+          {
+            after: (milliseconds, action) => {
+              const timer = setTimeout(action, milliseconds);
+              return { cancel: () => clearTimeout(timer) };
+            },
+          },
         ),
       };
     },

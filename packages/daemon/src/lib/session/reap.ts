@@ -56,7 +56,7 @@ function paneKey(pane: Pick<RegisteredTerminalPane, 'tmuxSession' | 'paneId' | '
   return `${pane.tmuxSession}\n${pane.paneId}\n${pane.pid}\n${pane.processStartTicks}`;
 }
 
-function hasSafeIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): boolean {
+export function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): boolean {
   return (
     pane.tmuxSession.length > 0 &&
     /^%[1-9][0-9]*$/u.test(pane.paneId) &&
@@ -64,6 +64,21 @@ function hasSafeIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): b
     pane.pid > 1 &&
     Number.isSafeInteger(pane.processStartTicks) &&
     pane.processStartTicks > 0
+  );
+}
+
+/** Whether a fresh observation still names the complete process incarnation that was registered. */
+export function terminalPaneIdentityMatches(
+  registration: RegisteredTerminalPane,
+  observation: ObservedTerminalPane,
+): boolean {
+  return (
+    hasSafeTerminalPaneIdentity(registration) &&
+    hasSafeTerminalPaneIdentity(observation) &&
+    registration.tmuxSession === observation.tmuxSession &&
+    registration.paneId === observation.paneId &&
+    registration.pid === observation.pid &&
+    registration.processStartTicks === observation.processStartTicks
   );
 }
 
@@ -99,7 +114,7 @@ export function planTerminalReap(input: {
   const observations = new Map<string, ObservedTerminalPane>();
   const ambiguousObservations = new Set<string>();
   for (const observation of input.observations) {
-    if (!hasSafeIdentity(observation)) continue;
+    if (!hasSafeTerminalPaneIdentity(observation)) continue;
     const key = paneKey(observation);
     if (observations.has(key)) {
       observations.delete(key);
@@ -113,7 +128,7 @@ export function planTerminalReap(input: {
     if (
       registration.daemonId !== input.daemonId ||
       registration.sessionId.length === 0 ||
-      !hasSafeIdentity(registration)
+      !hasSafeTerminalPaneIdentity(registration)
     )
       continue;
     const key = paneKey(registration);

@@ -18,8 +18,10 @@ import type {
 } from './service.ts';
 import type {
   FyEvent,
+  FyEventStreamIdle,
   SendRequest,
   SendResult,
+  SessionAttachTarget,
   SessionView,
   SignalKind,
   SignalOptions,
@@ -36,7 +38,7 @@ export interface IFyHttpTransport {
 }
 
 export interface IFyEventTransport {
-  stream(input: { url: string; token: string; onMessage(value: unknown): void }): Promise<void>;
+  stream(input: { url: string; token: string; signal?: AbortSignal; onMessage(value: unknown): void }): Promise<void>;
 }
 
 export interface IFyFileLoader {
@@ -99,10 +101,17 @@ export interface IFyApiClient {
   rename(id: string, name?: string, teammate?: string, clearParent?: boolean): Promise<SessionView>;
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
+  attachTarget(id: string): Promise<SessionAttachTarget>;
   snapshot(id: string): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
   events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
   history(id: string, after?: number, limit?: number): Promise<FyEvent[]>;
   upload(id: string, file: string | Blob, filename?: string): Promise<AttachmentView>;
-  stream(sessionId: string | undefined, after: number, onEvent: (event: FyEvent) => void): Promise<void>;
+  stream(
+    sessionId: string | undefined,
+    after: number,
+    onEvent: (event: FyEvent) => void,
+    signal?: AbortSignal,
+    onIdle?: (idle: FyEventStreamIdle) => void,
+  ): Promise<void>;
 }

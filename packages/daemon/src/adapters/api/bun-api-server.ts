@@ -42,7 +42,7 @@ export interface HostSocketState {
 export interface HostSocket {
   readonly data: HostSocketState;
   /** Bun reports the bytes it took, or a negative number when the peer has gone away. */
-  send(bytes: Uint8Array): number;
+  send(frame: string | Uint8Array): number;
   close(code?: number, reason?: string): void;
   getBufferedAmount(): number;
 }

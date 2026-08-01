@@ -362,7 +362,7 @@ describe('the mounted terminal stream', () => {
     return {
       sent,
       port: {
-        send: bytes => sent.push(new TextDecoder().decode(bytes)),
+        send: frame => sent.push(typeof frame === 'string' ? frame : new TextDecoder().decode(frame)),
         close: () => undefined,
         bufferedBytes: () => 0,
       },
