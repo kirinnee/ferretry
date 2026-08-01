@@ -183,7 +183,9 @@ describe('the mounted daemon surface', () => {
       request({
         method: 'POST',
         path: '/v1/sessions/s1/migrate',
-        headers: human,
+        // A migration names its logical request id, so a retried POST is one migration rather than
+        // several destructive relaunches; the route refuses one that carries none.
+        headers: { ...human, 'x-fy-request-id': 'surface-migration' },
         body: JSON.stringify({ agent: 'claude-auto-other' }),
       }),
     );

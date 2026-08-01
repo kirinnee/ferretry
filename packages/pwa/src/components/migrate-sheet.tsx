@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import {
   AlertOctagon,
   AlertTriangle,
@@ -32,14 +32,36 @@ export type MigrateSession = (
   connection: DaemonConnection,
   scope: DaemonSessionScope,
   input: MigrationTarget,
+  requestId: string,
 ) => Promise<SessionView>;
 
+type MigrateClient = Pick<IFyApiClient, 'migrate'>;
+export type MigrateClientFactory = (connection: DaemonConnection) => Promise<MigrateClient>;
+
 /** The production adapter: one typed client, bound to one runtime-paired daemon. */
-export const migrateSessionWithDaemon: MigrateSession = async (connection, scope, input) => {
+export const migrateSessionWithDaemon = async (
+  connection: DaemonConnection,
+  scope: DaemonSessionScope,
+  input: MigrationTarget,
+  requestId: string,
+  createClient: MigrateClientFactory = daemonApiClient,
+): Promise<SessionView> => {
   if (connection.daemonId !== scope.daemonId) throw new Error('migration scope must belong to the requested daemon');
-  const client = await daemonApiClient(connection);
-  return await client.migrate(scope.sessionId, input.agent, input.model, input.allowContextDowngrade);
+  const client = await createClient(connection);
+  return await client.migrate(scope.sessionId, input.agent, input.model, input.allowContextDowngrade, requestId);
 };
+
+/**
+ * The stable identity of ONE logical migration.
+ *
+ * A migration is destructive and the typed client retries its POST on transport failure, so the id
+ * has to outlive a single call: every attempt at the same target must be the same operation to the
+ * daemon. It must equally NOT outlive the target — once the reader picks a different account, model
+ * or downgrade answer, that is a new decision, and reusing the previous id would have the daemon
+ * answer with the migration the reader just changed their mind about.
+ */
+export const migrationRequestKey = (scope: DaemonSessionScope, input: MigrationTarget): string =>
+  JSON.stringify([daemonSessionKey(scope), input.agent, input.model ?? null, input.allowContextDowngrade]);
 
 export interface MigrateSheetProps {
   readonly connection: DaemonConnection;
@@ -87,6 +109,10 @@ export function MigrateSheet({
   const scopedIdentity = JSON.stringify([connection.daemonId, daemonSessionKey(scope), config.id]);
   const liveIdentity = useRef(scopedIdentity);
   liveIdentity.current = scopedIdentity;
+  // The request identity of the migration currently on offer. Held in a ref, not
+  // state, because minting it must not re-render, and because a repeated submit
+  // has to observe the SAME id the first submit used.
+  const requestIdentity = useRef<{ key: string; id: string } | null>(null);
 
   // All local draft/error/acknowledgement state belongs to this exact daemon
   // and session. Same-shaped ids on another paired daemon start clean.
@@ -99,6 +125,7 @@ export function MigrateSheet({
     setFailure(null);
     setDowngradeAcknowledged(false);
     submitLock.current = false;
+    requestIdentity.current = null;
   }, [open, connection.daemonId, scope.daemonId, scope.sessionId, config.id]);
 
   const target = useMemo(() => migrationTarget(agent, model), [agent, model]);
@@ -150,11 +177,17 @@ export function MigrateSheet({
 
     const submittedIdentity = scopedIdentity;
     const input: MigrationTarget = { ...target, allowContextDowngrade };
+    // One id per logical target. A repeated confirmation of the SAME target reuses
+    // it, so the daemon recognises the second ask as the first one rather than
+    // relaunching twice; changing the target mints a new one.
+    const key = migrationRequestKey(scope, input);
+    const identity = requestIdentity.current?.key === key ? requestIdentity.current : { key, id: crypto.randomUUID() };
+    requestIdentity.current = identity;
     submitLock.current = true;
     setFailure(null);
     setPhase('submitting');
     try {
-      const migrated = await migrateSession(connection, scope, input);
+      const migrated = await migrateSession(connection, scope, input, identity.id);
       if (liveIdentity.current !== submittedIdentity) return;
       onMigrated(connection, scope, migrated);
       onClose();
@@ -310,7 +343,10 @@ export function MigrateSheet({
                 The daemon inspects the pane and process tree inside the migration request, immediately before any
                 write. A preview here would already be stale by the time the pane is replaced.
               </p>
-              <ul className="mt-2 grid gap-2 pl-5 text-ui leading-base text-muted">
+              {/* `list-disc` is explicit: the preflight resets `list-style` on every
+                  `ul`, and these three statements are the sheet's whole account of
+                  the safety model — unmarked they read as one run-on paragraph. */}
+              <ul className="mt-2 grid list-disc gap-2 pl-5 text-ui leading-base text-muted">
                 <li>Destructive or unknown in-flight work refuses the migration without changing the session.</li>
                 <li>This public route has no force switch, and this sheet does not invent one.</li>
                 <li>On success, the daemon writes the forensic report and hands it to the replacement agent.</li>

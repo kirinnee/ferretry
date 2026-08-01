@@ -10,6 +10,7 @@ import {
   MigrateSheet,
   type MigrateSheetProps,
   migrateSessionWithDaemon,
+  migrationRequestKey,
 } from '../../src/components/migrate-sheet.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -103,11 +104,61 @@ const props = (overrides: Partial<MigrateSheetProps> = {}): MigrateSheetProps =>
 describe('migrateSessionWithDaemon', () => {
   it('rejects a cross-daemon scope before constructing a typed client', async () => {
     await expect(
-      migrateSessionWithDaemon(daemonA, scopeB, {
-        agent: 'codex-auto-atomi',
-        allowContextDowngrade: false,
-      }),
+      migrateSessionWithDaemon(
+        daemonA,
+        scopeB,
+        {
+          agent: 'codex-auto-atomi',
+          allowContextDowngrade: false,
+        },
+        'request-1',
+      ),
     ).rejects.toThrow('migration scope must belong to the requested daemon');
+  });
+
+  it('forwards the whole target and the request id to the paired daemon client', async () => {
+    const calls: unknown[][] = [];
+    const migrated = await migrateSessionWithDaemon(
+      daemonA,
+      scopeA,
+      { agent: 'codex-auto-atomi', model: 'gpt-5.6-sol[1m]', allowContextDowngrade: true },
+      'request-7',
+      async connection => {
+        calls.push(['client', connection.daemonId]);
+        return {
+          migrate: async (...args: unknown[]) => {
+            calls.push(args);
+            return source();
+          },
+        } as never;
+      },
+    );
+
+    expect(migrated.config.id).toBe('same-session');
+    expect(calls).toEqual([
+      ['client', 'daemon-a'],
+      ['same-session', 'codex-auto-atomi', 'gpt-5.6-sol[1m]', true, 'request-7'],
+    ]);
+  });
+});
+
+describe('migrationRequestKey', () => {
+  it('is stable for one target and distinct for every field a reader can change', () => {
+    const target = { agent: 'codex-auto-atomi', model: 'gpt-5.6-sol', allowContextDowngrade: false } as const;
+    expect(migrationRequestKey(scopeA, target)).toBe(migrationRequestKey(scopeA, { ...target }));
+    expect(migrationRequestKey(scopeA, target)).not.toBe(
+      migrationRequestKey(scopeA, { ...target, agent: 'codex-auto-loge' }),
+    );
+    expect(migrationRequestKey(scopeA, target)).not.toBe(migrationRequestKey(scopeA, { ...target, model: 'other' }));
+    expect(migrationRequestKey(scopeA, target)).not.toBe(
+      migrationRequestKey(scopeA, { ...target, allowContextDowngrade: true }),
+    );
+    // The account default is a real target, and must not collide with a named model.
+    expect(migrationRequestKey(scopeA, { agent: target.agent, allowContextDowngrade: false })).not.toBe(
+      migrationRequestKey(scopeA, target),
+    );
+    // Same session id on another paired daemon is a different migration.
+    expect(migrationRequestKey(scopeA, target)).not.toBe(migrationRequestKey(scopeB, target));
   });
 });
 
@@ -155,7 +206,10 @@ describe('MigrateSheet', () => {
     expect(button(view.root, 'Relaunch on selected runtime')).toBeDefined();
     await press(view.root, 'Relaunch on selected runtime');
 
-    expect(calls).toEqual([[daemonA, scopeA, { agent: 'codex-auto-atomi', allowContextDowngrade: false }]]);
+    expect(calls.map(call => call.slice(0, 3))).toEqual([
+      [daemonA, scopeA, { agent: 'codex-auto-atomi', allowContextDowngrade: false }],
+    ]);
+    expect(typeof calls[0]?.[3]).toBe('string');
     expect(updates).toEqual([[daemonA, scopeA, migrated]]);
     expect(closes).toBe(1);
   });
@@ -179,7 +233,9 @@ describe('MigrateSheet', () => {
     review(view.root);
     await press(view.root, 'Relaunch on selected runtime');
 
-    expect(calls).toEqual([[daemonA, scopeA, { agent: 'codex-auto-loge', allowContextDowngrade: false }]]);
+    expect(calls.map(call => call.slice(0, 3))).toEqual([
+      [daemonA, scopeA, { agent: 'codex-auto-loge', allowContextDowngrade: false }],
+    ]);
   });
 
   it('blocks an oversized conversation and a mismatched daemon/session scope before the RPC', () => {
@@ -398,5 +454,48 @@ describe('MigrateSheet', () => {
       ),
     ).toEqual(['claude-auto-loge', 'claude-opus-5']);
     await mounted.unmount();
+  });
+
+  it('marks the safety statements as a real list, so they do not read as one paragraph', () => {
+    const view = renderSheet(<MigrateSheet {...props()} />);
+    // The CSS preflight clears `list-style` on every `ul`, so the class has to be explicit.
+    expect(view.root.findByType('ul').props.className).toContain('list-disc');
+  });
+
+  it('warns when the target account is on a restricted routing tier', () => {
+    const restricted = source();
+    const view = renderSheet(
+      <MigrateSheet {...props({ view: { ...restricted, config: { ...restricted.config, agent: 'claude-glm52' } } })} />,
+    );
+    expect(JSON.stringify(view.toJSON())).toContain('Restricted tier');
+  });
+
+  it('reuses one request id for a repeated confirmation of the same target, and mints a new one when it changes', async () => {
+    // A migration is destructive and the typed client retries its POST, so a second confirmation of
+    // the SAME target must be the same operation to the daemon — while a changed target must not be.
+    const seen: Array<{ agent: string; requestId: string }> = [];
+    const migrateSession: MigrateSession = async (_connection, _scope, input, requestId) => {
+      seen.push({ agent: input.agent, requestId });
+      throw new FyHttpError('in-flight work refuses this migration', 409, 'migration_refused');
+    };
+    const view = renderSheet(<MigrateSheet {...props({ migrateSession })} />);
+
+    change(field(view.root, 0), 'codex-auto-atomi');
+    review(view.root);
+    await press(view.root, 'Migrate and relaunch');
+    await press(view.root, 'Retry safety check');
+
+    // Same target, so the retry is the same logical migration.
+    expect(seen).toHaveLength(2);
+    expect(seen[0]?.requestId).toBe(seen[1]?.requestId);
+
+    // A different target is a different decision and must not inherit the id.
+    await press(view.root, 'Back');
+    change(field(view.root, 0), 'codex-auto-other');
+    review(view.root);
+    await press(view.root, 'Migrate and relaunch');
+    expect(seen).toHaveLength(3);
+    expect(seen[2]?.agent).toBe('codex-auto-other');
+    expect(seen[2]?.requestId).not.toBe(seen[0]?.requestId);
   });
 });

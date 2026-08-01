@@ -179,3 +179,72 @@ describe('daemon HTTP transport', () => {
     should(crossDaemon).throw('API client request must remain on the paired daemon');
   });
 });
+
+/**
+ * A migration is destructive and this client retries a POST on transport failure, so the request id
+ * is what makes a retry sequence ONE migration to the daemon rather than several.
+ */
+describe('the typed client migrate call', () => {
+  /** Fails in transport the first `failures` times, then answers, recording every attempt. */
+  class FlakyTransport implements IFyHttpTransport {
+    readonly calls: Array<{ url: string; init: RequestInit }> = [];
+    constructor(private readonly failures: number) {}
+    async send(url: string, init: RequestInit): Promise<Response> {
+      this.calls.push({ url, init });
+      if (this.calls.length <= this.failures) throw new Error('connection reset');
+      return new Response(JSON.stringify(sessionResponse), { headers: { 'content-type': 'application/json' } });
+    }
+  }
+
+  const sessionResponse = {
+    ...migratedView,
+    config: { ...migratedView.config, agent: 'codex-auto-atomi' },
+  } satisfies SessionView;
+
+  const daemon = paired('daemon-a', 'https://daemon-a.example.test', 'token-a');
+
+  it('should send the caller request id, so the daemon can recognise a replay', async () => {
+    // Arrange
+    const transport = new RecordingTransport(sessionResponse);
+    const client = await daemonApiClient(daemon, { transport, requestId: () => 'minted' });
+
+    // Act
+    await client.migrate('same-session', 'codex-auto-atomi', 'gpt-5.6-sol', true, 'caller-supplied');
+
+    // Assert
+    should(transport.calls).have.length(1);
+    should(transport.calls[0]?.url).equal('https://daemon-a.example.test/v1/sessions/same-session/migrate');
+    should(new Headers(transport.calls[0]?.init.headers).get('x-fy-request-id')).equal('caller-supplied');
+  });
+
+  it('should hold ONE request id across every automatic transport retry', async () => {
+    // This is the whole point: three attempts carrying three ids would be three migrations, and the
+    // second and third would each relaunch a session the first had already relaunched.
+    // Arrange
+    const transport = new FlakyTransport(2);
+    const client = await daemonApiClient(daemon, { transport, requestId: () => 'minted' });
+
+    // Act
+    const view = await client.migrate('same-session', 'codex-auto-atomi', undefined, false, 'one-migration');
+
+    // Assert
+    should(view.config.agent).equal('codex-auto-atomi');
+    should(transport.calls).have.length(3);
+    const ids = transport.calls.map(call => new Headers(call.init.headers).get('x-fy-request-id'));
+    should(ids).deepEqual(['one-migration', 'one-migration', 'one-migration']);
+  });
+
+  it('should mint a request id when the caller supplies none, so the header is never absent', async () => {
+    // The daemon refuses a migration with no request id, so an omitted one must still produce a
+    // usable header rather than falling through to the route's 400.
+    // Arrange
+    const transport = new RecordingTransport(sessionResponse);
+    const client = await daemonApiClient(daemon, { transport, requestId: () => 'minted' });
+
+    // Act
+    await client.migrate('same-session', 'codex-auto-atomi');
+
+    // Assert
+    should(new Headers(transport.calls[0]?.init.headers).get('x-fy-request-id')).equal('minted');
+  });
+});
