@@ -146,6 +146,66 @@ const RetryPolicySchema = z.object({
   allowAccountFailover: z.boolean(),
 });
 
+/**
+ * How this session's harness transcript was IDENTIFIED.
+ *
+ * `minted` — the daemon chose the harness session id itself and put it on the launch argv, so the
+ * transcript's name was decided before the harness ran. Nothing was inferred.
+ * `correlated` — the harness named its own session, and the daemon proved which one by finding a
+ * string only this session could contain in a rollout that did not exist before the launch.
+ * `undiscovered` — neither proof is available yet. A session in this state has NO transcript, which
+ * is the point: attributing one by working directory or recency silently hands one agent's
+ * transcript to another session and the mistake is invisible.
+ */
+export const TranscriptIdentitySchema = z.enum(['minted', 'correlated', 'undiscovered']);
+export type TranscriptIdentity = z.infer<typeof TranscriptIdentitySchema>;
+
+/**
+ * Where this session's transcript lives, recorded as evidence captured at launch.
+ *
+ * This is a PROVENANCE record, not a cache. Every field is something the daemon observed or decided
+ * at the moment the session was created — the harness home the wrapper exports, the session id the
+ * daemon minted, the rollouts that already existed before this launch — because after the fact
+ * there is no way to tell two concurrent sessions of the same agent in the same directory apart.
+ */
+export const TranscriptProvenanceSchema = z
+  .object({
+    v: z.literal(1),
+    /** The harness's own private home, as the launched wrapper exports it. */
+    home: z.string().min(1),
+    /** The harness's identity for this session, once it is known. */
+    harnessSessionId: z.string().min(1).optional(),
+    identity: TranscriptIdentitySchema,
+    /**
+     * The harness session ids that already existed when this session launched.
+     *
+     * Recorded only for a harness that names its own session (Codex). Everything listed here
+     * belongs to somebody else by construction, so a later discovery can exclude all of it without
+     * having to reason about time.
+     */
+    baseline: z.array(z.string().min(1)).optional(),
+    /**
+     * A string this daemon injected into this session and into no other.
+     *
+     * It is the whole proof behind `correlated`: a rollout containing it was written by this
+     * session, and a rollout that does not is not this session's however recent it is.
+     */
+    correlationToken: z.string().min(1).optional(),
+    /** The exact transcript file. Present exactly when the identity is established. */
+    file: z.string().min(1).optional(),
+    /** When the identity was established. */
+    resolvedAt: InstantSchema.optional(),
+  })
+  .refine(value => (value.identity === 'undiscovered') === (value.harnessSessionId === undefined), {
+    message: 'an identified transcript must name the harness session it belongs to',
+    path: ['harnessSessionId'],
+  })
+  .refine(value => (value.identity === 'undiscovered') === (value.file === undefined), {
+    message: 'an identified transcript must name its file',
+    path: ['file'],
+  });
+export type TranscriptProvenance = z.infer<typeof TranscriptProvenanceSchema>;
+
 /** Effective, safe-to-publish session configuration. */
 export const SessionConfigSchema = z.object({
   id: z.string().min(1),
@@ -181,6 +241,12 @@ export const SessionConfigSchema = z.object({
       at: InstantSchema,
     })
     .optional(),
+  /**
+   * Optional because a session started before this record existed has none, and because a harness
+   * home the daemon cannot resolve must leave the session with no transcript rather than a guessed
+   * one.
+   */
+  transcript: TranscriptProvenanceSchema.optional(),
   retry: RetryPolicySchema,
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;

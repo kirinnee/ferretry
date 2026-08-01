@@ -62,11 +62,18 @@
 #     was said to be waiting behind. The display is no longer the blocker and this line still stands:
 #     the worker program and `BrowserViewerHost` are both absent, and neither is downstream of the
 #     display. `/v1/sessions/:id/browser` is served as a stated 501 naming exactly these two.
-#   * `transcripts` — `TranscriptSource.read` takes the transcript FILE and no document records one.
-#     `SessionConfigSchema` has no transcript field; `state.lastTranscriptAt` is an instant, is read
-#     only by the unmounted warden detector, and is written by nothing. It is also why the migration
-#     preflight joins its open tool ids against an EMPTY chat tail and classifies them `unknown` —
-#     the fail-closed answer: the daemon knows a tool is open and not what it is.
+#   * `transcripts` — SPENT. A session now records its transcript provenance at creation
+#     (`SessionConfigSchema.transcript`), so `TranscriptSource.read` can be given an exact file:
+#     Claude's is DECIDED — the daemon mints the harness session id, puts it on the launch argv and
+#     derives the path — and Codex's is CORRELATED against a pre-launch rollout baseline plus a
+#     string only that session contains. The migration preflight joins its open tool ids against
+#     that transcript instead of an empty array. Read this bullet as the record of a closed gap.
+#     WHAT IS STILL OPEN behind it: `state.lastTranscriptAt` is still written by nothing, so the
+#     warden's liveness ledger has no producer; and a session whose wrapper declares no resolvable
+#     harness home — or a Codex session that was handed no opening turn to inject a token into —
+#     records no provenance and therefore has no transcript. That is deliberate: the alternative is
+#     attributing a transcript by cwd or recency, which silently gives one agent's transcript to
+#     another session.
 #   * `wardenReports` — this header named it, and a gate reports it now rather than prose. The
 #     decisive blocker is simpler than the one recorded under PR #19, and it is upstream of it:
 #     NOTHING IN THIS DAEMON WRITES A WARDEN REPORT. `WardenReportFileSystem` declares `listFiles`
@@ -115,10 +122,13 @@
 #     Every lifecycle transition appends to `storage.append`, so the journal a start writes is real
 #     evidence — but the read needs a wire decision the start did not make: `FyEvent` requires `turn`
 #     and `source`, and `SessionEventSchema` records neither.
-#   * NO SESSION RECORDS ITS TRANSCRIPT. `world.transcripts` is constructed and never called, and
-#     `TranscriptSource.read` takes the transcript FILE. `SessionConfigSchema` has no transcript field
-#     at all, which is the same wall `lib/learning/extract.ts` is behind: the harness writes it, this
-#     daemon does not yet learn where, and both surfaces unblock together when it does.
+#   * EVERY SESSION NOW RECORDS ITS TRANSCRIPT — this bullet is SPENT. `SessionConfigSchema` carries
+#     `transcript`, the start captures it before it launches anything, and `world.transcripts` is
+#     called. `lib/learning/extract.ts` was said to be behind the same wall and it is only PARTLY
+#     freed: the transcript half is available now, and the extractor also takes the session's INBOX
+#     and its turn documents. There is still no send ledger for a mounted session (see the bullet
+#     above), so the inbox half has no producer and a digest built now would systematically
+#     under-count human steers — which is exactly the signal it exists to measure.
 #   * THERE IS NO WAY TO HAND A SESSION A SECRET, which is the fourth wiring unit's finding and the
 #     one hard blocker in front of the biggest group left. The CLI reads every board capability from
 #     its ENVIRONMENT (`FY_SESSION_BOARD_CAPABILITY`, `FY_BOARD_CAPABILITY`, see
@@ -363,8 +373,24 @@ packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is rea
 # lives in the transcript and the inbox, and both are absent. Worse, `hasSignal` would answer true for
 # any interactive session on the strength of `interactive session (human at the wheel)` alone, so the
 # miner would report signal it had not measured. The blocker is the transcript, exactly as recorded.
-packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; no mounted session start can produce a miner run
-packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcript and inbox the daemon does not assemble
+#
+# RE-CHECKED AND HALVED by the transcript-provenance unit. THE TRANSCRIPT IS NO LONGER THE BLOCKER:
+# a session records where its harness writes, `SessionTranscriptReader` returns that session's own
+# normalized events, and `world.transcripts` is called. `extractSession`'s `records` input can be
+# supplied today. Both lines below still stand, on what is left rather than on what was fixed:
+#
+#   * THE INBOX HAS NO PRODUCER, and this is not a shortfall the extractor tolerates. `humanMessages`
+#     is computed as `humanInbox.length` for an AUTO session — the only mode the daemon can start
+#     unattended — so with no inbox every auto session scores zero human messages and zero teammate
+#     steers by construction. `hasSignal` would then be decided by interrupts and tool failures
+#     alone. That is not a smaller sample of the same measurement; it is a different measurement
+#     reported under the same name. The inbox is the send ledger, and there is still no send.
+#   * NOTHING RUNS A MINER. `applyMinerOutput` applies the OUTPUT of a mining pass, and this daemon
+#     has no pass to run one: `POST /v1/learning/run` refuses with a stated reason, and neither a
+#     scheduler nor a model call exists behind it. A digest the daemon can now build is an input to
+#     a miner, not a substitute for one.
+packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; nothing in this daemon runs a mining pass — POST /v1/learning/run refuses, and no scheduler or model call exists behind it
+packages/daemon/src/lib/learning/extract.ts # PR #13: the transcript half is available now; the INBOX is not, and for an auto session humanMessages/teammateSteers are computed from the inbox alone — a digest built now would report zero human signal as a measurement rather than as a gap
 
 
 # PR #15 — add browser session control: THE HUMAN LOGIN WINDOW IS MOUNTED, nothing to list.

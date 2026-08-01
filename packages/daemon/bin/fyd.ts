@@ -100,6 +100,13 @@ import {
 } from '../src/adapters/session/lifecycle/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
+  FileHarnessWrapperSource,
+  NodeCodexRolloutIndex,
+  StorageTranscriptClaims,
+  StorageTranscriptProvenanceStore,
+  storedTranscriptProvenance,
+} from '../src/adapters/session/transcript/index.ts';
+import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
   FileSessionHealthEventSink,
@@ -175,6 +182,12 @@ import {
   type SessionDirectorySubsystem,
   type SessionIdFactory,
   type SessionLifecycleLauncher,
+  SessionTranscriptReader,
+  SessionTranscriptResolver,
+  TranscriptProvenanceCapture,
+  relaunchCommand,
+  type ClockPort,
+  type WorkingDirectoryResolver,
   TaskError,
   exactWorkerAssignee,
   type TaskAssigneeCandidate,
@@ -947,6 +960,23 @@ function createSessionControlSubsystem(
   digests: PayloadDigestPort,
   attachments: InitialAttachments,
   boardGrants: ChildGrantRequester,
+  /**
+   * The evidence a session's transcript is identified from, taken here because here is the only
+   * place it exists: the wrapper about to be launched, the directory it will run in, and — for
+   * Claude — an id this start is free to choose because nothing has started yet.
+   */
+  transcripts: TranscriptProvenanceCapture,
+  /**
+   * The same canonicalization the lifecycle applies, run BEFORE the launch argv is built.
+   *
+   * Claude's transcript directory is a pure function of the working directory the harness process
+   * actually runs in, which is the canonical one the record holds — so deriving the path from the
+   * raw request would name the wrong file whenever the caller passed a symlink or a trailing slash.
+   */
+  directories: WorkingDirectoryResolver,
+  /** The session's own private directory, which is the string a Codex rollout is correlated by. */
+  sessionDirectory: (id: SessionId) => string,
+  clock: ClockPort,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -993,7 +1023,25 @@ function createSessionControlSubsystem(
         return { role: request.boardAccess, capability: boardCapability };
       })();
       const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
+      // Canonicalized HERE rather than only inside the lifecycle, because the transcript path below
+      // is derived from it. The lifecycle resolves it again over an already-canonical value, and a
+      // directory the agent could not have started in is refused as an invalid request — which is
+      // exactly what this failure taxonomy calls "an absent cwd".
+      const cwd = await directories.resolve(request.cwd).catch((error: unknown) => {
+        throw new SessionControlError('invalid', error instanceof Error ? error.message : String(error));
+      });
       const id = ids.next();
+      // BEFORE the callsign and the plan, because it decides part of the launch argv: Claude is
+      // told which session id to write its transcript under, and that has to be in `command` when
+      // the record is created. Nothing here can fail a start — a wrapper with no declared home
+      // yields no record and no arguments.
+      const transcript = await transcripts.capture({
+        harness: account.kind,
+        executable,
+        cwd,
+        correlationToken: sessionDirectory(id),
+        at: clock.now(),
+      });
       // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
       // a pool name for the whole resolution window on a session that never happens.
       const opening = composeOpeningMessage(attachments, id, request);
@@ -1017,6 +1065,8 @@ function createSessionControlSubsystem(
       const command = [
         executable,
         ...(request.remoteControl === true ? plan.extraArgs : []),
+        ...transcript.launchArguments,
+        // LAST, so an operator flag still wins over everything the daemon decided for them.
         ...(request.harnessFlags ?? []),
       ];
       const envelope: SessionProtocolEnvelope = {
@@ -1049,6 +1099,16 @@ function createSessionControlSubsystem(
          * first revive of it writes `turn-001.md` with nothing to overwrite.
          */
         turn: prompt === undefined ? 0 : 1,
+        /**
+         * WHERE THIS SESSION'S TRANSCRIPT IS, recorded in the same single write as everything else
+         * the start decided.
+         *
+         * It is here rather than added afterwards for the reason the whole unit exists: the
+         * evidence is only true at this instant. A record written after the launch would be
+         * describing a harness that has already started writing somewhere, and the only way to find
+         * out where would be to guess.
+         */
+        ...(transcript.provenance === undefined ? {} : { transcript: transcript.provenance }),
         ...(teammate === undefined ? {} : { teammate }),
         ...(request.label === undefined ? {} : { label: request.label }),
         ...SESSION_START_DEFAULTS,
@@ -1069,7 +1129,9 @@ function createSessionControlSubsystem(
         await lifecycle.create({
           agent: executable,
           command,
-          cwd: request.cwd,
+          // The canonical directory, so the record and the transcript path above agree about which
+          // directory this session actually runs in.
+          cwd,
           mode: request.mode,
           ...(request.name === undefined ? {} : { name: request.name }),
           ...(prompt === undefined ? {} : { prompt }),
@@ -1285,6 +1347,19 @@ interface SessionMigrateParts {
   readonly accounts: AccountInventoryPort;
   readonly executables: ExecutableResolverPort;
   readonly clock: SystemClock;
+  /**
+   * The session's own transcript, which is what the preflight joins its open tool ids against.
+   *
+   * Until a session recorded its transcript this was an EMPTY array and every open tool was
+   * classified `unknown`, which the gate refuses on — the daemon knew a tool was running and not
+   * what it was. With provenance persisted the join has real evidence, and a session that still has
+   * no locatable transcript degrades to exactly the previous behaviour rather than to a guess.
+   */
+  readonly transcripts: SessionTranscriptReader;
+  /** The target account's own transcript evidence, taken before the relaunch argv is authorized. */
+  readonly transcriptProvenance: TranscriptProvenanceCapture;
+  /** The session's own private directory, which is what a Codex rollout is correlated by. */
+  readonly sessionDirectory: (id: SessionId) => string;
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
 }
@@ -1427,11 +1502,29 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // service that applies it. The relaunch reads this argv straight out of the document written
     // below, so without this check a fleet manifest publishing something that is not an auto wrapper
     // would be launchable by a migrate and refused by a start.
+    //
+    // THE TRANSCRIPT IS RE-CAPTURED FOR THE TARGET, for the same reason the flags are rebuilt: the
+    // record the session carries describes the account it is LEAVING. Keeping it would point a
+    // codex session at a claude transcript — parsed by the wrong parser, attributed to the wrong
+    // harness — so it is replaced by the target's own evidence, or by nothing when the target
+    // declares no resolvable home.
+    const relaunchTranscript = await parts.transcriptProvenance.capture({
+      harness: account.kind,
+      executable,
+      cwd: config.cwd,
+      correlationToken: parts.sessionDirectory(id),
+      at: parts.clock.now(),
+    });
     const command = ((): readonly string[] => {
       try {
         return authorizeSessionCommand(
           executable,
-          [executable, ...(config.remoteControl ? plan.extraArgs : []), ...config.harnessFlags],
+          [
+            executable,
+            ...(config.remoteControl ? plan.extraArgs : []),
+            ...relaunchTranscript.launchArguments,
+            ...config.harnessFlags,
+          ],
           defaultSessionLifecycleSettings,
         );
       } catch (error) {
@@ -1445,19 +1538,23 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         `${account.agent} serves ${plan.model} with a ${plan.contextWindow}-token window and this session is ` +
           `running in ${window}; the conversation would be truncated. Send allowContextDowngrade to accept that.`,
       );
-    const report = await parts.preflight.inspect({
-      sessionId: id,
-      harness: config.harness,
-      tmuxSession,
-      status: state.status,
-      turn: state.turn,
-      // The state document's own record of the tool calls this session has open. The chat tail is
-      // EMPTY because no transcript is indexed — `world.transcripts` reads a file no session records
-      // — so an open id joins to nothing and is classified `unknown`, which the gate then refuses.
-      // That is the fail-closed answer: the daemon knows a tool is running and not what it is.
-      openTools: state.openTools ?? [],
-      ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
-    });
+    const report = await parts.preflight.inspect(
+      {
+        sessionId: id,
+        harness: config.harness,
+        tmuxSession,
+        status: state.status,
+        turn: state.turn,
+        // The state document's own record of the tool calls this session has open.
+        openTools: state.openTools ?? [],
+        ...(state.subprocessSince === undefined ? {} : { subprocessSince: state.subprocessSince }),
+      },
+      // The session's OWN transcript, resolved from the provenance its start recorded. A session
+      // with none reads as an empty tail, which classifies every open tool `unknown` and refuses
+      // the migration — the same fail-closed answer this call gave before, now reached only when
+      // the evidence is genuinely absent rather than always.
+      await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+    );
     const decision = parts.preflight.gate(report);
     if (!decision.proceed)
       throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`);
@@ -1474,18 +1571,25 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     );
     const from = config.agent;
     const generation = config.runtimeGeneration + 1;
-    await parts.storage.updateConfig(id, current => ({
-      ...(jsonObject(current) ?? {}),
-      agent: account.agent,
-      harness: account.kind,
-      model: plan.model,
-      modelHint: request.model ?? account.defaultModel ?? '',
-      command: [...command],
-      incarnation: `${id}-${generation}`,
-      runtimeGeneration: generation,
-      migration: { from, to: account.agent, at },
-      updatedAt: at,
-    }));
+    await parts.storage.updateConfig(id, current => {
+      // The previous account's transcript record is REMOVED rather than merged over: a target that
+      // declares no resolvable home must leave the session with no transcript, and a merge would
+      // silently keep the old harness's file under the new harness's name.
+      const { transcript: _replaced, ...retained } = jsonObject(current) ?? {};
+      return {
+        ...retained,
+        agent: account.agent,
+        harness: account.kind,
+        model: plan.model,
+        modelHint: request.model ?? account.defaultModel ?? '',
+        command: [...command],
+        incarnation: `${id}-${generation}`,
+        runtimeGeneration: generation,
+        migration: { from, to: account.agent, at },
+        ...(relaunchTranscript.provenance === undefined ? {} : { transcript: relaunchTranscript.provenance }),
+        updatedAt: at,
+      };
+    });
     await parts.storage.append(id, 'session.migrating', {
       from,
       to: account.agent,
@@ -2055,6 +2159,58 @@ export function buildWorld(): DaemonWorld {
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  /**
+   * The rollout index, shared by the start that records a Codex baseline and the resolver that
+   * later correlates against it — one reader of one home, so the two halves cannot disagree about
+   * what was there.
+   */
+  const codexRollouts = new NodeCodexRolloutIndex();
+  /**
+   * Transcript provenance, taken at creation.
+   *
+   * `process.env` is the environment this daemon will launch the wrapper with, which is what a
+   * `$HOME` in the wrapper's declared harness home expands against. `crypto.randomUUID` mints the
+   * Claude session id, because the harness's own id space is UUIDs and the daemon has to name one
+   * the harness will accept.
+   */
+  const transcriptProvenance = new TranscriptProvenanceCapture(
+    new FileHarnessWrapperSource(),
+    { next: () => crypto.randomUUID() },
+    codexRollouts,
+    process.env,
+  );
+  /**
+   * The parsers, held as a local so `world.transcripts` and the per-storage reader below are the
+   * SAME two sources. A second construction would be a second answer to "how is a Claude record
+   * normalized" the moment either one changed.
+   */
+  const transcriptSources = [
+    new NodeTranscriptSource(new ClaudeTranscriptParser()),
+    new NodeTranscriptSource(new CodexTranscriptParser()),
+  ];
+  /**
+   * A session's own transcript, over the provenance its start recorded.
+   *
+   * Per opened storage because both halves read documents: the resolver reads the provenance record
+   * and writes back the rollout it correlates, and the claims reader has to see every other
+   * session's attribution to keep two sessions from claiming one file.
+   */
+  const createTranscriptReader = (storage: DaemonStorage): SessionTranscriptReader => {
+    const resolver = new SessionTranscriptResolver(
+      codexRollouts,
+      new StorageTranscriptClaims(storage),
+      new StorageTranscriptProvenanceStore(storage),
+      clock,
+    );
+    return new SessionTranscriptReader(transcriptSources, {
+      file: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return undefined;
+        const config = await storage.readConfig(id).catch(() => undefined);
+        return await resolver.file(sessionId, storedTranscriptProvenance(config));
+      },
+    });
+  };
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -2094,8 +2250,18 @@ export function buildWorld(): DaemonWorld {
     return new TmuxResumeLauncher(
       controller,
       async id => {
-        const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id)));
-        return { tmuxSession: config.tmuxSession, cwd: config.cwd, command: config.command };
+        const raw = await storage.readConfig(id);
+        const config = SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(raw));
+        // A recorded `--session-id` CREATES a harness session, so re-running it verbatim would ask
+        // the harness for an id it already has. The transcript the start named is the harness's own
+        // record of having created it, so its existence decides between creating and resuming.
+        const transcript = storedTranscriptProvenance(raw)?.file;
+        const started = transcript !== undefined && (await Bun.file(transcript).exists());
+        return {
+          tmuxSession: config.tmuxSession,
+          cwd: config.cwd,
+          command: relaunchCommand(config.command, started),
+        };
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
     );
@@ -2240,10 +2406,7 @@ export function buildWorld(): DaemonWorld {
       CLIENT_NAME,
     ),
     transcripts: {
-      sources: [
-        new NodeTranscriptSource(new ClaudeTranscriptParser()),
-        new NodeTranscriptSource(new CodexTranscriptParser()),
-      ],
+      sources: transcriptSources,
       search: (events, query, options) => searchTranscript(events, query, options),
     },
     api: new BunApiServer(),
@@ -2332,6 +2495,10 @@ export function buildWorld(): DaemonWorld {
           // The board grant a `--board-access` start asks for, over the same world and the same
           // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
           childGrantRequester(boards),
+          transcriptProvenance,
+          new NodeWorkingDirectoryResolver(),
+          id => createSessionPaths(paths, id).directory,
+          clock,
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
@@ -2345,6 +2512,9 @@ export function buildWorld(): DaemonWorld {
           accounts,
           executables,
           clock,
+          transcripts: createTranscriptReader(storage),
+          transcriptProvenance,
+          sessionDirectory: id => createSessionPaths(paths, id).directory,
           // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
           // make every unrelated document write in the process wait behind it.
           serial: new KeyedSerialExecutor(),
