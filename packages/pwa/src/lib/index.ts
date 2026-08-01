@@ -21,6 +21,7 @@ export * from '../features/settings/notification-settings.tsx';
 export * from '../features/learning/learning-header.tsx';
 export * from '../features/learning/learning-page.tsx';
 export * from '../features/pins/pins-trigger.tsx';
+export * from '../features/pins/pins-board.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/tasks/task-assignee-link.tsx';
 export * from '../features/tasks/task-board-model.ts';
