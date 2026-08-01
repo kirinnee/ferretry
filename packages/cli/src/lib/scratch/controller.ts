@@ -5,7 +5,6 @@ import { renderScratchPlan, renderScratchSweep } from './render.ts';
 export interface ScratchCommandOptions {
   readonly dryRun?: boolean;
   readonly limit?: number;
-  readonly force?: boolean;
   readonly json?: boolean;
 }
 
@@ -25,7 +24,7 @@ export class ScratchController {
       return;
     }
 
-    const result = await this.gateway.scratchSweep(options.force === true);
+    const result = await this.gateway.scratchSweep(false);
     this.out.success(options.json === true ? JSON.stringify(result, null, 2) : renderScratchSweep(result));
   }
 }

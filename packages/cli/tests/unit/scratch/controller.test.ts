@@ -63,16 +63,16 @@ describe('scratch sweeping', () => {
     should(out.messages).eql(['reclaimed 2.5 MB from 1 session(s)']);
   });
 
-  it('should pass the daemon-supported config override and retain partial failures', async () => {
+  it('should retain partial failures without overriding a daemon-side refusal', async () => {
     // Arrange
     const gateway = new RecordingScratchGateway([], { sessions: 2, bytes: 1_000_000_000, failures: 3 });
     const { subject, out } = controller(gateway);
 
     // Act
-    await subject.execute({ force: true });
+    await subject.execute({});
 
     // Assert
-    should(gateway.forces).eql([true]);
+    should(gateway.forces).eql([false]);
     should(out.messages[0]).equal(
       'reclaimed 1.0 GB from 2 session(s); 3 entr(ies) could not be removed (see daemon log)',
     );

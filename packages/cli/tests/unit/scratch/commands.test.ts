@@ -25,13 +25,18 @@ describe('scratch command surface', () => {
     should(gateway.forces).be.empty();
   });
 
-  it('should run a real sweep and forward the supported override', async () => {
+  it('should run a real sweep and emit JSON', async () => {
     // Arrange + Act
-    const { parsed, gateway, out } = run(['gc', '--force', '--json']);
+    const { parsed, gateway, out } = run(['gc', '--json']);
     await parsed;
 
     // Assert
-    should(gateway.forces).eql([true]);
+    should(gateway.forces).eql([false]);
     should(JSON.parse(out.messages[0] ?? '')).have.property('sessions', 1);
+  });
+
+  it('should not offer a flag that overrides daemon-side GC safety', async () => {
+    // Arrange + Act + Assert
+    await should(run(['gc', '--force']).parsed).be.rejected();
   });
 });
