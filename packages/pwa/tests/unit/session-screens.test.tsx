@@ -310,6 +310,20 @@ describe('session screen components', () => {
     expect(jump.children.join('')).toContain('1 new message · Jump to latest');
     run(() => jump.props.onClick());
     expect(viewport.scrollTop).toBe(900);
+
+    viewport.scrollTop = 0;
+    run(() => log.props.onScroll());
+    run(() =>
+      transcript.update(
+        <Transcript
+          daemonId="daemon-b"
+          entries={[...first, { id: 'two', kind: 'user', text: 'A distinct daemon message' }]}
+          sessionId="same-id"
+        />,
+      ),
+    );
+    expect(viewport.scrollTop).toBe(900);
+    expect(transcript.root.findAllByProps({ className: 'fy-jump-latest' })).toHaveLength(0);
   });
 
   test('renders transcript prose and daemon chrome with readable defaults and safe timestamps', () => {

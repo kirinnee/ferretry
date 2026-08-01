@@ -23,6 +23,18 @@ export function Transcript({ daemonId, sessionId, entries, busy = false, label =
   const [newCount, setNewCount] = useState(0);
   const previousLength = useRef(entries.length);
 
+  // Follow position and the unread counter are browser-local state, but their
+  // meaning belongs to the daemon/session transcript currently on screen. A
+  // daemon switch can legitimately keep the same session id, so reset before
+  // the follow effect runs rather than carrying a detached reader into another
+  // daemon's transcript.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: daemon/session are deliberate reset triggers
+  useEffect(() => {
+    following.current = true;
+    previousLength.current = entries.length;
+    setNewCount(0);
+  }, [daemonId, sessionId]);
+
   // These deps are the TRIGGER, not inputs. The body reads only refs, so the rule sees them as
   // unnecessary — but dropping them stops the viewport following new entries, which is the entire
   // purpose of the effect. Re-running on a daemon or session change also resets the scroll for the
