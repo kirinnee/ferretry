@@ -8,9 +8,10 @@ import { FileTaskStore } from '../../../src/adapters/tasks/file-task-store.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/tasks/serial-executor.ts';
 import { TaskRecordService } from '../../../src/adapters/tasks/task-record-service.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
+import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { taskRoutes, type TaskSubsystem } from '../../../src/lib/runtime/mounts/tasks.ts';
-import { TASK_UNAVAILABLE_MESSAGE, TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
+import { TASK_UNAVAILABLE_MESSAGE, TaskError, TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
 import { CREDENTIALS, human } from '../../unit/runtime/mounts/support.ts';
@@ -65,22 +66,36 @@ const writeBoard = async (root: string, content: string): Promise<string> => {
 };
 
 /**
- * The daemon's real task routes over a real file-backed board.
+ * The daemon's real task routes over real file-backed boards, one per session id.
  *
  * Nothing here is a double: the router, the dispatcher, the record service and the store are the
  * production ones, and the only thing under the test's control is the bytes on disk. That is what
  * makes the status assertions below evidence about the daemon rather than about a fixture.
  */
-const mountedOver = (path: string): ApiDispatcher => {
-  const board = new TaskRecordService(SESSION, new FileTaskStore(path), { now: () => INSTANT });
+const mountedOverMany = (paths: Readonly<Record<string, string>>): ApiDispatcher => {
+  const boards = new Map(
+    Object.entries(paths).map(
+      ([sessionId, path]) =>
+        [sessionId, new TaskRecordService(sessionId, new FileTaskStore(path), { now: () => INSTANT })] as const,
+    ),
+  );
   const subsystem: TaskSubsystem = {
-    board: () => board,
-    sessionIds: async () => [SESSION],
+    board: sessionId => {
+      const board = boards.get(sessionId);
+      // Exactly what the composition root does with an id the state-home layout will not accept.
+      if (board === undefined)
+        throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
+      return board;
+    },
+    sessionIds: async () => [...boards.keys()],
     observe: async () => new Map(),
     now: () => INSTANT,
   };
   return new ApiDispatcher(new ApiRouter(taskRoutes(subsystem)), CREDENTIALS);
 };
+
+/** The single-board case, which is most of them. */
+const mountedOver = (path: string): ApiDispatcher => mountedOverMany({ [SESSION]: path });
 
 describe('FileTaskStore', () => {
   it('should read an empty board before anything has ever been written', async () => {
@@ -265,6 +280,78 @@ describe('FileTaskStore', () => {
  * real routes over a real file so nothing but the bytes on disk is a fixture.
  */
 describe('the task mount over a damaged snapshot', () => {
+  /** Every assertion a damaged-board answer must satisfy: the status, the code, the fixed message,
+   *  and a body that names nothing about where the file lives. */
+  const shouldBeUnavailableAnswer = (response: ApiResponse, root: string, path: string): void => {
+    should(response.status).equal(503);
+    should(response.status).not.equal(400);
+    should(jsonBody(response)).have.property('code', 'unavailable');
+    should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+    // The body goes to every agent on the host, so it must name neither the board file nor the
+    // directory it sits under — the operator's home is in that path.
+    should(response.body).not.containEql(path);
+    should(response.body).not.containEql(root);
+    should(response.body).not.containEql('tasks.json');
+  };
+
+  it('should refuse a session board listing rather than answer with the records it could decode', async () => {
+    // The list was the hole in the fail-closed contract: detail, create and act already refused a
+    // damaged board while `GET .../tasks` answered 200 with the healthy subset and a count.
+    await withTempRoot(async root => {
+      // Arrange
+      const path = await writeBoard(root, DAMAGED_BOARD);
+      const dispatch = mountedOver(path);
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: `/v1/sessions/${SESSION}/tasks`, headers: human }));
+
+      // Assert
+      shouldBeUnavailableAnswer(response, root, path);
+      // The one entry the decoder could read must not have leaked out as a shorter board.
+      should(response.body).not.containEql('Ship the task store');
+      should(await readFile(path, 'utf8')).equal(DAMAGED_BOARD);
+    });
+  });
+
+  it('should refuse the whole fleet listing when the only board it knows is damaged', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const path = await writeBoard(root, DAMAGED_BOARD);
+      const dispatch = mountedOver(path);
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert
+      shouldBeUnavailableAnswer(response, root, path);
+      should(response.body).not.containEql('Ship the task store');
+      should(await readFile(path, 'utf8')).equal(DAMAGED_BOARD);
+    });
+  });
+
+  it('should refuse a fleet listing even for the sessions whose boards are healthy', async () => {
+    // The healthy board is read FIRST, so its rows are already gathered when the damaged one refuses:
+    // this is the case where answering short would have been easiest and is exactly what must not
+    // happen. Two real files, one good and one damaged.
+    await withTempRoot(async root => {
+      // Arrange
+      const path = await writeBoard(root, DAMAGED_BOARD);
+      const healthy = join(root, 'boards', 'session-beta', 'tasks.json');
+      await mkdir(join(root, 'boards', 'session-beta'), { recursive: true });
+      await writeFile(healthy, `${JSON.stringify(snapshot('F1'))}\n`);
+      const dispatch = mountedOverMany({ 'session-beta': healthy, [SESSION]: path });
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert — the healthy board answers on its own, and not as part of the fleet
+      shouldBeUnavailableAnswer(response, root, path);
+      const scoped = await dispatch.dispatch(request({ path: '/v1/sessions/session-beta/tasks', headers: human }));
+      should(scoped.status).equal(200);
+      should((jsonBody(scoped) as unknown as { tasks: unknown[] }).tasks).have.length(1);
+    });
+  });
+
   it('should answer a task read with a server-side status, never the caller’s fault', async () => {
     await withTempRoot(async root => {
       // Arrange

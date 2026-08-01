@@ -27,7 +27,6 @@ import {
   taskBlockedBy,
   type TaskActor,
   type TaskEntry,
-  type TaskParseIssue,
 } from '../../tasks/index.ts';
 
 /**
@@ -56,7 +55,9 @@ import {
  * hands one over with no wrapper.
  */
 export interface TaskBoardPort {
-  list(): Promise<{ readonly entries: readonly TaskEntry[]; readonly parseErrors: readonly TaskParseIssue[] }>;
+  /** The WHOLE board, or a refusal. A board that could only be partly decoded is not a shorter
+   *  board, so this never answers with a subset and a count of what it dropped. */
+  list(): Promise<{ readonly entries: readonly TaskEntry[] }>;
   detail(id: string): Promise<TaskEntry>;
   create(request: TaskCreateRequestInput, actor: TaskActor): Promise<TaskEntry>;
   act(id: string, action: TaskActionRequest, actor: TaskActor): Promise<TaskEntry>;
@@ -330,19 +331,22 @@ function scopedSummary(
   };
 }
 
-/** The ids of the records the decoder had to discard, so a caller can tell a short board from a
- *  damaged one. Absent rather than empty when nothing was discarded. */
-function parseErrorIds(issues: readonly TaskParseIssue[]): string[] | undefined {
-  const ids = issues.map(issue => issue.taskId).filter((id): id is string => id !== null);
-  return ids.length === 0 ? undefined : ids;
-}
+/**
+ * How many records a served board had to discard: none, always.
+ *
+ * The field stays on the wire because the protocol requires it and both clients render a warning
+ * from it, but it is a CONSTANT now rather than a count. A board with even one unreadable record no
+ * longer produces a list at all — it produces {@link TASK_UNAVAILABLE_STATUS} — so any list a caller
+ * receives is the whole board by construction. `parseErrorIds` is omitted for the same reason: there
+ * is no such record to name.
+ */
+const NO_DISCARDED_RECORDS = 0;
 
 /** One session's board, filtered and summarised. */
 async function listSession(subsystem: TaskSubsystem, sessionId: string, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
   const read = await boardFor(subsystem, sessionId).list().catch(reraise);
   const board = read.entries.map(entry => entry.task);
-  const damaged = parseErrorIds(read.parseErrors);
   const shown = board.filter(task => matchesFilters(task, filters));
   // Resolved for the rows the caller will actually see, not for the whole board: a filtered list must
   // not fan out over the fleet on behalf of tasks it is about to discard.
@@ -351,42 +355,53 @@ async function listSession(subsystem: TaskSubsystem, sessionId: string, context:
     v: TASK_SCHEMA_VERSION,
     sessionId,
     tasks: shown.map(task => scopedSummary(sessionId, task, board, observations)),
-    parseErrors: read.parseErrors.length,
-    ...(damaged === undefined ? {} : { parseErrorIds: damaged }),
+    parseErrors: NO_DISCARDED_RECORDS,
     updatedAt: subsystem.now(),
   };
   return jsonResponse(response);
 }
 
 /**
+ * A board the fleet read could not use, restated as the daemon's own unavailability.
+ *
+ * The session ids here come from the daemon's INDEX, not from the request, so a board it cannot
+ * acquire or read is damaged state and never the caller's mistake — an id the state-home layout
+ * refuses would otherwise be reported as the 400 that `invalid` maps to, blaming a caller who named
+ * no session at all. Anything that is not a domain refusal is left alone, so a genuine defect still
+ * becomes the 500 it is instead of being dressed up as unavailable state.
+ */
+function unreadableFleetBoard(sessionId: string, error: unknown): never {
+  if (error instanceof TaskStateUnavailableError) reraise(error);
+  if (error instanceof TaskError) reraise(new TaskStateUnavailableError(`session ${sessionId}: ${error.message}`));
+  throw error;
+}
+
+/**
  * Every session's board in one read.
  *
- * A session whose board cannot be read does NOT fail the fleet answer — one damaged board would
- * otherwise hide every healthy one — it contributes to `parseErrors` instead, which is exactly what
- * that counter is for. Rows keep their own `sessionId`, so the caller can still tell whose task it
- * is even though the response's scope is `null`.
+ * FAILS CLOSED, deliberately reversing what this did before: a session whose board cannot be read
+ * used to contribute to a `parseErrors` counter while the healthy boards were served around it. That
+ * makes the fleet answer a partial one — and a fleet board silently missing one session's tasks is
+ * what an operator plans against, so the missing work simply does not exist as far as anyone reading
+ * it is concerned. One damaged board now fails the whole authoritative answer, which is the same
+ * rule the per-session read and every mutation already follow. The cost is real and accepted: a
+ * single corrupt file makes `GET /v1/tasks` unavailable until an operator repairs it.
+ *
+ * Rows keep their own `sessionId`, so the caller can still tell whose task it is even though the
+ * response's scope is `null`.
  */
 async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
   // Gathered before any assignee is resolved, so ONE batch answers for the whole fleet: resolving
   // inside the loop would fan out over every session once per session's board.
   const gathered: { readonly sessionId: string; readonly task: Task; readonly board: readonly Task[] }[] = [];
-  let parseErrors = 0;
-  const damaged: string[] = [];
   for (const sessionId of await subsystem.sessionIds()) {
     // Acquisition is inside the guard for the same reason the read is: an id the index holds but the
-    // layout refuses is a damaged session, not grounds for failing every healthy board with it.
+    // layout refuses is a damaged session, and a fleet answer that skipped it would be short.
     const read = await Promise.resolve()
       .then(async () => await subsystem.board(sessionId).list())
-      .catch(() => undefined);
-    if (read === undefined) {
-      parseErrors += 1;
-      damaged.push(sessionId);
-      continue;
-    }
+      .catch((error: unknown) => unreadableFleetBoard(sessionId, error));
     const board = read.entries.map(entry => entry.task);
-    parseErrors += read.parseErrors.length;
-    damaged.push(...(parseErrorIds(read.parseErrors) ?? []));
     for (const task of board.filter(candidate => matchesFilters(candidate, filters))) {
       gathered.push({ sessionId, task, board });
     }
@@ -399,8 +414,7 @@ async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promi
     v: TASK_SCHEMA_VERSION,
     sessionId: null,
     tasks: gathered.map(row => scopedSummary(row.sessionId, row.task, row.board, observations)),
-    parseErrors,
-    ...(damaged.length === 0 ? {} : { parseErrorIds: damaged }),
+    parseErrors: NO_DISCARDED_RECORDS,
     updatedAt: subsystem.now(),
   };
   return jsonResponse(response);
