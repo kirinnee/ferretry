@@ -2,6 +2,7 @@
 export const packageRole = 'pwa' as const;
 
 export * from '../components/attachment-unlock-prompt.tsx';
+export * from '../components/composer-autocomplete.ts';
 export * from '../components/question-form.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
