@@ -145,6 +145,9 @@ try {
       const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
       await page.getByLabel('Session task board').screenshot({ path: sessionTasksTarget });
       process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
+      const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
+      await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
+      process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
 
       const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
       await page.goto(`${server.url}?attachment-unlock`);
