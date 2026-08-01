@@ -10,6 +10,7 @@ import {
   type Pin,
   type PinSnapshot,
   type SessionView,
+  type SignalSessionRequest,
   type StartSessionRequest,
   type TaskActionRequest,
   type TaskCreateRequestInput,
@@ -63,6 +64,7 @@ import {
   type SessionMigrateSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
+import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
 import type { SttSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import {
@@ -931,6 +933,40 @@ export class FakeSessionResume implements SessionResumeSubsystem {
     // Turn two, because a revive that handed the agent a new turn moved the counter: a view still
     // reporting turn one would not distinguish a revive from a read.
     return sessionView(sessionId, {}, { status: 'running', turn: 2 });
+  }
+}
+
+/**
+ * A session's own voice, recorded instead of acted on.
+ *
+ * The REQUEST is what this fake exists to capture. A signal is entirely decided by its `kind` plus
+ * the three wait fields, and the mount's only job is to hand all four through untouched — so proving
+ * `until`, `condition` and `peer` arrive is the difference between a park with a deadline and an
+ * open-ended one nothing will wake on time.
+ *
+ * Its refusals are keyed by session, so every HTTP answer the mount can give is reachable without a
+ * pane, a marker file or a state document behind it.
+ */
+export class FakeSessionSignal implements SessionSignalSubsystem {
+  /** Every signal that reached the subsystem, as the session and the request it carried. */
+  readonly signals: Array<readonly [string, SignalSessionRequest]> = [];
+
+  constructor(
+    /** Sessions that exist, so a signal has something to speak for. */
+    private readonly known: readonly string[] = ['s1'],
+    /** Session ids mapped to the refusal asking about them raises. */
+    private readonly refusals: Readonly<Record<string, SessionSignalError>> = {},
+  ) {}
+
+  async signal(sessionId: string, request: SignalSessionRequest): Promise<SessionView> {
+    this.signals.push([sessionId, request]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionSignalError('not_found', `no session ${sessionId}`);
+    // The status each kind produces, because a view still reporting `running` would not distinguish a
+    // completion from a read.
+    const status = request.kind === 'done' ? 'completed' : request.kind === 'working' ? 'running' : 'waiting';
+    return sessionView(sessionId, {}, { status });
   }
 }
 

@@ -19,6 +19,7 @@ import { recommendRoutes, type RecommendSubsystem } from './recommend.ts';
 import { sessionControlRoutes, type SessionControlSubsystem } from './session-control.ts';
 import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
+import { sessionSignalRoutes, type SessionSignalSubsystem } from './session-signal.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
 import { sttRawRoutes, type SttSubsystem } from './stt.ts';
 import { taskBoardRoutes, type TaskBoardSubsystem } from './task-boards.ts';
@@ -59,6 +60,10 @@ export interface MountedSubsystems {
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
   readonly sessionResume: SessionResumeSubsystem;
+  /** What a session says about ITSELF: it finished, it is parked, it is stuck, it is working again.
+   *  The only path that can write `completed`, and the only one that can declare the wait the warden
+   *  detector was already built to read. */
+  readonly sessionSignal: SessionSignalSubsystem;
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;
@@ -119,6 +124,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
     // other, and both belong above the deeper per-session subsystems.
     ...sessionMigrateRoutes(subsystems.sessionMigrate),
+    // The signal registers with the rest of the write surface for the same reason the revive and the
+    // migration do: it is a one-segment pattern under `/v1/sessions/:sessionId` whose final literal
+    // (`signal`) no other route uses, so it can neither shadow nor be shadowed, and it belongs above
+    // the deeper per-session subsystems.
+    ...sessionSignalRoutes(subsystems.sessionSignal),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),
