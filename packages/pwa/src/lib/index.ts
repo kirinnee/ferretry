@@ -27,7 +27,14 @@ export * from '../features/browser/remote-browser-chrome.tsx';
 export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/learning/learning-header.tsx';
-export * from '../features/learning/learning-page.tsx';
+export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
+export {
+  LearningPage,
+  LearningReview,
+  learningErrorMessage,
+  learningStrength,
+  ProposalCard,
+} from '../features/learning/learning-page.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
