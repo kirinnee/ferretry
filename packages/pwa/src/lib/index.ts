@@ -19,6 +19,7 @@ export * as filesApi from '../components/files-api.ts';
 export * as filesModel from '../components/files-model.ts';
 export * from '../components/new-session-page.tsx';
 export * from '../components/question-form.tsx';
+export * from '../components/rename-sheet.tsx';
 export * from '../components/runtime-controls.tsx';
 export * from '../components/session-chat-model.ts';
 export * from '../components/session-chat-parts.tsx';

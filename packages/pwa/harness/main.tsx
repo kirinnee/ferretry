@@ -38,6 +38,7 @@ import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
+import { RenameSheet } from '../src/components/rename-sheet.tsx';
 import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
 import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
@@ -291,6 +292,11 @@ const harnessSession = {
   },
   directory: '/work/ferretry',
 } as unknown as SessionView;
+
+const harnessChildSession = {
+  ...harnessSession,
+  config: { ...harnessSession.config, parent: 'harness-lead' },
+} as SessionView;
 
 openSidePaneTab(scope, 'pins');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
@@ -1096,6 +1102,7 @@ function Shell() {
   const stopOpen = window.location.hash === '#stop';
   const fleetDrawerOpen = window.location.hash === '#fleet-drawer';
   const stopResultsOpen = window.location.hash === '#stop-results';
+  const renameOpen = window.location.hash === '#rename';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
   // The headless browser sizes its window after the first paint, so a viewport
@@ -2315,6 +2322,13 @@ function Shell() {
         >
           <div className="p-panel text-ui">The shared modal shell, swipe handle and all.</div>
         </BottomSheet>
+        <RenameSheet
+          connection={daemon}
+          createClient={async () => ({ rename: async () => harnessChildSession })}
+          onClose={() => {}}
+          open={renameOpen}
+          view={harnessChildSession}
+        />
         <AttachmentUnlockPrompt
           filename="design-brief.pdf"
           onCancel={() => {}}

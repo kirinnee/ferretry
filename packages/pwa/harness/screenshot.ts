@@ -333,6 +333,13 @@ try {
         process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
       }
 
+      const renameTarget = join(outDir, `${viewport.name}-rename.png`);
+      await page.goto(`${server.url}#rename`);
+      await page.reload();
+      await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
+      await page.screenshot({ path: renameTarget });
+      process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
+
       await context.close();
     }
   } finally {
