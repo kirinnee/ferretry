@@ -140,6 +140,22 @@ const CASES: readonly MethodCase[] = [
     expected: usageFeedView,
   },
   {
+    name: 'projects',
+    invoke: client => client.projects(),
+    verb: 'GET',
+    path: '/v1/projects',
+    response: () => jsonResponse([]),
+    expected: [],
+  },
+  {
+    name: 'sessionSkills with a percent-encoded session id',
+    invoke: client => client.sessionSkills('session 1/a'),
+    verb: 'GET',
+    path: '/v1/sessions/session%201%2Fa/skills',
+    response: () => jsonResponse({ harness: 'codex', skills: [] }),
+    expected: { harness: 'codex', skills: [] },
+  },
+  {
     name: 'analytics without a query',
     invoke: client => client.analytics(),
     verb: 'GET',

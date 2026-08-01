@@ -10,6 +10,7 @@ import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
+import { catalogRoutes, type CatalogSubsystem } from './catalogs.ts';
 import { daemonHealthRoutes, type DaemonHealthSubsystem } from './health.ts';
 import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
@@ -49,6 +50,8 @@ export interface MountedSubsystems {
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
+  /** Daemon-local project and per-session skill catalogs. */
+  readonly catalogs: CatalogSubsystem;
   /** The session write: starting one agent and stopping it. A SEND is not here — the lifecycle
    *  delivers turn one and has no method for a later turn. */
   readonly sessionControl: SessionControlSubsystem;
@@ -103,6 +106,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
     // deeper per-session routes that follow.
     ...sessionRoutes(subsystems.sessions),
+    ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
     // The write surface registers AFTER the read for the same reason the read comes first: `POST
     // /v1/sessions` is a fixed literal and the stop is a deeper pattern, so neither shadows the
     // other and both sit above every per-session subsystem that follows.

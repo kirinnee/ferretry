@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   type LearningConfig,
@@ -20,6 +21,7 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   NodeBrowserLoginRuntime,
+  NodeCatalog,
   XvfbDisplay,
   BunApiServer,
   BunProcessProbe,
@@ -224,6 +226,7 @@ import {
   type ApiServerHandle,
   type ApiServerPort,
   type DaemonConfig,
+  type CatalogSubsystem,
   type MillisecondClockPort,
   type MountedSubsystems,
   type SttSubsystem,
@@ -467,6 +470,8 @@ export interface DaemonWorld {
      * production builds them.
      */
     stt: SttSubsystem,
+    /** Local paths are configuration, so the catalog is constructed against this exact document. */
+    catalogs: CatalogSubsystem,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -2141,7 +2146,18 @@ export function buildWorld(): DaemonWorld {
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     browserLogin: createBrowserLoginWorld(paths),
-    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight, browserLogin, stt) => {
+    createSubsystems: (
+      storage,
+      terminals,
+      usage,
+      health,
+      launcher,
+      reviver,
+      preflight,
+      browserLogin,
+      stt,
+      catalogs,
+    ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
@@ -2173,6 +2189,7 @@ export function buildWorld(): DaemonWorld {
           { next: () => crypto.randomUUID() },
         ),
         sessions,
+        catalogs,
         sessionControl: createSessionControlSubsystem(
           storage,
           sessions,
@@ -2288,6 +2305,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
+  const catalogs = new NodeCatalog({ home: homedir(), projectRoots: config.projectRoots });
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -2301,6 +2319,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.migratePreflight,
     world.browserLogin.window,
     world.stt,
+    catalogs,
   );
   // Registered with the other host acquisitions: the dictation surface spawns a Whisper worker on
   // the first transcription and holds it loaded for the next one, so a daemon that exited without

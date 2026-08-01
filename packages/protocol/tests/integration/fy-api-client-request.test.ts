@@ -13,7 +13,7 @@ import { BASE_CLIENT_OPTIONS as BASE_OPTIONS, connectClient as connect, headersO
 import { captureError, emptyResponse, jsonResponse, QueuedHttpTransport, textResponse } from './fakes.ts';
 
 describe('FyApiClient construction and generic requests', () => {
-  it('should expose exactly 33 instance methods and connect separately', async () => {
+  it('should expose exactly 35 instance methods and connect separately', async () => {
     // Arrange
     const expected = [
       'analytics',
@@ -27,6 +27,7 @@ describe('FyApiClient construction and generic requests', () => {
       'list',
       'logs',
       'migrate',
+      'projects',
       'pwaConfig',
       'remove',
       'rename',
@@ -35,6 +36,7 @@ describe('FyApiClient construction and generic requests', () => {
       'scratchPlan',
       'scratchSweep',
       'send',
+      'sessionSkills',
       'signal',
       'snapshot',
       'start',
@@ -59,7 +61,7 @@ describe('FyApiClient construction and generic requests', () => {
 
     // Assert
     should(methods).deepEqual(expected);
-    should(methods).have.length(33);
+    should(methods).have.length(35);
     should(client).be.instanceof(FyApiClient);
     should(typeof FyApiClient.connect).equal('function');
   });

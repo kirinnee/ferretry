@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
+import { ProjectListSchema, type ProjectList, SessionSkillsSchema, type SessionSkills } from '../lib/catalog.ts';
 import {
   FY_BOARD_CAPABILITY_HEADER,
   FY_REQUEST_ID_HEADER,
@@ -346,6 +347,14 @@ export class FyApiClient implements IFyApiClient {
 
   usage(): Promise<UsageFeedView> {
     return this.request('/v1/usage', UsageFeedViewSchema);
+  }
+
+  projects(): Promise<ProjectList> {
+    return this.request('/v1/projects', ProjectListSchema);
+  }
+
+  sessionSkills(id: string): Promise<SessionSkills> {
+    return this.request(`/v1/sessions/${encodeURIComponent(id)}/skills`, SessionSkillsSchema);
   }
 
   analytics(query?: string): Promise<AnalyticsResponse> {

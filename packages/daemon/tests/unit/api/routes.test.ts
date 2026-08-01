@@ -187,7 +187,25 @@ describe('the usage feed', () => {
 
     // Assert
     should(response.status).equal(200);
-    should(jsonBody(response).accounts).deepEqual([account]);
+    should(jsonBody(response)).deepEqual({ at: new Date(NOW).toISOString(), stale: false, accounts: [account] });
+  });
+
+  it('should tell a protocol client when no usage snapshot has ever been collected', async () => {
+    // Arrange
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...usageRoutes(new StubFeed([], undefined), fixedClock(NOW))]),
+      {
+        admin: 'admin-secret',
+      },
+    );
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({ path: '/v1/usage', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    // Assert
+    should(jsonBody(response)).deepEqual({ stale: true, accounts: [] });
   });
 
   it('should never let a machine feed be cached', async () => {
