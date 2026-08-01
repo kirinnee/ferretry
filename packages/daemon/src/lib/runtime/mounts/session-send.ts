@@ -177,7 +177,9 @@ async function interrupt(subsystem: SessionSendSubsystem, context: RouteContext)
     throw new ApiError(
       501,
       `abandoning structured question ${request.toolUseId} is not served: cancelling a rendered ` +
-        'question means driving the harness form back out of the way, and that is not in this daemon yet',
+        'question means positively re-binding THAT question on the terminal before releasing it, and ' +
+        'this daemon has no pane matchers, so it cannot tell the question you named from one that ' +
+        'appeared afterwards — releasing the wrong overlay is worse than refusing',
       'question_abandon_unsupported',
     );
   const view = await subsystem.interrupt(id).catch(refuse);
