@@ -5,6 +5,7 @@ import {
   DEFAULT_DICTATION_SHORTCUT,
   DICTATION_SHORTCUT_HOLD_MS,
   DictationShortcutGesture,
+  dictationShortcutAria,
   dictationShortcutCaptureActive,
   matchesDictationShortcut,
   type ShortcutKeyboardEvent,
@@ -132,5 +133,19 @@ describe('dictationShortcutCaptureActive', () => {
     should(dictationShortcutCaptureActive()).be.true();
     outer();
     should(dictationShortcutCaptureActive()).be.false();
+  });
+});
+
+describe('dictationShortcutAria', () => {
+  it('writes the default chord in aria-keyshortcuts grammar', () => {
+    should(dictationShortcutAria(DEFAULT_DICTATION_SHORTCUT)).equal('Alt');
+  });
+
+  it('joins the modifiers with the primary key', () => {
+    should(dictationShortcutAria({ code: 'KeyD', key: 'd', modifiers: ['Control', 'Shift'] })).equal('Control+Shift+D');
+  });
+
+  it('drops the side of a key, which names hardware the reader cannot pick', () => {
+    should(dictationShortcutAria({ code: 'ControlLeft', key: 'Control', modifiers: ['Shift'] })).equal('Shift+Ctrl');
   });
 });

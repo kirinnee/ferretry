@@ -97,7 +97,7 @@ export function DictationShortcutPicker({ binding, onChange }: DictationShortcut
         </kbd>
       </div>
       <p className="m-0 text-meta leading-base text-muted">
-        The bounded on-device settle and one enhancement pass insert at your current caret. The shortcut never sends the
+        The finished transcript and one correction pass insert at your current caret. The shortcut never sends the
         message. On a phone, use the mic button—the keyboard shortcut is optional.
       </p>
       <div className="flex flex-wrap gap-2">

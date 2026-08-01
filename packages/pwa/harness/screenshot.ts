@@ -164,6 +164,21 @@ try {
       const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
       await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
       process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
+      const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
+      await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
+      process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
+      // The dictation settings surface is several viewports tall. Chrome culls
+      // painting outside the viewport while an element screenshot scrolls, so
+      // the capture is taken against a temporarily tall viewport and the real
+      // one is restored immediately — otherwise most of the image is black.
+      const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
+      await page.setViewportSize({ width: viewport.width, height: 3_000 });
+      await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
+      const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
+      await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
+      process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
       const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
       await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
       process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);

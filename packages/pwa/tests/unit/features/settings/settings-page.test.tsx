@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
-import { DEFAULT_DICTATION_SHORTCUT } from '../../../../src/features/settings/dictation-shortcut.ts';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
-import { daemonId } from '../../../../src/lib/daemon-connection.ts';
+import { daemonConnection, daemonId } from '../../../../src/lib/daemon-connection.ts';
+import type { FetchLike } from '../../../../src/lib/stt/daemon-engine.ts';
+import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
 
@@ -12,14 +13,34 @@ const memoryStorage = (): ControlsStorage => {
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 };
 
+/**
+ * The page never reaches a daemon in a unit test. This request stays pending for
+ * ever on purpose: these assertions are about the page's section order and
+ * chrome, and a status that resolved after the synchronous render would settle
+ * state outside `act` and say nothing about either. The dictation surface's own
+ * suite drives the answered cases.
+ */
+const offlineFetch: FetchLike = () => new Promise<Response>(() => undefined);
+
 const settings = (daemon = daemonId('daemon-alpha')) => {
   const controls = new DaemonControlsStore(memoryStorage());
   const navigated: string[] = [];
+  const connection = daemonConnection({
+    daemonId: daemon,
+    baseUrl: 'http://127.0.0.1:1',
+    deviceToken: 'settings-page-token',
+  });
   const page = render(
     <SettingsPage
       daemonId={daemon}
       controls={controls}
-      dictation={{ binding: DEFAULT_DICTATION_SHORTCUT, onChange: () => {} }}
+      dictation={{
+        daemon: connection,
+        settings: DEFAULT_STT_SETTINGS,
+        update: () => {},
+        persisted: true,
+        fetchImpl: offlineFetch,
+      }}
       onNavigate={to => navigated.push(to)}
     />,
   );

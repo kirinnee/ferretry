@@ -141,6 +141,18 @@ export const dictationShortcutLabel = (binding: DictationShortcutBinding): strin
   return [...binding.modifiers.map(modifier => labels[modifier]), codeLabel(binding)].join(' + ');
 };
 
+/**
+ * The same chord in `aria-keyshortcuts` grammar: `Alt`, `Control+Shift+KeyD`.
+ *
+ * The side of a key is dropped because the attribute names a KEY, not a
+ * physical switch, and a screen reader reading out "Left Alt" would be telling
+ * the reader about hardware they cannot choose from the announcement.
+ */
+export const dictationShortcutAria = (binding: DictationShortcutBinding): string => {
+  const primary = binding.code === 'Alt' ? 'Alt' : codeLabel(binding).replace(/^(?:Left|Right) /u, '');
+  return [...binding.modifiers, primary].join('+');
+};
+
 export const sameDictationShortcutTrigger = (
   binding: DictationShortcutBinding,
   event: Pick<ShortcutKeyboardEvent, 'code' | 'key'>,

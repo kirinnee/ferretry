@@ -7,6 +7,8 @@
   "exports": {
     ".": "./src/lib/index.ts",
     "./components/composer": "./src/components/composer.tsx",
+    "./components/dictation-control": "./src/components/dictation-control.tsx",
+    "./components/dictation-sheet": "./src/components/dictation-sheet.tsx",
     "./components/attachment-unlock-prompt": "./src/components/attachment-unlock-prompt.tsx",
     "./components/session-details": "./src/components/session-details.tsx",
     "./components/session-list": "./src/components/session-list.tsx",
