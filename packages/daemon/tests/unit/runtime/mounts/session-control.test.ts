@@ -4,6 +4,7 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './support.ts';
 
@@ -107,9 +108,30 @@ describe('the session control mount', () => {
     should(control.starts).be.empty();
   });
 
-  it('should name the missing unit for the one option it cannot honour', async () => {
-    // Accepted by the protocol schema and unservable, so it is refused with the unit that would serve
-    // it rather than accepted and silently dropped.
+  it('should carry the presented board capability down with a start that asks for board access', async () => {
+    // The capability is the AUTHORIZATION for the child grant, and it travels on the header rather
+    // than in the body: a body field would be a caller-controlled claim about who is asking, which on
+    // a board is a privilege escalation rather than a wrong name in a journal.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const board = await subject.dispatch(
+      startRequest(startBody({ boardAccess: 'worker', parent: 's1' }), {
+        [FY_REQUEST_ID_HEADER]: REQUEST_ID,
+        'x-fy-board-capability': 'parent-capability',
+      }),
+    );
+
+    // Assert
+    should(board.status).equal(201);
+    should(control.boardAsks).deepEqual([['worker', 'parent-capability']]);
+  });
+
+  it('should refuse a board-access start that presents no capability', async () => {
+    // 401 and `missing_capability`, which is exactly how the eight board routes report the same
+    // absence — a caller that can read one of those refusals can read this one.
     // Arrange
     const control = new FakeSessionControl();
     const subject = dispatcher(control);
@@ -118,9 +140,50 @@ describe('the session control mount', () => {
     const board = await subject.dispatch(startRequest(startBody({ boardAccess: 'worker', parent: 's1' })));
 
     // Assert
-    should(board.status).equal(501);
-    should(jsonBody(board)).have.property('code', 'board_access_not_mounted');
+    should(board.status).equal(401);
+    should(jsonBody(board)).have.property('code', 'missing_capability');
+    // Nothing was started: the refusal happens before the subsystem is reached, so a start that
+    // cannot be granted never opens a pane.
     should(control.starts).be.empty();
+  });
+
+  it('should never read a board capability for a start that asks for no board access', async () => {
+    // An operator's ordinary `fy start` must not begin failing because a stray header is unset.
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const plain = await subject.dispatch(startRequest(startBody()));
+
+    // Assert
+    should(plain.status).equal(201);
+    should(control.boardAsks).deepEqual([['none', undefined]]);
+  });
+
+  it('should restate a board refusal in the board’s own vocabulary rather than as a launch failure', async () => {
+    // The caller asked for a session WITH board access and the board said no. Flattening every board
+    // reason into `session_launch_failed` would hide which one, and the route it must retry on —
+    // `/v1/task-boards/child-grants/request` — answers in exactly this vocabulary.
+    // Arrange
+    const control = new FakeSessionControl();
+    control.boardRefusal = {
+      role: 'coordinator',
+      error: new TaskBoardError('forbidden', 'only a live interactive membership root may request child access'),
+    };
+    const subject = dispatcher(control);
+
+    // Act
+    const board = await subject.dispatch(
+      startRequest(startBody({ boardAccess: 'coordinator', parent: 's1' }), {
+        [FY_REQUEST_ID_HEADER]: REQUEST_ID,
+        'x-fy-board-capability': 'parent-capability',
+      }),
+    );
+
+    // Assert
+    should(board.status).equal(403);
+    should(jsonBody(board)).have.property('code', 'forbidden');
   });
 
   it('should carry an inline attachment through to the subsystem instead of refusing it', async () => {

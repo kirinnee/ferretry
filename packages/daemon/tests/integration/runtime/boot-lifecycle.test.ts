@@ -927,6 +927,151 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * `fy start --board-access worker`, driven end to end through the production composition root.
+   *
+   * The start refused this with `501` on the belief that it "would launch a pane holding a capability
+   * that authorizes nothing until a third party acts". It hands the pane no capability at all: a child
+   * grant is a PENDING INTENT by construction, so the state the refusal was avoiding is the only state
+   * the domain can produce, and refusing it meant the flag could not be used.
+   *
+   * This proves the grant DOES ITS JOB rather than merely being reachable: a real board is created over
+   * two real sessions, the creator's capability is read from the file the daemon actually delivered it
+   * to, and the intent the start produced is read back out of `task-boards.json` on disk.
+   *
+   * It also pins the ORDERING, which is the part a unit test cannot see. The grant is requested after
+   * the session record exists — the board's directory reads the session's own documents — and before
+   * the launch, so a refusal costs no agent: the refused start's session is `stopped` and the launcher
+   * never saw it.
+   */
+  it('should request a child grant for a start that asked for board access', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-board-access-start');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startSession = async (
+      requestId: string,
+      fields: Readonly<Record<string, unknown>>,
+      extra: Readonly<Record<string, string>> = {},
+    ): Promise<Response> =>
+      await fetch(sessions, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-request-id': requestId, ...extra },
+        body: JSON.stringify({ agent: WRAPPER, cwd: home, prompt: 'work the board', ...fields }),
+      });
+
+    // Act
+    // The membership ROOT: live, interactive and top-level, which is the only shape the domain lets
+    // request a child grant.
+    const root = SessionViewSchema.parse(await (await startSession('req-board-root', { mode: 'interactive' })).json());
+    const coordinator = SessionViewSchema.parse(
+      await (await startSession('req-board-coordinator', { mode: 'auto', parent: root.config.id })).json(),
+    );
+    // The operator's capability is minted LAZILY, on the first request that has to check one — the
+    // same shape as the API token, which the first authenticated request mints. So this is the
+    // operator's real first move: try, be refused, then read what `fyd` issued.
+    const createBoard = async (adminCapability: string): Promise<Response> =>
+      await fetch(`http://127.0.0.1:${port}/v1/task-boards/create`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'x-fy-board-admin-capability': adminCapability },
+        body: JSON.stringify({ creatorSessionId: root.config.id, coordinatorSessionId: coordinator.config.id }),
+      });
+    const beforeMint = await createBoard('not-the-operator');
+    const adminCapability = (await readFile(join(home, 'board-admin-capability'), 'utf8')).trim();
+    const created = await createBoard(adminCapability);
+    // The root's own board capability, read from the file the daemon delivered it to rather than from
+    // the response — the response never carries one, which is the point of the environment channel.
+    const rootEnvironment = JSON.parse(
+      await readFile(join(home, 'state', 'sessions', root.config.id, 'environment.json'), 'utf8'),
+    ) as Readonly<Record<string, string>>;
+    const rootCapability = rootEnvironment.FY_BOARD_CAPABILITY ?? '';
+    const launchesBeforeRefusals = launcher.launched.length;
+    // The start under test.
+    const granted = await startSession(
+      'req-board-child',
+      { mode: 'auto', parent: root.config.id, boardAccess: 'worker' },
+      { 'x-fy-board-capability': rootCapability },
+    );
+    const grantedBody = SessionViewSchema.parse(await granted.json());
+    const boardDocument = JSON.parse(await readFile(join(home, 'task-boards.json'), 'utf8')) as {
+      readonly boards: ReadonlyArray<{
+        readonly childGrantIntents: ReadonlyArray<{
+          readonly targetSessionId: string;
+          readonly requestedRole: string;
+          readonly status: string;
+        }>;
+      }>;
+    };
+    // No capability at all, and a capability that names no membership: the two refusals a caller can
+    // actually produce.
+    const noCapability = await startSession('req-board-bare', {
+      mode: 'auto',
+      parent: root.config.id,
+      boardAccess: 'worker',
+    });
+    const refused = await startSession(
+      'req-board-stranger',
+      { mode: 'auto', parent: root.config.id, boardAccess: 'worker' },
+      { 'x-fy-board-capability': 'not-anybody-s-capability' },
+    );
+    const listed = SessionListSchema.parse(await (await fetch(sessions, { headers })).json());
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(beforeMint.status).equal(403);
+    should(created.status).equal(201);
+    should(rootCapability).not.be.empty();
+    // The start was SERVED, where it used to answer 501.
+    should(granted.status).equal(201);
+    // And the document it wrote records what the caller asked for. Recording `none` here would make
+    // every surface reading this session disagree with the intent the board is holding for it.
+    should(grantedBody.config.boardAccess).equal('worker');
+    // The intent is real, durable and PENDING — which is the only status the request reducer produces,
+    // for any requester, coordinator included.
+    should(
+      boardDocument.boards
+        .flatMap(board => board.childGrantIntents)
+        .map(intent => [intent.targetSessionId, intent.requestedRole, intent.status]),
+    ).deepEqual([[grantedBody.config.id, 'worker', 'pending']]);
+    // A missing secret is reported the way the eight board routes report one.
+    should(noCapability.status).equal(401);
+    should((await noCapability.json()) as { code: string }).have.property('code', 'missing_capability');
+    // A capability naming no membership is the board's own refusal, in the board's own vocabulary
+    // rather than flattened into `session_launch_failed`.
+    should(refused.status).equal(403);
+    should((await refused.json()) as { code: string }).have.property('code', 'forbidden');
+    // NEITHER refusal cost an agent: the grant is requested before the launch, so the only session the
+    // two refusals left behind is the stranger's, and it is stopped rather than running.
+    should(launcher.launched).have.length(launchesBeforeRefusals + 1);
+    const refusedSessions = listed.filter(session => session.config.boardAccess === 'worker');
+    should(refusedSessions.map(session => session.state.status).sort()).deepEqual(['running', 'stopped']);
+    should(refusedSessions.find(session => session.state.status === 'stopped')?.state.reason).containEql(
+      'board access refused',
+    );
+  });
+
+  /**
    * The files an opening message attached, driven through the production composition root.
    *
    * `initialAttachments` was refused with `501` for four units on the belief that attachments need a

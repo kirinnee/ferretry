@@ -4,6 +4,7 @@ import {
   TaskBoardCreateRequestSchema,
   TaskBoardInvitationApprovalSchema,
   TaskBoardInvitationRequestSchema,
+  type TaskBoardChildAccess,
   type TaskBoardCreateResponse,
   type TaskBoardErrorCode,
   type TaskBoardGrantRequestView,
@@ -100,8 +101,12 @@ export const BOARD_CAPABILITY_VARIABLE = 'FY_BOARD_CAPABILITY';
 /** The one-time invitation proof, read from the environment by `fy task-board invite-accept`. */
 export const BOARD_INVITATION_CAPABILITY_VARIABLE = 'FY_BOARD_INVITATION_CAPABILITY';
 
-/** Where a peer presents its own board capability. Never a body field, never argv. */
-const BOARD_CAPABILITY_HEADER = 'x-fy-board-capability';
+/** Where a peer presents its own board capability. Never a body field, never argv.
+ *
+ *  Exported because `POST /v1/sessions` carries it too: a `--board-access` start is a parent asking
+ *  for a child grant, and it presents the same secret on the same header. One literal, because two
+ *  spellings of a security header is a route that silently authorizes nobody. */
+export const BOARD_CAPABILITY_HEADER = 'x-fy-board-capability';
 
 /** Where the human operator presents theirs. */
 const BOARD_ADMIN_CAPABILITY_HEADER = 'x-fy-board-admin-capability';
@@ -178,11 +183,19 @@ function services(issuer: TaskBoardCredentialIssuer): TaskBoardServices {
 }
 
 /** Restates a domain refusal as the HTTP answer for its code. Anything else is a defect, not a
- *  refusal, and travels as a 500 rather than being flattened into a client error. */
-function reraise(error: unknown): never {
+ *  refusal, and travels as a 500 rather than being flattened into a client error.
+ *
+ *  Exported for the ONE other route that reaches the board domain: a `--board-access` start requests
+ *  a child grant, and its refusal must read the same on the wire as the refusal of the standalone
+ *  route that requests the identical grant. A second status table would let the two disagree about
+ *  what "forbidden" means. */
+export function reraiseTaskBoardError(error: unknown): never {
   if (isTaskBoardError(error)) throw new ApiError(TASK_BOARD_ERROR_STATUS[error.code], error.message, error.code);
   throw error;
 }
+
+/** The local spelling, kept so the eight route bodies below read unchanged. */
+const reraise = reraiseTaskBoardError;
 
 /** A presented secret, refused before any state is read when it is absent. */
 function presented(request: ApiRequest, header: string, missing: string): string {
@@ -359,26 +372,79 @@ async function requestChildGrant(subsystem: MountedTaskBoards, context: RouteCon
     'requesting a child grant needs the calling session’s own board capability',
   );
   const request = await parseBody(context.request, TaskBoardChildGrantRequestSchema);
-  const at = subsystem.now();
-  const view = await subsystem.repository
-    .transaction(async state => {
-      const sessions = await subsystem.sessions.snapshot();
-      const source = peerCredential(state, sessions, capability, subsystem.issuer);
-      return subsystem.services.children.request(state, sessions, {
-        source,
-        targetSessionId: request.targetSessionId,
-        role: request.role,
-        requestId: derivedRequestId(subsystem.issuer, [
-          'grant.request',
-          source.sessionId,
-          request.targetSessionId,
-          request.role,
-        ]),
-        at,
-      });
-    })
-    .catch(reraise);
+  const view = await requestChildGrantFor(subsystem, capability, request.targetSessionId, request.role).catch(reraise);
   return jsonResponse(view satisfies TaskBoardGrantRequestView);
+}
+
+/**
+ * The child-grant request itself, with no HTTP in it, so the two callers that make one make the SAME
+ * one: this route, and `POST /v1/sessions` with a `--board-access` other than `none`.
+ *
+ * THE REQUEST ID IS DERIVED, WHICH IS WHAT MAKES THE TWO SAFE TOGETHER. A start that requested the
+ * grant and a client that re-requested it after losing the start's answer hash to the same id, so the
+ * reducer's own replay ledger answers the second one with the intent the first created rather than
+ * opening a duplicate. That convergence is not incidental — the protocol client only re-requests on
+ * the recovery path precisely because it cannot know whether the daemon already did.
+ *
+ * Raises `TaskBoardError`; the caller restates it through `reraiseTaskBoardError`.
+ */
+async function requestChildGrantFor(
+  subsystem: MountedTaskBoards,
+  capability: string,
+  targetSessionId: string,
+  role: TaskBoardChildAccess,
+): Promise<TaskBoardGrantRequestView> {
+  const at = subsystem.now();
+  return await subsystem.repository.transaction(async state => {
+    const sessions = await subsystem.sessions.snapshot();
+    const source = peerCredential(state, sessions, capability, subsystem.issuer);
+    return subsystem.services.children.request(state, sessions, {
+      source,
+      targetSessionId,
+      role,
+      requestId: derivedRequestId(subsystem.issuer, ['grant.request', source.sessionId, targetSessionId, role]),
+      at,
+    });
+  });
+}
+
+/** Requests a child grant for a session a start has just created, over one world built once. */
+export type ChildGrantRequester = (
+  capability: string,
+  targetSessionId: string,
+  role: TaskBoardChildAccess,
+) => Promise<TaskBoardGrantRequestView>;
+
+/**
+ * The child-grant requester the composition root hands to session control.
+ *
+ * It builds the reducers the same way `taskBoardRoutes` does — one authorization service, bound
+ * methods rather than a spread — so a start's grant travels the same decision path as the route's.
+ */
+export function childGrantRequester(world: TaskBoardSubsystem): ChildGrantRequester {
+  const subsystem = mounted(world);
+  return async (capability, targetSessionId, role) =>
+    await requestChildGrantFor(subsystem, capability, targetSessionId, role);
+}
+
+/**
+ * The world plus its reducers, built once.
+ *
+ * Each method is BOUND rather than spread. `{...world}` copies own enumerable properties only, so a
+ * world supplied as a class instance — which the ports invite, and which the tests use — would arrive
+ * with `now`, `deliver` and `operatorCapabilityHash` silently missing from the prototype they live on.
+ * Naming them is what makes this mount indifferent to how its world was constructed.
+ */
+function mounted(world: TaskBoardSubsystem): MountedTaskBoards {
+  return {
+    repository: world.repository,
+    sessions: world.sessions,
+    issuer: world.issuer,
+    now: () => world.now(),
+    operatorCapabilityHash: async () => await world.operatorCapabilityHash(),
+    deliver: async (sessionId, variables) => await world.deliver(sessionId, variables),
+    services: services(world.issuer),
+  };
 }
 
 /**
@@ -592,20 +658,7 @@ async function relinquish(subsystem: MountedTaskBoards, context: RouteContext): 
 export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] {
   // The reducers are built ONCE here, not per request: they are stateless, and one authorization
   // service shared by every route is what makes "the decision path" a single thing rather than eight.
-  //
-  // Each method is BOUND rather than spread. `{...world}` copies own enumerable properties only, so a
-  // world supplied as a class instance — which the ports invite, and which the tests use — would
-  // arrive with `now`, `deliver` and `operatorCapabilityHash` silently missing from the prototype they
-  // live on. Naming them is what makes this mount indifferent to how its world was constructed.
-  const subsystem: MountedTaskBoards = {
-    repository: world.repository,
-    sessions: world.sessions,
-    issuer: world.issuer,
-    now: () => world.now(),
-    operatorCapabilityHash: async () => await world.operatorCapabilityHash(),
-    deliver: async (sessionId, variables) => await world.deliver(sessionId, variables),
-    services: services(world.issuer),
-  };
+  const subsystem = mounted(world);
   return [
     {
       method: 'GET',

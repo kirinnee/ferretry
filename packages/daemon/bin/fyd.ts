@@ -8,6 +8,7 @@ import {
   type StartSessionRequest,
   SessionStateSchema,
   type SessionView,
+  type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
@@ -177,6 +178,9 @@ import {
   type FoundationPaths,
   type LearningSubsystem,
   type ScratchReclamation,
+  type ChildGrantRequester,
+  childGrantRequester,
+  isTaskBoardError,
   type TaskBoardSubsystem,
   type TaskSubsystem,
   TerminalMountError,
@@ -925,6 +929,7 @@ function createSessionControlSubsystem(
   callsigns: CallsignClaims,
   digests: PayloadDigestPort,
   attachments: InitialAttachments,
+  boardGrants: ChildGrantRequester,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -942,7 +947,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId, payload) => {
+    start: async (request, requestId, payload, boardCapability) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -956,6 +961,20 @@ function createSessionControlSubsystem(
       // which is never what a caller meant; the resolver refuses a relative one for the same reason.
       if (request.cwd === undefined)
         throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
+      // The board ask, resolved BEFORE anything is written and as one value rather than two loose
+      // ones: the role and the secret that authorizes it are only ever meaningful together, and a
+      // start that carried the role without the secret would otherwise be startable with the grant
+      // silently skipped — a session whose document claims board access nothing asked the board for.
+      // The mount refuses this case already; this is the fail-closed answer for any other caller.
+      const boardAsk = ((): { readonly role: TaskBoardChildAccess; readonly capability: string } | undefined => {
+        if (request.boardAccess === 'none') return undefined;
+        if (boardCapability === undefined || boardCapability === '')
+          throw new SessionControlError(
+            'invalid',
+            `a start asking for ${request.boardAccess} board access must present the requesting session's own board capability`,
+          );
+        return { role: request.boardAccess, capability: boardCapability };
+      })();
       const { account, executable } = await resolveStartAccount(accounts, request.agent, executables);
       const id = ids.next();
       // BEFORE the callsign is claimed, so a start refused over an unusable attachment does not park
@@ -990,7 +1009,10 @@ function createSessionControlSubsystem(
         // the next. The generation is the daemon-side counter of those relaunches.
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
-        boardAccess: 'none',
+        // What the caller asked for, on the document the API projects. Recording `none` for a start
+        // that asked for `worker` would make every surface reading this session disagree with the
+        // grant intent the board is holding for it.
+        boardAccess: request.boardAccess,
         // What the caller asked for, kept beside the model that was actually resolved for it: the
         // hint is evidence about the request and the model is the decision.
         modelHint: request.model ?? account.defaultModel ?? '',
@@ -1037,8 +1059,20 @@ function createSessionControlSubsystem(
           ...(request.parent === undefined ? {} : { parent: request.parent }),
         });
         if (opening.files.length > 0) await storeAttachments(lifecycle, attachments, id, opening.files);
+        // AFTER the record and BEFORE the launch, which is the only window in which both halves are
+        // true: the board's session directory reads the session's own documents, so the target must
+        // exist for the grant to name it, and a refusal must not have cost an agent.
+        if (boardAsk !== undefined) await boardGrants(boardAsk.capability, id, boardAsk.role);
         await lifecycle.start(id);
       } catch (error) {
+        // A BOARD refusal is not a launch failure and must not be answered as one: nothing launched,
+        // and the caller asked for a session WITH board access. The record is retired with the
+        // board's own reason so the refusal leaves no session that will never run, and the error
+        // travels on for the mount to restate in the board's own vocabulary.
+        if (isTaskBoardError(error)) {
+          await lifecycle.stop(id, `board access refused: ${error.message}`).catch(() => undefined);
+          throw error;
+        }
         // The record survives a failed launch with the reason in it, so the failure is answered with
         // the session that holds the evidence rather than an error the caller cannot follow up.
         const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);
@@ -2115,6 +2149,11 @@ export function buildWorld(): DaemonWorld {
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
       const resume = createSessionResume(storage, reviver);
+      // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
+      // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
+      // its own repository handle over the same document, and the atomicity of `transaction` is what
+      // the whole authorization model rests on.
+      const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
       return {
         health: createHealthSubsystem(health),
         attention: new AttentionService(
@@ -2157,6 +2196,9 @@ export function buildWorld(): DaemonWorld {
               ),
             write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
           },
+          // The board grant a `--board-access` start asks for, over the same world and the same
+          // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
+          childGrantRequester(boards),
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionMigrate: createSessionMigrateSubsystem({
@@ -2174,7 +2216,7 @@ export function buildWorld(): DaemonWorld {
           serial: new KeyedSerialExecutor(),
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
-        taskBoards: createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations),
+        taskBoards: boards,
         analytics: createAnalyticsSubsystem(storage),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
