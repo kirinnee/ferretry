@@ -272,6 +272,9 @@ import {
   type SessionSignalSubsystem,
   SessionTranscriptReader,
   SessionTranscriptResolver,
+  type SessionTranscriptTail,
+  type TranscriptFileResolver,
+  OperatorReadService,
   SignalRefused,
   SttEnhancementService,
   type SttSubsystem,
@@ -2496,21 +2499,48 @@ export function buildWorld(): DaemonWorld {
    * and writes back the rollout it correlates, and the claims reader has to see every other
    * session's attribution to keep two sessions from claiming one file.
    */
-  const createTranscriptReader = (storage: DaemonStorage): SessionTranscriptReader => {
+  const createTranscriptFileResolver = (storage: DaemonStorage): TranscriptFileResolver => {
     const resolver = new SessionTranscriptResolver(
       codexRollouts,
       new StorageTranscriptClaims(storage),
       new StorageTranscriptProvenanceStore(storage),
       clock,
     );
-    return new SessionTranscriptReader(transcriptSources, {
+    return {
       file: async sessionId => {
         const id = tryParseSessionId(sessionId);
         if (id === undefined) return undefined;
         const config = await storage.readConfig(id).catch(() => undefined);
         return await resolver.file(sessionId, storedTranscriptProvenance(config));
       },
-    });
+    };
+  };
+  const createTranscriptReader = (storage: DaemonStorage): SessionTranscriptReader =>
+    new SessionTranscriptReader(transcriptSources, createTranscriptFileResolver(storage));
+  /**
+   * The same transcript read, for an operator who asked to SEE it.
+   *
+   * It reports RESOLUTION separately from content, over the one resolver the reader itself uses, and
+   * that difference is the whole reason it exists. `SessionTranscriptReader` answers an unresolved
+   * session with an empty batch on purpose — a question watcher must not fail an operation over
+   * missing evidence — but `fy logs` handing a human a blank page tells them the agent said nothing,
+   * which is a claim the daemon has no basis for. So the file is resolved first and its absence is
+   * reported as an absence; only a file this daemon can prove is the session's own is ever read.
+   */
+  const createSessionTranscriptTail = (storage: DaemonStorage): SessionTranscriptTail => {
+    const resolver = createTranscriptFileResolver(storage);
+    const reader = new SessionTranscriptReader(transcriptSources, resolver);
+    return {
+      tail: async (sessionId, limit) => {
+        if ((await resolver.file(sessionId).catch(() => undefined)) === undefined) return { kind: 'unresolved' };
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return { kind: 'unresolved' };
+        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+        if (!config.success) return { kind: 'unresolved' };
+        const harness = config.data.harness === 'codex' ? 'codex' : 'claude';
+        return { kind: 'read', events: await reader.tail({ sessionId, harness }, limit) };
+      },
+    };
   };
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
@@ -2982,6 +3012,48 @@ export function buildWorld(): DaemonWorld {
           reportsDirectory: wardenPaths.reports,
           supervision: wardenSupervision,
         }),
+        // The three operator reads, each over the evidence that actually holds the answer: the durable
+        // journal this storage opened, the pane the lifecycle document names, and the transcript the
+        // start proved is this session's.
+        //
+        // EVERY ONE IS KEYED BY SESSION ID THROUGH THIS DAEMON'S OWN STATE HOME. The journal is a file
+        // under it, the pane address is read from the document beside that file, and the tmux server is
+        // this daemon's private socket — so a session with the same name under another daemon cannot be
+        // captured here, which is the failure a `fy stream` attaching to the wrong pane would be.
+        sessionReads: new OperatorReadService(
+          {
+            replay: async (sessionId, afterSequence, limit) => {
+              // PARSED, not asserted: an id the layout would not accept must never become a journal path.
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return [];
+              const page = await storage.replay(id, afterSequence, limit);
+              return page.events.map(event => ({
+                sequence: event.sequence,
+                sessionId: event.sessionId,
+                time: event.time,
+                type: event.type,
+                data: event.data,
+              }));
+            },
+          },
+          {
+            capture: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return undefined;
+              // PARSED for the reason every other terminal address is: a document that no longer
+              // validates must leave the session with no pane rather than address whatever it names.
+              const lifecycle = SessionLifecycleConfigSchema.safeParse(
+                lifecycleConfigDocument(await storage.readConfig(id).catch(() => undefined)),
+              );
+              if (!lifecycle.success) return undefined;
+              const state = await launchTmux.state(lifecycle.data.tmuxSession);
+              // The scrollback, not the visible frame: an operator reading a snapshot is catching up on
+              // what happened, and the visible 24 lines are whatever the harness last redrew.
+              return { alive: state.alive, dead: state.dead, text: state.history };
+            },
+          },
+          createSessionTranscriptTail(storage),
+        ),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

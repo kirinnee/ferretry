@@ -11,6 +11,7 @@ import {
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
+import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -78,6 +79,15 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   warden: new FakeWarden(),
+  sessionReads: new OperatorReadService(
+    {
+      replay: async () => [
+        { sequence: 1, sessionId: 's1', time: '2026-01-01T00:00:00.000Z', type: 'session.created', data: {} },
+      ],
+    },
+    { capture: async () => ({ alive: true, dead: false, text: 'screen' }) },
+    { tail: async () => ({ kind: 'read', events: [] }) },
+  ),
 });
 
 describe('the mounted daemon surface', () => {
@@ -161,6 +171,12 @@ describe('the mounted daemon surface', () => {
       'POST /v1/warden/run',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',
+      // The operator reads: the history the daemon recorded, the screen the agent is looking at, and
+      // the transcript it wrote. Every one of these answered `unknown_route` while the protocol
+      // client carried a method for it — see the mount's own header.
+      'GET /v1/sessions/:sessionId/events',
+      'GET /v1/sessions/:sessionId/snapshot',
+      'GET /v1/sessions/:sessionId/logs',
     ]);
   });
 
@@ -224,6 +240,12 @@ describe('the mounted daemon surface', () => {
       }),
     );
 
+    // The three operator reads, over the same dispatcher: every one of them answered `unknown_route`
+    // while the protocol client carried a method that spoke to it.
+    const events = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/events', headers: human }));
+    const screen = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/snapshot', headers: human }));
+    const transcript = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/logs', headers: human }));
+
     // Assert
     should(health.status).equal(200);
     // The liveness probe and the scoped report are two different answers under one subject, and both
@@ -247,6 +269,9 @@ describe('the mounted daemon surface', () => {
     should(stopped.status).equal(200);
     should(revived.status).equal(200);
     should(migrated.status).equal(200);
+    should(events.status).equal(200);
+    should(screen.status).equal(200);
+    should(transcript.status).equal(200);
   });
 
   it('should validate the GC plan and force request before reaching the collector', async () => {

@@ -9,6 +9,7 @@ import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
+import type { OperatorReadService } from '../../session/reads/index.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
@@ -22,6 +23,7 @@ import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
+import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
@@ -116,6 +118,10 @@ export interface MountedSubsystems {
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
    *  invisible to the reachability gate, which is how a background subsystem ships unmounted. */
   readonly warden: WardenSubsystem;
+  /** How a human watches one session: what the daemon recorded, what its screen shows now, and what the
+   *  agent itself wrote. Every one of these refuses rather than answering blank — see the domain's own
+   *  header for why a dead pane and an unresolved transcript are errors and an empty event page is not. */
+  readonly sessionReads: OperatorReadService;
 }
 
 /**
@@ -182,6 +188,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
     // neither shadow nor be shadowed by anything above it.
     ...wardenRoutes(subsystems.warden),
+    // The operator reads register last, beside the working-tree read they sit alongside. All three are
+    // one-segment patterns under `/v1/sessions/:sessionId` whose final literals (`events`, `snapshot`,
+    // `logs`) no other route uses, so they can neither shadow nor be shadowed by anything above.
+    ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions),
   ];
 }
 
