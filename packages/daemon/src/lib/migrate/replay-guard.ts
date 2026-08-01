@@ -129,6 +129,27 @@ export function migrationReplayKey({ sessionId, requestId }: MigrationReplayKey)
 /** Decides whether a rejection happened after the session was already destroyed. */
 export type MigrationFailureRetention = (error: unknown) => boolean;
 
+/**
+ * The admission cap, normalised so that no input can switch admission off.
+ *
+ * `Math.max(1, Math.trunc(value))` looked like it clamped everything, and it did not: `Math.trunc`
+ * passes `NaN` and `Infinity` straight through, `Math.max` keeps both, and the comparison that spends
+ * the cap is `size >= limit` — which is ALWAYS FALSE against either. So a non-finite cap did not raise
+ * the ceiling, it removed it, silently restoring the unbounded ledger admission exists to prevent. A
+ * `NaN` is easy to arrive at by accident, from a parsed config value or an arithmetic slip.
+ *
+ * Non-finite therefore normalises to 1 — the same direction every other bad input already took, and
+ * the same direction the rest of this file takes when it cannot be sure: refuse rather than allow. A
+ * daemon that admits one migration is visibly, immediately wrong and gets fixed; one that admits
+ * unlimited migrations looks healthy until it dies. Throwing would also be defensible, but it would
+ * make a misconfigured cap fail at daemon boot rather than at the route, and fail-closed keeps every
+ * bad value on one path.
+ */
+function admissionLimit(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.trunc(value));
+}
+
 interface ReplayEntry {
   readonly fingerprint: string;
   /** Present while the migration is running; every replay awaits this exact promise. */
@@ -180,7 +201,7 @@ export class MigrationReplayGuard {
 
   constructor(retainFailure: MigrationFailureRetention, maxEntries: number = MIGRATION_REPLAY_MAX_ENTRIES) {
     this.#retainFailure = retainFailure;
-    this.#maxEntries = Math.max(1, Math.trunc(maxEntries));
+    this.#maxEntries = admissionLimit(maxEntries);
   }
 
   /** How many logical migrations this process is currently holding. */

@@ -380,6 +380,56 @@ describe('MigrationReplayGuard admission', () => {
     expect(MIGRATION_REPLAY_MAX_ENTRIES).toBe(4096);
   });
 
+  // A non-finite cap used to DISABLE admission rather than widen it: `Math.trunc` passes NaN and
+  // Infinity through, `Math.max` keeps them, and `size >= NaN` / `size >= Infinity` are both always
+  // false — so the ledger became unbounded again while looking configured. Each of these must admit
+  // exactly one migration and refuse the second.
+  for (const [label, cap] of [
+    ['NaN', Number.NaN],
+    ['+Infinity', Number.POSITIVE_INFINITY],
+    ['-Infinity', Number.NEGATIVE_INFINITY],
+  ] as const) {
+    it(`admits exactly one migration when the cap is ${label}`, async () => {
+      const guard = new MigrationReplayGuard(retainAll, cap);
+      let performed = 0;
+      const perform = async () => {
+        performed += 1;
+        return view(`agent-${performed}`);
+      };
+
+      // The single admission it does allow works normally.
+      expect((await guard.run(key('r1'), 'target-a', perform)).config.agent).toBe('agent-1');
+      expect(guard.size).toBe(1);
+
+      // And the ledger is genuinely closed afterwards, not merely slow to fill.
+      for (const requestId of ['r2', 'r3', 'r4']) {
+        await expect(guard.run(key(requestId), 'target-a', perform)).rejects.toBeInstanceOf(
+          MigrationReplayCapacityError,
+        );
+      }
+      expect(performed).toBe(1);
+      expect(guard.size).toBe(1);
+
+      // The one receipt it holds is still replayed — fail-closed narrows admission, never retention.
+      expect((await guard.run(key('r1'), 'target-a', perform)).config.agent).toBe('agent-1');
+      expect(performed).toBe(1);
+    });
+  }
+
+  it('truncates a fractional cap rather than admitting the extra migration', async () => {
+    const guard = new MigrationReplayGuard(retainAll, 2.9);
+    let performed = 0;
+    const perform = async () => {
+      performed += 1;
+      return view(`agent-${performed}`);
+    };
+
+    await guard.run(key('r1'), 'target-a', perform);
+    await guard.run(key('r2'), 'target-a', perform);
+    await expect(guard.run(key('r3'), 'target-a', perform)).rejects.toBeInstanceOf(MigrationReplayCapacityError);
+    expect(performed).toBe(2);
+  });
+
   it('defaults to the production cap when none is given', async () => {
     const guard = new MigrationReplayGuard(retainAll);
     let performed = 0;
