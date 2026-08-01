@@ -96,6 +96,7 @@ export * from './github-pr.ts';
 export * from './learning-api.ts';
 export * from './md-compose.ts';
 export * from './notification-preferences.ts';
+export * from './notification-ledger.ts';
 export * from './pages/new-session.ts';
 export * from './pages/page-host.tsx';
 export * from './pages/routes.ts';
