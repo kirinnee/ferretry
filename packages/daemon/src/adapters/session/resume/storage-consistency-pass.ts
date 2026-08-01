@@ -36,10 +36,11 @@ export class StorageConsistencyPass implements ConsistencyPassPort {
     // reindexing a healthy fleet once a minute is the steady file IO this check exists to avoid.
     if (!deep && missingFromIndex.length === 0 && staleRows.length === 0)
       return { missingFromIndex, staleRows, zombies, repaired: [], unhealable: [] };
-    await this.storage.reconcile();
+    const reconciliation = await this.storage.reconcile();
+    const failed = new Set(reconciliation.failedSessionIds ?? []);
     const afterDisk = await this.storage.sessionIdsOnDisk();
     const afterIndex = new Set(this.storage.listSessions().map(session => session.id));
-    const unhealable = afterDisk.filter(id => !afterIndex.has(id));
+    const unhealable = afterDisk.filter(id => !afterIndex.has(id) || failed.has(id));
     const repaired = missingFromIndex.filter(id => afterIndex.has(id));
     return { missingFromIndex, staleRows, zombies, repaired, unhealable };
   }

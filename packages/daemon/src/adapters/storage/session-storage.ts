@@ -56,6 +56,16 @@ export class SessionLayoutError extends Error {
   }
 }
 
+export class MissingSessionJournalError extends Error {
+  constructor(
+    readonly sessionId: SessionId,
+    readonly file: string,
+  ) {
+    super(`indexed session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
+    this.name = 'MissingSessionJournalError';
+  }
+}
+
 export class DurableEventIndexError extends Error {
   readonly durable = true;
 
@@ -129,6 +139,13 @@ export class DaemonStorage {
 
   private assertOpen(): void {
     if (this.closed) throw new Error('daemon storage is closed');
+  }
+
+  /** An index fingerprint is durable evidence that this session had a journal, even if it is gone now. */
+  private assertExpectedJournal(id: SessionId, indexed: IndexedSession | undefined, present: boolean): void {
+    if (indexed !== undefined && indexed.journal !== null && !present) {
+      throw new MissingSessionJournalError(id, createSessionPaths(this.paths, id).events);
+    }
   }
 
   private async ensureSessionDirectory(id: SessionId): Promise<void> {
@@ -285,6 +302,7 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { eventCount: 0, problems: [] };
     }
+    this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
     return this.applySource(source);
   }
 
@@ -319,8 +337,12 @@ export class DaemonStorage {
       }
       try {
         const source = await this.readSource(id, true);
-        if (source) sources.push(source);
+        if (source) {
+          this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
+          sources.push(source);
+        }
       } catch (error) {
+        if (error instanceof MissingSessionJournalError) throw error;
         failedSessionIds.push(id);
         problems.push({
           file: createSessionPaths(this.paths, id).directory,
@@ -460,6 +482,7 @@ export class DaemonStorage {
       this.index.removeSession(id);
       return { problems: [] };
     }
+    this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
     const result = this.applySource(source);
     return { session: result.session, problems: result.problems };
   }
@@ -541,6 +564,7 @@ export class DaemonStorage {
       for (const observation of observationById.values()) {
         const current = indexedById.get(observation.id);
         try {
+          this.assertExpectedJournal(observation.id, current, observation.journal !== undefined);
           const journal = observation.journal?.fingerprint ?? null;
           const lastIndexedEventMatches =
             current === undefined
@@ -621,6 +645,7 @@ export class DaemonStorage {
     }
     if (decideSessionMarker(observation.marker.text) === 'refuse')
       throw new SessionLayoutError(id, observation.marker.text);
+    this.assertExpectedJournal(id, current, observation.journal !== undefined);
     const fingerprint = observation.journal?.fingerprint ?? null;
     const currentPointerMatches =
       current === undefined

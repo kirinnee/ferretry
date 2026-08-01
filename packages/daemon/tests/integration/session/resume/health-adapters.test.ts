@@ -317,6 +317,27 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
+  it('should report a vanished indexed journal as unhealable instead of healthy', async () => {
+    // Arrange
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('lost-journal');
+    await opened.storage.append(id, 'session.started', { durable: true });
+    await rm(createSessionPaths(paths(home), id).events);
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const actual = await pass.run(true);
+
+    // Assert — membership alone is not health evidence when reconciliation could not read the
+    // journal. The stale index row is deliberately retained so it cannot become an empty session.
+    should(actual.missingFromIndex).deepEqual([]);
+    should(actual.repaired).deepEqual([]);
+    should(actual.unhealable).deepEqual([id]);
+    should(opened.storage.findSession(id)?.lastSequence).equal(1);
+    await opened.storage.close();
+  });
+
   it('should ignore a terminal session with no finish stamp rather than call it a zombie', async () => {
     // Arrange
     const home = await temporaryHome();

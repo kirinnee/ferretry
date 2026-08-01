@@ -23,6 +23,7 @@ import {
   DurableEventIndexError,
   InvalidStateDocumentError,
   KeyedSerialExecutor,
+  MissingSessionJournalError,
   type OpenedDaemonStorage,
   RuntimeEnvironment,
   SessionLayoutError,
@@ -541,6 +542,34 @@ describe('journal storage', () => {
     should(replayAfterShrink.events.map(event => event.sequence)).deepEqual([1]);
     should(appended.sequence).equal(2);
     should(finalReplay.events.map(event => event.type)).deepEqual(['first', 'replacement-second']);
+  });
+
+  it('should preserve indexed evidence and refuse every empty fallback when a journal disappears', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('missing-journal');
+    await opened.storage.append(id, 'preserved', { value: true });
+    const eventsFile = createSessionPaths(opened.paths, id).events;
+    await rm(eventsFile);
+
+    // Act — each path used to accept the missing file as a legitimate zero-event journal.
+    const syncError = await capturedError(async () => await opened.storage.syncSession(id));
+    const rebuildError = await capturedError(async () => await opened.storage.rebuildIndex());
+    const reconciliation = await opened.storage.reconcile();
+    const replayError = await capturedError(async () => await opened.storage.replay(id));
+    const appendError = await capturedError(async () => await opened.storage.append(id, 'replacement', {}));
+
+    // Assert — the disposable pointer remains as evidence; no operation recreates the journal or
+    // reports an empty replay after durable data has vanished.
+    should(syncError instanceof MissingSessionJournalError).be.true();
+    should(rebuildError instanceof MissingSessionJournalError).be.true();
+    should(replayError instanceof MissingSessionJournalError).be.true();
+    should(appendError instanceof MissingSessionJournalError).be.true();
+    should(reconciliation.failedSessionIds).deepEqual([id]);
+    should(reconciliation.problems[0]?.message).containEql('has lost its durable journal');
+    should(opened.storage.findSession(id)?.lastSequence).equal(1);
+    should(await exists(eventsFile)).be.false();
   });
 
   it('should report that a journaled event is durable when both index attempts fail', async () => {
