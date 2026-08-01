@@ -15,6 +15,8 @@ export * as filesModel from '../components/files-model.ts';
 export * from '../components/new-session-page.tsx';
 export * from '../components/question-form.tsx';
 export * from '../components/runtime-controls.tsx';
+export * from '../components/session-chat-model.ts';
+export * from '../components/session-chat-parts.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
 export * from '../components/session-tasks.tsx';
