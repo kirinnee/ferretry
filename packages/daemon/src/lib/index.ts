@@ -43,6 +43,7 @@ export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/resume/index.ts';
+export * from './session/signal/index.ts';
 export * from './state-home.ts';
 export * from './stt/index.ts';
 export * from './storage-types.ts';

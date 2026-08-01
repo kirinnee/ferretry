@@ -9,6 +9,7 @@ import {
   type StartSessionRequest,
   SessionStateSchema,
   type SessionView,
+  type SignalSessionRequest,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
@@ -112,6 +113,11 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
+  FileSignalArtifacts,
+  LauncherSignalTerminal,
+  StorageSignalRepository,
+} from '../src/adapters/session/signal/index.ts';
+import {
   ManagedTerminalService,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -205,6 +211,12 @@ import {
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
+  InvalidDeadlineRefused,
+  SessionSignalError,
+  SessionSignalService,
+  type SessionSignalSubsystem,
+  SignalRefused,
+  UnknownPeerRefused,
   sessionHealthSettingsAt,
   type SessionHealthSettings,
   defaultSessionResumeSettings,
@@ -1180,6 +1192,80 @@ function createSessionResumeSubsystem(
         throw new SessionResumeError(
           'failed',
           `session ${id} was revived but its documents do not satisfy the protocol`,
+        );
+      return view;
+    },
+  };
+}
+
+/** How each signal refusal the domain raises is answered. The three are genuinely different next
+ *  actions — fix the request, revive the session, name a peer that exists — so they are not collapsed
+ *  into one conflict. */
+function signalRefusal(error: unknown): never {
+  // The most specific subclasses first: both extend `SignalRefused`, and a plain refusal is the base.
+  if (error instanceof InvalidDeadlineRefused) throw new SessionSignalError('invalid', error.message);
+  if (error instanceof UnknownPeerRefused) throw new SessionSignalError('unknown_peer', error.message);
+  if (error instanceof SignalRefused) throw new SessionSignalError('refused', error.message);
+  // Acted on and failed: the evidence, the pane or the document write. The session's own journal holds
+  // whatever got as far as being recorded.
+  throw new SessionSignalError('failed', error instanceof Error ? error.message : String(error));
+}
+
+/** The wait fields, which only a `waiting` signal carries. Narrowed on the discriminant rather than
+ *  probed, so a new kind gaining an `until` cannot silently start parking sessions. */
+function waitFields(request: SignalSessionRequest) {
+  return request.kind === 'waiting'
+    ? {
+        ...(request.until === undefined ? {} : { until: request.until }),
+        ...(request.condition === undefined ? {} : { condition: request.condition }),
+        ...(request.peer === undefined ? {} : { peer: request.peer }),
+      }
+    : {};
+}
+
+/**
+ * What a session says about itself, over the signal domain this unit built.
+ *
+ * ONE SERVICE FOR THE WHOLE OPENED STORAGE, for the reason the revive gives: its `SerialExecutor` is
+ * what stops a completion and a park of the same session interleaving, and a service built per request
+ * would hand each caller a private queue that sees none of the others.
+ *
+ * THE TERMINAL IS THE REVIVE'S OWN LAUNCHER, not a second tmux adapter, and that is a correctness
+ * requirement. `TmuxResumeLauncher` keeps the final frame of every pane it snapshots in its own map, so
+ * a completion that captured its last screen through a different object would file that frame where no
+ * revive could find it.
+ *
+ * THE ID IS PARSED AND LOOKED UP HERE, before the service is asked, for the reason the stop and the
+ * revive both do it: the repository answers `undefined` for a session that does not exist and the
+ * service turns that into a refusal, which would surface as a `409` about a session the caller should
+ * simply be told is not here.
+ */
+function createSessionSignalSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  service: SessionSignalService,
+): SessionSignalSubsystem {
+  return {
+    signal: async (reference, request) => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined)
+        throw new SessionSignalError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+      if (storage.findSession(id) === undefined) throw new SessionSignalError('not_found', `no session ${reference}`);
+      await service
+        .signal({
+          id,
+          kind: request.kind,
+          ...(request.message === undefined ? {} : { message: request.message }),
+          ...waitFields(request),
+        })
+        .catch((error: unknown) => signalRefusal(error));
+      // Read back through the SAME reader the list and the single read serve, so a signal answers with
+      // the view those surfaces will show rather than a projection of the signal's own outcome.
+      const view = await sessions.get(id).catch(() => undefined);
+      if (view === undefined)
+        throw new SessionSignalError(
+          'failed',
+          `session ${id} recorded its ${request.kind} signal but its documents do not satisfy the protocol`,
         );
       return view;
     },
@@ -2165,6 +2251,17 @@ export function buildWorld(): DaemonWorld {
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
       const resume = createSessionResume(storage, reviver);
+      // The session's own voice, over the SAME launcher the revive holds — see the subsystem's header
+      // for why a second tmux adapter would misfile the final frame of every completed pane.
+      const signals = new SessionSignalService({
+        repository: new StorageSignalRepository(storage, clock),
+        artifacts: new FileSignalArtifacts(id => createSessionPaths(paths, id).directory, clock),
+        terminal: new LauncherSignalTerminal(reviver),
+        // Its own queue: a completion holds its lock across writing evidence and retiring a pane, and
+        // must not make every unrelated document write in the process wait behind it.
+        serial: new KeyedSerialExecutor(),
+        clock,
+      });
       // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
       // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
       // its own repository handle over the same document, and the atomicity of `transaction` is what
@@ -2218,6 +2315,7 @@ export function buildWorld(): DaemonWorld {
           childGrantRequester(boards),
         ),
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
+        sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionMigrate: createSessionMigrateSubsystem({
           storage,
           sessions,
