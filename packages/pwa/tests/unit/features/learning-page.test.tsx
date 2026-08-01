@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import type { ProposalView } from '@ferretry/protocol';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
+  absoluteTime,
   LearningPage,
   LearningReview,
-  ProposalCard,
-  absoluteTime,
   learningErrorMessage,
   learningStrength,
+  ProposalCard,
 } from '../../../src/features/learning/learning-page.tsx';
 import type { MediaQueryListLike } from '../../../src/features/learning/use-touch-affected.ts';
+import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { proposal, status } from '../learning-api.test.ts';
 
@@ -533,6 +533,12 @@ describe('LearningReview', () => {
       await runAsync(async () => {
         await Promise.resolve();
       });
+      // Clearing belongs to the re-scoped render itself. While B is still
+      // parked, no committed frame may retain A's proposal or busy state.
+      const whileBLoads = JSON.stringify(renderer.toJSON());
+      expect(whileBLoads).toContain('Reading learning proposals…');
+      expect(whileBLoads).not.toContain(proposal.title);
+      expect(runButton(renderer).props.disabled).toBe(false);
       await runAsync(async () => {
         parked.nth(statusUrl(connectionB), 0).resolve(json(status));
         parked
