@@ -34,6 +34,16 @@ const homes = new Set<string>();
 const NOW = '2026-07-31T10:00:00.000Z';
 const SETTINGS = defaultSessionHealthSettings;
 
+/** Counts journal byte reads, which is what separates a shallow tick from a full reconcile. */
+class CountingStateFileSystem extends StateFileSystem {
+  journalReads = 0;
+
+  override async *readChunks(path: string, chunkSize: number, offset = 0): AsyncIterable<Uint8Array> {
+    if (path.endsWith('/events.jsonl')) this.journalReads += 1;
+    yield* super.readChunks(path, chunkSize, offset);
+  }
+}
+
 async function temporaryHome() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-health-test-'));
   homes.add(home);
@@ -252,6 +262,7 @@ describe('storage consistency pass', () => {
       repaired: [],
       unhealable: [],
     });
+    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id: 'known', journalLost: false }]);
     await opened.storage.close();
   });
 
@@ -337,6 +348,54 @@ describe('storage consistency pass', () => {
     should(actual.repaired).deepEqual([]);
     should(actual.unhealable).deepEqual([id]);
     should(opened.storage.findSession(id)?.lastSequence).equal(1);
+    await opened.storage.close();
+  });
+
+  it('should keep reporting a lost journal on every shallow tick without reconciling again', async () => {
+    // Arrange — a healthy deep pass first, so the finding can only come from the deletion.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const lost = parseSessionId('lost-journal');
+    const healthy = parseSessionId('healthy-session');
+    await opened.storage.append(lost, 'session.started', { durable: true });
+    await opened.storage.append(healthy, 'session.started', { durable: true });
+    const fileSystem = new CountingStateFileSystem(paths(home));
+    const pass = new StorageConsistencyPass(opened.storage, fileSystem, paths(home), SETTINGS);
+    const healthyPass = await pass.run(true);
+    await rm(createSessionPaths(paths(home), lost).events);
+    fileSystem.journalReads = 0;
+
+    // Act
+    const shallow = [await pass.run(false), await pass.run(false), await pass.run(false)];
+
+    // Assert — the finding survives every ordinary tick, so the restart streak can never be reset
+    // by one, and no tick pays for a reconcile it cannot possibly heal.
+    should(healthyPass.unhealable).deepEqual([]);
+    should(shallow.map(tick => tick.unhealable)).deepEqual([[lost], [lost], [lost]]);
+    should(shallow.map(tick => tick.missingFromIndex)).deepEqual([[], [], []]);
+    should(fileSystem.journalReads).equal(0);
+    should(opened.storage.findSession(healthy)?.lastSequence).equal(1);
+    await opened.storage.close();
+  });
+
+  it('should report a legacy session whose only witness is the index as unhealable too', async () => {
+    // Arrange — a version-1 directory the boot sweep deliberately refused to migrate, because
+    // fabricating its journal would have destroyed the index fingerprint that proves the loss.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('legacy-witnessed');
+    await opened.storage.append(id, 'session.started', { durable: true });
+    const session = createSessionPaths(paths(home), id);
+    await writeFile(session.marker, '1\n', { mode: 0o600 });
+    await rm(session.events);
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const actual = await pass.run(false);
+
+    // Assert
+    should(await opened.storage.surveySessionDirectories()).deepEqual([{ id, journalLost: true }]);
+    should(actual.unhealable).deepEqual([id]);
     await opened.storage.close();
   });
 

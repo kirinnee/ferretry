@@ -106,6 +106,17 @@ interface ObservationCollection {
   readonly failedSessionIds: readonly string[];
 }
 
+/** One session directory as a health tick sees it: cheap to obtain, enough to spot lost history. */
+export interface SessionDirectorySurvey {
+  readonly id: SessionId;
+  /**
+   * True when the journal file is gone from a session that owes one — either because its marker is
+   * the current version, or because an unmigrated legacy session still has an index fingerprint
+   * witnessing the journal it used to have.
+   */
+  readonly journalLost: boolean;
+}
+
 interface JournalObservation {
   readonly file: string;
   readonly fingerprint: JournalFingerprint;
@@ -1015,18 +1026,35 @@ export class DaemonStorage {
     });
   }
 
-  async sessionIdsOnDisk(): Promise<readonly SessionId[]> {
+  /**
+   * The readable session directories and, for each, whether its journal has vanished.
+   *
+   * One `readText` per directory plus one `stat` for each directory that owes a journal. No journal
+   * bytes are read and nothing is reconciled, so a health tick can afford this on every pass. Loss
+   * is decided exactly as the read paths decide it — current marker OR a surviving index witness —
+   * so a legacy session that has not been migrated is not silently reported as healthy.
+   */
+  async surveySessionDirectories(): Promise<readonly SessionDirectorySurvey[]> {
     this.assertOpen();
     const entries = await this.fileSystem.listDirectory(this.paths.sessions);
-    const ids: SessionId[] = [];
+    const survey: SessionDirectorySurvey[] = [];
     for (const entry of entries) {
       if (!entry.directory) continue;
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
-      const marker = await this.fileSystem.readText(createSessionPaths(this.paths, id).marker);
-      if (decideSessionMarker(marker) === 'proceed') ids.push(id);
+      const paths = createSessionPaths(this.paths, id);
+      const marker = await this.fileSystem.readText(paths.marker);
+      if (decideSessionMarker(marker) === 'refuse') continue;
+      const indexed = this.index.findSession(id);
+      const owesJournal = sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null);
+      const journalLost = owesJournal && (await this.fileSystem.information(paths.events)) === undefined;
+      survey.push({ id, journalLost });
     }
-    return ids.sort();
+    return survey.sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async sessionIdsOnDisk(): Promise<readonly SessionId[]> {
+    return (await this.surveySessionDirectories()).map(session => session.id);
   }
 
   forgetFromIndex(id: SessionId): void {
