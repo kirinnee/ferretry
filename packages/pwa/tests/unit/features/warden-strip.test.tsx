@@ -23,14 +23,19 @@ describe('WardenStrip', () => {
     expect(container.textContent).toContain('every 5m');
   });
 
-  it('shows an em dash rather than a guess when no sweep has happened', async () => {
+  it('refuses to call an empty report set healthy', async () => {
     const { container } = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
 
-    expect(container.textContent).toContain('last sweep —');
+    expect(container.textContent).toContain('not reporting');
+    expect(container.textContent).toContain('no evidence');
+    expect(container.querySelector('.text-ok')).toBeNull();
+    expect(container.querySelector('.text-warn')).not.toBeNull();
   });
 
   it('switches the shield and the tone once anomalies exist', async () => {
-    const clean = await mount(<WardenStrip status={wardenStatus()} now={NOW} />);
+    const clean = await mount(
+      <WardenStrip status={wardenStatus({ lastSweepAt: '2026-07-31T11:58:00.000Z' })} now={NOW} />,
+    );
     const dirty = await mount(
       <WardenStrip status={wardenStatus({ anomalies: [wardenAnomaly({ teammate: 'ms-98' })] })} now={NOW} />,
     );
