@@ -121,6 +121,12 @@ import {
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
 import {
+  FileWaitHeartbeat,
+  MonitorTickRunner,
+  SendMonitorNudge,
+  StorageMonitorWaits,
+} from '../src/adapters/session/monitor/index.ts';
+import {
   FileSendChannel,
   FileSendLedger,
   FileSendTurnStore,
@@ -240,6 +246,8 @@ import {
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
+  SessionMonitorService,
+  defaultSessionMonitorSettings,
   InvalidDeadlineRefused,
   SessionSignalError,
   SessionSignalService,
@@ -2534,8 +2542,11 @@ export function buildWorld(): DaemonWorld {
       const resume = createSessionResume(storage, reviver);
       // The session's own voice, over the SAME launcher the revive holds — see the subsystem's header
       // for why a second tmux adapter would misfile the final frame of every completed pane.
+      // Hoisted, because the monitor loop below reads the same documents through the same narrowing:
+      // a second repository would be a second opinion about what a park on a damaged record means.
+      const signalRepository = new StorageSignalRepository(storage, clock);
       const signals = new SessionSignalService({
-        repository: new StorageSignalRepository(storage, clock),
+        repository: signalRepository,
         artifacts: new FileSignalArtifacts(id => createSessionPaths(paths, id).directory, clock),
         terminal: new LauncherSignalTerminal(reviver),
         // Its own queue: a completion holds its lock across writing evidence and retiring a pane, and
@@ -2582,6 +2593,31 @@ export function buildWorld(): DaemonWorld {
         // The receiving agent is told the CLI a human types, not this daemon — `fyd send` is not a
         // command, exactly as the harness quirk service already reasons about `fyd resume`.
         { ...defaultSessionSendSettings, clientName: CLIENT_NAME },
+      );
+      /**
+       * The declared-wait watcher, built LAST among the session slices because it drives two of them.
+       *
+       * IT ENDS PARKS THROUGH THE SIGNAL SERVICE and wakes teammates through the SEND, rather than
+       * writing either itself. Clearing a wait credits the parked time back against the turn ceiling
+       * and re-anchors the activity ledger — that is the signal slice's arithmetic, shared with
+       * `signal working` and with the peer reply PR #153 landed — and typing into a live pane is the
+       * send's, including every refusal it makes about whose composer that pane belongs to.
+       *
+       * ONE LOOP PER DAEMON, over the sessions of the storage this process opened. Nothing here can
+       * name a session in another daemon's state home, so no tick can reach one.
+       */
+      const monitor = new SessionMonitorService(
+        {
+          waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
+          heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
+          nudge: new SendMonitorNudge(sends),
+          clock,
+          wallClock: { nowMs: () => Date.now() },
+          // A duration, so it is read off a clock that cannot step: a wall-clock jump would otherwise
+          // make an on-time tick look hours late, or a missed one look on time.
+          monotonic: new SystemMonotonicClock(),
+        },
+        defaultSessionMonitorSettings,
       );
       // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
       // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
@@ -2642,6 +2678,10 @@ export function buildWorld(): DaemonWorld {
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
+        // The record lives in this daemon's own state home, beside the lock and the index it was
+        // opened with. Two daemons on one host have two homes and therefore two records, so neither
+        // can overwrite the other's account of its own loop.
+        monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
         sessionMigrate: createSessionMigrateSubsystem({
           storage,
           sessions,
@@ -2810,6 +2850,29 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     void health.selfCheck().catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
+  /**
+   * The declared-wait tick, armed beside the self-check and for the same reasons.
+   *
+   * ARMED BEFORE ITS FIRST RUN, so the record it publishes says "the loop is running and has not
+   * ticked yet" rather than "there is no loop". The two are the same picture from the outside and
+   * completely different faults, which is the distinction this whole subsystem exists to keep.
+   *
+   * THE FIRST TICK RUNS IMMEDIATELY. A daemon that has just restarted is exactly when a park is most
+   * likely to be overdue — nothing serviced it while the process was down — and waiting out a full
+   * interval before looking would add that interval to every wake the restart already delayed.
+   *
+   * THE SHUTDOWN SAYS SO RATHER THAN TICKING. `close` disarms and republishes the record; it does not
+   * run a tick, because cleanups run in the order they were registered and the storage a tick would
+   * read is closed by the first of them. Leaving the last tick's `armed: true` behind would tell the
+   * next reader that something is still watching these parks.
+   */
+  subsystems.monitor.arm();
+  await subsystems.monitor.run();
+  const waitTicks = setInterval(() => void subsystems.monitor.run(), subsystems.monitor.intervalMs);
+  cleanups.push(async () => {
+    clearInterval(waitTicks);
+    await subsystems.monitor.close();
+  });
   await world.untilShutdown();
   return 0;
 }

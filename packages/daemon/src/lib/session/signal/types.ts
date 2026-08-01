@@ -70,6 +70,7 @@ export interface SignalTransition {
     | 'session.protocol_violation'
     | 'interaction.help'
     | 'session.waiting'
+    | 'session.waiting_held'
     | 'session.waiting_cleared';
   readonly status?: SessionStatus | undefined;
   readonly health?: SessionHealth | undefined;

@@ -59,6 +59,10 @@ const subsystems = (): MountedSubsystems => ({
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
   sessionSignal: new FakeSessionSignal(),
+  // The declared-wait loop serves no route, so it contributes nothing to the table below. It is a
+  // mounted subsystem because a background loop the daemon never constructs is the same absent
+  // capability as an unserved route — see the field's own comment.
+  monitor: { intervalMs: 15_000, arm: () => {}, run: async () => undefined, close: async () => {} },
   sessionMigrate: new FakeSessionMigrate(),
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),

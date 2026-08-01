@@ -75,15 +75,15 @@ And of the GET surface the client reads: `snapshot`, `logs`, `events`, `attachme
 
 ## C. Signals and declared waits — **this unit**
 
-| Source                                | Line       | Ferretry                                                                                                                                                                                                       |
-| ------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `signal`                              | 4461       | PORTED — `lib/session/signal/service.ts`, `mounts/session-signal.ts`                                                                                                                                           |
-| `doneMarkerTurn`, `doneMarkerForTurn` | 4447, 4456 | PARTIAL — the WRITER is ported (`adapters/session/signal/file-signal-artifacts.ts`, turn-certified). The READER that refuses a marker from an older turn belongs to the monitor loop, which is **GAP** (see F) |
-| `applyWaitingSignal`                  | 4538       | PORTED — `SessionSignalService.park`                                                                                                                                                                           |
-| `parseDeadline` (module fn)           | 814        | PORTED — `lib/session/signal/policy.ts`, including the anchored ISO guard and the backstop clamp                                                                                                               |
-| `clearWaiting`                        | 4608       | PORTED — `SessionSignalService.clearWait`, with the credit and the activity re-anchor                                                                                                                          |
-| `endPeerWait`                         | 4599       | PORTED — `SessionSignalService.endPeerWait`, fired by the send once a message has actually landed. A message merely HELD for an explicit revive does not end a park                                            |
-| `serviceWaiting`                      | 4640       | **GAP** — the heartbeat, the deadline wake and the `waiting` status hold are one monitor tick, and there is no monitor. `lib/warden/detect.ts` already DETECTS a stale wait; nothing wakes one                 |
+| Source                                | Line       | Ferretry                                                                                                                                                                                                                                         |
+| ------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `signal`                              | 4461       | PORTED — `lib/session/signal/service.ts`, `mounts/session-signal.ts`                                                                                                                                                                             |
+| `doneMarkerTurn`, `doneMarkerForTurn` | 4447, 4456 | PARTIAL — the WRITER is ported (`adapters/session/signal/file-signal-artifacts.ts`, turn-certified). The READER that refuses a marker from an older turn belongs to the monitor loop, which is **GAP** (see F)                                   |
+| `applyWaitingSignal`                  | 4538       | PORTED — `SessionSignalService.park`                                                                                                                                                                                                             |
+| `parseDeadline` (module fn)           | 814        | PORTED — `lib/session/signal/policy.ts`, including the anchored ISO guard and the backstop clamp                                                                                                                                                 |
+| `clearWaiting`                        | 4608       | PORTED — `SessionSignalService.clearWait`, with the credit and the activity re-anchor                                                                                                                                                            |
+| `endPeerWait`                         | 4599       | PORTED — `SessionSignalService.endPeerWait`, fired by the send once a message has actually landed. A message merely HELD for an explicit revive does not end a park                                                                              |
+| `serviceWaiting`                      | 4640       | PORTED — `lib/session/monitor/*`, `adapters/session/monitor/*`, armed in `bin/fyd.ts`. All three halves: the heartbeat (`checks/waiting.json`), the deadline wake (`SessionSignalService.expireWait` + a send), and the status hold (`holdWait`) |
 
 Two divergences worth recording:
 
@@ -119,24 +119,30 @@ Two divergences worth recording:
 | `claimedCodexSessionIds`                                         | 7659       | **GAP** — the harness mints its own ids (`quirks.mintsOwnSessionIds`), and nothing in the daemon inventories which session has claimed which        |
 | `runSessionCommand`                                              | 3091       | **GAP**                                                                                                                                             |
 
-## F. The monitor loop — absent in full
+## F. The monitor loop — one responsibility of it now runs
 
-Nothing in `packages/daemon` runs a per-session watcher. This is the single largest missing subsystem
-and several other GAPs above are downstream of it.
+A LOOP EXISTS. `lib/session/monitor` ticks the fleet on a timer armed in `bin/fyd.ts`, and carries
+exactly one of `monitorLoop`'s responsibilities: `serviceWaiting` (C). It is per-daemon — the roster
+is the session index of the storage that process opened — and it publishes `monitor.json` in the
+state home on every tick, including a failed one, so a stopped loop is distinguishable from a fleet
+with nothing parked.
 
-| Source                                                                                       | Line             | Ferretry                                                                                                                                 |
-| -------------------------------------------------------------------------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `startMonitor`, `stopMonitor`                                                                | 5271, 5410       | **GAP** — `adapters/session/resume/no-monitor-supervision.ts` is a deliberate no-op stub the resume service calls                        |
-| `monitorLoop`                                                                                | 5620             | **GAP** (687 lines)                                                                                                                      |
-| `startTranscriptWatcher`, `ensureCodexTranscript`, `armCodexTranscript`                      | 5301, 5340, 5350 | **GAP** — the PARSERS are ported (`lib/transcript/claude.ts`, `codex.ts`, `adapters/transcript/file-source.ts`); nothing tails them live |
-| `handleClaudeEvents`, `handleCodexEvents`                                                    | 6458, 6685       | **GAP**                                                                                                                                  |
-| `transition`                                                                                 | 6924             | PARTIAL — each domain has its own narrow transition (resume, signal); the general one is **GAP**                                         |
-| `handleObservedInputs`                                                                       | 6307             | PARTIAL — `lib/transcript/observed-input.ts` classifies them; nothing feeds it                                                           |
-| `reconcileStructuredQuestionFrame`                                                           | 5437             | **GAP**                                                                                                                                  |
-| `ingestTerminalAnalytics`, `setTerminalAnalyticsIngestor`                                    | 6353, 1120       | **GAP** — `lib/analytics/*` holds the durable record and the fleet read; the per-session ingest is absent                                |
-| `reconcileNeedsHuman`, `clearNeedsHuman`                                                     | 8740, 8834       | PARTIAL — `lib/attention/state-machine.ts` + `mounts/attention.ts` serve the ledger; the reconciliation sweep is **GAP**                 |
-| `launchingRecently`, `hasLiveWarden`                                                         | 941, 7743        | PARTIAL — `InMemoryLaunchGate` covers the first; the second needs the warden runtime                                                     |
-| Self-check: `SELF_CHECK_INTERVAL_MS`, `eventLoopLagMs`, `wedgeCount`, `selfRestartRequested` | 575–1045         | PORTED — `lib/session/health/self-check.ts`, `wedge.ts`, `self-restart.ts`, `incoherence.ts`, `zombie.ts`, `mounts/health.ts`            |
+Everything else below is still absent. The loop is shaped to take them: a tick is a plan over a
+roster, so another responsibility is another planner, not another timer.
+
+| Source                                                                                       | Line             | Ferretry                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startMonitor`, `stopMonitor`                                                                | 5271, 5410       | **GAP** — the loop is fleet-wide, not per-session, so there is no handle to arm or disarm. `adapters/session/resume/no-monitor-supervision.ts` is still the resume service's stub, and the self-check still reports `supervisesMonitors: false` |
+| `monitorLoop`                                                                                | 5620             | PARTIAL — `lib/session/monitor/service.ts` runs the tick; only the `serviceWaiting` planner rides it                                                                                                                                            |
+| `startTranscriptWatcher`, `ensureCodexTranscript`, `armCodexTranscript`                      | 5301, 5340, 5350 | **GAP** — the PARSERS are ported (`lib/transcript/claude.ts`, `codex.ts`, `adapters/transcript/file-source.ts`); nothing tails them live                                                                                                        |
+| `handleClaudeEvents`, `handleCodexEvents`                                                    | 6458, 6685       | **GAP**                                                                                                                                                                                                                                         |
+| `transition`                                                                                 | 6924             | PARTIAL — each domain has its own narrow transition (resume, signal); the general one is **GAP**                                                                                                                                                |
+| `handleObservedInputs`                                                                       | 6307             | PARTIAL — `lib/transcript/observed-input.ts` classifies them; nothing feeds it                                                                                                                                                                  |
+| `reconcileStructuredQuestionFrame`                                                           | 5437             | **GAP**                                                                                                                                                                                                                                         |
+| `ingestTerminalAnalytics`, `setTerminalAnalyticsIngestor`                                    | 6353, 1120       | **GAP** — `lib/analytics/*` holds the durable record and the fleet read; the per-session ingest is absent                                                                                                                                       |
+| `reconcileNeedsHuman`, `clearNeedsHuman`                                                     | 8740, 8834       | PARTIAL — `lib/attention/state-machine.ts` + `mounts/attention.ts` serve the ledger; the reconciliation sweep is **GAP**                                                                                                                        |
+| `launchingRecently`, `hasLiveWarden`                                                         | 941, 7743        | PARTIAL — `InMemoryLaunchGate` covers the first; the second needs the warden runtime                                                                                                                                                            |
+| Self-check: `SELF_CHECK_INTERVAL_MS`, `eventLoopLagMs`, `wedgeCount`, `selfRestartRequested` | 575–1045         | PORTED — `lib/session/health/self-check.ts`, `wedge.ts`, `self-restart.ts`, `incoherence.ts`, `zombie.ts`, `mounts/health.ts`                                                                                                                   |
 
 ## G. Quota, usage and failover
 
@@ -210,8 +216,11 @@ client speaks is served, and no sweep timer exists; `world.wardenReports` is a f
    `awaiting_question`. Take it WITH F, together with the bound-abandon path of `interrupt`.
 2. **Scratch GC** (L). Unbounded disk growth on the operator's machine, with the protocol shape
    already agreed.
-3. **The monitor loop** (F). The largest single piece, and the prerequisite for `serviceWaiting`,
-   quota polling, transient retry firing, chat broadcast and the stale-marker refusal. It should be
-   attacked as its own unit, not as part of another.
+3. ~~**The monitor loop** (F)~~ — partly taken. The TIMER exists and `serviceWaiting` rides it, so a
+   declared wait now ends. What is still GAP is every other planner that belongs on the same tick:
+   the transcript watchers and their event handlers, `handleObservedInputs`, the stale-marker
+   refusal, `reconcileStructuredQuestionFrame` (and with it `answer`), per-session quota polling,
+   transient-retry firing and chat broadcast. Each is now an addition to a running loop rather than a
+   loop of its own — take them one planner at a time.
 4. **The warden sweep runtime** (K). Six modules are built and four are on the reachability
    allowlist; mounting them is mostly wiring plus a timer.
