@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { transcriptIsFollowing, type TranscriptEntry } from '../lib/session-screens.ts';
+import { type TranscriptEntry, transcriptIsFollowing } from '../lib/session-screens.ts';
 import { TranscriptRow } from './transcript-row.tsx';
 
 export interface TranscriptProps {
@@ -80,8 +80,8 @@ export function Transcript({ daemonId, sessionId, entries, busy = false, label =
         role="log"
         aria-live="polite"
       >
-        {entries.map(entry => (
-          <TranscriptRow entry={entry} key={entry.id} />
+        {entries.map((entry, index) => (
+          <TranscriptRow entry={entry} isLast={index === entries.length - 1} key={entry.id} live={busy} />
         ))}
         {busy ? <p className="fy-thinking">Working…</p> : null}
       </div>

@@ -27,6 +27,7 @@
   "types": "./src/lib/index.ts",
   "dependencies": {
     "@ferretry/protocol": "workspace:*",
+    "highlight.js": "^11.11.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0"
   },
