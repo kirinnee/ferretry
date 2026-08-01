@@ -847,6 +847,10 @@ export class DaemonStorage {
       const paths = createSessionPaths(this.paths, id);
       const current = await this.readDocument(id, kind);
       if (current === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+      // The journal contract is settled BEFORE the transform runs and before any byte is written,
+      // so a session that has lost its journal keeps its documents exactly as they were. The write
+      // paths get the same gate from their own ensureSessionDirectory call.
+      await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await transform(current));
       await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);

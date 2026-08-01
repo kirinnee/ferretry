@@ -387,6 +387,46 @@ describe('session documents', () => {
     should(await readdir(opened.paths.temporary)).deepEqual([]);
   });
 
+  it('should leave every document byte-for-byte unchanged when the journal is missing', async () => {
+    // Arrange — the observed repro persisted config version 2 and then failed on the journal
+    // append, leaving the documents a transition ahead of the history that justifies them.
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('gated-documents');
+    await opened.storage.writeConfig(id, { generation: 1 });
+    await opened.storage.writeState(id, { status: 'running' });
+    await opened.storage.append(id, 'durable', {});
+    const paths = createSessionPaths(opened.paths, id);
+    const before = { config: await readFile(paths.config, 'utf8'), state: await readFile(paths.state, 'utf8') };
+    await rm(paths.events);
+    let transforms = 0;
+    const bump = (): JsonValue => {
+      transforms += 1;
+      return { generation: 2 };
+    };
+
+    // Act
+    const failures = [
+      await capturedError(async () => await opened.storage.writeConfig(id, { generation: 2 })),
+      await capturedError(async () => await opened.storage.writeState(id, { status: 'claimed' })),
+      await capturedError(async () => await opened.storage.updateConfig(id, bump)),
+      await capturedError(async () => await opened.storage.updateState(id, bump)),
+    ];
+
+    // Assert — the refusal lands before the transform, so nothing was even computed to write.
+    should(failures.map(failure => (failure as Error).name)).deepEqual([
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+      'MissingSessionJournalError',
+    ]);
+    should(transforms).equal(0);
+    should(await readFile(paths.config, 'utf8')).equal(before.config);
+    should(await readFile(paths.state, 'utf8')).equal(before.state);
+    should(await exists(paths.events)).be.false();
+    should(await readdir(opened.paths.temporary)).deepEqual([]);
+  });
+
   it('should report malformed documents with their file boundary', async () => {
     // Arrange
     const home = await createTemporaryHome();
