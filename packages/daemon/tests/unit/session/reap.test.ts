@@ -91,4 +91,16 @@ describe('terminal reap policy', () => {
     should(plan({ registrations: [registration(), registration()] }).targets).deepEqual([]);
     should(plan({ registrations: [registration(), registration(), registration()] }).targets).deepEqual([]);
   });
+
+  it('should refuse a session or a pane that two records disagree about', () => {
+    // Duplicate evidence is dropped rather than resolved, on each of the three inputs independently.
+    // A second record for the same key does not merely lose a tie-break: it makes the key ambiguous,
+    // and a third arriving later must not resurrect it — which is why the plan tracks the ambiguity
+    // rather than just deleting. Two records claiming one session is the case where guessing would
+    // reap a pane on the strength of the wrong session's terminal state.
+    should(plan({ sessions: [terminal(), terminal()] }).targets).deepEqual([]);
+    should(plan({ sessions: [terminal(), terminal({ status: 'stopped' }), terminal()] }).targets).deepEqual([]);
+    should(plan({ observations: [observed(), observed()] }).targets).deepEqual([]);
+    should(plan({ observations: [observed(), observed({ pid: 902 }), observed()] }).targets).deepEqual([]);
+  });
 });

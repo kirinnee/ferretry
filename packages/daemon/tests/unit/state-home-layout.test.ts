@@ -116,6 +116,10 @@ describe('foundation paths', () => {
       config: '/tmp/fy-home/state/sessions/session-01/config.json',
       state: '/tmp/fy-home/state/sessions/session-01/state.json',
       events: '/tmp/fy-home/state/sessions/session-01/events.jsonl',
+      // The durable registration the reap sweep reads. It lives beside the session's other records
+      // rather than in a daemon-wide table so a pane can only ever be claimed by the session that
+      // owns this directory — the sweep kills nothing it cannot find a registration for here.
+      terminalPane: '/tmp/fy-home/state/sessions/session-01/terminal-pane.json',
     });
   });
 

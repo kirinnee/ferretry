@@ -4,11 +4,13 @@ import {
   capturePaneArguments,
   deleteBufferArguments,
   hasSessionArguments,
+  killPaneArguments,
   killSessionArguments,
   listSessionsArguments,
   loadBufferArguments,
   newSessionArguments,
   pasteBufferName,
+  paneIdentityArguments,
   paneMetadataArguments,
   panePidArguments,
   paneTarget,
@@ -341,5 +343,63 @@ describe('tmux bracketed paste', () => {
     await should(
       new TmuxController(new FakeTmux([{ code: 1, stdout: '', stderr: '' }])).paste('work-1', 'a\nb'),
     ).rejectedWith('tmux could not load the paste buffer');
+  });
+
+  it('should read a pane identity only when tmux answers with a usable id and a real pid', async () => {
+    // The reap sweep kills by pane id, so an identity it cannot fully trust must be no identity at
+    // all rather than a partly-filled record. A pid of 1 is refused with the rest: init is never a
+    // pane's process, and treating it as one would aim a kill at the process tree of the whole box.
+    // Arrange
+    const answers: Array<[string, unknown]> = [
+      ['%12\t4821', { paneId: '%12', pid: 4821 }],
+      ['%12\t', undefined],
+      ['\t4821', undefined],
+      ['0.0\t4821', undefined],
+      ['%0\t4821', undefined],
+      ['%12\tnot-a-pid', undefined],
+      ['%12\t1', undefined],
+      ['%12\t0', undefined],
+      ['', undefined],
+    ];
+
+    // Act / Assert
+    for (const [stdout, expected] of answers) {
+      const tmux = new FakeTmux([ok(stdout)]);
+      should(await new TmuxController(tmux).paneIdentity('work-1')).deepEqual(expected);
+      should(tmux.received[0]).deepEqual(paneIdentityArguments('work-1'));
+    }
+    // tmux itself failing is also no identity, not a throw: the sweep treats absent evidence as a
+    // reason to do nothing.
+    should(
+      await new TmuxController(new FakeTmux([{ code: 1, stdout: '%12\t4821', stderr: 'no server' }])).paneIdentity(
+        'work-1',
+      ),
+    ).equal(undefined);
+  });
+
+  it('should refuse to build a kill for anything that is not a real pane id', () => {
+    // This validation is the last thing standing between the sweep and an arbitrary kill target, so
+    // it rejects rather than coerces. `%0` is excluded deliberately: tmux numbers panes from 1, and
+    // a zero would most likely be a parsed-empty value rather than a pane.
+    // Act / Assert
+    should(killPaneArguments('%12')).deepEqual(['kill-pane', '-t', '%12']);
+    for (const bad of ['%0', '0.0', '12', '%', '', '%1x', '%-1', 'work-1', '%12 ; rm -rf /', '%１２']) {
+      should(() => killPaneArguments(bad)).throw(TmuxAddressError);
+    }
+  });
+
+  it('should kill an exact pane and report a tmux refusal rather than swallowing it', async () => {
+    // Arrange
+    const killed = new FakeTmux([ok()]);
+    const refused = new FakeTmux([{ code: 1, stdout: '', stderr: "can't find pane: %12\n" }]);
+    const silent = new FakeTmux([{ code: 1, stdout: '', stderr: '   ' }]);
+
+    // Act
+    await new TmuxController(killed).killPaneExact('%12');
+
+    // Assert
+    should(killed.received).deepEqual([['kill-pane', '-t', '%12']]);
+    await should(new TmuxController(refused).killPaneExact('%12')).rejectedWith("can't find pane: %12");
+    await should(new TmuxController(silent).killPaneExact('%12')).rejectedWith('tmux could not kill the pane');
   });
 });
