@@ -2,11 +2,13 @@ import {
   capturePaneArguments,
   deleteBufferArguments,
   hasSessionArguments,
+  killPaneArguments,
   killSessionArguments,
   listSessionsArguments,
   loadBufferArguments,
   newSessionArguments,
   paneMetadataArguments,
+  paneIdentityArguments,
   pasteBufferArguments,
   remainOnExitArguments,
   sendKeyArguments,
@@ -53,6 +55,19 @@ export class TmuxController {
       history: historyResult.code === 0 ? historyResult.stdout : '',
       visible,
     };
+  }
+
+  async paneIdentity(session: string): Promise<{ readonly paneId: string; readonly pid: number } | undefined> {
+    const result = await this.commands.execute(paneIdentityArguments(session));
+    if (result.code !== 0) return undefined;
+    const [paneId = '', rawPid = ''] = result.stdout.trim().split('\t');
+    const pid = Number(rawPid);
+    return /^%[1-9][0-9]*$/u.test(paneId) && Number.isSafeInteger(pid) && pid > 1 ? { paneId, pid } : undefined;
+  }
+
+  async killPaneExact(paneId: string): Promise<void> {
+    const result = await this.commands.execute(killPaneArguments(paneId));
+    if (result.code !== 0) throw new Error(result.stderr.trim() || 'tmux could not kill the pane');
   }
 
   async launch(launch: TmuxLaunch): Promise<void> {

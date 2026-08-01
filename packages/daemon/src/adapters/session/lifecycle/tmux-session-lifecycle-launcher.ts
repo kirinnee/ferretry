@@ -6,6 +6,10 @@ import type {
 import type { TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 
+export interface SessionPaneRegistrar {
+  register(record: SessionLifecycleRecord): Promise<void>;
+}
+
 /** A session with no stored environment launches with none, which is the pre-credential behaviour. */
 const NO_ENVIRONMENT: SessionEnvironmentStore = {
   write: async () => undefined,
@@ -18,6 +22,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly tmux: TmuxController,
     private readonly delivery: TmuxPaneDelivery,
     private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
+    private readonly registrar?: SessionPaneRegistrar,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -36,6 +41,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
       command: [program, ...arguments_],
       ...(Object.keys(env).length === 0 ? {} : { env }),
     });
+    await this.registrar?.register(record);
   }
 
   /**

@@ -26,6 +26,15 @@ export function panePidArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_pid}'];
 }
 
+export function paneIdentityArguments(session: string): readonly string[] {
+  return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_id}\t#{pane_pid}'];
+}
+
+export function killPaneArguments(paneId: string): readonly string[] {
+  if (!/^%[1-9][0-9]*$/u.test(paneId)) throw new TmuxAddressError('pane id is not usable');
+  return ['kill-pane', '-t', paneId];
+}
+
 export function sendLiteralArguments(session: string, text: string): readonly string[] {
   if (text.length === 0) throw new TmuxAddressError('literal text must not be empty');
   return ['send-keys', '-t', sessionTarget(session), '-l', text];
