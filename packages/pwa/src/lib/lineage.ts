@@ -184,11 +184,10 @@ export const nestByLineage = (rows: readonly SessionView[], lineage: LineageInde
     if (!node) continue;
     const parent = lineage.parentOf.get(id);
     if (parent && visibleIds.has(parent) && !wouldCreateCycle(id, parent, lineage.parentOf)) {
-      const parentNode = nodes.get(parent);
-      if (parentNode) {
-        parentNode.children.push(node);
-        continue;
-      }
+      // `visibleIds` and `nodes` are constructed from this same `rows` array.
+      const parentNode = nodes.get(parent) as NestedRow;
+      parentNode.children.push(node);
+      continue;
     }
     const rawParent = view.config.parent?.trim();
     if (rawParent && rawParent !== id) node.spawnedBy = rawParent;
