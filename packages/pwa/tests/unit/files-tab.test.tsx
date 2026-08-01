@@ -55,9 +55,28 @@ const route = (url: string): Response => {
   return json(fixture.listings?.[path] ?? { entries: [] });
 };
 
+/**
+ * The pane reads `useLayoutMode`, which reads `window.innerWidth`. happy-dom is
+ * registered once for the whole process, so a sibling suite that set a phone
+ * width would otherwise decide whether this pane's tree starts open — an
+ * order-dependent test that passes locally and fails on another machine.
+ * Every case states the width it means.
+ */
+const setViewport = (width: number): void => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+};
+
+/** Wide enough for the tree to sit beside the listing (`rail`/`full`). */
+const DESKTOP_WIDTH = 1_280;
+/** Below `DRAWER_MAX`, where the tree starts collapsed. */
+const PHONE_WIDTH = 390;
+/** Handed back afterwards: the DOM is shared with every other suite. */
+const ORIGINAL_WIDTH = typeof window === 'undefined' ? DESKTOP_WIDTH : window.innerWidth;
+
 beforeEach(() => {
   fixture = {};
   asked = [];
+  setViewport(DESKTOP_WIDTH);
   resetFilesTabStates();
   resetFsProbes();
   globalThis.fetch = (async (input: string | URL | Request) => {
@@ -68,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  setViewport(ORIGINAL_WIDTH);
 });
 
 /** Lets every queued daemon read and its follow-up render settle. */
@@ -253,6 +273,21 @@ describe('the Files tab', () => {
       await settle();
       expect(view.container.textContent).toContain('a.ts');
       expect(view.container.querySelector('.kt-fs-crumbs')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('starts with the tree collapsed on a phone, and opens it only when asked', async () => {
+    setViewport(PHONE_WIDTH);
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      // A phone cannot fit a tree beside a listing, so it starts closed.
+      expect(view.container.querySelector('[aria-label="Folder tree"]')).toBeNull();
+      await click(view.container, 'Show the folder tree');
+      await settle();
+      expect(view.container.querySelector('[aria-label="Folder tree"]')).not.toBeNull();
     } finally {
       await view.unmount();
     }
