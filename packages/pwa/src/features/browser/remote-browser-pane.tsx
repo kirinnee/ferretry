@@ -16,6 +16,7 @@
  * HTTP, and only the live display waits for a ticket.
  */
 
+import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
 import { Monitor } from 'lucide-react';
 import type {
   FormEvent,
@@ -110,6 +111,21 @@ const printableKey = (event: {
   readonly metaKey: boolean;
 }): boolean => event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
 
+/**
+ * The pane's own engine, published to a host that draws shared chrome around it.
+ *
+ * `runAction` is the pane's single dispatcher, so a host toolbar drives the SAME
+ * `useRemoteBrowser` instance the pane polls with — never a second transport
+ * that could race it or start a second Chrome. `status` is `null` while the
+ * daemon has not answered yet, including for the frame after a re-scope.
+ */
+export interface RemoteBrowserPaneState {
+  readonly status: BrowserStatus | null;
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly runAction: (action: BrowserAction) => void;
+}
+
 export interface RemoteBrowserPaneProps {
   readonly daemon: DaemonConnection;
   /** Must name `daemon`; a scope from another daemon is a programming error. */
@@ -122,6 +138,14 @@ export interface RemoteBrowserPaneProps {
   readonly streamTicket: string | null;
   /** A hidden retained pane detaches; the daemon-side browser survives. */
   readonly isActive?: boolean;
+  /**
+   * False only for a host that already owns an address bar for this engine.
+   * Standalone remote usage keeps its own navigation row, so nothing can reach
+   * a pane with no way to navigate it.
+   */
+  readonly showNavigation?: boolean;
+  /** Publishes this pane's engine so a host can label and drive it. */
+  readonly onStateChange?: (state: RemoteBrowserPaneState) => void;
   readonly onHumanActivity?: (kind: RemoteHumanActivity) => void;
   readonly resizeDebounceMs?: number;
   readonly pollIntervalMs?: number;
@@ -140,6 +164,8 @@ export function RemoteBrowserPane({
   scope,
   streamTicket,
   isActive = true,
+  showNavigation = true,
+  onStateChange,
   onHumanActivity,
   resizeDebounceMs = REMOTE_BROWSER_RESIZE_DEBOUNCE_MS,
   pollIntervalMs,
@@ -223,6 +249,12 @@ export function RemoteBrowserPane({
       cancelPending?.();
     };
   }, [delay, isActive, observeSize, resizeDebounceMs, runAction, running, viewportMode]);
+
+  // Published after the render that produced it, so a host toolbar redraws from
+  // the same snapshot the pane is showing rather than one frame behind it.
+  useEffect(() => {
+    onStateChange?.({ status, busy, error, runAction });
+  }, [busy, error, onStateChange, runAction, status]);
 
   const pasteFromClipboard = useCallback(async () => {
     const scopeEpoch = scopeEpochRef.current;
@@ -308,7 +340,9 @@ export function RemoteBrowserPane({
     >
       <RemoteBrowserStatusBar status={status} connection={connection} busy={busy} />
       <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />
-      <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+      {showNavigation && (
+        <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+      )}
       <RemoteBrowserControls
         status={status}
         connection={connection}

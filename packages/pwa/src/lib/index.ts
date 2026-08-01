@@ -49,6 +49,7 @@ export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/browser/in-app-browser.tsx';
 export * from '../features/browser/in-app-browser-model.ts';
 export * from '../features/browser/unified-browser-model.ts';
+export * from '../features/browser/unified-browser-surface.tsx';
 export * from '../features/browser/remote-browser-chrome.tsx';
 export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';

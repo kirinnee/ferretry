@@ -4,6 +4,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   type RemoteBrowserDelay,
   RemoteBrowserPane,
+  type RemoteBrowserPaneState,
   type RemoteBrowserSizeObserver,
   type RemoteContainerSize,
 } from '../../../src/features/browser/remote-browser-pane.tsx';
@@ -1076,5 +1077,63 @@ describe('RemoteBrowserPane errors', () => {
     expect(json(renderer)).toContain('blob:last-frame');
     expect(json(renderer)).toContain('Display disconnected — reconnecting…');
     expect(json(renderer)).toContain('Remote display disconnected');
+  });
+});
+
+describe('RemoteBrowserPane as a hosted engine', () => {
+  it('publishes its own engine and drops its address row for a host that owns one', async () => {
+    const transport = new FakeTransport(runningStatus());
+    const states: RemoteBrowserPaneState[] = [];
+    const renderer = await mountPane(
+      <RemoteBrowserPane
+        daemon={daemonA}
+        scope={scopeA}
+        streamTicket={null}
+        showNavigation={false}
+        onStateChange={state => states.push(state)}
+        transport={transport}
+        schedule={pollSeam().schedule}
+      />,
+    );
+    const markup = json(renderer);
+
+    // The host's toolbar owns the address, so this pane must not draw a second.
+    expect(markup).not.toContain('Navigate remote browser');
+    // Everything the DAEMON owns stays here: its pages, lifecycle and governor.
+    expect(markup).toContain('Chrome pages');
+    expect(markup).toContain('Stop');
+    expect(markup).toContain('10m idle stop');
+
+    // Published in order: the pre-answer null, then the daemon's own snapshot.
+    expect(states[0]?.status).toBeNull();
+    expect(states.at(-1)?.status).toEqual(runningStatus());
+    expect(states.at(-1)?.error).toBeNull();
+
+    // The host drives THIS engine: one dispatcher, one scope, one Chrome.
+    await runAsync(async () => states.at(-1)?.runAction({ action: 'reload' }));
+    expect(transport.dispatched()).toEqual([{ action: 'reload' }]);
+    expect(transport.actions.every(entry => entry.scope === scopeA)).toBe(true);
+    expect(states.some(state => state.busy)).toBe(true);
+    expect(states.at(-1)?.busy).toBe(false);
+  });
+
+  it('publishes the failure a host has to show instead of a page', async () => {
+    const transport = new FakeTransport(runningStatus());
+    transport.failure = new Error('the daemon refused the browser request');
+    const states: RemoteBrowserPaneState[] = [];
+    await mountPane(
+      <RemoteBrowserPane
+        daemon={daemonA}
+        scope={scopeA}
+        streamTicket={null}
+        showNavigation={false}
+        onStateChange={state => states.push(state)}
+        transport={transport}
+        schedule={pollSeam().schedule}
+      />,
+    );
+
+    expect(states.at(-1)?.error).toBe('the daemon refused the browser request');
+    expect(states.at(-1)?.status).toBeNull();
   });
 });

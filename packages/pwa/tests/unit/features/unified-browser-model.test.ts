@@ -2,13 +2,19 @@ import { beforeEach, describe, expect, it } from 'bun:test';
 import type { BrowserDestination } from '../../../src/features/browser/in-app-browser-model.ts';
 import {
   browserEngineForSession,
+  browserSessionMemory,
   createPreviewHistory,
+  currentBrowserUrl,
   currentPreviewEntry,
   movePreviewHistory,
+  previewCanGoBack,
+  previewCanGoForward,
   pushPreviewHistory,
   rememberBrowserEngine,
+  rememberBrowserIncoming,
   resetBrowserSurfaceSessions,
   resolveBrowserAddress,
+  shouldAdoptIncomingLink,
 } from '../../../src/features/browser/unified-browser-model.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -48,6 +54,81 @@ describe('the remembered engine', () => {
     expect(browserEngineForSession(otherScope)).toBe('preview');
     resetBrowserSurfaceSessions();
     expect(browserEngineForSession(scope)).toBe('preview');
+  });
+
+  it('has nothing to remember until a surface has been there', () => {
+    expect(browserSessionMemory(scope)).toBeNull();
+    rememberBrowserEngine(scope, 'remote');
+    expect(browserSessionMemory(scope)).toEqual({ engine: 'remote', lastIncoming: null });
+    expect(browserSessionMemory(otherScope)).toBeNull();
+  });
+
+  it('keeps the engine and the incoming link independent of each other', () => {
+    const first = destination('https://a.example.test/');
+    rememberBrowserIncoming(scope, first);
+    // Writing the link may not silently reset the engine to the default…
+    expect(browserSessionMemory(scope)).toEqual({ engine: 'preview', lastIncoming: first });
+    rememberBrowserEngine(scope, 'remote');
+    // …and writing the engine may not forget the link.
+    expect(browserSessionMemory(scope)).toEqual({ engine: 'remote', lastIncoming: first });
+    rememberBrowserIncoming(scope, null);
+    expect(browserSessionMemory(scope)).toEqual({ engine: 'remote', lastIncoming: null });
+    expect(browserSessionMemory(otherScope)).toBeNull();
+  });
+});
+
+describe('the incoming-link remount policy', () => {
+  const stored = destination('https://a.example.test/');
+
+  it('reattaches rather than re-opening when nothing changed while it was gone', () => {
+    expect(shouldAdoptIncomingLink({ engine: 'remote', lastIncoming: stored }, stored)).toBe(false);
+    // A first mount has no memory to compare against: keep the reader's place.
+    expect(shouldAdoptIncomingLink(null, stored)).toBe(false);
+    // No link at all is nothing to adopt.
+    expect(shouldAdoptIncomingLink({ engine: 'remote', lastIncoming: stored }, null)).toBe(false);
+    expect(shouldAdoptIncomingLink({ engine: 'remote', lastIncoming: stored }, undefined)).toBe(false);
+  });
+
+  it('adopts a link the app changed while the surface was absent', () => {
+    expect(shouldAdoptIncomingLink({ engine: 'remote', lastIncoming: null }, stored)).toBe(true);
+    // Identity, not href: a fresh tap of the same address is a new request.
+    expect(
+      shouldAdoptIncomingLink({ engine: 'remote', lastIncoming: stored }, destination('https://a.example.test/')),
+    ).toBe(true);
+  });
+});
+
+describe('the engine-agnostic toolbar', () => {
+  const first = destination('https://a.example.test/');
+  const second = destination('https://b.example.test/');
+
+  it('reports where the preview engine can still go', () => {
+    const empty = createPreviewHistory();
+    expect(previewCanGoBack(empty)).toBe(false);
+    expect(previewCanGoForward(empty)).toBe(false);
+
+    const one = createPreviewHistory(first);
+    expect(previewCanGoBack(one)).toBe(false);
+    expect(previewCanGoForward(one)).toBe(false);
+
+    const two = pushPreviewHistory(one, second);
+    expect(previewCanGoBack(two)).toBe(true);
+    expect(previewCanGoForward(two)).toBe(false);
+    expect(previewCanGoForward(movePreviewHistory(two, -1))).toBe(true);
+  });
+
+  it('shows the selected engine’s address, falling back rather than blanking', () => {
+    expect(currentBrowserUrl('preview', null, null)).toBe('');
+    expect(currentBrowserUrl('preview', first, { url: 'https://chrome.example.test/', title: '' })).toBe(
+      'https://a.example.test/',
+    );
+    expect(currentBrowserUrl('remote', first, { url: 'https://chrome.example.test/', title: '' })).toBe(
+      'https://chrome.example.test/',
+    );
+    // Chrome has not reported a page yet: the preview position is better than
+    // an empty bar, and an empty bar is better than an invented address.
+    expect(currentBrowserUrl('remote', first, null)).toBe('https://a.example.test/');
+    expect(currentBrowserUrl('remote', null, null)).toBe('');
   });
 });
 
