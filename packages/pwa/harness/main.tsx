@@ -42,6 +42,7 @@ import { QuestionForm } from '../src/components/question-form.tsx';
 import { RenameSheet } from '../src/components/rename-sheet.tsx';
 import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
 import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
+import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
@@ -91,16 +92,18 @@ import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
-import { DaemonControlsStore } from '../src/lib/controls.ts';
+import { DaemonControlsStore, DEFAULT_DEVICE_CONTROLS } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import type { SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
+import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
@@ -278,6 +281,7 @@ const harnessSession = {
     model: 'gpt-5.6-sol',
     modelHint: 'gpt-5.6',
     agent: 'codex',
+    harness: 'codex',
     mode: 'auto',
     cwd: '/work/ferretry',
     updatedAt: '1970-01-01T00:00:01.000Z',
@@ -662,6 +666,104 @@ const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
     '✅ Coverage artifact matches the complete unit production ledger',
     '$ ',
   ].join('\n');
+
+const dashboardSession = (
+  id: string,
+  teammate: string,
+  taskName: string,
+  cwd: string,
+  state: Partial<SessionView['state']> = {},
+  config: Partial<SessionView['config']> = {},
+): SessionView =>
+  ({
+    ...harnessSession,
+    config: {
+      ...harnessSession.config,
+      id,
+      teammate,
+      name: taskName,
+      cwd,
+      label: 'pwalist',
+      agent: 'codex',
+      harness: 'codex',
+      model: 'gpt-5.6-sol',
+      modelHint: 'gpt-5.6',
+      ...config,
+    },
+    state: {
+      ...harnessSession.state,
+      id,
+      lastActivityAt: '2026-07-31T11:58:00.000Z',
+      contextPercent: 54,
+      activity: 'Porting the responsive dashboard',
+      ...state,
+    },
+  }) as SessionView;
+
+const DASHBOARD_SESSIONS: readonly SessionView[] = [
+  dashboardSession('ms9zelda-a1', 'zelda', 'Assemble the sessions dashboard', '/work/ferretry'),
+  dashboardSession(
+    'ms9fable-b2',
+    'fable',
+    'Review the visual contract',
+    '/work/ferretry',
+    { status: 'awaiting_user', contextPercent: 88, needsHuman: 'Choose the release window' },
+    { remoteControl: true },
+  ),
+  dashboardSession('ms9tyrese-c3', 'tyrese', 'Audit migration safety', '/work/ferretry', {
+    status: 'failed',
+    activity: undefined,
+    contextPercent: 31,
+  }),
+  dashboardSession('ms9karime-d4', 'karime', 'Map the PWA primitives', '/work/home-manager', {
+    status: 'completed',
+    activity: undefined,
+    contextPercent: 42,
+  }),
+  dashboardSession('ms9alex-e5', 'alexavier', 'Build dashboard rows', '/work/home-manager', {
+    status: 'running',
+    activity: 'Waiting on the test gate',
+    waiting: { since: '2026-07-31T11:50:00.000Z', condition: 'the test gate' },
+    contextPercent: 73,
+  }),
+  dashboardSession('ms9lina-f6', 'lina', 'Verify daemon isolation', '/work/home-manager', {
+    contextPercent: 96,
+  }),
+];
+
+const DASHBOARD_GROUPS: readonly SessionGroup[] = [
+  { name: 'ferretry', path: '/work/ferretry', rows: DASHBOARD_SESSIONS.slice(0, 3) },
+  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3) },
+];
+
+const DASHBOARD_COMPACT_GROUPS: readonly SessionGroup[] = [
+  {
+    name: 'ferretry',
+    path: '/work/ferretry',
+    rows: [...DASHBOARD_SESSIONS.slice(0, 1), ...DASHBOARD_SESSIONS.slice(5, 6), ...DASHBOARD_SESSIONS.slice(2, 3)],
+  },
+  { name: 'home-manager', path: '/work/home-manager', rows: DASHBOARD_SESSIONS.slice(3, 5) },
+  { name: 'protocol', path: '/work/protocol', rows: DASHBOARD_SESSIONS.slice(5) },
+];
+
+const DASHBOARD_USAGE = new DaemonUsageIndex();
+DASHBOARD_USAGE.apply(daemon.daemonId, {
+  at: '2026-07-31T11:59:00.000Z',
+  stale: false,
+  accounts: [
+    {
+      agent: 'codex',
+      usageBased: true,
+      provider: 'openai',
+      availability: 'available',
+      unavailable: false,
+      fiveHourPercent: 37,
+      weeklyPercent: 61,
+      atLimit: false,
+      authOk: true,
+    },
+  ],
+});
 
 /** One daemon's fleet, as the palette ranks and renders it. */
 const PALETTE_SESSIONS = paletteSessionEntries([
@@ -1132,6 +1234,126 @@ function Shell() {
             connection={daemon}
             onNavigate={() => {}}
             startSession={async () => ({ config: { id: 'harness-created-session' } })}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Session dashboard full table',
+      render: () => (
+        <section
+          aria-label="Session dashboard full table"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'table', projectScope: null }}
+            density="full"
+            error={null}
+            groups={DASHBOARD_GROUPS}
+            narrow={phone}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope={null}
+            scopeName=""
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={DASHBOARD_USAGE}
+            wardenStatus={null}
+            wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Session dashboard full cards',
+      render: () => (
+        <section
+          aria-label="Session dashboard full cards"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: null }}
+            density="full"
+            error={null}
+            groups={DASHBOARD_GROUPS}
+            narrow={phone}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope={null}
+            scopeName=""
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={DASHBOARD_USAGE}
+            wardenStatus={null}
+            wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Session dashboard compact panel',
+      render: () => (
+        <section
+          aria-label="Session dashboard compact panel"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: 'cards', projectScope: null }}
+            density="compact"
+            error={null}
+            groups={DASHBOARD_COMPACT_GROUPS}
+            narrow={phone}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope={null}
+            scopeName=""
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={DASHBOARD_USAGE}
+            wardenStatus={null}
+            wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Session dashboard scoped',
+      render: () => (
+        <section
+          aria-label="Session dashboard scoped"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            controls={{ ...DEFAULT_DEVICE_CONTROLS, dashboardView: null, projectScope: '/work/ferretry' }}
+            density="full"
+            error={null}
+            groups={DASHBOARD_GROUPS.slice(0, 1)}
+            narrow={phone}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope="/work/ferretry"
+            scopeName="ferretry"
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={DASHBOARD_USAGE}
+            wardenStatus={null}
+            wardenVerdicts={[]}
           />
         </section>
       ),

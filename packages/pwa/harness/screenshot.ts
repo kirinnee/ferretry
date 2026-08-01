@@ -245,6 +245,17 @@ try {
       await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
       process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
 
+      for (const [label, slug] of [
+        ['Session dashboard full table', 'session-dashboard-table'],
+        ['Session dashboard full cards', 'session-dashboard-cards'],
+        ['Session dashboard compact panel', 'session-dashboard-compact'],
+        ['Session dashboard scoped', 'session-dashboard-scoped'],
+      ] as const) {
+        const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
+        await page.getByLabel(label, { exact: true }).screenshot({ path: dashboardTarget });
+        process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
+      }
+
       const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
       await page.goto(`${server.url}?attachment-unlock`);
       await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });

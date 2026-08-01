@@ -122,7 +122,8 @@ export function SessionDashboard({
               title="Show all folders"
               to={daemonSessionsPath(connection.daemonId)}
             >
-              <Folders aria-hidden="true" size={13} /> All folders
+              <Folders aria-hidden="true" size={13} />
+              <span className="hidden sm:inline">All folders</span>
             </RouteLink>
             <FolderGit2 aria-hidden="true" className="shrink-0 text-faint" size={15} />
             <h1
@@ -160,12 +161,14 @@ export function SessionDashboard({
             />
           ) : null}
           <RouteLink
+            aria-label="New session"
             className="kt-btn"
             data-variant="primary"
             onNavigate={onNavigate}
             to={daemonNewSessionPath(connection.daemonId)}
           >
-            <Plus aria-hidden="true" size={13} /> New session
+            <Plus aria-hidden="true" size={13} />
+            <span className="hidden sm:inline">New session</span>
           </RouteLink>
         </div>
       </div>
