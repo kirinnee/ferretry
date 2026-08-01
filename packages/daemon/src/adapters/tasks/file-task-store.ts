@@ -38,9 +38,12 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
     this.instants = options.instants ?? new SystemInstantSource();
   }
 
-  /** The readable board. A damaged entry is dropped rather than failing the whole read. */
+  /**
+   * The authoritative readable board. Diagnostic callers that can present partial state use
+   * `readDecoded`; a caller asking for the board itself must never confuse damage with absence.
+   */
   async read(): Promise<TaskSnapshot> {
-    return (await this.readDecoded()).snapshot;
+    return this.requireClean(await this.readDecoded());
   }
 
   /**
@@ -66,19 +69,23 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
     transform: (current: TaskSnapshot) => TaskStoreMutation<TaskSnapshot, TResult>,
   ): Promise<TResult> {
     return await this.executor.run(this.snapshotPath, async () => {
-      const decoded = await this.readDecoded();
-      if (decoded.fatal) {
-        throw new TaskError(
-          'invalid',
-          `refusing to mutate an unreadable task snapshot at ${this.snapshotPath}: ${
-            decoded.parseErrors[0]?.detail ?? 'unknown decode failure'
-          }`,
-        );
-      }
-      const mutation = transform(decoded.snapshot);
+      const current = this.requireClean(await this.readDecoded());
+      const mutation = transform(current);
       await this.writer.write(this.snapshotPath, serializeTaskSnapshot(mutation.container));
       return mutation.result;
     });
+  }
+
+  /** One malformed entry or activity is enough to make a whole-snapshot replacement destructive. */
+  private requireClean(decoded: DecodedTaskSnapshot): TaskSnapshot {
+    const first = decoded.parseErrors[0];
+    if (first !== undefined) {
+      throw new TaskError(
+        'invalid',
+        `refusing to use a damaged task snapshot at ${this.snapshotPath}: ${first.detail}`,
+      );
+    }
+    return decoded.snapshot;
   }
 
   /** The instant a caller should stamp onto records it is about to commit. */

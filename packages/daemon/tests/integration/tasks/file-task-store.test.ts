@@ -83,24 +83,29 @@ describe('FileTaskStore', () => {
     });
   });
 
-  it('should drop a damaged entry on read rather than failing the whole board', async () => {
+  it('should diagnose a damaged entry but refuse to use or rewrite the partial board', async () => {
     await withTempRoot(async root => {
       // Arrange
       const path = boardPath(root);
       await mkdir(join(root, 'boards', 'session-alpha'), { recursive: true });
-      await writeFile(
-        path,
-        JSON.stringify({ v: 1, tasks: [{ task: { id: 'F1' } }, { task: task(), activity: [createdActivity()] }] }),
-      );
+      const damaged = JSON.stringify({
+        v: 1,
+        tasks: [{ task: { id: 'F1' } }, { task: task(), activity: [createdActivity()] }],
+      });
+      await writeFile(path, damaged);
       const store = new FileTaskStore(path);
 
       // Act
       const decoded = await store.readDecoded();
 
-      // Assert
+      // Assert — diagnostics retain the healthy entry, but no authoritative caller can mistake the
+      // partial snapshot for the whole board or replace the damaged evidence with its clean subset.
       should(decoded.fatal).be.false();
       should(decoded.snapshot.tasks).have.length(1);
       should(decoded.parseErrors).have.length(1);
+      await shouldReject('invalid', () => store.read());
+      await shouldReject('invalid', () => store.transact(() => ({ container: snapshot('F2'), result: null })));
+      should(await readFile(path, 'utf8')).equal(damaged);
     });
   });
 
