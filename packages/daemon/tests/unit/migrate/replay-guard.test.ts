@@ -1,11 +1,13 @@
 import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
 import {
-  MIGRATION_REPLAY_CAPACITY,
   MigrationReplayGuard,
   MigrationReplayMismatchError,
   migrationReplayKey,
 } from '../../../src/lib/migrate/replay-guard.ts';
+
+/** Stands in for the taxonomy's `failed`: a failure raised past the point of no return. */
+class CommittedError extends Error {}
 
 const view = (agent: string): SessionView => ({ config: { agent } }) as unknown as SessionView;
 
@@ -142,28 +144,53 @@ describe('MigrationReplayGuard', () => {
     expect(performed).toBe(3);
   });
 
-  it('bounds the settled ledger and forgets the oldest outcome first', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 2);
+  it('still replays an early success and an early committed failure after very many later migrations', async () => {
+    // THE REGRESSION THIS PINS. The guard used to keep a bounded 64-entry history, so 64 later
+    // migrations discarded an earlier receipt and the next request carrying that earlier id found a
+    // clean slate and relaunched a session that had already been relaunched. The bound was counted in
+    // MIGRATIONS, not seconds, so no retry window was short enough to be safe. Nothing settled may be
+    // forgotten while the process lives, and 500 unrelated migrations is well past any bound a future
+    // change might reintroduce.
+    const guard = new MigrationReplayGuard(committedFailure => committedFailure instanceof CommittedError);
     let performed = 0;
-    const perform = async () => {
+    const succeed = async () => {
       performed += 1;
       return view(`agent-${performed}`);
     };
+    const failAfterDestruction = async (): Promise<SessionView> => {
+      performed += 1;
+      throw new CommittedError('the relaunch failed after the pane was replaced');
+    };
 
-    await guard.run(key('r1'), 'target-a', perform);
-    await guard.run(key('r2'), 'target-a', perform);
-    await guard.run(key('r3'), 'target-a', perform);
-    expect(performed).toBe(3);
+    // Two early receipts: one success, one failure that happened past the point of no return.
+    const early = await guard.run(key('early-success'), 'target-a', succeed);
+    expect(early.config.agent).toBe('agent-1');
+    await expect(guard.run(key('early-failure'), 'target-a', failAfterDestruction)).rejects.toThrow(
+      'the relaunch failed after the pane was replaced',
+    );
+    expect(performed).toBe(2);
 
-    // r1 was evicted, so it is performed afresh; r3 is still remembered.
-    expect((await guard.run(key('r1'), 'target-a', perform)).config.agent).toBe('agent-4');
-    expect((await guard.run(key('r3'), 'target-a', perform)).config.agent).toBe('agent-3');
-    expect(performed).toBe(4);
+    // Heavy unrelated traffic, far more than any plausible capacity.
+    for (let index = 0; index < 500; index += 1) await guard.run(key(`bulk-${index}`), 'target-a', succeed);
+    expect(performed).toBe(502);
+
+    // Both early receipts must still answer, and neither may run its destruction a second time.
+    expect((await guard.run(key('early-success'), 'target-a', succeed)).config.agent).toBe('agent-1');
+    await expect(guard.run(key('early-failure'), 'target-a', failAfterDestruction)).rejects.toThrow(
+      'the relaunch failed after the pane was replaced',
+    );
+    expect(performed).toBe(502);
+
+    // And a receipt from the middle of the traffic is intact too, not just the endpoints.
+    expect((await guard.run(key('bulk-250'), 'target-a', succeed)).config.agent).toBe('agent-253');
+    expect(performed).toBe(502);
   });
 
-  it('never evicts a running migration, even when several are in flight over capacity', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 1);
-    const gates = [deferred(), deferred(), deferred()];
+  it('keeps every concurrent migration recognisable, however many are in flight at once', async () => {
+    // There is no capacity to overflow any more, but the in-flight map must still hold every running
+    // migration: a replay that failed to find its original would start a second relaunch.
+    const guard = new MigrationReplayGuard(retainAll);
+    const gates = Array.from({ length: 24 }, () => deferred());
     let performed = 0;
     const perform = (index: number) => () => {
       performed += 1;
@@ -172,44 +199,16 @@ describe('MigrationReplayGuard', () => {
       return gate.promise;
     };
 
-    const runs = [
-      guard.run(key('r1'), 'target-a', perform(0)),
-      guard.run(key('r2'), 'target-a', perform(1)),
-      guard.run(key('r3'), 'target-a', perform(2)),
-    ];
-    expect(performed).toBe(3);
-
-    // All three are over a capacity of one, and every one of them must still recognise its replay
-    // rather than launch a second relaunch.
-    const replays = [
-      guard.run(key('r1'), 'target-a', perform(0)),
-      guard.run(key('r2'), 'target-a', perform(1)),
-      guard.run(key('r3'), 'target-a', perform(2)),
-    ];
-    expect(performed).toBe(3);
+    const runs = gates.map((_gate, index) => guard.run(key(`r${index}`), 'target-a', perform(index)));
+    const replays = gates.map((_gate, index) => guard.run(key(`r${index}`), 'target-a', perform(index)));
+    expect(performed).toBe(gates.length);
 
     gates.forEach((gate, index) => {
       gate.settle(view(`agent-${index}`));
     });
-    expect((await Promise.all(runs)).map(v => v.config.agent)).toEqual(['agent-0', 'agent-1', 'agent-2']);
-    expect((await Promise.all(replays)).map(v => v.config.agent)).toEqual(['agent-0', 'agent-1', 'agent-2']);
-    expect(performed).toBe(3);
-  });
-
-  it('treats a non-positive capacity as one retained outcome', async () => {
-    const guard = new MigrationReplayGuard(retainAll, 0);
-    let performed = 0;
-    const perform = async () => {
-      performed += 1;
-      return view(`agent-${performed}`);
-    };
-
-    await guard.run(key('r1'), 'target-a', perform);
-    expect((await guard.run(key('r1'), 'target-a', perform)).config.agent).toBe('agent-1');
-    expect(performed).toBe(1);
-  });
-
-  it('publishes a default capacity', () => {
-    expect(MIGRATION_REPLAY_CAPACITY).toBeGreaterThan(0);
+    const expected = gates.map((_gate, index) => `agent-${index}`);
+    expect((await Promise.all(runs)).map(v => v.config.agent)).toEqual(expected);
+    expect((await Promise.all(replays)).map(v => v.config.agent)).toEqual(expected);
+    expect(performed).toBe(gates.length);
   });
 });

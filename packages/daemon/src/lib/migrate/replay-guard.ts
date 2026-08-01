@@ -41,10 +41,16 @@
  * migration to account B succeeded when what happened was a migration to account A. That is worse
  * than any error, so a mismatch is refused outright and neither migration is performed.
  *
- * WHAT THIS DOES NOT COVER, stated plainly: THE LEDGER IS PROCESS-LOCAL BY DESIGN. It is a `Map` in
- * one daemon process, so a daemon RESTART forgets every migration it has performed, and a retry that
- * spans a restart is unguarded. Nor is it shared between daemons — each paired daemon guards only its
- * own sessions, which is what multi-daemon isolation requires and not a limitation.
+ * THE ONE THING THIS DOES NOT COVER, stated plainly: THE LEDGER IS PROCESS-LOCAL BY DESIGN. It is a
+ * `Map` in one daemon process, so a daemon RESTART forgets every migration it has performed, and a
+ * retry that spans a restart is unguarded. Nor is it shared between daemons — each paired daemon
+ * guards only its own sessions, which is what multi-daemon isolation requires and not a limitation.
+ *
+ * PROCESS LIFETIME IS THEREFORE THE ONLY BOUNDARY AT WHICH A RECEIPT IS ALLOWED TO DISAPPEAR, and the
+ * class below forgets nothing before it. That boundary is defensible because it is VISIBLE — the
+ * daemon went down, an operator knows it went down, and a session mid-relaunch at that moment needs a
+ * human anyway. An eviction policy is the opposite: it discards receipts silently, on a schedule
+ * nobody observes, while the daemon looks healthy. See the class comment for the bug that taught this.
  *
  * Closing the restart window needs the record to live beside the session on disk — the session
  * already carries a migration report, so that is where it would go — and it is deliberately not
@@ -59,9 +65,6 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-
-/** How many settled migrations are remembered. */
-export const MIGRATION_REPLAY_CAPACITY = 64;
 
 /** One logical migration, identified the way the route identifies it. */
 export interface MigrationReplayKey {
@@ -101,19 +104,28 @@ interface ReplayEntry {
  * Remembers migrations by logical identity so a retried POST joins the original instead of starting
  * a second one.
  *
- * Bounded on purpose: a daemon runs for weeks and every migration would otherwise leave a permanent
- * entry. Insertion order is eviction order — the oldest retained outcome goes first — because a
- * client's retry window is under a second and its recovery window is minutes, both far inside a
- * 64-entry history of an operation a human performs by hand.
+ * A SETTLED RECEIPT IS NEVER FORGOTTEN WHILE THE PROCESS LIVES, and that is a correctness
+ * requirement rather than a tuning choice. An earlier version of this class kept a bounded 64-entry
+ * history, reasoning that a client's retry window is under a second and no real fleet migrates often
+ * enough for the bound to matter. That reasoning was wrong in the only direction that counts: the
+ * bound is measured in MIGRATIONS, not in time, so 64 later migrations silently discard an earlier
+ * receipt, and the next request carrying that earlier id finds a clean slate and RELAUNCHES A SESSION
+ * THAT WAS ALREADY RELAUNCHED. A cache whose eviction policy can re-authorize destruction is not a
+ * safety mechanism. There is no capacity to tune, because no capacity is safe: any finite bound is a
+ * number of migrations after which the guard stops guarding.
+ *
+ * WHAT THIS COSTS, so the trade is explicit: one map entry per logical migration for the daemon's
+ * lifetime — a key string, a fingerprint, and either a `SessionView` or one error. Migrations are
+ * destructive operations a human performs deliberately, a handful per session at most, so the ledger
+ * grows at human pace and is bounded in practice by the process lifetime the section below describes.
+ * Retaining a few thousand receipts costs a few megabytes; forgetting one costs a destroyed session.
  */
 export class MigrationReplayGuard {
   readonly #entries = new Map<string, ReplayEntry>();
-  readonly #capacity: number;
   readonly #retainFailure: MigrationFailureRetention;
 
-  constructor(retainFailure: MigrationFailureRetention, capacity: number = MIGRATION_REPLAY_CAPACITY) {
+  constructor(retainFailure: MigrationFailureRetention) {
     this.#retainFailure = retainFailure;
-    this.#capacity = Math.max(1, Math.trunc(capacity));
   }
 
   /**
@@ -135,42 +147,17 @@ export class MigrationReplayGuard {
     }
 
     const started = perform();
-    const entry: ReplayEntry = { fingerprint, running: started };
-    this.#remember(identity, entry);
+    this.#entries.set(identity, { fingerprint, running: started });
     try {
       const view = await started;
-      // Replace rather than mutate-in-place-only so eviction order tracks completion.
-      this.#entries.delete(identity);
-      this.#remember(identity, { fingerprint, view });
+      this.#entries.set(identity, { fingerprint, view });
       return view;
     } catch (error) {
-      this.#entries.delete(identity);
       // A failure that happened after the pane was destroyed must never be retried; one that
       // happened before it was touched must never be cached.
-      if (this.#retainFailure(error)) this.#remember(identity, { fingerprint, committedFailure: error });
+      if (this.#retainFailure(error)) this.#entries.set(identity, { fingerprint, committedFailure: error });
+      else this.#entries.delete(identity);
       throw error;
     }
-  }
-
-  /**
-   * A RUNNING entry is never evicted, at any pressure. Evicting one would hand the very next replay
-   * a clean slate and let it start a second destructive relaunch of a migration already in progress —
-   * the exact failure this class exists to prevent, reintroduced by its own bookkeeping. So eviction
-   * only ever consumes SETTLED entries, oldest first, and when every entry is still running the map
-   * is allowed over capacity until they finish. That excess is bounded by the number of migrations
-   * genuinely in flight, which is bounded by callers, not by history.
-   */
-  #remember(identity: string, entry: ReplayEntry): void {
-    this.#entries.set(identity, entry);
-    while (this.#entries.size > this.#capacity) {
-      const evictable = this.#oldestSettled();
-      if (evictable === undefined) break;
-      this.#entries.delete(evictable);
-    }
-  }
-
-  #oldestSettled(): string | undefined {
-    for (const [identity, entry] of this.#entries) if (entry.running === undefined) return identity;
-    return undefined;
   }
 }
