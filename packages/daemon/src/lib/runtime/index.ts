@@ -16,6 +16,7 @@ export * from './mounts/session-resume.ts';
 export * from './mounts/session-send.ts';
 export * from './mounts/session-signal.ts';
 export * from './mounts/sessions.ts';
+export * from './mounts/scratch-gc.ts';
 export * from './mounts/stt.ts';
 export * from './mounts/task-boards.ts';
 export * from './mounts/tasks.ts';

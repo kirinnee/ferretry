@@ -11,6 +11,7 @@ export * from './migrate/file-migration-report.ts';
 export * from './names/index.ts';
 export * from './pins/index.ts';
 export * from './runtime/index.ts';
+export * from './scratch/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/monitor/index.ts';

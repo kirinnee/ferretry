@@ -4,14 +4,15 @@ import {
   createMountedDispatcher,
   createMountedRawDispatcher,
   createMountedSocketDispatcher,
+  type MountedSubsystems,
   mountedDaemonRoutes,
   mountedRawRoutes,
   mountedSocketRoutes,
-  type MountedSubsystems,
+  type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
-import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
+import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   analyticsSubsystem,
   attentionService,
@@ -20,10 +21,11 @@ import {
   FakeBrowserLogin,
   FakeSessionControl,
   FakeSessionMigrate,
-  FakeTaskBoards,
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
+  FakeStt,
+  FakeTaskBoards,
   FakeTerminals,
   healthSubsystem,
   human,
@@ -33,7 +35,6 @@ import {
   recommendSubsystem,
   sessionDirectory,
   sessionView,
-  FakeStt,
   taskSubsystem,
 } from './support.ts';
 
@@ -46,7 +47,7 @@ import {
 
 const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
 
-const subsystems = (): MountedSubsystems => ({
+const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
   attention: attentionService(),
   pins: pinService([]),
@@ -74,6 +75,7 @@ const subsystems = (): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   stt: new FakeStt(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
+  scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
 });
 
 describe('the mounted daemon surface', () => {
@@ -88,6 +90,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/usage',
       'GET /metrics',
       'GET /v1/health',
+      'GET /v1/gc',
+      'POST /v1/gc',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',
@@ -172,6 +176,7 @@ describe('the mounted daemon surface', () => {
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
     const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
+    const gc = await dispatcher.dispatch(request({ path: '/v1/gc', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
     const projects = await dispatcher.dispatch(request({ path: '/v1/projects', headers: human }));
@@ -215,6 +220,7 @@ describe('the mounted daemon surface', () => {
     // The liveness probe and the scoped report are two different answers under one subject, and both
     // are reached: the daemon's own health is a mounted subsystem now, not a hardcoded literal.
     should(report.status).equal(200);
+    should(gc.status).equal(200);
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.
     should(session.status).equal(200);
@@ -232,6 +238,38 @@ describe('the mounted daemon surface', () => {
     should(stopped.status).equal(200);
     should(revived.status).equal(200);
     should(migrated.status).equal(200);
+  });
+
+  it('should validate the GC plan and force request before reaching the collector', async () => {
+    // Arrange
+    const limits: number[] = [];
+    const forces: boolean[] = [];
+    const dispatcher = createMountedDispatcher(
+      base,
+      subsystems({
+        plan: async limit => {
+          limits.push(limit);
+          return [];
+        },
+        sweep: async force => {
+          forces.push(force);
+          return { sessions: 0, bytes: 0, failures: 0 };
+        },
+      }),
+    );
+
+    // Act
+    const planned = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['limit', '7']], headers: human }));
+    const forced = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/gc', headers: human, body: JSON.stringify({ force: true }) }),
+    );
+    const invalid = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['limit', '0']], headers: human }));
+    const unknown = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['other', '1']], headers: human }));
+
+    // Assert
+    should([planned.status, forced.status, invalid.status, unknown.status]).deepEqual([200, 200, 400, 400]);
+    should(limits).deepEqual([7]);
+    should(forces).deepEqual([true]);
   });
 
   it('should serve every protocol-switching route from one table too', () => {
