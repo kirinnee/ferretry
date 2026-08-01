@@ -5,6 +5,7 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   GlobalAnalyticsPage,
   GLOBAL_ANALYTICS_DEFAULT_QUERY,
+  GLOBAL_ANALYTICS_STARTERS,
 } from '../../../src/features/analytics/global-analytics-page.tsx';
 import { render, run, runAsync } from '../../support/react.ts';
 
@@ -88,6 +89,60 @@ describe('GlobalAnalyticsPage', () => {
     expect(JSON.stringify(renderer.toJSON())).toContain('No indexed session matched this query.');
   });
 
+  it('renders the query controls as kteam does: default-size outline buttons with 44px touch targets', async () => {
+    // Arrange
+    const renderer = render(<GlobalAnalyticsPage connection={daemonA} requestAnalytics={async () => aggregate()} />);
+    await runAsync(async () => await Promise.resolve());
+
+    // Act — the query controls, straight off the host elements
+    const starters = renderer.root.findByProps({ role: 'toolbar' }).findAllByType('button');
+    const submit = renderer.root.findAllByType('button').filter(button => button.props.type === 'submit');
+
+    // Assert — one control per starter plus Run
+    expect(starters).toHaveLength(GLOBAL_ANALYTICS_STARTERS.length);
+    expect(submit).toHaveLength(1);
+
+    // Assert — starters are `.kt-btn` at the DEFAULT size: `kt-btn--sm` would
+    // override the themed control height, inline padding and font size.
+    for (const starter of starters) {
+      expect(starter.props.className).toBe('kt-btn min-h-[44px] shrink-0 text-xs');
+      expect(starter.props.className).not.toContain('kt-btn--sm');
+      expect(starter.props['data-variant']).toBeUndefined();
+    }
+
+    // Assert — Run is the resting outline style, not an accent-filled primary
+    expect(submit[0]?.props.className).toBe('kt-btn min-h-[44px] shrink-0');
+    expect(submit[0]?.props['data-variant']).toBeUndefined();
+  });
+
+  it('labels each starter with its own query and keeps the hints as titles', async () => {
+    // Arrange
+    const calls: (string | undefined)[] = [];
+    const renderer = render(
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        requestAnalytics={async (_daemon, query) => {
+          calls.push(query);
+          return aggregate(query);
+        }}
+      />,
+    );
+    await runAsync(async () => await Promise.resolve());
+
+    // Act — click every starter in turn
+    const starters = renderer.root.findByProps({ role: 'toolbar' }).findAllByType('button');
+    for (const [index, starter] of starters.entries()) {
+      expect(starter.props.title).toBe(GLOBAL_ANALYTICS_STARTERS[index]?.hint);
+      await runAsync(async () => {
+        starter.props.onClick();
+        await Promise.resolve();
+      });
+    }
+
+    // Assert — the mount request, then one request per starter, in order
+    expect(calls).toEqual([GLOBAL_ANALYTICS_DEFAULT_QUERY, ...GLOBAL_ANALYTICS_STARTERS.map(starter => starter.query)]);
+  });
+
   it('submits trimmed blank input, loads autocomplete values, and reports failed requests', async () => {
     const calls: string[] = [];
     const renderer = render(
@@ -114,6 +169,49 @@ describe('GlobalAnalyticsPage', () => {
     run(() => input.props.onChange({ currentTarget: { value: '{status=', selectionStart: 8 } }));
     await runAsync(async () => await Promise.resolve());
     expect(calls).toContain('count by (status)');
+  });
+
+  it('drops the previous daemon autocomplete cache before replacement values arrive', async () => {
+    let resolveBValues: ((response: AnalyticsResponse) => void) | undefined;
+    const withStatus = (value: string, query: string): AnalyticsResponse => {
+      const response = aggregate(query);
+      if (response.kind !== 'aggregate') throw new Error('aggregate fixture changed kind');
+      return {
+        ...response,
+        results: response.results.map((row, index) =>
+          index === 0 ? { ...row, labels: { ...row.labels, status: value } } : row,
+        ),
+      };
+    };
+    const requestAnalytics = async (daemon: typeof daemonA, query?: string): Promise<AnalyticsResponse> => {
+      if (query !== 'count by (status)') return aggregate(query);
+      if (daemon.daemonId === daemonA.daemonId) return withStatus('daemon-a-only', query);
+      return new Promise<AnalyticsResponse>(resolve => {
+        resolveBValues = resolve;
+      });
+    };
+    const renderer = render(<GlobalAnalyticsPage connection={daemonA} requestAnalytics={requestAnalytics} />);
+    await runAsync(async () => await Promise.resolve());
+    const openStatusValues = async () => {
+      const input = renderer.root.findByProps({ role: 'combobox' });
+      run(() => {
+        input.props.onFocus();
+        input.props.onChange({ currentTarget: { value: '{status=', selectionStart: 8 } });
+      });
+      await runAsync(async () => await Promise.resolve());
+    };
+    await openStatusValues();
+    expect(JSON.stringify(renderer.toJSON())).toContain('daemon-a-only');
+
+    run(() => renderer.update(<GlobalAnalyticsPage connection={daemonB} requestAnalytics={requestAnalytics} />));
+    await runAsync(async () => await Promise.resolve());
+    await openStatusValues();
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('daemon-a-only');
+    await runAsync(async () => {
+      resolveBValues?.(withStatus('daemon-b-only', 'count by (status)'));
+      await Promise.resolve();
+    });
+    expect(JSON.stringify(renderer.toJSON())).toContain('daemon-b-only');
   });
 
   it('drops a late daemon response when the route switches to another paired daemon', async () => {

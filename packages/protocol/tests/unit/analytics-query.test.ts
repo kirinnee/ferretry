@@ -9,7 +9,7 @@ import {
   matcherLikePattern,
   parseAnalyticsQuery,
   scopeAnalyticsQuery,
-} from '../../../src/lib/analytics/query.ts';
+} from '../../src/lib/analytics-query.ts';
 
 describe('analytics query language', () => {
   it('should default to a daily fleet aggregate', () => {
@@ -38,6 +38,67 @@ describe('analytics query language', () => {
     should(globId.matchers).deepEqual([{ label: 'id', op: '=', value: 'one', wildcard: false }]);
   });
 
+  it('should preserve leading/trailing whitespace and escaped control chars through the scope round trip', () => {
+    // Arrange — trim must gate all-whitespace ids only; the exact bytes must survive unchanged
+    const spaced = '  session-1  ';
+    const control = 'line\nnext\tvalue';
+
+    // Act
+    const spacedRound = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, spaced));
+    const controlRound = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, control));
+    const controlCanonical = scopeAnalyticsQuery(undefined, control);
+
+    // Assert — exact bytes round-trip through the canonical form
+    should(spacedRound.matchers[0]).deepEqual({ label: 'id', op: '=', value: spaced, wildcard: false });
+    should(controlRound.matchers[0]).deepEqual({ label: 'id', op: '=', value: control, wildcard: false });
+    should(controlCanonical).equal(`${DEFAULT_SESSION_ANALYTICS_QUERY} {id="line\\nnext\\tvalue"}`);
+  });
+
+  it('should reject all-whitespace session ids regardless of whitespace kind', () => {
+    // Arrange
+    const whitespaces = ['   ', '\t\t', '\n \t', ' \r\n '];
+
+    // Act / Assert
+    for (const ws of whitespaces) {
+      let actual: unknown;
+      try {
+        scopeAnalyticsQuery(undefined, ws);
+      } catch (error) {
+        actual = error;
+      }
+
+      should(actual).be.instanceof(AnalyticsQueryError);
+      should((actual as Error).message).containEql('exact session id');
+    }
+  });
+
+  it('should decode full JSON escapes (CR/BS/FF/NUL and a surrogate pair) in double-quoted values', () => {
+    // Act — explicit JSON escapes the old n/t-only decoder mis-read as literal letters
+    const carriage = parseAnalyticsQuery('{id="a\\rb"}').matchers[0];
+    const backspace = parseAnalyticsQuery('{id="a\\bb"}').matchers[0];
+    const formFeed = parseAnalyticsQuery('{id="a\\fb"}').matchers[0];
+    const nul = parseAnalyticsQuery('{id="a\\u0000b"}').matchers[0];
+    const surrogate = parseAnalyticsQuery('{id="\\uD835\\uDD4F"}').matchers[0];
+
+    // Assert
+    should(carriage).deepEqual({ label: 'id', op: '=', value: 'a\rb', wildcard: false });
+    should(backspace).deepEqual({ label: 'id', op: '=', value: 'a\bb', wildcard: false });
+    should(formFeed).deepEqual({ label: 'id', op: '=', value: 'a\fb', wildcard: false });
+    should(nul).deepEqual({ label: 'id', op: '=', value: 'a\x00b', wildcard: false });
+    should(surrogate).deepEqual({ label: 'id', op: '=', value: '𝕏', wildcard: false });
+  });
+
+  it('should round-trip control-char session ids (CR/BS/FF/NUL) exactly through the scope', () => {
+    // Arrange — canonical JSON.stringify escapes these; double-quoted decoding must reverse them
+    const ids = ['a\rb', 'a\bb', 'a\fb', 'a\x00b'];
+
+    // Act / Assert
+    for (const raw of ids) {
+      const round = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, raw));
+      should(round.matchers[0]).deepEqual({ label: 'id', op: '=', value: raw, wildcard: false });
+    }
+  });
+
   it('should parse aggregation, grouping, aliases, and quoted matcher values', () => {
     // Act
     const actual = parseAnalyticsQuery(
@@ -60,10 +121,16 @@ describe('analytics query language', () => {
 
   it('should decode quoted escapes and omit empty matcher segments', () => {
     // Act
-    const actual = parseAnalyticsQuery(`{label="line\\nnext\\tvalue\\"",, status=completed,}`);
+    const actual = parseAnalyticsQuery(
+      `{label="line\\nnext\\tvalue\\"", mode='single\\nnext\\tvalue\\q',, status=completed,}`,
+    );
 
     // Assert
-    should(actual.matchers.map(matcher => matcher.value)).deepEqual(['line\nnext\tvalue"', 'completed']);
+    should(actual.matchers.map(matcher => matcher.value)).deepEqual([
+      'line\nnext\tvalue"',
+      'single\nnext\tvalueq',
+      'completed',
+    ]);
   });
 
   it('should preserve exact wildcard characters through canonical round trips', () => {
@@ -99,6 +166,7 @@ describe('analytics query language', () => {
     { source: '{status}', message: 'could not parse filter matcher' },
     { source: '{tree=session-*}', message: 'tree filters take one exact session id' },
     { source: '{label="unterminated}', message: 'unterminated quoted filter value' },
+    { source: '{label="bad\\x"}', message: 'malformed double-quoted filter value' },
   ])('should reject $message failures', ({ source, message }) => {
     // Act
     let actual: unknown;

@@ -20,13 +20,23 @@ export * from '../features/analytics/analytics-query-complete.ts';
 export * from '../features/analytics/analytics-response-view.tsx';
 export * from '../features/analytics/analytics-result-table.tsx';
 export * from '../features/analytics/global-analytics-page.tsx';
+export * from '../features/analytics/session-analytics-query.ts';
+export * from '../features/analytics/session-analytics-surface.tsx';
 export * from '../features/attention/attention-api.ts';
 export * from '../features/attention/attention-board.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/browser/remote-browser-chrome.tsx';
+export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/learning/learning-header.tsx';
-export * from '../features/learning/learning-page.tsx';
+export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
+export {
+  LearningPage,
+  LearningReview,
+  learningErrorMessage,
+  learningStrength,
+  ProposalCard,
+} from '../features/learning/learning-page.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';

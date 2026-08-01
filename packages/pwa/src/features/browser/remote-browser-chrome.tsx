@@ -7,7 +7,7 @@
  * so a parent that re-scopes to another daemon re-renders it with that daemon's
  * status and nothing from the previous one can survive in it.
  */
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -62,7 +62,13 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
         {busy ? 'Working…' : loading ? 'Loading page…' : page?.pageState === 'error' ? 'Page failed' : ''}
       </span>
       <span className="ml-auto text-meta text-muted">
-        {connection === 'connected' ? 'Live' : connection === 'connecting' ? 'Connecting…' : 'Display idle'}
+        {connection === 'connected'
+          ? 'Live'
+          : connection === 'connecting'
+            ? 'Connecting…'
+            : connection === 'disconnected'
+              ? 'Display disconnected — reconnecting…'
+              : 'Display idle'}
       </span>
     </div>
   );
@@ -289,6 +295,8 @@ export interface RemoteBrowserControlsProps {
   readonly onToggleFit: () => void;
   readonly onToggleViewportMode: () => void;
   readonly onPasteFromClipboard: () => void;
+  /** Optional input that belongs at the end of the same wrapping controls row. */
+  readonly trailingControl?: ReactNode;
 }
 
 /** Lifecycle, clipboard and viewport controls; all touch targets are 44px. */
@@ -302,6 +310,7 @@ export function RemoteBrowserControls({
   onToggleFit,
   onToggleViewportMode,
   onPasteFromClipboard,
+  trailingControl,
 }: RemoteBrowserControlsProps) {
   const running = status?.state === 'running';
   return (
@@ -360,6 +369,7 @@ export function RemoteBrowserControls({
         {viewportMode === 'desktop' ? <Monitor size={14} aria-hidden="true" /> : <Scan size={14} aria-hidden="true" />}
         {viewportMode === 'desktop' ? 'Desktop fit' : 'Responsive'}
       </Button>
+      {trailingControl}
     </div>
   );
 }

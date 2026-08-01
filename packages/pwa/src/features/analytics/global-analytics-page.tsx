@@ -9,15 +9,12 @@ import { fetchAnalytics } from './analytics-api.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
 import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from './analytics-time-series.tsx';
+import type { AnalyticsStarter } from './session-analytics-query.ts';
 
 export const GLOBAL_ANALYTICS_DEFAULT_QUERY = 'sum by (day)';
 
-export interface AnalyticsStarter {
-  readonly id: string;
-  readonly label: string;
-  readonly query: string;
-  readonly hint: string;
-}
+/** One starter shape serves both analytics destinations; it is declared with the pure query grammar. */
+export type { AnalyticsStarter } from './session-analytics-query.ts';
 
 export const GLOBAL_ANALYTICS_STARTERS: readonly AnalyticsStarter[] = [
   {
@@ -59,6 +56,18 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
   const [querying, setQuerying] = useState(true);
   const requestSerial = useRef(0);
   const treeIds = useMemo(() => [], []);
+  const [renderedDaemon, setRenderedDaemon] = useState(connection.daemonId);
+
+  // Invalidate daemon A during the re-scoped render. Waiting for an effect
+  // cleanup leaves one committed frame in which A can still publish under B.
+  if (renderedDaemon !== connection.daemonId) {
+    setRenderedDaemon(connection.daemonId);
+    requestSerial.current += 1;
+    setQuery(GLOBAL_ANALYTICS_DEFAULT_QUERY);
+    setQuerying(true);
+    setResult(null);
+    setError(null);
+  }
 
   const runQuery = useCallback(
     async (source: string) => {
@@ -148,11 +157,13 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
             role="toolbar"
           >
             {GLOBAL_ANALYTICS_STARTERS.map(starter => (
+              // `outline` at the DEFAULT size: kteam's starters are a bare
+              // `kt-btn`, and `size="sm"` would swap the control height,
+              // inline padding and font size for the compact set.
               <Button
                 key={starter.id}
                 type="button"
                 variant="outline"
-                size="sm"
                 className="min-h-[44px] shrink-0 text-xs"
                 title={starter.hint}
                 onClick={() => {
@@ -177,6 +188,7 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               Global analytics query
             </label>
             <AnalyticsQueryAutocomplete
+              key={connection.daemonId}
               inputId={queryId}
               value={query}
               onValueChange={setQuery}
@@ -186,7 +198,10 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               loadValues={loadValues}
               placeholder={GLOBAL_ANALYTICS_DEFAULT_QUERY}
             />
-            <Button type="submit" variant="primary" disabled={querying} className="min-h-[44px] shrink-0">
+            {/* Run is the DEFAULT outline control, exactly as in kteam. A primary
+                fill would make the query box the loudest thing on a page whose
+                subject is the result below it. */}
+            <Button type="submit" variant="outline" disabled={querying} className="min-h-[44px] shrink-0">
               {querying ? (
                 <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               ) : (

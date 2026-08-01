@@ -84,6 +84,7 @@ describe('remote browser status bar', () => {
       <RemoteBrowserStatusBar status={running({ pageState: 'error', pageError: 'boom' })} connection="disconnected" />,
     ).root;
     expect(texts(failed)).toContain('Page failed');
+    expect(texts(failed)).toContain('Display disconnected — reconnecting…');
     const unknown = render(<RemoteBrowserStatusBar status={null} connection="detached" />).root;
     expect(texts(unknown)).toContain('checking');
     expect(texts(unknown)).toContain('No input yet');
@@ -302,6 +303,14 @@ describe('remote browser controls', () => {
     const alternate = controls(running(), { fit: false, viewportMode: 'desktop' });
     expect(texts(alternate.tree)).toContain('Desktop fit');
     expect(texts(alternate.tree)).toContain('1:1');
+  });
+
+  it('keeps a supplied mobile input in the same wrapping controls row', () => {
+    const live = controls(running(), {
+      trailingControl: <textarea aria-label="Type into remote browser" />,
+    });
+    const field = byLabel(live.tree, 'Type into remote browser');
+    expect(field.parent).toBe(live.tree.findByType('div'));
   });
 
   it('blocks paste unless the display is actually attached', () => {
