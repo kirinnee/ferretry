@@ -139,6 +139,7 @@ export * from './send-ledger.ts';
 export * from './send-ledger-join.ts';
 export * from './session-screens.ts';
 export * from './side-pane-preferences.ts';
+export * from './stt/audio-capture.ts';
 export * from './stt/capabilities.ts';
 export * from './stt/capture-error.ts';
 export * from './stt/daemon-engine.ts';
