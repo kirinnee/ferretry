@@ -48,6 +48,7 @@ import {
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
+import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
@@ -793,6 +794,19 @@ function Shell() {
           </PanelHeader>
           <PanelBody>
             <WardenStrip status={WARDEN} now={HARNESS_NOW} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Pins trigger',
+      render: () => (
+        <Card aria-label="Pins trigger" className="overflow-visible">
+          <PanelHeader>
+            <Label>Pins</Label>
+          </PanelHeader>
+          <PanelBody>
+            <PinsTrigger id="harness-pins" count={3} expanded={false} onClick={() => {}} />
           </PanelBody>
         </Card>
       ),

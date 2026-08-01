@@ -130,6 +130,9 @@ try {
       const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
       await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
       process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
+      const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
+      await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });
+      process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
       const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
       await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
       process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
