@@ -45,6 +45,9 @@ const service = (options: {
   readonly capture?: PaneCapture | undefined;
   readonly tail?: TranscriptTailResult;
   readonly tailLimits?: number[];
+  readonly storedSnapshot?:
+    | { readonly kind: 'absent' | 'unreadable' }
+    | { readonly kind: 'read'; readonly text: string };
 }): OperatorReadService =>
   new OperatorReadService(
     {
@@ -60,6 +63,7 @@ const service = (options: {
         return options.tail ?? { kind: 'read', events: [] };
       },
     },
+    { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
   );
 
 const message = (text: string, overrides: Partial<TranscriptEvent> = {}): TranscriptEvent =>
@@ -194,6 +198,31 @@ describe('OperatorReadService.snapshot', () => {
     should(goneRefusal).be.instanceof(OperatorReadError).and.have.property('failure', 'pane_dead');
     should(exitedRefusal).be.instanceof(OperatorReadError).and.have.property('failure', 'pane_dead');
   });
+
+  it('should serve the captured terminal frame only when stored evidence exists', async () => {
+    // Arrange
+    const reads = service({ storedSnapshot: { kind: 'read', text: 'finished screen' } });
+
+    // Act
+    const frame = await reads.snapshot('s1', false);
+
+    // Assert
+    should(frame).equal('finished screen');
+  });
+
+  it('should refuse a missing or unreadable stored frame rather than inventing a blank screen', async () => {
+    // Arrange
+    const missing = service({ storedSnapshot: { kind: 'absent' } });
+    const damaged = service({ storedSnapshot: { kind: 'unreadable' } });
+
+    // Act
+    const missingRefusal = await missing.snapshot('s1', false).catch((error: unknown) => error);
+    const damagedRefusal = await damaged.snapshot('s1', false).catch((error: unknown) => error);
+
+    // Assert
+    should(missingRefusal).be.instanceof(OperatorReadError).and.have.property('failure', 'stored_snapshot_unavailable');
+    should(damagedRefusal).be.instanceof(OperatorReadError).and.have.property('failure', 'stored_snapshot_unreadable');
+  });
 });
 
 describe('OperatorReadService.logs', () => {
@@ -264,6 +293,41 @@ describe('OperatorReadService.logs', () => {
 
     // Assert — the file exists and holds nothing yet. That one IS a fact.
     should(text).equal('');
+  });
+
+  it('should slice only between explicit started markers', async () => {
+    // Arrange
+    const reads = service({
+      tail: {
+        kind: 'read',
+        events: [
+          { kind: 'turn', harness: 'codex', role: 'system', state: 'started' },
+          message('first'),
+          { kind: 'turn', harness: 'codex', role: 'system', state: 'completed' },
+          { kind: 'turn', harness: 'codex', role: 'system', state: 'started' },
+          message('second'),
+        ],
+      },
+    });
+
+    // Act
+    const first = await reads.logs('s1', undefined, 0);
+    const second = await reads.logs('s1', undefined, 1);
+
+    // Assert
+    should(first).containEql('first').and.not.containEql('second');
+    should(second).containEql('second').and.not.containEql('first');
+  });
+
+  it('should refuse a requested turn when transcript evidence has no explicit boundary', async () => {
+    // Arrange
+    const reads = service({ tail: { kind: 'read', events: [message('unpartitioned')] } });
+
+    // Act
+    const refusal = await reads.logs('s1', undefined, 0).catch((error: unknown) => error);
+
+    // Assert
+    should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'turn_partition_unavailable');
   });
 });
 

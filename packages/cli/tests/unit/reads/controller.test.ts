@@ -65,16 +65,15 @@ describe('fy logs', () => {
     should(io.out).eql(['[09:08:07] assistant/message: ready']);
   });
 
-  it('should refuse a turn slice locally rather than sending one the daemon cannot honour', async () => {
+  it('should send a requested turn slice to the daemon', async () => {
     // Arrange
     const { controller, gateway } = build();
 
     // Act
-    const refusal = await controller.logs('s1', { turn: 3 }).catch((error: unknown) => error);
+    await controller.logs('s1', { turn: 3 });
 
-    // Assert — the message is the operator's, not a 501 they have to interpret.
-    should(refusal).be.instanceof(Error).and.have.property('exitCode', 2);
-    should(gateway.logCalls).be.empty();
+    // Assert — the daemon can prove a boundary from transcript evidence or refuse it precisely.
+    should(gateway.logCalls).eql([{ id: 's1', turn: 3 }]);
   });
 });
 

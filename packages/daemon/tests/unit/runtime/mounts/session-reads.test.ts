@@ -31,6 +31,9 @@ function fixture(
     /** A session the daemon recorded no terminal address for, which is not the same as a dead pane. */
     readonly noTerminal?: true;
     readonly tail?: TranscriptTailResult;
+    readonly storedSnapshot?:
+      | { readonly kind: 'absent' | 'unreadable' }
+      | { readonly kind: 'read'; readonly text: string };
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -40,6 +43,7 @@ function fixture(
         options.noTerminal === true ? undefined : (options.capture ?? { alive: true, dead: false, text: 'screen' }),
     },
     { tail: async () => options.tail ?? { kind: 'read', events: [] } },
+    { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
   );
   const dispatcher = new ApiDispatcher(
     new ApiRouter([...sessionReadRoutes(reads, sessionDirectory([sessionView('s1')]))]),
@@ -169,15 +173,27 @@ describe('the session snapshot route', () => {
     should(response.headers.get('cache-control')).eql('no-store');
   });
 
-  it('should refuse a stored last frame this daemon never wrote', async () => {
+  it('should serve a stored final frame when the daemon captured one', async () => {
+    // Arrange
+    const dispatch = fixture({ storedSnapshot: { kind: 'read', text: 'final frame' } });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/snapshot', query: [['live', 'false']], headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).equal('final frame');
+  });
+
+  it('should refuse a stored last frame the daemon never captured', async () => {
     // Arrange
     const dispatch = fixture();
 
     // Act
     const response = await dispatch({ path: '/v1/sessions/s1/snapshot', query: [['live', 'false']], headers: human });
 
-    // Assert — honouring it would answer '' for every session, which reads as a blank terminal.
-    should(response.status).equal(501);
+    // Assert — an absent artifact is not a blank captured terminal.
+    should(response.status).equal(409);
     should(jsonBody(response)).have.property('code', 'stored_snapshot_unavailable');
   });
 
@@ -235,15 +251,35 @@ describe('the session transcript route', () => {
     should(response.body).equal('[09:08:07] assistant/message: ready');
   });
 
-  it('should refuse a turn slice this daemon keeps no log for', async () => {
+  it('should serve a turn slice only when normalized evidence proves its boundary', async () => {
+    // Arrange
+    const dispatch = fixture({
+      tail: {
+        kind: 'read',
+        events: [
+          { kind: 'turn', harness: 'codex', role: 'system', state: 'started' },
+          { kind: 'message', harness: 'codex', role: 'assistant', text: 'first turn' },
+        ],
+      },
+    });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/logs', query: [['turn', '0']], headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).containEql('first turn');
+  });
+
+  it('should refuse a turn slice whose boundary transcript evidence cannot prove', async () => {
     // Arrange
     const dispatch = fixture();
 
     // Act
     const response = await dispatch({ path: '/v1/sessions/s1/logs', query: [['turn', '3']], headers: human });
 
-    // Assert — serving the whole tail would hand a caller comparing two turns the same bytes twice.
-    should(response.status).equal(501);
+    // Assert
+    should(response.status).equal(409);
     should(jsonBody(response)).have.property('code', 'turn_partition_unavailable');
   });
 

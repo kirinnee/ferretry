@@ -1,4 +1,5 @@
 import type { PaneObservation, ResumeLauncher } from '../../../lib/session/resume/types.ts';
+import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import type { TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
@@ -18,18 +19,12 @@ export interface ResumeLaunchSpec {
  * this daemon did not create.
  */
 export class TmuxResumeLauncher implements ResumeLauncher {
-  private readonly frames = new Map<string, string>();
-
   constructor(
     private readonly tmux: TmuxController,
     private readonly spec: (id: SessionId) => Promise<ResumeLaunchSpec>,
     private readonly delivery: TmuxPaneDelivery,
+    private readonly snapshots?: LastSnapshotWriter,
   ) {}
-
-  /** The final frame captured before a pane was destroyed, so discarded composer text is recoverable. */
-  finalFrame(id: SessionId): string | undefined {
-    return this.frames.get(id);
-  }
 
   async observe(id: SessionId): Promise<PaneObservation> {
     const state = await this.tmux.state((await this.spec(id)).tmuxSession);
@@ -38,7 +33,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
 
   async snapshot(id: SessionId): Promise<void> {
     const state = await this.tmux.state((await this.spec(id)).tmuxSession);
-    this.frames.set(id, state.visible);
+    if (state.alive && !state.dead) await this.snapshots?.write(id, state.visible);
   }
 
   async kill(id: SessionId, _reason: string): Promise<void> {

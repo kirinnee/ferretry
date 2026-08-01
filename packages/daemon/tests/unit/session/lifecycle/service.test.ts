@@ -1,10 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId, type ClockPort, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
-  defaultSessionLifecycleSettings,
-  SessionLifecycleService,
   type CreateSessionLifecycleRequest,
+  defaultSessionLifecycleSettings,
   type SessionCredential,
   type SessionCredentialIssuer,
   type SessionEnvironmentStore,
@@ -14,6 +13,7 @@ import {
   type SessionLifecyclePorts,
   type SessionLifecycleRecord,
   type SessionLifecycleRepository,
+  SessionLifecycleService,
   type SessionLifecycleSettings,
   type SessionTaskStore,
   type WorkingDirectoryResolver,
@@ -73,6 +73,10 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
     this.calls.push(`deliver:${instruction}`);
     if (this.deliverError) throw this.deliverError;
+  }
+
+  async snapshot(): Promise<void> {
+    this.calls.push('snapshot');
   }
 
   async stop(): Promise<void> {
@@ -536,7 +540,7 @@ describe('SessionLifecycleService', () => {
     // Assert
     should(stopped.state).containDeep({ status: 'stopped', reason: 'work complete' });
     should(repeated).deepEqual(stopped);
-    should(launcher.calls.filter(call => call === 'stop')).deepEqual(['stop']);
+    should(launcher.calls.filter(call => call === 'snapshot' || call === 'stop')).deepEqual(['snapshot', 'stop']);
     should(repository.events.at(-1)).deepEqual({ type: 'session.stopped', data: { reason: 'work complete' } });
   });
 

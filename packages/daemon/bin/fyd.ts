@@ -75,13 +75,6 @@ import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins
 import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
-  FileWardenArtifacts,
-  FileWardenConfigStore,
-  FileWardenStateStore,
-  NodeWardenReportFileSystem,
-  WardenReportReader,
-} from '../src/adapters/warden/index.ts';
-import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
   ExactTmuxPaneReaper,
@@ -127,6 +120,7 @@ import {
   LauncherSignalTerminal,
   StorageSignalRepository,
 } from '../src/adapters/session/signal/index.ts';
+import { FileLastSnapshotStore } from '../src/adapters/session/snapshot/index.ts';
 import {
   FileHarnessWrapperSource,
   NodeCodexRolloutIndex,
@@ -156,6 +150,13 @@ import {
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import {
+  FileWardenArtifacts,
+  FileWardenConfigStore,
+  FileWardenStateStore,
+  NodeWardenReportFileSystem,
+  WardenReportReader,
+} from '../src/adapters/warden/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
@@ -194,12 +195,14 @@ import {
   type DaemonConfig,
   type DaemonHealthSubsystem,
   type DecodedInitialAttachment,
+  DONE_MARKER_FILENAME,
   decodeInitialAttachments,
   defaultSessionLifecycleSettings,
   defaultSessionMonitorSettings,
   defaultSessionResumeSettings,
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
+  doneMarkerCertifiesTurn,
   EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
   type FinishedAnalyticsSession,
@@ -222,11 +225,13 @@ import {
   type NameSubsystem,
   normalizeCallsign,
   type ObservedSession,
+  OperatorReadService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   packageRole,
   parseSessionId,
+  parseWardenConfigPatch,
   planInitialAttachments,
   RecommendError,
   type RecommendSubsystem,
@@ -273,12 +278,11 @@ import {
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
-  type TranscriptFileResolver,
-  OperatorReadService,
   SignalRefused,
   SttEnhancementService,
   type SttSubsystem,
   searchTranscript,
+  selectableAutoAccounts,
   sessionHealthSettingsAt,
   type TaskAssigneeCandidate,
   type TaskBoardSubsystem,
@@ -292,23 +296,20 @@ import {
   type TerminalSubsystem,
   TmuxController,
   type TranscriptEvent,
+  type TranscriptFileResolver,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   type TranscriptSource,
-  DONE_MARKER_FILENAME,
-  doneMarkerCertifiesTurn,
-  parseWardenConfigPatch,
-  selectableAutoAccounts,
-  WARDEN_LABEL,
-  WardenSweepLoop,
-  WardenSweepService,
-  type WardenFleetSession,
-  type WardenSubsystem,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
   usageProbeCommand,
+  WARDEN_LABEL,
+  type WardenFleetSession,
+  type WardenSubsystem,
+  WardenSweepLoop,
+  WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
 import { startSttWorker } from './stt-worker.ts';
@@ -2590,6 +2591,12 @@ export function buildWorld(): DaemonWorld {
    * something else. It travels through the same document mapping the lifecycle repository writes, so
    * the executable is recovered from the argv the start recorded.
    */
+  const lastSnapshots = new FileLastSnapshotStore(id => {
+    const parsed = tryParseSessionId(id);
+    if (parsed === undefined)
+      throw new Error(`cannot store a final frame for unusable session id ${JSON.stringify(id)}`);
+    return createSessionPaths(paths, parsed).lastSnapshot;
+  });
   const createResumeLauncher = (storage: DaemonStorage): ResumeLauncher => {
     const controller = new TmuxController(new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')));
     return new TmuxResumeLauncher(
@@ -2609,6 +2616,7 @@ export function buildWorld(): DaemonWorld {
         };
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
+      lastSnapshots,
     );
   };
   /**
@@ -2697,6 +2705,7 @@ export function buildWorld(): DaemonWorld {
       // environment anyway.
       sessionEnvironments,
       new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
+      lastSnapshots,
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
@@ -3068,6 +3077,7 @@ export function buildWorld(): DaemonWorld {
             },
           },
           createSessionTranscriptTail(storage),
+          lastSnapshots,
         ),
       };
     },

@@ -9,8 +9,8 @@ import {
 } from './policy.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
 import {
-  SESSION_BOARD_CAPABILITY_VARIABLE,
   type CreateSessionLifecycleRequest,
+  SESSION_BOARD_CAPABILITY_VARIABLE,
   type SessionCredentialIssuer,
   type SessionEnvironmentStore,
   type SessionIdFactory,
@@ -116,6 +116,7 @@ export class SessionLifecycleService {
       const current = await this.require(parsed);
       if (current.state.status === 'stopped') return current;
       try {
+        await this.ports.launcher.snapshot(current);
         await this.ports.launcher.stop(current);
       } catch (error) {
         // A pane that refused to die is the one failure an operator must be able to see: record it
@@ -167,6 +168,12 @@ export class SessionLifecycleService {
   }
 
   private async recordFailure(record: SessionLifecycleRecord, error: unknown): Promise<unknown> {
+    try {
+      await this.ports.launcher.snapshot(record);
+    } catch {
+      // Terminal failure is still durable when its optional frame capture fails; the missing artifact
+      // is served later as absent evidence rather than fabricated as a blank frame.
+    }
     await this.persist(transitionSessionRecord(record, 'failed', this.ports.clock.now(), failureMessage(error)));
     return error;
   }

@@ -4,44 +4,44 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
+  BrowserLoginStatusSchema,
   HealthViewSchema,
   LearningConfigSchema,
   LearningPatchResponseSchema,
   LearningStatusSchema,
+  NameSuggestionsSchema,
   ProposalViewSchema,
   SessionConfigSchema,
   SessionListSchema,
   SessionStateSchema,
   SessionViewSchema,
-  NameSuggestionsSchema,
-  BrowserLoginStatusSchema,
   TerminalListViewSchema,
   TerminalViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { z } from 'zod';
-import { buildWorld, start, type DaemonWorld } from '../../../bin/fyd.ts';
-import { daemonVersion } from '../../../src/lib/version.ts';
+import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import {
+  type BrowserLoginChild,
+  type BrowserLoginRuntime,
+  BrowserLoginWindowService,
+  BrowserProfileStore,
+} from '../../../src/adapters/index.ts';
+import {
+  DEFAULT_CALLSIGN_POOL,
   EXIT_ALREADY_RUNNING,
   MigrationPreflight,
-  parseSessionId,
-  DEFAULT_CALLSIGN_POOL,
   type PaneObservation,
   type ProcessInventoryPort,
   type ProcessObservation,
+  parseSessionId,
   type ResumeLauncher,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
-import {
-  BrowserLoginWindowService,
-  BrowserProfileStore,
-  type BrowserLoginChild,
-  type BrowserLoginRuntime,
-} from '../../../src/adapters/index.ts';
+import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -226,6 +226,11 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
 
   async deliver(_record: SessionLifecycleRecord, instruction: string): Promise<void> {
     this.delivered.push(instruction);
+  }
+
+  async snapshot(_record: SessionLifecycleRecord): Promise<void> {
+    // The integration world has no terminal screen; this proves lifecycle terminalization still
+    // invokes its required capture seam without touching a host pane.
   }
 
   async stop(record: SessionLifecycleRecord): Promise<void> {

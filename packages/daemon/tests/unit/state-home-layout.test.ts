@@ -13,9 +13,9 @@ import {
   parseSessionId,
   requiredLayoutDirectories,
   resolveStateHome,
+  StateHomeLayoutError,
   sessionJournalRequired,
   sessionMarkerNeedsUpgrade,
-  StateHomeLayoutError,
   temporaryFilePath,
   tryParseSessionId,
 } from '../../src/lib/index.ts';
@@ -116,6 +116,8 @@ describe('foundation paths', () => {
       config: '/tmp/fy-home/state/sessions/session-01/config.json',
       state: '/tmp/fy-home/state/sessions/session-01/state.json',
       events: '/tmp/fy-home/state/sessions/session-01/events.jsonl',
+      // Durable final-frame evidence. Scratch GC preserves this beside the session's state and journal.
+      lastSnapshot: '/tmp/fy-home/state/sessions/session-01/last-snapshot.txt',
       // The durable registration the reap sweep reads. It lives beside the session's other records
       // rather than in a daemon-wide table so a pane can only ever be claimed by the session that
       // owns this directory — the sweep kills nothing it cannot find a registration for here.
