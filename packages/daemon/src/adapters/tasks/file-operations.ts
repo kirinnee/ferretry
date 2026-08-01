@@ -50,10 +50,6 @@ export class NodeTaskFileOperations implements TaskFileOperations {
       await handle.writeFile(contents, 'utf8');
       await handle.sync();
     } catch (error) {
-      if (handle !== undefined) {
-        await handle.close().catch(() => undefined);
-        handle = undefined;
-      }
       if (created) await rm(path, { force: true }).catch(() => undefined);
       throw error;
     } finally {
