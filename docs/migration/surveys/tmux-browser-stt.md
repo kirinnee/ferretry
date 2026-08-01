@@ -34,18 +34,26 @@ is symbol-by-symbol against the code, not against names.
 | `paneShowsModelSelector`                                    | `lib/tmux/composer.ts` — **ported by this PR**                 |
 | `InjectionOutcome`                                          | `lib/tmux/delivery.ts` — **ported by this PR**                 |
 | `startupDialogAction`, `resumeMenuAction`, `StartupDialog*` | `lib/tmux/startup.ts` — **ported by this PR**                  |
-| `paneWorkCounters`, `workCountersAdvanced`                  | `lib/tmux/liveness.ts` — **ported by this PR**                 |
-| `foldStallLiveness`, `StallLivenessState`                   | `lib/tmux/liveness.ts` — **ported by this PR**                 |
-| `paneActivityLine`                                          | `lib/tmux/liveness.ts` — **ported by this PR**                 |
+| `paneWorkCounters`, `workCountersAdvanced`                  | **GAP** — see below                                            |
+| `foldStallLiveness`, `StallLivenessState`                   | **GAP** — see below                                            |
+| `paneActivityLine`                                          | **GAP** — see below                                            |
 | `contextPercentUsed`                                        | **GAP** — see below                                            |
 | `INTERACTIVE/AUTOMODE/DEFAULT/LAUNCH_READY_TIMEOUT_MS`      | **GAP (partial)** — Ferretry counts readiness attempts, not ms |
 
-**`contextPercentUsed` — GAP.** Ferretry's `lib/core/context-window.ts` computes a context
-percentage from transcript TOKEN COUNTS (`contextWindowFor` + `contextPercent`), which is a
-different source of truth. kteam additionally scrapes the harness statusline (`Context 42% used`,
-`38% context left`, `42% (735k/1M)`) so a session whose transcript has not flushed still shows
-context pressure. Not ported: nothing in Ferretry polls a pane on an interval, so there is no
-caller. It belongs with whatever unit builds the pane poller.
+**The pane-poller group — GAP, all four, and for the same reason.** `paneWorkCounters`,
+`workCountersAdvanced`, `foldStallLiveness`, `paneActivityLine` and `contextPercentUsed` are all
+readings that only mean something ACROSS FRAMES: a stall is proven by an elapsed clock or a token
+count that failed to advance between two polls, and an activity line is only worth showing while it
+is being refreshed. Ferretry captures a pane on demand — at launch, at revive, at a migration
+preflight — and never on an interval, so there is no second frame to compare against and nowhere to
+mount any of them. They belong with the unit that builds the poller (the same one that would revive
+`lib/warden/detect.ts`, which is itself unmounted).
+
+Two of them have a partial home already. `lib/core/context-window.ts` computes a context percentage
+from transcript TOKEN COUNTS, which is a different and better source of truth than the statusline
+scrape — but it goes blank when the transcript has not flushed, which is exactly when a human wants
+it. `lib/session/health/wedge.ts` classifies a wedged session from self-check ticks rather than from
+pane counters.
 
 ### 1.2 Structured-question drive — pure functions (lines 384–1343)
 
@@ -84,7 +92,7 @@ refuse on an unknown screen) applied to Codex's model picker rather than to agen
 | `state`           | `lib/tmux/controller.ts`                                                   |
 | `launch`          | `lib/tmux/controller.ts` + `adapters/session/lifecycle/…-launcher.ts`      |
 | `stop`            | `lib/tmux/controller.ts`                                                   |
-| `waitReady`       | `lib/tmux/readiness.ts` decision + both launchers — **ported by this PR**  |
+| `waitReady`       | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**    |
 | `inject`          | `lib/tmux/delivery.ts` + `adapters/tmux/pane-delivery.ts` — **this PR**    |
 | `send`            | `adapters/…/tmux-session-lifecycle-launcher.ts` `deliver` — **this PR**    |
 | `paneProcessId`   | **GAP** — `#{pane_pid}` args exist (`panePidArguments`), no caller         |
