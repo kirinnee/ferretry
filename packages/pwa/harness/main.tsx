@@ -51,6 +51,7 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
+import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
@@ -705,6 +706,30 @@ function Shell() {
   // Keep feature surfaces append-only. PWA units add one entry instead of
   // competing to edit the gallery's JSX body during integration.
   const HARNESS_CARDS: ReadonlyArray<{ label: string; render: () => ReactNode }> = [
+    {
+      label: 'Daemon pairing',
+      render: () => (
+        <Card aria-label="Daemon pairing" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[
+              { ...daemon, label: 'Harness daemon', pairedAt: HARNESS_NOW - 3_600_000, lastSelectedAt: HARNESS_NOW },
+              {
+                daemonId: 'archive-daemon' as typeof daemon.daemonId,
+                baseUrl: 'https://archive.invalid',
+                deviceToken: 'harness-archive-token',
+                label: 'Archive daemon',
+                pairedAt: HARNESS_NOW - 7_200_000,
+                lastSelectedAt: HARNESS_NOW - 1_800_000,
+              },
+            ]}
+            selectedDaemonId={daemon.daemonId}
+            onPair={async () => {}}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
     {
       label: 'Warden verdicts',
       render: () => (
