@@ -2,6 +2,7 @@ import {
   LearningActionRequestSchema,
   type LearningActionRequest,
   type LearningConfig,
+  LearningRunRequestSchema,
   type LearningPatchResponse,
   type LearningStatus,
   type ProposalState,
@@ -32,15 +33,11 @@ import {
  * mounting it turns the shipped command group from 404s into a working capability. `FileLearningStore`
  * and the policy behind it were built and fully tested by PR #13 and nothing constructed them.
  *
- * WHAT IS DELIBERATELY NOT SERVED HERE, AND WHY IT IS NOT A HOLE.
- *
- * MINING. Producing evidence means reading a finished session's transcript and its inbox, digesting
- * both, and spawning a miner agent over the result. The daemon holds none of that: no session document
- * records where a harness wrote its transcript, there is no inbox, and no session start is mounted to
- * launch a miner from. `POST /v1/learning/run` therefore REFUSES with a stated reason rather than
- * answering with a manifest reporting zero sessions — a run that scanned nothing would be indexed by
- * the client as "there is nothing to learn", which is a wrong answer rather than a missing feature.
- * `extractSession` and `applyMinerOutput` stay unmounted with it.
+ * MINING IS MOUNTED THROUGH THE SUBSYSTEM. It reads only terminal sessions from this daemon's opened
+ * state home, requires each session's exact transcript provenance, combines that transcript with the
+ * durable send inbox, and starts a bounded, self-excluding miner. Its output is aggregated only after
+ * every quote is verified against the saved human corpus. Missing or unresolved provenance is reported
+ * in the run manifest and is never treated as an empty conversation.
  *
  * THE OPERATOR'S GUIDANCE FILE. Accepting a proposal does NOT edit it. The daemon writes only inside
  * its own state home: an accepted rule is rendered as a patch DOCUMENT and recorded under
@@ -76,6 +73,8 @@ export interface LearningSubsystem {
   config(): LearningConfig;
   /** The instant a verdict is stamped with. */
   now(): string;
+  /** Runs an ingest pass and, when requested, starts a bounded miner batch. */
+  run(spawn: boolean): Promise<import('@ferretry/protocol').RunManifest>;
 }
 
 /** An instant the response schema will accept, or `undefined`. The state document is decoded from
@@ -164,8 +163,8 @@ async function status(subsystem: LearningSubsystem): Promise<ApiResponse> {
     ...(instantOrUndefined(state.lastRunAt) === undefined ? {} : { lastRunAt: state.lastRunAt }),
     pending: { total: pending.length, strong, weak: pending.length - strong },
     totals: { observations: observations.length, proposals: proposals.length, tombstones: tombstones.length },
-    // The daemon spawns no miner, so nothing it started can still be running; a run id left in the
-    // state document by another writer is the only thing that can make this true.
+    // A spawned miner outlives this request. `runningRunId` is retained as the durable extension
+    // point for a scheduler; the manual runner returns a pending manifest until ingestion completes.
     running: state.runningRunId !== undefined,
     ...(lastRun === undefined ? {} : { lastRun }),
   };
@@ -342,19 +341,16 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       handle: async context => await patch(subsystem, context),
     },
     {
-      // Mounted as a REFUSAL rather than left off the table, so `fy learning run` is told this daemon
-      // does not mine instead of receiving a 404 it can only read as version skew. See the header.
       method: 'POST',
       path: '/v1/learning/run',
       scope: 'admin',
       noStore: true,
-      handle: async () => {
-        throw new ApiError(
-          501,
-          'this daemon mounts the learning review surface but no miner: it cannot read a session transcript or spawn a mining session',
-          'mining_not_mounted',
-        );
-      },
+      handle: async context =>
+        jsonResponse(
+          await subsystem.transaction(
+            async () => await subsystem.run((await parseBody(context.request, LearningRunRequestSchema)).spawn),
+          ),
+        ),
     },
   ];
 }

@@ -68,7 +68,7 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import { FileLearningStore } from '../src/adapters/learning/index.ts';
+import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
@@ -2200,15 +2200,12 @@ const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 /**
  * The learning schedule this daemon reports.
  *
- * `enabled` is FALSE and is not configurable, because it is a fact about this build rather than a
- * setting: the daemon mounts the review surface and no miner, so there is nothing an operator could
- * switch on. Offering the flag in `config/daemon.json` would invite them to turn on a subsystem that
- * cannot come on, and `GET /v1/learning/status` would then report `enabled: true` beside a
- * `lastRunAt` that never moves. The remaining fields describe the cadence the miner will use when the
- * unit that mounts it lands, and become configuration in that same unit.
+ * Mining is now mounted for explicit runs. The configuration remains deployment-owned until a
+ * scheduler lands; reporting it enabled tells an operator that `POST /v1/learning/run` can start a
+ * bounded miner and later ingest its verified output.
  */
 const LEARNING_CONFIG = {
-  enabled: false,
+  enabled: true,
   agent: 'claude',
   intervalMinutes: 60,
   batchSize: 20,
@@ -2312,12 +2309,27 @@ function createLearningSubsystem(
   files: StateFileSystem,
   clock: SystemClock,
   serial: TaskBoardSerialExecutor,
+  sessions: SessionDirectorySubsystem,
+  transcripts: SessionTranscriptReader,
+  sessionControl: SessionControlSubsystem,
 ): LearningSubsystem {
+  const store = new FileLearningStore(paths, files, clock);
+  const miner = new LearningMiner(
+    paths,
+    files,
+    store,
+    sessions,
+    transcripts,
+    sessionControl,
+    () => LEARNING_CONFIG,
+    () => clock.now(),
+  );
   return {
-    store: new FileLearningStore(paths, files, clock),
+    store,
     transaction: async work => await serial.run('learning', work),
     config: () => LEARNING_CONFIG,
     now: () => clock.now(),
+    run: async spawn => await miner.run(spawn),
   };
 }
 
@@ -3014,7 +3026,15 @@ export function buildWorld(): DaemonWorld {
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
         names: createNameSubsystem(storage),
-        learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
+        learning: createLearningSubsystem(
+          paths,
+          stateFiles,
+          clock,
+          learningBoard,
+          sessions,
+          createTranscriptReader(storage),
+          sessionControl,
+        ),
         recommend: createRecommendSubsystem(advisorOver, usage),
         stt,
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and

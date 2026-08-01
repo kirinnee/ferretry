@@ -589,6 +589,23 @@ export function learningSubsystem(store: FakeLearningStore = new FakeLearningSto
     },
     config: () => LEARNING_CONFIG,
     now: () => AT,
+    run: async spawn => ({
+      runId: 'run-1',
+      startedAt: AT,
+      finishedAt: AT,
+      sessionsScanned: 0,
+      sessionsWithSignal: 0,
+      minerSessions: [],
+      observationsProposed: 0,
+      observationsVerified: 0,
+      rejectedQuotes: 0,
+      malformedFiles: 0,
+      proposalsCreated: 0,
+      proposalsStrengthened: 0,
+      proposalsSuppressedByTombstone: 0,
+      perHarness: { claude: 0, codex: 0 },
+      message: spawn ? 'no new terminal sessions to scan' : 'ingest-only run (no spawn requested)',
+    }),
   };
 }
 
