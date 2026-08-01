@@ -19,6 +19,7 @@ import {
   type UnifiedBrowserDependencies,
   type UnifiedBrowserSurfaceProps,
 } from '../../../src/features/browser/unified-browser-surface.tsx';
+import type { BrowserLoginSnapshot } from '../../../src/lib/browser-login.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { interact, mount, must, pressKey } from '../../support/dom.ts';
@@ -130,6 +131,71 @@ const fakeRemoteEngine = (): FakeRemoteEngine => {
     publish: async (status, busy = false) => {
       const publisher = must(apply, 'a mounted remote engine');
       await interact(() => publisher(status, busy));
+    },
+  };
+};
+
+interface ChurningRemoteEngine {
+  readonly Pane: ComponentType<RemoteBrowserPaneProps>;
+  /** Every dispatched action, tagged with the pane render that received it. */
+  readonly dispatched: { readonly action: BrowserAction; readonly generation: number }[];
+  readonly renders: () => number;
+  readonly publishes: () => number;
+  /** Change the one view fact the toolbar reads, then republish. */
+  readonly setBusy: (next: boolean) => Promise<void>;
+}
+
+/**
+ * A hosted pane that behaves as badly as a real one can.
+ *
+ * It republishes an EQUIVALENT view — the very same `status`, `busy` and `error`
+ * — through a fresh wrapper object and a fresh `runAction` after every render.
+ * That is exactly what `useRemoteBrowser` does when its host rebuilds `scope`,
+ * `daemon` or `transport` each pass: `runAction` is memoised on those props, so
+ * its identity churns and the publish effect fires again. If the surface treated
+ * a fresh wrapper as a view change, this would not terminate.
+ */
+const CHURN_LIMIT = 40;
+
+const churningRemoteEngine = (status: BrowserStatus | null): ChurningRemoteEngine => {
+  const dispatched: { action: BrowserAction; generation: number }[] = [];
+  let renders = 0;
+  let publishes = 0;
+  let busy = false;
+  let republish: (() => void) | null = null;
+
+  const Pane = ({ onStateChange }: RemoteBrowserPaneProps) => {
+    renders += 1;
+    const generation = renders;
+    const [, force] = useState(0);
+    republish = () => force(value => value + 1);
+    // Deliberately unmemoised: a brand-new dispatcher identity every render.
+    const runAction = (action: BrowserAction) => {
+      dispatched.push({ action, generation });
+    };
+    // Deliberately without a dependency array: an effect keyed on a churning
+    // `runAction` re-runs on every render, which is the shape being defended
+    // against.
+    useEffect(() => {
+      // The cap is a TEST SAFETY VALVE, not part of the behaviour. A surface
+      // that re-rendered on the wrapper would spin here forever and hang the
+      // suite instead of failing it; stopping at the cap turns that regression
+      // into a plain count mismatch.
+      if (publishes >= CHURN_LIMIT) return;
+      publishes += 1;
+      onStateChange?.({ status, busy, error: null, runAction });
+    });
+    return <div data-churning-pane={String(generation)} />;
+  };
+
+  return {
+    Pane,
+    dispatched,
+    renders: () => renders,
+    publishes: () => publishes,
+    setBusy: async (next: boolean) => {
+      busy = next;
+      await interact(() => must(republish, 'a mounted churning engine')());
     },
   };
 };
@@ -618,6 +684,148 @@ describe('the unified browser surface', () => {
     });
     expect(view.container.textContent).toContain('Open browser login window');
     expect(alertText(view.container)).toBe('');
+    await view.unmount();
+  });
+
+  it('never reports a login window into the daemon that did not ask for one', async () => {
+    const { dependencies } = engines();
+    let settleA: ((snapshot: BrowserLoginSnapshot) => void) | null = null;
+    const view = await mount(
+      surface({
+        dependencies,
+        onOpenLoginWindow: () =>
+          new Promise<BrowserLoginSnapshot>(resolve => {
+            settleA = resolve;
+          }),
+      }),
+    );
+
+    await click(named(view.container, 'Open browser login window'));
+    expect(view.container.textContent).toContain('Opening login window…');
+
+    await view.render(
+      surface({
+        daemon: daemonB,
+        scope: scopeB,
+        dependencies,
+        onOpenLoginWindow: async () => ({ state: 'opening', profilePrimed: false }),
+      }),
+    );
+
+    // Daemon B never asked for a login window, so it may not wear A's busy
+    // treatment for the frame — or the minutes — before A answers.
+    expect(view.container.textContent).toContain('Open browser login window');
+    expect(view.container.textContent).not.toContain('Opening login window…');
+    expect(alertText(view.container)).toBe('');
+
+    await interact(async () => {
+      must(settleA, 'the pending login request')({ state: 'unknown', error: 'daemon A could not be reached' });
+      await Promise.resolve();
+    });
+
+    // A's failure is A's. It must not surface as B's, and it must not clear a
+    // busy flag B never set.
+    expect(alertText(view.container)).toBe('');
+    expect(view.container.textContent).toContain('Open browser login window');
+    expect(view.container.textContent).not.toContain('Opening login window…');
+    await view.unmount();
+  });
+
+  it('fences a login request by the mount epoch, not merely by the scope it named', async () => {
+    const { dependencies } = engines();
+    let refuseA: ((reason: Error) => void) | null = null;
+    const opener = () =>
+      new Promise<BrowserLoginSnapshot>((_resolve, reject) => {
+        refuseA = reject;
+      });
+
+    const view = await mount(surface({ dependencies, onOpenLoginWindow: opener }));
+    await click(named(view.container, 'Open browser login window'));
+
+    // Away to daemon B and back again. The surface is on scope A once more, but
+    // this is a NEW episode: A was never asked a second time, so the first
+    // request's failure is no longer anyone's to show. A fence that compared
+    // scope keys rather than a monotonic epoch would let it through here.
+    await view.render(surface({ daemon: daemonB, scope: scopeB, dependencies, onOpenLoginWindow: opener }));
+    await view.render(surface({ dependencies, onOpenLoginWindow: opener }));
+
+    await interact(async () => {
+      must(refuseA, 'the pending login request')(new Error('login window is already open'));
+      await Promise.resolve();
+    });
+
+    expect(alertText(view.container)).toBe('');
+    expect(view.container.textContent).toContain('Open browser login window');
+    expect(view.container.textContent).not.toContain('Opening login window…');
+    await view.unmount();
+  });
+
+  it('settles a login request that outlives the surface without throwing', async () => {
+    const { dependencies } = engines();
+    let refuseA: ((reason: Error) => void) | null = null;
+    const view = await mount(
+      surface({
+        dependencies,
+        onOpenLoginWindow: () =>
+          new Promise<BrowserLoginSnapshot>((_resolve, reject) => {
+            refuseA = reject;
+          }),
+      }),
+    );
+
+    await click(named(view.container, 'Open browser login window'));
+    await view.unmount();
+
+    // HONEST SCOPE: React 18 ignores a write to an unmounted tree silently, so
+    // there is no rendered outcome to assert here — the unmount half of the
+    // fence is carried by `mountedRef` and by the epoch test above. What this
+    // pins is that the late rejection is caught and settles quietly instead of
+    // escaping as an unhandled rejection.
+    await interact(async () => {
+      must(refuseA, 'the pending login request')(new Error('login window is already open'));
+      await Promise.resolve();
+    });
+    expect(view.container.textContent).toBe('');
+  });
+
+  it('settles against a pane that republishes an equivalent view forever', async () => {
+    rememberBrowserEngine(scopeA, 'remote');
+    const running = runningStatus();
+    const churning = churningRemoteEngine(running);
+    const { preview } = engines();
+    const view = await mount(surface({ dependencies: { PreviewFrame: preview.Frame, RemotePane: churning.Pane } }));
+
+    // Bounded, and bounded tightly. Publish 1 is a real view (there was none)
+    // and renders the surface; publish 2 follows that render and is recognised
+    // as the same view; the address bar catching up to Chrome's page renders
+    // once more, and publish 3 is recognised too. Then it stops — an unguarded
+    // surface never reaches this line at all.
+    expect(churning.publishes()).toBe(3);
+    expect(churning.renders()).toBe(3);
+    expect(addressField(view.container).value).toBe('https://example.test/');
+
+    // The queued resume still ran, exactly once, through the pane's dispatcher.
+    expect(churning.dispatched.map(entry => entry.action)).toEqual([{ action: 'open' }]);
+
+    // A REAL view change is still a render: the guard suppresses equivalence,
+    // not updates.
+    await churning.setBusy(true);
+    expect(must(view.container.querySelector('[role="status"]'), 'the working strip').textContent).toContain(
+      'Working…',
+    );
+    // The busy publish, the render it earns, and the equivalent publish after it.
+    expect(churning.publishes()).toBe(5);
+
+    await churning.setBusy(false);
+    expect(view.container.querySelector('[role="status"]')).toBeNull();
+    const settled = churning.publishes();
+
+    // And the toolbar drives the NEWEST dispatcher, not the one that happened to
+    // be published on the last render the surface bothered to do.
+    await click(labelled(view.container, 'Reload real browser'));
+    expect(churning.dispatched.at(-1)).toEqual({ action: { action: 'reload' }, generation: churning.renders() });
+    // Dispatching is not a view change, so it costs no further publishes.
+    expect(churning.publishes()).toBe(settled);
     await view.unmount();
   });
 

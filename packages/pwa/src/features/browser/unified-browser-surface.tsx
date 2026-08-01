@@ -119,6 +119,19 @@ const resumeRemote = (memory: BrowserSessionMemory | null, destination: BrowserD
 const loginFailure = (caught: unknown): string =>
   caught instanceof Error ? caught.message : 'Could not open the browser login window.';
 
+/**
+ * Do two published pane states mean the same thing to THIS surface?
+ *
+ * The pane republishes a fresh wrapper object every time its effect runs, and a
+ * fresh `runAction` whenever its own `scope`/`daemon`/`transport` props change
+ * identity — which a host that rebuilds those props each render does on every
+ * pass. Re-rendering on the wrapper would feed that churn straight back into the
+ * pane and loop without bound. Only the three fields that reach the toolbar
+ * decide a render; the dispatcher is kept imperatively and is always the newest.
+ */
+const sameRemoteView = (previous: RemoteBrowserPaneState | null, next: RemoteBrowserPaneState): boolean =>
+  previous !== null && previous.status === next.status && previous.busy === next.busy && previous.error === next.error;
+
 /** The first value with something in it: a control's name must never read blank. */
 const firstNonEmpty = (...values: readonly (string | undefined)[]): string =>
   values.find(value => value !== undefined && value !== '') ?? '';
@@ -157,6 +170,10 @@ export function UnifiedBrowserSurface({
   const remoteRef = useRef<RemoteBrowserPaneState | null>(null);
   const pendingRemoteRef = useRef<BrowserAction | null>(null);
   const scopeRef = useRef<string | null>(null);
+  /** Bumped on every re-scope, exactly as `useRemoteBrowser` does, so async work
+   *  launched for one daemon can tell it no longer speaks for this surface. */
+  const scopeEpochRef = useRef(0);
+  const mountedRef = useRef(true);
 
   const scopeKey = daemonSessionKey(scope);
   // Applied during render, exactly as the pane and its hook do: a re-scoped
@@ -167,6 +184,7 @@ export function UnifiedBrowserSurface({
   if (scopeRef.current !== scopeKey) {
     const remounted = scopeRef.current !== null;
     scopeRef.current = scopeKey;
+    scopeEpochRef.current += 1;
     const memory = browserSessionMemory(scope);
     const restored = memory?.engine ?? 'preview';
     const history = createPreviewHistory(destination);
@@ -177,6 +195,10 @@ export function UnifiedBrowserSurface({
       setAddress(currentBrowserUrl(restored, currentPreviewEntry(history), null));
       setError(null);
       setMenuOpen(false);
+      // The busy treatment belongs to the daemon that was asked. Leaving it on
+      // would tell the reader THIS daemon is opening a login window nobody
+      // asked it for, and the old request's `finally` is now fenced off.
+      setLoginBusy(false);
     }
     incomingRef.current = destination;
     remoteRef.current = null;
@@ -204,12 +226,29 @@ export function UnifiedBrowserSurface({
   }, []);
 
   const remoteStateChanged = useCallback((state: RemoteBrowserPaneState): void => {
+    const previous = remoteRef.current;
+    // The imperative dispatcher is ALWAYS refreshed: a retained `runAction`
+    // closes over the pane's previous props, so the toolbar would drive a
+    // transport the pane has already replaced.
     remoteRef.current = state;
-    setRemote(state);
+    // Rendering, though, follows only what the toolbar reads. See
+    // `sameRemoteView`: republishing an equivalent view is not a change, and
+    // treating it as one lets the pane's own render churn loop through here.
+    if (!sameRemoteView(previous, state)) setRemote(state);
     const pending = pendingRemoteRef.current;
     if (pending === null) return;
     pendingRemoteRef.current = null;
     state.runAction(pending);
+  }, []);
+
+  // A surface that has gone away must not be told anything by a request it
+  // launched. Assigned on mount rather than only at declaration, because a
+  // remount reuses this instance's refs.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   // Remembered for the NEXT mount: which link this scope last received, so a
@@ -320,16 +359,23 @@ export function UnifiedBrowserSurface({
   };
 
   const openLoginWindow = async (open: () => Promise<BrowserLoginSnapshot>): Promise<void> => {
+    // The login window belongs to ONE paired daemon. Capture which surface and
+    // which scope asked, so a slow or failing request cannot report itself into
+    // a surface that has since been re-scoped to another daemon or unmounted —
+    // the same fence `useRemoteBrowser` puts around its own in-flight actions.
+    const epochAtLaunch = scopeEpochRef.current;
+    const stillOurs = (): boolean => mountedRef.current && epochAtLaunch === scopeEpochRef.current;
     setLoginBusy(true);
     setError(null);
     try {
       const snapshot = await open();
+      if (!stillOurs()) return;
       if (snapshot.state === 'unknown' || snapshot.state === 'error')
         setError(snapshot.error ?? 'Could not open the browser login window.');
     } catch (caught) {
-      setError(loginFailure(caught));
+      if (stillOurs()) setError(loginFailure(caught));
     } finally {
-      setLoginBusy(false);
+      if (stillOurs()) setLoginBusy(false);
     }
   };
 
