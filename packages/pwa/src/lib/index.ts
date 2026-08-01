@@ -81,6 +81,7 @@ export * from '../shell/view-tabs.tsx';
 export * from '../worklets/pcm16-worklet.ts';
 export * from './api-client.ts';
 export * from './attachment-ids.ts';
+export * from './attachment-blob-cache.ts';
 export * from './attachment-unlock.ts';
 export * from './attention-client.ts';
 export * from './attention-store.ts';
