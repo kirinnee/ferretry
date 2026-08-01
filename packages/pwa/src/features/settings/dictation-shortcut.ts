@@ -149,6 +149,78 @@ export const sameDictationShortcutTrigger = (
     ? event.key === 'Alt' || event.code === 'AltLeft' || event.code === 'AltRight'
     : event.code === binding.code || (!event.code && event.key === binding.key);
 
+/**
+ * True when the WHOLE chord matches — the primary key and exactly the declared
+ * modifiers, no more and no fewer. A keydown owns the gesture, so this is the
+ * strict half; `sameDictationShortcutTrigger` is the lenient keyup half.
+ */
+export const matchesDictationShortcut = (binding: DictationShortcutBinding, event: ShortcutKeyboardEvent): boolean => {
+  if (!sameDictationShortcutTrigger(binding, event)) return false;
+  const current = eventModifiers(event, event.code || event.key);
+  return current.length === binding.modifiers.length && binding.modifiers.every(modifier => current.includes(modifier));
+};
+
+/** A hold this long or longer finishes on release; anything shorter latches. */
+export const DICTATION_SHORTCUT_HOLD_MS = 500;
+
+export type DictationShortcutAction = 'start' | 'stop' | null;
+
+type GestureState = 'idle' | 'pressed' | 'latched' | 'stopping';
+
+/**
+ * Hybrid interaction: a hold releases to finish; a quick tap latches and the
+ * next press finishes. `currentlyActive` also lets the shortcut stop a capture
+ * that some other control started.
+ */
+export class DictationShortcutGesture {
+  readonly #holdMs: number;
+  #state: GestureState = 'idle';
+  #pressedAt = 0;
+
+  constructor(holdMs: number = DICTATION_SHORTCUT_HOLD_MS) {
+    this.#holdMs = holdMs;
+  }
+
+  keyDown(now: number, currentlyActive: boolean): DictationShortcutAction {
+    if (this.#state === 'pressed' || this.#state === 'stopping') return null;
+    if (this.#state === 'latched' || currentlyActive) {
+      this.#state = 'stopping';
+      return 'stop';
+    }
+    this.#state = 'pressed';
+    this.#pressedAt = now;
+    return 'start';
+  }
+
+  keyUp(now: number): DictationShortcutAction {
+    if (this.#state === 'stopping') {
+      this.#state = 'idle';
+      return null;
+    }
+    if (this.#state !== 'pressed') return null;
+    if (Math.max(0, now - this.#pressedAt) >= this.#holdMs) {
+      this.#state = 'idle';
+      return 'stop';
+    }
+    this.#state = 'latched';
+    return null;
+  }
+
+  blur(): DictationShortcutAction {
+    // The React phase update triggered by `start()` may not have committed yet
+    // when bare Alt immediately moves focus. Gesture state is the stronger
+    // fact: `pressed`/`latched` means this controller already issued start, so
+    // always issue the idempotent stop rather than trusting a stale phase.
+    const shouldStop = this.#state === 'pressed' || this.#state === 'latched';
+    this.#state = 'idle';
+    return shouldStop ? 'stop' : null;
+  }
+
+  reset(): void {
+    this.#state = 'idle';
+  }
+}
+
 let captureDepth = 0;
 
 /** Stops retained composer listeners from hearing keys used to test a shortcut. */
@@ -161,3 +233,6 @@ export function beginDictationShortcutCapture(): () => void {
     captureDepth = Math.max(0, captureDepth - 1);
   };
 }
+
+/** True while the picker is capturing, so no composer acts on the keys it sees. */
+export const dictationShortcutCaptureActive = (): boolean => captureDepth > 0;
