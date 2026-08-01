@@ -188,6 +188,65 @@ describe('session dashboard row leaves', () => {
     expect(text(minimal)).not.toContain('run');
   });
 
+  it('contains the compact table attention pills below sm without hiding a word of them', () => {
+    const crowded = render(
+      <LeanSessionRow
+        daemonId={DAEMON}
+        density="compact"
+        view={view('crowded', {
+          state: {
+            status: 'awaiting_user',
+            waiting: { since: '2026-08-01T11:00:00.000Z' },
+            needsHuman: 'Approve production deploy',
+          },
+        })}
+      />,
+    ).root;
+
+    // The signals cell is 28% of a table that has no horizontal scroller, so
+    // below `sm` each pill takes the full column instead of sharing a line.
+    const signals = crowded.findAllByType('td')[2];
+    if (signals === undefined) throw new Error('missing compact signals cell');
+    const stack = String(signals.findByType('div').props.className);
+    expect(stack).toContain('flex-col');
+    expect(stack).toContain('sm:flex-row');
+    expect(stack).toContain('sm:flex-wrap');
+    // The unconditional wrap is gone: it kept both pills on one narrow line.
+    expect(stack).not.toMatch(/(^|\s)flex-wrap/);
+
+    const spans = crowded.findAllByType('span');
+    const pills = spans.filter(node => String(node.props.className).startsWith('kt-badge'));
+    expect(pills).toHaveLength(2);
+    for (const pill of pills) {
+      // Bounded by the cell, and never shortened — `truncate` would drop the
+      // word the reader needs to act on.
+      expect(String(pill.props.className)).toContain('max-w-full');
+      expect(String(pill.props.className)).not.toContain('truncate');
+      expect(String(pill.props.className)).not.toContain('hidden');
+    }
+
+    // `.kt-badge` sets `white-space: nowrap` at the same specificity as a
+    // utility and wins on source order, so the reflow has to live on the label.
+    const labels = spans.filter(node => String(node.props.className).includes('whitespace-normal'));
+    expect(labels.map(label => text(label))).toEqual(['parked', 'needs human']);
+    for (const label of labels) {
+      expect(String(label.props.className)).toBe('whitespace-normal sm:whitespace-nowrap');
+    }
+
+    // The 44px panel row is a different path that already fits its pills, and
+    // the containment must not have cost it either its height or its layout.
+    const card = render(
+      <LeanSessionCard
+        daemonId={DAEMON}
+        density="compact"
+        view={view('lean-crowded', { state: { needsHuman: 'Approve production deploy' } })}
+      />,
+    ).root;
+    expect(String(card.findByType('a').props.className)).toContain('min-h-[44px]');
+    const flagRow = card.findAllByType('span').find(node => String(node.props.className).includes('ml-auto'));
+    expect(String(flagRow?.props.className)).toContain('shrink-0');
+  });
+
   it('renders compact-card status and flag exceptions while minimal mounts neither', () => {
     const compact = render(
       <LeanSessionCard

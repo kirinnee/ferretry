@@ -56,14 +56,35 @@ export function Th({ children, className = '' }: { readonly children: ReactNode;
   );
 }
 
-/** The declared park and an explicit human escalation are independently meaningful. */
+/**
+ * The declared park and an explicit human escalation are independently
+ * meaningful.
+ *
+ * `.kt-badge` is `white-space: nowrap`, and the compact table's status column
+ * is 28% of its width — at 390px that is a 102px cell holding a 139px "needs
+ * human" pill, which escaped the panel and was clipped by its edge. Below `sm`
+ * the label may therefore reflow onto a second line inside the cell. Nothing is
+ * truncated or dropped: the words wrap, the pill grows downward, and the
+ * one-line pill is restored at `sm` and up, where the column is wide enough.
+ *
+ * The override lives on an inner span, not on the pill: `.kt-badge` and a
+ * `whitespace-*` utility are both one class, so the component rule wins on
+ * source order and a utility on the pill silently does nothing — it shrinks the
+ * box and lets the text keep spilling.
+ */
+const ATTENTION_LABEL = 'whitespace-normal sm:whitespace-nowrap';
+
 export function AttentionFlags({ view }: { readonly view: SessionView }) {
   return (
     <>
-      {view.state.waiting && <Badge tone="warn">parked</Badge>}
+      {view.state.waiting && (
+        <Badge tone="warn" className="max-w-full">
+          <span className={ATTENTION_LABEL}>parked</span>
+        </Badge>
+      )}
       {view.state.needsHuman && (
-        <Badge tone="err" title={view.state.needsHuman}>
-          needs human
+        <Badge tone="err" title={view.state.needsHuman} className="max-w-full">
+          <span className={ATTENTION_LABEL}>needs human</span>
         </Badge>
       )}
     </>
@@ -193,7 +214,9 @@ export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daem
       </td>
       {density === 'compact' && (
         <td>
-          <div className="flex min-w-0 flex-wrap items-center gap-xs">
+          {/* Stacked below `sm` so each pill owns the full column; the wrapped
+              row returns at `sm`, where two pills fit side by side again. */}
+          <div className="flex min-w-0 flex-col items-start gap-xs sm:flex-row sm:flex-wrap sm:items-center">
             {!view.state.waiting && (
               <Badge tone={dashboardTone(view.state.status)} title={view.state.status} className="max-w-full truncate">
                 {statusWord(view.state.status)}
