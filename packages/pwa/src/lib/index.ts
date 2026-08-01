@@ -56,6 +56,7 @@ export * from '../hooks/use-keyboard-open.ts';
 export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-live-clock.ts';
 export * from '../hooks/use-pins.ts';
+export * from '../hooks/use-pull-to-search.ts';
 export * from '../hooks/use-dictation-shortcut.ts';
 export * from '../hooks/use-remote-browser.ts';
 export * from '../hooks/use-stt-settings.ts';
