@@ -178,6 +178,11 @@ try {
         process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
       }
 
+      const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
+      await page.getByLabel('Send ledger rows').screenshot({ path: ledgerTarget });
+      process.stdout.write(`📸 send ledger -> ${ledgerTarget}
+`);
+
       // A tool run's EXPANDED state is the other half of its design — the slim
       // chrome line is what it looks like at rest, and the code surfaces only
       // exist after a deliberate click — so it gets its own pass.
