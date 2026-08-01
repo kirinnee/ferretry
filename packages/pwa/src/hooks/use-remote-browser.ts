@@ -6,15 +6,18 @@
  * daemons while keeping the same session id, and the previous daemon's Chrome
  * would then be shown — and driven — under the new daemon's name.
  *
- * So the scope key is `(daemonId, sessionId)`. Changing it clears the snapshot
- * synchronously and invalidates every request already in flight, rather than
- * letting a late response from daemon A land on daemon B's screen.
+ * So the liveness key is the SCOPE PLUS THE CONNECTION — `(daemonId,
+ * sessionId)` is not the whole of it. A daemon id is durable across a re-pair,
+ * which is precisely when the base URL or the device token rotates, so an
+ * id-only key would leave a rotation invisible and let the old credential's
+ * late answer land here. Any change to either clears the snapshot synchronously
+ * and invalidates every request already in flight.
  */
 
 import type { BrowserAction, BrowserActionResult, BrowserStatus } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { fetchRemoteBrowserStatus, runRemoteBrowserAction } from '../lib/remote-browser.ts';
 
@@ -82,15 +85,25 @@ export function useRemoteBrowser({
   const [busy, setBusy] = useState(false);
   const generationRef = useRef(0);
   const mutationsRef = useRef(0);
-  const scopeRef = useRef<string | null>(null);
+  const pairingRef = useRef<{ readonly connection: DaemonConnection; readonly scope: DaemonSessionScope } | null>(null);
   const scopeEpochRef = useRef(0);
 
-  const scopeKey = JSON.stringify([daemon.daemonId, scope.daemonId, scope.sessionId]);
+  // The liveness identity is the CONNECTION plus the scope, not `(daemonId,
+  // sessionId)`. A re-pair keeps the daemon id and rotates the base URL and/or
+  // the device token, so a key built from ids alone would let the previous
+  // pairing's answer commit here as though this pairing had produced it.
+  const previousPairing = pairingRef.current;
+  const rescoped =
+    previousPairing === null ||
+    previousPairing.scope.daemonId !== scope.daemonId ||
+    previousPairing.scope.sessionId !== scope.sessionId ||
+    !sameDaemonConnection(previousPairing.connection, daemon);
 
-  // Applied during render: a re-scoped pane must never paint the previous
-  // daemon's lifecycle state, not even for the frame before its first response.
-  if (scopeRef.current !== scopeKey) {
-    scopeRef.current = scopeKey;
+  // Applied during render: a re-scoped or re-paired pane must never paint the
+  // previous connection's lifecycle state, not even for the frame before its
+  // first response.
+  if (rescoped) {
+    pairingRef.current = { connection: daemon, scope };
     scopeEpochRef.current += 1;
     generationRef.current += 1;
     mutationsRef.current = 0;
@@ -123,12 +136,12 @@ export function useRemoteBrowser({
   const runAction = useCallback(
     (action: BrowserAction) => {
       const generation = ++generationRef.current;
-      // The mutation counter is reset to 0 on every re-scope and thereafter
-      // belongs to the new scope. An old daemon's late finally must not settle
-      // that new scope's accounting — it would decrement a counter it never
-      // incremented and could clear busy while a new-scope action is in flight.
-      // Capturing the scope at launch makes the finalizer scope-safe without
-      // weakening the generation fence on commit/fail above.
+      // The mutation counter is reset to 0 on every re-scope AND every re-pair,
+      // and thereafter belongs to the new pairing. An old connection's late
+      // finally must not settle that pairing's accounting — it would decrement
+      // a counter it never incremented and could clear busy while a new
+      // action is in flight. Capturing the epoch at launch makes the finalizer
+      // safe without weakening the generation fence on commit/fail above.
       const scopeEpochAtLaunch = scopeEpochRef.current;
       mutationsRef.current += 1;
       setBusy(true);

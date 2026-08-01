@@ -21,12 +21,18 @@
  * NO ENGINE IS FORKED HERE. The remote half is `RemoteBrowserPane` with its own
  * navigation row switched off: the toolbar dispatches through the pane's single
  * `useRemoteBrowser` instance, so there is one poll, one snapshot and one Chrome
- * per `(daemonId, sessionId)` — never a second transport racing the first.
+ * per pairing — never a second transport racing the first.
  *
  * MULTI-DAEMON. The daemon is an explicit runtime prop and its scope must name
  * it; a mismatched pair is refused before any transport exists. Nothing here
  * reads the page origin, a build-time default or a bundled daemon identity, and
  * the stream ticket stays a runtime value that may honestly be `null`.
+ *
+ * A RE-PAIR IS A LIVENESS BOUNDARY, NOT AN IDENTITY ONE. `daemonId` survives a
+ * re-pair while the base URL and device token rotate, so the reader is looking
+ * at the same session on the same daemon over a NEW grant. The engine memory,
+ * keyed by `(daemonId, sessionId)`, is durable and stays; a login request, a
+ * published pane view and the pixels behind it are credentialed and do not.
  */
 
 import type { BrowserAction } from '@ferretry/protocol';
@@ -44,7 +50,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type ComponentType, type FormEvent } from 'react';
 
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { browserDestination, type BrowserDestination } from './in-app-browser-model.ts';
@@ -169,44 +175,68 @@ export function UnifiedBrowserSurface({
   const incomingRef = useRef<BrowserDestination | null>(destination);
   const remoteRef = useRef<RemoteBrowserPaneState | null>(null);
   const pendingRemoteRef = useRef<BrowserAction | null>(null);
-  const scopeRef = useRef<string | null>(null);
-  /** Bumped on every re-scope, exactly as `useRemoteBrowser` does, so async work
-   *  launched for one daemon can tell it no longer speaks for this surface. */
-  const scopeEpochRef = useRef(0);
+  const pairingRef = useRef<{ readonly connection: DaemonConnection; readonly scopeKey: string } | null>(null);
+  /** Bumped on every re-scope AND every re-pair, exactly as `useRemoteBrowser`
+   *  does, so credentialed work launched for one pairing can tell it no longer
+   *  speaks for this surface. */
+  const livenessEpochRef = useRef(0);
   const mountedRef = useRef(true);
 
   const scopeKey = daemonSessionKey(scope);
-  // Applied during render, exactly as the pane and its hook do: a re-scoped
-  // surface must never show the previous daemon's engine, position or address,
-  // not even for the frame before the new daemon answers. The engine comes back
-  // from the NEW scope's memory, because the remote engine is a Chrome process
-  // on one daemon and the other has none.
-  if (scopeRef.current !== scopeKey) {
-    const remounted = scopeRef.current !== null;
-    scopeRef.current = scopeKey;
-    scopeEpochRef.current += 1;
+  const previousPairing = pairingRef.current;
+  // TWO DIFFERENT IDENTITIES, and conflating them is the bug this separates.
+  //
+  //   IDENTITY  — `(daemonId, sessionId)`. What the reader is looking at. It
+  //     alone selects the durable engine memory, and only a change to it may
+  //     discard the preview reader's own client-side position.
+  //   LIVENESS  — that scope PLUS the connection. A daemon id is DURABLE ACROSS
+  //     A RE-PAIR, which is exactly when the base URL or the device token
+  //     rotates; nothing holding the old credential may report into the new
+  //     pairing, even though the reader is looking at the same session.
+  const rescoped = previousPairing !== null && previousPairing.scopeKey !== scopeKey;
+  const repaired = previousPairing !== null && !sameDaemonConnection(previousPairing.connection, daemon);
+  // Applied during render, exactly as the pane and its hook do: a re-scoped or
+  // re-paired surface must never show the previous connection's position, not
+  // even for the frame before the new one answers.
+  if (previousPairing === null || rescoped || repaired) {
+    pairingRef.current = { connection: daemon, scopeKey };
+    livenessEpochRef.current += 1;
     const memory = browserSessionMemory(scope);
     const restored = memory?.engine ?? 'preview';
     const history = createPreviewHistory(destination);
-    if (remounted) {
+    if (rescoped || repaired) {
+      // Liveness, for both: the remote view came from a connection that no
+      // longer speaks here, and the busy treatment belongs to the daemon that
+      // was actually asked. Leaving it on would tell the reader THIS pairing is
+      // opening a login window nobody asked it for; the old request's `finally`
+      // is fenced off by the epoch above.
+      setRemote(null);
+      setError(null);
+      setLoginBusy(false);
+      setMenuOpen(false);
+      remoteRef.current = null;
+    }
+    if (rescoped) {
+      // Identity, only for a genuine re-scope. A re-pair is the SAME session on
+      // the same daemon id, so its preview history and remembered engine are
+      // still the reader's place and are deliberately left standing.
       setEngine(restored);
       setPreviewHistory(history);
-      setRemote(null);
       setAddress(currentBrowserUrl(restored, currentPreviewEntry(history), null));
-      setError(null);
-      setMenuOpen(false);
-      // The busy treatment belongs to the daemon that was asked. Leaving it on
-      // would tell the reader THIS daemon is opening a login window nobody
-      // asked it for, and the old request's `finally` is now fenced off.
-      setLoginBusy(false);
+      incomingRef.current = destination;
+      // A remembered remote engine survives a phone sheet unmount: reattach to
+      // the page Chrome was left on, and adopt the incoming link only when the
+      // app changed it while this scope had no surface. The pane is not mounted
+      // yet, so the action waits for its dispatcher rather than taking a second
+      // route. A re-pair queues nothing: the pane re-polls the new connection
+      // on its own, and re-opening Chrome is not something the reader asked for.
+      pendingRemoteRef.current = restored === 'remote' ? resumeRemote(memory, destination) : null;
     }
-    incomingRef.current = destination;
-    remoteRef.current = null;
-    // A remembered remote engine survives a phone sheet unmount: reattach to the
-    // page Chrome was left on, and adopt the incoming link only when the app
-    // changed it while this scope had no surface. The pane is not mounted yet,
-    // so the action waits for its dispatcher instead of taking a second route.
-    pendingRemoteRef.current = restored === 'remote' ? resumeRemote(memory, destination) : null;
+    if (previousPairing === null) {
+      incomingRef.current = destination;
+      remoteRef.current = null;
+      pendingRemoteRef.current = restored === 'remote' ? resumeRemote(memory, destination) : null;
+    }
   }
 
   const previewEntry = currentPreviewEntry(previewHistory);
@@ -363,8 +393,8 @@ export function UnifiedBrowserSurface({
     // which scope asked, so a slow or failing request cannot report itself into
     // a surface that has since been re-scoped to another daemon or unmounted —
     // the same fence `useRemoteBrowser` puts around its own in-flight actions.
-    const epochAtLaunch = scopeEpochRef.current;
-    const stillOurs = (): boolean => mountedRef.current && epochAtLaunch === scopeEpochRef.current;
+    const epochAtLaunch = livenessEpochRef.current;
+    const stillOurs = (): boolean => mountedRef.current && epochAtLaunch === livenessEpochRef.current;
     setLoginBusy(true);
     setError(null);
     try {

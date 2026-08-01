@@ -20,6 +20,13 @@ const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.exa
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b' });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
+/** Daemon A after a re-pair: durable id and session, a rotated device grant. */
+const daemonARepaired = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a.example.test',
+  deviceToken: 'a2',
+});
+const scopeARepaired = daemonSessionScope(daemonARepaired, 'same-session');
 
 const runningStatus = (viewportWidth = 640) =>
   ({
@@ -422,6 +429,60 @@ describe('RemoteBrowserPane scoping', () => {
       releaseLate?.(late);
     });
     // The late daemon-A snapshot is dropped rather than painted over daemon B.
+    expect(json(renderer)).not.toContain('1024×480');
+    expect(json(renderer)).toContain('800×480');
+  });
+
+  it('clears the previous grant and rejects its late work when the same id is re-paired', async () => {
+    const first = runningStatus(640);
+    const second = runningStatus(800);
+    const late = runningStatus(1024);
+    const stream = sockets();
+    const poll = pollSeam();
+    let releaseLate: ((status: BrowserStatus) => void) | undefined;
+    let reads = 0;
+    const transport: RemoteBrowserTransport = {
+      // Keyed by the GRANT, not the id: both pairings answer to `daemon-a`, so
+      // an id-only test would not be able to tell them apart either.
+      readStatus: async (daemon: DaemonConnection) => {
+        if (daemon.deviceToken !== daemonA.deviceToken) return second;
+        reads += 1;
+        if (reads === 1) return first;
+        return await new Promise<BrowserStatus>(resolve => {
+          releaseLate = resolve;
+        });
+      },
+      runAction: async () => ({ status: first }),
+    };
+    const paneFor = (daemon: DaemonConnection, scope: DaemonSessionScope) => (
+      <RemoteBrowserPane
+        daemon={daemon}
+        scope={scope}
+        streamTicket="ticket"
+        transport={transport}
+        schedule={poll.schedule}
+        socketFactory={stream.factory}
+        createObjectUrl={() => `blob:${daemon.deviceToken}`}
+        revokeObjectUrl={() => undefined}
+      />
+    );
+    const renderer = await mountPane(paneFor(daemonA, scopeA));
+    run(() => stream.opened[0]?.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(json(renderer)).toContain('blob:a');
+    expect(json(renderer)).toContain('640×480');
+
+    poll.tick();
+    await runAsync(async () => renderer.update(paneFor(daemonARepaired, scopeARepaired)));
+
+    // The old grant's socket is detached and its last frame is gone, even though
+    // `(daemonId, sessionId)` never changed.
+    expect(stream.opened[0]?.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+    expect(json(renderer)).not.toContain('blob:a"');
+    expect(json(renderer)).toContain('800×480');
+
+    await runAsync(async () => {
+      releaseLate?.(late);
+    });
     expect(json(renderer)).not.toContain('1024×480');
     expect(json(renderer)).toContain('800×480');
   });

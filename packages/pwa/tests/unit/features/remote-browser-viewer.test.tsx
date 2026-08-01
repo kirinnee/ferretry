@@ -3,7 +3,7 @@ import type { BrowserInputEvent, BrowserStatus } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useLayoutEffect } from 'react';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../../../src/features/browser/remote-browser-viewer.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
@@ -138,6 +138,51 @@ describe('RemoteBrowserViewer', () => {
     expect(sockets).toHaveLength(2);
     expect(sockets[0]?.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
     expect(JSON.stringify(renderer.toJSON())).not.toContain('blob:daemon-a');
+  });
+
+  it('drops the previous grant’s pixels and its socket work when the same id is re-paired', () => {
+    const sockets: FakeSocket[] = [];
+    const socketFactory = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    // Same durable id, same session, rotated device grant. `(daemonId,
+    // sessionId)` is byte-identical across this render, so only comparing the
+    // connection can see it.
+    const daemonARepaired = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'a2',
+    });
+    const viewerFor = (daemon: DaemonConnection, blob: string) => (
+      <RemoteBrowserViewer
+        daemon={daemon}
+        scope={daemonSessionScope(daemon, 'same-session')}
+        streamTicket="ticket"
+        status={running('same-session')}
+        socketFactory={socketFactory}
+        createObjectUrl={() => blob}
+        revokeObjectUrl={() => undefined}
+      />
+    );
+    const renderer = render(viewerFor(daemonA, 'blob:old-grant'));
+    run(() => sockets[0]?.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(JSON.stringify(renderer.toJSON())).toContain('blob:old-grant');
+
+    run(() => renderer.update(viewerFor(daemonARepaired, 'blob:new-grant')));
+    expect(sockets).toHaveLength(2);
+    expect(sockets[0]?.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+    // Cleared during the rotating render itself, so the old grant's pixels are
+    // never painted once under the new grant's identity.
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('blob:old-grant');
+
+    // React tears an effect down AFTER the render that superseded it, so the old
+    // socket can still deliver here. It must not be able to repaint.
+    run(() => sockets[0]?.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('blob:old-grant');
+    run(() => sockets[1]?.emit('message', new MessageEvent('message', { data: frame('page-a') })));
+    expect(JSON.stringify(renderer.toJSON())).toContain('blob:new-grant');
   });
 
   it('renders only the active page frame and exposes a stalled stream instead of freezing silently', async () => {

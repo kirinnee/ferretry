@@ -30,6 +30,22 @@ const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.exa
 /** The adversarial pair: one session id, two daemons, two different Chromes. */
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
+/**
+ * Daemon A AFTER A RE-PAIR: the durable id and the session are unchanged, so
+ * `(daemonId, sessionId)` cannot see the rotation. Only the grant moved.
+ */
+const daemonARotatedToken = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a.example.test',
+  deviceToken: 'a2',
+});
+const daemonAMovedUrl = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a2.example.test',
+  deviceToken: 'a',
+});
+const scopeARotatedToken = daemonSessionScope(daemonARotatedToken, 'same-session');
+const scopeAMovedUrl = daemonSessionScope(daemonAMovedUrl, 'same-session');
 
 const link = (href: string): BrowserDestination => must(browserDestination(href), `destination for ${href}`);
 
@@ -786,6 +802,70 @@ describe('the unified browser surface', () => {
       await Promise.resolve();
     });
     expect(view.container.textContent).toBe('');
+  });
+
+  it('fences a login request across a same-id re-pair, and keeps the reader’s place', async () => {
+    rememberBrowserEngine(scopeA, 'remote');
+    const { remote, dependencies } = engines();
+    let settleA: ((snapshot: BrowserLoginSnapshot) => void) | null = null;
+    const opener = () =>
+      new Promise<BrowserLoginSnapshot>(resolve => {
+        settleA = resolve;
+      });
+
+    const view = await mount(surface({ dependencies, onOpenLoginWindow: opener }));
+    await remote.publish(runningStatus({ url: 'https://old-grant.test/' }));
+    expect(addressField(view.container).value).toBe('https://old-grant.test/');
+
+    const menu = await openMenu(view.container);
+    await click(named(menu, 'Preview'));
+    await click(named(view.container, 'Open browser login window'));
+    expect(view.container.textContent).toContain('Opening login window…');
+
+    // THE RE-PAIR. Same daemon id, same session, rotated device token — so the
+    // engine memory key is untouched and nothing about the reader's identity
+    // changed. Only the grant did.
+    await view.render(
+      surface({ daemon: daemonARotatedToken, scope: scopeARotatedToken, dependencies, onOpenLoginWindow: opener }),
+    );
+    expect(view.container.textContent).not.toContain('Opening login window…');
+    expect(alertText(view.container)).toBe('');
+
+    // The request the OLD token started answers. It was authorised by a grant
+    // this pairing never made, so it may not speak here.
+    await interact(async () => {
+      must(settleA, 'the pending login request')({ state: 'unknown', error: 'the old grant was revoked' });
+      await Promise.resolve();
+    });
+    expect(alertText(view.container)).toBe('');
+    expect(view.container.textContent).not.toContain('Opening login window…');
+
+    // Durable memory is NOT liveness: the engine the reader chose for this
+    // (daemonId, sessionId) survives the re-pair.
+    expect(browserEngineForSession(scopeARotatedToken)).toBe('preview');
+    rememberBrowserEngine(scopeARotatedToken, 'remote');
+    expect(browserEngineForSession(scopeA)).toBe('remote');
+    await view.unmount();
+  });
+
+  it('drops the previous grant’s remote view when only the base URL moves', async () => {
+    rememberBrowserEngine(scopeA, 'remote');
+    const { remote, dependencies } = engines();
+    const view = await mount(surface({ dependencies }));
+    await remote.publish(runningStatus({ url: 'https://old-grant.test/', title: 'Old grant' }));
+    expect(addressField(view.container).value).toBe('https://old-grant.test/');
+
+    // A re-paired base URL is the same liveness boundary as a rotated token:
+    // the page behind the old origin is not this pairing's page.
+    await view.render(surface({ daemon: daemonAMovedUrl, scope: scopeAMovedUrl, dependencies }));
+    expect(addressField(view.container).value).toBe('');
+    expect((await openMenu(view.container)).textContent).toContain('Shared Chrome · persistent session');
+    await closeMenu(view.container);
+    // The engine itself is durable and still selected, so the pane stays mounted
+    // for the new grant rather than falling back to the preview reader.
+    expect(remote.mounted()).toBe(true);
+    expect(remote.props().daemon).toBe(daemonAMovedUrl);
+    await view.unmount();
   });
 
   it('settles against a pane that republishes an equivalent view forever', async () => {

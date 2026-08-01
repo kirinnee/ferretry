@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { daemonBaseUrl, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
+import { daemonBaseUrl, daemonConnection, daemonId, sameDaemonConnection } from '../../src/lib/daemon-connection.ts';
 
 describe('daemon connection', () => {
   it('should preserve a runtime daemon identity and normalize its URL', () => {
@@ -42,5 +42,47 @@ describe('daemon connection', () => {
     should(queried).throw('daemon URL may not include credentials, a query, or a fragment');
     should(fragmented).throw('daemon URL may not include credentials, a query, or a fragment');
     should(pathPrefixed).throw('daemon URL must be an origin without a path');
+  });
+  it('should treat a rotated grant as a different connection and an equivalent rebuild as the same one', () => {
+    // Arrange
+    const paired = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'grant-1',
+    });
+    const rebuilt = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'grant-1',
+    });
+    // A re-pair keeps the durable id and moves exactly one of the other two.
+    const rotatedToken = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'grant-2',
+    });
+    const movedUrl = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a2.example.test',
+      deviceToken: 'grant-1',
+    });
+    const otherDaemon = daemonConnection({
+      daemonId: 'daemon-b',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'grant-1',
+    });
+
+    // Assert
+    should(sameDaemonConnection(paired, paired)).be.true();
+    // Field equality, not object identity: a host that rebuilds this each
+    // render has not re-paired, and blanking its panes would be a bug.
+    should(sameDaemonConnection(paired, rebuilt)).be.true();
+    // The durable id alone cannot answer the question — all three of these
+    // share it, and two of them are new grants.
+    should(sameDaemonConnection(paired, rotatedToken)).be.false();
+    should(sameDaemonConnection(paired, movedUrl)).be.false();
+    should(sameDaemonConnection(paired, otherDaemon)).be.false();
+    // Symmetric, so no caller has to remember which side is the incumbent.
+    should(sameDaemonConnection(rotatedToken, paired)).be.false();
   });
 });

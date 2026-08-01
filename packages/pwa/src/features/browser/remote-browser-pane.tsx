@@ -31,7 +31,7 @@ import {
   type RemoteBrowserTransport,
   useRemoteBrowser,
 } from '../../hooks/use-remote-browser.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { isLocalPasteChord, type RemoteViewportMode, remoteViewportForContainer } from '../../lib/remote-browser.ts';
 import {
@@ -200,16 +200,24 @@ export function RemoteBrowserPane({
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const lastViewportRef = useRef('');
-  const scopeRef = useRef<string | null>(null);
+  const pairingRef = useRef<{ readonly connection: DaemonConnection; readonly scope: DaemonSessionScope } | null>(null);
   const scopeEpochRef = useRef(0);
 
-  const scopeKey = JSON.stringify([daemon.daemonId, scope.daemonId, scope.sessionId]);
+  // The identity that decides liveness is the CONNECTION plus the scope. A
+  // re-pair keeps `daemonId` and rotates the base URL or the device token, so
+  // an id-only key would leave the pane showing the previous pairing's chrome.
+  const previousPairing = pairingRef.current;
+  const rescoped =
+    previousPairing === null ||
+    previousPairing.scope.daemonId !== scope.daemonId ||
+    previousPairing.scope.sessionId !== scope.sessionId ||
+    !sameDaemonConnection(previousPairing.connection, daemon);
   // Applied during render, exactly as the hook clears its snapshot: the chrome
-  // must not still claim "Live" for one frame after the pane is re-scoped, and
-  // the previous daemon's negotiated viewport must not suppress the first
-  // resize sent to the new one.
-  if (scopeRef.current !== scopeKey) {
-    scopeRef.current = scopeKey;
+  // must not still claim "Live" for one frame after the pane is re-scoped or
+  // re-paired, and the previous connection's negotiated viewport must not
+  // suppress the first resize sent to the new one.
+  if (rescoped) {
+    pairingRef.current = { connection: daemon, scope };
     scopeEpochRef.current += 1;
     lastViewportRef.current = '';
     if (displayState !== 'idle') setDisplayState('idle');
