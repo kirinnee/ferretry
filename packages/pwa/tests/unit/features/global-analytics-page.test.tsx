@@ -5,6 +5,7 @@ import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import {
   GlobalAnalyticsPage,
   GLOBAL_ANALYTICS_DEFAULT_QUERY,
+  GLOBAL_ANALYTICS_STARTERS,
 } from '../../../src/features/analytics/global-analytics-page.tsx';
 import { render, run, runAsync } from '../../support/react.ts';
 
@@ -86,6 +87,60 @@ describe('GlobalAnalyticsPage', () => {
     });
     expect(calls.at(-1)).toEqual({ daemon: 'daemon-a', query: 'sum by (week)' });
     expect(JSON.stringify(renderer.toJSON())).toContain('No indexed session matched this query.');
+  });
+
+  it('renders the query controls as kteam does: default-size outline buttons with 44px touch targets', async () => {
+    // Arrange
+    const renderer = render(<GlobalAnalyticsPage connection={daemonA} requestAnalytics={async () => aggregate()} />);
+    await runAsync(async () => await Promise.resolve());
+
+    // Act — the query controls, straight off the host elements
+    const starters = renderer.root.findByProps({ role: 'toolbar' }).findAllByType('button');
+    const submit = renderer.root.findAllByType('button').filter(button => button.props.type === 'submit');
+
+    // Assert — one control per starter plus Run
+    expect(starters).toHaveLength(GLOBAL_ANALYTICS_STARTERS.length);
+    expect(submit).toHaveLength(1);
+
+    // Assert — starters are `.kt-btn` at the DEFAULT size: `kt-btn--sm` would
+    // override the themed control height, inline padding and font size.
+    for (const starter of starters) {
+      expect(starter.props.className).toBe('kt-btn min-h-[44px] shrink-0 text-xs');
+      expect(starter.props.className).not.toContain('kt-btn--sm');
+      expect(starter.props['data-variant']).toBeUndefined();
+    }
+
+    // Assert — Run is the resting outline style, not an accent-filled primary
+    expect(submit[0]?.props.className).toBe('kt-btn min-h-[44px] shrink-0');
+    expect(submit[0]?.props['data-variant']).toBeUndefined();
+  });
+
+  it('labels each starter with its own query and keeps the hints as titles', async () => {
+    // Arrange
+    const calls: (string | undefined)[] = [];
+    const renderer = render(
+      <GlobalAnalyticsPage
+        connection={daemonA}
+        requestAnalytics={async (_daemon, query) => {
+          calls.push(query);
+          return aggregate(query);
+        }}
+      />,
+    );
+    await runAsync(async () => await Promise.resolve());
+
+    // Act — click every starter in turn
+    const starters = renderer.root.findByProps({ role: 'toolbar' }).findAllByType('button');
+    for (const [index, starter] of starters.entries()) {
+      expect(starter.props.title).toBe(GLOBAL_ANALYTICS_STARTERS[index]?.hint);
+      await runAsync(async () => {
+        starter.props.onClick();
+        await Promise.resolve();
+      });
+    }
+
+    // Assert — the mount request, then one request per starter, in order
+    expect(calls).toEqual([GLOBAL_ANALYTICS_DEFAULT_QUERY, ...GLOBAL_ANALYTICS_STARTERS.map(starter => starter.query)]);
   });
 
   it('submits trimmed blank input, loads autocomplete values, and reports failed requests', async () => {

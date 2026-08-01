@@ -9,15 +9,12 @@ import { fetchAnalytics } from './analytics-api.ts';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
 import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
 import { AnalyticsTimeSeries } from './analytics-time-series.tsx';
+import type { AnalyticsStarter } from './session-analytics-query.ts';
 
 export const GLOBAL_ANALYTICS_DEFAULT_QUERY = 'sum by (day)';
 
-export interface AnalyticsStarter {
-  readonly id: string;
-  readonly label: string;
-  readonly query: string;
-  readonly hint: string;
-}
+/** One starter shape serves both analytics destinations; it is declared with the pure query grammar. */
+export type { AnalyticsStarter } from './session-analytics-query.ts';
 
 export const GLOBAL_ANALYTICS_STARTERS: readonly AnalyticsStarter[] = [
   {
@@ -148,11 +145,13 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
             role="toolbar"
           >
             {GLOBAL_ANALYTICS_STARTERS.map(starter => (
+              // `outline` at the DEFAULT size: kteam's starters are a bare
+              // `kt-btn`, and `size="sm"` would swap the control height,
+              // inline padding and font size for the compact set.
               <Button
                 key={starter.id}
                 type="button"
                 variant="outline"
-                size="sm"
                 className="min-h-[44px] shrink-0 text-xs"
                 title={starter.hint}
                 onClick={() => {
@@ -186,7 +185,10 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               loadValues={loadValues}
               placeholder={GLOBAL_ANALYTICS_DEFAULT_QUERY}
             />
-            <Button type="submit" variant="primary" disabled={querying} className="min-h-[44px] shrink-0">
+            {/* Run is the DEFAULT outline control, exactly as in kteam. A primary
+                fill would make the query box the loudest thing on a page whose
+                subject is the result below it. */}
+            <Button type="submit" variant="outline" disabled={querying} className="min-h-[44px] shrink-0">
               {querying ? (
                 <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
               ) : (
