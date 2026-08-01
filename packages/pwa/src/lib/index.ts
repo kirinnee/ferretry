@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../components/attachment-gallery.tsx';
 export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/composer-autocomplete.ts';
 export * from '../components/composer-runtime.tsx';
@@ -8,6 +9,10 @@ export * from '../components/dictation-control.tsx';
 export * from '../components/dictation-sheet.tsx';
 export * from '../components/input-waveform.tsx';
 export * from '../components/file-tree.tsx';
+export * from '../components/files-resource.ts';
+export * from '../components/files-tab.tsx';
+export * from '../components/files-views.tsx';
+export * as filesTabModel from '../components/files-tab-model.ts';
 export * from '../components/markdown.tsx';
 export * as fileTreeModel from '../components/file-tree-model.ts';
 export * as filesApi from '../components/files-api.ts';
@@ -20,6 +25,8 @@ export * from '../components/session-chat-parts.tsx';
 export * from '../components/session-command-controls.tsx';
 export * from '../components/session-header.tsx';
 export * from '../components/session-tasks.tsx';
+export * from '../components/terminal-snapshot.tsx';
+export * as terminalSnapshotModel from '../components/terminal-snapshot-model.ts';
 export * from '../features/analytics/analytics-api.ts';
 export * from '../features/analytics/analytics-query-autocomplete.tsx';
 export * from '../features/analytics/analytics-query-complete.ts';
@@ -31,6 +38,9 @@ export * from '../features/analytics/session-analytics-surface.tsx';
 export * from '../features/attention/attention-api.ts';
 export * from '../features/attention/attention-board.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
+export * from '../features/browser/in-app-browser.tsx';
+export * from '../features/browser/in-app-browser-model.ts';
+export * from '../features/browser/unified-browser-model.ts';
 export * from '../features/browser/remote-browser-chrome.tsx';
 export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';

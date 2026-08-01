@@ -51,18 +51,15 @@ export type SidePaneTabId = string;
 export type SidePaneTabPresentation = 'pane' | 'sheet';
 
 /**
- * How much of the page a browser destination is trusted with. Ported alongside
- * the destination itself so the tab model does not depend on the (unported)
- * in-app browser surface.
+ * The destination model now has ONE home: `features/browser/in-app-browser-model.ts`,
+ * which is where the surface that opens it lives. This module used to carry a
+ * second copy because that surface was unported; re-exporting keeps the tab
+ * model's public surface unchanged while removing the chance of the two
+ * definitions drifting apart.
  */
-export type BrowserScope = 'same-origin' | 'cross-origin' | 'device-loopback';
+import type { BrowserDestination } from '../features/browser/in-app-browser-model.ts';
 
-/** One browser page's target. */
-export interface BrowserDestination {
-  readonly href: string;
-  readonly hostname: string;
-  readonly scope: BrowserScope;
-}
+export type { BrowserDestination, BrowserScope } from '../features/browser/in-app-browser-model.ts';
 
 // ---- instance identity -------------------------------------------------------
 

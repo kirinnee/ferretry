@@ -24,19 +24,28 @@ import type {
 } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import {
+  type AttachmentBlobLoader,
+  AttachmentGalleryProvider,
+  TranscriptAttachmentGallery,
+} from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
 import { DictationControl } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
+import { FilesTab } from '../src/components/files-tab.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
+import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
+import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
 import { SessionCommandControls } from '../src/components/session-command-controls.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
+import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
@@ -49,6 +58,8 @@ import {
 } from '../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
+import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
+import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
 import { RemoteBrowserPane } from '../src/features/browser/remote-browser-pane.tsx';
 import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
@@ -79,11 +90,13 @@ import { DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import { buildLineage } from '../src/lib/lineage.ts';
+import { writeMdComposePref } from '../src/lib/md-compose.ts';
+import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
-import { writeMdComposePref } from '../src/lib/md-compose.ts';
-import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
+import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
@@ -95,10 +108,6 @@ import { FleetNavigationRail } from '../src/shell/fleet-navigation-rail.tsx';
 import { MarkerLine, MarkerSeparator } from '../src/shell/marker.tsx';
 import { ModeBadge } from '../src/shell/mode-badge.tsx';
 import { paletteSessionEntries } from '../src/shell/palette-model.ts';
-import { RuntimeEffortControls, RuntimeModelControls } from '../src/components/runtime-controls.tsx';
-import { PendingAttachmentStrip, PendingMessage, ThreadSkeleton } from '../src/components/session-chat-parts.tsx';
-import { buildLineage } from '../src/lib/lineage.ts';
-import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { ActionGroup, Badge, Button, Card, Label, PanelBody, PanelHeader, Textarea } from '../src/shell/primitives.tsx';
 import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
@@ -511,6 +520,112 @@ const LEARNING_PROPOSALS: readonly ProposalView[] = [
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
+
+/**
+ * The thumbnail's picture is supplied as an INLINE image and the document card
+ * as a stored attachment. That covers both gallery surfaces without a network
+ * round trip: the harness aborts every off-origin request, and a `data:` URL
+ * has no origin to allow.
+ */
+const HARNESS_ATTACHMENT_IMAGE =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="200"%3E%3Crect width="320" height="200" fill="%23111827"/%3E%3Crect x="24" y="132" width="48" height="44" fill="%2310b981"/%3E%3Crect x="88" y="96" width="48" height="80" fill="%2338bdf8"/%3E%3Crect x="152" y="60" width="48" height="116" fill="%23f59e0b"/%3E%3Crect x="216" y="40" width="48" height="136" fill="%23a78bfa"/%3E%3Ctext x="24" y="32" fill="%23f9fafb" font-family="system-ui" font-size="15"%3ECoverage by tier%3C/text%3E%3C/svg%3E';
+
+const HARNESS_ATTACHMENT_LOADER: AttachmentBlobLoader = async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' });
+
+const HARNESS_ATTACHMENTS = [
+  { kind: 'inline' as const, src: HARNESS_ATTACHMENT_IMAGE, alt: 'Coverage by tier' },
+  {
+    kind: 'attachment' as const,
+    sessionId: 'harness-session',
+    attachmentId: 'harness-doc',
+    filename: 'split-proposal.pdf',
+    mime: 'application/pdf',
+    size: 481_233,
+    textExtraction: { method: 'pdfjs' as const, characters: 18_204, truncated: true },
+  },
+  {
+    kind: 'attachment' as const,
+    sessionId: 'harness-session',
+    attachmentId: 'harness-brief',
+    filename: 'unit-brief.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    size: 24_112,
+    textExtractionFailure: { code: 'password_protected_document', message: 'the document is password protected' },
+  },
+];
+
+/**
+ * The Files tab reads its directory, git status and file bytes through the
+ * global `fetch`, because `useFsProbe` is a page-level store rather than a
+ * prop. The harness has no daemon and must not reach one, so the fixture is
+ * installed as a narrow wrapper: anything addressed to the harness daemon's
+ * `/fs` routes is answered here, and every other request still goes through the
+ * real fetch (which the screenshot pass aborts if it leaves the loopback
+ * origin). Harness-only — nothing in `src/` patches a global.
+ */
+const HARNESS_FS_LISTINGS: Readonly<Record<string, unknown>> = {
+  '': {
+    entries: [
+      { name: 'docs', type: 'dir' },
+      { name: 'packages', type: 'dir' },
+      { name: 'node_modules', type: 'dir', ignored: true },
+      { name: 'CLAUDE.md', type: 'file', size: 4_812 },
+      { name: 'Taskfile.yaml', type: 'file', size: 9_233 },
+      { name: 'flake.nix', type: 'file', size: 2_104 },
+      { name: '.env', type: 'file', denied: true },
+      { name: 'result', type: 'symlink', escapes: true },
+    ],
+  },
+};
+
+const HARNESS_FS_CHANGES = {
+  repo: true,
+  branch: 'port/pwafiles3',
+  changes: [
+    { path: 'CLAUDE.md', status: ' M', additions: 12, deletions: 3 },
+    { path: 'Taskfile.yaml', status: '??' },
+  ],
+};
+
+const harnessFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
+  if (url.hostname !== 'daemon.invalid' || !url.pathname.includes('/fs')) return await harnessFetch(input, init);
+  const body = url.pathname.endsWith('/fs/changes')
+    ? HARNESS_FS_CHANGES
+    : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
+  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+}) as typeof fetch;
+
+/** Two link states worth looking at: an ordinary remote page and one that
+ *  names the reader's own phone rather than the agent's machine. */
+const HARNESS_REMOTE_LINK: BrowserDestination = {
+  href: 'https://docs.example.test/getting-started',
+  hostname: 'docs.example.test',
+  scope: 'cross-origin',
+};
+const HARNESS_LOOPBACK_LINK: BrowserDestination = {
+  href: 'http://localhost:5173/',
+  hostname: 'localhost',
+  scope: 'device-loopback',
+};
+
+/** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
+const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
+  [
+    '$ direnv exec . task test',
+    '🧪 Running unit tests with coverage...',
+    'bun test v1.3.13 (bf2e2cec)',
+    '',
+    ' packages/pwa/tests/unit/terminal-snapshot.test.tsx:',
+    ' ✓ terminal snapshot view > polls the paired daemon, prints the pane [4.00ms]',
+    ' ✓ terminal snapshot view > keeps the last good pane when the daemon goes quiet [3.00ms]',
+    '',
+    ' 7 pass',
+    ' 0 fail',
+    '✅ Coverage artifact matches the complete unit production ledger',
+    '$ ',
+  ].join('\n');
 
 /** One daemon's fleet, as the palette ranks and renders it. */
 const PALETTE_SESSIONS = paletteSessionEntries([
@@ -1861,6 +1976,73 @@ function Shell() {
             <div className="min-w-0 flex-1 p-panel text-meta text-muted">
               The transcript sits here. The column beside it is the sidebar under test.
             </div>
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'In-app link preview',
+      render: () => (
+        <Card aria-label="In-app link preview" className="min-w-0 overflow-hidden" id="harness-in-app-browser">
+          <div className="flex h-[24rem] flex-col">
+            {/* The frame stays empty on purpose: the harness aborts every
+                off-origin request, which is exactly the refusal the surface
+                already warns about, so this IS the honest steady state. */}
+            <InAppBrowserSurface
+              destination={HARNESS_REMOTE_LINK}
+              presentation="pane"
+              titleId="harness-in-app-browser-title"
+              onClose={() => {}}
+            />
+          </div>
+          <div className="flex h-[18rem] flex-col border-t border-border">
+            <InAppBrowserSurface
+              destination={HARNESS_LOOPBACK_LINK}
+              presentation="pane"
+              titleId="harness-in-app-browser-loopback-title"
+              onClose={() => {}}
+            />
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Files browser',
+      render: () => (
+        <Card aria-label="Files browser" className="min-w-0 overflow-hidden" id="harness-files">
+          <div className="flex h-[26rem] flex-col">
+            <FilesTab daemon={daemon} scope={scope} cwd="/work/ferretry" />
+          </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Transcript attachments',
+      render: () => (
+        <Card aria-label="Transcript attachments" className="min-w-0 overflow-hidden" id="harness-attachments">
+          <PanelHeader>
+            <Label>Attachments</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AttachmentGalleryProvider load={HARNESS_ATTACHMENT_LOADER}>
+              <TranscriptAttachmentGallery daemon={daemon} images={HARNESS_ATTACHMENTS} />
+            </AttachmentGalleryProvider>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Terminal snapshot',
+      render: () => (
+        <Card aria-label="Terminal snapshot" className="min-w-0 overflow-hidden" id="harness-terminal-snapshot">
+          <div className="flex h-64 flex-col">
+            <TerminalSnapshotView
+              daemon={daemon}
+              scope={scope}
+              tmuxSession="ms9u6kfu-16918932"
+              now={() => HARNESS_NOW}
+              readSnapshot={HARNESS_PANE_SNAPSHOT}
+            />
           </div>
         </Card>
       ),
