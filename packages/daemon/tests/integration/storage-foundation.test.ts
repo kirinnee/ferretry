@@ -36,8 +36,14 @@ import {
 } from '../../src/adapters/index.ts';
 import {
   createSessionPaths,
+  type DurableAppendOutcome,
   encodeSessionEvent,
+  type FileInformation,
+  type FileSystemFactory,
+  type FileSystemPort,
+  type FoundationPaths,
   indexFiles,
+  type JournalFingerprint,
   type JsonValue,
   jsonObject,
   parseSessionId,
@@ -56,6 +62,59 @@ class MarkerFailingStateFileSystem extends StateFileSystem {
   }
 }
 
+/**
+ * Disturbs a journal exactly once, on the next `information` call.
+ *
+ * The durable append verifies the pathname after its bytes are on disk, and that verification is
+ * its only `information` call — so this is where a swap or a foreign write has to land to be
+ * observed at all.
+ */
+class RepointingStateFileSystem extends StateFileSystem {
+  disturbOnNextInformation: 'delete' | 'replace' | 'foreign-append' | undefined;
+
+  override async information(path: string): Promise<FileInformation | undefined> {
+    const disturb = this.disturbOnNextInformation;
+    if (disturb !== undefined && path.endsWith('/events.jsonl')) {
+      this.disturbOnNextInformation = undefined;
+      if (disturb === 'foreign-append') await appendFile(path, 'foreign\n');
+      else {
+        await rm(path, { force: true });
+        if (disturb === 'replace') await writeFile(path, '');
+      }
+    }
+    return await super.information(path);
+  }
+}
+
+/** Deletes or swaps a journal in the instant between the caller's check and the real append. */
+class TearingStateFileSystem extends StateFileSystem {
+  tearOnNextAppend: 'delete' | 'replace' | undefined;
+
+  override async appendLineToExisting(
+    path: string,
+    line: string,
+    expect: JournalFingerprint,
+  ): Promise<DurableAppendOutcome> {
+    const tear = this.tearOnNextAppend;
+    if (tear !== undefined && path.endsWith('/events.jsonl')) {
+      this.tearOnNextAppend = undefined;
+      await rm(path, { force: true });
+      if (tear === 'replace') await writeFile(path, '');
+    }
+    return await super.appendLineToExisting(path, line, expect);
+  }
+}
+
+class TearingFileSystemFactory implements FileSystemFactory {
+  instance: TearingStateFileSystem | undefined;
+
+  create(paths: FoundationPaths): FileSystemPort {
+    const fileSystem = new TearingStateFileSystem(paths);
+    this.instance = fileSystem;
+    return fileSystem;
+  }
+}
+
 async function createTemporaryHome(): Promise<string> {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-daemon-test-'));
   homes.add(home);
@@ -68,10 +127,14 @@ function clockStartingAt(instant = '2026-07-30T12:00:00.000Z'): SystemClock {
   return new SystemClock(() => new Date(start + tick++ * 1_000));
 }
 
-async function openStorage(home: string, clock = clockStartingAt()): Promise<OpenedDaemonStorage> {
+async function openStorage(
+  home: string,
+  clock = clockStartingAt(),
+  fileSystems: FileSystemFactory = new StateFileSystemFactory(),
+): Promise<OpenedDaemonStorage> {
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
+    fileSystems,
     new StateHomeLayout(),
     new SqliteHomeLockFactory(),
     new BunSqliteIndexFactory(),
@@ -713,6 +776,33 @@ describe('journal storage', () => {
     should(await exists(paths.state)).be.false();
   });
 
+  it.each([
+    { tear: 'delete' as const, error: 'MissingSessionJournalError' },
+    { tear: 'replace' as const, error: 'JournalReplacedError' },
+  ])('should refuse the second append when the journal is $tear-d just before it', async ({ tear, error }) => {
+    // Arrange — the exact repro: append #1, deletion, append #2 silently succeeding into a file the
+    // daemon had just recreated, and a replay that then contained only event #2.
+    const home = await createTemporaryHome();
+    const fileSystems = new TearingFileSystemFactory();
+    const opened = await openStorage(home, clockStartingAt(), fileSystems);
+    const id = parseSessionId('torn-append');
+    await opened.storage.append(id, 'first', { value: 1 });
+    const eventsFile = createSessionPaths(opened.paths, id).events;
+    const indexedBefore = opened.storage.findSession(id);
+    if (fileSystems.instance === undefined) throw new Error('test filesystem must be created');
+    fileSystems.instance.tearOnNextAppend = tear;
+
+    // Act
+    const failure = await capturedError(async () => await opened.storage.append(id, 'second', { value: 2 }));
+
+    // Assert — nothing recreates the journal, nothing is written into an impostor, and the index
+    // still holds the pre-deletion evidence.
+    should((failure as Error).name).equal(error);
+    should(await exists(eventsFile)).equal(tear === 'replace');
+    should(tear === 'delete' ? '' : await readFile(eventsFile, 'utf8')).equal('');
+    should(opened.storage.findSession(id)).deepEqual(indexedBefore);
+  });
+
   it('should report that a journaled event is durable when both index attempts fail', async () => {
     // Arrange
     const home = await createTemporaryHome();
@@ -780,6 +870,99 @@ describe('journal storage', () => {
     should(rebuild).deepEqual({ sessionCount: 1, eventCount: 1, problems: [] });
     should(jsonObject(replay.events[0]?.data)?.text).equal(text);
   });
+});
+
+describe('durable journal append', () => {
+  async function journalFor(id: string): Promise<{ fileSystem: RepointingStateFileSystem; file: string }> {
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const session = parseSessionId(id);
+    await opened.storage.append(session, 'first', { value: 1 });
+    return {
+      fileSystem: new RepointingStateFileSystem(opened.paths),
+      file: createSessionPaths(opened.paths, session).events,
+    };
+  }
+
+  it('should append to the exact file the caller named', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('exact-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome.kind).equal('appended');
+    should(outcome.kind === 'appended' && outcome.append.byteOffset).equal(expected.size);
+    should(await readFile(file, 'utf8')).containEql('{"second":true}\n');
+  });
+
+  it('should report an absent journal rather than creating one', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('absent-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await rm(file);
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'absent' });
+    should(await exists(file)).be.false();
+  });
+
+  it('should report a replacement when the pathname names a different file', async () => {
+    // Arrange
+    const { fileSystem, file } = await journalFor('swapped-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await rm(file);
+    await writeFile(file, '');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert — the impostor must not receive the record.
+    should(outcome).deepEqual({ kind: 'replaced' });
+    should(await readFile(file, 'utf8')).equal('');
+  });
+
+  it('should report a replacement when the file changed size under the caller', async () => {
+    // Arrange — a foreign appender, which the caller must re-inspect before trusting an offset.
+    const { fileSystem, file } = await journalFor('resized-append');
+    const expected = await fileSystem.information(file);
+    if (expected === undefined) throw new Error('test journal must exist');
+    await appendFile(file, 'foreign\n');
+
+    // Act
+    const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+    // Assert
+    should(outcome).deepEqual({ kind: 'replaced' });
+    should(await readFile(file, 'utf8')).not.containEql('second');
+  });
+
+  it.each(['delete', 'replace', 'foreign-append'] as const)(
+    'should report a replacement when a %s disturbs the journal after the bytes land',
+    async disturb => {
+      // Arrange — the record is durable in some inode, but if the path no longer names it, or the
+      // file grew by more than this record, the byte offset the caller would index is a lie.
+      const { fileSystem, file } = await journalFor(`disturbed-${disturb}`);
+      const expected = await fileSystem.information(file);
+      if (expected === undefined) throw new Error('test journal must exist');
+      fileSystem.disturbOnNextInformation = disturb;
+
+      // Act
+      const outcome = await fileSystem.appendLineToExisting(file, '{"second":true}', expected);
+
+      // Assert
+      should(outcome).deepEqual({ kind: 'replaced' });
+      should(await exists(file)).equal(disturb !== 'delete');
+    },
+  );
 });
 
 describe('disposable session index', () => {

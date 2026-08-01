@@ -65,8 +65,19 @@ export class MissingSessionJournalError extends Error {
     readonly sessionId: SessionId,
     readonly file: string,
   ) {
-    super(`indexed session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
+    // Not "indexed": under the current marker this is proved from disk, long after the index is gone.
+    super(`session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
     this.name = 'MissingSessionJournalError';
+  }
+}
+
+export class JournalReplacedError extends Error {
+  constructor(
+    readonly sessionId: SessionId,
+    readonly file: string,
+  ) {
+    super(`session ${sessionId} journal ${file} was replaced while appending; refusing to write into it`);
+    this.name = 'JournalReplacedError';
   }
 }
 
@@ -870,10 +881,17 @@ export class DaemonStorage {
         validated.data,
       );
       const encoded = encodeSessionEvent(event);
-      await this.ensureSessionDirectory(id);
+      const paths = createSessionPaths(this.paths, id);
+      const ensured = await this.ensureSessionDirectory(id);
       if (inspection.kind === 'repair' && inspection.source === null) this.index.removeSession(id);
       const current = this.applySessionInspection(inspection);
-      const appended = await this.fileSystem.appendLineDurable(createSessionPaths(this.paths, id).events, encoded);
+      const outcome = await this.fileSystem.appendLineToExisting(paths.events, encoded, current?.journal ?? ensured);
+      // Both refusals are terminal on purpose. Retrying would mean deciding, without evidence,
+      // which of two files is the real journal — and getting that wrong writes history into an
+      // impostor and reports success.
+      if (outcome.kind === 'absent') throw new MissingSessionJournalError(id, paths.events);
+      if (outcome.kind === 'replaced') throw new JournalReplacedError(id, paths.events);
+      const appended = outcome.append;
       const insertedSeparator =
         current?.journal !== null && current?.journal !== undefined && appended.byteOffset === current.journal.size + 1;
       const session: IndexedSession = {
