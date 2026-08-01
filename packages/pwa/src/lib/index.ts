@@ -148,6 +148,7 @@ export * from './stt/pcm.ts';
 export * from './stt/remote-enhancement.ts';
 export * from './stt/silence-segmenter.ts';
 export * from './stt/stt-settings.ts';
+export * from './stt/utterance.ts';
 export * from './stt/word-only-verifier.ts';
 export * from './theme-preferences.ts';
 export * from './tool-extract.ts';
