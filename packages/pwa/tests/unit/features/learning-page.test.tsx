@@ -5,11 +5,31 @@ import {
   LearningPage,
   LearningReview,
   ProposalCard,
+  absoluteTime,
   learningErrorMessage,
   learningStrength,
 } from '../../../src/features/learning/learning-page.tsx';
+import type { MediaQueryListLike } from '../../../src/features/learning/use-touch-affected.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { proposal, status } from '../learning-api.test.ts';
+
+/** Pins the pointer modality so `autoFocus` is a decision, not an accident. */
+const withModality = <T,>(desktop: boolean, body: () => T): T => {
+  const ambient = Object.getOwnPropertyDescriptor(globalThis, 'matchMedia');
+  Object.defineProperty(globalThis, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryListLike => ({
+      matches: desktop ? query === '(pointer: fine)' || query === '(hover: hover)' : true,
+    }),
+  });
+  try {
+    return body();
+  } finally {
+    if (ambient) Object.defineProperty(globalThis, 'matchMedia', ambient);
+    else Reflect.deleteProperty(globalThis, 'matchMedia');
+  }
+};
 
 const connection = daemonConnection({
   daemonId: 'daemon/a',
@@ -145,6 +165,118 @@ describe('LearningReview', () => {
       if (documentDescriptor) Object.defineProperty(globalThis, 'document', documentDescriptor);
       else Reflect.deleteProperty(globalThis, 'document');
     }
+  });
+
+  it('renders the shared learning header, with its label, separators and hour-scale ages', () => {
+    const renderer = render(
+      <LearningReview
+        connection={connection}
+        status={status}
+        proposals={[]}
+        error={null}
+        busy={false}
+        // Three hours after the recorded run: the header must say `3h ago`,
+        // which the minute-only formatter this replaced rendered as `180m ago`.
+        now={Date.parse('2026-07-31T15:00:00.000Z')}
+        onRun={() => undefined}
+        onAction={() => undefined}
+      />,
+    );
+    const header = renderer.root.findByProps({ 'aria-label': 'Learning status' });
+    const spans = header.findAllByType('span');
+    const text = spans.map(span => span.children.join('')).join(' ');
+    expect(text).toContain('Learning');
+    expect(text).toContain('enabled');
+    expect(text).toContain('last run 3h ago');
+    expect(text).toContain('1 pending');
+    expect(text).toContain('1 strong');
+    const separators = spans.filter(span => span.children.join('') === '·');
+    expect(separators.length).toBeGreaterThan(0);
+    expect(separators.every(span => span.props['aria-hidden'] === 'true')).toBe(true);
+  });
+
+  it('names the teammate the way a reader reads it and stamps evidence with an exact time', () => {
+    const renderer = render(
+      <ProposalCard
+        connection={connection}
+        proposal={{
+          ...proposal,
+          evidence: [{ ...proposal.evidence[0]!, teammate: 'ms-98', source: 'teammate' }],
+        }}
+        busy={false}
+        accepted={false}
+        onAction={() => undefined}
+      />,
+    );
+    const meta = renderer.root
+      .findByType('a')
+      .findAllByType('span')
+      .map(span => span.children.join(''))
+      .join('');
+    expect(meta).toContain('teammate steer');
+    expect(meta).toContain('Ms-98');
+    expect(meta).not.toContain('ms-98');
+    // Local-zone rendering, so assert the shape rather than a fixed instant —
+    // what matters is that the raw ISO string never reaches the reader.
+    expect(meta).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/u);
+    expect(meta).not.toContain('2026-07-31T12:00:00.000Z');
+  });
+
+  it('formats, refuses and passes through evidence instants predictably', () => {
+    expect(absoluteTime('2026-07-31T12:00:00.000Z', 'UTC')).toBe('2026-07-31 12:00:00');
+    expect(absoluteTime('2026-07-31T12:00:00.000Z', 'Asia/Singapore')).toBe('2026-07-31 20:00:00');
+    expect(absoluteTime(undefined)).toBe('—');
+    expect(absoluteTime('')).toBe('—');
+    // An unparseable stamp is shown verbatim: hiding it would hide the defect.
+    expect(absoluteTime('not-an-instant')).toBe('not-an-instant');
+  });
+
+  it('makes a strong signal look strong and a weak one look weak', () => {
+    const renderer = render(
+      <LearningReview
+        connection={connection}
+        status={status}
+        proposals={[makeProposal('pending', 5, 'strong'), makeProposal('pending', 1, 'weak')]}
+        error={null}
+        busy={false}
+        now={0}
+        onRun={() => undefined}
+        onAction={() => undefined}
+      />,
+    );
+    const strongCard = renderer.root.findByProps({ 'aria-label': 'Learning proposal pending strong' });
+    const weakCard = renderer.root.findByProps({ 'aria-label': 'Learning proposal pending weak' });
+    const badge = (card: typeof strongCard) => card.findAllByType('span').find(span => span.props.title !== undefined);
+
+    expect(String(strongCard.props.className)).not.toContain('opacity-80');
+    expect(String(weakCard.props.className)).toContain('opacity-80');
+    expect(badge(strongCard)?.props.title).toBe('5 distinct sessions');
+    expect(String(badge(strongCard)?.props.className)).toContain('font-semibold');
+    expect(badge(weakCard)?.props.title).toBe('1 distinct session');
+    expect(String(badge(weakCard)?.props.className)).not.toContain('font-semibold');
+    expect(strongCard.findAllByType('span').some(span => span.props.title === 'distinct repos this was seen in')).toBe(
+      true,
+    );
+  });
+
+  it('autofocuses the rule editor on a pointer device and never on a touch one', () => {
+    const openEditor = (desktop: boolean) =>
+      withModality(desktop, () => {
+        const renderer = render(
+          <ProposalCard
+            connection={connection}
+            proposal={makeProposal('pending', 2, 'focus')}
+            busy={false}
+            accepted={false}
+            onAction={() => undefined}
+          />,
+        );
+        run(() => renderer.root.findByProps({ 'aria-label': 'Edit pending focus' }).props.onClick());
+        return renderer.root.findByType('textarea').props.autoFocus;
+      });
+
+    expect(openEditor(true)).toBe(true);
+    expect(openEditor(false)).toBe(false);
   });
 
   it('classifies strength and unknown errors without pretending they are healthy', () => {

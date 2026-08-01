@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, FileDown, GraduationCap, Pencil, RefreshCw, X } from 'lucide-react';
+import { Check, Copy, FileDown, GraduationCap, Pencil, X } from 'lucide-react';
 import type { LearningActionRequest, LearningStatus, ProposalView } from '@ferretry/protocol';
 
+import { displayCallsign } from '../../lib/callsign.ts';
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   actOnLearningProposal,
@@ -11,6 +13,8 @@ import {
   runLearningScan,
 } from '../../lib/learning-api.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { LearningHeader } from './learning-header.tsx';
+import { useTouchAffected } from './use-touch-affected.ts';
 
 export type LearningStrength = 'weak' | 'normal' | 'strong';
 export const learningStrength = (occurrences: number): LearningStrength =>
@@ -18,12 +22,38 @@ export const learningStrength = (occurrences: number): LearningStrength =>
 export const learningErrorMessage = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'Learning is unavailable on this daemon.';
 
-const relative = (value: string | undefined, now: number): string => {
-  if (value === undefined) return '—';
-  const milliseconds = Date.parse(value) - now;
-  if (!Number.isFinite(milliseconds)) return '—';
-  const minutes = Math.round(Math.abs(milliseconds) / 60_000);
-  return minutes === 0 ? 'now' : `${minutes}m ${milliseconds <= 0 ? 'ago' : 'from now'}`;
+const ABSOLUTE_FIELDS = ['year', 'month', 'day', 'hour', 'minute', 'second'] as const;
+
+/**
+ * `yyyy-MM-dd HH:mm:ss` in the reader's own zone, matching the source page's
+ * `fmtAbsolute`. Evidence is an audit trail — "when exactly" is the question a
+ * quote raises, and a relative age cannot answer it.
+ *
+ * It stays local to this feature rather than joining `relativeTime` in
+ * `session-screens.ts`: that module is the session surfaces' vocabulary, and
+ * learning is the only caller that needs a second, absolute form.
+ *
+ * `timeZone` is a parameter because a formatter that silently reads an ambient
+ * zone cannot be asserted; production passes nothing and gets the local zone.
+ */
+export const absoluteTime = (at: string | undefined, timeZone?: string): string => {
+  if (at === undefined || at === '') return '—';
+  const timestamp = Date.parse(at);
+  if (!Number.isFinite(timestamp)) return at;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    ...(timeZone === undefined ? {} : { timeZone }),
+  }).formatToParts(new Date(timestamp));
+  const [year, month, day, hour, minute, second] = ABSOLUTE_FIELDS.map(
+    field => parts.find(part => part.type === field)?.value ?? '',
+  );
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 };
 
 export interface LearningPageProps {
@@ -138,7 +168,24 @@ export function LearningReview({
             verified against its transcript.
           </p>
         </header>
-        <LearningHeader status={status} error={error} busy={busy} now={now} onRun={onRun} />
+        <LearningHeader
+          status={status}
+          failed={error !== null}
+          busy={busy}
+          // ALWAYS true, and the reason is structural rather than lax. The
+          // source page gated these controls on a module-global `HAS_TOKEN`
+          // because the bundle was served by the daemon it talked to and might
+          // have been handed no token at all. Here a page cannot render without
+          // a `DaemonConnection`, and `daemonConnection` refuses an empty
+          // `deviceToken` — so a rendered learning page is an authenticated one
+          // by construction, and there is no reachable read-only mode to model.
+          // A per-device capability grant would change that; nothing issues one
+          // today, and inventing a permanently-`true` flag to carry would be a
+          // lie about a check that is not happening.
+          canRun
+          now={now}
+          onRunNow={onRun}
+        />
         {status === null && error === null && (
           <p role="status" className="text-ui text-muted">
             Reading learning proposals…
@@ -173,7 +220,14 @@ export function LearningReview({
             <summary className="min-h-[44px] cursor-pointer text-ui font-medium text-muted">
               Weak signals (single occurrence) · {group('weak').length}
             </summary>
-            <ProposalGroup label="" proposals={group('weak')} busy={busy} onAction={onAction} connection={connection} />
+            <ProposalGroup
+              label=""
+              proposals={group('weak')}
+              busy={busy}
+              onAction={onAction}
+              connection={connection}
+              muted
+            />
           </details>
         )}
         <ProposalGroup
@@ -203,43 +257,6 @@ export function LearningReview({
   );
 }
 
-function LearningHeader({
-  status,
-  error,
-  busy,
-  now,
-  onRun,
-}: {
-  readonly status: LearningStatus | null;
-  readonly error: string | null;
-  readonly busy: boolean;
-  readonly now: number;
-  readonly onRun: () => void;
-}) {
-  return (
-    <section
-      className="kt-panel flex flex-wrap items-center gap-x-3 gap-y-1 p-3 text-meta"
-      aria-label="Learning status"
-    >
-      <span className={status?.enabled ? 'text-ok' : 'text-muted'}>{status?.enabled ? 'enabled' : 'disabled'}</span>
-      <span aria-hidden="true">·</span>
-      <span className="mono text-muted">last run {relative(status?.lastRunAt, now)}</span>
-      <span aria-hidden="true">·</span>
-      <span className="mono text-muted">{status?.pending.total ?? 0} pending</span>
-      {(status?.pending.strong ?? 0) > 0 && <span className="mono text-accent">{status?.pending.strong} strong</span>}
-      {error !== null && <span className="mono text-warn">unavailable on this daemon</span>}
-      <Button className="ml-auto min-h-[44px]" size="sm" disabled={busy} onClick={onRun}>
-        <RefreshCw
-          size={14}
-          className={busy ? 'animate-spin motion-reduce:animate-none' : undefined}
-          aria-hidden="true"
-        />
-        Run now
-      </Button>
-    </section>
-  );
-}
-
 function ProposalGroup({
   label,
   proposals,
@@ -247,6 +264,7 @@ function ProposalGroup({
   onAction,
   connection,
   accepted = false,
+  muted = false,
 }: {
   readonly label: string;
   readonly proposals: readonly ProposalView[];
@@ -254,6 +272,7 @@ function ProposalGroup({
   readonly onAction: LearningReviewProps['onAction'];
   readonly connection: DaemonConnection;
   readonly accepted?: boolean;
+  readonly muted?: boolean;
 }) {
   if (proposals.length === 0) return null;
   return (
@@ -267,6 +286,7 @@ function ProposalGroup({
           onAction={onAction}
           connection={connection}
           accepted={accepted}
+          muted={muted}
         />
       ))}
     </section>
@@ -279,13 +299,16 @@ export function ProposalCard({
   onAction,
   connection,
   accepted,
+  muted = false,
 }: {
   readonly proposal: ProposalView;
   readonly busy: boolean;
   readonly onAction: LearningReviewProps['onAction'];
   readonly connection: DaemonConnection;
   readonly accepted: boolean;
+  readonly muted?: boolean;
 }) {
+  const touchAffected = useTouchAffected();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(proposal.ruleText);
   const [copied, setCopied] = useState<'rule' | 'patch' | null>(null);
@@ -332,12 +355,22 @@ export function ProposalCard({
     }
   };
   return (
-    <article className="kt-panel flex flex-col gap-2 p-3" aria-label={`Learning proposal ${proposal.title}`}>
+    <article
+      className={cn('kt-panel flex flex-col gap-2 p-3', muted && 'opacity-80')}
+      aria-label={`Learning proposal ${proposal.title}`}
+    >
       <div className="flex flex-wrap items-start gap-2">
-        <span className="kt-badge" data-tone={strength === 'strong' ? 'accent' : strength === 'weak' ? 'pend' : 'ok'}>
+        <span
+          // The count IS the argument for the rule, so a strong one is set in
+          // heavier type as well as a different tone — colour alone would carry
+          // the whole distinction for a reader who cannot separate the two.
+          className={cn('kt-badge shrink-0', strength === 'strong' && 'font-semibold')}
+          data-tone={strength === 'strong' ? 'accent' : strength === 'weak' ? 'pend' : 'ok'}
+          title={`${proposal.occurrences} distinct session${proposal.occurrences === 1 ? '' : 's'}`}
+        >
           {proposal.occurrences}×
         </span>
-        <span className="mono text-meta text-faint">
+        <span className="mono text-meta text-faint" title="distinct repos this was seen in">
           {proposal.crossRepoCount} repo{proposal.crossRepoCount === 1 ? '' : 's'}
         </span>
         <h3 className="m-0 min-w-0 flex-1 text-ui font-semibold">{proposal.title}</h3>
@@ -350,6 +383,10 @@ export function ProposalCard({
         <textarea
           className="kt-input resize-y"
           rows={3}
+          // Desktop opens Edit already able to type; a touch-affected device
+          // does not, because autofocus there throws a keyboard over the card
+          // the reader was about to read.
+          autoFocus={!touchAffected}
           aria-label={`Edit rule text for ${proposal.title}`}
           value={draft}
           onChange={event => setDraft(event.target.value)}
@@ -371,7 +408,8 @@ export function ProposalCard({
                 <span className="text-ui text-fg-soft">“{evidence.quote}”</span>
                 <span className="mono text-meta text-faint">
                   {evidence.source === 'teammate' ? 'teammate steer' : 'human'}
-                  {evidence.teammate ? ` · ${evidence.teammate}` : ''} · {evidence.repo} · {evidence.at}
+                  {evidence.teammate ? ` · ${displayCallsign(evidence.teammate)}` : ''} · {evidence.repo} ·{' '}
+                  {absoluteTime(evidence.at)}
                 </span>
               </a>
             </li>
