@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
-import { SessionIdSchema, type SessionId } from '../../session-id.ts';
+import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
 export const LifecycleSessionStatusSchema = z.enum([
   'created',
@@ -113,6 +113,8 @@ export interface SessionLifecycleLauncher {
   launch(record: SessionLifecycleRecord): Promise<void>;
   /** Types one instruction into the live terminal once it is ready to accept input. */
   deliver(record: SessionLifecycleRecord, instruction: string): Promise<void>;
+  /** Captures a live final frame before a durable terminal transition, if one exists. */
+  snapshot(record: SessionLifecycleRecord): Promise<void>;
   stop(record: SessionLifecycleRecord): Promise<void>;
 }
 

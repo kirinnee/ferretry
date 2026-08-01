@@ -3,6 +3,7 @@ import type {
   SessionLifecycleLauncher,
   SessionLifecycleRecord,
 } from '../../../lib/session/lifecycle/index.ts';
+import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 
@@ -23,6 +24,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly delivery: TmuxPaneDelivery,
     private readonly environment: SessionEnvironmentStore = NO_ENVIRONMENT,
     private readonly registrar?: SessionPaneRegistrar,
+    private readonly snapshots?: LastSnapshotWriter,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
@@ -54,6 +56,11 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
    */
   async deliver(record: SessionLifecycleRecord, instruction: string): Promise<void> {
     await this.delivery.deliver(record.config.tmuxSession, instruction);
+  }
+
+  async snapshot(record: SessionLifecycleRecord): Promise<void> {
+    const state = await this.tmux.state(record.config.tmuxSession);
+    if (state.alive && !state.dead) await this.snapshots?.write(record.config.id, state.visible);
   }
 
   async stop(record: SessionLifecycleRecord): Promise<void> {

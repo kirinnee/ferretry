@@ -2,7 +2,7 @@ import { FyTransportError } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../session/errors.ts';
 import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo } from './ports.ts';
 import { renderEvent, renderStreamIdle } from './render.ts';
-import { decideWait, renderWaitOutcome, waitExitCode, type WaitNotices, type WaitOutcome } from './wait.ts';
+import { decideWait, renderWaitOutcome, type WaitNotices, type WaitOutcome, waitExitCode } from './wait.ts';
 
 /**
  * The operator read commands: how a human watches a session that is already running.
@@ -88,15 +88,10 @@ export class ReadsController {
   /**
    * The session's transcript tail.
    *
-   * `--turn` is refused HERE rather than sent, because the daemon keeps no per-turn log and would refuse
-   * it anyway. Refusing locally makes the message the operator's, not a 501 they have to interpret.
+   * `--turn` reaches the daemon, which returns only an explicitly bounded normalized transcript turn.
    */
   async logs(sessionId: string, options: LogsOptions): Promise<void> {
-    if (options.turn !== undefined)
-      throw new SessionCommandError(
-        'the daemon keeps no per-turn log, so `fy logs --turn` cannot be answered; read the whole tail instead',
-      );
-    this.out.success(await this.gateway.logs(sessionId));
+    this.out.success(await this.gateway.logs(sessionId, options.turn));
   }
 
   /** One page — or every page — of the session's durable history. */

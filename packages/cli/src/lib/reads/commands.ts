@@ -61,7 +61,7 @@ export function registerReadsCommands(program: Command, controller: ReadsCommand
     .command('logs')
     .description("read the tail of the session's own harness transcript")
     .argument('<id>', 'session id')
-    .option('--turn <number>', 'refused: this daemon keeps no per-turn log', Number)
+    .option('--turn <number>', 'read one explicitly bounded transcript turn', Number)
     .action(async (id: string, options: LogsOptions) => {
       await controller.logs(id, options);
     });

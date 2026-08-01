@@ -24,6 +24,7 @@ export interface SessionPaths {
   readonly config: string;
   readonly state: string;
   readonly events: string;
+  readonly lastSnapshot: string;
   readonly terminalPane: string;
 }
 
@@ -57,6 +58,7 @@ export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId)
     config: join(directory, 'config.json'),
     state: join(directory, 'state.json'),
     events: join(directory, 'events.jsonl'),
+    lastSnapshot: join(directory, 'last-snapshot.txt'),
     terminalPane: join(directory, 'terminal-pane.json'),
   };
 }

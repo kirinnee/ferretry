@@ -24,6 +24,7 @@
 
 import type { FyEvent } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
+import type { LastSnapshotReader } from '../snapshot/index.ts';
 
 /** Why a read could not be answered. */
 export type OperatorReadFailure =
@@ -33,10 +34,16 @@ export type OperatorReadFailure =
   | 'no_terminal'
   /** The terminal address exists and the pane behind it is gone. */
   | 'pane_dead'
+  /** No final frame was captured when the session became terminal. */
+  | 'stored_snapshot_unavailable'
+  /** The final-frame artifact exists but cannot be read as evidence. */
+  | 'stored_snapshot_unreadable'
   /** The daemon cannot prove which transcript file is this session's. */
   | 'no_transcript'
   /** A transcript was proved, but it could not be read as evidence. */
   | 'transcript_unreadable'
+  /** The transcript is readable but does not prove the requested turn boundary. */
+  | 'turn_partition_unavailable'
   /** A journal page contradicted the requested session or cursor. */
   | 'event_evidence_mismatch';
 
@@ -208,6 +215,7 @@ export class OperatorReadService {
     private readonly journal: SessionEventJournal,
     private readonly pane: SessionPaneReader,
     private readonly transcript: SessionTranscriptTail,
+    private readonly lastSnapshot: LastSnapshotReader = { read: async () => ({ kind: 'absent' }) },
   ) {}
 
   /**
@@ -246,13 +254,27 @@ export class OperatorReadService {
    * an empty string for a dead pane, which is indistinguishable from a healthy blank screen and is
    * the exact false-success shape this migration keeps finding.
    */
-  async snapshot(sessionId: string): Promise<string> {
+  async snapshot(sessionId: string, live = true): Promise<string> {
+    if (!live) return await this.storedSnapshot(sessionId);
     const capture = await this.pane.capture(sessionId);
     if (capture === undefined)
       throw new OperatorReadError('no_terminal', `session ${sessionId} records no terminal this daemon could capture`);
     if (!capture.alive || capture.dead)
       throw new OperatorReadError('pane_dead', `session ${sessionId} has no live pane, so there is no screen to read`);
     return capture.text;
+  }
+
+  /** The durable final frame, only when the daemon actually captured one before terminalization. */
+  private async storedSnapshot(sessionId: string): Promise<string> {
+    const stored = await this.lastSnapshot.read(sessionId);
+    if (stored.kind === 'absent')
+      throw new OperatorReadError('stored_snapshot_unavailable', `session ${sessionId} has no captured final frame`);
+    if (stored.kind === 'unreadable')
+      throw new OperatorReadError(
+        'stored_snapshot_unreadable',
+        `session ${sessionId} has a final-frame artifact, but this daemon could not read it`,
+      );
+    return stored.text;
   }
 
   /**
@@ -264,7 +286,7 @@ export class OperatorReadService {
    * claim the daemon has no basis for. An empty read of a file it DID resolve is served as empty,
    * because that one is a fact.
    */
-  async logs(sessionId: string, limit: number | undefined): Promise<string> {
+  async logs(sessionId: string, limit: number | undefined, turn?: number): Promise<string> {
     const tail = boundedLimit(limit, DEFAULT_LOG_TAIL, MAX_LOG_TAIL, 'limit');
     const result = await this.transcript.tail(sessionId, tail);
     if (result.kind === 'unresolved')
@@ -277,6 +299,19 @@ export class OperatorReadService {
         'transcript_unreadable',
         `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
-    return renderTranscript(result.events);
+    if (turn === undefined) return renderTranscript(result.events);
+    if (!Number.isSafeInteger(turn) || turn < 0)
+      throw new OperatorReadError('invalid_query', 'turn must be a non-negative integer');
+    const starts = result.events.flatMap((event, index) =>
+      event.kind === 'turn' && event.state === 'started' ? [index] : [],
+    );
+    const start = starts[turn];
+    if (start === undefined)
+      throw new OperatorReadError(
+        'turn_partition_unavailable',
+        `session ${sessionId}'s transcript has no discernible boundary for turn ${turn}`,
+      );
+    const end = starts[turn + 1] ?? result.events.length;
+    return renderTranscript(result.events.slice(start, end).slice(-tail));
   }
 }

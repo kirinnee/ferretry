@@ -1,5 +1,5 @@
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, queryValue, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { OperatorReadError, type OperatorReadFailure, type OperatorReadService } from '../../session/reads/index.ts';
@@ -35,8 +35,11 @@ const REFUSALS: Readonly<Record<OperatorReadFailure, { readonly status: number; 
   // terminal — a client that retries the same id later may well get a screen.
   no_terminal: { status: 409, code: 'no_terminal' },
   pane_dead: { status: 409, code: 'pane_dead' },
+  stored_snapshot_unavailable: { status: 409, code: 'stored_snapshot_unavailable' },
+  stored_snapshot_unreadable: { status: 409, code: 'stored_snapshot_unreadable' },
   no_transcript: { status: 409, code: 'no_transcript' },
   transcript_unreadable: { status: 409, code: 'transcript_unreadable' },
+  turn_partition_unavailable: { status: 409, code: 'turn_partition_unavailable' },
   event_evidence_mismatch: { status: 500, code: 'event_evidence_mismatch' },
 };
 
@@ -95,10 +98,9 @@ async function events(
 /**
  * The live screen.
  *
- * `?live` is accepted only as `true`. The legacy daemon's default was a stored last frame read from
- * disk, and this daemon writes none — so honouring `live=false` would mean answering the empty string
- * for every session, which reads as a blank terminal rather than as a missing feature. It is a stated
- * 501 instead, and the code names what is absent.
+ * `?live=false` selects the final frame captured at terminalization; the omitted and `true` forms
+ * retain the live-pane default. A missing artifact remains a refusal instead of a blank screen,
+ * because absence is not evidence that the final screen was blank.
  */
 async function snapshot(
   reads: OperatorReadService,
@@ -107,15 +109,11 @@ async function snapshot(
 ): Promise<ApiResponse> {
   const id = sessionId(context);
   const live = queryValue(context.request, 'live');
-  if (live !== undefined && live !== 'true')
-    throw new ApiError(
-      501,
-      'this daemon stores no last frame, so only live=true can be answered',
-      'stored_snapshot_unavailable',
-    );
+  if (live !== undefined && live !== 'true' && live !== 'false')
+    throw new ApiError(400, 'query parameter "live" must be true or false', 'invalid_query');
   await requireSession(sessions, id);
   try {
-    return textResponse(await reads.snapshot(id));
+    return textResponse(await reads.snapshot(id, live !== 'false'));
   } catch (error) {
     return refuse(error);
   }
@@ -124,9 +122,9 @@ async function snapshot(
 /**
  * The session's own transcript tail, as text.
  *
- * `?turn` is REFUSED rather than ignored. Legacy `logs --turn N` read a per-turn log file this daemon
- * does not write; accepting the parameter and serving the whole tail would answer a different question
- * than the one asked, and a caller comparing two turns would be handed the same bytes twice.
+ * `?turn` selects only transcript events between explicit normalized `turn/started` markers. A
+ * transcript with no such marker cannot prove a partition, so it is refused rather than guessed from
+ * timestamps or handed the whole tail.
  */
 async function logs(
   reads: OperatorReadService,
@@ -134,15 +132,9 @@ async function logs(
   context: RouteContext,
 ): Promise<ApiResponse> {
   const id = sessionId(context);
-  if (queryValue(context.request, 'turn') !== undefined)
-    throw new ApiError(
-      501,
-      'this daemon keeps no per-turn log, so a transcript cannot be sliced by turn',
-      'turn_partition_unavailable',
-    );
   await requireSession(sessions, id);
   try {
-    return textResponse(await reads.logs(id, numberQuery(context, 'limit')));
+    return textResponse(await reads.logs(id, numberQuery(context, 'limit'), numberQuery(context, 'turn')));
   } catch (error) {
     return refuse(error);
   }

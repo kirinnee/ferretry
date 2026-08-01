@@ -299,12 +299,17 @@ describe('storage resume repository', () => {
 });
 
 describe('tmux resume launcher', () => {
-  function launcher(port: TmuxCommandPort, options: PaneDeliveryOptions = {}) {
+  function launcher(
+    port: TmuxCommandPort,
+    options: PaneDeliveryOptions = {},
+    snapshots?: { write(id: string, text: string): Promise<void> },
+  ) {
     const controller = new TmuxController(port);
     return new TmuxResumeLauncher(
       controller,
       async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
       new TmuxPaneDelivery(controller, async () => {}, options),
+      snapshots,
     );
   }
 
@@ -322,13 +327,16 @@ describe('tmux resume launcher', () => {
   it('should capture the final frame before the pane is destroyed', async () => {
     // Arrange
     const port = new RecordingTmuxPort();
-    const subject = launcher(port);
+    const writes: Array<readonly [string, string]> = [];
+    const subject = launcher(port, {}, { write: async (id, text) => void writes.push([id, text]) });
 
     // Act
     await subject.snapshot(ID);
 
     // Assert
-    should(subject.finalFrame(ID)).containEql('the last frame');
+    should(writes).have.length(1);
+    should(writes[0]?.[0]).equal(ID);
+    should(writes[0]?.[1]).containEql('the last frame');
   });
 
   it('should address only this session name when it kills or relaunches', async () => {
