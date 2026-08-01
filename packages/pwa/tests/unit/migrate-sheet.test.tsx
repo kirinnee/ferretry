@@ -1,12 +1,13 @@
 import '../support/dom.ts';
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { describe, expect, it } from 'bun:test';
-import type { ReactTestInstance } from 'react-test-renderer';
+import type { ReactElement } from 'react';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
-  MigrateSheet,
   type MigrateSession,
+  MigrateSheet,
   type MigrateSheetProps,
   migrateSessionWithDaemon,
 } from '../../src/components/migrate-sheet.tsx';
@@ -27,6 +28,19 @@ const daemonB = daemonConnection({
 });
 const scopeA = daemonSessionScope(daemonA, 'same-session');
 const scopeB = daemonSessionScope(daemonB, 'same-session');
+const mountedViews: ReactTestRenderer[] = [];
+
+const renderSheet = (element: ReactElement): ReactTestRenderer => {
+  const view = render(element);
+  mountedViews.push(view);
+  return view;
+};
+
+afterEach(() => {
+  run(() => {
+    for (const view of mountedViews.splice(0)) view.unmount();
+  });
+});
 
 const source = (status: SessionView['state']['status'] = 'running'): SessionView =>
   sessionView('same-session', {
@@ -98,7 +112,7 @@ describe('migrateSessionWithDaemon', () => {
 
 describe('MigrateSheet', () => {
   it('is inert while closed or read-only, and renders the daemon-owned safety contract when editable', () => {
-    const view = render(<MigrateSheet {...props({ open: false })} />);
+    const view = renderSheet(<MigrateSheet {...props({ open: false })} />);
     expect(view.toJSON()).toBeNull();
 
     run(() => view.update(<MigrateSheet {...props({ canMutate: false })} />));
@@ -121,7 +135,7 @@ describe('MigrateSheet', () => {
       calls.push(args);
       return migrated;
     };
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession,
@@ -152,7 +166,7 @@ describe('MigrateSheet', () => {
       return source();
     };
     const oversized = source();
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession,
@@ -191,7 +205,7 @@ describe('MigrateSheet', () => {
       return migrated;
     };
     const updates: SessionView[] = [];
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet {...props({ migrateSession, onMigrated: (_connection, _scope, next) => updates.push(next) })} />,
     );
     change(field(view.root, 0), 'codex-auto-atomi');
@@ -215,7 +229,7 @@ describe('MigrateSheet', () => {
   });
 
   it('offers the daemon-suggested 1M model without silently accepting a downgrade', async () => {
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession: async () => {
@@ -242,7 +256,7 @@ describe('MigrateSheet', () => {
     let attempts = 0;
     const message =
       'open tool work is not safe to interrupt\nin-flight inventory — status tool_running, turn 4, worst: UNKNOWN\n  blind [UNKNOWN] open tool call-7 has no transcript';
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession: async () => {
@@ -265,7 +279,7 @@ describe('MigrateSheet', () => {
   });
 
   it('keeps an actionable typed failure in confirmation and lets the reader return to edit', async () => {
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession: async () => {
@@ -303,7 +317,7 @@ describe('MigrateSheet', () => {
         onMigrated: connection => updates.push(connection.daemonId),
         ...overrides,
       });
-    const view = render(<MigrateSheet {...make()} />);
+    const view = renderSheet(<MigrateSheet {...make()} />);
     change(field(view.root, 0), 'codex-auto-atomi');
     review(view.root);
     const action = button(view.root, 'Migrate and relaunch');

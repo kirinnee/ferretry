@@ -7,6 +7,7 @@ type MediaListener = () => void;
 const listeners = new Set<MediaListener>();
 const queries: string[] = [];
 const originalMatchMedia = Object.getOwnPropertyDescriptor(window, 'matchMedia');
+const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
 
 const setWidth = (width: number): void => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
@@ -40,6 +41,8 @@ afterEach(() => {
   queries.length = 0;
   if (originalMatchMedia) Object.defineProperty(window, 'matchMedia', originalMatchMedia);
   else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'matchMedia');
+  if (originalInnerWidth) Object.defineProperty(window, 'innerWidth', originalInnerWidth);
+  else Reflect.deleteProperty(window as unknown as Record<string, unknown>, 'innerWidth');
 });
 
 describe('dashboard width projection', () => {
