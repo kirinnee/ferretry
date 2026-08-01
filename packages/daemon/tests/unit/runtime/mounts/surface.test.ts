@@ -8,6 +8,7 @@ import {
   mountedDaemonRoutes,
   mountedRawRoutes,
   mountedSocketRoutes,
+  type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { fixedClock, request } from '../../api/support.ts';
@@ -46,7 +47,7 @@ import {
 
 const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
 
-const subsystems = (): MountedSubsystems => ({
+const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
   attention: attentionService(),
   pins: pinService([]),
@@ -74,10 +75,7 @@ const subsystems = (): MountedSubsystems => ({
   recommend: recommendSubsystem(),
   stt: new FakeStt(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
-  scratchGc: {
-    plan: async () => [],
-    sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }),
-  },
+  scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
 });
 
 describe('the mounted daemon surface', () => {
@@ -240,6 +238,38 @@ describe('the mounted daemon surface', () => {
     should(stopped.status).equal(200);
     should(revived.status).equal(200);
     should(migrated.status).equal(200);
+  });
+
+  it('should validate the GC plan and force request before reaching the collector', async () => {
+    // Arrange
+    const limits: number[] = [];
+    const forces: boolean[] = [];
+    const dispatcher = createMountedDispatcher(
+      base,
+      subsystems({
+        plan: async limit => {
+          limits.push(limit);
+          return [];
+        },
+        sweep: async force => {
+          forces.push(force);
+          return { sessions: 0, bytes: 0, failures: 0 };
+        },
+      }),
+    );
+
+    // Act
+    const planned = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['limit', '7']], headers: human }));
+    const forced = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/gc', headers: human, body: JSON.stringify({ force: true }) }),
+    );
+    const invalid = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['limit', '0']], headers: human }));
+    const unknown = await dispatcher.dispatch(request({ path: '/v1/gc', query: [['other', '1']], headers: human }));
+
+    // Assert
+    should([planned.status, forced.status, invalid.status, unknown.status]).deepEqual([200, 200, 400, 400]);
+    should(limits).deepEqual([7]);
+    should(forces).deepEqual([true]);
   });
 
   it('should serve every protocol-switching route from one table too', () => {
