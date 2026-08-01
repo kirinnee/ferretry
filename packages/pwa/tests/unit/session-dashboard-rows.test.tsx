@@ -224,6 +224,7 @@ describe('session dashboard row leaves', () => {
       'button',
     );
     expect(text(heading)).toContain('ferretry/work/ferretry2');
+    expect(heading.props.className).toContain('min-h-[44px]');
     run(() => heading.props.onClick());
     expect(focused).toEqual(['/work/ferretry']);
 

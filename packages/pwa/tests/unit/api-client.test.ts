@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import type { IFyHttpTransport, SessionView } from '@ferretry/protocol';
-import { DaemonHttpTransport, PWA_PROTOCOL_VERSION, daemonApiClient } from '../../src/lib/api-client.ts';
+import should from 'should';
+import { DaemonHttpTransport, daemonApiClient, PWA_PROTOCOL_VERSION } from '../../src/lib/api-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 const health = {

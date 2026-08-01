@@ -10,22 +10,22 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Activity, Bot, FolderGit2, Sparkles } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
+import { TaskName } from '../features/tasks/task-name.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
-import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { Density } from '../lib/controls.ts';
+import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { absoluteTime } from '../lib/session-screens.ts';
 import type { DaemonUsageIndex } from '../lib/usage.ts';
-import { TaskName } from '../features/tasks/task-name.tsx';
-import { activityLine, dashboardTone, sessionAge, statusWord } from './session-dashboard-model.ts';
+import { ModeBadge } from '../shell/mode-badge.tsx';
+import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
 import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
-import { ModeBadge } from '../shell/mode-badge.tsx';
-import { Badge } from '../shell/primitives.tsx';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
+import { activityLine, dashboardTone, sessionAge, statusWord } from './session-dashboard-model.ts';
 
 interface SessionNavigationProps {
   readonly daemonId: DaemonId;
@@ -315,7 +315,7 @@ export function ProjectHeading({
       onClick={() => onFocus(group.path)}
       aria-label={`Focus folder ${group.name}`}
       title={`Focus folder ${group.name}`}
-      className="mb-1 flex w-full min-w-0 items-baseline gap-sm overflow-hidden rounded-control px-0.5 text-left hover:bg-surface-2"
+      className="mb-1 flex min-h-[44px] w-full min-w-0 items-center gap-sm overflow-hidden rounded-control px-0.5 py-1 text-left hover:bg-surface-2"
     >
       <FolderGit2 size={13} className="shrink-0 translate-y-0.5 text-faint" />
       <span className="min-w-0 truncate text-ui font-semibold text-fg">{group.name}</span>

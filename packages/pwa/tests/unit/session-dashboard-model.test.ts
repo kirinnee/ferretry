@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import {
+  activityLine,
   DENSITY_COLUMN_LABELS,
   DENSITY_COLUMN_WIDTHS,
-  GROUP_HUES,
-  SCOPE_RECOVERY_MESSAGE,
-  activityLine,
   dashboardEmptyMessage,
   dashboardMode,
   dashboardTone,
+  GROUP_HUES,
   groupHueIndex,
   groupHueVar,
   groupHueVars,
   hoistedStatus,
   isBusy,
+  SCOPE_RECOVERY_MESSAGE,
   sessionAge,
   sessionCountLabel,
   statusWord,

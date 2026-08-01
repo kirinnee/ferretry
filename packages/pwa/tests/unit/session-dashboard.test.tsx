@@ -1,11 +1,11 @@
 import '../support/dom.ts';
 
-import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DEFAULT_DEVICE_CONTROLS } from '../../src/lib/controls.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
 import { render, run } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';

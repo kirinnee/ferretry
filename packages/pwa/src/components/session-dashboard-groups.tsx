@@ -1,11 +1,11 @@
 /** Group/table scaffolds for the sessions dashboard; leaf markup lives in the row module. */
 
 import { FolderGit2 } from 'lucide-react';
-import type { DaemonId } from '../lib/daemon-connection.ts';
+import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
+import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { DaemonUsageIndex } from '../lib/usage.ts';
-import { cn } from '../lib/class-names.ts';
 import { Badge } from '../shell/primitives.tsx';
 import {
   DENSITY_COLUMN_LABELS,

@@ -9,17 +9,17 @@
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
 import { FolderGit2, Folders, LayoutGrid, Plus, Rows3 } from 'lucide-react';
 import { useId } from 'react';
+import { WardenStrip } from '../features/warden/warden-strip.tsx';
 import {
-  WardenVerdicts,
   type WardenReportRequest,
+  WardenVerdicts,
   type WardenVerdictView,
 } from '../features/warden/warden-verdicts.tsx';
-import { WardenStrip } from '../features/warden/warden-strip.tsx';
-import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
+import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { cn } from '../lib/class-names.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DashboardView, Density, UiControls } from '../lib/controls.ts';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
 import type { DaemonUsageIndex } from '../lib/usage.ts';
@@ -27,9 +27,9 @@ import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
 import {
-  SCOPE_RECOVERY_MESSAGE,
   dashboardEmptyMessage,
   dashboardMode,
+  SCOPE_RECOVERY_MESSAGE,
   sessionCountLabel,
 } from './session-dashboard-model.ts';
 import { SkeletonRows } from './session-dashboard-rows.tsx';

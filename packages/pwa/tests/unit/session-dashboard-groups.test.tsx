@@ -1,7 +1,7 @@
 import '../support/dom.ts';
 
-import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
   FullDensityGroups,
