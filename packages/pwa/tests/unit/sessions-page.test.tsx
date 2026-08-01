@@ -165,6 +165,48 @@ describe('SessionsPage', () => {
     await page.unmount();
   });
 
+  it('renders an authoritative empty fleet and applies every connected control filter', async () => {
+    const empty = pageProps({
+      fleet: new DaemonFleetStore({ list: () => Promise.resolve([]), get: () => Promise.reject(new Error('unused')) }),
+    });
+    const emptyPage = await mount(<SessionsPage {...empty} />);
+    await settle();
+    expect(emptyPage.container.textContent).toContain('No matching sessions.');
+    await emptyPage.unmount();
+
+    const filtered = pageProps({
+      fleet: new DaemonFleetStore({
+        list: () =>
+          Promise.resolve([
+            sessionView('auto-rc', {
+              config: { teammate: 'auto', name: 'needle', cwd: '/alpha/repo', mode: 'auto', remoteControl: true },
+            }),
+            sessionView('interactive', {
+              config: {
+                teammate: 'interactive',
+                name: 'needle',
+                cwd: '/alpha/repo',
+                mode: 'interactive',
+                remoteControl: true,
+              },
+            }),
+            sessionView('finished', {
+              config: { teammate: 'done', name: 'needle', cwd: '/alpha/repo', mode: 'auto', remoteControl: true },
+              state: { status: 'completed' },
+            }),
+          ]),
+        get: () => Promise.reject(new Error('unused')),
+      }),
+    });
+    filtered.controls.setDeviceControls({ query: 'needle', mode: 'auto', rcOnly: true, includeFinished: false });
+    const page = await mount(<SessionsPage {...filtered} />);
+    await settle();
+    expect(page.container.textContent).toContain('Auto');
+    expect(page.container.textContent).not.toContain('Interactive');
+    expect(page.container.textContent).not.toContain('Done');
+    await page.unmount();
+  });
+
   it('writes device view controls and pushes daemon-qualified scope history', async () => {
     const props = pageProps();
     const nav = navigation();
@@ -194,6 +236,7 @@ describe('SessionsPage', () => {
     const page = await mount(<SessionsPage {...props} scopeNavigation={nav} />);
     await settle();
     expect(page.container.textContent).toContain('alpha repo');
+    expect(page.container.textContent).toContain('1 session');
     await interact(() =>
       (must(page.container.querySelector('[aria-label="Show all folders"]'), 'scope exit') as HTMLElement).click(),
     );
@@ -205,7 +248,11 @@ describe('SessionsPage', () => {
     recoveryProps.controls.setControls(alpha.daemonId, { projectScope: '/missing' });
     const recovered = await mount(<SessionsPage {...recoveryProps} scopeNavigation={navigation()} />);
     await settle();
+    // The pure dashboard suite proves its transient role=status banner. Here the
+    // connected effect is allowed to clear in the same React flush, so prove its
+    // durable daemon-qualified recovery side effects instead.
     expect(recoveryProps.controls.controls(alpha.daemonId).projectScope).toBeNull();
+    expect((recovered.container.querySelector('main') as HTMLElement).dataset.density).toBe('full');
     await recovered.unmount();
   });
 
