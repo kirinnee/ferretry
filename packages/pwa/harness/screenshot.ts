@@ -340,6 +340,13 @@ try {
       await page.screenshot({ path: renameTarget });
       process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
 
+      const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
+      await page.goto(`${server.url}#migrate`);
+      await page.reload();
+      await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
+      await page.screenshot({ path: migrateTarget });
+      process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
+
       await context.close();
     }
   } finally {

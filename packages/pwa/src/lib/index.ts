@@ -15,6 +15,7 @@ export * from '../components/files-views.tsx';
 export * as filesTabModel from '../components/files-tab-model.ts';
 export * from '../components/markdown.tsx';
 export * as migrateModel from '../components/migrate-model.ts';
+export * from '../components/migrate-sheet.tsx';
 export * as fileTreeModel from '../components/file-tree-model.ts';
 export * as filesApi from '../components/files-api.ts';
 export * as filesModel from '../components/files-model.ts';

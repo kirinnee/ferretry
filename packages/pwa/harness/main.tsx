@@ -36,6 +36,7 @@ import { DictationSheet, type DictationStage } from '../src/components/dictation
 import { FilesTab } from '../src/components/files-tab.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
+import { MigrateSheet } from '../src/components/migrate-sheet.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
 import { RenameSheet } from '../src/components/rename-sheet.tsx';
@@ -1102,6 +1103,7 @@ function Shell() {
   const stopOpen = window.location.hash === '#stop';
   const fleetDrawerOpen = window.location.hash === '#fleet-drawer';
   const stopResultsOpen = window.location.hash === '#stop-results';
+  const migrateOpen = window.location.hash === '#migrate';
   const renameOpen = window.location.hash === '#rename';
   const [chatWidth, setChatWidth] = useState<ChatWidth>('balanced');
 
@@ -2328,6 +2330,15 @@ function Shell() {
           onClose={() => {}}
           open={renameOpen}
           view={harnessChildSession}
+        />
+        <MigrateSheet
+          canMutate
+          connection={daemon}
+          onClose={() => {}}
+          onMigrated={() => {}}
+          open={migrateOpen}
+          scope={scope}
+          view={harnessSession}
         />
         <AttachmentUnlockPrompt
           filename="design-brief.pdf"
