@@ -323,7 +323,7 @@
 # NO worktree or branch field of any kind, and neither does the CLI's own start. So there is nothing a
 # start could persist, and giving it something means DESIGNING a wire contract rather than wiring an
 # existing one — which is why this line is still here after the start landed.
-packages/daemon/src/lib/worktrees/index.ts # PR #9: the domain beneath it is reachable; the barrel awaits a mount, which awaits a managed-worktree registry
+packages/daemon/src/lib/worktrees/index.ts # PR #9 GAP: kteam's worktrees.ts defines ManagedWorktree creation/removal but SessionManager never imports it or persists one; it records only each session's cwd. Ferretry's StartSessionRequest and fy start likewise carry no worktree/branch intent, so no per-daemon, session-owned record can be created or verified. Mounting /v1/worktrees would therefore report an empty registry as healthy, which is false.
 
 # PR #10 — port the task record system and its file store: FULLY MOUNTED, nothing to list.
 # bin/fyd.ts builds a FileTaskStore-backed TaskRecordService per session and the task routes serve
