@@ -10,7 +10,7 @@ import { TaskRecordService } from '../../../src/adapters/tasks/task-record-servi
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
 import { taskRoutes, type TaskSubsystem } from '../../../src/lib/runtime/mounts/tasks.ts';
-import { TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
+import { TASK_UNAVAILABLE_MESSAGE, TaskStateUnavailableError } from '../../../src/lib/tasks/task-error.ts';
 import type { TaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
 import { CREDENTIALS, human } from '../../unit/runtime/mounts/support.ts';
@@ -36,12 +36,12 @@ const DAMAGED_BOARD = JSON.stringify({
 });
 
 /**
- * Asserts the call fails as a PERSISTENCE refusal.
+ * Asserts the call fails as a PERSISTENCE refusal, and hands the error back for its detail.
  *
  * Deliberately not `shouldReject`, which asserts a `TaskError` carrying a protocol code: a damaged
  * snapshot is not in that taxonomy at all, and asserting it there is what let the mount answer 400.
  */
-const shouldBeUnavailable = async (act: () => Promise<unknown>): Promise<void> => {
+const shouldBeUnavailable = async (act: () => Promise<unknown>): Promise<TaskStateUnavailableError> => {
   let thrown: unknown;
   try {
     await act();
@@ -49,7 +49,11 @@ const shouldBeUnavailable = async (act: () => Promise<unknown>): Promise<void> =
     thrown = error;
   }
   should(thrown).be.instanceof(TaskStateUnavailableError);
-  should((thrown as TaskStateUnavailableError).code).equal('unavailable');
+  const failure = thrown as TaskStateUnavailableError;
+  should(failure.code).equal('unavailable');
+  // The message is the client's, so it is the fixed one whatever the store was looking at.
+  should(failure.message).equal(TASK_UNAVAILABLE_MESSAGE);
+  return failure;
 };
 
 /** Writes `content` as the board's authoritative snapshot, creating the board directory for it. */
@@ -160,9 +164,12 @@ describe('FileTaskStore', () => {
       should(decoded.fatal).be.false();
       should(decoded.snapshot.tasks).have.length(1);
       should(decoded.parseErrors).have.length(1);
-      await shouldBeUnavailable(() => store.read());
+      const refusal = await shouldBeUnavailable(() => store.read());
       await shouldBeUnavailable(() => store.transact(() => ({ container: snapshot('F2'), result: null })));
       should(await readFile(path, 'utf8')).equal(damaged);
+      // The operator still gets the whole story — in the detail, which stays inside the daemon.
+      should(refusal.detail).containEql(path);
+      should(refusal.detail).containEql('damaged task snapshot');
     });
   });
 
@@ -261,7 +268,8 @@ describe('the task mount over a damaged snapshot', () => {
   it('should answer a task read with a server-side status, never the caller’s fault', async () => {
     await withTempRoot(async root => {
       // Arrange
-      const dispatch = mountedOver(await writeBoard(root, DAMAGED_BOARD));
+      const path = await writeBoard(root, DAMAGED_BOARD);
+      const dispatch = mountedOver(path);
 
       // Act
       const response = await dispatch.dispatch(request({ path: `/v1/sessions/${SESSION}/tasks/F1`, headers: human }));
@@ -270,6 +278,12 @@ describe('the task mount over a damaged snapshot', () => {
       should(response.status).equal(503);
       should(response.status).not.equal(400);
       should(jsonBody(response)).have.property('code', 'unavailable');
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      // The body goes to every agent on the host, so it must name neither the board file nor the
+      // directory it sits under — the operator's home is in that path.
+      should(response.body).not.containEql(path);
+      should(response.body).not.containEql(root);
+      should(response.body).not.containEql('tasks.json');
     });
   });
 
@@ -296,6 +310,9 @@ describe('the task mount over a damaged snapshot', () => {
       // Assert
       should(response.status).equal(503);
       should(jsonBody(response)).have.property('code', 'unavailable');
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      should(response.body).not.containEql(path);
+      should(response.body).not.containEql(root);
       // The refusal must not have replaced the corrupt board with an apparently healthy one.
       should(await readFile(path, 'utf8')).equal('not json at all');
     });

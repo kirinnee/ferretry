@@ -4,9 +4,18 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { taskActor, taskLive, taskRoutes } from '../../../../src/lib/runtime/mounts/tasks.ts';
-import { TaskError } from '../../../../src/lib/tasks/index.ts';
+import { TASK_UNAVAILABLE_MESSAGE, TaskError } from '../../../../src/lib/tasks/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, AT, CREDENTIALS, FakeTaskBoard, human, taskSubsystem, type TaskWorld } from './support.ts';
+import {
+  agentIn,
+  AT,
+  BOARD_UNREADABLE_DETAIL,
+  CREDENTIALS,
+  FakeTaskBoard,
+  human,
+  taskSubsystem,
+  type TaskWorld,
+} from './support.ts';
 
 /**
  * The task board's HTTP surface, driven through the real router and the real reducer.
@@ -382,6 +391,10 @@ describe('the task board mount', () => {
       // Assert
       should(response.status).equal(503);
       should(jsonBody(response)).have.property('code', 'unavailable');
+      // The body is the fixed message, not whatever the store was looking at when it refused: a
+      // damaged board's detail is an absolute path under the operator's state home.
+      should(jsonBody(response)).have.property('error', TASK_UNAVAILABLE_MESSAGE);
+      should(response.body).not.containEql(BOARD_UNREADABLE_DETAIL);
     });
   });
 

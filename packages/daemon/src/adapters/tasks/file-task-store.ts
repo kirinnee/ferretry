@@ -82,6 +82,10 @@ export class FileTaskStore implements TaskStorePort<TaskSnapshot> {
    * The refusal is a PERSISTENCE failure, not a protocol one: whoever asked did nothing wrong, and
    * this file is damaged until an operator repairs it. Raising it as `TaskError('invalid')` made the
    * HTTP mount answer 400 and blame the caller for the daemon's own unreadable board.
+   *
+   * The path goes in the error's DETAIL, which stays inside the daemon. It is an absolute path under
+   * the operator's state home, so putting it in the error's message — which the mount answers with —
+   * would hand every agent on the host the operator's home directory for the price of a corrupt file.
    */
   private requireClean(decoded: DecodedTaskSnapshot): TaskSnapshot {
     const first = decoded.parseErrors[0];

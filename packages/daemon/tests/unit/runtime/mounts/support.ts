@@ -190,6 +190,12 @@ export function attentionService(repository: AttentionLedgerRepository = new Fak
 }
 
 /**
+ * What the unreadable board refuses with — shaped like the real thing, an absolute path under the
+ * operator's state home. Exported so a route test can prove this never reaches the wire.
+ */
+export const BOARD_UNREADABLE_DETAIL = 'refusing to use a damaged task snapshot at /home/operator/.fy/s1/tasks.json';
+
+/**
  * An in-memory task board.
  *
  * The reducer, the ordering and the authorization rules are the REAL ones — only the JSON file is
@@ -211,7 +217,7 @@ export class FakeTaskBoard implements TaskBoardPort {
   ) {}
 
   async list(): Promise<{ readonly entries: readonly TaskEntry[]; readonly parseErrors: readonly TaskParseIssue[] }> {
-    if (this.unreadable) throw new TaskStateUnavailableError('the snapshot could not be read');
+    if (this.unreadable) throw new TaskStateUnavailableError(BOARD_UNREADABLE_DETAIL);
     return { entries: this.snapshot.tasks, parseErrors: this.parseErrors };
   }
 

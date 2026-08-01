@@ -150,7 +150,11 @@ export function taskActor(actor: ApiActor | undefined): TaskActor {
 const TASK_UNAVAILABLE_STATUS = 503;
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug still
- *  becomes a 500 instead of being reported as the client's fault. */
+ *  becomes a 500 instead of being reported as the client's fault.
+ *
+ *  A persistence refusal answers with its `message`, which is the FIXED
+ *  {@link TASK_UNAVAILABLE_MESSAGE} — the failing path is on the error's `detail` and deliberately
+ *  stays there, because this body is served to every agent on the host. */
 function reraise(error: unknown): never {
   if (error instanceof TaskStateUnavailableError)
     throw new ApiError(TASK_UNAVAILABLE_STATUS, error.message, error.code);
