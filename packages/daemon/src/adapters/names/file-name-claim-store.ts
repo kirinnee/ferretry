@@ -55,6 +55,13 @@ export class FileNameClaimStore implements NameClaimStore {
   }
 
   async tryClaim(claim: NameClaim): Promise<NameClaimAttempt> {
+    // A caller can hand in a `NameClaim` the schema still rejects: a non-canonical callsign, an owner
+    // id of "", an expiry at or before its creation. Persisting it would make the very next `ledger()`
+    // read throw and leave the file poisoned, so the same decoder that guards reads guards this write.
+    const incoming = NameClaimSchema.safeParse(claim);
+    if (!incoming.success) {
+      throw new Error(`invalid callsign claim for ${this.file}: ${incoming.error.message}`);
+    }
     return await this.executor.run(this.file, async () => {
       const existing = await this.listClaims();
       // Only an UNEXPIRED claim conflicts, and an owner re-claiming its own name does not: a retried

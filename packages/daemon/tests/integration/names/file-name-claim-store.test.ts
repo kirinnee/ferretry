@@ -193,4 +193,36 @@ describe('FileNameClaimStore', () => {
     should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
     should(await readFile(subject.file, 'utf8')).equal(damaged);
   });
+
+  it('should refuse a claim its own decoder would reject and leave the ledger untouched', async () => {
+    // tryClaim must not persist a caller-supplied NameClaim the store could not read back. The type
+    // system still admits claims the schema rejects — a non-canonical callsign, an empty owner id,
+    // an expiry at or before its creation — and writing one would poison every later read, so writes
+    // are guarded by the same decoder that guards reads.
+    // Arrange — a valid reservation already on disk, captured byte-for-byte.
+    const subject = await fixture();
+    const held = DEFAULT_CALLSIGN_POOL[0]!;
+    const seeded = await subject.allocator.allocate({ ownerId: 'session-a', nowMs: NOW, requested: held });
+    should(seeded.ok).be.true();
+    const before = await readFile(subject.file, 'utf8');
+
+    // Act + Assert — each malformed claim is refused before any write, and the valid ledger never moves.
+    const malformed: readonly NameClaim[] = [
+      // A free name whose expiry is at its creation: with no conflict this is exactly the row that,
+      // unguarded, would land on disk and throw on the next read.
+      { callsign: DEFAULT_CALLSIGN_POOL[1]!, ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW },
+      // A non-canonical callsign the decoder rejects.
+      { callsign: 'NOT-CANONICAL', ownerId: 'session-b', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
+      // An empty owner id, which the schema forbids.
+      { callsign: DEFAULT_CALLSIGN_POOL[2]!, ownerId: '', claimedAtMs: NOW, expiresAtMs: NOW + CALLSIGN_WINDOW_MS },
+    ];
+    for (const bad of malformed) {
+      await should(subject.store.tryClaim(bad)).be.rejectedWith(/invalid callsign claim/u);
+      should(await readFile(subject.file, 'utf8')).equal(before);
+    }
+
+    // The store still reads back, and none of the bad claims reached the ledger.
+    const listed = await subject.store.listClaims();
+    should(listed.some(row => row.ownerId === 'session-b')).be.false();
+  });
 });
