@@ -2,18 +2,17 @@ import { describe, expect, it } from 'bun:test';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
 import {
-  baseName,
   clampActiveIndex,
   matchesPaletteCommand,
   nextActiveIndex,
   type PaletteCommand,
+  type PaletteSettingsEntry,
   paletteCountLabel,
   paletteFocusPolicy,
   paletteGroupHeading,
   paletteResultId,
   paletteResults,
   paletteSessionEntries,
-  type PaletteSettingsEntry,
   paletteSettingHref,
   settingsDestinationHrefs,
 } from '../../src/shell/palette-model.ts';
@@ -41,20 +40,8 @@ const setting = (overrides: Partial<PaletteSettingsEntry> = {}): PaletteSettings
 
 const noGroups = { destinations: [], commands: [], settings: [] };
 
-describe('baseName', () => {
-  it('names a project by its last path segment', () => {
-    expect(baseName('/home/k/Workspace/ferretry')).toBe('ferretry');
-  });
-
-  it('reads a trailing separator the same as none', () => {
-    expect(baseName('/home/k/Workspace/ferretry/')).toBe('ferretry');
-  });
-
-  it('leaves a bare name alone', () => {
-    expect(baseName('ferretry')).toBe('ferretry');
-  });
-});
-
+// `baseName` moved to `lib/fleet-grouping.ts`, where grouping, scoping and the
+// palette now share one folder-naming rule; its tests moved with it.
 describe('paletteSessionEntries', () => {
   it('keeps the searchable callsign RAW and the rendered headline title-cased', () => {
     const [entry] = paletteSessionEntries([sessionView('s1', { config: { teammate: 'ms-98' } })]);
