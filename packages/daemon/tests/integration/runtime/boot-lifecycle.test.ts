@@ -14,6 +14,7 @@ import {
   SessionStateSchema,
   SessionViewSchema,
   NameSuggestionsSchema,
+  BrowserLoginStatusSchema,
   TerminalListViewSchema,
   TerminalViewSchema,
 } from '@ferretry/protocol';
@@ -34,6 +35,12 @@ import {
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
+import {
+  BrowserLoginWindowService,
+  BrowserProfileStore,
+  type BrowserLoginChild,
+  type BrowserLoginRuntime,
+} from '../../../src/adapters/index.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -374,6 +381,87 @@ async function seedMigrationFleet(home: string): Promise<void> {
     { mode: 0o600 },
   );
   process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
+}
+
+/**
+ * The host effects the login window performs, with no host behind them.
+ *
+ * This is the seam `bin/fyd.ts` already builds the window over, and it is substituted for exactly the
+ * reason the world declares it: a real one starts an X server, a Chrome and a VNC server on whatever
+ * machine runs the suite. Everything ABOVE it stays production — the window's state machine, the real
+ * `BrowserProfileStore` over the test's own state home, the mount, the dispatcher and the socket — so
+ * what is proved is that the daemon leases the profile, records the human's verdict and serves a
+ * status the reader can parse.
+ */
+class RecordingLoginRuntime implements BrowserLoginRuntime {
+  readonly spawned: string[][] = [];
+  readonly terminated: string[] = [];
+  readonly platform = 'linux' as const;
+  readonly environmentSource = { PATH: '/usr/bin', HOME: '/home/operator' } as const;
+  readonly hostname = 'boot-host';
+  readonly sshUser = 'operator';
+  private clock = Date.parse('2026-07-31T12:00:00.000Z');
+
+  async display(): Promise<string> {
+    return ':77';
+  }
+
+  chromeExecutable(): string {
+    return '/usr/bin/google-chrome';
+  }
+
+  x11vncExecutable(): string {
+    return '/usr/bin/x11vnc';
+  }
+
+  timeoutExecutable(): string {
+    return '/usr/bin/timeout';
+  }
+
+  async chromeVersion(): Promise<string> {
+    return 'Google Chrome 130.0.6723.116';
+  }
+
+  spawn(argv: readonly string[]): BrowserLoginChild {
+    this.spawned.push([...argv]);
+    return { pid: 1_000 + this.spawned.length, exited: new Promise<number>(() => undefined), kill: () => undefined };
+  }
+
+  async freePort(): Promise<number> {
+    return 5_912;
+  }
+
+  async writePassword(): Promise<string> {
+    return '/tmp/does-not-matter';
+  }
+
+  async waitForChrome(): Promise<void> {
+    return undefined;
+  }
+
+  async waitForVnc(): Promise<void> {
+    return undefined;
+  }
+
+  async removePassword(): Promise<void> {
+    return undefined;
+  }
+
+  async terminateChrome(): Promise<void> {
+    this.terminated.push('chrome');
+  }
+
+  async terminateVnc(): Promise<void> {
+    this.terminated.push('vnc');
+  }
+
+  now(): number {
+    return this.clock;
+  }
+
+  advance(milliseconds: number): void {
+    this.clock += milliseconds;
+  }
 }
 
 /** Boots the production world against a seeded temp home, with shutdown driven by the test. */
@@ -1759,6 +1847,119 @@ describe('daemon boot lifecycle', () => {
    * from the self-check `start` actually ran before it bound the port, and the version from the
    * daemon's own package.
    */
+  /**
+   * The human browser-login window, driven through the production composition root over a real socket.
+   *
+   * The read half runs against the PRODUCTION window — the one `buildWorld` builds, over the real
+   * `BrowserProfileStore` in the real state home — because asking a closed window for its status
+   * spawns nothing. That alone is what `fy browser login` and the PWA's banner have been unable to do
+   * since they were ported: the route answered `unknown_route`.
+   *
+   * The write half swaps the runtime beneath the same production window, because a `start` genuinely
+   * launches an X server, a Chrome and a VNC listener, and a test suite must never put those on the
+   * host. Everything else stays real, so what this proves is the job rather than the construction:
+   * the profile is leased inside the state home, the argv Chrome would have been launched with is the
+   * domain's own, and the human's "I signed in" is written to a primed marker a LATER read reports.
+   */
+  it('should serve, open and prime the human login window through the mounted subsystem', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-browser-login');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const base = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    // The production status read, before anything is substituted: proof the route the boot mounts is
+    // answered by the real profile store over this home.
+    const production = await base.browserLogin.window.status();
+    const runtime = new RecordingLoginRuntime();
+    const world = {
+      ...base,
+      browserLogin: {
+        window: new BrowserLoginWindowService({ profile: new BrowserProfileStore(home), runtime }),
+        close: async () => undefined,
+      },
+    };
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
+    const json = { ...headers, 'content-type': 'application/json' };
+    const url = `http://127.0.0.1:${port}/v1/browser/login`;
+    const act = (body: unknown) => fetch(url, { method: 'POST', headers: json, body: JSON.stringify(body) });
+
+    // Act
+    const closed = await fetch(url, { headers });
+    const closedBody = BrowserLoginStatusSchema.parse(await closed.json());
+    const opened = await act({ action: 'start', minutes: 20 });
+    const openedBody = BrowserLoginStatusSchema.parse(await opened.json());
+    const whileOpen = BrowserLoginStatusSchema.parse(await (await fetch(url, { headers })).json());
+    const tooLong = await act({ action: 'start', minutes: 600 });
+    const stopped = await act({ action: 'stop', primed: true });
+    const stoppedBody = BrowserLoginStatusSchema.parse(await stopped.json());
+    const afterPrime = BrowserLoginStatusSchema.parse(await (await fetch(url, { headers })).json());
+    const confirmWithNoWindow = await act({ action: 'confirm' });
+    // The per-session browser surface: a shipped command told what is missing rather than a 404.
+    const automation = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/browser`, { headers });
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // The production window, over the real profile store: nothing has ever been signed in here.
+    should(production).deepEqual({ state: 'closed', profilePrimed: false });
+    should(closed.status).equal(200);
+    should(closedBody).deepEqual({ state: 'closed', profilePrimed: false });
+    // A window a person can actually connect to: loopback only, with the tunnel they must open.
+    should(opened.status).equal(200);
+    should(openedBody.state).equal('open');
+    should(openedBody.state === 'open' ? openedBody.connection : undefined).deepEqual({
+      host: '127.0.0.1',
+      port: 5_912,
+      password: openedBody.state === 'open' ? openedBody.connection.password : '',
+      sshTunnel: 'ssh -N -L 5912:127.0.0.1:5912 operator@boot-host',
+    });
+    // The minutes the caller asked for are the minutes the window expires after.
+    should(openedBody.state === 'open' ? Date.parse(openedBody.expiresAt) - Date.parse(openedBody.openedAt) : 0).equal(
+      20 * 60_000,
+    );
+    // A second read sees the SAME window rather than opening another: the subsystem is one instance
+    // the boot constructed, not one per request.
+    should(whileOpen).deepEqual(openedBody);
+    // Chrome was launched into the daemon's own private profile, on the display the runtime owns, with
+    // the sign-in page the domain names.
+    should(runtime.spawned[0]?.[0]).equal('/usr/bin/google-chrome');
+    should(runtime.spawned[0]).containEql(`--user-data-dir=${join(home, 'browser', 'profile')}`);
+    should(runtime.spawned[0]).containEql('https://accounts.google.com/');
+    // The VNC server is supervised by `timeout` for exactly the window's own duration.
+    should(runtime.spawned[1]?.slice(0, 4)).deepEqual(['/usr/bin/timeout', '--signal=TERM', '--kill-after=10', '1200']);
+    // A duration the contract refuses never reaches the host.
+    should(tooLong.status).equal(400);
+    should(stopped.status).equal(200);
+    should(stoppedBody).deepEqual({ state: 'closed', profilePrimed: true });
+    // The human's verdict is DURABLE, not in memory: a later read over the real state home reports it,
+    // and the marker is a file inside the daemon's own browser directory.
+    should(afterPrime).deepEqual({ state: 'closed', profilePrimed: true });
+    should(await readdir(join(home, 'browser'))).containEql('profile.primed.json');
+    // Both processes were released when the window closed, VNC before Chrome.
+    should(runtime.terminated).deepEqual(['vnc', 'chrome']);
+    // Confirming a window that is not open is a statement about the WINDOW, not about the request, so
+    // it travels as the domain classified it: this daemon has no window to confirm.
+    should(confirmWithNoWindow.status).equal(503);
+    should((await confirmWithNoWindow.json()) as { error: string }).have.property(
+      'error',
+      'the human browser login window is not open',
+    );
+    should(automation.status).equal(501);
+  });
+
   it('should report its own health, measured by the self-check the boot ran', async () => {
     // Arrange
     const home = await tempDirectory('fyd-health');

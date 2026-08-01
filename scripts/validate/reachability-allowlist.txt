@@ -56,8 +56,12 @@
 #     contain one. `packages/daemon/bin/` ships `stt-worker.ts` and nothing else; the only browser
 #     worker that exists is `tests/integration/browser/transport/fixtures/fake-worker.mjs`, a test
 #     fixture. The other half is missing too: nothing in production implements `BrowserViewerHost` —
-#     the browser SESSION runtime would, and that is PR #15 below, two adapters deep and ending in an
-#     X server on the host. Wiring this means WRITING the worker, not calling it.
+#     the browser SESSION runtime would. Wiring this means WRITING the worker, not calling it.
+#
+#     RE-CHECKED now that PR #15's login window IS mounted, because that unit built the X display this
+#     was said to be waiting behind. The display is no longer the blocker and this line still stands:
+#     the worker program and `BrowserViewerHost` are both absent, and neither is downstream of the
+#     display. `/v1/sessions/:id/browser` is served as a stated 501 naming exactly these two.
 #   * `transcripts` — `TranscriptSource.read` takes the transcript FILE and no document records one.
 #     `SessionConfigSchema` has no transcript field; `state.lastTranscriptAt` is an instant, is read
 #     only by the unmounted warden detector, and is written by nothing. It is also why the migration
@@ -323,29 +327,40 @@ packages/daemon/src/lib/learning/aggregate.ts # PR #13: applies miner output; no
 packages/daemon/src/lib/learning/extract.ts # PR #13: digests a session transcript and inbox the daemon does not assemble
 
 
-# PR #15 — add browser session control
-# BLOCKED ON AN ADAPTER THAT DOES NOT EXIST — and it is a PORT, not a wiring. The host contract is
-# declared, not missing: `BrowserLoginRuntime` in adapters/browser/control/login-window.ts names
-# every effect the window needs. Nothing implements it. Doing so means writing Chrome executable
-# discovery, X display resolution, an x11vnc supervisor, a one-shot VNC password file, free-port
-# allocation and readiness polling — a new adapter of real size, whose first successful call puts a
-# browser and a VNC server on whatever machine booted the daemon. The CLI already speaks
-# `/v1/browser/login` and `/v1/sessions/:id/browser`, so this is the largest gap the product has
-# between a shipped command and a mounted capability; it belongs to the unit that ports the runtime.
+# PR #15 — add browser session control: THE HUMAN LOGIN WINDOW IS MOUNTED, nothing to list.
+# The blocker recorded here for three units was accurate and it was a PORT, not a wiring: the host
+# contract `BrowserLoginRuntime` was declared in adapters/browser/control/login-window.ts and nothing
+# implemented it. `src/adapters/browser/control/login-runtime.ts` implements it now, and
+# `src/lib/runtime/mounts/browser-login.ts` serves `GET`/`POST /v1/browser/login` — the route
+# `fy browser login` and the PWA's login banner have both spoken since they were ported, against a
+# daemon that answered `unknown_route`. `packages/pwa/src/lib/browser-login.ts` said so in its own
+# header; that sentence is now history.
 #
-# RE-CHECKED by the second wiring unit against the kteam source, which sharpens the estimate in one
-# way that matters: `BrowserLoginRuntime.display()` is not "resolve $DISPLAY". The source deliberately
-# never inherits an ambient display — it owns one, through a 250-line BrowserDisplayService that finds a
-# free X socket, spawns Xvfb, polls it ready and closes it after. Ferretry has no equivalent of that
-# module and no reference to Xvfb anywhere, so this line is TWO adapters deep, not one, and the second
-# of them puts an X server on the host as well as a browser and a VNC listener.
-packages/daemon/src/adapters/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/browser/control/login-window.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/adapters/browser/control/profile-store.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/lib/browser/control/index.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/lib/browser/control/login.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/lib/browser/control/policy.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
-packages/daemon/src/lib/browser/control/profile.ts # PR #15: add browser session control; not mounted in bin/fyd.ts
+# THE DISPLAY IS OWNED, NOT INHERITED, which was the sharpening the second wiring unit recorded and it
+# was right. `display()` is not "resolve $DISPLAY": the operator's own desktop is what $DISPLAY names,
+# and this window's whole purpose is to publish a screen to whoever holds the VNC password. `XvfbDisplay`
+# starts an Xvfb with `-displayfd`, which takes a free display and reports the number it took ONCE IT IS
+# ACCEPTING CONNECTIONS — so one mechanism answers both "which display" and "is it up", and there is no
+# window in which two daemons on one host choose the same number. It is created once and released by
+# `cleanups`, because the runtime contract has no per-window release hook to hang it on.
+#
+# WHAT MOUNTING FOUND, which no unit test had reached:
+#   * A `confirm` WITH NO WINDOW OPEN is classified `launch_failed` by the domain, not `bad_request`.
+#     The mount passes the domain's split through rather than re-deciding it, so that answers 503 —
+#     which is the honest reading: it is a statement about the window, not about the request.
+#   * AN UNUSABLE DISPLAY ANNOUNCEMENT AND A DEAD Xvfb ARE DIFFERENT FAILURES, and the stream closing
+#     wins the race against the exit being observed. Readiness is therefore a USABLE NUMBER rather than
+#     merely an answer, so an Xvfb that died reports its exit status instead of "did not report a
+#     display number" — the diagnostic an operator can act on.
+#
+# WHAT IS STILL NOT MOUNTED, and it is not a module on this list: per-session browser AUTOMATION.
+# `/v1/sessions/:id/browser` is served as a stated 501 rather than a 404, matching `/v1/learning/run`,
+# because `fy browser open` is a shipped command and a 404 is indistinguishable from version skew. Two
+# things are genuinely absent, and neither is a wiring: the browser WORKER is a program this repository
+# does not contain (`packages/daemon/bin/` ships `stt-worker.ts` and nothing else, and the only worker
+# that exists is a test fixture), and nothing in production implements `BrowserViewerHost`. That pair is
+# the same blocker the header records against `browserTransport`, and it belongs to the unit that ports
+# the browser session runtime.
 
 # PR #19 — port warden supervision: detection, verdicts, failover and provenance
 # BLOCKED ON THE SUPERVISOR ITSELF. All four are policy for a sweep loop that does not exist: they
