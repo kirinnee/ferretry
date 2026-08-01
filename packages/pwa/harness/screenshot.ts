@@ -175,6 +175,17 @@ try {
         process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
       }
 
+      // A tool run's EXPANDED state is the other half of its design — the slim
+      // chrome line is what it looks like at rest, and the code surfaces only
+      // exist after a deliberate click — so it gets its own pass.
+      const toolGroup = page.locator('[data-transcript-kind="tool"]').first();
+      await toolGroup.scrollIntoViewIfNeeded();
+      await toolGroup.getByRole('button').first().click();
+      await toolGroup.getByRole('button').nth(1).click();
+      const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
+      await toolGroup.screenshot({ path: toolGroupTarget });
+      process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
+
       // The context menu is anchored and `fixed`, which is exactly what a
       // full-page stitch cannot capture — so it gets its own viewport-sized
       // pass behind a fragment.

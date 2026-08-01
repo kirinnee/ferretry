@@ -771,7 +771,56 @@ function Shell() {
               entries={[
                 { id: 'human', kind: 'user', text: 'Please port the session screen.', label: 'You' },
                 { id: 'assistant', kind: 'assistant', text: 'I am adding rendered component tests.', label: 'Codex' },
+                {
+                  id: 'tools',
+                  kind: 'tool',
+                  text: 'ran 4 tools',
+                  tools: [
+                    {
+                      key: 'tool-read',
+                      use: { name: 'Read', input: { file_path: '/work/packages/pwa/src/components/transcript.tsx' } },
+                      result: { text: 'export function Transcript(…)' },
+                    },
+                    {
+                      key: 'tool-edit-1',
+                      use: { name: 'Edit', input: { file_path: 'transcript-row.tsx', new_string: 'ToolGroup' } },
+                      result: { text: 'applied' },
+                    },
+                    {
+                      key: 'tool-edit-2',
+                      use: { name: 'Edit', input: { file_path: 'tool-group.tsx', new_string: 'summarizeToolRun' } },
+                      result: { text: 'applied' },
+                    },
+                    {
+                      key: 'tool-bash',
+                      use: { name: 'Bash', input: { command: 'bun test --config=bunfig.unit.toml' } },
+                      result: { text: 'error: 1 test failed', isError: true },
+                    },
+                  ],
+                },
                 { id: 'notice', kind: 'notice', text: 'Drafts remain scoped to this paired daemon.' },
+                {
+                  id: 'tools-live',
+                  kind: 'tool',
+                  text: 'running a tool',
+                  tools: [
+                    {
+                      key: 'tool-live-read',
+                      use: { name: 'Read', input: { file_path: 'scripts/ci/test.sh' } },
+                      result: { text: 'coverage ledger' },
+                    },
+                    {
+                      key: 'tool-live-grep',
+                      use: { name: 'Grep', input: { pattern: 'components' } },
+                      result: { text: '1 match' },
+                    },
+                    {
+                      key: 'tool-live',
+                      use: { name: 'Bash', input: { command: 'bun test --coverage' } },
+                      ts: new Date(Date.now() - 34_000).toISOString(),
+                    },
+                  ],
+                },
               ]}
               sessionId="harness-session"
             />

@@ -1,4 +1,22 @@
 import type { SessionStatus } from '@ferretry/protocol';
+import type { ToolResultData, ToolUseData } from './tool-extract.ts';
+
+/**
+ * One tool invocation as the transcript shows it: the use, its result when one
+ * came back, and the key that keeps a live run's rows stable.
+ *
+ * A result whose `use` never arrived is not dropped — it is marked
+ * `orphanResult` and still shown, because a run that silently loses a row reads
+ * as a tool that never ran.
+ */
+export interface ToolCall {
+  readonly key: string;
+  readonly use: ToolUseData;
+  readonly result?: ToolResultData;
+  /** ISO instant the call started; drives the running tool's elapsed label. */
+  readonly ts?: string;
+  readonly orphanResult?: boolean;
+}
 
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
@@ -7,6 +25,9 @@ export interface TranscriptEntry {
   readonly text: string;
   readonly at?: number;
   readonly label?: string;
+  /** Consecutive tool calls this row stands for. A `tool` row carrying calls
+   *  renders as the collapsed tool group instead of a text line. */
+  readonly tools?: readonly ToolCall[];
 }
 
 export const isTerminalSessionStatus = (status: SessionStatus): boolean =>

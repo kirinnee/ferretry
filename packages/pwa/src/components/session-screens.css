@@ -558,6 +558,15 @@
 .fy-message-notice {
   max-width: 100%;
 }
+/* A tool run carries NO card, border, rail or background of its own — it is the
+   chrome tier from styles/index.css (`.kt-chrome`), and the whole point is that
+   it recedes behind the message text. This wrapper therefore supplies vertical
+   rhythm and nothing else; in particular it must not be a flex row, or a group
+   and its running tool line would sit side by side instead of stacking. */
+.fy-message-tools {
+  max-width: 100%;
+  margin: 2px 0;
+}
 .fy-message-chrome {
   align-items: baseline;
   border-left: 2px solid var(--fy-border);
