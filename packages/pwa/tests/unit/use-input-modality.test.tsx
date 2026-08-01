@@ -151,6 +151,28 @@ describe('createInputModalityStore', () => {
     expect(failed.read()).toEqual({ touchAffected: true, enterSends: false });
     failed.dispose();
   });
+
+  it('supports legacy media listeners and treats a throwing media read as unknown', () => {
+    const legacyListeners = new Set<() => void>();
+    const legacy: InputModalitySource = {
+      matchMedia: () => ({
+        get matches(): boolean {
+          throw new Error('media state became unavailable');
+        },
+        addListener: listener => legacyListeners.add(listener),
+        removeListener: listener => legacyListeners.delete(listener),
+      }),
+      addPointerListener: () => {},
+      removePointerListener: () => {},
+    };
+    const store = createInputModalityStore(() => legacy);
+
+    store.subscribe(() => {});
+    expect(store.read()).toEqual({ touchAffected: true, enterSends: false });
+    expect(legacyListeners.size).toBe(1);
+    store.dispose();
+    expect(legacyListeners.size).toBe(0);
+  });
 });
 
 const Probe = () => {
