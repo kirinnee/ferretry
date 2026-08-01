@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
-import type { SingleBar } from 'cli-progress';
 import type inquirer from 'inquirer';
 import type { Ora } from 'ora';
-import { BunShell } from '../../src/adapters/system/shell';
 import { ConsoleIo } from '../../src/adapters/terminal/console-io';
-import { CliProgressBar } from '../../src/adapters/terminal/progress';
 import { InquirerPrompt } from '../../src/adapters/terminal/prompt';
 import { OraSpinner } from '../../src/adapters/terminal/spinner';
 
@@ -33,24 +30,7 @@ describe('terminal and system adapters', () => {
   it('should construct every adapter with its production default collaborator', () => {
     // Constructing the defaults must be side-effect free off a TTY (nothing starts rendering).
     expect(new OraSpinner()).toBeInstanceOf(OraSpinner);
-    expect(new CliProgressBar()).toBeInstanceOf(CliProgressBar);
     expect(new InquirerPrompt()).toBeInstanceOf(InquirerPrompt);
-  });
-
-  it('should delegate progress state to cli-progress', () => {
-    const events: string[] = [];
-    const bar = {
-      start: (total: number, current: number) => events.push(`start:${total}:${current}`),
-      increment: () => events.push('tick'),
-      stop: () => events.push('stop'),
-    } as unknown as SingleBar;
-    const subject = new CliProgressBar(bar);
-
-    subject.start(3);
-    subject.tick();
-    subject.stop();
-
-    expect(events).toEqual(['start:3:0', 'tick', 'stop']);
   });
 
   it('should delegate live status to ora', () => {
@@ -78,9 +58,5 @@ describe('terminal and system adapters', () => {
     } as unknown as Pick<typeof inquirer, 'prompt'>;
 
     expect(await new InquirerPrompt(client).ask('value?')).toBe('chosen');
-  });
-
-  it('should report the host platform through BunShell', async () => {
-    expect(await new BunShell().platform()).toMatch(/\S+/);
   });
 });

@@ -21,6 +21,19 @@ set -euo pipefail
 # explaining why `world.transcripts` has no caller counted as the third mention and passed the very
 # field it was documenting. A gate a sentence can turn off is worse than no gate, because the field
 # it stops reporting looks wired.
+#
+# NEITHER ARE STRING LITERALS, for the same reason and a worse one. `DaemonWorld.stt` was constructed
+# and called by nothing while `fy stt` spoke five routes to a daemon that answered `unknown_route`,
+# and BOTH halves of the rule above were satisfied by substrings rather than by a call: `\bstt\b`
+# matches inside the composition root's own `'./stt-worker.ts'` import, which made `in_root` three,
+# and it matches the path of every module under `src/lib/stt` and `src/adapters/stt`, which made
+# `elsewhere` true. A field whose name is a short, common substring was therefore invisible to this
+# gate — the exact failure it exists to prevent. Strings are stripped before counting now.
+#
+# AND A MENTION ELSEWHERE MUST LOOK LIKE A READ. `elsewhere` used to accept the bare word anywhere in
+# the package, so an unrelated local, parameter or type of the same name spoke for the field. It now
+# requires a property access (`.field`) or a destructure/shorthand (`field,` / `field}`), which are
+# the only shapes a world field can actually be read through.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -56,6 +69,16 @@ strip_comments() {
   ' "$1"
 }
 
+# Source text with string literals blanked. A field name inside a string is never a call to it — it
+# is an import path, a route, or a message — and an import path is how the one field this gate has
+# missed so far hid from it. Nesting is not handled and does not need to be: the worst a mis-paired
+# quote can do is erase MORE text, which can only ever hide a mention, the conservative direction.
+strip_strings() {
+  # The template-literal delimiter is written as \x60 rather than as itself: a literal backtick
+  # inside a single-quoted argument reads as an attempted command substitution to shellcheck.
+  sed -E -e "s/'[^']*'//g" -e 's/"[^"]*"//g' -e 's/\x60[^\x60]*\x60//g'
+}
+
 check_root() {
   local file="$1" interface="$2" package_src="$3"
   [ -f "${file}" ] || return 0
@@ -79,13 +102,15 @@ check_root() {
     local in_root elsewhere
     # `|| true` matters: grep exits non-zero on no match, and `set -e` with `pipefail` would
     # abort the whole gate on the first field that happens to be absent.
-    in_root="$({ printf '%s\n' "${root_code}" | grep -oE "\b${field}\b" || true; } | wc -l)"
-    # Candidate files first, then the same comment-stripped read of each: a name that survives only
-    # inside a doc block in another module is documentation about the field, not a call to it.
+    in_root="$({ printf '%s\n' "${root_code}" | strip_strings | grep -oE "\b${field}\b" || true; } | wc -l)"
+    # Candidate files first — a deliberately LOOSE prefilter, because it may only ever add files for
+    # the authoritative check below to reject. That check reads each one with comments and strings
+    # removed and demands a read-shaped mention: a name that survives only inside a doc block, an
+    # import path or a message is documentation about the field, not a call to it.
     elsewhere=0
     while IFS= read -r candidate; do
       [ -n "${candidate}" ] || continue
-      if strip_comments "${candidate}" | grep -qE "\b${field}\b"; then
+      if strip_comments "${candidate}" | strip_strings | grep -qE "[.]${field}\b|\b${field}\b[,}]"; then
         elsewhere=1
         break
       fi
