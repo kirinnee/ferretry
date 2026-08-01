@@ -6,9 +6,9 @@ import {
   DaemonNotificationPreferences,
   DEFAULT_NOTIFICATION_PREFERENCES,
   NOTIFICATION_PREFERENCES_KEY,
-  parseNotificationPreferences,
-  parseNotificationPreferenceStore,
   type NotificationPreferenceStorage,
+  parseNotificationPreferenceStore,
+  parseNotificationPreferences,
 } from '../../src/lib/notification-preferences.ts';
 
 const daemonA = daemonId('daemon-a');
@@ -159,5 +159,27 @@ describe('DaemonNotificationPreferences', () => {
     should(initial).deepEqual(DEFAULT_NOTIFICATION_PREFERENCES);
     should(next.enabled).be.true();
     should(writeStore.get(daemonA).enabled).be.true();
+  });
+
+  it('should persist opaque daemon IDs as data rather than object metaproperties', () => {
+    // Arrange
+    const storage = new MemoryStorage();
+    const store = new DaemonNotificationPreferences(storage);
+    const prototypeId = daemonId('__proto__');
+    const constructorId = daemonId('constructor');
+
+    // Act
+    store.set(prototypeId, { enabled: true });
+    store.set(constructorId, { events: { failed: false } });
+    const raw = storage.values.get(NOTIFICATION_PREFERENCES_KEY) ?? null;
+    const document = JSON.parse(raw ?? 'null') as { daemons?: Record<string, unknown> } | null;
+    const restored = parseNotificationPreferenceStore(raw);
+
+    // Assert
+    should(document).not.be.null();
+    should(Object.hasOwn(document?.daemons ?? {}, '__proto__')).be.true();
+    should(Object.hasOwn(document?.daemons ?? {}, 'constructor')).be.true();
+    should(restored.get(prototypeId)?.enabled).be.true();
+    should(restored.get(constructorId)?.events.failed).be.false();
   });
 });

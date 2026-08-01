@@ -18,7 +18,7 @@
 
 import type { PushNotificationKind, PushPreferences } from '@ferretry/protocol';
 
-import { daemonId, type DaemonId } from './daemon-connection.ts';
+import { type DaemonId, daemonId } from './daemon-connection.ts';
 
 export const NOTIFICATION_KINDS = [
   'attention',
@@ -189,7 +189,10 @@ export class DaemonNotificationPreferences {
 
   #persist(): void {
     if (this.#storage === null) return;
-    const daemons: Record<string, NotificationPreferences> = {};
+    // A daemon fingerprint is opaque input. A null-prototype dictionary keeps
+    // values such as `__proto__` and `constructor` as ordinary own keys rather
+    // than letting object metaproperties alter or disappear from persistence.
+    const daemons = Object.create(null) as Record<string, NotificationPreferences>;
     for (const [id, preferences] of this.#snapshots) daemons[id] = preferences;
     try {
       this.#storage.setItem(NOTIFICATION_PREFERENCES_KEY, JSON.stringify({ version: 1, daemons }));
