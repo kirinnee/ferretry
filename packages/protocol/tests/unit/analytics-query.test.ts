@@ -72,6 +72,33 @@ describe('analytics query language', () => {
     }
   });
 
+  it('should decode full JSON escapes (CR/BS/FF/NUL and a surrogate pair) in double-quoted values', () => {
+    // Act — explicit JSON escapes the old n/t-only decoder mis-read as literal letters
+    const carriage = parseAnalyticsQuery('{id="a\\rb"}').matchers[0];
+    const backspace = parseAnalyticsQuery('{id="a\\bb"}').matchers[0];
+    const formFeed = parseAnalyticsQuery('{id="a\\fb"}').matchers[0];
+    const nul = parseAnalyticsQuery('{id="a\\u0000b"}').matchers[0];
+    const surrogate = parseAnalyticsQuery('{id="\\uD835\\uDD4F"}').matchers[0];
+
+    // Assert
+    should(carriage).deepEqual({ label: 'id', op: '=', value: 'a\rb', wildcard: false });
+    should(backspace).deepEqual({ label: 'id', op: '=', value: 'a\bb', wildcard: false });
+    should(formFeed).deepEqual({ label: 'id', op: '=', value: 'a\fb', wildcard: false });
+    should(nul).deepEqual({ label: 'id', op: '=', value: 'a\x00b', wildcard: false });
+    should(surrogate).deepEqual({ label: 'id', op: '=', value: '𝕏', wildcard: false });
+  });
+
+  it('should round-trip control-char session ids (CR/BS/FF/NUL) exactly through the scope', () => {
+    // Arrange — canonical JSON.stringify escapes these; double-quoted decoding must reverse them
+    const ids = ['a\rb', 'a\bb', 'a\fb', 'a\x00b'];
+
+    // Act / Assert
+    for (const raw of ids) {
+      const round = parseAnalyticsQuery(scopeAnalyticsQuery(undefined, raw));
+      should(round.matchers[0]).deepEqual({ label: 'id', op: '=', value: raw, wildcard: false });
+    }
+  });
+
   it('should parse aggregation, grouping, aliases, and quoted matcher values', () => {
     // Act
     const actual = parseAnalyticsQuery(
@@ -133,6 +160,7 @@ describe('analytics query language', () => {
     { source: '{status}', message: 'could not parse filter matcher' },
     { source: '{tree=session-*}', message: 'tree filters take one exact session id' },
     { source: '{label="unterminated}', message: 'unterminated quoted filter value' },
+    { source: '{label="bad\\x"}', message: 'malformed double-quoted filter value' },
   ])('should reject $message failures', ({ source, message }) => {
     // Act
     let actual: unknown;

@@ -72,6 +72,16 @@ function parseValue(source: string): string {
   if (first !== '"' && first !== "'") return value;
   if (value.at(-1) !== first) throw new AnalyticsQueryError('unterminated quoted filter value');
 
+  // Double-quoted values are bounded JSON strings: decode via JSON.parse so CR, BS, FF, NUL,
+  // \uXXXX and astral surrogate pairs round-trip exactly against canonical JSON.stringify.
+  if (first === '"') {
+    try {
+      return JSON.parse(value) as string;
+    } catch {
+      throw new AnalyticsQueryError('malformed double-quoted filter value');
+    }
+  }
+
   let result = '';
   for (let index = 1; index < value.length - 1; index += 1) {
     const char = value[index]!;
