@@ -4,7 +4,7 @@ import {
   type ComposerAutocompleteProvider,
   useComposerAutocomplete,
 } from '../../src/components/composer-autocomplete.ts';
-import { render, run } from '../support/react.ts';
+import { render, run, runAsync } from '../support/react.ts';
 
 const providers: readonly ComposerAutocompleteProvider[] = [
   {
@@ -21,26 +21,48 @@ const providers: readonly ComposerAutocompleteProvider[] = [
   },
 ];
 
-function Probe() {
-  const [value, setValue] = useState('/');
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+function Probe({
+  initial = '/',
+  sourceProviders = providers,
+  input,
+  acceptChanges = true,
+}: {
+  readonly initial?: string;
+  readonly sourceProviders?: readonly ComposerAutocompleteProvider[];
+  readonly input?: { value: string; setSelectionRange(start: number, end: number): void };
+  readonly acceptChanges?: boolean;
+}) {
+  const [value, setValue] = useState(initial);
+  const inputRef = useRef(input as HTMLTextAreaElement | null);
   const controller = useComposerAutocomplete({
     value,
-    onValueChange: setValue,
+    onValueChange: next => {
+      if (!acceptChanges) {
+        if (input) input.value = '/rewritten';
+        setValue('/rewritten');
+        return;
+      }
+      if (input) input.value = next;
+      setValue(next);
+    },
     inputRef,
-    providers,
+    providers: sourceProviders,
     listboxId: 'composer-list',
   });
   return (
-    <textarea
-      {...controller.textareaAria}
-      data-active={String(controller.activeIndex)}
-      data-open={String(controller.open)}
-      data-status={controller.status}
-      data-value={value}
-      onKeyDown={controller.handleKeyDown}
-      ref={inputRef}
-    />
+    <>
+      <textarea
+        {...controller.textareaAria}
+        data-active={String(controller.activeIndex)}
+        data-open={String(controller.open)}
+        data-status={controller.status}
+        data-value={value}
+        onKeyDown={controller.handleKeyDown}
+      />
+      <button onClick={() => controller.accept(99)} type="button">
+        Impossible acceptance
+      </button>
+    </>
   );
 }
 
@@ -48,7 +70,9 @@ const key = (value: string) => ({ key: value, nativeEvent: { isComposing: false 
 
 describe('useComposerAutocomplete', () => {
   test('renders a real controller state, navigates enabled candidates, accepts, and dismisses', () => {
-    const renderer = render(<Probe />);
+    const selected: Array<readonly [number, number]> = [];
+    const input = { value: '/', setSelectionRange: (start: number, end: number) => selected.push([start, end]) };
+    const renderer = render(<Probe input={input} />);
     const textarea = () => renderer.root.findByType('textarea');
 
     expect(textarea().props['aria-autocomplete']).toBe('list');
@@ -60,11 +84,77 @@ describe('useComposerAutocomplete', () => {
 
     run(() => textarea().props.onKeyDown(key('ArrowUp')));
     expect(textarea().props['data-active']).toBe('0');
-    run(() => textarea().props.onKeyDown(key('Enter')));
-    expect(textarea().props['data-value']).toBe('/compact ');
-    expect(textarea().props['data-open']).toBe('false');
-
     run(() => textarea().props.onKeyDown(key('Escape')));
-    expect(textarea().props['aria-expanded']).toBeUndefined();
+    expect(textarea().props['data-open']).toBe('false');
+    run(() => textarea().props.onKeyDown(key('x')));
+    run(() => renderer.root.findByType('button').props.onClick());
+
+    const accepted = render(<Probe input={input} />);
+    const acceptedTextarea = () => accepted.root.findByType('textarea');
+    run(() => acceptedTextarea().props.onKeyDown(key('Enter')));
+    expect(acceptedTextarea().props['data-value']).toBe('/compact ');
+    expect(acceptedTextarea().props['data-open']).toBe('false');
+    expect(selected).toEqual([[9, 9]]);
+
+    const rejected = render(<Probe acceptChanges={false} input={{ value: '/', setSelectionRange() {} }} />);
+    run(() => rejected.root.findByType('textarea').props.onKeyDown(key('Enter')));
+    expect(rejected.root.findByType('textarea').props['data-value']).toBe('/rewritten');
+  });
+
+  test('uses the initial subset, dismisses only after a click, and reports an asynchronous provider failure', async () => {
+    const globals = globalThis as typeof globalThis & { document?: Document; Node?: typeof Node };
+    const originalDocument = globals.document;
+    const OriginalNode = globals.Node;
+    class FakeNode {}
+    let click: ((event: MouseEvent) => void) | undefined;
+    globals.Node = FakeNode as unknown as typeof Node;
+    globals.document = {
+      addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
+        click = listener as (event: MouseEvent) => void;
+      },
+      removeEventListener: () => undefined,
+      getElementById: () => null,
+    } as unknown as Document;
+    const initial: ComposerAutocompleteProvider = {
+      id: 'initial:daemon-a:session-a',
+      trigger: '/',
+      label: 'Initial',
+      initialCandidates: () => ({ candidates: [{ id: 'now', kind: 'command', label: 'now', replacement: '/now' }] }),
+      candidates: () => new Promise(() => undefined),
+    };
+    const initialRenderer = render(<Probe sourceProviders={[initial]} />);
+    expect(initialRenderer.root.findByType('textarea').props['data-status']).toBe('ready');
+    run(() => click?.({ target: new FakeNode() } as unknown as MouseEvent));
+    expect(initialRenderer.root.findByType('textarea').props['data-open']).toBe('false');
+
+    let reject: (error: Error) => void = () => undefined;
+    const failing: ComposerAutocompleteProvider = {
+      id: 'failing:daemon-a:session-a',
+      trigger: '/',
+      label: 'Failing',
+      candidates: () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    };
+    const failedRenderer = render(<Probe sourceProviders={[failing]} />);
+    expect(failedRenderer.root.findByType('textarea').props['data-status']).toBe('loading');
+    await runAsync(async () => {
+      reject(new Error('offline'));
+      await Promise.resolve();
+    });
+    expect(failedRenderer.root.findByType('textarea').props['data-status']).toBe('error');
+
+    const thrown: ComposerAutocompleteProvider = {
+      id: 'thrown:daemon-a:session-a',
+      trigger: '/',
+      label: 'Thrown',
+      candidates: () => {
+        throw new Error('unavailable');
+      },
+    };
+    expect(render(<Probe sourceProviders={[thrown]} />).root.findByType('textarea').props['data-status']).toBe('error');
+    globals.document = originalDocument;
+    globals.Node = OriginalNode;
   });
 });
