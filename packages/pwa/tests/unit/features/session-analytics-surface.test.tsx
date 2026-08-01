@@ -251,6 +251,17 @@ describe('SessionAnalyticsSurface', () => {
 
     // The count starter writes a real, session-scoped query through the same input.
     expect(calls.at(-1)).toBe(`count by (status) ${analyticsIdQuery('session-a')}`);
+
+    // Submitting uses the same visible query path as the Run control rather
+    // than relying on the autocomplete's keyboard shortcut.
+    const form = renderer.root.findByType('form');
+    let prevented = false;
+    await runAsync(async () => {
+      form.props.onSubmit({ preventDefault: () => (prevented = true) });
+      await Promise.resolve();
+    });
+    expect(prevented).toBe(true);
+    expect(calls.at(-1)).toBe(`count by (status) ${analyticsIdQuery('session-a')}`);
   });
 
   it('disables every control while a query is in flight', async () => {
