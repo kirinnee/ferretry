@@ -366,6 +366,27 @@ describe('phone control', () => {
     expect(calls.removed).toEqual(['file:src/api.ts', 'tasks']);
     await view.unmount();
   });
+
+  it('closes after adding or spawning, and its close control dismisses it', async () => {
+    const calls = emptyCalls();
+    const view = await mount(control(calls));
+    const trigger = byLabel(view.container, 'Switch tab — Pins is showing');
+
+    await interact(() => trigger.click());
+    await interact(() => byLabel(view.container, 'Add MCP tab').click());
+    expect(calls.added).toEqual(['mcp']);
+    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
+
+    await interact(() => trigger.click());
+    await interact(() => byLabel(view.container, 'New Browser tab').click());
+    expect(calls.spawned).toEqual(['browser']);
+    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
+
+    await interact(() => trigger.click());
+    await interact(() => byLabel(view.container, 'Close tab switcher').click());
+    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
+    await view.unmount();
+  });
 });
 
 describe('switcher list', () => {

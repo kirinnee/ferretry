@@ -245,6 +245,10 @@ try {
       await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
       process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
 
+      const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
+      await page.locator('[data-harness="side-pane-tabs"]').screenshot({ path: sidePaneTabsTarget });
+      process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
+
       for (const [label, slug] of [
         ['Session dashboard full table', 'session-dashboard-table'],
         ['Session dashboard full cards', 'session-dashboard-cards'],

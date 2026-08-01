@@ -172,21 +172,9 @@ export function SidePaneWorkspace({
   const paneId = `session-side-pane-${generatedId}`;
   const titleId = `${paneId}-title`;
   const openerRef = useRef<HTMLElement | null>(null);
-  const allTabs = useSyncExternalStore(
-    subscribeSidePaneTabRegistry,
-    getSidePaneTabDefinitions,
-    getSidePaneTabDefinitions,
-  );
-  const state = useSyncExternalStore(
-    subscribeSidePaneTabsState,
-    () => readSidePaneTabsState(scope),
-    () => readSidePaneTabsState(scope),
-  );
-  const storedPreferences = useSyncExternalStore(
-    preferences.subscribe,
-    () => preferences.snapshot(),
-    () => preferences.snapshot(),
-  );
+  const allTabs = useSyncExternalStore(subscribeSidePaneTabRegistry, getSidePaneTabDefinitions);
+  const state = useSyncExternalStore(subscribeSidePaneTabsState, () => readSidePaneTabsState(scope));
+  const storedPreferences = useSyncExternalStore(preferences.subscribe, () => preferences.snapshot());
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
   const [everRetained, setEverRetained] = useState<ReadonlySet<SidePaneTabId>>(() => new Set());
   const compact = presentation === 'sheet';

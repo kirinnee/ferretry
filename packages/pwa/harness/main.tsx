@@ -1688,7 +1688,7 @@ function Shell() {
     {
       label: 'Side pane tabs',
       render: () => (
-        <Card className="flex min-h-0 flex-col overflow-hidden">
+        <Card data-harness="side-pane-tabs" className="flex min-h-0 flex-col overflow-hidden">
           <SidePaneTabs
             paneId="harness-pane"
             presentation={phone ? 'sheet' : 'pane'}
