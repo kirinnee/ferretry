@@ -24,6 +24,11 @@ import type {
 } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import {
+  type AttachmentBlobLoader,
+  AttachmentGalleryProvider,
+  TranscriptAttachmentGallery,
+} from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
 import { DictationControl } from '../src/components/dictation-control.tsx';
@@ -512,6 +517,39 @@ const LEARNING_PROPOSALS: readonly ProposalView[] = [
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
+
+/**
+ * The thumbnail's picture is supplied as an INLINE image and the document card
+ * as a stored attachment. That covers both gallery surfaces without a network
+ * round trip: the harness aborts every off-origin request, and a `data:` URL
+ * has no origin to allow.
+ */
+const HARNESS_ATTACHMENT_IMAGE =
+  'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="200"%3E%3Crect width="320" height="200" fill="%23111827"/%3E%3Crect x="24" y="132" width="48" height="44" fill="%2310b981"/%3E%3Crect x="88" y="96" width="48" height="80" fill="%2338bdf8"/%3E%3Crect x="152" y="60" width="48" height="116" fill="%23f59e0b"/%3E%3Crect x="216" y="40" width="48" height="136" fill="%23a78bfa"/%3E%3Ctext x="24" y="32" fill="%23f9fafb" font-family="system-ui" font-size="15"%3ECoverage by tier%3C/text%3E%3C/svg%3E';
+
+const HARNESS_ATTACHMENT_LOADER: AttachmentBlobLoader = async () => new Blob(['%PDF-1.7'], { type: 'application/pdf' });
+
+const HARNESS_ATTACHMENTS = [
+  { kind: 'inline' as const, src: HARNESS_ATTACHMENT_IMAGE, alt: 'Coverage by tier' },
+  {
+    kind: 'attachment' as const,
+    sessionId: 'harness-session',
+    attachmentId: 'harness-doc',
+    filename: 'split-proposal.pdf',
+    mime: 'application/pdf',
+    size: 481_233,
+    textExtraction: { method: 'pdfjs' as const, characters: 18_204, truncated: true },
+  },
+  {
+    kind: 'attachment' as const,
+    sessionId: 'harness-session',
+    attachmentId: 'harness-brief',
+    filename: 'unit-brief.docx',
+    mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    size: 24_112,
+    textExtractionFailure: { code: 'password_protected_document', message: 'the document is password protected' },
+  },
+];
 
 /** A tmux pane the harness owns outright: the terminal tab never polls a daemon here. */
 const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
@@ -1880,6 +1918,21 @@ function Shell() {
               The transcript sits here. The column beside it is the sidebar under test.
             </div>
           </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Transcript attachments',
+      render: () => (
+        <Card aria-label="Transcript attachments" className="min-w-0 overflow-hidden" id="harness-attachments">
+          <PanelHeader>
+            <Label>Attachments</Label>
+          </PanelHeader>
+          <PanelBody className="min-w-0">
+            <AttachmentGalleryProvider load={HARNESS_ATTACHMENT_LOADER}>
+              <TranscriptAttachmentGallery daemon={daemon} images={HARNESS_ATTACHMENTS} />
+            </AttachmentGalleryProvider>
+          </PanelBody>
         </Card>
       ),
     },

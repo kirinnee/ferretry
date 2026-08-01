@@ -220,6 +220,19 @@ try {
       await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
       process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
 
+      const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
+      // The thumbnail is `loading="lazy"` and the harness stacks it thousands
+      // of pixels below the fold, so Chrome has not started decoding it yet.
+      // Scroll first: capturing before it lands gives a 0x0 box and a card
+      // screenshot that is silently missing its image.
+      await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
+      await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
+      await page.getByLabel('Transcript attachments').screenshot({ path: attachmentsTarget });
+      process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
+      const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
+      await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
+      process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
+
       const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
       await page.goto(`${server.url}?attachment-unlock`);
       await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });

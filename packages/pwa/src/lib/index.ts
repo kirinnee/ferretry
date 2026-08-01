@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package's initial public surface. */
 export const packageRole = 'pwa' as const;
 
+export * from '../components/attachment-gallery.tsx';
 export * from '../components/attachment-unlock-prompt.tsx';
 export * from '../components/composer-autocomplete.ts';
 export * from '../components/composer-runtime.tsx';
