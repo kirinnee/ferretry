@@ -2,8 +2,10 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   createMountedDispatcher,
+  createMountedRawDispatcher,
   createMountedSocketDispatcher,
   mountedDaemonRoutes,
+  mountedRawRoutes,
   mountedSocketRoutes,
   type MountedSubsystems,
 } from '../../../../src/lib/runtime/index.ts';
@@ -27,6 +29,7 @@ import {
   recommendSubsystem,
   sessionDirectory,
   sessionView,
+  FakeStt,
   taskSubsystem,
 } from './support.ts';
 
@@ -55,6 +58,7 @@ const subsystems = (): MountedSubsystems => ({
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
+  stt: new FakeStt(),
 });
 
 describe('the mounted daemon surface', () => {
@@ -207,6 +211,47 @@ describe('the mounted daemon surface', () => {
 
     // Assert
     should(routes).deepEqual(['GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
+  });
+
+  it('should serve every byte-shaped route from one table too', () => {
+    // The third table, asserted for the same reason as the other two. Dictation is the only
+    // subsystem whose traffic is bytes — audio in, a model file out — so a route missing from here
+    // is a `fy stt` command answering `unknown_route`, however completely the surface is built.
+    // Arrange / Act
+    const routes = mountedRawRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
+
+    // Assert
+    should(routes).deepEqual([
+      'GET /v1/stt/status',
+      'GET /v1/stt/models',
+      'GET /v1/stt/models/:modelId/install',
+      'POST /v1/stt/models/:modelId/install',
+      'GET /v1/stt/models/:modelId',
+      'POST /v1/stt/transcribe',
+      'POST /v1/stt/enhance',
+    ]);
+  });
+
+  it('should authorize a byte-shaped route over the same credentials as the HTTP surface', async () => {
+    // Three dispatchers, one credential set, for the same reason the socket one shares it: a table
+    // with its own credentials is a second, quieter authorization boundary that would drift.
+    // Arrange
+    const mounted = subsystems();
+    const dispatcher = createMountedRawDispatcher(base, mounted);
+
+    // Act
+    const anonymous = await dispatcher.serve(
+      request({ path: '/v1/stt/status' }),
+      new Request('http://127.0.0.1:9999/v1/stt/status'),
+    );
+    const authorized = await dispatcher.serve(
+      request({ path: '/v1/stt/status', headers: human }),
+      new Request('http://127.0.0.1:9999/v1/stt/status'),
+    );
+
+    // Assert
+    should(anonymous.kind === 'refused' ? anonymous.response.status : 0).equal(401);
+    should(authorized.kind === 'served' ? authorized.response.status : 0).equal(200);
   });
 
   it('should authorize a protocol switch over the same credentials as the HTTP surface', async () => {

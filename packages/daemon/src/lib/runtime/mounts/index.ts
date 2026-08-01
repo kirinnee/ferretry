@@ -1,4 +1,5 @@
 import { ApiDispatcher } from '../../api/dispatcher.ts';
+import { ApiRawDispatcher, type RawRoute } from '../../api/raw.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
@@ -18,6 +19,7 @@ import { sessionControlRoutes, type SessionControlSubsystem } from './session-co
 import { sessionMigrateRoutes, type SessionMigrateSubsystem } from './session-migrate.ts';
 import { sessionResumeRoutes, type SessionResumeSubsystem } from './session-resume.ts';
 import { sessionRoutes, type SessionDirectorySubsystem } from './sessions.ts';
+import { sttRawRoutes, type SttSubsystem } from './stt.ts';
 import { taskBoardRoutes, type TaskBoardSubsystem } from './task-boards.ts';
 import { taskRoutes, type TaskSubsystem } from './tasks.ts';
 import { terminalRoutes, terminalSocketRoutes, type TerminalSubsystem } from './terminals.ts';
@@ -78,6 +80,10 @@ export interface MountedSubsystems {
   readonly learning: LearningSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
+  /** Dictation: the Whisper worker, the model store, and the enhancement pass. Its routes are the
+   *  daemon's only BYTE-shaped ones, so they are served from the raw table rather than this one —
+   *  see `mounts/stt.ts`. */
+  readonly stt: SttSubsystem;
 }
 
 /**
@@ -151,4 +157,24 @@ export function createMountedSocketDispatcher(
   subsystems: MountedSubsystems,
 ): ApiSocketDispatcher {
   return new ApiSocketDispatcher(new ApiRouter(mountedSocketRoutes(subsystems)), base.credentials);
+}
+
+/**
+ * Every route that reads and writes the transport's own bytes rather than an `ApiResponse`.
+ *
+ * A THIRD table for the same reason there is a second: the three answer different questions. An
+ * `ApiRoute` returns a string body, a `SocketRoute` returns something that keeps talking, and a
+ * `RawRoute` returns a response the daemon cannot express as a string at all. Dictation is the only
+ * one today; it is the only mounted subsystem whose traffic is audio and model files.
+ */
+export function mountedRawRoutes(subsystems: MountedSubsystems): readonly RawRoute[] {
+  return [...sttRawRoutes(subsystems.stt)];
+}
+
+/** The raw dispatcher the transport adapter serves, over the same credentials as the other two. */
+export function createMountedRawDispatcher(
+  base: DaemonApiDependencies,
+  subsystems: MountedSubsystems,
+): ApiRawDispatcher {
+  return new ApiRawDispatcher(new ApiRouter(mountedRawRoutes(subsystems)), base.credentials);
 }

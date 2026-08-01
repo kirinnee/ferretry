@@ -62,6 +62,7 @@ import {
   type SessionMigrateSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
+import type { SttSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
 import {
   TeamAdvisor,
@@ -1119,5 +1120,32 @@ export class BrokenBrowserLogin implements BrowserLoginLifecycle {
 
   async confirm(): Promise<BrowserLoginStatus> {
     throw new Error('/home/operator/.fy/browser/profile.lock is unreadable');
+  }
+}
+
+/**
+ * A dictation surface that records what it was handed and answers whatever it was told to.
+ *
+ * The real one spawns a Whisper worker and downloads model files, so nothing about the mount can be
+ * exercised against it. This keeps the route table, the credentials and the dispatcher exactly as
+ * production builds them and substitutes only the process-spawning half.
+ */
+export class FakeStt implements SttSubsystem {
+  readonly seen: string[] = [];
+  closed = 0;
+
+  constructor(
+    /** `undefined` means "this surface does not own that path", which is what the real service
+     *  answers for a model id that decodes to something with a separator in it. */
+    private readonly answer: (request: Request) => Response | undefined = () => Response.json({ ok: true }),
+  ) {}
+
+  async handle(request: Request): Promise<Response | undefined> {
+    this.seen.push(`${request.method} ${new URL(request.url).pathname}`);
+    return this.answer(request);
+  }
+
+  async close(): Promise<void> {
+    this.closed += 1;
   }
 }
