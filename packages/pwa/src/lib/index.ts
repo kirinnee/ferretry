@@ -140,6 +140,7 @@ export * from './side-pane-preferences.ts';
 export * from './stt/capabilities.ts';
 export * from './stt/capture-error.ts';
 export * from './stt/draft.ts';
+export * from './stt/enhancement.ts';
 export * from './stt/ort-precache.ts';
 export * from './stt/pcm.ts';
 export * from './stt/silence-segmenter.ts';
