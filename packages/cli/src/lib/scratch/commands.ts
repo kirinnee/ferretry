@@ -7,7 +7,7 @@ export function registerScratchCommands(program: Command, controller: ScratchCon
     .command('gc')
     .description('reclaim agent scratch from sessions terminal past the TTL (daemon data is never touched)')
     .option('--dry-run', 'print what would be freed and why, without deleting anything')
-    .option('--limit <count>', 'sessions to consider in a dry run', Number, 20)
+    .option('--limit <count>', 'sessions to consider in a dry run', Number)
     .option('--json', 'print the protocol payload instead of the human rendering')
     .action(async options => {
       await controller.execute(options);

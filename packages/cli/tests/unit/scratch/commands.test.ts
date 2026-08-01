@@ -39,4 +39,13 @@ describe('scratch command surface', () => {
     // Arrange + Act + Assert
     await should(run(['gc', '--force']).parsed).be.rejected();
   });
+
+  it('should not make a sweep look bounded by silently ignoring --limit', async () => {
+    // Arrange
+    const { parsed, gateway } = run(['gc', '--limit', '1']);
+
+    // Act + Assert
+    await should(parsed).be.rejectedWith('--limit applies only to `gc --dry-run`');
+    should(gateway.forces).be.empty();
+  });
 });

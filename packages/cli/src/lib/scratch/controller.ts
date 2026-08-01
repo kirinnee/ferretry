@@ -23,6 +23,7 @@ export class ScratchController {
       this.out.success(options.json === true ? JSON.stringify(plan, null, 2) : renderScratchPlan(plan));
       return;
     }
+    if (options.limit !== undefined) throw new Error('--limit applies only to `gc --dry-run`');
 
     const result = await this.gateway.scratchSweep(false);
     this.out.success(options.json === true ? JSON.stringify(result, null, 2) : renderScratchSweep(result));

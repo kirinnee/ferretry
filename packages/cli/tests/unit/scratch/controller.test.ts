@@ -78,6 +78,15 @@ describe('scratch sweeping', () => {
     );
   });
 
+  it('should reject a dry-run limit on a real sweep before contacting the daemon', async () => {
+    // Arrange
+    const { subject, gateway } = controller();
+
+    // Act + Assert
+    await should(subject.execute({ limit: 1 })).be.rejectedWith('--limit applies only to `gc --dry-run`');
+    should(gateway.forces).be.empty();
+  });
+
   it('should emit the sweep result as JSON', async () => {
     // Arrange
     const { subject, out } = controller();
