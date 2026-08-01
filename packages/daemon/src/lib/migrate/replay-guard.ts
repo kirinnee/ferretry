@@ -82,6 +82,45 @@ export class MigrationReplayMismatchError extends Error {
   }
 }
 
+/**
+ * How many logical migrations one daemon process will admit.
+ *
+ * A ceiling on RECEIPTS, chosen against how migrations actually happen: a human decides to move a
+ * session, so a busy fleet produces a few dozen a day and a single session a handful in its life.
+ * Four thousand of them is years of deliberate use, and the whole ledger at that size is a few
+ * megabytes — a key, a fingerprint and one `SessionView` per entry. So the cap is unreachable by real
+ * operation and reachable only by a caller minting fresh ids on purpose, which is exactly who it is
+ * for.
+ *
+ * Nothing about it is a retention window. Compare `MigrationReplayCapacityError` below.
+ */
+export const MIGRATION_REPLAY_MAX_ENTRIES = 4096;
+
+/**
+ * Raised when a NEW migration cannot be admitted because the ledger is full.
+ *
+ * THIS IS THE FAIL-CLOSED HALF OF THE LEDGER, and it exists because "never forget a receipt" and
+ * "bounded memory" cannot both hold unconditionally — one of them has to yield, and which one is a
+ * safety decision rather than a capacity decision.
+ *
+ * Forgetting yields nothing safely: a discarded receipt re-authorizes a destructive relaunch that
+ * already happened, silently, while the daemon looks healthy. Refusing yields safely: the caller is
+ * told, in the response, that this daemon will not start another migration, and NOTHING IS DESTROYED
+ * to produce that answer. So new work is refused and every existing receipt is still served.
+ *
+ * The only caller that can reach this is one minting unique request ids without ever completing a
+ * migration — the memory-exhaustion path Darcy identified. A real operator hits an unreachable
+ * ceiling; an id generator hits a wall instead of the daemon's heap.
+ */
+export class MigrationReplayCapacityError extends Error {
+  constructor(readonly limit: number) {
+    super(
+      `this daemon has already recorded ${limit} migrations and will not admit another: a migration receipt is never discarded, because discarding one would let a retry relaunch a session that was already relaunched. Restart the daemon to clear the ledger.`,
+    );
+    this.name = 'MigrationReplayCapacityError';
+  }
+}
+
 /** The stable string identity of one logical migration. */
 export function migrationReplayKey({ sessionId, requestId }: MigrationReplayKey): string {
   return JSON.stringify([sessionId, requestId]);
@@ -119,13 +158,34 @@ interface ReplayEntry {
  * destructive operations a human performs deliberately, a handful per session at most, so the ledger
  * grows at human pace and is bounded in practice by the process lifetime the section below describes.
  * Retaining a few thousand receipts costs a few megabytes; forgetting one costs a destroyed session.
+ *
+ * THE LEDGER IS THEREFORE CAPPED BY ADMISSION RATHER THAN BY EVICTION, and the difference is the whole
+ * design. Eviction bounds memory by dropping OLD receipts, which re-authorizes destruction that
+ * already happened. Admission bounds memory by refusing NEW work, which destroys nothing: at
+ * `MIGRATION_REPLAY_MAX_ENTRIES` a fresh identity is turned away with
+ * `MigrationReplayCapacityError` — before `perform` is called — while every receipt already held is
+ * still served in full. Read the cap as "how many migrations this process will ever start", never as
+ * "how many it remembers"; those were the same number in the bug this class used to have, and they
+ * must never be the same number again.
+ *
+ * ONLY COMMITTED OUTCOMES OCCUPY A SLOT, which is what keeps the cap far away from real use. A
+ * migration refused BEFORE the pane is touched frees its slot on the way out, so a fleet that trips
+ * the preflight all day long consumes no admission at all. The ledger grows only when destruction
+ * actually happened, or while it is happening.
  */
 export class MigrationReplayGuard {
   readonly #entries = new Map<string, ReplayEntry>();
   readonly #retainFailure: MigrationFailureRetention;
+  readonly #maxEntries: number;
 
-  constructor(retainFailure: MigrationFailureRetention) {
+  constructor(retainFailure: MigrationFailureRetention, maxEntries: number = MIGRATION_REPLAY_MAX_ENTRIES) {
     this.#retainFailure = retainFailure;
+    this.#maxEntries = Math.max(1, Math.trunc(maxEntries));
+  }
+
+  /** How many logical migrations this process is currently holding. */
+  get size(): number {
+    return this.#entries.size;
   }
 
   /**
@@ -134,6 +194,11 @@ export class MigrationReplayGuard {
    * `perform` is a thunk rather than a promise so it is never invoked for a replay: the whole
    * guarantee is that the destructive work does not begin a second time. `fingerprint` is the
    * caller's rendering of the target this id names.
+   *
+   * Admission is checked ONLY on the path that would add an identity, and only after every replay
+   * branch above it has been ruled out. A full ledger must never stop answering for the migrations it
+   * already holds — that would turn a memory limit into exactly the re-destruction hazard the limit
+   * was added to avoid.
    */
   async run(key: MigrationReplayKey, fingerprint: string, perform: () => Promise<SessionView>): Promise<SessionView> {
     const identity = migrationReplayKey(key);
@@ -145,6 +210,15 @@ export class MigrationReplayGuard {
       if ('committedFailure' in existing) throw existing.committedFailure;
       if (existing.running !== undefined) return await existing.running;
     }
+
+    // Admitting a new identity is the only thing a full ledger refuses, and it is refused HERE:
+    // before `perform`, so a rejected admission has destroyed nothing.
+    //
+    // The cap holds under concurrency without a lock. This function does not suspend between the
+    // check and the reservation below it: `perform()` is a call, not an `await`, and it runs
+    // synchronously to its own first suspension point before handing a promise back — so no other
+    // caller's `run` can interleave in the gap and let two admissions pass one free slot.
+    if (this.#entries.size >= this.#maxEntries) throw new MigrationReplayCapacityError(this.#maxEntries);
 
     const started = perform();
     this.#entries.set(identity, { fingerprint, running: started });

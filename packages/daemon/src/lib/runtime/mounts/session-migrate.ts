@@ -1,5 +1,10 @@
 import { FY_REQUEST_ID_HEADER, MigrateSessionRequestSchema, type SessionView } from '@ferretry/protocol';
-import { MigrationReplayGuard, MigrationReplayMismatchError } from '../../migrate/replay-guard.ts';
+import {
+  MIGRATION_REPLAY_MAX_ENTRIES,
+  MigrationReplayCapacityError,
+  MigrationReplayGuard,
+  MigrationReplayMismatchError,
+} from '../../migrate/replay-guard.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
@@ -99,6 +104,14 @@ function refuse(error: unknown): never {
   // 409: the id is usable, but it already names a different migration, and the caller has to decide
   // which one it meant. Not 400 — the request itself is well formed.
   if (error instanceof MigrationReplayMismatchError) throw new ApiError(409, error.message, 'request_id_reused');
+  // 503: the request is valid and the caller did nothing wrong — this daemon has simply recorded as
+  // many migrations as it will hold, and it refuses to start another rather than discard a receipt and
+  // let some later retry relaunch a session twice. NOTHING WAS DESTROYED to produce this answer.
+  //
+  // 503 rather than 429, because this is not a rate: waiting does not clear it. The ledger frees a
+  // slot only when a migration is refused before it touches the pane, and otherwise not until the
+  // process restarts — which the message says outright, since it is the operator's actual remedy.
+  if (error instanceof MigrationReplayCapacityError) throw new ApiError(503, error.message, 'migration_ledger_full');
   throw error;
 }
 
@@ -182,11 +195,17 @@ async function migrate(
  *
  * `noStore` because the answer is a live session view whose agent, model and status are exactly what
  * the call changed; a cached one describes the account the session just left.
+ *
+ * `maxReplayEntries` exists so a test can reach the ledger's admission limit in three requests instead
+ * of four thousand. Production never passes it.
  */
-export function sessionMigrateRoutes(subsystem: SessionMigrateSubsystem): readonly ApiRoute[] {
+export function sessionMigrateRoutes(
+  subsystem: SessionMigrateSubsystem,
+  maxReplayEntries: number = MIGRATION_REPLAY_MAX_ENTRIES,
+): readonly ApiRoute[] {
   // One guard per mount, so it lives as long as the daemon does. A guard created per request would
   // recognise nothing, which is the bug this route had.
-  const guard = new MigrationReplayGuard(committedAfterDestruction);
+  const guard = new MigrationReplayGuard(committedAfterDestruction, maxReplayEntries);
   return [
     {
       method: 'POST',

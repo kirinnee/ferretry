@@ -403,4 +403,69 @@ describe('the session migrate mount, replayed', () => {
     // Assert
     should(migrator.calls).equal(2);
   });
+
+  it('should answer 503 when the ledger will admit no further migration, having destroyed nothing', async () => {
+    // The ledger never discards a receipt, so the only way to bound it is to stop admitting NEW work.
+    // A caller minting fresh request ids forever meets this wall instead of the daemon's heap.
+    // Arrange: a mount that admits exactly two migrations.
+    const migrator = new CountingMigrate();
+    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 2)), CREDENTIALS);
+
+    // Act
+    await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-1')));
+    await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-2')));
+    const full = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-3')));
+
+    // Assert
+    should(full.status).equal(503);
+    const body = JSON.parse(full.body) as { code: string; error: string };
+    should(body.code).equal('migration_ledger_full');
+    // The message names the operator's actual remedy rather than implying that waiting helps.
+    should(body.error).match(/will not admit another/);
+    should(body.error).match(/Restart the daemon/);
+    // The refused request never reached the subsystem, so no third pane was destroyed.
+    should(migrator.calls).equal(2);
+  });
+
+  it('should keep replaying the migrations it already holds while the ledger is full', async () => {
+    // A memory limit that stopped answering for migrations already performed would BE the
+    // re-destruction hazard the limit exists to prevent.
+    // Arrange
+    const migrator = new CountingMigrate();
+    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS);
+    const held = withRequestId(human, 'req-held');
+
+    // Act
+    const first = await subject.dispatch(migrateRequest('s1', held));
+    const refused = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-new')));
+    const replay = await subject.dispatch(migrateRequest('s1', held));
+
+    // Assert
+    should(first.status).equal(200);
+    should(refused.status).equal(503);
+    should(replay.status).equal(200);
+    should(replay.body).equal(first.body);
+    should(migrator.calls).equal(1);
+  });
+
+  it('should free admission again once a migration is refused before it touches the pane', async () => {
+    // A refused preflight destroyed nothing, so it holds no receipt and its slot returns to the pool.
+    // Arrange: one admission, and a subsystem that refuses first and then succeeds.
+    const migrator = new CountingMigrate([new SessionMigrateError('refused', 'in-flight work refuses this'), 'ok']);
+    const subject = new ApiDispatcher(new ApiRouter(sessionMigrateRoutes(migrator, 1)), CREDENTIALS);
+
+    // Act
+    const refusedPreflight = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-blocked')));
+    const admitted = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-after')));
+    const full = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-third')));
+
+    // Assert
+    should(refusedPreflight.status).equal(409);
+    should((JSON.parse(refusedPreflight.body) as { code: string }).code).equal('migration_refused');
+    // The freed slot admitted real work...
+    should(admitted.status).equal(200);
+    // ...and now that the slot holds a committed receipt, the cap bites.
+    should(full.status).equal(503);
+    should(migrator.calls).equal(2);
+  });
 });
