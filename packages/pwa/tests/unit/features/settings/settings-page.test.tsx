@@ -83,4 +83,18 @@ describe('SettingsPage', () => {
 
     expect(navigated).toEqual(['/d/daemon%20beta', '/d/daemon%20beta/warden#config']);
   });
+
+  it('leaves text-scale choices visible but disabled when percentage adjustment is unsupported', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
+    Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });
+    try {
+      const { root } = settings();
+      expect(root.findByProps({ id: 'text-scale-unsupported' }).props.role).toBe('status');
+      for (const input of root.findAllByType('input').filter(input => input.props.name === 'text-scale'))
+        expect(input.props.disabled).toBe(true);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, 'CSS', descriptor);
+      else Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'CSS');
+    }
+  });
 });

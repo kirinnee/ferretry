@@ -4,6 +4,7 @@ import {
   isSettingId,
   SETTINGS_DEFINITIONS,
   SETTINGS_LINKS,
+  settingDefinition,
   settingsHref,
   settingsPaletteEntries,
 } from '../../../../src/features/settings/settings-catalog.ts';
@@ -85,5 +86,17 @@ describe('shared settings catalog', () => {
     expect(settingsHref(alpha)).toBe('/d/daemon-alpha/settings');
     expect(settingsHref(alpha, 'density')).toBe('/d/daemon-alpha/settings#density');
     expect(settingsHref(beta, 'density')).toBe('/d/daemon-beta/settings#density');
+  });
+
+  test('returns catalog definitions and refuses an impossible id', () => {
+    expect(settingDefinition('theme').label).toBe('Theme');
+    expect(() => settingDefinition('not-a-setting' as never)).toThrow('Unknown setting: not-a-setting');
+  });
+
+  test('offers the Open settings command when its own vocabulary matches', () => {
+    expect(settingsPaletteEntries(alpha, 'preferences')[0]).toMatchObject({
+      id: 'open-settings',
+      settingId: null,
+    });
   });
 });
