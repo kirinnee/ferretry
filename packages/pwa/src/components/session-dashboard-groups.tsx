@@ -5,7 +5,7 @@ import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
-import type { DaemonUsageIndex } from '../lib/usage.ts';
+import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { Badge } from '../shell/primitives.tsx';
 import {
   DENSITY_COLUMN_LABELS,
@@ -35,7 +35,7 @@ export interface FullDensityGroupsProps extends NavigationProps {
   readonly groups: readonly SessionGroup[];
   readonly mode: DashboardView;
   readonly scoped: boolean;
-  readonly usage: DaemonUsageIndex | null;
+  readonly usage: SessionQuotaResolver | null;
   readonly now: number;
 }
 

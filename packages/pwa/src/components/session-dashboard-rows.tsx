@@ -18,7 +18,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { absoluteTime } from '../lib/session-screens.ts';
-import type { DaemonUsageIndex } from '../lib/usage.ts';
+import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { ModeBadge } from '../shell/mode-badge.tsx';
 import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
@@ -34,7 +34,7 @@ interface SessionNavigationProps {
 
 interface FullSessionProps extends SessionNavigationProps {
   readonly view: SessionView;
-  readonly usage: DaemonUsageIndex | null;
+  readonly usage: SessionQuotaResolver | null;
   /** Injected clock for deterministic age and quota-reset copy. */
   readonly now: number;
 }

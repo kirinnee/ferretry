@@ -26,7 +26,7 @@ import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
-import type { DaemonUsageIndex } from '../lib/usage.ts';
+import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
@@ -60,7 +60,7 @@ export interface SessionDashboardProps {
    * rows. Compact and minimal do not render quota data and must not subscribe
    * or join usage merely to supply this prop.
    */
-  readonly usage: DaemonUsageIndex | null;
+  readonly usage: SessionQuotaResolver | null;
   readonly wardenStatus: WardenStatusView | null;
   readonly wardenVerdicts: readonly WardenVerdictView[];
   readonly now: number;
