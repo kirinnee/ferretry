@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
-import { LineageSurfaceContent } from '../../../src/features/lineage/lineage-surface.tsx';
-import { daemonId } from '../../../src/lib/daemon-connection.ts';
-import { render, run } from '../../support/react.ts';
+import { LineageSurface, LineageSurfaceContent } from '../../../src/features/lineage/lineage-surface.tsx';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
+import { DaemonControlsStore } from '../../../src/lib/controls.ts';
+import { DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
+import { render, run, runAsync } from '../../support/react.ts';
 import { sessionView } from '../../support/sessions.ts';
 
 const daemon = daemonId('daemon-a');
@@ -66,5 +68,44 @@ describe('LineageSurfaceContent', () => {
 
     const missing = render(<LineageSurfaceContent daemonId={daemon} sessionId="other" sessions={[orphan]} />);
     expect(JSON.stringify(missing.toJSON())).toContain('not in this daemon’s live fleet snapshot');
+  });
+
+  it('offers an explicit reset when no sessions match the selected status', () => {
+    const current = sessionView('current', { state: { status: 'running' } });
+    const completed = sessionView('completed', { config: { parent: 'current' }, state: { status: 'completed' } });
+    const view = render(
+      <LineageSurfaceContent daemonId={daemon} sessionId="current" sessions={[current, completed]} />,
+    );
+    const completedFilter = view.root
+      .findAllByType('button')
+      .find(button => button.props['aria-label']?.startsWith('completed'));
+    if (!completedFilter) throw new Error('completed filter missing');
+
+    run(() => completedFilter.props.onClick());
+    run(() => view.update(<LineageSurfaceContent daemonId={daemon} sessionId="current" sessions={[current]} />));
+    view.root.findByProps({ 'data-lineage-role': 'no-matches' });
+    expect(JSON.stringify(view.toJSON())).toContain('No sessions currently match');
+    const reset = view.root.findAllByType('button').find(button => button.children.join('') === 'Show all');
+    if (!reset) throw new Error('reset filter missing');
+    run(() => reset.props.onClick());
+    expect(view.root.findAllByProps({ 'data-lineage-role': 'current' }).length).toBeGreaterThan(0);
+  });
+
+  it('reads the live adapter from only the named daemon slice', async () => {
+    const connection = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceToken: 'token-a',
+    });
+    const current = sessionView('current', { state: { status: 'running' } });
+    const fleet = new DaemonFleetStore({ list: async () => [current], get: async () => current });
+    const controls = new DaemonControlsStore(undefined);
+    const view = render(<LineageSurface daemonId={daemon} sessionId="current" fleet={fleet} controls={controls} />);
+
+    expect(JSON.stringify(view.toJSON())).toContain('Loading lineage…');
+    await runAsync(async () => {
+      await fleet.hydrate(connection);
+    });
+    expect(view.root.findByProps({ 'data-lineage-role': 'current' }).props.to).toBe('/d/daemon-a/session/current');
   });
 });

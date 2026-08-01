@@ -24,6 +24,12 @@ describe('lineage surface model', () => {
     expect(model.descendantCount).toBe(2);
     expect(surfaceRows(model)[0]?.view.config.id).toBe('root');
 
+    // Looking up a deeply nested focus must walk through its ancestors rather
+    // than only inspecting the first nested row.
+    expect(buildLineageSurfaceModel('grandchild', [grandchild, child, current, root]).current?.config.id).toBe(
+      'grandchild',
+    );
+
     const cyclic = sessionView('cycle', { config: { parent: 'cycle' } });
     expect(buildLineageSurfaceModel('cycle', [cyclic]).parent).toEqual({ kind: 'invalid', shortId: 'cycle' });
   });

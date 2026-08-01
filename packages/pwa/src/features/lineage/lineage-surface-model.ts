@@ -53,14 +53,13 @@ export const STATUS_ORDER: readonly SessionStatus[] = [
 ];
 
 const findNestedRow = (rows: readonly NestedRow[], sessionId: string): NestedRow | undefined => {
-  const pending = [...rows];
-  while (pending.length > 0) {
-    const row = pending.pop();
-    if (!row) continue;
-    if (row.view.config.id === sessionId) return row;
-    pending.push(...row.children);
-  }
-  return undefined;
+  const flattened: NestedRow[] = [];
+  const visit = (row: NestedRow): void => {
+    flattened.push(row);
+    row.children.forEach(visit);
+  };
+  rows.forEach(visit);
+  return flattened.find(row => row.view.config.id === sessionId);
 };
 
 const countNestedRows = (rows: readonly NestedRow[]): number => {
