@@ -169,7 +169,7 @@ which is the honest state.
 | `discoverNixLibstdcxx`                          | **GAP**                                                                                    |
 | `buildSttWorkerEnvironment`                     | **GAP (partial)** — `BunSttWorkerSpawnerOptions.environment` is the seam, nothing fills it |
 | `createBoundedSttLogSink`                       | **GAP**                                                                                    |
-| idle worker shutdown (`scheduleIdle`)           | **GAP** — see below                                                                        |
+| idle worker shutdown (`scheduleIdle`)           | `adapters/stt/worker-client.ts` — **ported by this PR**                                    |
 
 **Native library discovery — GAP, and it is a Nix-specific one.** kteam finds the newest
 `libstdc++` in `/nix/store` and puts it on the child's `LD_LIBRARY_PATH`, because the sherpa-onnx
@@ -179,17 +179,19 @@ but never tries to prevent it. On a Nix host the batch transcriber therefore fai
 clear message instead of working. The seam exists (`BunSttWorkerSpawnerOptions.environment`); what
 is missing is the discovery.
 
-**Idle worker shutdown — GAP with a memory consequence.** kteam releases the worker child after an
-idle period (`scheduleIdle` → `stopChild(false)`) so a loaded speech model does not sit resident.
-Ferretry's client keeps the child until `close()`. A loaded sherpa model is hundreds of megabytes,
-and the daemon is long-lived.
+**Idle worker shutdown — closed by this PR.** kteam releases the worker child after an idle period
+(`scheduleIdle` → `stopChild(false)`) so a loaded speech model does not sit resident. Ferretry's
+client held the child until `close()`, which for a long-lived daemon means a worker that transcribed
+once at breakfast keeps hundreds of megabytes all day. `SttWorkerClient` now arms a release whenever
+it goes idle (default five minutes, `idleTimeoutMs: 0` keeps it resident), cancels it on every
+request, and re-checks the busy state when the timer fires so a release can never race a decode.
 
 ---
 
 ## What this PR changed
 
-Only §1.1 and the readiness/delivery path — the places where the absence was a correctness or
-safety problem rather than a missing feature:
+Only §1.1, the readiness/delivery path, and one leak in §3 — the places where the absence was a
+correctness or safety problem rather than a missing feature:
 
 1. `paneShowsActiveWork` and the startup-blocker list had been carried in NARROWED form. A busy
    Claude pane (`✻ Lollygagging… (34s · 2.1k tokens)`) matched none of the three markers Ferretry
@@ -199,5 +201,7 @@ safety problem rather than a missing feature:
    budget and threw — reading as "the agent was given no work".
 3. `deliver` pressed Enter with no proof the payload reached the composer, and sent a multi-line
    turn brief as literal keystrokes rather than a bracketed paste.
+4. The STT worker was never released, so a loaded speech model stayed resident for the life of the
+   daemon.
 
 Everything else above stays a declared GAP.
