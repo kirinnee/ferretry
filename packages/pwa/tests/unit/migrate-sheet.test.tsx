@@ -162,7 +162,7 @@ describe('MigrateSheet', () => {
 
   it('allows an explicitly selected model to be cleared for the same account default', async () => {
     const calls: unknown[][] = [];
-    const view = render(
+    const view = renderSheet(
       <MigrateSheet
         {...props({
           migrateSession: async (...args) => {
