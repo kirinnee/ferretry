@@ -10,6 +10,7 @@ import {
   InMemoryLaunchGate,
   KeyedSerialExecutor,
   NoMonitorSupervision,
+  type PaneDeliveryOptions,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
   StateFileSystemFactory,
@@ -18,9 +19,8 @@ import {
   SystemClock,
   TmuxPaneDelivery,
   TmuxResumeLauncher,
-  type PaneDeliveryOptions,
 } from '../../../../src/adapters/index.ts';
-import { parseSessionId, TmuxController, type TmuxCommandPort } from '../../../../src/lib/index.ts';
+import { parseSessionId, type TmuxCommandPort, TmuxController } from '../../../../src/lib/index.ts';
 import { FakeTmuxServer } from '../../support/fake-tmux-server.ts';
 
 const homes = new Set<string>();

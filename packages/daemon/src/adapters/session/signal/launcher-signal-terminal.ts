@@ -1,6 +1,6 @@
-import type { SessionId } from '../../../lib/session-id.ts';
 import type { ResumeLauncher } from '../../../lib/session/resume/types.ts';
 import type { SignalTerminal } from '../../../lib/session/signal/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /** The two things a signal does to a terminal. Named as a subset so nothing else can be reached. */
 export type SignalPaneControl = Pick<ResumeLauncher, 'snapshot' | 'kill'>;

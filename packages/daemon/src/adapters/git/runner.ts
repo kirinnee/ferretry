@@ -17,6 +17,13 @@ const HARDENED_GIT_ARGUMENTS: readonly string[] = [
   'core.quotepath=false',
   '-c',
   'diff.external=',
+  // Porcelain paths must stay repo-root-relative whatever a repo-local `status.relativePaths=true` says,
+  // because that is the shape the status parser filters by prefix. And `showUntrackedFiles=all` is pinned
+  // because a repo-local or global `no` would otherwise hide every untracked file from a Changes list.
+  '-c',
+  'status.relativePaths=false',
+  '-c',
+  'status.showUntrackedFiles=all',
 ] as const;
 
 export class GitProcessError extends Error {
@@ -91,7 +98,10 @@ function checkedLimit(value: number | undefined, fallback: number, label: string
   return limit;
 }
 
-function gitEnvironment(inherited: Readonly<Record<string, string | undefined>>): Record<string, string> {
+function gitEnvironment(
+  inherited: Readonly<Record<string, string | undefined>>,
+  literalPathspecs: boolean,
+): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(inherited)) {
     if (!key.startsWith('GIT_') && value !== undefined) environment[key] = value;
@@ -107,7 +117,7 @@ function gitEnvironment(inherited: Readonly<Record<string, string | undefined>>)
     GIT_OPTIONAL_LOCKS: '0',
     GIT_PAGER: 'cat',
     GIT_ASKPASS: '',
-    GIT_LITERAL_PATHSPECS: '1',
+    ...(literalPathspecs ? { GIT_LITERAL_PATHSPECS: '1' } : {}),
   };
 }
 
@@ -132,14 +142,15 @@ export class BunGitRunner implements GitRunner {
 
     await checkWorkingDirectory(invocation.cwd);
 
-    // Git is never given stdin: every command this daemon runs is non-interactive, so an open
-    // stdin could only ever hang the daemon on a prompt.
-    let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
+    // Git is given stdin only when the caller has bytes for it. Every command this daemon runs is
+    // non-interactive, so an open stdin with nothing written could only ever hang the daemon on a prompt —
+    // a supplied buffer is closed by the runtime once written, which is a different thing.
+    let child: Bun.Subprocess<'ignore' | Blob, 'pipe', 'pipe'>;
     try {
       child = Bun.spawn(['git', ...HARDENED_GIT_ARGUMENTS, ...invocation.args], {
         cwd: invocation.cwd,
-        env: gitEnvironment(this.inheritedEnvironment()),
-        stdin: 'ignore',
+        env: gitEnvironment(this.inheritedEnvironment(), invocation.literalPathspecs ?? true),
+        stdin: invocation.stdin ? new Blob([invocation.stdin]) : 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
       });

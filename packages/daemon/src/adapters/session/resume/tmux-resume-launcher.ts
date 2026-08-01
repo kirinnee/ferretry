@@ -1,5 +1,5 @@
-import type { SessionId } from '../../../lib/session-id.ts';
 import type { PaneObservation, ResumeLauncher } from '../../../lib/session/resume/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 import type { TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 

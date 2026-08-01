@@ -1,7 +1,7 @@
 import type { FileSystemPort } from '../../../lib/ports.ts';
 import {
-  SelfRestartStampSchema,
   type SelfRestartStamp,
+  SelfRestartStampSchema,
   type SelfRestartStampStore,
 } from '../../../lib/session/health/types.ts';
 

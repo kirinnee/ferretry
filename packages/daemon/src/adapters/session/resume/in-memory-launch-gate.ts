@@ -1,5 +1,5 @@
-import type { SessionId } from '../../../lib/session-id.ts';
 import type { LaunchGate } from '../../../lib/session/resume/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /**
  * Which sessions this process currently has a launch in flight for.

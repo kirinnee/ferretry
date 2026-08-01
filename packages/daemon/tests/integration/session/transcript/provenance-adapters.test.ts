@@ -2,8 +2,8 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import should from 'should';
 import type { TranscriptProvenance } from '@ferretry/protocol';
+import should from 'should';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,

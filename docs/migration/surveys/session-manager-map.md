@@ -169,11 +169,11 @@ and several other GAPs above are downstream of it.
 
 ## J. Attachments and the file browser
 
-| Source                                             | Line             | Ferretry                                                                                                                                                                                              |
-| -------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `addAttachment`, `getAttachment`, `attachmentView` | 5032, 5043, 7554 | **GAP (unmounted)** — `lib/attachments/*` and `adapters/attachments/session-attachment-store.ts` exist and are used by the START's `initialAttachments`; the per-session attachment ROUTES are absent |
-| `unlockAttachment`, `lockAttachment`               | 5056, 5064       | **GAP**                                                                                                                                                                                               |
-| `fsList`, `fsFile`, `fsChanges`, `fsDiff`          | 5070–5085        | **GAP** — kteam's `./fs` module has no Ferretry counterpart                                                                                                                                           |
+| Source                                             | Line             | Ferretry                                                                                                                                                                                                                                      |
+| -------------------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `addAttachment`, `getAttachment`, `attachmentView` | 5032, 5043, 7554 | **GAP (unmounted)** — `lib/attachments/*` and `adapters/attachments/session-attachment-store.ts` exist and are used by the START's `initialAttachments`; the per-session attachment ROUTES are absent                                         |
+| `unlockAttachment`, `lockAttachment`               | 5056, 5064       | **GAP**                                                                                                                                                                                                                                       |
+| `fsList`, `fsFile`, `fsChanges`, `fsDiff`          | 5070–5085        | **PORTED** — `lib/session/filesystem/*` (the six gates, the ports, the Git output parsers) and `adapters/session/filesystem/*` (the procfs descriptor pin, the Git reads), mounted on `GET /v1/sessions/:sessionId/fs{,/file,/changes,/diff}` |
 
 ## K. Warden — built, not mounted
 

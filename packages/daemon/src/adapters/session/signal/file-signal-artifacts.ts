@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { appendFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { ClockPort } from '../../../lib/ports.ts';
-import type { SessionId } from '../../../lib/session-id.ts';
 import { DEFAULT_COMPLETION_SUMMARY } from '../../../lib/session/signal/policy.ts';
 import type { SignalArtifacts } from '../../../lib/session/signal/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /**
  * The evidence a signal leaves inside the session's own private directory.

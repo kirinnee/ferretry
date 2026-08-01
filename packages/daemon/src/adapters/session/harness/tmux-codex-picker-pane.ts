@@ -1,14 +1,14 @@
 import {
   activePaneIdArguments,
+  type CodexPickerPanePort,
   capturePaneIdArguments,
   dismissPaneIdArguments,
+  type PickerPaneObservation,
   paneIdCursorArguments,
   parsePaneCursor,
-  type CodexPickerPanePort,
-  type PickerPaneObservation,
 } from '../../../lib/index.ts';
-import { promptIsReady } from '../../../lib/tmux/pane.ts';
 import type { TmuxCommandPort } from '../../../lib/tmux/contracts.ts';
+import { promptIsReady } from '../../../lib/tmux/pane.ts';
 
 /**
  * Pane-scoped tmux access for Codex picker cleanup.
