@@ -18,7 +18,6 @@
 
 import type { PushNotificationKind, PushPreferences } from '@ferretry/protocol';
 
-<<<<<<< HEAD
 import { type DaemonId, daemonId } from './daemon-connection.ts';
 
 export const NOTIFICATION_KINDS = [
