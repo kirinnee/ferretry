@@ -199,6 +199,30 @@ describe('FileNameClaimStore', () => {
     should(await readFile(subject.file, 'utf8')).equal(damaged);
   });
 
+  it('should refuse a ledger row carrying an unknown field and leave the file unchanged', async () => {
+    // Zod's default strip mode would accept an unknown field, drop it, and rewrite the row on the next
+    // successful claim — silently reshaping a tampered or corrupted ledger. The schema is strict, so the
+    // row fails closed like any other malformed one and the bytes are left for diagnosis.
+    // Arrange — a row that is valid apart from the extra field strip mode would have tolerated.
+    const subject = await fixture();
+    const [pending, free] = DEFAULT_CALLSIGN_POOL;
+    if (pending === undefined || free === undefined)
+      throw new Error('DEFAULT_CALLSIGN_POOL must expose at least two entries');
+    const withExtra = JSON.stringify([
+      { ...claim(pending, 'session-pending'), unexpected: 'strip mode would drop me' },
+    ]);
+    await mkdir(dirname(subject.file), { recursive: true });
+    await writeFile(subject.file, withExtra, { mode: 0o600 });
+
+    // Act — claiming any name reads the ledger, which must reject the unknown field.
+    const allocated = await subject.allocator.allocate({ ownerId: 'session-racing', nowMs: NOW, requested: free });
+
+    // Assert — the whole ledger is refused, and nothing was rewritten.
+    should(allocated.ok).be.false();
+    should(allocated.ok ? '' : allocated.error.code).equal('claim_store_failed');
+    should(await readFile(subject.file, 'utf8')).equal(withExtra);
+  });
+
   it('should refuse a claim its own decoder would reject and leave the ledger untouched', async () => {
     // tryClaim must not persist a caller-supplied NameClaim the store could not read back. The type
     // system still admits claims the schema rejects — a non-canonical callsign, an empty owner id,
