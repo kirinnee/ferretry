@@ -93,6 +93,7 @@ export * from '../hooks/use-layout-mode.ts';
 export * from '../hooks/use-live-clock.ts';
 export * from '../hooks/use-pins.ts';
 export * from '../hooks/use-pull-to-search.ts';
+export * from '../hooks/use-project-scope.ts';
 export * from '../hooks/use-pull-to-palette.ts';
 export * from '../hooks/use-dictation.ts';
 export * from '../hooks/use-dictation-shortcut.ts';
