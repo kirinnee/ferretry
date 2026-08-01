@@ -624,6 +624,93 @@
 .fy-composer textarea:focus {
   outline: 0;
 }
+
+/* The composer's markdown highlight overlay.
+ *
+ * The wrapper follows the textarea's real, measured height; the overlay is
+ * absolute and therefore cannot contribute a pixel to composer growth. */
+.fy-composer-input-layer {
+  min-width: 0;
+  position: relative;
+  width: 100%;
+}
+/* THE METRIC CONTRACT. Both layers paint the same bytes at the same glyph
+ * positions, so every property that can move a glyph is stated here and stated
+ * once. Changing any of these for one layer alone walks the painted text away
+ * from the native caret. */
+.fy-composer-input-layer textarea,
+.fy-composer-highlight {
+  border: 0;
+  box-sizing: border-box;
+  font: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+  overflow-wrap: break-word;
+  overflow-x: auto;
+  padding: 0;
+  tab-size: inherit;
+  text-align: inherit;
+  text-indent: inherit;
+  text-transform: inherit;
+  white-space: pre-wrap;
+  width: 100%;
+  word-break: break-word;
+}
+.fy-composer-input-layer textarea {
+  position: relative;
+  z-index: 1;
+}
+.fy-composer-highlight {
+  inset: 0;
+  overflow-y: hidden;
+  pointer-events: none;
+  position: absolute;
+  user-select: none;
+}
+.fy-composer-highlight[hidden] {
+  display: none;
+}
+/* Paint comes from the aria-hidden sibling; the textarea stays the sole input,
+ * so only its glyphs go transparent — never its caret. */
+.fy-composer-input-layer[data-highlighted='true'] textarea {
+  caret-color: var(--fy-fg);
+  color: transparent;
+}
+/* Colour ONLY. Weight, style, size and family are deliberately absent: they
+ * would change glyph widths and break the metric contract above. */
+.fy-composer-highlight [data-md-token='text'] {
+  color: var(--fy-fg);
+}
+.fy-composer-highlight [data-md-token='fence'],
+.fy-composer-highlight [data-md-token='boldItalic'] {
+  color: var(--syn-meta);
+}
+.fy-composer-highlight [data-md-token='codeBlock'],
+.fy-composer-highlight [data-md-token='linkText'] {
+  color: var(--syn-string);
+}
+.fy-composer-highlight [data-md-token='inlineCode'] {
+  background-color: var(--code-bg);
+  color: var(--syn-string);
+}
+.fy-composer-highlight [data-md-token='bold'],
+.fy-composer-highlight [data-md-token='heading'] {
+  color: var(--syn-keyword);
+}
+.fy-composer-highlight [data-md-token='italic'] {
+  color: var(--syn-type);
+}
+.fy-composer-highlight [data-md-token='mark'],
+.fy-composer-highlight [data-md-token='linkUrl'],
+.fy-composer-highlight [data-md-token='quoteMarker'] {
+  color: var(--syn-comment);
+}
+.fy-composer-highlight [data-md-token='listMarker'] {
+  color: var(--syn-number);
+}
+.fy-composer-highlight [data-md-token='reference'] {
+  color: var(--fy-accent);
+}
 .fy-composer-actions {
   justify-content: space-between;
 }

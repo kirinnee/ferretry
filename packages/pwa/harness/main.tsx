@@ -69,6 +69,8 @@ import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
+import { DaemonDraftStore } from '../src/lib/drafts.ts';
+import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
@@ -106,6 +108,35 @@ const daemon = daemonConnection({
   deviceToken: 'harness-token',
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
+
+/**
+ * The markdown composer preference is a single reader-wide setting, so the
+ * harness turns it ON for the whole page: that is the state a reviewer needs to
+ * look at, and the composers with an empty draft are unaffected (a placeholder
+ * is painted by the textarea, not by the overlay). Toggle it live from the
+ * "Composer settings" card when serving the harness by hand.
+ */
+writeMdComposePref('on');
+
+/** A draft that exercises every paint token the overlay knows. */
+const MARKDOWN_DRAFT = [
+  '# Port review',
+  '',
+  'Ping :zelda about **the metric contract** and *the caret*, then read',
+  '@packages/pwa/src/lib/composer-markdown.ts:1-24 before &F12 lands.',
+  '',
+  '> Colour is `paint` only — see [the design record](docs/standards/index.md).',
+  '',
+  '- lossless tokens',
+  '1. best-effort semantics',
+  '',
+  '```ts',
+  'const tokens = tokenizeMarkdown(draft);',
+  '```',
+].join('\n');
+const MARKDOWN_DRAFT_SCOPE = daemonSessionScope(daemon, 'harness-markdown-composer');
+const markdownDrafts = new DaemonDraftStore();
+markdownDrafts.save(MARKDOWN_DRAFT_SCOPE, MARKDOWN_DRAFT);
 
 const harnessSession = {
   config: {
@@ -761,6 +792,25 @@ function Shell() {
             },
           ]}
         />
+      ),
+    },
+    {
+      label: 'Composer markdown highlighting',
+      render: () => (
+        // The real composer is one row tall until the reader drags it; the
+        // harness stands it up so every paint token is visible at once.
+        <section
+          aria-label="Composer markdown highlighting harness"
+          className="[&_textarea]:min-h-[15rem]"
+          id="harness-composer-markdown"
+        >
+          <Composer
+            api={{ send: async () => ({}) as never }}
+            daemon={daemon}
+            draftStore={markdownDrafts}
+            sessionId={MARKDOWN_DRAFT_SCOPE.sessionId}
+          />
+        </section>
       ),
     },
     {
