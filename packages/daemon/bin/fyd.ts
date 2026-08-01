@@ -75,6 +75,13 @@ import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins
 import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
+  FileWardenArtifacts,
+  FileWardenConfigStore,
+  FileWardenStateStore,
+  NodeWardenReportFileSystem,
+  WardenReportReader,
+} from '../src/adapters/warden/index.ts';
+import {
   DurableTerminalPaneRegistrar,
   DurableTerminalPaneStore,
   ExactTmuxPaneReaper,
@@ -149,7 +156,6 @@ import {
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
-import { NodeWardenReportFileSystem, WardenReportReader } from '../src/adapters/warden/index.ts';
 import {
   GitWorktreeGateway,
   ManagedWorktreeAdapter,
@@ -287,6 +293,15 @@ import {
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   type TranscriptSource,
+  DONE_MARKER_FILENAME,
+  doneMarkerCertifiesTurn,
+  parseWardenConfigPatch,
+  selectableAutoAccounts,
+  WARDEN_LABEL,
+  WardenSweepLoop,
+  WardenSweepService,
+  type WardenFleetSession,
+  type WardenSubsystem,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -1436,6 +1451,199 @@ function createSessionSignalSubsystem(
   };
 }
 
+/**
+ * How long the daemon remembers when the last sweep finished, for its own health report.
+ *
+ * MUTABLE ON PURPOSE, and it is the one piece of shared state this root holds. The self-check is
+ * built before the subsystems are — it is passed INTO `createSubsystems` — and it needs a synchronous
+ * answer to "how stale is the sweep", while the sweep itself learns the answer asynchronously much
+ * later. A holder both sides close over is what lets the health report tell an armed-but-late timer
+ * apart from an absent one, which is the distinction `wardenTimerArmed` exists to make.
+ */
+interface WardenSupervisionState {
+  armed: boolean;
+  intervalMs: number;
+  lastSweepAt: string | undefined;
+}
+
+/** The collaborators a warden subsystem needs from the rest of the root. */
+interface WardenParts {
+  readonly sessions: SessionDirectorySubsystem;
+  readonly control: SessionControlSubsystem;
+  readonly usage: UsageFeedPort;
+  readonly accounts: AccountInventoryPort;
+  readonly files: NodeWardenReportFileSystem;
+  readonly reportsReader: WardenReportReader;
+  readonly wardenRoot: string;
+  readonly reportsDirectory: string;
+  readonly supervision: WardenSupervisionState;
+}
+
+/**
+ * Fleet supervision, assembled from the modules that had no way to reach a running daemon.
+ *
+ * THE FLEET READER IS THE SAME SESSION READER EVERY OTHER SURFACE USES, so the sessions a warden
+ * judges are the sessions the list shows, parsed by the same schemas from the same documents. A
+ * private reader would let the warden act on a view nobody else can see.
+ *
+ * `hasLiveMonitor` IS ALWAYS FALSE, because this daemon runs no per-session monitors, and that is the
+ * truth rather than a placeholder. The sweep is told so through `supervisesMonitors` and collapses
+ * what would otherwise be one `dead_monitor` anomaly per live session into the single daemon-level
+ * fault it is — see `collapseUnsupervisedMonitors`. Reporting the fleet as watched would be the
+ * dangerous lie: it would also switch on the sus classifiers, which reason over a liveness ledger
+ * nothing here updates.
+ *
+ * `stopCapability` IS RECORDED AND NOT DELIVERED. The sweep mints an unguessable secret per
+ * assignment and the durable state holds it, but this daemon's start declares no field to carry one
+ * into the warden's own terminal, so no warden can present it. That is why `mayAct` is false: the
+ * prompts say plainly that the report is the deliverable rather than handing a warden commands it
+ * cannot run.
+ */
+function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
+  const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
+  const service = new WardenSweepService(
+    {
+      fleet: {
+        fleet: async () =>
+          await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view))),
+      },
+      spawner: {
+        spawn: async request => {
+          const start = {
+            agent: request.agent,
+            ...(request.model === undefined ? {} : { model: request.model }),
+            name: request.name,
+            // The label is what the detector's lineage shield reads: a warden that was not labelled
+            // would be swept, flagged and investigated by the next warden, forever.
+            label: WARDEN_LABEL,
+            mode: 'auto' as const,
+            prompt: request.prompt,
+            cwd: request.cwd,
+            boardAccess: 'none' as const,
+          };
+          const payload = JSON.stringify(start);
+          const view = await parts.control.start(start, crypto.randomUUID(), payload);
+          return {
+            sessionId: view.config.id,
+            createdAt: view.config.createdAt,
+            agent: view.config.agent,
+            harness: view.config.harness === 'codex' ? 'codex' : 'claude',
+            // The model the start actually resolved, never the one that was asked for: provenance
+            // records what RAN. `modelHint` is the planner's resolution when the account pinned none.
+            model: view.config.model ?? view.config.modelHint,
+            modelSource: view.config.model === undefined ? 'configured' : 'agent',
+          };
+        },
+      },
+      artifacts,
+      state: new FileWardenStateStore(parts.files, parts.wardenRoot),
+      config: new FileWardenConfigStore(parts.files, parts.wardenRoot),
+      agents: {
+        installed: async () => selectableAutoAccounts(await parts.accounts.accounts()).map(account => account.id),
+      },
+      // The daemon-wide feed, with the one shape difference reconciled here: the wire lets `retryAt`
+      // be explicitly null to mean "the provider named no retry time", and the warden's health type
+      // says `undefined` for the same thing. Collapsing it at the boundary is what stops a null
+      // reading as an epoch instant that has already passed.
+      usage: {
+        accounts: async () =>
+          (await parts.usage.accounts()).map(({ retryAt, ...account }) => ({
+            ...account,
+            ...(typeof retryAt === 'number' ? { retryAt } : {}),
+          })),
+      },
+      // The journal is the daemon's own log for now: the fleet event tier these belong on is
+      // `emitTransient`, which section I of the survey records as absent. A supervision decision an
+      // operator cannot see is worse than a noisy one, so they are written rather than dropped.
+      journal: {
+        record: (type, data) =>
+          process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
+      },
+      nowMs: () => Date.now(),
+      // Two UUIDs concatenated: the value authorizes stopping a session, so it is minted from the
+      // same source as every other secret here and is longer than one.
+      capabilities: () => `${crypto.randomUUID()}${crypto.randomUUID().replaceAll('-', '')}`,
+    },
+    {
+      clientName: CLIENT_NAME,
+      // The state home, never an agent's workspace: a warden must not be able to be mistaken for
+      // work on a repository, and its own prompt forbids touching one.
+      wardenCwd: parts.wardenRoot,
+      supervisesMonitors: false,
+      mayAct: false,
+    },
+  );
+  // The loop drives a WRAPPED service so the holder is refreshed by the timer's sweeps as well as by
+  // a manual one. Wrapping here rather than after `loop.run` is the difference: a periodic tick calls
+  // the loop directly and would never reach a wrapper placed outside it, so the daemon's health
+  // report would show the sweep ageing forever while the timer worked perfectly.
+  const loop = new WardenSweepLoop(
+    {
+      run: async options => {
+        const view = await service.run(options);
+        parts.supervision.lastSweepAt = view.sweptAt;
+        return view;
+      },
+      intervalMs: async () => await service.intervalMs(),
+    },
+    {
+      every: (intervalMs, tick) => {
+        const handle = setInterval(tick, intervalMs);
+        return () => clearInterval(handle);
+      },
+    },
+  );
+  return {
+    status: async () => await service.status(),
+    run: async (force: boolean) => await loop.run(force),
+    config: async () => await service.view(),
+    updateConfig: async (patch: unknown) => await service.updateConfig(parseWardenConfigPatch(patch)),
+    lastSweepAt: async () => await service.lastSweepAt(),
+    intervalMs: async () => await service.intervalMs(),
+    arm: async () => {
+      parts.supervision.intervalMs = await service.intervalMs();
+      parts.supervision.armed = true;
+      const disarm = await loop.arm();
+      return () => {
+        parts.supervision.armed = false;
+        disarm();
+      };
+    },
+  };
+}
+
+/**
+ * One session as the warden reads it.
+ *
+ * The done marker is READ here — the reader `FileSignalArtifacts` was written for. Without it the
+ * detector's guard is dead and every session whose pane died after its teammate declared the work
+ * finished is reported as abandoned wreckage on every sweep.
+ */
+async function wardenFleetSession(parts: WardenParts, view: SessionView): Promise<WardenFleetSession> {
+  const marker = await parts.files.readText(join(view.directory, DONE_MARKER_FILENAME)).catch(() => undefined);
+  return {
+    config: {
+      id: view.config.id,
+      mode: view.config.mode,
+      createdAt: view.config.createdAt,
+      updatedAt: view.config.updatedAt,
+      ...(view.config.teammate === undefined ? {} : { teammate: view.config.teammate }),
+      ...(view.config.label === undefined ? {} : { label: view.config.label }),
+      ...(view.config.parent === undefined ? {} : { parent: view.config.parent }),
+      agent: view.config.agent,
+      ...(view.config.model === undefined ? {} : { model: view.config.model }),
+      intervalSeconds: view.config.intervalSeconds,
+    },
+    state: view.state,
+    directory: view.directory,
+    cwd: view.config.cwd,
+    turn: view.state.turn,
+    // Always false, and honestly so: no monitor subsystem exists. See `createWardenSubsystem`.
+    hasLiveMonitor: false,
+    hasDoneMarker: doneMarkerCertifiesTurn(marker, view.state.turn),
+  };
+}
+
 /** The collaborators a migration needs. Grouped because eight positional arguments in the order the
  *  flow happens to use them is a call site nobody can check. */
 interface SessionMigrateParts {
@@ -2160,6 +2368,12 @@ export function buildWorld(): DaemonWorld {
   const files = new NodeWorktreeFileSystem();
   const gateway = new GitWorktreeGateway(new BunGitRunner(), files, worktreeClock);
   const wardenFiles = new NodeWardenReportFileSystem();
+  /**
+   * Shared by the self-check and the sweep, because they learn the same fact at different times and
+   * in different shapes — see `WardenSupervisionState`. It starts unarmed, so a boot that fails
+   * before the timer is armed reports a daemon that supervises nothing, which is what it is.
+   */
+  const wardenSupervision: WardenSupervisionState = { armed: false, intervalMs: 0, lastSweepAt: undefined };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
   const sttModels = new SttModelStore({
@@ -2457,10 +2671,17 @@ export function buildWorld(): DaemonWorld {
         {
           inventory: new StorageSessionHealthInventory(storage, {
             monitors: false,
-            warden: false,
+            // Read from the holder rather than hardcoded: a sweep timer IS armed now, and reporting
+            // `false` beside a running one would make a late sweep indistinguishable from a missing
+            // subsystem — the distinction this flag exists to make.
+            get warden() {
+              return wardenSupervision.armed;
+            },
             monitored: () => false,
-            sweepIntervalMs: 0,
-            lastSweepAt: () => undefined,
+            get sweepIntervalMs() {
+              return wardenSupervision.intervalMs;
+            },
+            lastSweepAt: () => wardenSupervision.lastSweepAt,
             // Boot state is owned by `start`; until it reports otherwise a booted daemon that
             // reached this point has finished the storage bootstrap it does have.
             bootstrapFinished: () => true,
@@ -2650,6 +2871,42 @@ export function buildWorld(): DaemonWorld {
       // its own repository handle over the same document, and the atomicity of `transaction` is what
       // the whole authorization model rests on.
       const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
+      // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
+      // ordinary managed session that happens to carry the warden label — which is exactly what the
+      // detector's lineage shield reads. A private launch path would produce a session the fleet
+      // read could not see and the shield could not recognise.
+      const sessionControl = createSessionControlSubsystem(
+        storage,
+        sessions,
+        createSessionLifecycle,
+        planner,
+        launcher,
+        accounts,
+        executables,
+        sessionIds,
+        createCallsignClaims(storage, stateFiles, paths, callsignClaims),
+        payloadDigests,
+        // The session's own private directory holds the files, and the extractor over them is the
+        // production one: `initialAttachments` is the only mounted route that carries document
+        // bytes, so this is where a DOCX becomes text the agent can read.
+        {
+          plan: (id, decoded) =>
+            planInitialAttachments(
+              decoded,
+              join(createSessionPaths(paths, id).directory, 'attachments'),
+              new NodeRawDeflate(),
+            ),
+          write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
+        },
+        // The board grant a `--board-access` start asks for, over the same world and the same
+        // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
+        childGrantRequester(boards),
+        transcriptProvenance,
+        new NodeWorkingDirectoryResolver(),
+        id => createSessionPaths(paths, id).directory,
+        clock,
+      );
+      const wardenPaths = createWardenPaths(paths.home);
       return {
         health: createHealthSubsystem(health, scratch),
         attention: new AttentionService(
@@ -2670,37 +2927,7 @@ export function buildWorld(): DaemonWorld {
         ),
         sessions,
         catalogs,
-        sessionControl: createSessionControlSubsystem(
-          storage,
-          sessions,
-          createSessionLifecycle,
-          planner,
-          launcher,
-          accounts,
-          executables,
-          sessionIds,
-          createCallsignClaims(storage, stateFiles, paths, callsignClaims),
-          payloadDigests,
-          // The session's own private directory holds the files, and the extractor over them is the
-          // production one: `initialAttachments` is the only mounted route that carries document
-          // bytes, so this is where a DOCX becomes text the agent can read.
-          {
-            plan: (id, decoded) =>
-              planInitialAttachments(
-                decoded,
-                join(createSessionPaths(paths, id).directory, 'attachments'),
-                new NodeRawDeflate(),
-              ),
-            write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
-          },
-          // The board grant a `--board-access` start asks for, over the same world and the same
-          // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
-          childGrantRequester(boards),
-          transcriptProvenance,
-          new NodeWorkingDirectoryResolver(),
-          id => createSessionPaths(paths, id).directory,
-          clock,
-        ),
+        sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
@@ -2742,6 +2969,19 @@ export function buildWorld(): DaemonWorld {
           new RunnerSessionGit(new BunGitRunner()),
         ),
         scratchGc,
+        warden: createWardenSubsystem({
+          sessions,
+          control: sessionControl,
+          usage,
+          accounts,
+          files: wardenFiles,
+          // The SAME reader `world.wardenReports` builds, over the same directory: the verdict list
+          // and the sweep's own "was this target cleared" read must agree about what a report says.
+          reportsReader: new WardenReportReader(wardenFiles, wardenPaths.reports),
+          wardenRoot: wardenPaths.root,
+          reportsDirectory: wardenPaths.reports,
+          supervision: wardenSupervision,
+        }),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -2907,6 +3147,18 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     void terminalReaper.sweep().catch(() => undefined);
   }, 5_000);
   cleanups.push(() => clearInterval(terminalReapTicks));
+  // The warden sweep, armed only once the daemon is actually serving — like the self-check above, and
+  // for the same reason: a sweep spawns sessions, and it must not race the bind it would report on.
+  //
+  // It arms LAST because arming fires a boot sweep, and that sweep reads the fleet and may spawn. The
+  // disarm is registered like every other acquisition, so a stopped daemon does not leave a timer
+  // firing at closed storage. A failure to arm is swallowed for the reason the ticks swallow theirs:
+  // a daemon whose fleet is fine must not fail to serve because its supervisor could not start, and
+  // the absence is already visible as `wardenTimerArmed: false` on its own health report.
+  await subsystems.warden
+    .arm()
+    .then(disarm => cleanups.push(disarm))
+    .catch(() => undefined);
   await world.untilShutdown();
   return 0;
 }
