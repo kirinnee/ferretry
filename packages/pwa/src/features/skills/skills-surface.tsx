@@ -189,7 +189,11 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
               autoComplete="off"
               spellCheck={false}
               disabled={state !== 'ready' || catalog === null || catalog.skills.length === 0}
-              className="kt-input min-h-[44px] w-full pl-9 pr-3"
+              // `!pl-9`: `.kt-input`'s padding shorthand is defined after
+              // `@tailwind utilities`, so a plain `pl-9` loses and the leading
+              // magnifier sits on top of the placeholder. Same fix as
+              // `shell/side-pane-search.tsx`.
+              className="kt-input min-h-[44px] w-full !pl-9 !pr-3"
             />
           </span>
         </label>
