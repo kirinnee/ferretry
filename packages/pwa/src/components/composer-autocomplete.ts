@@ -533,12 +533,10 @@ export function useComposerAutocomplete({
         setActiveIndex(nextComposerCandidateIndex(candidates, boundedActive, event.key === 'ArrowDown' ? 1 : -1));
         return true;
       }
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        event.preventDefault();
-        if (boundedActive >= 0) accept(boundedActive);
-        return !event.nativeEvent.isComposing;
-      }
-      return false;
+      if (event.key !== 'Enter' && event.key !== 'Tab') return false;
+      event.preventDefault();
+      if (boundedActive >= 0) accept(boundedActive);
+      return true;
     },
     [accept, boundedActive, candidates, close, open],
   );
