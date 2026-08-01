@@ -24,8 +24,12 @@ import {
 import {
   CURRENT_SESSION_VERSION,
   createFoundationPaths,
+  createSessionEvent,
   createSessionPaths,
   defaultSessionHealthSettings,
+  encodeSessionEvent,
+  type FileSystemFactory,
+  type FileSystemPort,
   parseSessionId,
   resolveStateHome,
 } from '../../../../src/lib/index.ts';
@@ -44,16 +48,28 @@ class CountingStateFileSystem extends StateFileSystem {
   }
 }
 
+/**
+ * Hands storage the very same counting filesystem the consistency pass holds. Counting only the
+ * pass's own filesystem proves nothing: the survey and the reconcile both run through storage's.
+ */
+class CountingStateFileSystemFactory implements FileSystemFactory {
+  constructor(private readonly fileSystem: CountingStateFileSystem) {}
+
+  create(): FileSystemPort {
+    return this.fileSystem;
+  }
+}
+
 async function temporaryHome() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-health-test-'));
   homes.add(home);
   return home;
 }
 
-async function openStorage(home: string) {
+async function openStorage(home: string, fileSystems: FileSystemFactory = new StateFileSystemFactory()) {
   const factory = new DaemonStorageFactory(
     new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
-    new StateFileSystemFactory(),
+    fileSystems,
     new StateHomeLayout(),
     new SqliteHomeLockFactory(),
     new BunSqliteIndexFactory(),
@@ -354,15 +370,23 @@ describe('storage consistency pass', () => {
   it('should keep reporting a lost journal on every shallow tick without reconciling again', async () => {
     // Arrange — a healthy deep pass first, so the finding can only come from the deletion.
     const home = await temporaryHome();
-    const opened = await openStorage(home);
+    const fileSystem = new CountingStateFileSystem(paths(home));
+    const opened = await openStorage(home, new CountingStateFileSystemFactory(fileSystem));
     const lost = parseSessionId('lost-journal');
     const healthy = parseSessionId('healthy-session');
     await opened.storage.append(lost, 'session.started', { durable: true });
     await opened.storage.append(healthy, 'session.started', { durable: true });
-    const fileSystem = new CountingStateFileSystem(paths(home));
     const pass = new StorageConsistencyPass(opened.storage, fileSystem, paths(home), SETTINGS);
     const healthyPass = await pass.run(true);
     await rm(createSessionPaths(paths(home), lost).events);
+    // The healthy journal grows behind the index's back. A reconcile has to read those bytes to
+    // catch its row up, so a tick that finishes at zero reads provably never reconciled — without
+    // this divergence the counter would read zero even for a full pass, and prove nothing.
+    await writeFile(
+      createSessionPaths(paths(home), healthy).events,
+      `${encodeSessionEvent(createSessionEvent(healthy, 1, NOW, 'session.behind_the_index', {}))}\n`,
+      { flag: 'a', mode: 0o600 },
+    );
     fileSystem.journalReads = 0;
 
     // Act
