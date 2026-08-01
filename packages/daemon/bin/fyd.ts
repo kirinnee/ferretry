@@ -15,7 +15,11 @@ import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { startSttWorker } from './stt-worker.ts';
 import {
+  BrowserLoginWindowService,
+  BrowserProfileStore,
   BrowserWorkerClient,
+  NodeBrowserLoginRuntime,
+  XvfbDisplay,
   BunApiServer,
   BunProcessProbe,
   BunCommandRunner,
@@ -199,6 +203,7 @@ import {
   HarnessQuirkService,
   SessionProvenanceStamper,
   TmuxController,
+  type BrowserLoginLifecycle,
   type BrowserViewerHost,
   MigrationPreflight,
   type MigrationReportStore,
@@ -274,6 +279,23 @@ export interface DaemonWorld {
    *  rather than an instance. */
   readonly wardenReports: (stateDirectory: string) => WardenReportReader;
   readonly browserTransport: BrowserTransportWorld;
+  /**
+   * The daemon-global human browser-login window, and the release of the X display it renders on.
+   *
+   * A world FIELD for the same reason `terminalRuntime` and `sessionLauncher` are: its real behaviour
+   * cannot be driven from a test without putting an X server, a Chrome and a VNC listener on the host.
+   * A test substitutes this and keeps the mount, the routes, the credentials and the dispatcher
+   * exactly as production builds them.
+   *
+   * It is built at process start rather than per opened storage because none of it reads the session
+   * index — the profile is one directory in the state home, and the window is about that profile
+   * rather than about any session.
+   *
+   * `close` is here because the window holds host processes: an X server for the daemon's lifetime,
+   * and while a window is open a Chrome and a VNC listener too. A daemon that exited without
+   * releasing them would leave a desktop on the machine that nothing is left to close.
+   */
+  readonly browserLogin: BrowserLoginWorld;
   /**
    * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
    *
@@ -422,6 +444,14 @@ export interface DaemonWorld {
      * documents and the route exactly as production builds them.
      */
     preflight: MigrationPreflight,
+    /**
+     * The login window, passed IN for the same reason as every other host adapter here: opening one
+     * puts an X server, a Chrome and a VNC listener on the machine, so a test substitutes this and
+     * keeps the routes, the credentials and the dispatcher exactly as production builds them. A
+     * factory that closed over `browserLogin` would keep the production one no matter what a test
+     * supplied.
+     */
+    browserLogin: BrowserLoginLifecycle,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -455,6 +485,18 @@ function untilTerminated(): Promise<void> {
   return new Promise<void>(resolve => {
     for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => resolve());
   });
+}
+
+/**
+ * The human login window and the teardown of everything it put on the host.
+ *
+ * TWO members rather than one, because the window's own lifecycle contract has no release: `start`
+ * and `stop` are a person's intent about one sign-in, and the X display outlives any single window by
+ * design (see `XvfbDisplay`). So the intent goes on the route and the release goes to `cleanups`.
+ */
+export interface BrowserLoginWorld {
+  readonly window: BrowserLoginLifecycle;
+  readonly close: () => Promise<void>;
 }
 
 /**
@@ -1597,6 +1639,42 @@ function createTaskBoardSubsystem(
   };
 }
 
+/**
+ * The human browser-login window, over the daemon's own private profile and a private X display.
+ *
+ * ONE PROFILE for the whole daemon, inside the state home. It is the artefact the window exists to
+ * produce: a person signs in once, the profile is marked primed, and every later browser run reuses
+ * the cookies that sign-in left. The store keeps its lease, its Chrome pid and its primed marker
+ * beside the profile, so a second window — or a crashed daemon's leftovers — is refused rather than
+ * corrupting it.
+ *
+ * THE SECRET FILE SHARES THE PROFILE'S DIRECTORY rather than a temp path. x11vnc reads the password
+ * once and deletes it (`-passwdfile rm:`), but between the write and that read it is a live
+ * credential on disk, and the browser directory is the daemon's own 0700 tree.
+ *
+ * EVERY EXECUTABLE IS A PATH LOOKUP AT THE POINT OF USE, matching `executables` above: a host that
+ * installs x11vnc after the daemon booted must be able to open a window without a restart, and a host
+ * that has none refuses with a sentence naming what is missing rather than spawning whatever answers
+ * to the name.
+ */
+function createBrowserLoginWorld(paths: FoundationPaths): BrowserLoginWorld {
+  const profile = new BrowserProfileStore(paths.home);
+  const which = (name: string) => () => Bun.which(name, { PATH: process.env.PATH }) ?? undefined;
+  const runtime = new NodeBrowserLoginRuntime({
+    display: new XvfbDisplay({ executable: which('Xvfb') }),
+    secretsDirectory: profile.browserDirectory,
+    x11vncExecutable: which('x11vnc'),
+    timeoutExecutable: which('timeout'),
+    // The operator's explicit Chrome, honoured ahead of this platform's candidate list. The domain
+    // names the variable in its own refusal, so the name is read here rather than invented.
+    chromeOverride: () => process.env.FY_CHROME_BIN,
+  });
+  return {
+    window: new BrowserLoginWindowService({ profile, runtime }),
+    close: async () => await runtime.close(),
+  };
+}
+
 function createLearningSubsystem(
   paths: FoundationPaths,
   files: StateFileSystem,
@@ -1958,7 +2036,8 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
-    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight) => {
+    browserLogin: createBrowserLoginWorld(paths),
+    createSubsystems: (storage, terminals, usage, health, launcher, reviver, preflight, browserLogin) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
@@ -2028,6 +2107,7 @@ export function buildWorld(): DaemonWorld {
         taskBoards: createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations),
         analytics: createAnalyticsSubsystem(storage),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
+        browserLogin,
         names: createNameSubsystem(storage),
         learning: createLearningSubsystem(paths, stateFiles, clock, learningBoard),
         recommend: createRecommendSubsystem(advisorOver, usage),
@@ -2106,7 +2186,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
     world.createResumeLauncher(opened.storage),
     world.migratePreflight,
+    world.browserLogin.window,
   );
+  // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
+  // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
+  // be released whether the boot completes or fails part-way.
+  cleanups.push(() => world.browserLogin.close());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
   // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also

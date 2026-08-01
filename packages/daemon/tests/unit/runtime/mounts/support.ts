@@ -17,6 +17,11 @@ import {
   type TerminalView,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
+import {
+  BrowserControlError,
+  type BrowserLoginLifecycle,
+  type BrowserLoginStatus,
+} from '../../../../src/lib/browser/control/index.ts';
 import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
 import {
   AttentionService,
@@ -1024,4 +1029,82 @@ export function boardSession(input: Partial<TaskBoardSession> & Pick<TaskBoardSe
     teammate: input.teammate ?? null,
     sessionCapabilityHash: input.sessionCapabilityHash ?? `hash:session:${input.id}`,
   };
+}
+
+/**
+ * A login window with no host behind it.
+ *
+ * The real one owns an X server, a Chrome and a VNC listener, so the mount is proved against this
+ * instead: the routes, the action schema, the scope and the refusal mapping are all exercised without
+ * anything being spawned. `BrowserLoginWindowService` itself is proved separately, against a fake
+ * runtime, in the integration tier.
+ */
+export class FakeBrowserLogin implements BrowserLoginLifecycle {
+  readonly calls: string[] = [];
+  private state: BrowserLoginStatus = { state: 'closed', profilePrimed: false };
+
+  constructor(
+    /** What the next lifecycle call refuses with, if anything. */
+    private readonly refusal?: BrowserControlError,
+  ) {}
+
+  async status(): Promise<BrowserLoginStatus> {
+    this.calls.push('status');
+    // A READ refuses for the same reasons an action does — the real window's `status` asks the profile
+    // store whether it is primed — so the fake refuses on every call rather than only on the writes.
+    if (this.refusal) throw this.refusal;
+    return this.state;
+  }
+
+  async start(options: { readonly minutes?: number } = {}): Promise<BrowserLoginStatus> {
+    this.calls.push(`start:${options.minutes ?? 'default'}`);
+    if (this.refusal) throw this.refusal;
+    this.state = {
+      state: 'open',
+      profilePrimed: false,
+      openedAt: '2026-01-01T00:00:00.000Z',
+      expiresAt: '2026-01-01T00:15:00.000Z',
+      connection: {
+        host: '127.0.0.1',
+        port: 5_901,
+        password: 'abcd2345',
+        sshTunnel: 'ssh -N -L 5901:127.0.0.1:5901 operator@host',
+      },
+    };
+    return this.state;
+  }
+
+  async stop(options: { readonly primed?: boolean } = {}): Promise<BrowserLoginStatus> {
+    this.calls.push(`stop:${options.primed ?? 'unstated'}`);
+    if (this.refusal) throw this.refusal;
+    this.state = { state: 'closed', profilePrimed: options.primed === true };
+    return this.state;
+  }
+
+  async confirm(): Promise<BrowserLoginStatus> {
+    this.calls.push('confirm');
+    if (this.refusal) throw this.refusal;
+    this.state = { ...this.state, profilePrimed: true };
+    return this.state;
+  }
+}
+
+/** A window whose every call fails the way an unexpected defect does, so the mount can be shown to
+ *  let it through as a 500 rather than dressing it up as a refusal. */
+export class BrokenBrowserLogin implements BrowserLoginLifecycle {
+  async status(): Promise<BrowserLoginStatus> {
+    throw new Error('/home/operator/.fy/browser/profile.lock is unreadable');
+  }
+
+  async start(): Promise<BrowserLoginStatus> {
+    throw new Error('/home/operator/.fy/browser/profile.lock is unreadable');
+  }
+
+  async stop(): Promise<BrowserLoginStatus> {
+    throw new Error('/home/operator/.fy/browser/profile.lock is unreadable');
+  }
+
+  async confirm(): Promise<BrowserLoginStatus> {
+    throw new Error('/home/operator/.fy/browser/profile.lock is unreadable');
+  }
 }

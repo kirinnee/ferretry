@@ -13,6 +13,7 @@ import {
   attentionService,
   CREDENTIALS,
   emptyFeed,
+  FakeBrowserLogin,
   FakeSessionControl,
   FakeSessionMigrate,
   FakeTaskBoards,
@@ -50,6 +51,7 @@ const subsystems = (): MountedSubsystems => ({
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
   terminals: new FakeTerminals(),
+  browserLogin: new FakeBrowserLogin(),
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
@@ -101,6 +103,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
+      // The human login window, and the per-session automation that is deliberately a stated refusal
+      // rather than a 404: there is no browser worker program in this repository and no production
+      // `BrowserViewerHost`. See the mount's own header.
+      'GET /v1/browser/login',
+      'POST /v1/browser/login',
+      'GET /v1/sessions/:sessionId/browser',
+      'POST /v1/sessions/:sessionId/browser',
       'GET /v1/names',
       'GET /v1/learning/status',
       'GET /v1/learning/config',
@@ -142,6 +151,9 @@ describe('the mounted daemon surface', () => {
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
     const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
+    // The login window, over the same dispatcher: the route `fy browser login` and the PWA's banner
+    // have both spoken since they were ported, against a daemon that answered `unknown_route`.
+    const login = await dispatcher.dispatch(request({ path: '/v1/browser/login', headers: human }));
     // The write half of the session surface, over the same dispatcher: a stop of a session the
     // fixture holds, which an unmounted route would answer as `unknown_route`.
     const stopped = await dispatcher.dispatch(
@@ -180,6 +192,7 @@ describe('the mounted daemon surface', () => {
     should(analytics.status).equal(200);
     should(terminals.status).equal(200);
     should(learning.status).equal(200);
+    should(login.status).equal(200);
     should(stopped.status).equal(200);
     should(revived.status).equal(200);
     should(migrated.status).equal(200);

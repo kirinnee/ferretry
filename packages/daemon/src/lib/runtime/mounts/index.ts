@@ -4,9 +4,11 @@ import { ApiRouter } from '../../api/router.ts';
 import { daemonApiRoutes, type DaemonApiDependencies } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { AttentionService } from '../../attention/index.ts';
+import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import { analyticsRoutes, type AnalyticsSubsystem } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
+import { browserLoginRoutes } from './browser-login.ts';
 import { daemonHealthRoutes, type DaemonHealthSubsystem } from './health.ts';
 import { learningRoutes, type LearningSubsystem } from './learning.ts';
 import { nameRoutes, type NameSubsystem } from './names.ts';
@@ -65,6 +67,10 @@ export interface MountedSubsystems {
   readonly analytics: AnalyticsSubsystem;
   /** Independent shell terminals attached to a session's working directory. */
   readonly terminals: TerminalSubsystem;
+  /** The daemon-global human browser-login window: a private X display, served over loopback VNC, that
+   *  a person signs into by hand so the agent's browser profile is primed. Per-session browser
+   *  AUTOMATION is not mounted — the mount's own header names what is missing and why. */
+  readonly browserLogin: BrowserLoginLifecycle;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -112,6 +118,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...taskBoardRoutes(subsystems.taskBoards),
     ...analyticsRoutes(subsystems.analytics),
     ...terminalRoutes(subsystems.terminals),
+    // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
+    // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
+    // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
+    ...browserLoginRoutes(subsystems.browserLogin),
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
     ...recommendRoutes(subsystems.recommend),
