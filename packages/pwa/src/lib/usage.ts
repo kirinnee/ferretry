@@ -28,7 +28,7 @@
  * also `agent` rather than kteam's `binary`.
  */
 
-import { UsageFeedViewSchema, type SessionState, type SessionView, type UsageFeedView } from '@ferretry/protocol';
+import { type SessionState, type SessionView, type UsageFeedView, UsageFeedViewSchema } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 
 /** One session's quota, normalized from whichever source supplied it. */
@@ -39,6 +39,15 @@ export interface ResolvedQuota {
   readonly weeklyResetAt?: number;
   readonly atLimit?: boolean;
   readonly authOk?: boolean;
+}
+
+/**
+ * The dashboard only needs to resolve one row's quota. Keeping this narrow
+ * lets its connected page pass a `DaemonUsageStore` without exposing that
+ * store's private feed index.
+ */
+export interface SessionQuotaResolver {
+  quotaFor(daemonId: DaemonId, view: SessionView): ResolvedQuota | null;
 }
 
 /**

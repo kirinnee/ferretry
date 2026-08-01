@@ -16,6 +16,7 @@
  * HTTP, and only the live display waits for a ticket.
  */
 
+import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
 import { Monitor } from 'lucide-react';
 import type {
   FormEvent,
@@ -30,7 +31,7 @@ import {
   type RemoteBrowserTransport,
   useRemoteBrowser,
 } from '../../hooks/use-remote-browser.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { isLocalPasteChord, type RemoteViewportMode, remoteViewportForContainer } from '../../lib/remote-browser.ts';
 import {
@@ -110,6 +111,21 @@ const printableKey = (event: {
   readonly metaKey: boolean;
 }): boolean => event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
 
+/**
+ * The pane's own engine, published to a host that draws shared chrome around it.
+ *
+ * `runAction` is the pane's single dispatcher, so a host toolbar drives the SAME
+ * `useRemoteBrowser` instance the pane polls with — never a second transport
+ * that could race it or start a second Chrome. `status` is `null` while the
+ * daemon has not answered yet, including for the frame after a re-scope.
+ */
+export interface RemoteBrowserPaneState {
+  readonly status: BrowserStatus | null;
+  readonly busy: boolean;
+  readonly error: string | null;
+  readonly runAction: (action: BrowserAction) => void;
+}
+
 export interface RemoteBrowserPaneProps {
   readonly daemon: DaemonConnection;
   /** Must name `daemon`; a scope from another daemon is a programming error. */
@@ -122,6 +138,14 @@ export interface RemoteBrowserPaneProps {
   readonly streamTicket: string | null;
   /** A hidden retained pane detaches; the daemon-side browser survives. */
   readonly isActive?: boolean;
+  /**
+   * False only for a host that already owns an address bar for this engine.
+   * Standalone remote usage keeps its own navigation row, so nothing can reach
+   * a pane with no way to navigate it.
+   */
+  readonly showNavigation?: boolean;
+  /** Publishes this pane's engine so a host can label and drive it. */
+  readonly onStateChange?: (state: RemoteBrowserPaneState) => void;
   readonly onHumanActivity?: (kind: RemoteHumanActivity) => void;
   readonly resizeDebounceMs?: number;
   readonly pollIntervalMs?: number;
@@ -140,6 +164,8 @@ export function RemoteBrowserPane({
   scope,
   streamTicket,
   isActive = true,
+  showNavigation = true,
+  onStateChange,
   onHumanActivity,
   resizeDebounceMs = REMOTE_BROWSER_RESIZE_DEBOUNCE_MS,
   pollIntervalMs,
@@ -174,16 +200,24 @@ export function RemoteBrowserPane({
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
   const lastViewportRef = useRef('');
-  const scopeRef = useRef<string | null>(null);
+  const pairingRef = useRef<{ readonly connection: DaemonConnection; readonly scope: DaemonSessionScope } | null>(null);
   const scopeEpochRef = useRef(0);
 
-  const scopeKey = JSON.stringify([daemon.daemonId, scope.daemonId, scope.sessionId]);
+  // The identity that decides liveness is the CONNECTION plus the scope. A
+  // re-pair keeps `daemonId` and rotates the base URL or the device token, so
+  // an id-only key would leave the pane showing the previous pairing's chrome.
+  const previousPairing = pairingRef.current;
+  const rescoped =
+    previousPairing === null ||
+    previousPairing.scope.daemonId !== scope.daemonId ||
+    previousPairing.scope.sessionId !== scope.sessionId ||
+    !sameDaemonConnection(previousPairing.connection, daemon);
   // Applied during render, exactly as the hook clears its snapshot: the chrome
-  // must not still claim "Live" for one frame after the pane is re-scoped, and
-  // the previous daemon's negotiated viewport must not suppress the first
-  // resize sent to the new one.
-  if (scopeRef.current !== scopeKey) {
-    scopeRef.current = scopeKey;
+  // must not still claim "Live" for one frame after the pane is re-scoped or
+  // re-paired, and the previous connection's negotiated viewport must not
+  // suppress the first resize sent to the new one.
+  if (rescoped) {
+    pairingRef.current = { connection: daemon, scope };
     scopeEpochRef.current += 1;
     lastViewportRef.current = '';
     if (displayState !== 'idle') setDisplayState('idle');
@@ -223,6 +257,12 @@ export function RemoteBrowserPane({
       cancelPending?.();
     };
   }, [delay, isActive, observeSize, resizeDebounceMs, runAction, running, viewportMode]);
+
+  // Published after the render that produced it, so a host toolbar redraws from
+  // the same snapshot the pane is showing rather than one frame behind it.
+  useEffect(() => {
+    onStateChange?.({ status, busy, error, runAction });
+  }, [busy, error, onStateChange, runAction, status]);
 
   const pasteFromClipboard = useCallback(async () => {
     const scopeEpoch = scopeEpochRef.current;
@@ -308,7 +348,9 @@ export function RemoteBrowserPane({
     >
       <RemoteBrowserStatusBar status={status} connection={connection} busy={busy} />
       <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />
-      <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+      {showNavigation && (
+        <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+      )}
       <RemoteBrowserControls
         status={status}
         connection={connection}

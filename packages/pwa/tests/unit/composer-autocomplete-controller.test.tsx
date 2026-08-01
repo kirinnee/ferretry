@@ -1,11 +1,26 @@
-import { describe, expect, test } from 'bun:test';
-import { useRef, useState } from 'react';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { type ReactElement, useRef, useState } from 'react';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import {
   type ComposerAutocompleteProvider,
   useComposerAutocomplete,
 } from '../../src/components/composer-autocomplete.ts';
-import { render, run, runAsync } from '../support/react.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { render as renderTree, run, runAsync } from '../support/react.ts';
+
+const renderers: ReactTestRenderer[] = [];
+
+const render = (element: ReactElement): ReactTestRenderer => {
+  const renderer = renderTree(element);
+  renderers.push(renderer);
+  return renderer;
+};
+
+afterEach(() => {
+  run(() => {
+    for (const renderer of renderers.splice(0)) renderer.unmount();
+  });
+});
 
 const providers: readonly ComposerAutocompleteProvider[] = [
   {
@@ -59,6 +74,7 @@ function Probe({
         data-status={controller.status}
         data-value={value}
         onKeyDown={controller.handleKeyDown}
+        onSelect={() => controller.syncSelection({ start: value.length, end: value.length })}
       />
       <button onClick={() => controller.accept(99)} type="button">
         Impossible acceptance
@@ -153,5 +169,31 @@ describe('useComposerAutocomplete', () => {
       },
     };
     expect(render(<Probe sourceProviders={[thrown]} />).root.findByType('textarea').props['data-status']).toBe('error');
+  });
+
+  test('does not restart a provider request for a content-identical caret update', () => {
+    let calls = 0;
+    let firstSignal: AbortSignal | undefined;
+    const provider: ComposerAutocompleteProvider = {
+      id: 'stable:daemon-a:session-a',
+      trigger: '/',
+      label: 'Stable',
+      initialCandidates: () => ({
+        candidates: [{ id: 'compact', kind: 'command', label: 'compact', replacement: '/compact' }],
+      }),
+      candidates: context => {
+        calls += 1;
+        firstSignal ??= context.signal;
+        return new Promise(() => undefined);
+      },
+    };
+    const renderer = render(<Probe initial="/comp" sourceProviders={[provider]} />);
+
+    expect(calls).toBe(1);
+    expect(firstSignal?.aborted).toBe(false);
+    run(() => renderer.root.findByType('textarea').props.onSelect());
+
+    expect(calls).toBe(1);
+    expect(firstSignal?.aborted).toBe(false);
   });
 });

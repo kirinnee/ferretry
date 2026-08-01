@@ -54,3 +54,27 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
   baseUrl: daemonBaseUrl(input.baseUrl),
   deviceToken: requireNonEmpty(input.deviceToken, 'deviceToken'),
 });
+
+/**
+ * Is this the same LIVE connection? The liveness boundary for anything holding
+ * a credential — an in-flight request, a poll generation, an open socket, the
+ * pixels already painted.
+ *
+ * `daemonId` alone cannot answer it. The id is DURABLE ACROSS A RE-PAIR, and a
+ * re-pair is exactly when the base URL or the device token rotates: the same
+ * daemon id can afterwards name a new endpoint or a new device grant. A holder
+ * that treated `(daemonId, sessionId)` as its whole identity would let the old
+ * pairing's late answer land in the new one.
+ *
+ * Compared FIELD BY FIELD, deliberately, and on purpose not as a derived key
+ * string. A host that rebuilds an equivalent connection object each render has
+ * not re-paired, so object identity is the wrong test; and a key string
+ * containing `deviceToken` invites the credential into a cache key, a DOM
+ * attribute or a log line, none of which may ever hold it.
+ *
+ * DURABLE state is a separate question with a separate answer: a remembered
+ * preference keyed by `(daemonId, sessionId)` — the browser engine memory, for
+ * instance — SHOULD survive a re-pair. Only liveness may not.
+ */
+export const sameDaemonConnection = (left: DaemonConnection, right: DaemonConnection): boolean =>
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;

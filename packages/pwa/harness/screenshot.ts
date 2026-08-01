@@ -98,271 +98,329 @@ try {
         colorScheme: 'dark',
         reducedMotion: 'reduce',
       });
-      await context.route('**/*', async route => {
-        if (new URL(route.request().url()).origin !== server.url.origin) {
-          await route.abort();
-          return;
+      // Every capture below runs against this one context and page. Closing them
+      // in `finally` keeps a single failed locator from leaking a Chromium context
+      // for the rest of the run; the browser and the server have the same
+      // guarantee one level up, so nothing here can survive a thrown capture.
+      try {
+        await context.route('**/*', async route => {
+          if (new URL(route.request().url()).origin !== server.url.origin) {
+            await route.abort();
+            return;
+          }
+          await route.continue();
+        });
+        const page = await context.newPage();
+        try {
+          await page.goto(server.url.toString());
+          const target = join(outDir, `${viewport.name}.png`);
+          await page.screenshot({ path: target });
+          process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+
+          if (viewport.name === 'desktop') {
+            const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
+            await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
+            process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
+          }
+
+          // Scoped to its own card: the unified browser surface renders the SAME
+          // pane, display and live frame, so a page-wide locator for any of them
+          // is ambiguous by design rather than by accident.
+          const remoteBrowserCard = page.locator('[data-harness="remote-browser"]');
+          const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
+          await remoteBrowserCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
+          await remoteBrowserCard.getByLabel('Remote browser display').screenshot({ path: browserTarget });
+          process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
+          // The whole pane, not just the display: the tab strip, address bar and
+          // lifecycle controls are the part that has to match the original.
+          const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
+          await remoteBrowserCard.screenshot({ path: browserPaneTarget });
+          process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
+
+          // The unified surface is captured HERE, beside the standalone pane it
+          // embeds and while its display is still live. The harness stream socket
+          // is one-shot by design, so a shot taken later in the run would show
+          // the honest "stream stalled" state instead of the composition under
+          // review.
+          const unifiedPreviewTarget = join(outDir, `unified-browser-preview-${viewport.name}.png`);
+          await page.locator('[data-harness="unified-browser-preview"]').screenshot({ path: unifiedPreviewTarget });
+          process.stdout.write(`📸 Unified browser preview -> ${unifiedPreviewTarget}\n`);
+
+          const unifiedRealCard = page.locator('[data-harness="unified-browser-real"]');
+          const unifiedRealTarget = join(outDir, `unified-browser-real-${viewport.name}.png`);
+          await unifiedRealCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
+          await unifiedRealCard.screenshot({ path: unifiedRealTarget });
+          process.stdout.write(`📸 Unified browser real engine -> ${unifiedRealTarget}\n`);
+
+          // The engine selector and the escape actions live behind the one ⋯
+          // menu, so opening it is the only way to review them. Escape closes it
+          // again and returns focus to the trigger, leaving the page as the rest
+          // of this pass expects to find it.
+          const unifiedMenuTarget = join(outDir, `unified-browser-menu-${viewport.name}.png`);
+          await unifiedRealCard.getByLabel('Browser controls').click();
+          await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'visible' });
+          await unifiedRealCard.screenshot({ path: unifiedMenuTarget });
+          await page.keyboard.press('Escape');
+          await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
+          process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
+          const learningTarget = join(outDir, `learning-${viewport.name}.png`);
+          await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
+          process.stdout.write(`📸 learning -> ${learningTarget}\n`);
+          const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
+          await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
+          process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
+          const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
+          await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
+          process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
+          const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
+          await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
+          process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
+          const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
+          const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
+          // The production shell correctly locks html/body to one viewport and
+          // gives route pages their own scroller. In this harness the route is far
+          // down a stacked review page, so Chrome cannot stitch its full scroll
+          // area in place on a phone: the top is blank and the tail is clipped.
+          // Clone the already-rendered route into the viewport for this one shot.
+          // It keeps the exact component DOM/styles while removing only the
+          // harness stacking context that no production route has.
+          await globalAnalytics.evaluate(element => {
+            document.documentElement.style.height = 'auto';
+            document.documentElement.style.overflow = 'auto';
+            document.body.style.height = 'auto';
+            document.body.style.overflow = 'auto';
+            document.body.replaceChildren(element.cloneNode(true));
+          });
+          await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
+          process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
+          // Restore the live React fixture after the static clone; later shots
+          // still exercise their real components, refs and async state.
+          await page.goto(server.url.toString());
+          const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
+          const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
+          await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
+          await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
+          process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
+          const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
+          await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
+          process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
+          const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
+          await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
+          process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
+          const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
+          await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
+          process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
+          // The dictation settings surface is several viewports tall. Chrome culls
+          // painting outside the viewport while an element screenshot scrolls, so
+          // the capture is taken against a temporarily tall viewport and the real
+          // one is restored immediately — otherwise most of the image is black.
+          const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
+          await page.setViewportSize({ width: viewport.width, height: 3_000 });
+          await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+          process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
+          const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
+          await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
+          process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
+          const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
+          await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
+          process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
+          const settingsPageTarget = join(outDir, `settings-page-${viewport.name}.png`);
+          await page.getByLabel('Settings page preview').screenshot({ path: settingsPageTarget });
+          process.stdout.write(`📸 Settings page -> ${settingsPageTarget}\n`);
+          const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
+          await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
+          process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
+          const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
+          await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
+          process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
+          const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
+          await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });
+          process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
+          const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
+          await page.getByLabel('Pins ledger').screenshot({ path: pinsTarget });
+          process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
+          const pairingTarget = join(outDir, `pairing-${viewport.name}.png`);
+          await page.getByLabel('Daemon pairing').screenshot({ path: pairingTarget });
+          process.stdout.write(`📸 pairing ${viewport.name} -> ${pairingTarget}\n`);
+          const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
+          await page
+            .locator('[aria-labelledby="warden-attention-heading"]')
+            .screenshot({ path: wardenAttentionTarget });
+          process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
+          const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
+          await page.locator('[data-harness="warden-strip"]').screenshot({ path: wardenStripTarget });
+          process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
+          const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
+          await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
+          process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
+          const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
+          await page.getByLabel('Session task board').screenshot({ path: sessionTasksTarget });
+          process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
+          const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
+          await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
+          process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
+
+          const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
+          await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
+          await page.getByLabel('In-app link preview').screenshot({ path: inAppTarget });
+          process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
+
+          const filesTarget = join(outDir, `files-${viewport.name}.png`);
+          await page.locator('#harness-files').scrollIntoViewIfNeeded();
+          await page.getByLabel('Files browser').screenshot({ path: filesTarget });
+          process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
+
+          const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
+          // The thumbnail is `loading="lazy"` and the harness stacks it thousands
+          // of pixels below the fold, so Chrome has not started decoding it yet.
+          // Scroll first: capturing before it lands gives a 0x0 box and a card
+          // screenshot that is silently missing its image.
+          await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
+          await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
+          await page.getByLabel('Transcript attachments').screenshot({ path: attachmentsTarget });
+          process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
+          const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
+          await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
+          process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
+
+          const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
+          await page.locator('[data-harness="side-pane-tabs"]').screenshot({ path: sidePaneTabsTarget });
+          process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
+
+          for (const [label, slug] of [
+            ['Session dashboard full table', 'session-dashboard-table'],
+            ['Session dashboard full cards', 'session-dashboard-cards'],
+            ['Session dashboard compact panel', 'session-dashboard-compact'],
+            ['Session dashboard scoped', 'session-dashboard-scoped'],
+            ['Session dashboard minimal panel', 'session-dashboard-minimal'],
+            ['Session dashboard lean table', 'session-dashboard-lean-table'],
+            ['Sessions page connected', 'sessions-page-connected'],
+          ] as const) {
+            const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
+            await page.getByLabel(label, { exact: true }).screenshot({ path: dashboardTarget });
+            process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
+          }
+
+          // Four stacked dashboards are taller than a phone viewport, and Chrome
+          // culls painting outside the viewport while an element screenshot scrolls
+          // — the same reason the dictation settings shot below borrows a tall
+          // viewport. Without this most of the image comes back black.
+          const dashboardStatesTarget = join(outDir, `session-dashboard-states-${viewport.name}.png`);
+          await page.setViewportSize({ width: viewport.width, height: 2_000 });
+          await page
+            .getByLabel('Session dashboard states', { exact: true })
+            .screenshot({ path: dashboardStatesTarget });
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
+          process.stdout.write(`📸 Session dashboard states -> ${dashboardStatesTarget}\n`);
+
+          const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
+          await page.goto(`${server.url}?attachment-unlock`);
+          await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });
+          process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
+          await page.goto(server.url.toString());
+
+          // The harness stacks every ported surface down one column, so most of it
+          // is below the fold. A full-page stitch cannot prove those: the app bar
+          // is sticky, and Chrome repaints a fixed layer into every stitched tile.
+          // So each surface below the fold is captured as ITS OWN element shot,
+          // which is both immune to that and easier to compare against the
+          // original screen by screen.
+          for (const section of SECTIONS) {
+            const element = page.locator(`#${section}`);
+            await element.scrollIntoViewIfNeeded();
+            const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
+            await element.screenshot({ path: sectionTarget });
+            process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
+          }
+
+          const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
+          await page.getByLabel('Send ledger rows').screenshot({ path: ledgerTarget });
+          process.stdout.write(`📸 send ledger -> ${ledgerTarget}
+    `);
+
+          // A tool run's EXPANDED state is the other half of its design — the slim
+          // chrome line is what it looks like at rest, and the code surfaces only
+          // exist after a deliberate click — so it gets its own pass.
+          const toolGroup = page.locator('[data-transcript-kind="tool"]').first();
+          await toolGroup.scrollIntoViewIfNeeded();
+          await toolGroup.getByRole('button').first().click();
+          await toolGroup.getByRole('button').nth(1).click();
+          const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
+          await toolGroup.screenshot({ path: toolGroupTarget });
+          process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
+
+          // The context menu is anchored and `fixed`, which is exactly what a
+          // full-page stitch cannot capture — so it gets its own viewport-sized
+          // pass behind a fragment.
+          const menuTarget = join(outDir, `${viewport.name}-menu.png`);
+          await page.goto(`${server.url}#menu`);
+          await page.reload();
+          // Wait for the rows, not just for load: the menu paints hidden and is
+          // revealed by a layout effect once it has been measured and clamped.
+          await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+          await page.screenshot({ path: menuTarget });
+          process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
+
+          const paletteTarget = join(outDir, `${viewport.name}-palette.png`);
+          await page.goto(`${server.url}#palette`);
+          await page.reload();
+          await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
+          await page.screenshot({ path: paletteTarget });
+          process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
+
+          const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
+          await page.goto(`${server.url}#row-menu`);
+          await page.reload();
+          await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
+          await page.screenshot({ path: rowMenuTarget });
+          process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
+
+          // The bulk-stop confirmation is a fixed overlay like the menu and the
+          // palette, and its two states are different screens: what will die, and
+          // what did.
+          for (const [fragment, name] of [
+            ['#stop', 'stop-confirm'],
+            ['#stop-results', 'stop-results'],
+          ] as const) {
+            const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
+            await page.goto(`${server.url}${fragment}`);
+            await page.reload();
+            await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
+            await page.screenshot({ path: stopTarget });
+            process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
+          }
+
+          // The fleet drawer only exists below the drawer breakpoint, and only while
+          // it is open, so a page-flow capture at 390px correctly shows nothing.
+          const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
+          await page.goto(`${server.url}#fleet-drawer`);
+          await page.reload();
+          const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
+          if (await drawer.isVisible().catch(() => false)) {
+            await page.screenshot({ path: drawerTarget });
+            process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
+          }
+
+          const renameTarget = join(outDir, `${viewport.name}-rename.png`);
+          await page.goto(`${server.url}#rename`);
+          await page.reload();
+          await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
+          await page.screenshot({ path: renameTarget });
+          process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
+
+          const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
+          await page.goto(`${server.url}#migrate`);
+          await page.reload();
+          await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
+          await page.screenshot({ path: migrateTarget });
+          process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
+        } finally {
+          await page.close();
         }
-        await route.continue();
-      });
-      const page = await context.newPage();
-      await page.goto(server.url.toString());
-      const target = join(outDir, `${viewport.name}.png`);
-      await page.screenshot({ path: target });
-      process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-
-      if (viewport.name === 'desktop') {
-        const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
-        await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
-        process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
+      } finally {
+        await context.close();
       }
-
-      const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
-      await page.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
-      await page.getByLabel('Remote browser display').screenshot({ path: browserTarget });
-      process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
-      // The whole pane, not just the display: the tab strip, address bar and
-      // lifecycle controls are the part that has to match the original.
-      const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
-      await page.locator('[data-harness="remote-browser"]').screenshot({ path: browserPaneTarget });
-      process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
-      const learningTarget = join(outDir, `learning-${viewport.name}.png`);
-      await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
-      process.stdout.write(`📸 learning -> ${learningTarget}\n`);
-      const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
-      await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
-      process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
-      const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
-      await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
-      process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
-      const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
-      await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
-      process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
-      const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
-      const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
-      // The production shell correctly locks html/body to one viewport and
-      // gives route pages their own scroller. In this harness the route is far
-      // down a stacked review page, so Chrome cannot stitch its full scroll
-      // area in place on a phone: the top is blank and the tail is clipped.
-      // Clone the already-rendered route into the viewport for this one shot.
-      // It keeps the exact component DOM/styles while removing only the
-      // harness stacking context that no production route has.
-      await globalAnalytics.evaluate(element => {
-        document.documentElement.style.height = 'auto';
-        document.documentElement.style.overflow = 'auto';
-        document.body.style.height = 'auto';
-        document.body.style.overflow = 'auto';
-        document.body.replaceChildren(element.cloneNode(true));
-      });
-      await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
-      process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
-      // Restore the live React fixture after the static clone; later shots
-      // still exercise their real components, refs and async state.
-      await page.goto(server.url.toString());
-      const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
-      const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
-      await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
-      await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
-      process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
-      const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
-      await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
-      process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
-      const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
-      await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
-      process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
-      const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
-      await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
-      process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
-      // The dictation settings surface is several viewports tall. Chrome culls
-      // painting outside the viewport while an element screenshot scrolls, so
-      // the capture is taken against a temporarily tall viewport and the real
-      // one is restored immediately — otherwise most of the image is black.
-      const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
-      await page.setViewportSize({ width: viewport.width, height: 3_000 });
-      await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
-      await page.setViewportSize({ width: viewport.width, height: viewport.height });
-      process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
-      const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
-      await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
-      process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
-      const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
-      await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
-      process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
-      const settingsPageTarget = join(outDir, `settings-page-${viewport.name}.png`);
-      await page.getByLabel('Settings page preview').screenshot({ path: settingsPageTarget });
-      process.stdout.write(`📸 Settings page -> ${settingsPageTarget}\n`);
-      const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
-      await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
-      process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
-      const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
-      await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
-      process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
-      const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
-      await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });
-      process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
-      const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
-      await page.getByLabel('Pins ledger').screenshot({ path: pinsTarget });
-      process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
-      const pairingTarget = join(outDir, `pairing-${viewport.name}.png`);
-      await page.getByLabel('Daemon pairing').screenshot({ path: pairingTarget });
-      process.stdout.write(`📸 pairing ${viewport.name} -> ${pairingTarget}\n`);
-      const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
-      await page.locator('[aria-labelledby="warden-attention-heading"]').screenshot({ path: wardenAttentionTarget });
-      process.stdout.write(`📸 Warden attention -> ${wardenAttentionTarget}\n`);
-      const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
-      await page.locator('[data-harness="warden-strip"]').screenshot({ path: wardenStripTarget });
-      process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
-      const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
-      await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
-      process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
-      const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
-      await page.getByLabel('Session task board').screenshot({ path: sessionTasksTarget });
-      process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
-      const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
-      await page.getByLabel('Task name').screenshot({ path: taskNameTarget });
-      process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);
-
-      const inAppTarget = join(outDir, `in-app-browser-${viewport.name}.png`);
-      await page.locator('#harness-in-app-browser').scrollIntoViewIfNeeded();
-      await page.getByLabel('In-app link preview').screenshot({ path: inAppTarget });
-      process.stdout.write(`📸 In-app link preview -> ${inAppTarget}\n`);
-
-      const filesTarget = join(outDir, `files-${viewport.name}.png`);
-      await page.locator('#harness-files').scrollIntoViewIfNeeded();
-      await page.getByLabel('Files browser').screenshot({ path: filesTarget });
-      process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
-
-      const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
-      // The thumbnail is `loading="lazy"` and the harness stacks it thousands
-      // of pixels below the fold, so Chrome has not started decoding it yet.
-      // Scroll first: capturing before it lands gives a 0x0 box and a card
-      // screenshot that is silently missing its image.
-      await page.locator('#harness-attachments').scrollIntoViewIfNeeded();
-      await page.getByAltText('Coverage by tier').waitFor({ state: 'visible' });
-      await page.getByLabel('Transcript attachments').screenshot({ path: attachmentsTarget });
-      process.stdout.write(`📸 Transcript attachments -> ${attachmentsTarget}\n`);
-      const terminalTarget = join(outDir, `terminal-snapshot-${viewport.name}.png`);
-      await page.getByLabel('Terminal snapshot').screenshot({ path: terminalTarget });
-      process.stdout.write(`📸 Terminal snapshot -> ${terminalTarget}\n`);
-
-      const sidePaneTabsTarget = join(outDir, `side-pane-tabs-${viewport.name}.png`);
-      await page.locator('[data-harness="side-pane-tabs"]').screenshot({ path: sidePaneTabsTarget });
-      process.stdout.write(`📸 Side pane tabs -> ${sidePaneTabsTarget}\n`);
-
-      for (const [label, slug] of [
-        ['Session dashboard full table', 'session-dashboard-table'],
-        ['Session dashboard full cards', 'session-dashboard-cards'],
-        ['Session dashboard compact panel', 'session-dashboard-compact'],
-        ['Session dashboard scoped', 'session-dashboard-scoped'],
-      ] as const) {
-        const dashboardTarget = join(outDir, `${slug}-${viewport.name}.png`);
-        await page.getByLabel(label, { exact: true }).screenshot({ path: dashboardTarget });
-        process.stdout.write(`📸 ${label} -> ${dashboardTarget}\n`);
-      }
-
-      const unlockTarget = join(outDir, `attachment-unlock-${viewport.name}.png`);
-      await page.goto(`${server.url}?attachment-unlock`);
-      await page.getByRole('dialog', { name: 'Unlock encrypted PDF' }).screenshot({ path: unlockTarget });
-      process.stdout.write(`📸 attachment unlock -> ${unlockTarget}\n`);
-      await page.goto(server.url.toString());
-
-      // The harness stacks every ported surface down one column, so most of it
-      // is below the fold. A full-page stitch cannot prove those: the app bar
-      // is sticky, and Chrome repaints a fixed layer into every stitched tile.
-      // So each surface below the fold is captured as ITS OWN element shot,
-      // which is both immune to that and easier to compare against the
-      // original screen by screen.
-      for (const section of SECTIONS) {
-        const element = page.locator(`#${section}`);
-        await element.scrollIntoViewIfNeeded();
-        const sectionTarget = join(outDir, `${viewport.name}-${section}.png`);
-        await element.screenshot({ path: sectionTarget });
-        process.stdout.write(`📸 ${viewport.name} ${section} -> ${sectionTarget}\n`);
-      }
-
-      const ledgerTarget = join(outDir, `send-ledger-${viewport.name}.png`);
-      await page.getByLabel('Send ledger rows').screenshot({ path: ledgerTarget });
-      process.stdout.write(`📸 send ledger -> ${ledgerTarget}
-`);
-
-      // A tool run's EXPANDED state is the other half of its design — the slim
-      // chrome line is what it looks like at rest, and the code surfaces only
-      // exist after a deliberate click — so it gets its own pass.
-      const toolGroup = page.locator('[data-transcript-kind="tool"]').first();
-      await toolGroup.scrollIntoViewIfNeeded();
-      await toolGroup.getByRole('button').first().click();
-      await toolGroup.getByRole('button').nth(1).click();
-      const toolGroupTarget = join(outDir, `tool-group-${viewport.name}.png`);
-      await toolGroup.screenshot({ path: toolGroupTarget });
-      process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
-
-      // The context menu is anchored and `fixed`, which is exactly what a
-      // full-page stitch cannot capture — so it gets its own viewport-sized
-      // pass behind a fragment.
-      const menuTarget = join(outDir, `${viewport.name}-menu.png`);
-      await page.goto(`${server.url}#menu`);
-      await page.reload();
-      // Wait for the rows, not just for load: the menu paints hidden and is
-      // revealed by a layout effect once it has been measured and clamped.
-      await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
-      await page.screenshot({ path: menuTarget });
-      process.stdout.write(`📸 ${viewport.name} context menu -> ${menuTarget}\n`);
-
-      const paletteTarget = join(outDir, `${viewport.name}-palette.png`);
-      await page.goto(`${server.url}#palette`);
-      await page.reload();
-      await page.locator('[role="option"]').last().waitFor({ state: 'visible' });
-      await page.screenshot({ path: paletteTarget });
-      process.stdout.write(`📸 ${viewport.name} command palette -> ${paletteTarget}\n`);
-
-      const rowMenuTarget = join(outDir, `${viewport.name}-row-menu.png`);
-      await page.goto(`${server.url}#row-menu`);
-      await page.reload();
-      await page.locator('[role="menuitem"]').last().waitFor({ state: 'visible' });
-      await page.screenshot({ path: rowMenuTarget });
-      process.stdout.write(`📸 ${viewport.name} session row menu -> ${rowMenuTarget}\n`);
-
-      // The bulk-stop confirmation is a fixed overlay like the menu and the
-      // palette, and its two states are different screens: what will die, and
-      // what did.
-      for (const [fragment, name] of [
-        ['#stop', 'stop-confirm'],
-        ['#stop-results', 'stop-results'],
-      ] as const) {
-        const stopTarget = join(outDir, `${viewport.name}-${name}.png`);
-        await page.goto(`${server.url}${fragment}`);
-        await page.reload();
-        await page.getByRole('dialog', { name: /confirm|results/ }).waitFor({ state: 'visible' });
-        await page.screenshot({ path: stopTarget });
-        process.stdout.write(`📸 ${viewport.name} ${name} -> ${stopTarget}\n`);
-      }
-
-      // The fleet drawer only exists below the drawer breakpoint, and only while
-      // it is open, so a page-flow capture at 390px correctly shows nothing.
-      const drawerTarget = join(outDir, `${viewport.name}-fleet-drawer.png`);
-      await page.goto(`${server.url}#fleet-drawer`);
-      await page.reload();
-      const drawer = page.getByRole('dialog', { name: 'Fleet sessions' });
-      if (await drawer.isVisible().catch(() => false)) {
-        await page.screenshot({ path: drawerTarget });
-        process.stdout.write(`📸 ${viewport.name} fleet drawer -> ${drawerTarget}\n`);
-      }
-
-      const renameTarget = join(outDir, `${viewport.name}-rename.png`);
-      await page.goto(`${server.url}#rename`);
-      await page.reload();
-      await page.getByRole('dialog', { name: 'Rename session' }).waitFor({ state: 'visible' });
-      await page.screenshot({ path: renameTarget });
-      process.stdout.write(`📸 ${viewport.name} rename sheet -> ${renameTarget}\n`);
-
-      const migrateTarget = join(outDir, `${viewport.name}-migrate.png`);
-      await page.goto(`${server.url}#migrate`);
-      await page.reload();
-      await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
-      await page.screenshot({ path: migrateTarget });
-      process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
-
-      await context.close();
     }
   } finally {
     await browser.close();

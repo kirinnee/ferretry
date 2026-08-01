@@ -48,6 +48,7 @@ import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
+import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
@@ -64,8 +65,14 @@ import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
-import { RemoteBrowserPane } from '../src/features/browser/remote-browser-pane.tsx';
+import { RemoteBrowserPane, type RemoteBrowserPaneProps } from '../src/features/browser/remote-browser-pane.tsx';
 import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser-viewer.tsx';
+import { rememberBrowserEngine } from '../src/features/browser/unified-browser-model.ts';
+import {
+  DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
+  UnifiedBrowserSurface,
+  type UnifiedBrowserDependencies,
+} from '../src/features/browser/unified-browser-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -91,19 +98,26 @@ import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx'
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
+import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
+import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
-import { DaemonControlsStore } from '../src/lib/controls.ts';
+import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
+import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { SessionGroup } from '../src/lib/fleet-grouping.ts';
+import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
+import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
+import { type DaemonProjectsPort, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
+import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
@@ -1188,6 +1202,160 @@ const harnessFrame =
 const HARNESS_BROWSER_SOCKET_FACTORY = () => new HarnessBrowserSocket();
 const HARNESS_BROWSER_CREATE_OBJECT_URL = () => harnessFrame;
 const HARNESS_BROWSER_REVOKE_OBJECT_URL = () => undefined;
+
+/**
+ * The real remote pane, pre-bound to the harness's offline daemon seams. The
+ * unified surface takes its remote engine as a dependency, so the harness hands
+ * it the SAME stubbed transport, poll and socket the standalone pane card uses —
+ * one fixture, two cards, and no card that could reach a live daemon.
+ */
+const HarnessRemotePane = (props: RemoteBrowserPaneProps) => (
+  <RemoteBrowserPane
+    {...props}
+    transport={HARNESS_BROWSER_TRANSPORT}
+    schedule={HARNESS_BROWSER_SCHEDULE}
+    socketFactory={HARNESS_BROWSER_SOCKET_FACTORY}
+    createObjectUrl={HARNESS_BROWSER_CREATE_OBJECT_URL}
+    revokeObjectUrl={HARNESS_BROWSER_REVOKE_OBJECT_URL}
+  />
+);
+
+const HARNESS_UNIFIED_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
+  ...DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
+  RemotePane: HarnessRemotePane,
+};
+
+/**
+ * One scope per unified-browser card. The remembered engine is module state keyed
+ * by `(daemonId, sessionId)`, so two cards sharing a scope would fight over which
+ * engine is selected; two scopes make each card's engine a fixture of its own.
+ */
+const UNIFIED_PREVIEW_SCOPE = daemonSessionScope(daemon, 'harness-unified-preview');
+const UNIFIED_REMOTE_SCOPE = daemonSessionScope(daemon, 'harness-unified-remote');
+/** Seeded, not clicked: the real-engine card renders that engine on first paint. */
+rememberBrowserEngine(UNIFIED_REMOTE_SCOPE, 'remote');
+
+/** Deterministic device controls: never a real device's stored view state. */
+const memoryControlsStorage = (): ControlsStorage => {
+  const values = new Map<string, string>();
+  return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+};
+
+/**
+ * The connected Sessions page, composed exactly as production composes it: real
+ * `DaemonFleetStore` / `DaemonControlsStore` / `DaemonProjectsStore` /
+ * `DaemonUsageStore` over stub PORTS. The ports are the only fiction, so this
+ * card proves the composition — hydration, grouping, filtering, density, scope —
+ * and not just the presentation the other dashboard cards already cover.
+ */
+const SESSIONS_PAGE_CONTROLS = new DaemonControlsStore(memoryControlsStorage());
+// Finished sessions are shown so this card carries the same rows as the
+// presentation cards above it; a reviewer is comparing them side by side.
+SESSIONS_PAGE_CONTROLS.setDeviceControls({ dashboardView: 'table', density: 'full', includeFinished: true });
+
+const SESSIONS_PAGE_FLEET = new DaemonFleetStore({
+  list: async () => DASHBOARD_SESSIONS,
+  get: async () => {
+    throw new Error('the harness never reads a single session');
+  },
+} satisfies DaemonFleetPort);
+
+const SESSIONS_PAGE_PROJECTS = new DaemonProjectsStore({
+  projects: async () => DASHBOARD_GROUPS.map(group => ({ name: group.name, path: group.path })),
+} satisfies DaemonProjectsPort);
+
+/**
+ * `isHidden` is pinned true: the first read after `watch()` is unconditional, so
+ * the quota columns still fill in, and no 60s poll is armed behind a screenshot.
+ */
+const SESSIONS_PAGE_USAGE = new DaemonUsageStore(
+  {
+    usage: async () => ({
+      at: '2026-07-31T11:59:00.000Z',
+      stale: false,
+      accounts: [
+        {
+          agent: 'codex',
+          usageBased: true,
+          provider: 'openai',
+          availability: 'available',
+          unavailable: false,
+          fiveHourPercent: 37,
+          weeklyPercent: 61,
+          atLimit: false,
+          authOk: true,
+        },
+      ],
+    }),
+  } satisfies DaemonUsagePort,
+  { isHidden: () => true },
+);
+
+const SESSIONS_PAGE_WARDEN: WardenStatusReader = async () => WARDEN;
+
+/**
+ * The scope machine's window, as a port. A harness card must not write the real
+ * address bar: the page's own `#menu`/`#palette` fragments are how the
+ * screenshot script drives it.
+ */
+const harnessScopeNavigation = (): ScopeNavigation => {
+  let current = new URL(daemonSessionsPath(daemon.daemonId), 'https://harness.invalid');
+  let state: unknown = null;
+  const pops = new Set<() => void>();
+  return {
+    snapshot: () => ({ pathname: current.pathname, search: current.search, state }),
+    push: (next, url) => {
+      current = new URL(url, 'https://harness.invalid');
+      state = next;
+    },
+    replace: (next, url) => {
+      current = new URL(url, 'https://harness.invalid');
+      state = next;
+    },
+    announce: () => {
+      for (const listener of pops) listener();
+    },
+    listen: listener => {
+      pops.add(listener);
+      return () => {
+        pops.delete(listener);
+      };
+    },
+  };
+};
+
+const SESSIONS_PAGE_NAVIGATION = harnessScopeNavigation();
+
+/** Frozen: a screenshot must not drift with the wall clock between viewports. */
+const HARNESS_FROZEN_CLOCK: LiveClockOptions = { now: () => HARNESS_NOW, hold: true };
+
+/** The four dashboard states worth one screenshot, in the order they degrade. */
+const DASHBOARD_STATE_CARDS = [
+  { title: 'Loading', sessions: null, groups: [], error: null, scopeRecovered: false },
+  { title: 'Authoritative empty fleet', sessions: [], groups: [], error: null, scopeRecovered: false },
+  // One row each: the banner is the subject, and a longer list would only be
+  // cut off by the fixed cell height these four states share.
+  {
+    title: 'Fleet error',
+    sessions: DASHBOARD_SESSIONS,
+    groups: [{ name: 'ferretry', path: '/work/ferretry', rows: DASHBOARD_SESSIONS.slice(0, 1) }],
+    error: 'The daemon could not list sessions: connection refused.',
+    scopeRecovered: false,
+  },
+  {
+    title: 'Scope recovery',
+    sessions: DASHBOARD_SESSIONS,
+    groups: [{ name: 'ferretry', path: '/work/ferretry', rows: DASHBOARD_SESSIONS.slice(0, 1) }],
+    error: null,
+    scopeRecovered: true,
+  },
+] as const satisfies ReadonlyArray<{
+  readonly title: string;
+  readonly sessions: readonly SessionView[] | null;
+  readonly groups: readonly SessionGroup[];
+  readonly error: string | null;
+  readonly scopeRecovered: boolean;
+}>;
 
 function Shell() {
   const [version, bump] = useState(0);
@@ -2382,6 +2550,183 @@ function Shell() {
             <ThinkingIndicator activity="Writing the migration tests (34s · 2.1k tokens)" since={Date.now() - 34_000} />
           </PanelBody>
         </Card>
+      ),
+    },
+    {
+      // The PWALIST2 money shot: the page, its stores and their ports — not a
+      // hand-built props object. Everything on screen was hydrated, grouped,
+      // filtered and scoped by the same code production runs.
+      label: 'Sessions page connected',
+      render: () => (
+        <section
+          aria-label="Sessions page connected"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionsPage
+            clock={HARNESS_FROZEN_CLOCK}
+            connection={daemon}
+            controls={SESSIONS_PAGE_CONTROLS}
+            fleet={SESSIONS_PAGE_FLEET}
+            narrow={phone}
+            onOpenWardenReport={() => {}}
+            projects={SESSIONS_PAGE_PROJECTS}
+            scopeNavigation={SESSIONS_PAGE_NAVIGATION}
+            usage={SESSIONS_PAGE_USAGE}
+            wardenStatus={SESSIONS_PAGE_WARDEN}
+          />
+        </section>
+      ),
+    },
+    {
+      // Minimal density: names and tasks only. No other card renders it, so its
+      // row chrome has never been looked at next to the compact one.
+      label: 'Session dashboard minimal panel',
+      render: () => (
+        <section
+          aria-label="Session dashboard minimal panel"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            dashboardView="cards"
+            density="minimal"
+            error={null}
+            groups={DASHBOARD_COMPACT_GROUPS}
+            narrow={phone}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope={null}
+            scopeName=""
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={null}
+            wardenStatus={null}
+            wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      // The lean TABLE. `narrow={false}` is deliberate and is why this card
+      // exists: a phone would otherwise be given cards, and the three-column
+      // table has never been seen at 390px, where its columns are tightest.
+      label: 'Session dashboard lean table',
+      render: () => (
+        <section
+          aria-label="Session dashboard lean table"
+          className="h-[720px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+        >
+          <SessionDashboard
+            connection={daemon}
+            dashboardView="table"
+            density="compact"
+            error={null}
+            groups={DASHBOARD_COMPACT_GROUPS}
+            narrow={false}
+            now={HARNESS_NOW}
+            onEnterScope={() => {}}
+            onExitScope={() => {}}
+            onOpenWardenReport={() => {}}
+            onSetView={() => {}}
+            scope={null}
+            scopeName=""
+            scopeRecovered={false}
+            sessions={DASHBOARD_SESSIONS}
+            usage={null}
+            wardenStatus={null}
+            wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      // Four states, one screenshot: loading is not empty, an empty fleet is not
+      // an error, and the scope-recovery notice has to read as a fact rather than
+      // a failure. They are stacked so the distinction is visible at a glance.
+      label: 'Session dashboard states',
+      render: () => (
+        <section aria-label="Session dashboard states" className="grid gap-3">
+          {DASHBOARD_STATE_CARDS.map(state => (
+            <div
+              className="h-[220px] min-h-0 overflow-hidden rounded-panel border border-border bg-surface px-panel"
+              key={state.title}
+            >
+              <SessionDashboard
+                connection={daemon}
+                dashboardView="cards"
+                density="compact"
+                error={state.error}
+                groups={state.groups}
+                narrow={phone}
+                now={HARNESS_NOW}
+                onEnterScope={() => {}}
+                onExitScope={() => {}}
+                onOpenWardenReport={() => {}}
+                onSetView={() => {}}
+                scope={null}
+                scopeName=""
+                scopeRecovered={state.scopeRecovered}
+                sessions={state.sessions}
+                usage={null}
+                wardenStatus={null}
+                wardenVerdicts={[]}
+              />
+            </div>
+          ))}
+        </section>
+      ),
+    },
+    {
+      // The unified surface on its preview engine, with nothing opened yet: one
+      // engine-agnostic toolbar, the empty "Where to?" state and the login
+      // affordance. Fully offline — the preview engine has no destination, so
+      // there is no frame and no request.
+      label: 'Unified browser preview',
+      render: () => (
+        <section
+          aria-label="Unified browser preview"
+          className="flex h-[560px] min-h-0 flex-col overflow-hidden rounded-panel border border-border bg-surface"
+          data-harness="unified-browser-preview"
+        >
+          <UnifiedBrowserSurface
+            daemon={daemon}
+            dependencies={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
+            onClose={() => {}}
+            onOpenLoginWindow={async () => ({ state: 'opening', profilePrimed: false })}
+            presentation="pane"
+            scope={UNIFIED_PREVIEW_SCOPE}
+            streamTicket={null}
+            titleId="harness-unified-browser-preview-title"
+          />
+        </section>
+      ),
+    },
+    {
+      // The same toolbar over the REAL engine, which is the standalone remote
+      // pane with its own address row switched off. The engine is remembered for
+      // this scope, so the surface paints Chrome's own tab strip and lifecycle
+      // controls under one shared bar. Fully offline: the pane is bound to the
+      // harness transport, poll and socket fixtures.
+      label: 'Unified browser real engine',
+      render: () => (
+        <section
+          aria-label="Unified browser real engine"
+          className="flex h-[720px] min-h-0 flex-col overflow-hidden rounded-panel border border-border bg-surface"
+          data-harness="unified-browser-real"
+        >
+          <UnifiedBrowserSurface
+            daemon={daemon}
+            dependencies={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
+            onClose={() => {}}
+            presentation="pane"
+            scope={UNIFIED_REMOTE_SCOPE}
+            streamTicket="harness-ticket"
+            titleId="harness-unified-browser-real-title"
+          />
+        </section>
       ),
     },
   ];

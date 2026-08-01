@@ -23,6 +23,27 @@ const daemonB = daemonConnection({
   deviceToken: 'token-b',
 });
 
+/**
+ * The same daemon AFTER A RE-PAIR. `daemonId` is durable, so only the base URL
+ * or the device token moves — which is exactly why an id-only key cannot see it.
+ */
+const daemonARotatedToken = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a.example.test',
+  deviceToken: 'token-a2',
+});
+const daemonAMovedUrl = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a2.example.test',
+  deviceToken: 'token-a',
+});
+/** Not a re-pair: a host that rebuilt an equivalent object on a render. */
+const daemonARebuilt = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a.example.test',
+  deviceToken: 'token-a',
+});
+
 const statusFor = (sessionId: string, state: 'stopped' | 'running' = 'stopped'): BrowserStatus =>
   ({
     sessionId,
@@ -143,6 +164,82 @@ describe('useRemoteBrowser', () => {
     run(() => pending[1]?.(statusFor('session-1')));
     await settle();
     expect(harness.model().status?.sessionId).toBe('daemon-b');
+  });
+
+  it('treats a same-id re-pair as a new generation and an equivalent rebuild as the same one', async () => {
+    const clock = manualScheduler();
+    const pending: ((status: BrowserStatus) => void)[] = [];
+    const harness = mount(
+      {
+        readStatus: (daemon, scope) =>
+          new Promise<BrowserStatus>(resolve =>
+            pending.push(() => resolve({ ...statusFor(scope.sessionId, 'running'), sessionId: daemon.baseUrl })),
+          ),
+        runAction: async () => ({ status: statusFor('session-1') }) as BrowserActionResult,
+      },
+      clock.schedule,
+    );
+    await settle();
+    run(() => pending[0]?.(statusFor('session-1')));
+    await settle();
+    expect(harness.model().status?.sessionId).toBe('https://a.example.test');
+
+    // A rebuilt but field-identical connection is the SAME pairing. Blanking
+    // here would make every render of an unmemoised host flash an empty pane.
+    await harness.setDaemon(daemonARebuilt);
+    expect(harness.model().status?.sessionId).toBe('https://a.example.test');
+
+    // A rotated device token is a new grant on the same durable id.
+    await harness.setDaemon(daemonARotatedToken);
+    expect(harness.model().status).toBeNull();
+    // The read the OLD token started now answers. It speaks for a grant this
+    // pairing never made, so it may not land.
+    run(() => pending[0]?.(statusFor('session-1')));
+    await settle();
+    expect(harness.model().status).toBeNull();
+
+    // A moved base URL is the same boundary, reached the other way.
+    run(() => pending.at(-1)?.(statusFor('session-1')));
+    await settle();
+    expect(harness.model().status?.sessionId).toBe('https://a.example.test');
+    await harness.setDaemon(daemonAMovedUrl);
+    expect(harness.model().status).toBeNull();
+    run(() => pending.at(-1)?.(statusFor('session-1')));
+    await settle();
+    expect(harness.model().status?.sessionId).toBe('https://a2.example.test');
+  });
+
+  it('does not let a pre-re-pair mutation settle the new pairing’s busy accounting', async () => {
+    const clock = manualScheduler();
+    const pending: ((result: BrowserActionResult) => void)[] = [];
+    const harness = mount(
+      {
+        readStatus: async () => statusFor('s'),
+        runAction: () => new Promise<BrowserActionResult>(resolve => pending.push(resolve)),
+      },
+      clock.schedule,
+    );
+    await settle();
+    run(() => harness.model().runAction({ action: 'start' }));
+    expect(harness.model().busy).toBe(true);
+
+    // The device token rotates while that action is still in flight.
+    await harness.setDaemon(daemonARotatedToken);
+    expect(harness.model().busy).toBe(false);
+
+    run(() => harness.model().runAction({ action: 'reload' }));
+    expect(harness.model().busy).toBe(true);
+    // The old grant's action settles. Its `finally` belongs to accounting this
+    // pairing never opened, and its result is not this pairing's status.
+    run(() => pending[0]?.({ status: statusFor('old-grant', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(true);
+    expect(harness.model().status?.sessionId).not.toBe('old-grant');
+
+    run(() => pending[1]?.({ status: statusFor('new-grant', 'running') } as BrowserActionResult));
+    await settle();
+    expect(harness.model().busy).toBe(false);
+    expect(harness.model().status?.sessionId).toBe('new-grant');
   });
 
   it('lets a mutation result win over the poll that is already in flight', async () => {

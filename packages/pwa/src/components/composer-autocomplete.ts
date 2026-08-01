@@ -6,8 +6,11 @@
  * reference family. This module is the pure half: it decides what a trigger is,
  * what "best match" means, and what the draft looks like after a candidate is
  * accepted. Providers deliberately do less — they receive the active query and
- * return candidate data — and the controller/popover that drives a live
- * textarea is a separate concern, not ported yet.
+ * return candidate data. This module also carries the source hook controller
+ * that drives a live textarea. The rendered listbox belongs to kteam's separate
+ * `src/components/ComposerAutocomplete.tsx`, not the assigned engine source,
+ * and remains an explicit migration gap; engine coverage must not be mistaken
+ * for a complete, visible composer surface.
  *
  * `!` shell mode is NOT here and is not coming back without a decision. It
  * needs a new tmux inject send path, which is the mechanism behind kteam's
@@ -18,6 +21,8 @@
  */
 
 import {
+  type KeyboardEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useId,
@@ -25,8 +30,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
-  type RefObject,
 } from 'react';
 import { fieldScore } from '../shell/palette-ranking.ts';
 
@@ -404,7 +407,12 @@ export function useComposerAutocomplete({
     null,
   );
 
-  const match = useMemo(() => detectComposerTrigger(value, selection), [selection, value]);
+  const selectionStart = selection.start;
+  const selectionEnd = selection.end;
+  const match = useMemo(
+    () => detectComposerTrigger(value, { start: selectionStart, end: selectionEnd }),
+    [selectionEnd, selectionStart, value],
+  );
   const provider = match ? (providers.find(item => item.trigger === match.trigger) ?? null) : null;
   const matchTriggerText = match?.triggerText ?? match?.trigger;
   const tokenDismissed =

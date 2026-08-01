@@ -15,7 +15,7 @@ import type {
   Ref,
 } from 'react';
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import {
   decodeRemoteBrowserFrame,
@@ -108,6 +108,25 @@ const activePageId = (status: BrowserStatus | null): string | undefined =>
   status !== null && status.state === 'running' && 'activePageId' in status ? status.activePageId : undefined;
 
 /**
+ * Everything that decides which socket, and therefore which pixels, are this
+ * viewer's. Deliberately NOT `(daemonId, sessionId)`: a re-pair keeps the daemon
+ * id while rotating the base URL or the device token, and the frames arriving
+ * over the old grant are then a different daemon-side browser's.
+ */
+interface ViewerTransport {
+  readonly connection: DaemonConnection;
+  readonly scopeDaemonId: string;
+  readonly sessionId: string;
+  readonly streamTicket: string | null;
+}
+
+const sameViewerTransport = (left: ViewerTransport, right: ViewerTransport): boolean =>
+  left.scopeDaemonId === right.scopeDaemonId &&
+  left.sessionId === right.sessionId &&
+  left.streamTicket === right.streamTicket &&
+  sameDaemonConnection(left.connection, right.connection);
+
+/**
  * Renders only the latest JPEG frame. The daemon already coalesces frames; this
  * extra replacement prevents a slow React paint from turning the PWA into an
  * unbounded client-side queue.
@@ -139,9 +158,10 @@ export function RemoteBrowserViewer({
   const [frameRevision, setFrameRevision] = useState(0);
   const [retry, setRetry] = useState(0);
   const previousUrlRef = useRef<string | null>(null);
-  const previousTransportRef = useRef<string | null>(null);
+  const previousTransportRef = useRef(0);
   const previousPageRef = useRef<string | undefined>(undefined);
-  const identityRef = useRef<string | null>(null);
+  const identityRef = useRef(0);
+  const transportRef = useRef<{ readonly identity: ViewerTransport; readonly generation: number } | null>(null);
   const activePageRef = useRef<string | undefined>(undefined);
   const frameContainerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -154,13 +174,26 @@ export function RemoteBrowserViewer({
 
   const running = status?.state === 'running';
   const currentPageId = activePageId(status);
-  const transportIdentity = `${daemon.daemonId}\u0000${scope.daemonId}\u0000${scope.sessionId}\u0000${streamTicket ?? ''}`;
+  // A MONOTONIC GENERATION, not a key string. This transport's identity includes
+  // the device token, and a token belongs in no value that can reach a DOM
+  // attribute, a persisted key or a log line — so the fields are compared and
+  // only the resulting counter is carried around as the identity.
+  const currentTransport: ViewerTransport = {
+    connection: daemon,
+    scopeDaemonId: scope.daemonId,
+    sessionId: scope.sessionId,
+    streamTicket: streamTicket ?? null,
+  };
+  if (transportRef.current === null || !sameViewerTransport(transportRef.current.identity, currentTransport)) {
+    transportRef.current = { identity: currentTransport, generation: (transportRef.current?.generation ?? 0) + 1 };
+  }
+  const transportIdentity = transportRef.current.generation;
   const [renderedIdentity, setRenderedIdentity] = useState(transportIdentity);
   const [renderedPageId, setRenderedPageId] = useState(currentPageId);
 
   // Applied DURING RENDER, not in an effect. An effect runs after the commit, so
-  // clearing there would still paint daemon A's pixels once under daemon B's
-  // identity — the precise confusion the (daemonId, sessionId) scope exists to
+  // clearing there would still paint the previous connection's pixels once under
+  // the new one's identity — the precise confusion this generation exists to
   // prevent. Only state is adjusted here; revoking the object URL and detaching
   // the socket are side effects and stay in the effects below.
   if (renderedIdentity !== transportIdentity) {

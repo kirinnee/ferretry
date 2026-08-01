@@ -15,4 +15,5 @@ test('Composer forwards textarea selection changes to its autocomplete controlle
   run(() => textarea.props.onChange({ currentTarget: { value: '/', selectionStart: 1, selectionEnd: 1 } }));
   run(() => textarea.props.onSelect({ currentTarget: { selectionStart: 1, selectionEnd: 1 } }));
   expect(view.root.findByType('textarea').props['aria-expanded']).toBe(true);
+  run(() => view.unmount());
 });

@@ -23,20 +23,58 @@ import { browserDestination, isLoopbackHostname, type BrowserDestination } from 
 
 export type BrowserEngine = 'preview' | 'remote';
 
-interface BrowserSessionMemory {
+export interface BrowserSessionMemory {
   readonly engine: BrowserEngine;
+  /**
+   * The destination this scope's surface last received from the app. OBJECT
+   * IDENTITY is the signal, not the href: a fresh tap of the address the reader
+   * is already on is a new object and means "go there again", while reopening a
+   * stored sheet hands back the very same object and means "nothing new".
+   */
+  readonly lastIncoming: BrowserDestination | null;
 }
+
+const NO_MEMORY: BrowserSessionMemory = { engine: 'preview', lastIncoming: null };
 
 const browserSessions = new Map<string, BrowserSessionMemory>();
 
+/** What a previous mount of this scope's surface left behind, if any. */
+export const browserSessionMemory = (scope: DaemonSessionScope): BrowserSessionMemory | null =>
+  browserSessions.get(daemonSessionKey(scope)) ?? null;
+
 /** Session-scoped even on a phone, where closing the sheet unmounts its body. */
 export const browserEngineForSession = (scope: DaemonSessionScope): BrowserEngine =>
-  browserSessions.get(daemonSessionKey(scope))?.engine ?? 'preview';
+  (browserSessions.get(daemonSessionKey(scope)) ?? NO_MEMORY).engine;
 
-/** The surface's single write path for the remembered engine. */
+/**
+ * The surface's single write path for the remembered engine. It keeps
+ * `lastIncoming`: choosing an engine says nothing about which link the app last
+ * handed this scope, and forgetting it would make the next mount treat a stale
+ * stored destination as a fresh tap.
+ */
 export const rememberBrowserEngine = (scope: DaemonSessionScope, engine: BrowserEngine): void => {
-  browserSessions.set(daemonSessionKey(scope), { engine });
+  const key = daemonSessionKey(scope);
+  browserSessions.set(key, { engine, lastIncoming: (browserSessions.get(key) ?? NO_MEMORY).lastIncoming });
 };
+
+/** The mirror write path: records the incoming link, keeps the chosen engine. */
+export const rememberBrowserIncoming = (scope: DaemonSessionScope, destination: BrowserDestination | null): void => {
+  const key = daemonSessionKey(scope);
+  browserSessions.set(key, { engine: (browserSessions.get(key) ?? NO_MEMORY).engine, lastIncoming: destination });
+};
+
+/**
+ * Whether a surface coming back with a remembered REMOTE engine should carry the
+ * incoming link into Chrome instead of silently reattaching to whatever page it
+ * was left on. Only a link that changed while this scope had no surface counts;
+ * a first mount has no memory to compare against, so it reattaches and keeps
+ * the reader's place.
+ */
+export const shouldAdoptIncomingLink = (
+  memory: BrowserSessionMemory | null,
+  destination: BrowserDestination | null | undefined,
+): boolean =>
+  destination !== null && destination !== undefined && memory !== null && memory.lastIncoming !== destination;
 
 export const resetBrowserSurfaceSessions = (): void => {
   browserSessions.clear();
@@ -149,3 +187,29 @@ export const movePreviewHistory = (history: PreviewHistory, offset: -1 | 1): Pre
 /** The entry the preview engine is currently showing, if it has one. */
 export const currentPreviewEntry = (history: PreviewHistory): BrowserDestination | null =>
   history.entries[history.index] ?? null;
+
+/** Where the reader can still go inside the preview engine's own history. */
+export const previewCanGoBack = (history: PreviewHistory): boolean => history.entries.length > 0 && history.index > 0;
+
+export const previewCanGoForward = (history: PreviewHistory): boolean =>
+  history.entries.length > 0 && history.index < history.entries.length - 1;
+
+/** Where the remote engine is, as the daemon last reported it. */
+export interface RemoteBrowserLocation {
+  readonly url: string;
+  readonly title: string;
+}
+
+/**
+ * The address the one engine-agnostic toolbar shows.
+ *
+ * Preview knows only its own history. The remote engine falls back to the
+ * preview position so switching engines never blanks the bar before Chrome has
+ * reported a page, and an empty string — not a fabricated URL — is the honest
+ * answer when neither engine has anywhere to be.
+ */
+export const currentBrowserUrl = (
+  engine: BrowserEngine,
+  previewEntry: BrowserDestination | null,
+  remote: RemoteBrowserLocation | null,
+): string => (engine === 'preview' ? (previewEntry?.href ?? '') : (remote?.url ?? previewEntry?.href ?? ''));
