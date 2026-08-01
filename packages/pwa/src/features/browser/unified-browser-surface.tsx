@@ -215,6 +215,14 @@ export function UnifiedBrowserSurface({
       setLoginBusy(false);
       setMenuOpen(false);
       remoteRef.current = null;
+      // AND THE QUEUE, which is the same staleness one step further back. An
+      // action the reader aimed at the previous pairing sits here whenever they
+      // acted before that pane first published its dispatcher; leaving it would
+      // have the NEXT pane run it the moment it publishes — a navigation or a
+      // reload delivered to a daemon nobody aimed it at. Clearing the ref
+      // during this render is early enough that anything dispatched afterwards
+      // belongs to the new pairing and is still queued normally.
+      pendingRemoteRef.current = null;
     }
     if (rescoped) {
       // Identity, only for a genuine re-scope. A re-pair is the SAME session on
@@ -228,8 +236,9 @@ export function UnifiedBrowserSurface({
       // the page Chrome was left on, and adopt the incoming link only when the
       // app changed it while this scope had no surface. The pane is not mounted
       // yet, so the action waits for its dispatcher rather than taking a second
-      // route. A re-pair queues nothing: the pane re-polls the new connection
-      // on its own, and re-opening Chrome is not something the reader asked for.
+      // route. A re-pair queues nothing in its place: the pane re-polls the new
+      // connection by itself, and re-opening Chrome is not something the reader
+      // asked for.
       pendingRemoteRef.current = restored === 'remote' ? resumeRemote(memory, destination) : null;
     }
     if (previousPairing === null) {

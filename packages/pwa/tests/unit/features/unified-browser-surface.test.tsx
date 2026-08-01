@@ -216,6 +216,49 @@ const churningRemoteEngine = (status: BrowserStatus | null): ChurningRemoteEngin
   };
 };
 
+interface DelayedRemoteEngine {
+  readonly Pane: ComponentType<RemoteBrowserPaneProps>;
+  /** Every action the pane was asked to run, tagged with the grant that got it. */
+  readonly ran: { readonly action: BrowserAction; readonly grant: string }[];
+  /** Publish the dispatcher the surface has been waiting for. */
+  readonly publish: () => Promise<void>;
+}
+
+/**
+ * A pane that does NOT publish on mount.
+ *
+ * That window is the whole point: while no dispatcher has been published the
+ * surface queues toolbar actions in `pendingRemoteRef`, and a re-pair landing
+ * inside the window is what could carry one pairing's action into the next.
+ * A real pane leaves this window open too — it publishes from an effect, and a
+ * reader can reach the toolbar before its first status arrives.
+ */
+const delayedRemoteEngine = (): DelayedRemoteEngine => {
+  const ran: { action: BrowserAction; grant: string }[] = [];
+  let announce: (() => void) | null = null;
+
+  const Pane = ({ daemon, onStateChange }: RemoteBrowserPaneProps) => {
+    // The grant is recorded in test memory only; nothing renders it.
+    const grant = daemon.deviceToken;
+    const runAction = useCallback(
+      (action: BrowserAction) => {
+        ran.push({ action, grant });
+      },
+      [grant],
+    );
+    announce = () => onStateChange?.({ status: null, busy: false, error: null, runAction });
+    return <div data-delayed-pane="live" />;
+  };
+
+  return {
+    Pane,
+    ran,
+    publish: async () => {
+      await interact(() => must(announce, 'a mounted delayed engine')());
+    },
+  };
+};
+
 /** Both engines, substituted together: no daemon, no socket, no network. */
 const engines = () => {
   const preview = fakePreviewEngine();
@@ -845,6 +888,48 @@ describe('the unified browser surface', () => {
     expect(browserEngineForSession(scopeARotatedToken)).toBe('preview');
     rememberBrowserEngine(scopeARotatedToken, 'remote');
     expect(browserEngineForSession(scopeA)).toBe('remote');
+    await view.unmount();
+  });
+
+  it('never hands a queued action across a re-pair, and still queues for the new grant', async () => {
+    rememberBrowserEngine(scopeA, 'remote');
+    const { preview } = engines();
+    const delayed = delayedRemoteEngine();
+    const view = await mount(surface({ dependencies: { PreviewFrame: preview.Frame, RemotePane: delayed.Pane } }));
+
+    // The pane has published nothing yet, so the reader's tap is QUEUED. This is
+    // the mount-time resume plus a reload the reader aimed at daemon A's Chrome.
+    await click(labelled(view.container, 'Reload real browser'));
+    expect(delayed.ran).toEqual([]);
+
+    // The grant rotates while that action is still sitting in the queue.
+    await view.render(
+      surface({
+        daemon: daemonARotatedToken,
+        scope: scopeARotatedToken,
+        dependencies: { PreviewFrame: preview.Frame, RemotePane: delayed.Pane },
+      }),
+    );
+
+    // The new pane publishes. It must NOT inherit the reload — the reader aimed
+    // that at a daemon this pairing has no relationship with, and a navigation
+    // or reload delivered to the wrong Chrome is a real action, not a stale read.
+    await delayed.publish();
+    expect(delayed.ran).toEqual([]);
+
+    // Clearing the queue is not the same as breaking it. A second rotation
+    // re-opens the window, and an action aimed at THAT grant still arrives.
+    await view.render(
+      surface({
+        daemon: daemonAMovedUrl,
+        scope: scopeAMovedUrl,
+        dependencies: { PreviewFrame: preview.Frame, RemotePane: delayed.Pane },
+      }),
+    );
+    await click(labelled(view.container, 'Reload real browser'));
+    expect(delayed.ran).toEqual([]);
+    await delayed.publish();
+    expect(delayed.ran).toEqual([{ action: { action: 'reload' }, grant: daemonAMovedUrl.deviceToken }]);
     await view.unmount();
   });
 
