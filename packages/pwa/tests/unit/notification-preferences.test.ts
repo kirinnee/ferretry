@@ -160,6 +160,7 @@ describe('DaemonNotificationPreferences', () => {
     should(next.enabled).be.true();
     should(writeStore.get(daemonA).enabled).be.true();
   });
+
   it('should persist opaque daemon IDs as data rather than object metaproperties', () => {
     // Arrange
     const storage = new MemoryStorage();
