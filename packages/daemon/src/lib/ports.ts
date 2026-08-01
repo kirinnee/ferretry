@@ -35,6 +35,8 @@ export interface FileSystemPort {
   readSlice(path: string, offset: number, length: number): Promise<Uint8Array | undefined>;
   information(path: string): Promise<FileInformation | undefined>;
   writeTextAtomic(path: string, text: string): Promise<void>;
+  /** Creates an empty file, refusing an existing path. Durable: the file and its directory are fsynced. */
+  createFileExclusive(path: string, mode: number): Promise<JournalFingerprint>;
   appendLineDurable(path: string, line: string): Promise<DurableAppend>;
   removeFile(path: string): Promise<void>;
   sweepTemporaryFiles(): Promise<void>;

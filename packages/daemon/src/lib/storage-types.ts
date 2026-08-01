@@ -54,6 +54,8 @@ export interface RebuildResult {
   readonly eventCount: number;
   readonly problems: readonly JournalProblem[];
   readonly failedSessionIds?: readonly string[];
+  /** Quarantined sessions whose durable marker promises a journal that is no longer on disk. */
+  readonly lostJournalSessionIds?: readonly string[];
 }
 
 export interface ReplayPage {

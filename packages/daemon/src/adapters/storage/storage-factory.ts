@@ -50,6 +50,11 @@ export class DaemonStorageFactory {
     }
     const storage = new DaemonStorage(paths, fileSystem, index, this.clock, this.serial(), homeLock);
     try {
+      // Version-1 directories predate the journal contract, so they are migrated under the home
+      // lock before anything reads them. A version-2 session whose journal is already gone is NOT
+      // touched here: opening the home must still succeed so rebuild can quarantine that one
+      // session and keep every healthy sibling indexed.
+      await storage.upgradeLegacySessions();
       await storage.repairSessionPermissions();
       return { paths, layout, storage };
     } catch (error) {

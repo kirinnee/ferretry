@@ -263,6 +263,8 @@ describe('storage consistency pass', () => {
     // directory is authoritative, and nothing in the index knows about it.
     const session = createSessionPaths(paths(home), parseSessionId('orphan'));
     await mkdir(session.directory, { recursive: true, mode: 0o700 });
+    // A current-version directory always carries its journal, so the fixture carries one too.
+    await writeFile(session.events, '', { mode: 0o600 });
     await writeFile(session.marker, `${CURRENT_SESSION_VERSION}\n`, { mode: 0o600 });
     await writeFile(session.state, JSON.stringify({ id: 'orphan', status: 'running' }), { mode: 0o600 });
     const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
@@ -355,19 +357,21 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
-  it('should read the journal for a session whose events file does not exist yet', async () => {
-    // Arrange
+  it('should not call a finished session with an untouched empty journal a zombie', async () => {
+    // Arrange — a session that recorded no events still has a real, zero-length journal, and its
+    // creation timestamp must not read as activity outliving the session.
     const home = await temporaryHome();
     const opened = await openStorage(home);
     const id = parseSessionId('quiet');
-    await opened.storage.writeState(id, { id: 'quiet', status: 'stopped', finishedAt: NOW });
-    should(createSessionPaths(paths(home), id).events).be.a.String();
+    await opened.storage.writeState(id, { id: 'quiet', status: 'stopped', finishedAt: new Date().toISOString() });
+    const journal = await new StateFileSystem(paths(home)).information(createSessionPaths(paths(home), id).events);
     const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
 
     // Act
     const actual = await pass.run(true);
 
     // Assert
+    should(journal?.size).equal(0);
     should(actual.zombies).deepEqual([]);
     await opened.storage.close();
   });
