@@ -17,13 +17,32 @@
  * be made again, with an exactly-once daemon action, not a flag someone flips.
  */
 
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react';
 import { fieldScore } from '../shell/palette-ranking.ts';
 
-type ComposerTrigger = '/' | '@';
+export type ComposerTrigger = '/' | '@';
 
-type ComposerAutocompleteKind = 'command' | 'skill' | 'agent' | 'file' | 'directory' | 'task' | 'attention' | 'pin';
+export type ComposerAutocompleteKind =
+  | 'command'
+  | 'skill'
+  | 'agent'
+  | 'file'
+  | 'directory'
+  | 'task'
+  | 'attention'
+  | 'pin';
 
-interface ComposerReferenceTierLegendItem {
+export interface ComposerReferenceTierLegendItem {
   readonly tier: 1 | 2 | 3 | 4 | 5;
   readonly trigger: string;
   readonly label: string;
@@ -71,14 +90,79 @@ export interface ComposerAutocompleteCandidate {
   readonly detail?: string;
   /** Extra search terms that do not need to be rendered. */
   readonly keywords?: string;
+  /** Visual section inside a provider's merged result list. */
+  readonly group?: string;
   /** Coarse source priority before fuzzy score. The unified reference picker
    *  keeps its small named sets ahead of the thousands-deep filesystem. */
   readonly rankPriority?: number;
+  /** Compact state/action word shown at the row's trailing edge. */
+  readonly badge?: string;
   /** Complete replacement for the active token, including its sigil. */
   readonly replacement: string;
   /** Final selections close with a separating space; directories stay open. */
   readonly append?: 'space' | 'none';
   readonly disabled?: boolean;
+  /** Honest explanation for a visible but refused row. */
+  readonly disabledReason?: string;
+}
+
+export interface ComposerProviderContext {
+  readonly query: string;
+  readonly match: ComposerTriggerMatch;
+  readonly signal: AbortSignal;
+}
+
+export interface ComposerProviderResult {
+  readonly candidates: readonly ComposerAutocompleteCandidate[];
+  /** Files search only their final path segment; other providers omit this. */
+  readonly filterQuery?: string;
+  readonly contextLabel?: string;
+  readonly notice?: string;
+}
+
+export interface ComposerAutocompleteProvider {
+  readonly id: string;
+  readonly trigger: ComposerTrigger;
+  readonly label: string;
+  readonly legend?: readonly ComposerReferenceTierLegendItem[];
+  /** Changes when a store-backed provider's live source changes. */
+  readonly snapshotKey?: unknown;
+  initialCandidates?(context: ComposerProviderContext): ComposerProviderResult | undefined;
+  shouldOpen?(match: ComposerTriggerMatch): boolean;
+  reset?(): void;
+  candidates(context: ComposerProviderContext): Promise<ComposerProviderResult> | ComposerProviderResult;
+}
+
+export type ComposerAutocompleteStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export interface ComposerAutocompleteSnapshot {
+  readonly open: boolean;
+  readonly status: ComposerAutocompleteStatus;
+  readonly provider: ComposerAutocompleteProvider | null;
+  readonly match: ComposerTriggerMatch | null;
+  readonly candidates: readonly ComposerAutocompleteCandidate[];
+  readonly activeIndex: number;
+  readonly activeId?: string;
+  readonly contextLabel?: string;
+  readonly notice?: string;
+  readonly error?: string;
+}
+
+export interface ComposerAutocompleteController extends ComposerAutocompleteSnapshot {
+  readonly listboxId: string;
+  /** An open list vetoes any host re-focus recovery. */
+  readonly blocksRefocus: boolean;
+  syncSelection(selection: ComposerSelection): void;
+  handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean;
+  accept(index: number): void;
+  close(): void;
+  readonly textareaAria: {
+    readonly 'aria-autocomplete'?: 'list';
+    readonly 'aria-controls'?: string;
+    readonly 'aria-expanded'?: boolean;
+    readonly 'aria-activedescendant'?: string;
+    readonly 'aria-haspopup'?: 'listbox';
+  };
 }
 
 export interface TokenReplacement {
@@ -115,7 +199,7 @@ export function pendingComposerInputSelection(selection: ComposerSelection): Com
 
 function tokenEnd(value: string, caret: number): number {
   let end = caret;
-  while (end < value.length && !TOKEN_SPACE.test(value[end]!)) end++;
+  while (end < value.length && !TOKEN_SPACE.test(value[end] ?? '')) end++;
   return end;
 }
 
@@ -152,7 +236,7 @@ function atTrigger(value: string, caret: number): ComposerTriggerMatch | null {
     let runEnd = start;
     while (runEnd < caret && value[runEnd] === '@') runEnd += 1;
 
-    if (start === 0 || !WORD_BEFORE_MENTION.test(value[start - 1]!)) {
+    if (start === 0 || !WORD_BEFORE_MENTION.test(value[start - 1] ?? '')) {
       const query = value.slice(runEnd, caret);
       if (!TOKEN_SPACE.test(query)) {
         const triggerText = value.slice(start, runEnd);
@@ -202,7 +286,7 @@ export function replaceComposerTrigger(
   let after = value.slice(match.end);
   let separator = '';
   if (append === 'space') {
-    if (!after || !TOKEN_SPACE.test(after[0]!)) separator = ' ';
+    if (!after || !TOKEN_SPACE.test(after[0] ?? '')) separator = ' ';
     else if (after[0] === ' ') {
       // Reuse one existing ASCII separator and leave any additional whitespace
       // exactly as the reader typed it.
@@ -266,7 +350,224 @@ export function nextComposerCandidateIndex(
   let index = current < 0 ? (direction === 1 ? candidates.length - 1 : 0) : current;
   for (let seen = 0; seen < candidates.length; seen++) {
     index = (index + direction + candidates.length) % candidates.length;
-    if (!candidates[index]!.disabled) return index;
+    if (!candidates[index]?.disabled) return index;
   }
   return -1;
+}
+
+function firstEnabled(candidates: readonly ComposerAutocompleteCandidate[]): number {
+  return candidates.findIndex(candidate => !candidate.disabled);
+}
+
+interface LoadState {
+  readonly key: string;
+  readonly status: ComposerAutocompleteStatus;
+  readonly candidates: readonly ComposerAutocompleteCandidate[];
+  readonly contextLabel?: string;
+  readonly notice?: string;
+  readonly error?: string;
+}
+
+const IDLE_LOAD: LoadState = { key: '', status: 'idle', candidates: [] };
+
+/**
+ * Connects a controlled textarea to stable, daemon-scoped providers. It never
+ * moves DOM focus: preserving a phone keyboard and a held transcript selection
+ * are host invariants, not suggestions a completion list may override.
+ */
+export function useComposerAutocomplete({
+  value,
+  onValueChange,
+  inputRef,
+  providers,
+  disabled,
+  listboxId,
+}: {
+  readonly value: string;
+  readonly onValueChange: (value: string) => void;
+  readonly inputRef: RefObject<HTMLTextAreaElement | null>;
+  readonly providers: readonly ComposerAutocompleteProvider[];
+  readonly disabled?: boolean;
+  readonly listboxId?: string;
+}): ComposerAutocompleteController {
+  const generatedId = useId();
+  const resolvedListboxId = listboxId ?? `composer-autocomplete-${generatedId.replace(/:/gu, '')}`;
+  const [selection, setSelection] = useState<ComposerSelection>({ start: value.length, end: value.length });
+  const [dismissed, setDismissed] = useState<{
+    readonly trigger: ComposerTrigger;
+    readonly triggerText: string;
+    readonly start: number;
+  } | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [load, setLoad] = useState<LoadState>(IDLE_LOAD);
+  const pendingSelection = useRef<{ readonly expectedValue: string; readonly selection: ComposerSelection } | null>(
+    null,
+  );
+
+  const match = useMemo(() => detectComposerTrigger(value, selection), [selection, value]);
+  const provider = match ? (providers.find(item => item.trigger === match.trigger) ?? null) : null;
+  const matchTriggerText = match?.triggerText ?? match?.trigger;
+  const tokenDismissed =
+    match !== null &&
+    dismissed?.trigger === match.trigger &&
+    dismissed.triggerText === matchTriggerText &&
+    dismissed.start === match.start;
+  const open =
+    match !== null && provider !== null && !disabled && !tokenDismissed && (provider.shouldOpen?.(match) ?? true);
+  const requestKey =
+    open && match && provider ? `${provider.id}:${match.start}:${matchTriggerText}:${match.query}` : '';
+
+  useEffect(() => {
+    if (match !== null || dismissed === null) return;
+    setDismissed(null);
+  }, [dismissed, match]);
+
+  useEffect(() => {
+    if (!open || match === null || provider === null) {
+      setLoad(previous => (previous.status === 'idle' ? previous : IDLE_LOAD));
+      setActiveIndex(-1);
+      return;
+    }
+    const abort = new AbortController();
+    const ready = (result: ComposerProviderResult) => {
+      if (abort.signal.aborted) return;
+      const candidates = rankComposerCandidates(result.candidates, result.filterQuery ?? match.query);
+      setLoad({
+        key: requestKey,
+        status: 'ready',
+        candidates,
+        contextLabel: result.contextLabel,
+        notice: result.notice,
+      });
+      setActiveIndex(firstEnabled(candidates));
+    };
+    const failed = (error: unknown) => {
+      if (abort.signal.aborted || (error as { readonly name?: string })?.name === 'AbortError') return;
+      setLoad({
+        key: requestKey,
+        status: 'error',
+        candidates: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+      setActiveIndex(-1);
+    };
+    const context: ComposerProviderContext = { query: match.query, match, signal: abort.signal };
+    try {
+      const initial = provider.initialCandidates?.(context);
+      if (initial !== undefined) ready(initial);
+      else {
+        setLoad({ key: requestKey, status: 'loading', candidates: [] });
+        setActiveIndex(-1);
+      }
+      const result = provider.candidates(context);
+      if (typeof (result as PromiseLike<ComposerProviderResult>).then === 'function')
+        void Promise.resolve(result).then(ready, failed);
+      else ready(result as ComposerProviderResult);
+    } catch (error) {
+      failed(error);
+    }
+    return () => abort.abort();
+  }, [match, open, provider, provider?.snapshotKey, requestKey]);
+
+  useLayoutEffect(() => {
+    const pending = pendingSelection.current;
+    const input = inputRef.current;
+    if (pending === null) return;
+    if (pending.expectedValue !== value) {
+      if (input !== null && input.value === value) pendingSelection.current = null;
+      return;
+    }
+    if (input === null || input.value !== value) return;
+    pendingSelection.current = null;
+    input.setSelectionRange(pending.selection.start, pending.selection.end);
+  }, [inputRef, value]);
+
+  const currentLoad: LoadState = load.key === requestKey ? load : { ...IDLE_LOAD, status: open ? 'loading' : 'idle' };
+  const candidates = currentLoad.candidates;
+  const boundedActive = activeIndex >= 0 && activeIndex < candidates.length ? activeIndex : firstEnabled(candidates);
+  const commit = useCallback(
+    (replacement: TokenReplacement) => {
+      pendingSelection.current = { expectedValue: replacement.value, selection: replacement.selection };
+      setSelection(replacement.selection);
+      onValueChange(replacement.value);
+    },
+    [onValueChange],
+  );
+  const close = useCallback(() => {
+    if (match !== null && matchTriggerText !== undefined)
+      setDismissed({ trigger: match.trigger, triggerText: matchTriggerText, start: match.start });
+  }, [match, matchTriggerText]);
+
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') return;
+    const dismissOutside = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (inputRef.current?.contains(target) || document.getElementById(resolvedListboxId)?.contains(target)) return;
+      close();
+    };
+    document.addEventListener('click', dismissOutside);
+    return () => document.removeEventListener('click', dismissOutside);
+  }, [close, inputRef, open, resolvedListboxId]);
+
+  const accept = useCallback(
+    (index: number) => {
+      if (match === null) return;
+      const candidate = candidates[index];
+      if (candidate === undefined || candidate.disabled) return;
+      commit(replaceComposerTrigger(value, match, candidate.replacement, candidate.append ?? 'space'));
+    },
+    [candidates, commit, match, value],
+  );
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+      if (event.nativeEvent.isComposing) return false;
+      if (!open) return false;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+        return true;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveIndex(nextComposerCandidateIndex(candidates, boundedActive, event.key === 'ArrowDown' ? 1 : -1));
+        return true;
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        if (boundedActive >= 0) accept(boundedActive);
+        return true;
+      }
+      return false;
+    },
+    [accept, boundedActive, candidates, close, open],
+  );
+  const activeId = boundedActive >= 0 ? `${resolvedListboxId}-option-${boundedActive}` : undefined;
+  return {
+    open,
+    status: currentLoad.status,
+    provider,
+    match,
+    candidates,
+    activeIndex: boundedActive,
+    activeId,
+    contextLabel: currentLoad.contextLabel,
+    notice: currentLoad.notice,
+    error: currentLoad.error,
+    listboxId: resolvedListboxId,
+    blocksRefocus: open,
+    syncSelection: next => setSelection(pendingComposerInputSelection(next)),
+    handleKeyDown,
+    accept,
+    close,
+    textareaAria: open
+      ? {
+          'aria-autocomplete': 'list',
+          'aria-controls': resolvedListboxId,
+          'aria-expanded': true,
+          'aria-activedescendant': activeId,
+          'aria-haspopup': 'listbox',
+        }
+      : {},
+  };
 }
