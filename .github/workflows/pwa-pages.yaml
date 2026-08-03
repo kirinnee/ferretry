@@ -1,0 +1,32 @@
+name: Deploy PWA to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pwa-pages-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and Deploy PWA
+    permissions:
+      contents: read
+      deployments: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Build static PWA bundle
+        run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+      - name: Deploy production bundle
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: pages deploy packages/pwa/dist --project-name=ferretry --branch=main
