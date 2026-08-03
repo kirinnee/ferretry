@@ -1,16 +1,16 @@
-import type { SessionView } from '@ferretry/protocol';
 import { describe, test } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import should from 'should';
 import {
-  codexReasoningObservationChanged,
   ComposerRuntime,
+  ComposerRuntimeWithKeyboard,
+  codexReasoningObservationChanged,
   modelObservationChanged,
   type RuntimeSwitchLifecycle,
   runtimeModelChipLabel,
   runtimeSwitchDisabledReason,
 } from '../../src/components/composer-runtime.tsx';
-import { KEYBOARD_ATTRIBUTE } from '../../src/hooks/use-keyboard-open.ts';
-import { interact, type Mounted, must, mount } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
 /**
  * The bar's contract is what its two chips CLAIM: a readout that never asserts an
@@ -411,15 +411,20 @@ describe('ComposerRuntime sheets', () => {
 
   test('should close an open sheet if the keyboard rises under it', async () => {
     // Arrange — the row is display:none while the keyboard is up, and it owns the sheet.
-    const view = await mount(<ComposerRuntime busy={false} canControl view={session({})} />);
-    await interact(() => modelChip(view).click());
+    const runtime = session({});
+    const view = await mount(
+      <ComposerRuntimeWithKeyboard busy={false} canControl view={runtime} keyboardOpen={false} />,
+    );
+    try {
+      await interact(() => modelChip(view).click());
 
-    // Act
-    await interact(() => document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'open'));
+      // Act
+      await view.render(<ComposerRuntimeWithKeyboard busy={false} canControl view={runtime} keyboardOpen />);
 
-    // Assert
-    should(modelChip(view).getAttribute('aria-expanded')).equal('false');
-    document.documentElement.removeAttribute(KEYBOARD_ATTRIBUTE);
-    await view.unmount();
+      // Assert
+      should(modelChip(view).getAttribute('aria-expanded')).equal('false');
+    } finally {
+      await view.unmount();
+    }
   });
 });

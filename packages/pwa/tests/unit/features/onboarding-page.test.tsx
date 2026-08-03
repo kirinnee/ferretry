@@ -7,12 +7,12 @@
  * against source text.
  */
 
-import { afterEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
-import { OnboardingPage } from '../../../src/features/onboarding/onboarding-page.tsx';
+import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../src/features/onboarding/onboarding-page.tsx';
 import {
-  OnboardingProgressStore,
   type OnboardingProgressStorage,
+  OnboardingProgressStore,
 } from '../../../src/features/onboarding/onboarding-progress.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 
@@ -69,10 +69,6 @@ const pageWith = async (options: PageOptions = {}) => {
   );
   return { opened, view };
 };
-
-afterEach(() => {
-  document.documentElement.removeAttribute('data-keyboard');
-});
 
 describe('the first-run stepper', () => {
   it('opens on install, showing one stage and the whole track', async () => {
@@ -246,7 +242,6 @@ describe('the daemon stage', () => {
 
 describe('with the software keyboard open', () => {
   it('keeps the stage, its actions and the track, and hides only standing chrome', async () => {
-    document.documentElement.setAttribute('data-keyboard', 'open');
     const { view } = await pageWith();
     await click(buttonWith(view.container, '[data-onboarding-next]'));
     await click(buttonWith(view.container, '[data-onboarding-next]'));
@@ -278,15 +273,16 @@ describe('with the software keyboard open', () => {
     };
     field.focus();
 
-    // The producer writes the attribute; this screen only observes it — and
-    // then waits a frame, because the shell is still its pre-keyboard height in
-    // the commit that carries the attribute.
-    await interact(async () => {
-      document.documentElement.setAttribute('data-keyboard', 'open');
-      await nextFrame();
-    });
+    // The hook-to-effect path is proved by the real-app keyboard capture. This
+    // rendered unit drives the narrow scheduling seam directly so another DOM
+    // test cannot remove the process-wide root attribute between its mutation
+    // and MutationObserver callback.
+    const root = must(view.container.querySelector<HTMLElement>('[data-onboarding="setup"]'), 'the stepper');
+    const cancel = scheduleFocusedOnboardingControl(root);
+    await nextFrame();
 
-    expect(scrolled).toEqual([{ block: 'center' }]);
+    expect(scrolled).toContainEqual({ block: 'center' });
+    cancel?.();
     await view.unmount();
   });
 
@@ -298,12 +294,12 @@ describe('with the software keyboard open', () => {
       scrolls += 1;
     };
 
-    await interact(async () => {
-      document.documentElement.setAttribute('data-keyboard', 'open');
-      await nextFrame();
-    });
+    const root = must(view.container.querySelector<HTMLElement>('[data-onboarding="setup"]'), 'the stepper');
+    const cancel = scheduleFocusedOnboardingControl(root);
+    await nextFrame();
 
     expect(scrolls).toBe(0);
+    cancel?.();
     await view.unmount();
   });
 });

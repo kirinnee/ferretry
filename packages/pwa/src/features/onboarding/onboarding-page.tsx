@@ -37,16 +37,16 @@ import {
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
+  nextOnboardingStep,
   ONBOARDING_STEP_COUNT,
   ONBOARDING_STEPS,
-  onboardingStep,
-  onboardingStepIndex,
   type OnboardingStepId,
   type OnboardingStepStatus,
+  onboardingStep,
+  onboardingStepIndex,
   onboardingStepStatus,
   PAIR_COMMAND,
   previousOnboardingStep,
-  nextOnboardingStep,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore } from './onboarding-progress.ts';
@@ -70,6 +70,24 @@ export interface OnboardingPageProps {
   /** Whether there is a paired daemon for the final action to open. */
   readonly fleetReady: boolean;
 }
+
+/**
+ * Waits for the shell's keyboard-sized layout, then keeps its focused control
+ * in view. Exported as the narrow effect seam so its geometry can be exercised
+ * without making unrelated DOM suites race over the process-wide `<html>`
+ * keyboard attribute.
+ */
+export const scheduleFocusedOnboardingControl = (root: HTMLElement | null): (() => void) | undefined => {
+  const view = root?.ownerDocument.defaultView;
+  if (root === null || view === null || view === undefined) return undefined;
+  const frame = view.requestAnimationFrame(() => {
+    const focused = root.ownerDocument.activeElement;
+    if (focused instanceof HTMLElement && root.contains(focused)) {
+      focused.scrollIntoView({ block: 'center' });
+    }
+  });
+  return () => view.cancelAnimationFrame(frame);
+};
 
 export function OnboardingPage({
   progress,
@@ -121,8 +139,6 @@ export function OnboardingPage({
   const keyboardOpen = useKeyboardOpen();
   useEffect(() => {
     if (!keyboardOpen) return;
-    const view = root.current?.ownerDocument.defaultView;
-    if (view === null || view === undefined) return;
     /*
      * ONE FRAME LATER, ON PURPOSE. The attribute is written in the same commit
      * that shortens the shell, so scrolling immediately measures the layout the
@@ -130,13 +146,7 @@ export function OnboardingPage({
      * does nothing — leaving the reader typing below the fold. Waiting for the
      * next frame measures the geometry they can actually see.
      */
-    const frame = view.requestAnimationFrame(() => {
-      const focused = root.current?.ownerDocument.activeElement;
-      if (focused instanceof HTMLElement && root.current?.contains(focused) === true) {
-        focused.scrollIntoView({ block: 'center' });
-      }
-    });
-    return () => view.cancelAnimationFrame(frame);
+    return scheduleFocusedOnboardingControl(root.current);
   }, [keyboardOpen]);
 
   return (
