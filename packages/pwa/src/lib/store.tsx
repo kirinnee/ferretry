@@ -13,7 +13,7 @@ import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
-import { DaemonPushDevices } from './push-enrolment.ts';
+import { type DaemonPushService, DaemonPushDevices, daemonPushService } from './push-enrolment.ts';
 import type { DaemonFetch } from './runtime-models.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
@@ -138,6 +138,13 @@ export interface AppStore {
   readonly stt: SttSettingsStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
   readonly pushDevices: DaemonPushDevices;
+  /**
+   * The daemon push API bound to the SAME fetcher as every other daemon call.
+   * Built here rather than by the root because a root that injects a fetcher —
+   * a suite, or a future offline shell — would otherwise get the real network
+   * for enrolment alone, which is the one call that hands a daemon an endpoint.
+   */
+  readonly pushService: DaemonPushService;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
 }
 
@@ -163,6 +170,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const stt = new SttSettingsStore(browserStorage);
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
   const pushDevices = new DaemonPushDevices(browserStorage);
+  const pushService = daemonPushService(fetcher);
   const connections = await DaemonConnectionStore.open({
     repository: options.repository ?? browserConnectionRepository(),
     caches: [clients, fleet, controls, projects, usage, notificationPreferences, pushDevices],
@@ -178,6 +186,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     stt,
     notificationPreferences,
     pushDevices,
+    pushService,
     pair: async seed => {
       const connection = await exchangePairing(seed, fetcher);
       connections.add(connection);
@@ -194,11 +203,25 @@ export interface StoreProviderProps {
   readonly createStore?: () => Promise<AppStore>;
 }
 
-/** Opens browser persistence once, including under React StrictMode's effect replay. */
+interface StoreAttempt {
+  readonly attempt: number;
+  readonly opening: Promise<AppStore>;
+}
+
+/**
+ * Opens browser persistence once, including under React StrictMode's effect
+ * replay, and keeps a rejected open recoverable.
+ *
+ * The in-flight promise is cached per ATTEMPT: StrictMode's second effect run
+ * reuses the open already running, while the reader's retry is a genuinely new
+ * one. A rejected attempt is dropped as it rejects, so no later run can be
+ * answered by a failure that has already been reported.
+ */
 export function StoreProvider({ children, store, createStore = createAppStore }: StoreProviderProps) {
-  const pending = useRef<Promise<AppStore> | null>(null);
+  const pending = useRef<StoreAttempt | null>(null);
   const [resolved, setResolved] = useState<AppStore | null>(store ?? null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     if (store !== undefined) {
@@ -206,22 +229,42 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
       setFailure(null);
       return;
     }
-    pending.current ??= createStore();
+    let entry = pending.current;
+    if (entry === null || entry.attempt !== attempt) {
+      entry = { attempt, opening: createStore() };
+      pending.current = entry;
+    }
+    const started = entry;
     let current = true;
-    void pending.current.then(
+    void started.opening.then(
       value => {
         if (current) setResolved(value);
       },
       reason => {
+        if (pending.current === started) pending.current = null;
         if (current) setFailure(reason instanceof Error ? reason.message : String(reason));
       },
     );
     return () => {
       current = false;
     };
-  }, [createStore, store]);
+  }, [attempt, createStore, store]);
 
-  if (failure !== null) return <p role="alert">Could not open local PWA state: {failure}</p>;
+  if (failure !== null)
+    return (
+      <div>
+        <p role="alert">Could not open local PWA state: {failure}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setFailure(null);
+            setAttempt(count => count + 1);
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
   if (resolved === null) return <p role="status">Opening Ferretry…</p>;
   return <StoreContext.Provider value={resolved}>{children}</StoreContext.Provider>;
 }

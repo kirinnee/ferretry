@@ -3,6 +3,7 @@ import type { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
+  type AppStore,
   browserConnectionRepository,
   createAppStore,
   DaemonApiPool,
@@ -12,7 +13,7 @@ import {
   useAppStore,
   useConnectionSnapshot,
 } from '../../src/lib/store.tsx';
-import { interact, mount } from '../support/dom.ts';
+import { interact, mount, must } from '../support/dom.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -223,6 +224,31 @@ describe('StoreProvider', () => {
     expect(store.pushDevices.get(beta.daemonId)).toBe('beta-device');
   });
 
+  it('reaches the daemon push API through the injected fetcher, never the global one', async () => {
+    const requests: string[] = [];
+    const globalFetch = globalThis.fetch;
+    globalThis.fetch = (() => {
+      throw new Error('the store reached the global fetch');
+    }) as unknown as typeof fetch;
+
+    try {
+      const store = await createAppStore({
+        repository: new MemoryRepository(),
+        connectClient: async () => client('unused'),
+        fetcher: async input => {
+          requests.push(String(input));
+          return Response.json({ devices: [] });
+        },
+      });
+
+      expect(await store.pushService.list(alpha)).toEqual([]);
+    } finally {
+      globalThis.fetch = globalFetch;
+    }
+
+    expect(requests).toEqual(['https://alpha.example.test/v1/push/subscriptions']);
+  });
+
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
     const store = await createAppStore({
       repository: new MemoryRepository(),
@@ -252,5 +278,39 @@ describe('StoreProvider', () => {
     await failure.unmount();
 
     await expect(mount(<StoreProbe />)).rejects.toThrow('useAppStore must be rendered inside StoreProvider');
+  });
+
+  it('recovers from a rejected open when the reader retries, without replaying the failure', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => client('unused'),
+      fetcher: async () => Response.json({}),
+    });
+    let attempts = 0;
+    const createStore = async (): Promise<AppStore> => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('database denied');
+      return store;
+    };
+
+    const view = await mount(
+      <StoreProvider createStore={createStore}>
+        <StoreProbe />
+      </StoreProvider>,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(view.container.textContent).toContain('database denied');
+
+    await interact(() => must(view.container.querySelector('button'), 'the retry button').click());
+    await interact(async () => await Promise.resolve());
+
+    expect(attempts).toBe(2);
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(view.container.textContent).toBe('unpaired');
+
+    // The recovered store is the live one, not a snapshot taken before the retry.
+    await interact(() => view.container.querySelector('button')?.click());
+    expect(view.container.textContent).toBe('alpha');
+    await view.unmount();
   });
 });

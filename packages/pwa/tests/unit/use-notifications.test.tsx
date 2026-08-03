@@ -290,13 +290,20 @@ describe('useNotificationControls', () => {
     ...over,
   });
 
-  const mount = (host: NotificationControlsHost, connection: DaemonConnection = daemonA) => {
+  /**
+   * Mounting is asynchronous because the mount effect is: it reads this daemon's
+   * device list, and the render is not finished until that has settled. Handing
+   * back a probe before then would leave the first delivery readout landing
+   * outside every `act` scope the test opens.
+   */
+  const mount = async (host: NotificationControlsHost, connection: DaemonConnection = daemonA) => {
     let latest: NotificationControls | undefined;
     function Probe({ daemon }: { readonly daemon: DaemonConnection }) {
       latest = useNotificationControls(host, daemon);
       return null;
     }
     const renderer = render(<Probe daemon={connection} />);
+    await settle();
     return {
       controls: () => {
         if (latest === undefined) throw new Error('the hook did not run');
@@ -318,8 +325,7 @@ describe('useNotificationControls', () => {
   it('reads this daemon’s device list on mount and again after a re-pair', async () => {
     const push = service();
     const host = controlsHost({ service: push.service });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     expect(push.log.listed).toBe(1);
     expect(probe.controls().devices).toHaveLength(1);
@@ -338,8 +344,7 @@ describe('useNotificationControls', () => {
     const target = surface('default', 'granted');
     const push = service();
     const host = controlsHost({ surface: target.surface, service: push.service });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     await runAsync(async () => {
       probe.controls().setEnabled(true);
@@ -359,8 +364,7 @@ describe('useNotificationControls', () => {
   it('leaves the switch off when the browser refuses', async () => {
     const target = surface('default', 'denied');
     const host = controlsHost({ surface: target.surface });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     await runAsync(async () => {
       probe.controls().setEnabled(true);
@@ -378,8 +382,7 @@ describe('useNotificationControls', () => {
   it('does not re-prompt a browser that has already answered', async () => {
     const target = surface('granted');
     const host = controlsHost({ surface: target.surface, enrolment: null });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     await runAsync(async () => {
       probe.controls().setEnabled(true);
@@ -399,8 +402,7 @@ describe('useNotificationControls', () => {
     devices.remember(daemonA.daemonId, DEVICE.id);
     const host = controlsHost({ service: push.service, devices });
     host.preferences.set(daemonA.daemonId, { enabled: true });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     await runAsync(async () => {
       probe.controls().setEnabled(false);
@@ -416,8 +418,7 @@ describe('useNotificationControls', () => {
   it('sends changed events onward only while delivery is on', async () => {
     const push = service();
     const host = controlsHost({ service: push.service });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
     const quiet = push.log.registered;
 
     await runAsync(async () => {
@@ -429,7 +430,11 @@ describe('useNotificationControls', () => {
     expect(probe.controls().preferences.interactiveOnly).toBe(true);
     expect(probe.controls().preferences.events.completed).toBe(false);
 
-    host.preferences.set(daemonA.daemonId, { enabled: true });
+    // The mounted probe subscribes to this store, so turning the master switch on
+    // re-renders it: an unwrapped write here is a state update outside `act`.
+    run(() => {
+      host.preferences.set(daemonA.daemonId, { enabled: true });
+    });
     await runAsync(async () => {
       probe.controls().setPreferences({ events: prefs.events, interactiveOnly: false });
     });
@@ -444,8 +449,7 @@ describe('useNotificationControls', () => {
   it('revokes a named device and re-reads the list', async () => {
     const push = service();
     const host = controlsHost({ service: push.service });
-    const probe = mount(host);
-    await settle();
+    const probe = await mount(host);
 
     await runAsync(async () => {
       probe.controls().revokeDevice(DEVICE.id);
@@ -460,8 +464,7 @@ describe('useNotificationControls', () => {
 
   it('re-reads on request', async () => {
     const push = service();
-    const probe = mount(controlsHost({ service: push.service }));
-    await settle();
+    const probe = await mount(controlsHost({ service: push.service }));
 
     await runAsync(async () => {
       probe.controls().refresh();
