@@ -295,11 +295,21 @@ function SetupGuide() {
   const [arrival] = useState(arrivalFromLocation);
   const scanHost = useMemo(browserQrScan, []);
   const takeArrival = useCallback(takeArrivalFromLocation, []);
-  // A tab opened FROM a pairing link is past install and daemon whatever
-  // storage remembers, so the arrival decides where it lands.
-  const progress = useMemo(
-    () => new OnboardingProgressStore(arrival.kind === 'none' ? {} : { entry: 'pair' }),
-    [arrival.kind],
+  /*
+   * A tab opened FROM a pairing link is past install and daemon whatever
+   * storage remembers, so the arrival decides where it lands.
+   *
+   * `paired` is read here, at hydration, and deliberately not tracked: it
+   * decides only whether a stored "finished" is believable for a browser that
+   * holds no daemon. A pairing removed later, with the last stage already on
+   * the glass, is that stage's own problem to state honestly.
+   */
+  const [progress] = useState(
+    () =>
+      new OnboardingProgressStore({
+        paired: snapshot.connections.length > 0,
+        ...(arrival.kind === 'none' ? {} : { entry: 'pair' as const }),
+      }),
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
   const selected = snapshot.selectedDaemonId;

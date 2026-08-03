@@ -26,6 +26,7 @@
 import { ArrowLeft, ArrowRight, Check, ExternalLink } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
+import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import { type ClipboardWriter, CommandBlock, CopyButton } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import {
@@ -104,8 +105,48 @@ export function OnboardingPage({
     heading.current?.focus();
   }, [current]);
 
+  /*
+   * A KEYBOARD MUST NOT SWALLOW THE FIELD IT BELONGS TO.
+   *
+   * The pairing link is near the bottom of a stage that is taller than a phone,
+   * so the keyboard opening leaves the reader typing into something they cannot
+   * see. `useKeyboardOpen` observes the SAME `data-keyboard` attribute the
+   * stylesheet keys off — no second measurement of the viewport — and once it
+   * flips, whatever is focused inside this screen is scrolled back into the
+   * shell's own scroller. `block: 'center'` rather than 'nearest' so the label
+   * and any error under the field come with it, and no smooth scrolling, which
+   * is both pointless here and unwelcome under reduced motion.
+   */
+  const root = useRef<HTMLElement>(null);
+  const keyboardOpen = useKeyboardOpen();
+  useEffect(() => {
+    if (!keyboardOpen) return;
+    const view = root.current?.ownerDocument.defaultView;
+    if (view === null || view === undefined) return;
+    /*
+     * ONE FRAME LATER, ON PURPOSE. The attribute is written in the same commit
+     * that shortens the shell, so scrolling immediately measures the layout the
+     * keyboard has not shrunk yet, concludes the field is already visible, and
+     * does nothing — leaving the reader typing below the fold. Waiting for the
+     * next frame measures the geometry they can actually see.
+     */
+    const frame = view.requestAnimationFrame(() => {
+      const focused = root.current?.ownerDocument.activeElement;
+      if (focused instanceof HTMLElement && root.current?.contains(focused) === true) {
+        focused.scrollIntoView({ block: 'center' });
+      }
+    });
+    return () => view.cancelAnimationFrame(frame);
+  }, [keyboardOpen]);
+
   return (
-    <main className={SHELL} aria-labelledby="onboarding-title" data-onboarding="setup" data-onboarding-step={current}>
+    <main
+      ref={root}
+      className={SHELL}
+      aria-labelledby="onboarding-title"
+      data-onboarding="setup"
+      data-onboarding-step={current}
+    >
       {/*
         `data-kb-hide` is legal here and nowhere else on this screen: the brand
         and the standing explanation are stateless chrome with no focus, no

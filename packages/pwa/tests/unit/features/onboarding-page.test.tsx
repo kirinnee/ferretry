@@ -26,6 +26,12 @@ class MemoryStorage implements OnboardingProgressStorage {
   }
 }
 
+/** Lets a `requestAnimationFrame` callback run, the way a real frame would. */
+const nextFrame = async (): Promise<void> =>
+  await new Promise<void>(resolve => {
+    requestAnimationFrame(() => resolve());
+  });
+
 const click = async (target: Element): Promise<void> => {
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 };
@@ -52,9 +58,12 @@ const pageWith = async (options: PageOptions = {}) => {
       fleetReady={options.fleetReady ?? false}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
       renderPairing={({ onPaired }) => (
-        <button type="button" data-test-pair="" onClick={onPaired}>
-          pretend the daemon answered
-        </button>
+        <>
+          <input id="fake-pairing-link" aria-label="Pairing link" />
+          <button type="button" data-test-pair="" onClick={onPaired}>
+            pretend the daemon answered
+          </button>
+        </>
       )}
     />,
   );
@@ -169,7 +178,12 @@ describe('the first-run stepper', () => {
     expect(stepOf(unpaired.view.container)).toBe('pair');
     await unpaired.view.unmount();
 
-    const paired = await pageWith({ progress: new OnboardingProgressStore({ storage }), fleetReady: true });
+    // `paired` is what makes a stored "finished" believable: without a pairing
+    // the same document reads as a fresh start, which the test below proves.
+    const paired = await pageWith({
+      progress: new OnboardingProgressStore({ storage, paired: true }),
+      fleetReady: true,
+    });
     await click(buttonWith(paired.view.container, '[data-onboarding-jump="done"]'));
     await click(buttonWith(paired.view.container, '[data-onboarding-open-fleet]'));
     expect(paired.opened).toEqual(['fleet']);
@@ -250,6 +264,46 @@ describe('with the software keyboard open', () => {
     // Nothing in this file measures the viewport itself.
     expect(view.container.innerHTML).not.toContain('100dvh');
     expect(view.container.innerHTML).not.toContain('100vh');
+    await view.unmount();
+  });
+
+  it('brings the focused field back into view when the keyboard arrives', async () => {
+    const { view } = await pageWith();
+    await click(buttonWith(view.container, '[data-onboarding-next]'));
+    await click(buttonWith(view.container, '[data-onboarding-next]'));
+    const field = must(view.container.querySelector<HTMLInputElement>('#fake-pairing-link'), 'the pairing field');
+    const scrolled: ScrollIntoViewOptions[] = [];
+    field.scrollIntoView = (options?: boolean | ScrollIntoViewOptions) => {
+      scrolled.push(typeof options === 'object' ? options : {});
+    };
+    field.focus();
+
+    // The producer writes the attribute; this screen only observes it — and
+    // then waits a frame, because the shell is still its pre-keyboard height in
+    // the commit that carries the attribute.
+    await interact(async () => {
+      document.documentElement.setAttribute('data-keyboard', 'open');
+      await nextFrame();
+    });
+
+    expect(scrolled).toEqual([{ block: 'center' }]);
+    await view.unmount();
+  });
+
+  it('leaves the page alone when the keyboard opens over something unfocused', async () => {
+    const { view } = await pageWith();
+    const field = must(view.container.querySelector('#onboarding-step-title'), 'the stage heading');
+    let scrolls = 0;
+    (field as HTMLElement).scrollIntoView = () => {
+      scrolls += 1;
+    };
+
+    await interact(async () => {
+      document.documentElement.setAttribute('data-keyboard', 'open');
+      await nextFrame();
+    });
+
+    expect(scrolls).toBe(0);
     await view.unmount();
   });
 });

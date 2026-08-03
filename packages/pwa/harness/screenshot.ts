@@ -45,7 +45,48 @@ const SECTIONS = [
   'harness-pending-sends',
   'harness-skills',
   'harness-thinking-indicator',
+  // The install stage is deliberately absent: it is taller than a phone, and an
+  // element capture inside this fixed gallery clips its top away. It gets a
+  // page of its own below instead.
+  'harness-onboarding-daemon',
+  'harness-onboarding-pair',
+  'harness-onboarding-done',
 ] as const;
+
+/**
+ * A software keyboard, told the truth.
+ *
+ * Chrome's `setViewportSize` (and CDP's visible-size) shrink the LAYOUT
+ * viewport: `innerHeight` and `screen.height` move together and the page looks
+ * like a short landscape device — which is the very misreading the portrait
+ * gate was fixed for. An Android keyboard does something different: with
+ * `interactive-widget=resizes-content` the screen stays a 390x844 portrait
+ * phone and only `window.visualViewport` gets shorter.
+ *
+ * So the seam replaces `window.visualViewport` with a real EventTarget whose
+ * height a harness setter can change, and dispatches the same `resize` the
+ * browser would. The production producer (`useAppViewport`) listens to exactly
+ * that, so the capture exercises the shipped code path rather than a mock of it.
+ */
+const VISUAL_VIEWPORT_SHIM = `(() => {
+  const real = window.visualViewport;
+  if (!real) throw new Error('this browser has no visualViewport to model a keyboard with');
+  // WRAP, never replace: a substitute object breaks the driver's own pointer
+  // coordinate maths once touch emulation is on, and every other reader of the
+  // viewport would be reading a fake. Only 'height' is overridden, and only
+  // while the harness says a keyboard is up.
+  let override = null;
+  const inherited = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(real), 'height');
+  Object.defineProperty(real, 'height', {
+    configurable: true,
+    get: () => (override === null ? inherited.get.call(real) : override),
+  });
+  window.__harnessKeyboard = (nextHeight) => {
+    override = nextHeight;
+    real.dispatchEvent(new Event('resize'));
+    window.dispatchEvent(new Event('resize'));
+  };
+})();`;
 
 function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);
@@ -495,6 +536,112 @@ try {
           await page.getByRole('dialog', { name: 'Change model or account' }).waitFor({ state: 'visible' });
           await page.screenshot({ path: migrateTarget });
           process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
+
+          // The install stage on a page of its own, so the capture starts at
+          // the real top of the screen rather than wherever the gallery's
+          // scroller happened to clip it.
+          const installTarget = join(outDir, `${viewport.name}-onboarding-install-page.png`);
+          await page.goto(`${server.url}#onboarding-install`);
+          await page.reload();
+          await page.locator('#harness-onboarding-install-page').waitFor({ state: 'visible' });
+          await page.screenshot({ path: installTarget, fullPage: true });
+          process.stdout.write(`📸 ${viewport.name} setup install page -> ${installTarget}\n`);
+
+          // The pairing stage with the keyboard up: the state the reader
+          // reported as broken. Phone only — a desktop has no software keyboard
+          // to model, and pretending otherwise would be a made-up screenshot.
+          //
+          // Supplementary, not authoritative: this gallery context is 390px wide
+          // but not touch-emulated, so it proves the layout and the focus, not
+          // the coarse-pointer branches. The real-app driver owns that.
+          if (viewport.name === 'mobile') {
+            await page.addInitScript(VISUAL_VIEWPORT_SHIM);
+            // A real document navigation, not a fragment jump: the alternate
+            // root only mounts on load, and an init script only runs on one.
+            await page.goto(`${server.url}#onboarding-keyboard`);
+            await page.reload();
+            await page.locator('#harness-onboarding-pair-page').waitFor({ state: 'visible' });
+
+            // The keyboard is only up because a FIELD has focus, so the shot has
+            // to start there — an unfocused capture would look identical and
+            // prove nothing about the state that was reported broken.
+            await page.getByRole('button', { name: 'Paste a link instead' }).click();
+            const field = page.locator('#pairing-link');
+            await field.waitFor({ state: 'visible' });
+            await field.focus();
+
+            const before = await page.evaluate(() => ({
+              innerHeight: window.innerHeight,
+              screenHeight: window.screen.height,
+              visual: window.visualViewport?.height ?? null,
+              focused: document.activeElement?.id ?? null,
+            }));
+            if (before.focused !== 'pairing-link') fail(`the pairing field never took focus (got ${before.focused})`);
+
+            await page.evaluate(() => {
+              (window as unknown as { __harnessKeyboard: (height: number) => void }).__harnessKeyboard(430);
+            });
+            // The producer schedules through requestAnimationFrame, so the
+            // attribute lands a frame after the resize, not with it.
+            await page
+              .waitForFunction(() => document.documentElement.getAttribute('data-keyboard') === 'open')
+              .catch(() => fail('the production viewport producer never reported an open keyboard'));
+
+            // The keyboard is only handled if the field it belongs to is still
+            // on screen. A shot of the stage with the input somewhere below the
+            // fold is a picture of the bug, not of the fix.
+            await page
+              .waitForFunction(() => {
+                const input = document.getElementById('pairing-link');
+                const limit = window.visualViewport?.height ?? window.innerHeight;
+                if (input === null) return false;
+                const rect = input.getBoundingClientRect();
+                return rect.top >= 0 && rect.bottom <= limit;
+              })
+              .catch(async () => {
+                const state = await page.evaluate(() => {
+                  const input = document.getElementById('pairing-link');
+                  const rect = input?.getBoundingClientRect();
+                  return {
+                    keyboard: document.documentElement.getAttribute('data-keyboard'),
+                    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-h'),
+                    visual: window.visualViewport?.height ?? null,
+                    focused: document.activeElement?.id ?? null,
+                    top: Math.round(rect?.top ?? -1),
+                    bottom: Math.round(rect?.bottom ?? -1),
+                  };
+                });
+                fail(`the focused pairing field never came back into view: ${JSON.stringify(state)}`);
+              });
+
+            const after = await page.evaluate(() => {
+              const rect = document.getElementById('pairing-link')?.getBoundingClientRect();
+              return {
+                innerHeight: window.innerHeight,
+                screenHeight: window.screen.height,
+                visual: window.visualViewport?.height ?? null,
+                focused: document.activeElement?.id ?? null,
+                keyboard: document.documentElement.getAttribute('data-keyboard'),
+                fieldTop: Math.round(rect?.top ?? -1),
+                fieldBottom: Math.round(rect?.bottom ?? -1),
+                gate: document.getElementById('fy-portrait-gate') !== null,
+              };
+            });
+            if (after.focused !== 'pairing-link') fail('the pairing field lost focus before the capture');
+            if (after.gate) fail('the portrait gate mounted over an upright phone with its keyboard open');
+
+            const keyboardTarget = join(outDir, `${viewport.name}-onboarding-keyboard.png`);
+            await page.screenshot({ path: keyboardTarget });
+            // Printed, not assumed: a shot that silently failed to open the
+            // keyboard looks exactly like one that did.
+            process.stdout.write(
+              `📸 ${viewport.name} setup pairing, keyboard open -> ${keyboardTarget}\n` +
+                `   screen ${before.screenHeight}px and layout ${before.innerHeight}px unchanged at ` +
+                `${after.screenHeight}px / ${after.innerHeight}px; visual viewport ${before.visual}px -> ` +
+                `${after.visual}px; data-keyboard=${after.keyboard}; focus=#${after.focused} visible at ` +
+                `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
+            );
+          }
         } finally {
           await page.close();
         }

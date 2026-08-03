@@ -67,6 +67,22 @@ export const parseOnboardingProgress = (raw: string | null | undefined): Onboard
   return { v: ONBOARDING_PROGRESS_VERSION, current, furthest };
 };
 
+/**
+ * Setup is only over if something is actually paired.
+ *
+ * Progress is a hint about where the reader was, never evidence of what they
+ * achieved: the pairing registry is the authority on that. So a stored document
+ * that claims the arc reached its end, read by a browser holding no daemon at
+ * all, is inconsistent across the two stores — a cleared registry, a different
+ * profile, a half-finished attempt — and the honest reading is a fresh start.
+ * The benign one would greet someone with "You are set up" beside a panel
+ * explaining that nothing is paired.
+ */
+export const reconcileOnboardingProgress = (progress: OnboardingProgress, paired: boolean): OnboardingProgress => {
+  if (paired) return progress;
+  return progress.current === 'done' || progress.furthest === 'done' ? fresh() : progress;
+};
+
 export interface OnboardingProgressStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -92,6 +108,16 @@ export interface OnboardingProgressStoreOptions {
    * rather than written, so merely opening a link never rewrites progress.
    */
   readonly entry?: OnboardingStepId | undefined;
+  /**
+   * Whether this browser holds a pairing at the moment the store hydrates.
+   *
+   * Defaults to `false`, which is the fail-closed reading: a caller that cannot
+   * say loses a stale "finished" rather than asserting one. Read ONCE, on
+   * hydration — a daemon forgotten later, while the last stage is already on
+   * the glass, is answered by that stage's own honest fallback instead of by
+   * yanking the screen out from under the reader.
+   */
+  readonly paired?: boolean;
 }
 
 /**
@@ -101,12 +127,14 @@ export interface OnboardingProgressStoreOptions {
 export class OnboardingProgressStore {
   readonly #storage: OnboardingProgressStorage | undefined;
   readonly #entry: OnboardingStepId | undefined;
+  readonly #paired: boolean;
   readonly #listeners = new Set<() => void>();
   #snapshot: OnboardingProgress | null = null;
 
   constructor(options: OnboardingProgressStoreOptions = {}) {
     this.#storage = 'storage' in options ? options.storage : browserOnboardingStorage();
     this.#entry = options.entry;
+    this.#paired = options.paired ?? false;
   }
 
   snapshot = (): OnboardingProgress => {
@@ -135,7 +163,7 @@ export class OnboardingProgressStore {
   }
 
   #load(): OnboardingProgress {
-    const stored = this.#read();
+    const stored = reconcileOnboardingProgress(this.#read(), this.#paired);
     const entry = this.#entry;
     if (entry === undefined) return stored;
     return { v: ONBOARDING_PROGRESS_VERSION, current: entry, furthest: furthestOnboardingStep(stored.furthest, entry) };

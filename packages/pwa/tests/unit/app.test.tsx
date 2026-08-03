@@ -223,6 +223,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('never greets an unpaired browser with "you are set up", however stale storage reads', async () => {
+    // Progress says the arc finished; the pairing registry — the authority on
+    // that — holds nothing. A cleared registry, another profile, an abandoned
+    // attempt: all of them make the stored claim unbelievable.
+    localStorage.setItem('fy-onboarding-v1', JSON.stringify({ v: 1, current: 'done', furthest: 'done' }));
+
+    const { view } = await renderShell('/');
+
+    expect(stepOfSetup(view.container)).toBe('install');
+    expect(view.container.textContent).not.toContain('You are set up');
+    await view.unmount();
+  });
+
   it('leaves a paired browser on its daemons, with setup one quiet link away', async () => {
     const { view } = await renderShell('/', [alpha.daemonId]);
 

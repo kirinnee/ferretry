@@ -13,6 +13,7 @@ import {
   FRESH_ONBOARDING_PROGRESS,
   ONBOARDING_PROGRESS_KEY,
   OnboardingProgressStore,
+  reconcileOnboardingProgress,
   type OnboardingProgressStorage,
   parseOnboardingProgress,
 } from '../../../src/features/onboarding/onboarding-progress.ts';
@@ -147,5 +148,35 @@ describe('OnboardingProgressStore', () => {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'localStorage');
     }
+  });
+});
+
+describe('reconcileOnboardingProgress', () => {
+  it('refuses to call setup finished for a browser that is paired with nothing', () => {
+    const storage = new MemoryStorage(stored({ v: 1, current: 'done', furthest: 'done' }));
+
+    // Cross-store inconsistency: progress says finished, the pairing registry —
+    // which is the authority — holds nothing. Fresh start, not congratulations.
+    expect(new OnboardingProgressStore({ storage, paired: false }).snapshot()).toEqual({
+      ...FRESH_ONBOARDING_PROGRESS,
+    });
+    // Absent evidence is the same answer: the default is fail-closed.
+    expect(new OnboardingProgressStore({ storage }).snapshot()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+    // With a pairing, the stored place is exactly what it says.
+    expect(new OnboardingProgressStore({ storage, paired: true }).snapshot()).toEqual({
+      v: 1,
+      current: 'done',
+      furthest: 'done',
+    });
+  });
+
+  it('leaves every unfinished document alone, paired or not', () => {
+    const midway = { v: 1, current: 'daemon', furthest: 'pair' } as const;
+    expect(reconcileOnboardingProgress(midway, false)).toBe(midway);
+    expect(reconcileOnboardingProgress(midway, true)).toBe(midway);
+    // Having once reached the end is also unbelievable without a pairing.
+    expect(reconcileOnboardingProgress({ v: 1, current: 'install', furthest: 'done' }, false)).toEqual({
+      ...FRESH_ONBOARDING_PROGRESS,
+    });
   });
 });
