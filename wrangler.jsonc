@@ -1,0 +1,4 @@
+{
+  "name": "ferretry",
+  "pages_build_output_dir": "./packages/pwa/dist"
+}

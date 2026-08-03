@@ -4,6 +4,7 @@
     "actions/checkout": "trusted",
     "actions/download-artifact": "trusted",
     "actions/upload-artifact": "trusted",
-    "cachix/install-nix-action": "trusted"
+    "cachix/install-nix-action": "trusted",
+    "cloudflare/wrangler-action": "non-trusted"
   }
 }

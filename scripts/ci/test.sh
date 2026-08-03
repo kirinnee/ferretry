@@ -8,6 +8,7 @@ root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 ./scripts/ci/setup.sh
+./scripts/validate/pages-config.sh
 
 if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
