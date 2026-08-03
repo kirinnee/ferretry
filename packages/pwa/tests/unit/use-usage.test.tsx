@@ -77,11 +77,19 @@ describe('useUsage', () => {
 
   it('shares one poll across several mounted consumers', async () => {
     const reads: string[] = [];
-    const store = new DaemonUsageStore(port(reads), { pollMs: 5, isHidden: () => false });
+    /**
+     * Mounting runs inside `act`, which yields to the event loop, so a live 5ms
+     * poll can slip a tick between the two mounts and make "one read each" a
+     * race the machine's load decides. The store's own gate settles it: the
+     * read after `watch()` is unconditional, every TICK waits for a visible tab.
+     */
+    let hidden = true;
+    const store = new DaemonUsageStore(port(reads), { pollMs: 5, isHidden: () => hidden });
     const first = await mount(<Percent store={store} daemon={laptop} />);
     const second = await mount(<Percent store={store} daemon={laptop} />);
 
     expect(reads).toHaveLength(2);
+    hidden = false;
     await interact(async () => await new Promise(resolve => setTimeout(resolve, 26)));
     const polled = reads.length;
     expect(polled).toBeGreaterThan(2);
