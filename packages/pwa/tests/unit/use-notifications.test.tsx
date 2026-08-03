@@ -34,6 +34,20 @@ import { sessionView } from '../support/sessions.ts';
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'token-b' });
 
+/** The SAME daemon after a credential rotation: a different live connection. */
+const rotatedA = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a.example.test',
+  deviceToken: 'token-a-rotated',
+});
+
+/** The same daemon and credential reached at a new address. */
+const movedA = daemonConnection({
+  daemonId: 'daemon-a',
+  baseUrl: 'https://a2.example.test',
+  deviceToken: 'token-a',
+});
+
 const prefs: PushPreferences = {
   events: { attention: true, question: true, failed: true, completed: true },
   interactiveOnly: false,
@@ -46,6 +60,13 @@ const DEVICE: PushDeviceView = {
   updatedAt: '2026-08-01T10:00:00.000Z',
   expirationTime: null,
   prefs,
+};
+
+/** A second device record, so a readout can be told apart by identity alone. */
+const ROTATED_DEVICE: PushDeviceView = {
+  ...DEVICE,
+  id: 'push-00000000-0000-4000-8000-000000000001',
+  deviceName: 'this browser, re-paired',
 };
 
 const view = (id: string, status: SessionStatus): SessionView => sessionView(id, { state: { status } });
@@ -142,6 +163,49 @@ const surface = (
   return harness;
 };
 
+/**
+ * A granted surface whose registration rejects the FIRST delivery it is asked
+ * for, then works. A worker that dies between the permission read and the show
+ * is an ordinary browser event, and both registration calls are asynchronous, so
+ * either one can be the rejection the hook has to contain.
+ */
+const brittleSurface = (
+  failing: 'getNotifications' | 'showNotification',
+): SurfaceHarness & { failures: () => number } => {
+  const shown: ShownNotification[] = [];
+  let failures = 0;
+  const fail = (stage: 'getNotifications' | 'showNotification'): never => {
+    failures += 1;
+    throw new Error(`the worker went away during ${stage}`);
+  };
+  return {
+    shown,
+    requests: 0,
+    failures: () => failures,
+    surface: {
+      permission: () => 'granted',
+      requestPermission: async () => 'granted',
+      registration: async () => ({
+        getNotifications: async () => {
+          if (failing === 'getNotifications' && failures === 0) fail('getNotifications');
+          return [];
+        },
+        showNotification: async (title: string, options?: NotificationOptions) => {
+          if (failing === 'showNotification' && failures === 0) fail('showNotification');
+          shown.push({
+            title,
+            tag: options?.tag,
+            body: options?.body,
+            data: options?.data as NotificationPresentationData,
+          });
+        },
+      }),
+      showOnPage: null,
+      navigate: () => undefined,
+    } satisfies NotificationSurface,
+  };
+};
+
 const service = (over: Partial<DaemonPushService> = {}) => {
   const log = { registered: 0, revoked: [] as string[], listed: 0 };
   const base: DaemonPushService = {
@@ -162,10 +226,46 @@ const service = (over: Partial<DaemonPushService> = {}) => {
   return { service: { ...base, ...over }, log };
 };
 
-const settle = () =>
-  runAsync(async () => {
-    for (let index = 0; index < 6; index += 1) await Promise.resolve();
+/** Drains the microtask queue; callable from INSIDE an `act` scope. */
+const drain = async (turns = 6) => {
+  for (let index = 0; index < turns; index += 1) await Promise.resolve();
+};
+
+const settle = () => runAsync(() => drain());
+
+/** A deeper drain, for a chain that confirms an enrolment before it lists. */
+const settleDeep = () => runAsync(() => drain(24));
+
+/**
+ * A push service whose device list resolves only when the test says so, which is
+ * what makes a read's resolution ORDER something a test can choose.
+ */
+const deferredService = () => {
+  const reads: {
+    readonly connection: DaemonConnection;
+    readonly settle: (devices: readonly PushDeviceView[]) => void;
+  }[] = [];
+  const push = service({
+    list: connection =>
+      new Promise<readonly PushDeviceView[]>(resolve => {
+        reads.push({ connection, settle: resolve });
+      }),
   });
+  return {
+    ...push,
+    count: () => reads.length,
+    /** Resolves the n-th started read and lets its whole chain finish. */
+    finish: async (index: number, devices: readonly PushDeviceView[]) => {
+      const read = reads[index];
+      if (read === undefined) throw new Error(`no delivery read #${index} has been started`);
+      await runAsync(async () => {
+        read.settle(devices);
+        await drain(12);
+      });
+      return read.connection;
+    },
+  };
+};
 
 describe('useNotificationPreferences', () => {
   it('re-renders on this daemon’s change and ignores another pairing’s', () => {
@@ -256,6 +356,59 @@ describe('useNotificationWatch', () => {
     expect(target.shown[0]?.tag).toBe('fy-session:daemon-a:s1');
     expect(target.shown[0]?.body).toBe('Waiting for you at the prompt.');
     probe.unmount();
+  });
+
+  /**
+   * A rejecting delivery must not escape the hook. Bun fails any test that lets
+   * an unhandled rejection reach the runtime, so these two cases are red without
+   * the containment and green with it — the assertions then prove the rest: the
+   * failed transition was never counted as shown, and the watch is still alive.
+   */
+  const brittleWatch = (target: SurfaceHarness) => {
+    const fleet = sessionsSource(snapshot([view('s1', 'running')]));
+    const store = new DaemonNotificationPreferences();
+    store.set(daemonA.daemonId, { enabled: true });
+    return { fleet, probe: mount(watchHost(fleet.source, target.surface, { preferences: store }), 'granted') };
+  };
+
+  it('contains a delivery whose showNotification rejects and keeps watching', async () => {
+    const target = brittleSurface('showNotification');
+    const watch = brittleWatch(target);
+
+    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    await settle();
+
+    // Attempted, rejected, and never reported as delivered.
+    expect(target.failures()).toBe(1);
+    expect(target.shown).toHaveLength(0);
+
+    // The subscription survived the failure, so the next transition still lands.
+    run(() => watch.fleet.publish(snapshot([view('s1', 'completed')])));
+    await settle();
+
+    expect(target.shown).toHaveLength(1);
+    // The ledger counted the attempt it planned, so this one carries the group
+    // tail; the LINE it announces is the new transition, not the lost one.
+    expect(target.shown[0]?.data.latestBody).toBe('Finished its task.');
+    watch.probe.unmount();
+  });
+
+  it('contains a delivery whose getNotifications rejects before anything is shown', async () => {
+    const target = brittleSurface('getNotifications');
+    const watch = brittleWatch(target);
+
+    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    await settle();
+
+    expect(target.failures()).toBe(1);
+    expect(target.shown).toHaveLength(0);
+
+    run(() => watch.fleet.publish(snapshot([view('s1', 'failed')])));
+    await settle();
+
+    expect(target.shown).toHaveLength(1);
+    expect(target.shown[0]?.data.latestBody).toBe('Failed.');
+    watch.probe.unmount();
   });
 
   it('never notifies about the pane the reader is already looking at', async () => {
@@ -472,6 +625,135 @@ describe('useNotificationControls', () => {
     await settle();
 
     expect(push.log.listed).toBe(2);
+
+    await probe.unmount();
+  });
+
+  /**
+   * THE READOUT BELONGS TO THE NEWEST CONNECTION, WHATEVER RESOLVES LAST.
+   *
+   * A rotated device token is the hard case: the daemon id is unchanged, so a
+   * fence keyed on identity alone would let the previous pairing's device list
+   * land as though this pairing had answered. Here the NEWER read resolves first
+   * and the superseded one second, which is exactly the order a last-write-wins
+   * reader gets wrong.
+   */
+  it('never lets a superseded pairing’s delayed read publish over the newer one', async () => {
+    const push = deferredService();
+    const probe = await mount(controlsHost({ service: push.service }));
+
+    expect(push.count()).toBe(1);
+    expect(probe.controls().delivery).toBe('checking');
+
+    await probe.setConnection(rotatedA);
+    await settleDeep();
+    expect(push.count()).toBe(2);
+
+    const newer = await push.finish(1, [ROTATED_DEVICE]);
+    expect(newer.deviceToken).toBe(rotatedA.deviceToken);
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+
+    const superseded = await push.finish(0, [DEVICE]);
+    expect(superseded.deviceToken).toBe(daemonA.deviceToken);
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+    expect(probe.controls().delivery).toBe('unavailable');
+    expect(probe.controls().deliveryMessage).toBe(PUSH_INACTIVE_MESSAGE);
+
+    // The fence discards the loser; it does not wedge the hook.
+    await runAsync(async () => {
+      probe.controls().refresh();
+    });
+    await settle();
+    await push.finish(2, [DEVICE]);
+    expect(probe.controls().devices).toEqual([DEVICE]);
+
+    await probe.unmount();
+  });
+
+  it('fences a delayed read when only the base URL moved', async () => {
+    const push = deferredService();
+    const probe = await mount(controlsHost({ service: push.service }));
+
+    await probe.setConnection(movedA);
+    await settleDeep();
+
+    const newer = await push.finish(1, [ROTATED_DEVICE]);
+    expect(newer.baseUrl).toBe(movedA.baseUrl);
+    await push.finish(0, [DEVICE]);
+
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+
+    await probe.unmount();
+  });
+
+  it('keeps another daemon’s delayed read out of this daemon’s readout', async () => {
+    const push = deferredService();
+    const probe = await mount(controlsHost({ service: push.service }));
+
+    await probe.setConnection(daemonB);
+    await settleDeep();
+
+    const newer = await push.finish(1, [ROTATED_DEVICE]);
+    expect(newer.daemonId).toBe(daemonB.daemonId);
+    await push.finish(0, [DEVICE]);
+
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+
+    await probe.unmount();
+  });
+
+  it('never lets a superseded revoke publish its result', async () => {
+    const push = deferredService();
+    const probe = await mount(controlsHost({ service: push.service }));
+    await push.finish(0, [DEVICE]);
+    expect(probe.controls().devices).toEqual([DEVICE]);
+
+    await runAsync(async () => {
+      probe.controls().revokeDevice(DEVICE.id);
+      await drain(12);
+    });
+
+    // The revoke itself reached the daemon that issued the id; only its readout
+    // is still in flight when the pairing rotates underneath it.
+    expect(push.log.revoked).toEqual([DEVICE.id]);
+    expect(push.count()).toBe(2);
+
+    await probe.setConnection(rotatedA);
+    await settleDeep();
+    await push.finish(2, [ROTATED_DEVICE]);
+    await push.finish(1, []);
+
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+
+    await probe.unmount();
+  });
+
+  /**
+   * Enabling is asked of ONE daemon and must still finish against it: the fence
+   * withholds the readout, never the enrolment, so the device the reader asked
+   * for exists even though a newer pairing now owns the screen.
+   */
+  it('completes a superseded enrolment without publishing its readout', async () => {
+    const push = deferredService();
+    const host = controlsHost({ service: push.service });
+    const probe = await mount(host);
+    await push.finish(0, [DEVICE]);
+
+    await runAsync(async () => {
+      probe.controls().setEnabled(true);
+      await drain(12);
+    });
+    expect(push.log.registered).toBe(1);
+    expect(push.count()).toBe(2);
+
+    await probe.setConnection(rotatedA);
+    await settleDeep();
+    await push.finish(2, [ROTATED_DEVICE]);
+    await push.finish(1, [DEVICE]);
+
+    expect(probe.controls().devices).toEqual([ROTATED_DEVICE]);
+    // The stored preference for that daemon still records what was asked for.
+    expect(probe.controls().enabled).toBe(true);
 
     await probe.unmount();
   });

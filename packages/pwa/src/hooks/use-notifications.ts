@@ -19,6 +19,12 @@
  * configures, enrols and revokes each independently — and the watch reads each
  * daemon's own preferences on every tick rather than whichever was read last.
  *
+ * ASYNCHRONOUS WORK IS FENCED AND CONTAINED. Nothing in here can cancel a read
+ * or a delivery already in flight, so `useNotificationControls` publishes a
+ * readout only while the connection context that started it is still the current
+ * one, and `useNotificationWatch` contains a rejected delivery instead of letting
+ * it escape the effect that started it. Both are spelled out where they happen.
+ *
  * NO BROWSER GLOBAL IS READ IN HERE. Permission, the registration and the
  * page-level constructor arrive as a `NotificationSurface`; the push enrolment
  * arrives as a `PushEnrolment`. That is what lets the whole subsystem be proved
@@ -27,7 +33,7 @@
  */
 
 import type { PushDeviceView, PushPreferences } from '@ferretry/protocol';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { startNotificationWatch, type SessionsSource } from '../lib/notification-ledger.ts';
@@ -91,7 +97,21 @@ export const useNotificationWatch = (host: NotificationWatchHost, permission: No
       hidden: host.hidden,
       foregroundSession: host.foregroundSession,
       show: spec => {
-        void showNotification(host.surface, notificationPayload(spec));
+        // DELIVERY FAILURE IS CONTAINED HERE, AT THE BOUNDARY THAT STARTED IT.
+        //
+        // A registration is remote machinery: `getNotifications` and
+        // `showNotification` are both asynchronous and both can reject — a worker
+        // that died between the permission read and this call, or an engine that
+        // refuses the tag. Left as a bare fire-and-forget, that rejection escapes
+        // as an unhandled rejection, which a browser logs and a test host treats
+        // as a failure of whatever happened to be running.
+        //
+        // The rejection is swallowed rather than reported, and swallowing it
+        // claims NOTHING: `showNotification` answers an outcome for a delivery
+        // that happened, and a rejected transport produced no outcome at all. The
+        // fleet UI still shows the status change the notification would have
+        // announced, and the next transition tries again with a fresh read.
+        void showNotification(host.surface, notificationPayload(spec)).catch(() => undefined);
       },
       now: host.now,
     });
@@ -162,14 +182,39 @@ export const useNotificationControls = (
     [connection.daemonId, connection.baseUrl, connection.deviceToken, host],
   );
 
+  // ONLY THE NEWEST CONNECTION CONTEXT MAY PUBLISH A READOUT.
+  //
+  // Every delivery read is asynchronous and none of them can be cancelled, so a
+  // read started for the previous context is still in flight when a rotated
+  // device token or a moved base URL produces a new one. Whichever resolves last
+  // would otherwise win, and the loser is not merely stale: it is a different
+  // live connection's device list, presented as this one's.
+  //
+  // The fence is the context IDENTITY, which is exactly what the memo above
+  // re-creates on a re-pair — the same identity the mount effect re-reads on. It
+  // is applied at resolution rather than at launch, because the side effects of
+  // an enrolment, a revoke or a preference sync were already asked for and must
+  // still complete against the daemon they were addressed to.
+  const currentContext = useRef(context);
+  if (currentContext.current !== context) currentContext.current = context;
+
+  const publish = useCallback(
+    (from: PushEnrolmentContext) =>
+      (report: PushDeliveryReport): void => {
+        if (currentContext.current !== from) return;
+        setReport(report);
+      },
+    [],
+  );
+
   const markChecking = useCallback(() => {
     setReport(current => ({ ...current, status: 'checking', message: null }));
   }, []);
 
   const refresh = useCallback(() => {
     markChecking();
-    void readPushDelivery(context).then(setReport);
-  }, [context, markChecking]);
+    void readPushDelivery(context).then(publish(context));
+  }, [context, markChecking, publish]);
 
   useEffect(() => {
     refresh();
@@ -178,8 +223,9 @@ export const useNotificationControls = (
   const setEnabled = useCallback(
     (next: boolean) => {
       markChecking();
+      const started = context;
       if (!next) {
-        void disablePushDelivery(context).then(setReport);
+        void disablePushDelivery(started).then(publish(started));
         return;
       }
       void (async () => {
@@ -188,33 +234,40 @@ export const useNotificationControls = (
         // is never re-prompted, because only the browser's own settings can
         // change that answer.
         const granted = current === 'default' ? await host.surface.requestPermission() : current;
+        // Permission is a fact about the BROWSER, not about a connection, so a
+        // late answer is still the truth for whichever daemon is now selected and
+        // is deliberately outside the fence. The same goes for storing the
+        // refusal: it is written against the daemon the gesture named.
         setPermission(granted);
         if (granted !== 'granted') {
           host.preferences.set(connection.daemonId, { enabled: false });
-          setReport(IDLE_REPORT);
+          publish(started)(IDLE_REPORT);
           return;
         }
-        setReport(await enablePushDelivery(context));
+        publish(started)(await enablePushDelivery(started));
       })();
     },
-    [connection.daemonId, context, host, markChecking],
+    [connection.daemonId, context, host, markChecking, publish],
   );
 
   const setPreferences = useCallback(
     (next: PushPreferences) => {
-      void syncPushPreferences(context, next).then(result => {
-        if (result !== null) setReport(result);
+      const started = context;
+      void syncPushPreferences(started, next).then(result => {
+        // `null` means nothing was sent onward, so the existing readout stands.
+        if (result !== null) publish(started)(result);
       });
     },
-    [context],
+    [context, publish],
   );
 
   const revokeDevice = useCallback(
     (deviceId: string) => {
       markChecking();
-      void revokePushDevice(context, deviceId).then(setReport);
+      const started = context;
+      void revokePushDevice(started, deviceId).then(publish(started));
     },
-    [context, markChecking],
+    [context, markChecking, publish],
   );
 
   return {
