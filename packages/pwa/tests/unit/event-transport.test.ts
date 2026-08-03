@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonEventSocket } from '../../src/lib/event-transport.ts';
-import { DaemonEventTransport } from '../../src/lib/event-transport.ts';
+import { daemonEventTicket, DaemonEventTransport } from '../../src/lib/event-transport.ts';
 
 class FakeSocket implements DaemonEventSocket {
   static latest: FakeSocket | undefined;
@@ -215,5 +215,43 @@ describe('DaemonEventTransport', () => {
 
     // Assert
     should(opened).equal(0);
+  });
+});
+
+describe('daemonEventTicket', () => {
+  const ticket = `fy_ticket_${'t'.repeat(43)}`;
+
+  it('should buy a ticket with the device token on the one request that can carry a header', async () => {
+    // Arrange
+    const seen: Array<readonly [string, RequestInit]> = [];
+
+    // Act
+    const issued = await daemonEventTicket(daemon, async (url, init) => {
+      seen.push([url, init]);
+      return new Response(JSON.stringify({ ticket, ttlSeconds: 30, expiresAt: '2026-08-03T12:00:30.000Z' }), {
+        status: 201,
+      });
+    });
+
+    // Assert — the durable credential travels in a header, and only the disposable one may reach a URL.
+    should(issued).equal(ticket);
+    should(seen[0]?.[0]).equal('https://daemon.example.test/v1/events/ticket');
+    should(seen[0]?.[1].method).equal('POST');
+    should(new Headers(seen[0]?.[1].headers).get('authorization')).equal('Bearer durable-device-token');
+  });
+
+  it('should refuse rather than hand back a ticket the daemon would not sell', async () => {
+    // Arrange / Act / Assert — a stream that silently never opens tells a viewer nothing at all.
+    await should(daemonEventTicket(daemon, async () => new Response('nope', { status: 403 }))).be.rejectedWith(/403/u);
+  });
+
+  it('should refuse a response that is not a ticket', async () => {
+    // Arrange / Act / Assert — a body that parses as something else is damaged evidence, not a ticket.
+    await should(
+      daemonEventTicket(
+        daemon,
+        async () => new Response(JSON.stringify({ ticket: 'plain', ttlSeconds: 30 }), { status: 201 }),
+      ),
+    ).be.rejected();
   });
 });

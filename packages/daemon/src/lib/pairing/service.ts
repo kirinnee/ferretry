@@ -73,10 +73,19 @@ export class PairingDeviceRegistry implements DeviceCredentialVerifier {
 
   add(record: PairingDeviceRecord): void {
     if (record.daemonId !== this.daemonId) throw new Error('a device grant belongs to a different daemon');
+    // A grant with no digest is not a grant. It could never match a real digest, so it would sit in
+    // the registry as a device that silently cannot authenticate — and the invariant "a stored grant
+    // is comparable evidence" would hold only in the file schema, one layer away from the comparison
+    // that relies on it. Refuse loudly instead of registering something unusable.
+    if (record.tokenHash.trim() === '') throw new Error('a device grant carries no token digest');
     this.records.set(record.id, record);
   }
 
   identify(token: string): string | undefined {
+    // Nothing is not a credential. Without this a blank token is hashed and compared against every
+    // record, safe today only because no grant can hold the digest of an empty token — a property
+    // owned by a schema elsewhere rather than by this comparison.
+    if (token.trim() === '') return undefined;
     const digest = this.cryptography.hashDeviceToken(this.daemonId, token);
     let identity: string | undefined;
     for (const record of this.records.values()) {

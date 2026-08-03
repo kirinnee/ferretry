@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiRouter } from '../../../../src/lib/api/index.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
+import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import { fleetEventSocketRoutes } from '../../../../src/lib/runtime/index.ts';
 import type { FleetEventStreamSubsystem } from '../../../../src/lib/runtime/mounts/fleet-events.ts';
 import type { FleetEventStreamScope } from '../../../../src/lib/session/events/index.ts';
@@ -41,11 +42,15 @@ class RecordingFleetEvents implements FleetEventStreamSubsystem {
 }
 
 function fixture(events: RecordingFleetEvents = new RecordingFleetEvents()) {
+  // A real registry, not a stub: a browser cannot put a header on a `WebSocket`, so the ticket IS how
+  // a paired phone reaches this feed and the handshake cases must exercise the credential it uses.
+  const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
   const dispatcher = new ApiSocketDispatcher(
     new ApiRouter([...fleetEventSocketRoutes(events, sessionDirectory([sessionView('s1')]))]),
     CREDENTIALS,
+    tickets,
   );
-  return { events, dispatcher };
+  return { events, dispatcher, tickets };
 }
 
 /** A socket that discards, for cases interested in the scope the attachment was bound to. */
@@ -220,8 +225,8 @@ describe('the mounted fleet event feed', () => {
     // Arrange — a browser `WebSocket` cannot carry an authorization header, so the token arrives as
     // a query parameter. That credential is honoured for loopback peers ONLY, and the route has to
     // tolerate the parameter as well: refusing it as an unknown query would make the feed
-    // unreachable from every browser. Issuing a ticket to a remote PWA is a separate concern that
-    // this credential deliberately does not cover.
+    // unreachable from every browser. A REMOTE browser presents a ticket instead — see the cases
+    // below — because a durable token in a URL is a durable token in an access log.
     const { dispatcher } = fixture();
     const query = [['token', CREDENTIALS.admin]] as const;
 
@@ -276,6 +281,107 @@ describe('the mounted fleet event feed', () => {
     // authority; the warden scope exists precisely so a supervisor cannot read all of it.
     should([refusedStatus(anonymous), refusedStatus(warden)]).deepEqual([401, 403]);
     should(events.scopes).be.empty();
+  });
+
+  it('should let a remote paired device hold the feed on a ticket', async () => {
+    // Arrange — this is the case the feed existed for and could not serve: a phone is not loopback and
+    // its `WebSocket` cannot carry a header, so before the ticket it had no way to authenticate here
+    // at all.
+    const { events, dispatcher, tickets } = fixture();
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
+
+    // Act
+    const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', ticket]] }));
+    await attach(decision);
+
+    // Assert — accepted, and the ticket parameter did not disturb the scope the caller asked for.
+    should(decision.outcome).equal('accepted');
+    should(events.scopes).deepEqual([{ kind: 'fleet' }]);
+  });
+
+  it('should let a ticket carry the cursor the caller asked for', async () => {
+    // Arrange
+    const { events, dispatcher, tickets } = fixture();
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['ticket', ticket],
+          ['sessionId', 's1'],
+          ['after', '9'],
+        ],
+      }),
+    );
+    await attach(decision);
+
+    // Assert
+    should(events.scopes).deepEqual([{ kind: 'session', sessionId: 's1', after: 9 }]);
+  });
+
+  it('should spend the ticket, so a captured URL cannot reopen the feed', async () => {
+    // Arrange — the URL reaches every proxy log on the path, so replay is the threat that matters.
+    const { events, dispatcher, tickets } = fixture();
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' });
+    const url = () => request({ path: '/v1/events', query: [['ticket', ticket]] });
+
+    // Act
+    const first = await dispatcher.upgrade(url());
+    await attach(first);
+    const replayed = await dispatcher.upgrade(url());
+
+    // Assert
+    should(first.outcome).equal('accepted');
+    should(refusedStatus(replayed)).equal(401);
+    should(events.scopes).have.length(1);
+  });
+
+  it('should refuse a ticket nobody issued, and say nothing about why', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act — a guess, and a blank one.
+    const guessed = await dispatcher.upgrade(
+      request({ path: '/v1/events', query: [['ticket', `fy_ticket_${'z'.repeat(43)}`]] }),
+    );
+    const blank = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', '']] }));
+
+    // Assert — the same 401 an unauthenticated caller gets, with no hint that a ticket surface exists.
+    should([refusedStatus(guessed), refusedStatus(blank)]).deepEqual([401, 401]);
+    should(refusedCode(guessed)).equal('unauthorized');
+    should(refusedCode(blank)).equal('unauthorized');
+    should(events.scopes).be.empty();
+  });
+
+  it('should never let a ticket relax the scope its buyer had', async () => {
+    // Arrange — a warden may not read the whole fleet's lifecycle, and buying a ticket must not be a
+    // way around that. The refusal is a 403, exactly as it is for the bearer itself.
+    const { events, dispatcher, tickets } = fixture();
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'warden' });
+
+    // Act
+    const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', ticket]] }));
+
+    // Assert
+    should(refusedStatus(decision)).equal(403);
+    should(events.scopes).be.empty();
+  });
+
+  it('should prefer a presented bearer over a ticket, so a real credential never spends one', async () => {
+    // Arrange
+    const { dispatcher, tickets } = fixture();
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' });
+
+    // Act — the CLI holds a header AND happens to carry a ticket in the URL.
+    const decision = await dispatcher.upgrade(
+      request({ path: '/v1/events', query: [['ticket', ticket]], headers: human }),
+    );
+
+    // Assert — accepted on the header, and the ticket is still unspent afterwards.
+    should(decision.outcome).equal('accepted');
+    should(tickets.redeem(ticket)).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
   it('should claim only its own path', () => {

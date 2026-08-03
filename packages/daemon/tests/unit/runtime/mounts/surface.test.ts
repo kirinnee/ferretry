@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import {
   createMountedDispatcher,
   createMountedRawDispatcher,
@@ -102,6 +103,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ),
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
+  socketTickets: new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` }),
 });
 
 describe('the mounted daemon surface', () => {
@@ -197,6 +199,10 @@ describe('the mounted daemon surface', () => {
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
+      // The ticket counter for the socket table below. It is on THIS table, not that one: a browser
+      // buys a ticket over an ordinary request — the only kind that can carry a header — and spends it
+      // on the upgrade.
+      'POST /v1/events/ticket',
     ]);
   });
 

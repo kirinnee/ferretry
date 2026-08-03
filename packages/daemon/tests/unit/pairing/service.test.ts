@@ -311,3 +311,116 @@ describe('PairingDeviceRegistry', () => {
     should(registry.identify(DEVICE_TOKEN)).be.undefined();
   });
 });
+
+/**
+ * The refusals, against a hash that is sensitive to BOTH the daemon id and the whole token — the
+ * shape `NodePairingCryptography` has. The service fixture's hash deliberately collides on token
+ * length, which is fine for exercising the state machine but cannot show that a wrong token, or the
+ * right token at the wrong daemon, is turned away.
+ */
+describe('PairingDeviceRegistry refusals', () => {
+  const SECOND_DAEMON_ID = `fy_daemon_${'f'.repeat(43)}` as DaemonId;
+  const separated = {
+    hashDeviceToken: (daemonId: string, token: string): string => `sha256(${daemonId}\0${token})`,
+  };
+
+  function grantedTo(daemonId: DaemonId, token: string, id = 'device-1'): PairingDeviceRegistry {
+    const registry = new PairingDeviceRegistry(daemonId, separated);
+    registry.add({
+      id,
+      daemonId,
+      name: 'phone',
+      platform: 'browser',
+      createdAt: '2026-08-03T12:00:00.000Z',
+      lastSeenAt: '2026-08-03T12:00:00.000Z',
+      tokenHash: separated.hashDeviceToken(daemonId, token),
+    });
+    return registry;
+  }
+
+  it('should identify the device that holds the token', () => {
+    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(DEVICE_TOKEN)).equal('device-1');
+  });
+
+  it('should refuse a token no grant covers', () => {
+    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(SECOND_DEVICE_TOKEN)).be.undefined();
+  });
+
+  it('should refuse a token granted by another daemon', () => {
+    // The digest is domain-separated by daemon id, so copying a device document — or the token
+    // itself — to a second daemon cannot make the credential valid there.
+    const here = grantedTo(DAEMON_ID, DEVICE_TOKEN);
+    const there = grantedTo(SECOND_DAEMON_ID, DEVICE_TOKEN, 'device-2');
+
+    should(here.identify(DEVICE_TOKEN)).equal('device-1');
+    should(there.identify(DEVICE_TOKEN)).equal('device-2');
+    should(new PairingDeviceRegistry(SECOND_DAEMON_ID, separated).identify(DEVICE_TOKEN)).be.undefined();
+  });
+
+  it('should refuse the stored digest presented as if it were the token', () => {
+    // What the daemon persists is not a credential: a reader of `devices.json` holds hashes, and a
+    // hash re-hashes to something else. Only the token the phone kept can authenticate.
+    const digest = separated.hashDeviceToken(DAEMON_ID, DEVICE_TOKEN);
+
+    should(grantedTo(DAEMON_ID, DEVICE_TOKEN).identify(digest)).be.undefined();
+  });
+
+  it('should refuse a blank token without consulting any grant', () => {
+    const consulted: string[] = [];
+    const recording = {
+      hashDeviceToken: (daemonId: string, token: string): string => {
+        consulted.push(token);
+        return separated.hashDeviceToken(daemonId, token);
+      },
+    };
+    const registry = new PairingDeviceRegistry(DAEMON_ID, recording);
+
+    should(registry.identify('')).be.undefined();
+    should(registry.identify('   ')).be.undefined();
+    should(consulted).be.empty();
+  });
+
+  it('should refuse to register a grant carrying no digest', () => {
+    const registry = new PairingDeviceRegistry(DAEMON_ID, separated);
+
+    should(() =>
+      registry.add({
+        id: 'device-1',
+        daemonId: DAEMON_ID,
+        name: 'phone',
+        platform: 'browser',
+        createdAt: '2026-08-03T12:00:00.000Z',
+        lastSeenAt: '2026-08-03T12:00:00.000Z',
+        tokenHash: '  ',
+      }),
+    ).throw('a device grant carries no token digest');
+    should(registry.identify(DEVICE_TOKEN)).be.undefined();
+  });
+
+  it('should compare every grant, so neither the match nor its position is observable', () => {
+    // No early exit: the loop walks all three records whichever one holds the token, so the number
+    // of comparisons never says which device answered — or whether one did.
+    const comparisons: Array<readonly [string, string]> = [];
+    const registry = new PairingDeviceRegistry(DAEMON_ID, separated, [], (left, right) => {
+      comparisons.push([left, right]);
+      return left === right;
+    });
+    for (const [index, token] of [SECOND_DEVICE_TOKEN, DEVICE_TOKEN, 'fy_device_other'].entries()) {
+      registry.add({
+        id: `device-${index}`,
+        daemonId: DAEMON_ID,
+        name: 'phone',
+        platform: 'browser',
+        createdAt: '2026-08-03T12:00:00.000Z',
+        lastSeenAt: '2026-08-03T12:00:00.000Z',
+        tokenHash: separated.hashDeviceToken(DAEMON_ID, token),
+      });
+    }
+
+    should(registry.identify(DEVICE_TOKEN)).equal('device-1');
+    should(comparisons).have.length(3);
+    comparisons.length = 0;
+    should(registry.identify('fy_device_absent')).be.undefined();
+    should(comparisons).have.length(3);
+  });
+});

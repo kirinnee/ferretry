@@ -26,6 +26,8 @@ import {
 const BIND = { host: '127.0.0.1', port: 0 } as const;
 
 const CREDENTIALS = { admin: 'admin-secret' } as const;
+/** The transport translation is the subject here, so no ticket is redeemable. */
+const NO_TICKETS = { redeem: () => undefined } as const;
 
 const running: ApiServerHandle[] = [];
 
@@ -40,7 +42,7 @@ afterEach(async () => {
 function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = [], raw: readonly RawRoute[] = []) {
   return {
     http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
-    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS),
+    sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_TICKETS),
     raw: new ApiRawDispatcher(new ApiRouter(raw), CREDENTIALS),
     corsOrigins: ['https://ferretry.pages.dev'],
   };

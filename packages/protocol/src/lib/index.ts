@@ -12,6 +12,7 @@ export * from './pins.ts';
 export * from './push.ts';
 export * from './service.ts';
 export * from './session.ts';
+export * from './socket-ticket.ts';
 export * from './stt.ts';
 export * from './task-boards.ts';
 export * from './tasks.ts';

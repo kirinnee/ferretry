@@ -1,9 +1,23 @@
-import type { IFyEventTransport } from '@ferretry/protocol';
+import { type IFyEventTransport, SocketTicketResponseSchema } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
-import { daemonEventUrl, daemonUrl } from './daemon-transport.ts';
+import { daemonEventUrl, daemonRequest, daemonUrl } from './daemon-transport.ts';
 
 /** Obtains a short-lived, single-use event ticket for one paired daemon. */
 export type DaemonEventTicketIssuer = (daemon: DaemonConnection) => Promise<string>;
+
+/** The one request in this adapter that CAN carry a header, which is the whole reason it exists: the
+ *  device token buys a ticket here so the socket below never has to put a durable credential in a URL.
+ *  A refusal is thrown rather than smoothed over — a stream that silently never connects is worse for
+ *  a viewer than one that says the daemon would not have it. */
+export const daemonEventTicket = async (
+  daemon: DaemonConnection,
+  send: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+): Promise<string> => {
+  const { url, init } = daemonRequest(daemon, '/v1/events/ticket', { method: 'POST' });
+  const response = await send(url, init);
+  if (!response.ok) throw new Error(`daemon refused an event ticket: ${response.status}`);
+  return SocketTicketResponseSchema.parse(await response.json()).ticket;
+};
 
 /** The browser WebSocket surface used by the protocol-client adapter. */
 export interface DaemonEventSocket {

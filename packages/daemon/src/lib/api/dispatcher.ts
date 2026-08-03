@@ -5,6 +5,7 @@ import { type ApiRequest, type ApiResponse, headerValue, queryValue } from './ht
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type { ApiRoute, RouteContext, ScopedRoute } from './route.ts';
 import type { ApiRouter } from './router.ts';
+import { SOCKET_TICKET_QUERY_PARAMETER, type SocketTicketRedeemer } from './socket-ticket.ts';
 
 /** The pane's own session id, so an in-pane caller is attributed to itself rather than to the
  *  shared token it holds. */
@@ -45,17 +46,26 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   router: ApiRouter<TRoute>,
   credentials: ApiCredentials,
   request: ApiRequest,
+  tickets?: SocketTicketRedeemer,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
   if (lookup.kind === 'matched' && lookup.route.scope === 'public')
     return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params } };
 
-  const authentication = authenticate(credentials, {
+  const presented = authenticate(credentials, {
     bearer: bearerToken(headerValue(request, 'authorization')),
     // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
     // that could already read the token file it came from.
     query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
   });
+  // A ticket is the credential a browser CAN present on an upgrade, and only the upgrade boundary
+  // passes a redeemer — an ordinary route is given none, so a ticket read out of an access log
+  // authenticates nothing there. It is tried only when the request could not authenticate on its own,
+  // so a caller holding a real bearer never silently spends a single-use ticket.
+  const authentication =
+    presented.kind === 'anonymous' && tickets !== undefined
+      ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '') ?? presented)
+      : presented;
   if (authentication.kind === 'anonymous')
     return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };
 
@@ -89,7 +99,11 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     sessionId: headerValue(request, SESSION_ID_HEADER),
     client: headerValue(request, CLIENT_HEADER),
   });
-  return { kind: 'authorized', route: lookup.route, context: { request, params: lookup.params, actor } };
+  return {
+    kind: 'authorized',
+    route: lookup.route,
+    context: { request, params: lookup.params, actor, credential: authentication },
+  };
 }
 
 /** Turns a request into a response, over the shared authorization boundary above. */

@@ -18,8 +18,10 @@ function soleQuery(context: RouteContext, name: string): string | undefined {
 
 async function scope(context: RouteContext, sessions: SessionDirectorySubsystem): Promise<FleetEventStreamScope> {
   for (const name of context.request.query.keys()) {
-    // `token` is consumed by loopback WebSocket authentication before the route is reached.
-    if (name !== 'after' && name !== 'sessionId' && name !== 'token')
+    // `token` and `ticket` are both consumed by the upgrade's authentication before the route is
+    // reached — the first from a loopback peer, the second from a browser that cannot send a header
+    // at all. Rejecting either here would refuse the only credential such a caller can present.
+    if (name !== 'after' && name !== 'sessionId' && name !== 'token' && name !== 'ticket')
       throw new ApiError(400, `unknown event-stream query parameter "${name}"`, 'invalid_query');
   }
   const rawAfter = soleQuery(context, 'after') ?? '0';
