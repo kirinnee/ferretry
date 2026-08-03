@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Ferretry">
+  <title>Ferretry</title>
+  <!--
+    The tab icon. One file for both colour schemes, because a favicon has no
+    theme hook other than this: the browser paints it onto ITS OWN tab strip, not
+    onto the page, so the page's `data-theme` cannot reach it and a single fixed
+    ink would be invisible on half of all readers' chrome.
+
+    `prefers-color-scheme` inside an SVG favicon is honoured by every browser that
+    supports SVG favicons at all; the ones that do not fall back to
+    `favicon-32.png`, which is a self-contained dark tile for exactly that reason
+    (see `scripts/local/gen-pwa-icons.sh`).
+
+    The geometry is `docs/brand/fleet-grid/logomark.svg` unchanged — deliberately
+    NOT simplified for small sizes. Every edge sits on the 4-unit grid, so at 16px
+    each cell is a whole 4x4 pixel block with a whole 1px gap and the eight cells
+    stay eight cells; that pixel alignment is why this direction is the one that
+    survives the shrink. The absent ninth cell is the mark's meaning, not a gap to
+    be tidied: Ferretry does not draw a healthy square for a report it never
+    received.
+  -->
+  <style>
+    :root { --ink: #17171b; --hub: #4f52d6; }
+    @media (prefers-color-scheme: dark) {
+      :root { --ink: #f2f2f4; --hub: #8f93ee; }
+    }
+  </style>
+  <g fill="var(--ink)">
+    <rect x="4" y="4" width="16" height="16" rx="4"/>
+    <rect x="24" y="4" width="16" height="16" rx="4"/>
+    <rect x="44" y="4" width="16" height="16" rx="4"/>
+    <rect x="4" y="24" width="16" height="16" rx="4"/>
+    <rect x="4" y="44" width="16" height="16" rx="4"/>
+    <rect x="24" y="44" width="16" height="16" rx="4"/>
+    <rect x="44" y="44" width="16" height="16" rx="4"/>
+  </g>
+  <circle cx="32" cy="32" r="8" fill="var(--hub)"/>
+</svg>

@@ -123,6 +123,7 @@ import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.t
 import { AgentSidebar } from '../src/shell/agent-sidebar.tsx';
 import { AppBar } from '../src/shell/app-bar.tsx';
 import { BottomSheet } from '../src/shell/bottom-sheet.tsx';
+import { BrandMark } from '../src/shell/brand-mark.tsx';
 import { BulkStopConfirmation } from '../src/shell/bulk-stop-confirmation.tsx';
 import { type ChatWidth, ChatWidthControl } from '../src/shell/chat-width-control.tsx';
 import { ChunkErrorBoundary } from '../src/shell/chunk-error-boundary.tsx';
@@ -2363,6 +2364,21 @@ function Shell() {
             <Label>Session marks</Label>
           </PanelHeader>
           <PanelBody className="flex flex-col gap-sm">
+            {/* The brand mark, in the two contexts that render it differently.
+                Untinted, `currentColor` resolves to `--fg` and the accent hub is
+                a visibly different kind of thing from the cells; inside the
+                accent-tinted lockup the pairing header uses, the two colours
+                coincide and only the round silhouette carries that. Both are
+                correct, and seeing them side by side is the only way to check
+                the second one still reads. */}
+            <ActionGroup>
+              <BrandMark size={20} />
+              <BrandMark size={32} />
+              <span className="flex items-center gap-2 text-accent">
+                <BrandMark size={20} />
+                <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
+              </span>
+            </ActionGroup>
             <div className="flex flex-col gap-1">
               {MARK_SESSIONS.map(([name, view]) => (
                 <span className="flex items-center gap-sm text-cell text-muted" key={name}>

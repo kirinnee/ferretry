@@ -1,3 +1,11 @@
+<!-- The wordmark ships in two inks and GitHub picks by the reader's theme: a
+     single image would be near-invisible for half of them. Both files are
+     committed under `docs/brand/fleet-grid/` — no external image host. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/fleet-grid/png/wordmark-dark-960.png">
+  <img src="docs/brand/fleet-grid/png/wordmark-960.png" alt="Ferretry" width="360">
+</picture>
+
 # ferretry
 
 Personal agent-orchestration product: a per-host daemon, one PWA, and a single CLI binary
