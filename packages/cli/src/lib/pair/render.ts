@@ -1,0 +1,206 @@
+import type { PairingCodeMintResponse } from '@ferretry/protocol';
+import { QR_INDENT, qrColumns, qrFitsTerminal } from './qr.ts';
+
+/**
+ * The pairing screen.
+ *
+ * Someone running `fy pair` for the first time should not have to read anything else, so the screen
+ * is ordered by where the eye goes: one instruction, then the QR as the visual centre, then the code
+ * for anyone whose camera will not cooperate, then when it dies.
+ *
+ * THE CODE IS PRINTED THREE WAYS ON PURPOSE. Scanned, it is inside the QR. Typed, it is the grouped
+ * `code` line. Dictated down a phone line, it is the `aloud` line — because `7F3K` read out is where
+ * pairing over a call actually fails, and the NATO alphabet is what people already reach for.
+ *
+ * NOTHING HERE IS EVER WRITTEN ANYWHERE ELSE. The code lives in this string, on this screen, for two
+ * minutes. It is not logged, not persisted, and never passed as an argument to anything.
+ */
+
+const INDENT = ' '.repeat(QR_INDENT);
+const LABEL_WIDTH = 9;
+
+/** How each symbol is said out loud. The pairing alphabet excludes every symbol without a distinct name. */
+const SPOKEN: Record<string, string> = {
+  A: 'alfa',
+  B: 'bravo',
+  C: 'charlie',
+  D: 'delta',
+  E: 'echo',
+  F: 'foxtrot',
+  G: 'golf',
+  H: 'hotel',
+  J: 'juliett',
+  K: 'kilo',
+  M: 'mike',
+  N: 'november',
+  P: 'papa',
+  Q: 'quebec',
+  R: 'romeo',
+  S: 'sierra',
+  T: 'tango',
+  V: 'victor',
+  W: 'whiskey',
+  X: 'x-ray',
+  Y: 'yankee',
+  Z: 'zulu',
+  '2': 'two',
+  '3': 'three',
+  '4': 'four',
+  '5': 'five',
+  '6': 'six',
+  '7': 'seven',
+  '8': 'eight',
+  '9': 'nine',
+};
+
+/** A code as it should be dictated: each group spelled, the groups kept apart. */
+export function spellCode(code: string): string {
+  return code
+    .split('-')
+    .map(group =>
+      Array.from(group)
+        .map(symbol => SPOKEN[symbol] ?? symbol)
+        .join(' '),
+    )
+    .join(' · ');
+}
+
+/**
+ * What is left on the clock, as `m:ss`.
+ *
+ * Rounded UP, so the last second is shown as `0:01` rather than as `0:00` beside a code that still
+ * works. A countdown that reads zero while the code lives is the same lie as a QR left on screen
+ * after it dies, just in the other direction.
+ */
+export function renderRemaining(milliseconds: number): string {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1_000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+/** Everything the screen needs, gathered so the layout is a pure function of it. */
+export interface PairingInvitation {
+  readonly mint: PairingCodeMintResponse;
+  /** The full pairing link, code and fingerprint included. */
+  readonly link: string;
+  /** The QR, already drawn in block characters. */
+  readonly qr: string;
+  /** The terminal width, or nothing when it will not say. */
+  readonly columns: number | undefined;
+  /** How long the code has left at the moment of printing. */
+  readonly remainingMs: number;
+  /** What this binary is called, so the retry hint is the command the operator actually has. */
+  readonly binaryName: string;
+}
+
+const indented = (block: string): string =>
+  block
+    .split('\n')
+    .map(line => (line === '' ? line : `${INDENT}${line}`))
+    .join('\n');
+
+/**
+ * Greedy word wrap for the screen's prose.
+ *
+ * Only the prose. The code, the spelling and the link are laid out to be read or copied whole, and the
+ * link is a single unbreakable token anyway — wrapping it would invite someone to copy half of it.
+ */
+export function wrapText(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    const candidate = line === '' ? word : `${line} ${word}`;
+    if (candidate.length > width && line !== '') {
+      lines.push(line);
+      line = word;
+      continue;
+    }
+    line = candidate;
+  }
+  lines.push(line);
+  return lines;
+}
+
+/**
+ * Said instead of a QR that would wrap: what is wrong, by how much, and the two ways out.
+ *
+ * Wrapped to the window that was just called too narrow, because a complaint about wrapping that
+ * itself wraps is not a message anyone trusts.
+ */
+function tooNarrow(invitation: PairingInvitation, columns: number): string {
+  const needed = qrColumns(invitation.qr) + QR_INDENT;
+  const notice =
+    `The QR needs ${needed} columns and this window has ${columns}, so it is not drawn — a QR that ` +
+    `wraps cannot be scanned. Widen the window and run \`${invitation.binaryName} pair\` again, or ` +
+    'open the link below on the phone.';
+  return wrapText(notice, Math.max(1, columns - QR_INDENT))
+    .map(line => `${INDENT}${line}`)
+    .join('\n');
+}
+
+function qrBlock(invitation: PairingInvitation): string {
+  const columns = invitation.columns;
+  if (columns !== undefined && !qrFitsTerminal(invitation.qr, columns)) return tooNarrow(invitation, columns);
+  return indented(invitation.qr);
+}
+
+/** The whole screen, from the instruction down to the deadline. */
+export function renderInvitation(invitation: PairingInvitation): string {
+  // A labelled row, wrapped under a hanging indent so the label column stays a column. The link has
+  // no spaces to break on and so is never wrapped — half a copied link is worse than a long one.
+  const gutter = INDENT + ' '.repeat(LABEL_WIDTH);
+  const row = (label: string, value: string): string =>
+    wrapText(value, Math.max(1, (invitation.columns ?? Number.POSITIVE_INFINITY) - gutter.length))
+      .map((line, index) => (index === 0 ? `${INDENT}${label.padEnd(LABEL_WIDTH)}${line}` : `${gutter}${line}`))
+      .join('\n');
+  const headline = "Scan this with your phone's camera — it opens Ferretry ready to pair.";
+  return [
+    wrapText(headline, invitation.columns ?? headline.length).join('\n'),
+    '',
+    qrBlock(invitation),
+    '',
+    row('code', invitation.mint.code),
+    row('aloud', spellCode(invitation.mint.code)),
+    row('link', invitation.link),
+    row('expires', `in ${renderRemaining(invitation.remainingMs)}, and the code works once`),
+  ].join('\n');
+}
+
+/** The live line while the code is alive. */
+export function renderWaiting(remainingMs: number): string {
+  return `Waiting for the scan — ${renderRemaining(remainingMs)} left`;
+}
+
+/**
+ * The ending the operator came back to the terminal for.
+ *
+ * The device's token is deliberately absent: it belongs to the device, the terminal has no use for it,
+ * and a token on a screen is a token in a screenshot.
+ *
+ * `deviceName` is the one piece of this screen the DEVICE chose, so it is attacker-influenced text. It
+ * is safe to print because the protocol refuses a name carrying a control or format character — an
+ * escape sequence here would otherwise rewrite the operator's terminal — and it is printed in full
+ * rather than truncated so nothing is hidden from whoever is deciding this pairing was expected.
+ */
+export function renderPaired(deviceName: string, daemonName: string, daemonHost: string): string {
+  return `${deviceName} is paired with ${daemonName} (${daemonHost}) — it holds its own token now.`;
+}
+
+/** The other ordinary ending: nobody scanned it. */
+export function renderExpired(binaryName: string): string {
+  return `The code expired unused. Run \`${binaryName} pair\` for a new one.`;
+}
+
+/**
+ * The ending that must not be mistaken for either of the other two.
+ *
+ * The daemon stopped answering, so whether the code was claimed is genuinely unknown. Reporting the
+ * benign reading — "expired unused" — would tell the operator a device is not enrolled when it may
+ * be, so this says what it does not know and refuses to round it off.
+ */
+export function renderUnconfirmed(reason: string, binaryName: string): string {
+  return [
+    `The code has expired and whether anything used it is unknown: ${reason}.`,
+    'Treating it as unpaired rather than reporting an ending on no evidence.',
+    `Run \`${binaryName} pair\` again once the daemon answers.`,
+  ].join(' ');
+}

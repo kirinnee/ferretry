@@ -53,6 +53,11 @@ import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
+import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
+import { registerPairCommands } from '../src/lib/pair/commands';
+import { PairController } from '../src/lib/pair/controller';
+import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
@@ -380,6 +385,22 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
+  // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is
+  // mostly a QR, and tinting the one image the onboarding depends on is a risk with nothing to gain.
+  ({ program, world, client }) =>
+    registerPairCommands(
+      program,
+      new PairController({
+        gateway: new ProtocolPairingGateway(client),
+        screen: new PlainScreen(),
+        progress: world.spinner,
+        exit: world.io,
+        clock: new SystemMillisecondClock(),
+        qr: new QrCodeTerminal(),
+        terminal: new ProcessTerminalSize(),
+        binaryName: BINARY_NAME,
+      }),
+    ),
 ];
 
 /**
