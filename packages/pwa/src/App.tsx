@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
@@ -59,12 +60,62 @@ import { CommandPalette } from './shell/command-palette.tsx';
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { ThemeToggle } from './shell/theme-toggle.tsx';
 
-let portraitLockInstalled = false;
+/**
+ * Wraps a one-shot document-lifetime side effect, latching only on SUCCESS.
+ *
+ * The latch exists because React runs a mount effect twice under StrictMode and
+ * the wrapped installers attach permanent listeners. Setting it BEFORE the call
+ * is the trap: a refusal would then consume the only attempt the tab ever
+ * makes, and the feature would stay off for the life of the document with
+ * nothing to show for it. A throw is swallowed for the same reason — these are
+ * progressive enhancements, and one that cannot install must degrade rather
+ * than take the shell down with it.
+ *
+ * A closure rather than a module-level flag so the behaviour is provable: the
+ * failure-then-retry sequence needs a fresh latch, which a module global cannot
+ * give a second test in the same process.
+ */
+export const installOnce = (install: () => void): (() => boolean) => {
+  let installed = false;
+  return () => {
+    if (installed) return false;
+    try {
+      install();
+    } catch {
+      return false;
+    }
+    installed = true;
+    return true;
+  };
+};
+
+const installPortraitLockOnce = installOnce(installPortraitLock);
+
+/**
+ * Does this event target own the keystroke?
+ *
+ * The palette shortcut is registered in the CAPTURE phase on `window`, so a
+ * field cannot decline it by handling the event first. Text entry therefore has
+ * to be recognised here: Ctrl+K is "delete to end of line" in every readline
+ * and GTK text field, and swallowing it inside the composer would break editing
+ * to open a palette nobody asked for.
+ *
+ * Structural, not `instanceof`: the event may originate in another realm — an
+ * embedded document, a test DOM — where `instanceof HTMLElement` is false for a
+ * perfectly ordinary `<input>`.
+ */
+export const isTextEntryTarget = (target: EventTarget | null): boolean => {
+  const element = target as { readonly tagName?: unknown; readonly isContentEditable?: unknown } | null;
+  if (element === null || typeof element !== 'object') return false;
+  if (element.isContentEditable === true) return true;
+  const tagName = typeof element.tagName === 'string' ? element.tagName.toUpperCase() : '';
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+};
 
 const notificationPermission = (): NotificationPermissionState =>
   typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
 
-const browserNotificationSurface = (
+export const browserNotificationSurface = (
   navigate: (path: string) => void,
   permissionChanged: (permission: NotificationPermissionState) => void,
 ): NotificationSurface => ({
@@ -87,7 +138,7 @@ const browserNotificationSurface = (
   navigate,
 });
 
-const browserPushEnrolment = (): PushEnrolment | null => {
+export const browserPushEnrolment = (): PushEnrolment | null => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
   if (
     !supportsWebPush({
@@ -137,6 +188,19 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'Learning' }];
   }
 };
+
+/**
+ * What a screen reader hears after an in-app navigation.
+ *
+ * Derived from the crumbs rather than written twice, so the announcement can
+ * never name a different page from the one the app bar shows. The daemon id is
+ * deliberately absent: it is a fingerprint, not a place, and the crumb trail is
+ * already the reader's location.
+ */
+export const routeAnnouncement = (route: PageRoute): string =>
+  pageCrumbs(route)
+    .map(crumb => crumb.label)
+    .join(', ');
 
 function ConnectionPicker() {
   const store = useAppStore();
@@ -194,6 +258,19 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
   );
 }
 
+type SessionState = 'opening' | 'connected' | 'failed';
+
+/**
+ * One sentence per state, in a table rather than nested ternaries, because the
+ * live region below must render exactly one of them and swapping the SENTENCE
+ * is the whole mechanism — see the comment on the region itself.
+ */
+const SESSION_STATE_MESSAGE: Record<SessionState, string> = {
+  opening: 'Opening this daemon-scoped session…',
+  connected: 'This session is connected. The conversation workspace is not assembled in this build yet.',
+  failed: 'This session could not be opened.',
+};
+
 function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
@@ -221,6 +298,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     return () => clearForegroundPinScope(foreground);
   }, [daemonId, sessionId]);
 
+  const sessionState: SessionState = error !== null ? 'failed' : session === undefined ? 'opening' : 'connected';
+
   return (
     <main
       className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3"
@@ -234,17 +313,20 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         <h1 id="session-route-heading" className="m-0 font-display text-display font-bold tracking-display">
           {session?.config.teammate || session?.config.name || scope.sessionId}
         </h1>
-        {error === null ? (
-          <p className="mb-0 text-ui text-muted" role={session === undefined ? 'status' : undefined}>
-            {session === undefined
-              ? 'Opening this daemon-scoped session…'
-              : 'This session is connected. The conversation workspace is not assembled in this build yet.'}
-          </p>
-        ) : (
-          <p className="mb-0 text-ui text-err" role="alert">
-            Could not open this session: {error}
-          </p>
-        )}
+        {/*
+          BOTH LIVE REGIONS STAY MOUNTED. A live region only announces changes
+          that happen while it is already on the page, so a region added in the
+          same commit that fills it — or removed in the same commit that
+          replaces its text — announces nothing at all. Only the SENTENCE
+          changes here, and the alert stays present-but-empty until there is a
+          reason to put something in it.
+        */}
+        <p className="mb-0 text-ui text-muted" role="status" aria-live="polite" data-session-state={sessionState}>
+          {SESSION_STATE_MESSAGE[sessionState]}
+        </p>
+        <p className={error === null ? 'sr-only' : 'mb-0 mt-1 text-ui text-err'} role="alert" data-session-error="">
+          {error === null ? '' : `Could not open this session: ${error}`}
+        </p>
       </section>
     </main>
   );
@@ -356,9 +438,8 @@ export function AppShell() {
   const [permission, setPermission] = useState<NotificationPermissionState>(notificationPermission);
 
   useEffect(() => {
-    if (portraitLockInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
-    portraitLockInstalled = true;
-    installPortraitLock();
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    installPortraitLockOnce();
   }, []);
 
   const workerEnvironment = useMemo(
@@ -412,11 +493,39 @@ export function AppShell() {
   );
   const closePalette = useCallback(() => setPalette(current => ({ ...current, open: false })), []);
 
+  /**
+   * ROUTE CHANGES ARE ANNOUNCED AND TAKE FOCUS.
+   *
+   * A pushState navigation is invisible to assistive technology: nothing
+   * reloads, and `PageHost` unmounts the control that was clicked, so focus
+   * silently falls back to `<body>` and a keyboard reader restarts from the top
+   * of the document on every navigation. Focusing a named region at the head of
+   * the shell restores the "new page" contract a real navigation would have
+   * given for free, and because that region is also the live region, the same
+   * change announces where the reader has arrived.
+   *
+   * NOT ON FIRST PAINT. The initial render is a page load, not a navigation:
+   * the browser has already placed focus, and stealing it would skip whatever
+   * the reader was given.
+   */
+  const pageKey = routePageKey(pageRoute);
+  const routeAnnouncer = useRef<HTMLParagraphElement>(null);
+  const loaded = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pageKey is the navigation signal, not a value this effect reads
+  useEffect(() => {
+    if (!loaded.current) {
+      loaded.current = true;
+      return;
+    }
+    routeAnnouncer.current?.focus();
+  }, [pageKey]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
+      if (isTextEntryTarget(event.target)) return;
       event.preventDefault();
       openPalette();
     };
@@ -457,7 +566,7 @@ export function AppShell() {
         />
         <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
           <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-            <PageHost key={routePageKey(pageRoute)} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+            <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
           </ChunkErrorBoundary>
         </div>
         <CommandPalette
@@ -474,6 +583,23 @@ export function AppShell() {
 
   return (
     <NotificationControlsContext.Provider value={notificationControlsHost}>
+      {/*
+        FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
+        new page's own chrome rather than back at the top of the old one.
+        `tabIndex={-1}` makes it programmatically focusable without adding a tab
+        stop of its own, and `sr-only` keeps it out of the visual design.
+      */}
+      <p
+        ref={routeAnnouncer}
+        tabIndex={-1}
+        className="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-route={pageKey}
+      >
+        {routeAnnouncement(pageRoute)}
+      </p>
       {content}
     </NotificationControlsContext.Provider>
   );

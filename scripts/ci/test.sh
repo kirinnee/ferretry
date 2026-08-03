@@ -38,6 +38,14 @@ if [[ ${mode} == "unit" ]]; then
   # new feature code cannot ship untested behind a green build.
   mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name features -o -name hooks -o -name worklets -o -name shell \) | sort)
   scope_dirs+=("${pwa_dirs[@]}")
+  # The composition root is a package-root FILE, so no directory glob reaches
+  # it, yet it is the most consequential production module in the package: it
+  # is where routes, stores, notification surfaces and browser capabilities are
+  # wired together. Named explicitly so it carries the same 100% obligation as
+  # everything it composes. `src/main.tsx` is deliberately absent — importing it
+  # calls `createRoot`, so it is proved by `tests/unit/host-document.test.ts`
+  # against the document instead.
+  scope_dirs+=("packages/pwa/src/App.tsx")
 fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
 source_list="$(mktemp)"
@@ -62,6 +70,7 @@ awk -v scope="${scope}" -v mode="${mode}" '
     files++
     allowed = path ~ "(^|/)" scope
     if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|features|hooks|worklets|shell)/") allowed = 1
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/App\\.tsx$") allowed = 1
     if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
       bad = 1
