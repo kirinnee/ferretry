@@ -23,10 +23,34 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Build static PWA bundle
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+      # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
+      # installs wrangler with whichever package manager it detects, picks bun from this repository's
+      # lockfile, and then cannot find bun — it runs outside the nix shell that provides it. Calling
+      # bunx inside `nix develop` uses the toolchain the rest of CI already uses, and drops a
+      # third-party action from the deploy path. Wrangler reads both credentials from the
+      # environment, so neither is ever passed as an argument.
+      #
+      # The project is created on first run: Cloudflare merged Workers and Pages into one flow whose
+      # direct-upload path wants files before it will create a project, which a repository that
+      # deploys its own build cannot supply from a browser. `project create` fails when the project
+      # exists, so the list is checked first rather than swallowing the error — a create that fails
+      # for any OTHER reason must still stop the deploy.
+      - name: Ensure the Pages project exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if nix develop .#ci -c bunx wrangler pages project list | grep -qE '(^|[[:space:]])ferretry([[:space:]]|$)'; then
+            echo "project ferretry already exists"
+          else
+            nix develop .#ci -c bunx wrangler pages project create ferretry --production-branch=main
+          fi
       - name: Deploy production bundle
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: pages deploy packages/pwa/dist --project-name=ferretry --branch=main
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          nix develop .#ci -c bunx wrangler pages deploy packages/pwa/dist \
+            --project-name=ferretry --branch=main
