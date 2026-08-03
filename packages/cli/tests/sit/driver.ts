@@ -91,6 +91,7 @@ export class InProcessCliDriver implements CliDriver {
       prompt,
       interactive: false,
       cwd: process.cwd(),
+      homeDirectory: process.cwd(),
       // Hermetic: an in-process journey receives only its explicit FY_* environment. With no token
       // the shared client refuses before it opens a socket, so no journey reaches a live daemon.
       environment,

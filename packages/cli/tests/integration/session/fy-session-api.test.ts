@@ -1,3 +1,4 @@
+import { describe, it } from 'bun:test';
 import type {
   AttachmentView,
   IFyApiClient,
@@ -6,12 +7,11 @@ import type {
   SignalKind,
   SignalOptions,
 } from '@ferretry/protocol';
-import { describe, it } from 'bun:test';
+import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
 import { createFyClientConnector } from '../../../src/adapters/session/client-connector.ts';
 import { FySessionApi } from '../../../src/adapters/session/fy-session-api.ts';
 import { SystemClock } from '../../../src/adapters/session/system-clock.ts';
-import { FyApiClient } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../../../src/lib/session/errors.ts';
 
 const view = { config: { id: 'ses-1' }, state: { id: 'ses-1' }, directory: '/d' } as unknown as SessionView;
@@ -170,6 +170,25 @@ describe('createFyClientConnector', () => {
 
     // Assert
     should(client).be.instanceof(FyApiClient);
+  });
+
+  it('should resolve the local daemon token lazily when FY_TOKEN is absent', async () => {
+    // Arrange
+    let tokenReads = 0;
+    const connector = createFyClientConnector({
+      version: '1.2.3',
+      resolveLocalToken: async () => {
+        tokenReads += 1;
+        return 'local-secret';
+      },
+    });
+
+    // Act
+    const client = await connector();
+
+    // Assert
+    should(client).be.instanceof(FyApiClient);
+    should(tokenReads).equal(1);
   });
 
   it('should refuse to build a client with no token configured', async () => {

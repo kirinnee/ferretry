@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { homedir } from 'node:os';
+import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
+import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
@@ -7,28 +9,31 @@ import type { z } from 'zod';
 // The root manifest is the single source for the PRODUCT name; this package's own name is the BINARY.
 import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
-import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
-import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
-import { SystemFleetClock } from '../src/adapters/fleet/clock';
-import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
-import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
+import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import { SystemFleetClock } from '../src/adapters/fleet/clock';
+import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
+import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
+import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
+import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
+import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
+import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunAudioFileReader } from '../src/adapters/stt/audio-file';
 import { TimerDelay } from '../src/adapters/stt/delay';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
-import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
 import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
-import { type ICliIo, ConsoleIo } from '../src/adapters/terminal/console-io';
-import { type IPrompt, InquirerPrompt } from '../src/adapters/terminal/prompt';
+import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
+import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
+import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
@@ -38,54 +43,50 @@ import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
-import { type DaemonLayout, resolveDaemonLayout } from '../src/lib/daemon/layout';
+import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
+import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
+import { FilesystemController } from '../src/lib/filesystem/controller';
+import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
-import { registerFilesystemCommands } from '../src/lib/filesystem/commands';
-import { FilesystemController } from '../src/lib/filesystem/controller';
-import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
-import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
-import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
-import { registerReadsCommands } from '../src/lib/reads/commands';
-import { ReadsController } from '../src/lib/reads/controller';
-import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
-import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
-import { registerScratchCommands } from '../src/lib/scratch/commands';
-import { ScratchController } from '../src/lib/scratch/controller';
-import { registerSttCommands } from '../src/lib/stt/commands';
-import { SttController } from '../src/lib/stt/controller';
-import { ProtocolSttGateway } from '../src/lib/stt/gateway';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
+import { registerReadsCommands } from '../src/lib/reads/commands';
+import { ReadsController } from '../src/lib/reads/controller';
+import { registerScratchCommands } from '../src/lib/scratch/commands';
+import { ScratchController } from '../src/lib/scratch/controller';
 import {
   AnswerQuestionController,
   InterruptSessionController,
   ListSessionsController,
-  registerSessionCommands,
-  type SessionCommandDeps,
   ResumeSessionController,
+  registerSessionCommands,
   SendMessageController,
+  type SessionCommandDeps,
   type SessionEnvironment,
   SessionPresenter,
-  SignalSessionController,
   SessionStatusController,
+  SignalSessionController,
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
+import { registerSttCommands } from '../src/lib/stt/commands';
+import { SttController } from '../src/lib/stt/controller';
+import { ProtocolSttGateway } from '../src/lib/stt/gateway';
 import { assertSemver } from '../src/lib/version';
 import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
@@ -114,6 +115,8 @@ export interface CliWorld {
   readonly interactive: boolean;
   /** The invocation directory, injected alongside the environment for hermetic in-process journeys. */
   readonly cwd: string;
+  /** The invoking user's home directory, captured for hermetic state-home lookup. */
+  readonly homeDirectory: string;
   /** The process environment, injected so tests never depend on the ambient one. */
   readonly environment: Record<string, string | undefined>;
 }
@@ -127,6 +130,7 @@ export function buildWorld(): CliWorld {
     prompt: new InquirerPrompt(),
     interactive: io.interactive(),
     cwd: process.cwd(),
+    homeDirectory: homedir(),
     environment: process.env,
   };
 }
@@ -135,19 +139,28 @@ export function buildWorld(): CliWorld {
 const DEFAULT_DAEMON_URL = 'http://127.0.0.1:7337';
 
 /**
- * How the CLI finds the daemon: the environment, and nothing else. The CLI never reads `fyd`'s state
- * home — that is the seam the whole split exists to enforce.
+ * How the CLI finds the daemon. An explicit `FY_TOKEN` is retained for remote/CI connections; on a
+ * local installation its absent value falls back to the owner-only credential file that `fyd` mints.
  */
-function daemonConnection(environment: Record<string, string | undefined>): {
+export async function daemonConnection(
+  environment: Record<string, string | undefined>,
+  homeDirectory: string,
+): Promise<{
   baseUrl: string;
   token: string;
   version: string;
-} {
-  const token = environment.FY_TOKEN?.trim() ?? '';
-  if (token === '') {
-    throw new Error('FY_TOKEN is not set — export the token fyd issued so the CLI can authenticate');
-  }
+}> {
+  const explicit = environment.FY_TOKEN?.trim() ?? '';
   const url = environment.FY_URL?.trim() ?? '';
+  if (explicit === '' && url !== '') {
+    throw new Error(
+      'FY_TOKEN is required when FY_URL targets a remote daemon; local daemon credentials are never sent remotely',
+    );
+  }
+  const token =
+    explicit === ''
+      ? await readDaemonToken(`${resolveDaemonStateHome(homeDirectory, environment.FY_HOME)}/api-token`)
+      : explicit;
   return { baseUrl: url === '' ? DEFAULT_DAEMON_URL : url, token, version: assertSemver(pkg.version) };
 }
 
@@ -157,9 +170,13 @@ function daemonConnection(environment: Record<string, string | undefined>): {
  * Deferring the connection is what keeps `--help`, `--version` and a mistyped command working on a
  * host with no daemon and no token: nothing reaches the network until a command actually asks.
  */
-function lazyDaemonConnection(environment: Record<string, string | undefined>): () => Promise<IFyApiClient> {
+function lazyDaemonConnection(
+  environment: Record<string, string | undefined>,
+  homeDirectory: string,
+): () => Promise<IFyApiClient> {
   let connected: Promise<FyApiClient> | undefined;
-  return (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(daemonConnection(environment)));
+  return (): Promise<FyApiClient> =>
+    (connected ??= daemonConnection(environment, homeDirectory).then(options => FyApiClient.connect(options)));
 }
 
 /**
@@ -455,6 +472,8 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
       version: assertSemver(pkg.version),
       ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
       ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
+      resolveLocalToken: () =>
+        daemonConnection(cliEnvironment, world.homeDirectory).then(connection => connection.token),
       ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
     }),
   );
@@ -482,7 +501,7 @@ export function registerDomain(program: Command, world: CliWorld): void {
   const wiring: DomainWiring = {
     program,
     world,
-    client: lazyDaemonClient(lazyDaemonConnection(environment)),
+    client: lazyDaemonClient(lazyDaemonConnection(environment, world.homeDirectory)),
     // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
     ownSessionId: environmentSessionId(environment),
   };

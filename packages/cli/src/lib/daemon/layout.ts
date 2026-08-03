@@ -78,6 +78,19 @@ function requireDirectory(value: string, field: string): string {
 }
 
 /**
+ * Resolve the state home exactly as the daemon does from `FY_HOME` and the invoking user's home.
+ *
+ * This is exported for the local credential reader too: service management and token discovery
+ * must address the same installation, especially when an operator pins `FY_HOME`.
+ */
+export function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined): string {
+  const home = requireDirectory(homeDirectory, 'home directory');
+  return stateHome === undefined || stateHome.trim().length === 0
+    ? join(home, '.ferretry')
+    : requireDirectory(stateHome, 'FY_HOME');
+}
+
+/**
  * Names that become a filename, a systemd unit or a launchd label. A path separator or whitespace
  * here would silently retarget the write — the unit file is the one artifact whose path must never
  * be attacker- or typo-steerable.
@@ -112,10 +125,7 @@ export function managerForPlatform(platform: string): DaemonManagerKind {
  */
 export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout {
   const homeDirectory = requireDirectory(input.homeDirectory, 'home directory');
-  const stateHome =
-    input.stateHome === undefined || input.stateHome.trim().length === 0
-      ? join(homeDirectory, '.ferretry')
-      : requireDirectory(input.stateHome, 'FY_HOME');
+  const stateHome = resolveDaemonStateHome(homeDirectory, input.stateHome);
   const configHome =
     input.configHome === undefined || input.configHome.trim().length === 0
       ? join(homeDirectory, '.config')
