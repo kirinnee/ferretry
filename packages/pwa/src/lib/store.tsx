@@ -1,5 +1,14 @@
 import type { FyApiClient } from '@ferretry/protocol/client';
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 
 import { daemonApiClient } from './api-client.ts';
 import {
@@ -208,6 +217,9 @@ interface StoreAttempt {
   readonly opening: Promise<AppStore>;
 }
 
+const openingSentence = (attempt: number): string =>
+  attempt === 0 ? 'Opening Ferretry…' : 'Retrying: opening Ferretry…';
+
 /**
  * Opens browser persistence once, including under React StrictMode's effect
  * replay, and keeps a rejected open recoverable.
@@ -216,6 +228,22 @@ interface StoreAttempt {
  * reuses the open already running, while the reader's retry is a genuinely new
  * one. A rejected attempt is dropped as it rejects, so no later run can be
  * answered by a failure that has already been reported.
+ *
+ * Until the store opens, one lifecycle surface stays mounted across every
+ * attempt rather than being swapped for a different tree per state. Swapping
+ * trees moves a screen reader's live regions in and out of the document — a
+ * region added in the same commit as its text is unreliably announced — and
+ * destroys the retry control the reader just pressed, so the retry drops focus
+ * to the body. Here the status region, the alert region and the retry control
+ * are the same three nodes from the first paint until the store is open.
+ *
+ * The status region owns the progress sentence and falls silent on failure;
+ * the alert region owns the failure sentence. They never both speak, because
+ * two live regions carrying the same sentence announce it twice.
+ *
+ * A failed open is reported, never smoothed over: no empty store is published
+ * in its place, so no consumer can mistake damaged local state for an
+ * unpaired one.
  */
 export function StoreProvider({ children, store, createStore = createAppStore }: StoreProviderProps) {
   const pending = useRef<StoreAttempt | null>(null);
@@ -250,23 +278,36 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
     };
   }, [attempt, createStore, store]);
 
-  if (failure !== null)
-    return (
-      <div>
-        <p role="alert">Could not open local PWA state: {failure}</p>
-        <button
-          type="button"
-          onClick={() => {
-            setFailure(null);
-            setAttempt(count => count + 1);
-          }}
-        >
-          Try again
-        </button>
-      </div>
-    );
-  if (resolved === null) return <p role="status">Opening Ferretry…</p>;
-  return <StoreContext.Provider value={resolved}>{children}</StoreContext.Provider>;
+  if (resolved !== null) return <StoreContext.Provider value={resolved}>{children}</StoreContext.Provider>;
+
+  const opening = failure === null;
+  return (
+    <div>
+      <p role="status" aria-live="polite" aria-atomic="true">
+        {opening ? openingSentence(attempt) : ''}
+      </p>
+      <p role="alert" aria-atomic="true">
+        {opening ? '' : `Could not open local PWA state: ${failure}`}
+      </p>
+      {/*
+        `aria-disabled` rather than `disabled`: a disabled control leaves the
+        focus order, so the browser blurs it the moment the retry starts —
+        exactly the focus loss a persistent control exists to prevent. The
+        handler enforces the same refusal the attribute announces.
+      */}
+      <button
+        type="button"
+        aria-disabled={opening}
+        onClick={() => {
+          if (opening) return;
+          setFailure(null);
+          setAttempt(count => count + 1);
+        }}
+      >
+        Try again
+      </button>
+    </div>
+  );
 }
 
 export function useAppStore(): AppStore {
@@ -275,7 +316,18 @@ export function useAppStore(): AppStore {
   return store;
 }
 
+/**
+ * Reads the pairing registry, resubscribing only when the store itself changes.
+ *
+ * The callbacks are memoised against the current connection store: a fresh
+ * `subscribe` identity makes `useSyncExternalStore` tear the subscription down
+ * and build it again on every render of every consumer, which is pure churn
+ * while the store is the same object — and still correct re-subscription when
+ * the provider publishes a different one.
+ */
 export function useConnectionSnapshot(): DaemonConnectionsSnapshot {
   const { connections } = useAppStore();
-  return useSyncExternalStore(connections.subscribe.bind(connections), connections.getSnapshot.bind(connections));
+  const subscribe = useCallback((listener: () => void) => connections.subscribe(listener), [connections]);
+  const getSnapshot = useCallback(() => connections.getSnapshot(), [connections]);
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
-import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
+import { useState } from 'react';
+import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import {
   type AppStore,
@@ -202,13 +203,76 @@ function StoreProbe() {
   );
 }
 
+/** Re-renders itself on demand without touching the connection store. */
+function RenderCountProbe() {
+  const snapshot = useConnectionSnapshot();
+  const [renders, setRenders] = useState(0);
+  return (
+    <button type="button" onClick={() => setRenders(count => count + 1)}>
+      {snapshot.selectedDaemonId ?? 'unpaired'}:{renders}
+    </button>
+  );
+}
+
+interface Gate<T> {
+  readonly promise: Promise<T>;
+  readonly resolve: (value: T) => void;
+  readonly reject: (reason: Error) => void;
+}
+
+/** An open the test finishes by hand, so the opening state can be observed. */
+const gate = <T,>(): Gate<T> => {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason: Error) => void = () => undefined;
+  const promise = new Promise<T>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return { promise, resolve, reject };
+};
+
+/** Flushes the promise hops between settling an open and its committed render. */
+const settle = async (): Promise<void> => {
+  await interact(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+};
+
+interface SubscriptionLog {
+  subscribes: number;
+  unsubscribes: number;
+}
+
+/** Counts real subscriptions by shadowing the instance's prototype method. */
+const countSubscriptions = (connections: DaemonConnectionStore): SubscriptionLog => {
+  const log: SubscriptionLog = { subscribes: 0, unsubscribes: 0 };
+  const subscribe = connections.subscribe.bind(connections);
+  Object.defineProperty(connections, 'subscribe', {
+    configurable: true,
+    value: (listener: () => void) => {
+      log.subscribes += 1;
+      const unsubscribe = subscribe(listener);
+      return () => {
+        log.unsubscribes += 1;
+        unsubscribe();
+      };
+    },
+  });
+  return log;
+};
+
+const memoryStore = async (): Promise<AppStore> =>
+  await createAppStore({
+    repository: new MemoryRepository(),
+    connectClient: async () => client('unused'),
+    fetcher: async () => Response.json({}),
+  });
+
 describe('StoreProvider', () => {
   it('invalidates notification preferences and push devices for only the removed daemon', async () => {
-    const store = await createAppStore({
-      repository: new MemoryRepository(),
-      connectClient: async () => client('unused'),
-      fetcher: async () => Response.json({}),
-    });
+    const store = await memoryStore();
     store.connections.add(alpha);
     store.connections.add(beta);
     store.notificationPreferences.set(alpha.daemonId, { enabled: true });
@@ -250,11 +314,7 @@ describe('StoreProvider', () => {
   });
 
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
-    const store = await createAppStore({
-      repository: new MemoryRepository(),
-      connectClient: async () => client('unused'),
-      fetcher: async () => Response.json({}),
-    });
+    const store = await memoryStore();
     const view = await mount(
       <StoreProvider store={store}>
         <StoreProbe />
@@ -281,11 +341,7 @@ describe('StoreProvider', () => {
   });
 
   it('recovers from a rejected open when the reader retries, without replaying the failure', async () => {
-    const store = await createAppStore({
-      repository: new MemoryRepository(),
-      connectClient: async () => client('unused'),
-      fetcher: async () => Response.json({}),
-    });
+    const store = await memoryStore();
     let attempts = 0;
     const createStore = async (): Promise<AppStore> => {
       attempts += 1;
@@ -312,5 +368,96 @@ describe('StoreProvider', () => {
     await interact(() => view.container.querySelector('button')?.click());
     expect(view.container.textContent).toBe('alpha');
     await view.unmount();
+  });
+
+  it('keeps one lifecycle surface, its sentences, and the reader focus across a failed retry', async () => {
+    const store = await memoryStore();
+    const attempts: Gate<AppStore>[] = [];
+    const createStore = async (): Promise<AppStore> => {
+      const opening = gate<AppStore>();
+      attempts.push(opening);
+      return await opening.promise;
+    };
+
+    const view = await mount(
+      <StoreProvider createStore={createStore}>
+        <StoreProbe />
+      </StoreProvider>,
+    );
+    const status = must(view.container.querySelector('[role="status"]'), 'the status region');
+    const alert = must(view.container.querySelector('[role="alert"]'), 'the alert region');
+    const retry = must(view.container.querySelector('button'), 'the retry control');
+
+    expect(status.textContent).toBe('Opening Ferretry…');
+    expect(alert.textContent).toBe('');
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+
+    // Pressing a control the reader has been told is disabled starts nothing.
+    retry.focus();
+    await interact(() => retry.click());
+    expect(attempts).toHaveLength(1);
+
+    must(attempts[0], 'the first open').reject(new Error('database denied'));
+    await settle();
+
+    // Same three nodes: the live regions were never remounted under the reader.
+    expect(view.container.querySelector('[role="status"]')).toBe(status);
+    expect(view.container.querySelector('[role="alert"]')).toBe(alert);
+    expect(view.container.querySelector('button')).toBe(retry);
+    expect(status.textContent).toBe('');
+    expect(alert.textContent).toBe('Could not open local PWA state: database denied');
+    expect(retry.getAttribute('aria-disabled')).toBe('false');
+    expect(document.activeElement).toBe(retry);
+
+    await interact(() => retry.click());
+
+    expect(attempts).toHaveLength(2);
+    expect(document.activeElement).toBe(retry);
+    expect(status.textContent).toBe('Retrying: opening Ferretry…');
+    expect(alert.textContent).toBe('');
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+
+    // A second press while that retry is in flight opens nothing further.
+    await interact(() => retry.click());
+    expect(attempts).toHaveLength(2);
+
+    must(attempts[1], 'the second open').resolve(store);
+    await settle();
+
+    expect(view.container.textContent).toBe('unpaired');
+    expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('subscribes to the connection store once per store, not once per render', async () => {
+    const first = await memoryStore();
+    const second = await memoryStore();
+    const firstLog = countSubscriptions(first.connections);
+    const secondLog = countSubscriptions(second.connections);
+
+    const view = await mount(
+      <StoreProvider store={first}>
+        <RenderCountProbe />
+      </StoreProvider>,
+    );
+    const probe = must(view.container.querySelector('button'), 'the render probe');
+    await interact(() => probe.click());
+    await interact(() => probe.click());
+
+    expect(view.container.textContent).toBe('unpaired:2');
+    expect(firstLog).toEqual({ subscribes: 1, unsubscribes: 0 });
+
+    // Scoped to the store: a different one is subscribed, the old one released.
+    await view.render(
+      <StoreProvider store={second}>
+        <RenderCountProbe />
+      </StoreProvider>,
+    );
+
+    expect(firstLog).toEqual({ subscribes: 1, unsubscribes: 1 });
+    expect(secondLog).toEqual({ subscribes: 1, unsubscribes: 0 });
+
+    await view.unmount();
+    expect(secondLog).toEqual({ subscribes: 1, unsubscribes: 1 });
   });
 });
