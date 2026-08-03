@@ -6,9 +6,9 @@ tasks:
       - task: cli
   cli:
     internal: true
-    desc: 'Cross-compile the CLI binary targets'
+    desc: 'Cross-compile CLI and daemon binary targets'
     cmds:
-      # Add a sibling daemon lane once packages/daemon owns a binary entry; the PWA is never a binary lane.
+      # The PWA is a browser bundle, never a standalone binary lane.
       - ./scripts/release/compile.sh
   smoke:
     desc: 'Smoke-test a compiled binary (task compile:smoke -- dist/bin/<binary>)'

@@ -10,13 +10,16 @@ cd "${root_dir}"
 cli_pkg="packages/cli"
 name="$(jq -r '.bin | to_entries[0].key' "${cli_pkg}/package.json")"
 [ -z "${name}" ] || [ "${name}" = "null" ] && echo "❌ no .bin entry in ${cli_pkg}/package.json" >&2 && exit 1
+daemon_pkg="packages/daemon"
+daemon_name="$(jq -r '.bin | to_entries[0].key' "${daemon_pkg}/package.json")"
+[ -z "${daemon_name}" ] || [ "${daemon_name}" = "null" ] && echo "❌ no .bin entry in ${daemon_pkg}/package.json" >&2 && exit 1
 product="$(jq -r '.name' package.json)"
 [ -z "${product}" ] || [ "${product}" = "null" ] && echo "❌ no name in root package.json" >&2 && exit 1
 mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name package.json -printf '%h\n' | sort)
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity; do
+  for each in arch workspace-package-scopes name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon nix-packages; do
     "$0" "${each}"
   done
   exit 0
@@ -79,6 +82,12 @@ name-single-source)
       exit 1
     }
   done
+  for script in scripts/release/compile.sh scripts/release/goreleaser-shim.sh; do
+    rg -qF 'packages/daemon' "${script}" || {
+      echo "❌ ${script} does not derive the daemon name from its bin key" >&2
+      exit 1
+    }
+  done
   # Two-name model: static PRODUCT-bearing files agree with the root package.json name, and
   # static BINARY-bearing files agree with the bin key (rename.sh keeps both in sync).
   rg -qF "project_name: ${product}" .goreleaser.yaml
@@ -109,12 +118,12 @@ release-artifacts)
     ([.release.extra_files[].glob] | index("scripts/release/install.sh") != null)' >/dev/null
   ;;
 homebrew-cask)
-  # The cask is named after the PRODUCT, installs the BINARY, lives in THIS repo (owner repo ==
-  # project) under Casks/, and strips the quarantine attribute post-install.
-  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --arg product "${product}" '
+  # The cask is named after the PRODUCT, installs both shipped executables, lives in THIS repo
+  # (owner repo == project) under Casks/, and strips the quarantine attribute post-install.
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg name "${name}" --arg daemon "${daemon_name}" --arg product "${product}" '
     (.homebrew_casks | length) > 0 and
     (.homebrew_casks[0].name == $product) and
-    (.homebrew_casks[0].binaries == [$name]) and
+    ((.homebrew_casks[0].binaries | sort) == ([$name, $daemon] | sort)) and
     (.homebrew_casks[0].repository.name == .project_name) and
     (.homebrew_casks[0].directory == "Casks") and
     ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine"))' >/dev/null
@@ -153,6 +162,29 @@ installation-parity)
   rg -qF 'https://yum.fury.io/kirinnee97/' INSTALLATION.md
   rg -qF "apt install ${name}" INSTALLATION.md
   rg -qF "dnf install ${name}" INSTALLATION.md
+  ;;
+release-daemon)
+  # A release archive, package, and cask must carry BOTH independently declared executables.
+  # Check the build IDs transitively so listing a daemon build without distributing it still fails.
+  yq -o=json '.' .goreleaser.yaml | jq -e --arg cli "${name}" --arg daemon "${daemon_name}" '
+    (.archives[0].ids as $archive_ids |
+      ([.builds[] | select(.id as $id | $archive_ids | index($id)) | .binary] | sort == ([$cli, $daemon] | sort))) and
+    (.nfpms[0].ids as $package_ids |
+      ([.builds[] | select(.id as $id | $package_ids | index($id)) | .binary] | sort == ([$cli, $daemon] | sort))) and
+    ((.homebrew_casks[0].binaries | sort) == ([$cli, $daemon] | sort))' >/dev/null
+  # The installer intentionally derives install names from verified archive contents. Requiring two
+  # executable files stops a CLI-only archive from being reported as a complete normal install.
+  rg -qF 'for artifact in "${contents}"/*; do' scripts/release/install.sh
+  rg -qF '[ "${#installed[@]}" -ge 2 ]' scripts/release/install.sh
+  ;;
+nix-packages)
+  # Nix's default package is the normal profile-install entry point. It must join the independently
+  # built CLI and daemon, and flake check must build that bundle instead of merely evaluating it.
+  test -f nix/ferretry.nix
+  rg -qF 'inherit fy fyd;' nix/ferretry.nix
+  rg -q -U 'paths = \[\s*\n\s*fy\s*\n\s*fyd\s*\n\s*\];' nix/ferretry.nix
+  rg -qF 'release-bundle = releasePackages.default;' flake.nix
+  rg -qF 'program = "${releasePackages.default}/bin/fy";' flake.nix
   ;;
 *)
   echo "❌ unknown CLI contract: ${contract}" >&2

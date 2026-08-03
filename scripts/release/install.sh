@@ -3,8 +3,9 @@ set -euo pipefail
 
 # One-line installer served from the GitHub release:
 #   curl -fsSL https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
-# REPO carries the product name, BINARY the CLI binary name — both rewritten by
-# scripts/local/rename.sh when either changes.
+# REPO carries the product name and BINARY carries the archive prefix. Both are rewritten by
+# scripts/local/rename.sh when either changes. Executable names themselves are taken from the
+# verified archive so a normal install receives every shipped binary, including the daemon.
 REPO="kirinnee/ferretry"
 BINARY="fy"
 
@@ -64,8 +65,21 @@ echo "🔐 verifying checksum ..."
 
 echo "📦 installing to ${BIN_DIR} ..."
 mkdir -p "${BIN_DIR}"
-tar -xzf "${tmp}/${archive}" -C "${tmp}"
-install -m 0755 "${tmp}/${BINARY}" "${BIN_DIR}/${BINARY}"
+contents="${tmp}/contents"
+mkdir -p "${contents}"
+tar -xzf "${tmp}/${archive}" -C "${contents}"
+
+installed=()
+for artifact in "${contents}"/*; do
+  [ -f "${artifact}" ] && [ -x "${artifact}" ] || continue
+  binary="$(basename "${artifact}")"
+  install -m 0755 "${artifact}" "${BIN_DIR}/${binary}"
+  installed+=("${binary}")
+done
+[ "${#installed[@]}" -ge 2 ] || {
+  echo "❌ archive must contain the CLI and daemon executables" >&2
+  exit 1
+}
 
 echo "📝 ensure ${BIN_DIR} is on your PATH."
-echo "✅ installed ${BINARY} to ${BIN_DIR}/${BINARY}"
+echo "✅ installed ${installed[*]} to ${BIN_DIR}"

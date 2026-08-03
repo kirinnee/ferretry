@@ -69,7 +69,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Workspace and CLI release contracts";
       entry = validator "scripts/validate/cli-contracts.sh all";
-      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|go\\.mod|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
+      files = "^(\\.goreleaser\\.yaml|\\.releaserc\\.yaml|Casks/.*|INSTALLATION\\.md|Taskfile\\.yaml|flake\\.nix|go\\.mod|nix/ferretry\\.nix|package\\.json|packages/.*|scripts/release/.*|scripts/validate/cli-contracts\\.sh)$";
       pass_filenames = false;
       language = "system";
     };

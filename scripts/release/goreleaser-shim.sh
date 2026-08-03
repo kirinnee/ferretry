@@ -4,10 +4,18 @@ set -euo pipefail
 # Swap the prebuilt Bun binary over GoReleaser's Go stub (its prebuilt builder is Pro-only).
 dest="$1"
 
-# Artifact prefix is the .bin key (the CLI's own name) — never hardcode the name.
-prefix="$(jq -r '.bin | to_entries[0].key' packages/cli/package.json)"
-[ -z "${prefix}" ] && echo "❌ no .bin entry in packages/cli/package.json" >&2 && exit 1
-[ "${prefix}" = "null" ] && echo "❌ no .bin entry in packages/cli/package.json" >&2 && exit 1
+# Match GoReleaser's destination to a package .bin key so the release never hardcodes either
+# executable name outside the manifest/configuration boundary.
+prefix=""
+for package in packages/cli packages/daemon; do
+  candidate="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
+  [ -z "${candidate}" ] || [ "${candidate}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  if [ "$(basename "${dest}")" = "${candidate}" ]; then
+    prefix="${candidate}"
+    break
+  fi
+done
+[ -z "${prefix}" ] && echo "❌ release destination does not match a standalone package binary: ${dest}" >&2 && exit 1
 
 case "$2/$3" in
 linux/amd64) suffix="linux-x64-baseline" ;;

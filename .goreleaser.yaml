@@ -7,9 +7,21 @@ version: 2
 project_name: ferretry
 
 builds:
-  - id: bun
+  - id: bun-cli
     main: ./goreleaser.go
     binary: fy
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    # Only darwin arm64 ships (no intel mac).
+    ignore:
+      - goos: darwin
+        goarch: amd64
+    hooks:
+      post:
+        - cmd: ./scripts/release/goreleaser-shim.sh "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}"
+  - id: bun-daemon
+    main: ./goreleaser.go
+    binary: fyd
     goos: [linux, darwin]
     goarch: [amd64, arm64]
     # Only darwin arm64 ships (no intel mac).
@@ -22,7 +34,7 @@ builds:
 
 archives:
   - id: archive
-    ids: [bun]
+    ids: [bun-cli, bun-daemon]
     formats: [tar.gz]
     name_template: 'fy_{{ .Os }}_{{ .Arch }}'
 
@@ -33,7 +45,7 @@ checksum:
 # account kirinnee) by scripts/release/fury.sh — see INSTALLATION.md.
 nfpms:
   - id: packages
-    ids: [bun]
+    ids: [bun-cli, bun-daemon]
     package_name: fy
     # Derives from package_name so rename.sh --bin only has to rewrite the line above.
     file_name_template: '{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
@@ -58,7 +70,7 @@ release:
 homebrew_casks:
   - name: ferretry
     ids: [archive]
-    binaries: [fy]
+    binaries: [fy, fyd]
     repository:
       owner: kirinnee
       name: ferretry
@@ -70,5 +82,5 @@ homebrew_casks:
       post:
         install: |
           if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy"]
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/fy", "#{staged_path}/fyd"]
           end

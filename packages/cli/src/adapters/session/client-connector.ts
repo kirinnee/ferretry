@@ -6,6 +6,8 @@ import type { FyClientConnector } from './fy-session-api.ts';
 export interface ConnectorOptions extends ConnectionInput {
   /** The CLI version, sent so the daemon can detect a version skew. */
   readonly version: string;
+  /** Resolves the local daemon credential only when the caller did not explicitly set one. */
+  readonly resolveLocalToken?: () => Promise<string>;
 }
 
 /**
@@ -16,7 +18,12 @@ export interface ConnectorOptions extends ConnectionInput {
  */
 export function createFyClientConnector(options: ConnectorOptions): FyClientConnector {
   return async (): Promise<IFyApiClient> => {
-    const connection = resolveConnection(options);
+    const configuredToken = options.token?.trim() ?? '';
+    const token =
+      configuredToken === '' && options.resolveLocalToken !== undefined
+        ? await options.resolveLocalToken()
+        : options.token;
+    const connection = resolveConnection({ ...options, token });
     return await FyApiClient.connect({
       baseUrl: connection.baseUrl,
       token: connection.token,

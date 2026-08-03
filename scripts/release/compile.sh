@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Cross-compile the standalone CLI (entry from the CLI package's .bin) for every supported target.
+# Cross-compile every standalone executable from its package's .bin entry for every supported target.
 ./scripts/ci/setup.sh
 
 CLI_PKG="packages/cli"
+DAEMON_PKG="packages/daemon"
 
-ENTRY="$(jq -r '.bin | to_entries[0].value' "${CLI_PKG}/package.json")"
-[ -z "${ENTRY}" ] && echo "❌ no .bin entry in ${CLI_PKG}/package.json" >&2 && exit 1
-[ "${ENTRY}" = "null" ] && echo "❌ no .bin entry in ${CLI_PKG}/package.json" >&2 && exit 1
-
-# Artifact prefix is the .bin key (the CLI's own name) — never hardcode the name.
-PREFIX="$(jq -r '.bin | to_entries[0].key' "${CLI_PKG}/package.json")"
-[ -z "${PREFIX}" ] && echo "❌ no .bin entry in ${CLI_PKG}/package.json" >&2 && exit 1
-[ "${PREFIX}" = "null" ] && echo "❌ no .bin entry in ${CLI_PKG}/package.json" >&2 && exit 1
+package_bins() {
+  local package="$1" entry prefix
+  entry="$(jq -r '.bin | to_entries[0].value' "${package}/package.json")"
+  prefix="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
+  [ -z "${entry}" ] || [ "${entry}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  [ -z "${prefix}" ] || [ "${prefix}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
+  printf '%s\t%s\t%s\n' "${package}" "${entry}" "${prefix}"
+}
 
 OUTDIR="${COMPILE_OUTDIR:-dist/bin}"
 mkdir -p "${OUTDIR}"
@@ -26,10 +27,15 @@ bun-darwin-arm64	darwin-arm64"
 count=0
 while IFS=$'\t' read -r target suffix; do
   [ -z "${target}" ] && continue
-  artifact="${PREFIX}-${suffix}"
-  echo "🔨 compiling ${target} -> ${OUTDIR}/${artifact}"
-  bun build "./${CLI_PKG}/${ENTRY}" --compile --target="${target}" --outfile "${OUTDIR}/${artifact}"
-  count=$((count + 1))
+  while IFS=$'\t' read -r package entry prefix; do
+    artifact="${prefix}-${suffix}"
+    echo "🔨 compiling ${package} for ${target} -> ${OUTDIR}/${artifact}"
+    bun build "./${package}/${entry}" --compile --target="${target}" --outfile "${OUTDIR}/${artifact}"
+    count=$((count + 1))
+  done < <(
+    package_bins "${CLI_PKG}"
+    package_bins "${DAEMON_PKG}"
+  )
 done <<<"${targets}"
 
 ls -la "${OUTDIR}"

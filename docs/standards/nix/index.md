@@ -17,6 +17,7 @@ concern lives in its own file under `nix/`.
 ```
 nix/
 ├── packages.nix   # aggregate packages from registries
+├── ferretry.nix   # build the shipped fy and fyd Bun executables
 ├── env.nix        # group packages by purpose
 ├── shells.nix     # define dev environments
 ├── fmt.nix        # configure formatters (treefmt)
@@ -38,11 +39,13 @@ Inputs today:
 | Input              | Provides                                      |
 | ------------------ | --------------------------------------------- |
 | `nixpkgs`          | every tool package (`nixos-unstable`)         |
-| `flake-utils`      | `eachDefaultSystem` — per-platform outputs    |
+| `flake-utils`      | `eachSystem` — per-platform outputs           |
 | `treefmt-nix`      | the multi-formatter wrapper used by `fmt.nix` |
 | `pre-commit-hooks` | the hook runner used by `pre-commit.nix`      |
 
-The outputs use `with rec { ... }` so modules can reference each other. Each module is
+The outputs use `with rec { ... }` so modules can reference each other. `eachSystem` enumerates
+the release targets (linux amd64/arm64 and macOS arm64), so the flake does not advertise an
+unsupported Intel macOS binary. Each module is
 imported with only the parameters it needs, and the pre-commit check's `shellHook` is threaded
 into `shells.nix`:
 
@@ -54,7 +57,11 @@ devShells = import ./nix/shells.nix {
 ```
 
 That is what installs the git hooks when you enter the shell. Exported outputs are `checks`
-(`pre-commit-check`, `format`), `formatter`, `packages`, and `devShells`.
+(`pre-commit-check`, `format`), `formatter`, `packages`, `apps`, and `devShells`.
+
+`packages.default` joins the `fy` CLI and `fyd` daemon, so
+`nix profile install github:kirinnee/ferretry` puts both commands on `PATH`. The named
+`packages.fy` and `packages.fyd` outputs and matching apps are available for one-binary use.
 
 ### nix/packages.nix — package aggregation
 
@@ -66,10 +73,9 @@ Only `nixpkgs` is wired today, so the file is a single `inherit (pkgs) ...` bloc
 yq-go`. When more than one registry is in play, each registry gets its own group in a
 `let all = { ... }` block and the groups merge with `//` in priority order — later groups win.
 
-> The CLI's own nix package build (a fixed-output `node_modules` derivation plus
-> `bun build --compile`) is deliberately **not** here yet; maintaining the dependency hash
-> was not worth it at P0. The `TODO` in `packages.nix` records that decision. Compilation is
-> owned by `scripts/release/compile.sh` instead.
+The shipped executables are built in `nix/ferretry.nix`: a fixed-output Bun dependency derivation
+feeds native `bun build --compile` builds for `fy` and `fyd`. This keeps profile installs
+hermetic without adding product packages to development-shell package aggregation.
 
 ### nix/env.nix — environment groups
 

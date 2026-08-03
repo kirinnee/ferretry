@@ -10,13 +10,17 @@ interface InstallerResult {
   readonly err: string;
 }
 
-// The installer hardcodes its binary name (rewritten by scripts/local/rename.sh); read it back so
-// this contract survives a product rename without edits.
-async function installerBinaryName(): Promise<string> {
+// The installer carries the CLI archive prefix, while every executable name is derived from a
+// package manifest. Keep the fixture on that same path so it catches a release that ships only one.
+async function installerBinaryNames(): Promise<readonly [string, string]> {
   const script = await Bun.file('scripts/release/install.sh').text();
   const match = /^BINARY="([^"]+)"$/m.exec(script);
   should(match).not.be.null();
-  return (match as RegExpExecArray)[1] as string;
+  const cli = (match as RegExpExecArray)[1] as string;
+  const daemonManifest = await Bun.file('packages/daemon/package.json').json();
+  const daemon = Object.keys((daemonManifest as { bin: Record<string, string> }).bin)[0];
+  should(daemon).be.a.String();
+  return [cli, daemon as string];
 }
 
 class InstallerHarness {
@@ -26,7 +30,7 @@ class InstallerHarness {
 
   constructor(
     readonly root: string,
-    readonly binary: string,
+    readonly binaries: readonly [string, string],
   ) {
     this.fakeBin = join(root, 'fake-bin');
     this.fixtureDir = join(root, 'fixture');
@@ -34,7 +38,7 @@ class InstallerHarness {
   }
 
   get archive(): string {
-    return `${this.binary}_linux_amd64.tar.gz`;
+    return `${this.binaries[0]}_linux_amd64.tar.gz`;
   }
 
   async setup(): Promise<void> {
@@ -70,9 +74,11 @@ esac
     const payload = join(this.root, 'payload');
     const archive = join(this.fixtureDir, this.archive);
     await mkdir(payload, { recursive: true });
-    await Bun.write(join(payload, this.binary), `#!/usr/bin/env bash\necho ${this.binary} fixture\n`);
-    await chmod(join(payload, this.binary), 0o755);
-    const tar = Bun.spawn(['tar', '-czf', archive, '-C', payload, this.binary]);
+    for (const binary of this.binaries) {
+      await Bun.write(join(payload, binary), `#!/usr/bin/env bash\necho ${binary} fixture\n`);
+      await chmod(join(payload, binary), 0o755);
+    }
+    const tar = Bun.spawn(['tar', '-czf', archive, '-C', payload, ...this.binaries]);
     should(await tar.exited).equal(0);
     const digestProc = Bun.spawn(['sha256sum', archive], { stdout: 'pipe' });
     const digest = (await new Response(digestProc.stdout).text()).split(' ')[0];
@@ -110,8 +116,8 @@ esac
 }
 
 async function harness(): Promise<InstallerHarness> {
-  const binary = await installerBinaryName();
-  const subject = new InstallerHarness(await mkdtemp(join(tmpdir(), 'cli-installer-')), binary);
+  const binaries = await installerBinaryNames();
+  const subject = new InstallerHarness(await mkdtemp(join(tmpdir(), 'cli-installer-')), binaries);
   await subject.setup();
   return subject;
 }
@@ -162,7 +168,9 @@ describe('release installer contract', () => {
       // Assert
       should(actual.code).equal(0);
       should(actual.out).containEql('checksum verified');
-      should(await readFile(join(subject.installDir, subject.binary), 'utf8')).containEql(`${subject.binary} fixture`);
+      for (const binary of subject.binaries) {
+        should(await readFile(join(subject.installDir, binary), 'utf8')).containEql(`${binary} fixture`);
+      }
     } finally {
       await subject.cleanup();
     }
