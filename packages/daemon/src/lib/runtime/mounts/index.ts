@@ -4,6 +4,7 @@ import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
+import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
@@ -31,6 +32,7 @@ import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resu
 import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts';
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
+import { type SocketTicketSubsystem, socketTicketRoutes } from './socket-tickets.ts';
 import { type SttSubsystem, sttRawRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
@@ -131,6 +133,10 @@ export interface MountedSubsystems {
   readonly sessionAttach: SessionAttachSubsystem;
   /** This daemon's bounded recent event tail followed by its own live journal appends. */
   readonly fleetEvents: FleetEventStreamSubsystem;
+  /** The credential a browser CAN carry onto an upgrade. One subsystem serves both halves of the
+   *  exchange: the route below sells a ticket, and the socket dispatcher is the only boundary handed
+   *  the redeemer — which is what keeps a ticket useless against an ordinary route. */
+  readonly socketTickets: SocketTicketSubsystem & SocketTicketRedeemer;
 }
 
 /**
@@ -207,6 +213,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
     // transcript it authorizes a local process action, and its mount revalidates the pane identity.
     ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
+    // The ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that only the
+    // request/response table carries — the socket table's `/v1/events` matches GET on one segment
+    // less — so the two cannot shadow each other and a POST here is never mistaken for an upgrade.
+    ...socketTicketRoutes(subsystems.socketTickets),
   ];
 }
 
@@ -232,12 +242,19 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
   ];
 }
 
-/** The socket dispatcher the transport adapter serves, over the same credentials as the HTTP one. */
+/**
+ * The socket dispatcher the transport adapter serves, over the same credentials as the HTTP one —
+ * plus the ticket redeemer, which is deliberately given to this boundary and to no other.
+ */
 export function createMountedSocketDispatcher(
   base: DaemonApiDependencies,
   subsystems: MountedSubsystems,
 ): ApiSocketDispatcher {
-  return new ApiSocketDispatcher(new ApiRouter(mountedSocketRoutes(subsystems)), base.credentials);
+  return new ApiSocketDispatcher(
+    new ApiRouter(mountedSocketRoutes(subsystems)),
+    base.credentials,
+    subsystems.socketTickets,
+  );
 }
 
 /**

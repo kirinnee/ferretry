@@ -1,5 +1,6 @@
 import type { ApiActor } from './actor.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
+import type { AuthenticatedCredential } from './socket-ticket.ts';
 
 /**
  * Who may reach a route.
@@ -25,6 +26,15 @@ export interface RouteContext {
   /** The server-derived identity of the caller. Never taken from the body or the query string, so
    *  a client cannot claim to be someone else. `undefined` on a `public` route. */
   readonly actor?: ApiActor;
+  /**
+   * WHICH credential authenticated the request — server-derived exactly like `actor`, and absent on a
+   * `public` route for the same reason.
+   *
+   * A handler needs this only to mint something that must not outrank its caller, which the socket
+   * ticket is the one route to do today. It is deliberately not the actor: an actor string is for
+   * attribution and is lossy about authority, so deriving a class back out of one would be guessing.
+   */
+  readonly credential?: AuthenticatedCredential;
 }
 
 /**

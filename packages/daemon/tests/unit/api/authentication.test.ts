@@ -135,6 +135,47 @@ describe('authenticate', () => {
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
+  it('should refuse a device the registry cannot name', () => {
+    // An identity-less "match" is damaged evidence, not a benign one. Honouring it would authorize a
+    // device on every operator route and journal the action as the bare actor `device`, which no
+    // later revocation could ever aim at.
+    const nameless = { admin: 'admin-secret', devices: { identify: () => '' } };
+    const blank = { admin: 'admin-secret', devices: { identify: () => '   ' } };
+
+    should(authenticate(nameless, { bearer: 'device-secret' })).deepEqual({ kind: 'anonymous' });
+    should(authenticate(blank, { bearer: 'device-secret' })).deepEqual({ kind: 'anonymous' });
+  });
+
+  it('should never consult the registry for a blank presented token', () => {
+    // `?token=` on a loopback upgrade presents ''. A blank secret must authenticate nothing without
+    // relying on the verifier to be the one that says so.
+    const consulted: string[] = [];
+    const recording = {
+      admin: 'admin-secret',
+      devices: {
+        identify: (token: string) => {
+          consulted.push(token);
+          return 'device-1';
+        },
+      },
+    };
+
+    const result = authenticate(recording, { query: '' });
+
+    should(result).deepEqual({ kind: 'anonymous' });
+    should(consulted).be.empty();
+  });
+
+  it('should attribute a device to the trimmed identity the registry reports', () => {
+    const padded = { admin: 'admin-secret', devices: { identify: () => ' device-1 ' } };
+
+    should(authenticate(padded, { bearer: 'device-secret' })).deepEqual({
+      kind: 'authenticated',
+      tokenClass: 'device',
+      deviceId: 'device-1',
+    });
+  });
+
   it('should prefer the host tokens over a registry that also claims them', () => {
     const greedy = { ...credentials, devices: { identify: () => 'device-1' } };
 

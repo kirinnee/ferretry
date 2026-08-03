@@ -47,6 +47,7 @@ import {
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodePairingCryptography,
+  NodeSocketTicketSecrets,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -285,6 +286,7 @@ import {
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SignalRefused,
+  SocketTicketRegistry,
   SttEnhancementService,
   type SttSubsystem,
   searchTranscript,
@@ -3179,6 +3181,14 @@ export function buildWorld(): DaemonWorld {
             },
           },
         ),
+        // ONE registry for both halves of the exchange: the route that sells a ticket and the socket
+        // dispatcher that spends it must be the same outstanding set, or every ticket a browser buys
+        // is redeemed against a registry that never issued it. Memory-only and per-daemon by
+        // construction — see the domain's own header for why it is never persisted.
+        // Its own millisecond clock, not the instant clock the journal writes with: a ticket's whole
+        // life is an elapsed-time question, and the world's `clock` field below reads the wall the
+        // same way for the same reason.
+        socketTickets: new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

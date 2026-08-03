@@ -74,8 +74,17 @@ export function authenticate(credentials: ApiCredentials, presented: PresentedTo
     return { kind: 'authenticated', tokenClass: 'warden' };
   if (credentials.devices !== undefined) {
     for (const candidate of candidates) {
-      const deviceId = credentials.devices.identify(candidate);
-      if (deviceId !== undefined) return { kind: 'authenticated', tokenClass: 'device', deviceId };
+      // A blank secret authenticates nothing HERE too, not only against the host tokens above. A
+      // loopback upgrade carrying `?token=` arrives as '', and a verifier is an injected port whose
+      // implementation is free to be sloppier than this one; the seam must not depend on it.
+      if (candidate.trim() === '') continue;
+      const identity = credentials.devices.identify(candidate)?.trim();
+      // A verifier that answers with a blank identity has said "I do not know who this is". Reading
+      // that as a match would authorize an unattributable device on every operator route and
+      // journal it as the bare actor `device` — damaged evidence taken for the benign case. An
+      // identity or nothing.
+      if (identity !== undefined && identity !== '')
+        return { kind: 'authenticated', tokenClass: 'device', deviceId: identity };
     }
   }
   return { kind: 'anonymous' };

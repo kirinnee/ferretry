@@ -128,6 +128,10 @@ export const AT = '2024-05-01T10:00:00.000Z';
 export const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'] as const;
 export const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret' } as const;
 
+/** A socket boundary with no ticket surface, for cases whose callers present a real bearer. A ticket
+ *  is the browser's credential; refusing every one of them is what these cases mean. */
+export const NO_TICKETS = { redeem: () => undefined } as const;
+
 /** The human's CLI. */
 export const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;
 /** An agent calling from inside its own pane. */

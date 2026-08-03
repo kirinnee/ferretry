@@ -20,6 +20,8 @@ import {
 import { jsonBody, request } from './support.ts';
 
 const CREDENTIALS = { admin: 'admin-secret', warden: 'warden-secret' } as const;
+/** These cases authenticate with a real bearer; the ticket surface has its own suite. */
+const NO_TICKETS = { redeem: () => undefined } as const;
 
 const human = { authorization: `Bearer ${CREDENTIALS.admin}` } as const;
 
@@ -50,7 +52,7 @@ function streamRoute(refusal?: unknown, scope: SocketRoute['scope'] = 'admin'): 
 }
 
 function dispatcherFor(...routes: readonly SocketRoute[]): ApiSocketDispatcher {
-  return new ApiSocketDispatcher(new ApiRouter(routes), CREDENTIALS);
+  return new ApiSocketDispatcher(new ApiRouter(routes), CREDENTIALS, NO_TICKETS);
 }
 
 describe('the socket frame cap', () => {

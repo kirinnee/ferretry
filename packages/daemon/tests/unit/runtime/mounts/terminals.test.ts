@@ -15,7 +15,7 @@ import {
   TerminalMountError,
 } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeTerminals, human } from './support.ts';
+import { CREDENTIALS, FakeTerminals, human, NO_TICKETS } from './support.ts';
 
 /**
  * The terminal lifecycle's HTTP surface, driven through the real router.
@@ -353,7 +353,7 @@ describe('the terminal mount', () => {
  */
 describe('the mounted terminal stream', () => {
   function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
-    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS);
+    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, NO_TICKETS);
   }
 
   /** A downstream that records, standing in for the socket the transport would supply. */
