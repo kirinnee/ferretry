@@ -1,7 +1,8 @@
 /**
  * Build the REAL bundle, serve `dist/` on an ephemeral loopback port, and
- * screenshot the running app at both viewports in both colour schemes — plus the
- * favicon at its true 16px, fetched by the page itself.
+ * screenshot the running app — the brand surfaces at both viewports in both
+ * colour schemes, and the first-run setup stepper in the five states that
+ * actually differ.
  *
  * This is the other half of `harness/screenshot.ts`, not a replacement for it.
  * That one bundles `harness/main.tsx`: a stacked gallery of every ported surface,
@@ -21,6 +22,9 @@
  *   - COLOUR SCHEME. `pre-paint.js` resolves the theme from `prefers-color-scheme`
  *     before first paint, so light mode is a different first frame rather than a
  *     class toggle. It has to be emulated at the context, not the DOM.
+ *   - A ROUTE'S REAL STATE. The setup stepper's steps are reached by clicking,
+ *     and its pairing step reacts to the software keyboard. Neither is a prop you
+ *     can set from outside; both have to be driven.
  *
  * Dev-only, never runs in CI, and nothing it writes is committed —
  * `harness/out/` is gitignored. Every request that leaves the loopback origin is
@@ -35,7 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright-core';
+import { type BrowserContextOptions, chromium, type Page } from 'playwright-core';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -49,8 +53,42 @@ const VIEWPORTS = [
 
 const SCHEMES = ['light', 'dark'] as const;
 
+const PHONE = { width: 390, height: 844 } as const;
+
+/**
+ * A phone, emulated rather than merely sized — used for the `-mobile` SETUP
+ * captures only.
+ *
+ * `isMobile` is what makes Chromium report `screen.orientation.type` as
+ * `portrait-primary` and `(pointer: coarse)` as true. Both matter here and
+ * neither follows from the viewport: a bare 390x844 headless context reports
+ * `landscape-primary`, and `use-app-viewport.ts` decides `phoneLike` from the
+ * coarse pointer. Setting the width alone produces a narrow desktop, which is a
+ * different thing from a phone and is precisely the state the keyboard capture
+ * must not be confused with.
+ *
+ * Deliberately NOT applied to the brand captures above. Those are the images that
+ * were reviewed and merged; re-emulating them now would silently change an
+ * already-approved review set for no reason connected to this change.
+ */
+const PHONE_CONTEXT = { viewport: PHONE, isMobile: true, hasTouch: true } as const;
+
+/** The keyboard-open visual viewport height, an Android-plausible ~414px of chrome. */
+const KEYBOARD_VISUAL_HEIGHT = 430;
+
 /** The favicon magnification factor, matching the `-at-12x` proofs in `docs/brand`. */
 const MAGNIFY = 12;
+
+/** The setup stepper's root, and the attribute that names the step it is on. */
+const SETUP_ROOT = '[data-onboarding="setup"]';
+const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-step="${step}"]`;
+
+/**
+ * The pairing arrival used for the Done capture. A fabricated single-use code
+ * against a `.test` host that cannot resolve — the reserved TLD is the point,
+ * since nothing here may address a real daemon.
+ */
+const PAIRING_ARRIVAL = '/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a';
 
 function fail(message: string): never {
   process.stderr.write(`❌ ${message}\n`);
@@ -65,35 +103,155 @@ if (build.error) fail(`vite could not be started: ${build.error.message}`);
 if (build.status !== 0) fail(`vite build exited ${build.status}`);
 
 /**
- * `dist/` served the way Cloudflare Pages serves it. `/` is the static landing;
- * `/app/`, daemon routes and pairing routes are the PWA document. Getting that
- * split wrong would make every screenshot below a screenshot of the wrong page.
+ * The SPA rewrite rules, READ FROM `public/_redirects` rather than restated here.
+ *
+ * This used to hardcode one `/* -> /index.html` fallback, and that was wrong the
+ * moment the static landing page landed: `/` is now the landing document and the
+ * app document is `/app/index.html`, with `/setup`, `/pair` and `/d/*` rewritten
+ * to it. A hardcoded fallback served the LANDING page for `/setup` and produced a
+ * perfectly clean screenshot of the wrong document — the exact silent failure
+ * this file exists to prevent, committed inside the file itself.
+ *
+ * So the rules come from the same file Cloudflare Pages reads. They cannot drift,
+ * and a future route change is picked up without touching this harness.
+ */
+const redirectRules = (await Bun.file(join(packageDir, 'public/_redirects')).text())
+  .split('\n')
+  .map(line => line.trim())
+  .filter(line => line !== '' && !line.startsWith('#'))
+  .map(line => {
+    const [from, to] = line.split(/\s+/);
+    return { from: from ?? '', to: to ?? '' };
+  });
+if (redirectRules.length === 0) fail('public/_redirects declares no rewrite rules');
+
+/** First matching rule wins, exactly as Pages orders them. `*` matches a path suffix. */
+const rewrite = (path: string): string => {
+  for (const rule of redirectRules) {
+    if (rule.from.endsWith('*')) {
+      if (path.startsWith(rule.from.slice(0, -1))) return rule.to;
+    } else if (path === rule.from) return rule.to;
+  }
+  return path;
+};
+
+/**
+ * `dist/` served the way Cloudflare Pages serves it: a real file wins, and
+ * anything else goes through the rewrite rules above, because the app's routes
+ * are client-side and `/setup` is not a file on disk.
  */
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
     const path = new URL(request.url).pathname;
-    const appPath =
-      path === '/app' || path === '/app/' ? '/app/index.html' : path.startsWith('/app/') ? path.slice(4) : path;
-    const file = Bun.file(join(distDir, appPath === '/' ? 'index.html' : appPath));
-    if (await file.exists()) {
+    const direct = Bun.file(join(distDir, path.endsWith('/') ? `${path}index.html` : path));
+    if (await direct.exists()) {
       // Bun has no type for `.webmanifest`, and a manifest served as
       // `application/octet-stream` is ignored outright by Chrome.
       const type = path.endsWith('.webmanifest') ? 'application/manifest+json' : undefined;
-      return new Response(file, type ? { headers: { 'content-type': type } } : undefined);
+      return new Response(direct, type ? { headers: { 'content-type': type } } : undefined);
     }
-    const appRoute =
-      path.startsWith('/app/') ||
-      path.startsWith('/d/') ||
-      path === '/setup' ||
-      path === '/pair' ||
-      path.startsWith('/pair/');
-    return new Response(Bun.file(join(distDir, appRoute ? 'app/index.html' : 'index.html')), {
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    });
+    const target = Bun.file(join(distDir, rewrite(path)));
+    if (!(await target.exists())) return new Response('not found', { status: 404 });
+    return new Response(target, { headers: { 'content-type': 'text/html; charset=utf-8' } });
   },
 });
+
+/**
+ * The synthetic `window.visualViewport`, installed before any app code runs.
+ *
+ * THIS IS THE ONLY HONEST WAY TO SCREENSHOT THE KEYBOARD-OPEN LAYOUT, and the
+ * obvious alternatives are all wrong in the same direction. `setViewportSize` and
+ * CDP device metrics shrink the LAYOUT viewport — `innerHeight` and
+ * `screen.height` shrink with it — which is a short window, not a keyboard.
+ * Android with `interactive-widget=resizes-content` and iOS panning both leave the
+ * layout viewport alone and move the VISUAL one, and
+ * `src/hooks/use-app-viewport.ts` reads exactly that. A driver that only moves the
+ * layout viewport renders a different state while looking plausible.
+ *
+ * It has to be an init script rather than a later `evaluate`, because
+ * `browserViewportEnvironment()` captures `window.visualViewport` ONCE when the
+ * shell mounts. An object installed after mount is never read.
+ *
+ * IT WRAPS THE REAL OBJECT AND OVERRIDES ONLY `height`. Replacing it outright
+ * with a hand-built stand-in breaks the driver itself: on a mobile context
+ * Playwright reads `window.visualViewport` for its own tap coordinate maths, so a
+ * stand-in reporting invented `width`/`scale` makes every click time out while the
+ * element sits there visible and enabled — which looks like a bad selector and is
+ * not one. Everything except `height` therefore delegates to the browser, real
+ * `resize`/`scroll` events are forwarded so nothing that listens loses them, and
+ * the override stays null until the keyboard is meant to be up (so every click
+ * happens while this object is telling the whole truth).
+ *
+ * `__setVisualViewportHeight` is the seam this file drives.
+ */
+const VISUAL_VIEWPORT_SCRIPT = `
+  (() => {
+    const real = window.visualViewport;
+    if (!real) return;
+    const target = new EventTarget();
+    let override = null;
+    for (const name of ['width', 'offsetTop', 'offsetLeft', 'pageTop', 'pageLeft', 'scale']) {
+      Object.defineProperty(target, name, { get: () => real[name], configurable: true });
+    }
+    Object.defineProperty(target, 'height', { get: () => override ?? real.height, configurable: true });
+    real.addEventListener('resize', () => target.dispatchEvent(new Event('resize')));
+    real.addEventListener('scroll', () => target.dispatchEvent(new Event('scroll')));
+    Object.defineProperty(window, 'visualViewport', { get: () => target, configurable: true });
+    window.__setVisualViewportHeight = next => {
+      override = next;
+      // The producer listens for 'resize' on the visual viewport and schedules its
+      // write on the next frame, so the event is what actually moves the app.
+      target.dispatchEvent(new Event('resize'));
+    };
+  })();
+`;
+
+/**
+ * Answers `/v1/pair` in the page, without a request leaving it.
+ *
+ * A page-level `fetch` stub rather than a route fulfilment on purpose: the daemon
+ * in the arrival is off-origin, every off-origin request is aborted here, and the
+ * honest way to screenshot a SUCCESSFUL pairing is for the exchange never to be
+ * attempted rather than to be intercepted and answered. Nothing else is stubbed —
+ * the rest of the page runs as shipped.
+ */
+const PAIR_RESPONSE_SCRIPT = `
+  (() => {
+    const original = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith('/v1/pair')) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ daemonId: 'daemon-a', deviceToken: 'screenshot-token' }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        );
+      }
+      return original(input, init);
+    };
+  })();
+`;
+
+interface KeyboardGeometry {
+  readonly innerHeight: number;
+  readonly screenHeight: number;
+  readonly orientation: string;
+  readonly visualHeight: number | undefined;
+  readonly appHeight: string;
+}
+
+/** Reads the three layout-viewport facts a keyboard must NOT change, plus the one it must. */
+const readGeometry = (page: Page): Promise<KeyboardGeometry> =>
+  page.evaluate(() => ({
+    innerHeight: window.innerHeight,
+    screenHeight: window.screen.height,
+    orientation: window.screen.orientation.type,
+    visualHeight: window.visualViewport?.height,
+    appHeight: document.documentElement.style.getPropertyValue('--app-h'),
+  }));
 
 try {
   const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
@@ -101,36 +259,80 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   const missing: string[] = [];
+  /**
+   * Behavioural assertions that failed, reported at the END rather than thrown.
+   *
+   * A thrown assertion would abandon the remaining captures, and the image of a
+   * broken state is the most useful thing this pass can hand a human — so the
+   * screenshot is taken first and the complaint is queued. The run still exits
+   * non-zero, so this defers the failure without softening it.
+   */
+  const defects: string[] = [];
+
+  /**
+   * One fresh context per capture, with the off-origin block and the nested
+   * teardown applied BY CONSTRUCTION rather than repeated per call site.
+   *
+   * Every capture below therefore gets a genuinely fresh browser state — no
+   * storage, no carried-over onboarding progress — which is what makes "first
+   * run" mean first run. The `finally` chain is why a thrown locator cannot leak
+   * a Chromium context or a page for the rest of the run; the browser and the
+   * server have the same guarantee one level up.
+   */
+  const capture = async (options: BrowserContextOptions, body: (page: Page) => Promise<void>): Promise<void> => {
+    const context = await browser.newContext({ reducedMotion: 'reduce', ...options });
+    try {
+      await context.route('**/*', async route => {
+        if (new URL(route.request().url()).origin !== server.url.origin) {
+          await route.abort();
+          return;
+        }
+        await route.continue();
+      });
+      const page = await context.newPage();
+      try {
+        // A 404 on an icon or the manifest is the exact failure this pass exists
+        // to catch, and it is invisible in a screenshot: the tab just shows the
+        // browser's default glyph.
+        page.on('response', response => {
+          if (response.status() >= 400) missing.push(`${response.status()} ${response.url()}`);
+        });
+        await body(page);
+      } finally {
+        await page.close();
+      }
+    } finally {
+      await context.close();
+    }
+  };
+
+  /**
+   * `/app/` and not `/`. Since the static landing page landed, `/` is a different
+   * document that happens to also say "Ferretry" — so a capture named `app-…`
+   * taken at `/` would be a screenshot of marketing copy that looks entirely
+   * plausible. The app's own routes (`/setup`, `/pair`, `/d/…`) are passed
+   * through unchanged and reach this same document via the rewrite rules.
+   */
+  const APP_ROOT = '/app/';
+
+  const open = async (page: Page, path = APP_ROOT): Promise<void> => {
+    await page.goto(new URL(path, server.url).toString(), { waitUntil: 'load' });
+  };
+
+  const shot = async (page: Page, name: string): Promise<void> => {
+    const target = join(outDir, `${name}.png`);
+    await page.screenshot({ path: target });
+    process.stdout.write(`📸 ${name} -> ${target}\n`);
+  };
+
   try {
     for (const viewport of VIEWPORTS) {
       for (const scheme of SCHEMES) {
-        const context = await browser.newContext({
-          viewport: { width: viewport.width, height: viewport.height },
-          colorScheme: scheme,
-          reducedMotion: 'reduce',
-        });
-        try {
-          await context.route('**/*', async route => {
-            if (new URL(route.request().url()).origin !== server.url.origin) {
-              await route.abort();
-              return;
-            }
-            await route.continue();
-          });
-          const page = await context.newPage();
-          try {
-            // A 404 on an icon or the manifest is the exact failure this pass
-            // exists to catch, and it is invisible in a screenshot: the tab just
-            // shows the browser's default glyph.
-            page.on('response', response => {
-              if (response.status() >= 400) missing.push(`${response.status()} ${response.url()}`);
-            });
-            await page.goto(new URL('/app/', server.url).toString(), { waitUntil: 'load' });
-            const target = join(outDir, `app-${viewport.name}-${scheme}.png`);
-            await page.screenshot({ path: target });
-            process.stdout.write(
-              `📸 app ${viewport.name} ${viewport.width}x${viewport.height} ${scheme} -> ${target}\n`,
-            );
+        await capture(
+          { viewport: { width: viewport.width, height: viewport.height }, colorScheme: scheme },
+          async page => {
+            await open(page);
+            await shot(page, `app-${viewport.name}-${scheme}`);
 
             // The favicon proof, once per scheme — the SVG's ink is
             // scheme-dependent, so one capture would only ever prove half of it.
@@ -181,108 +383,203 @@ try {
                 },
                 { magnify: MAGNIFY },
               );
-              const proof = page.locator('#favicon-proof');
               const proofTarget = join(outDir, `favicon-16-${scheme}.png`);
-              await proof.screenshot({ path: proofTarget });
+              await page.locator('#favicon-proof').screenshot({ path: proofTarget });
               process.stdout.write(`📸 favicon 16px + ${MAGNIFY}x ${scheme} -> ${proofTarget}\n`);
             }
-          } finally {
-            await page.close();
-          }
-        } finally {
-          await context.close();
-        }
-      }
-    }
-    // Exercise the built documents, not just their source contracts. The pairing
-    // QR opens `/pair#v1;…`, which must receive the app entry and its fragment;
-    // the landing's marker redirect must still take an already-paired reader to
-    // `/app/`, while unavailable storage is deliberately a fail-open landing.
-    const routeContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    try {
-      const pairingPage = await routeContext.newPage();
-      try {
-        await pairingPage.goto(
-          new URL('/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a', server.url).toString(),
-          { waitUntil: 'load' },
+          },
         );
-        await pairingPage.getByRole('heading', { name: 'Pair this device?' }).waitFor();
-        if (new URL(pairingPage.url()).pathname !== '/pair')
-          fail('QR pairing deep link did not retain the pairing route');
-      } finally {
-        await pairingPage.close();
       }
-
-      const pairedLanding = await routeContext.newPage();
-      try {
-        await pairedLanding.addInitScript(() => localStorage.setItem('fy-has-pairings-v1', '1'));
-        await pairedLanding.goto(server.url.toString(), { waitUntil: 'load' });
-        await pairedLanding.waitForURL('**/app/');
-      } finally {
-        await pairedLanding.close();
-      }
-
-      const failOpenLanding = await routeContext.newPage();
-      try {
-        await failOpenLanding.addInitScript(() => {
-          Object.defineProperty(window, 'localStorage', {
-            configurable: true,
-            get: () => {
-              throw new Error('storage unavailable');
-            },
-          });
-        });
-        await failOpenLanding.goto(server.url.toString(), { waitUntil: 'load' });
-        if (new URL(failOpenLanding.url()).pathname !== '/')
-          fail('landing did not fail open when browser storage was unavailable');
-      } finally {
-        await failOpenLanding.close();
-      }
-      process.stdout.write('✅ QR pairing route and landing redirect/fail-open behaviour verified\n');
-    } finally {
-      await routeContext.close();
     }
+
     // THE HEADER LOCKUP, MAGNIFIED. The mark renders at 20px next to the
     // wordmark, and 20px of grid is too small to judge in a 390px page
     // screenshot — which is exactly the size at which a 3x3 grid's cells start
     // merging into a blob. Captured at deviceScaleFactor 4 so the review is of
     // real rendered pixels enlarged, not of a re-render at a size nothing ships.
     for (const scheme of SCHEMES) {
-      const context = await browser.newContext({
-        viewport: { width: 390, height: 844 },
-        colorScheme: scheme,
-        reducedMotion: 'reduce',
-        deviceScaleFactor: 4,
+      await capture({ viewport: PHONE, colorScheme: scheme, deviceScaleFactor: 4 }, async page => {
+        await open(page);
+        const target = join(outDir, `header-lockup-${scheme}.png`);
+        // The lockup is the mark plus the word, so the mark's own size and its
+        // optical weight beside the type are both in frame.
+        await page.getByText('Ferretry', { exact: true }).first().locator('..').screenshot({ path: target });
+        process.stdout.write(`📸 header lockup at 4x ${scheme} -> ${target}\n`);
       });
-      try {
-        await context.route('**/*', async route => {
-          if (new URL(route.request().url()).origin !== server.url.origin) {
-            await route.abort();
-            return;
-          }
-          await route.continue();
+    }
+
+    /**
+     * Is the setup stepper in this bundle at all?
+     *
+     * Probed once, and the answer decides between capturing all five setup states
+     * and skipping all five LOUDLY. The alternative — letting each capture fail on
+     * its own locator — cannot tell "this bundle predates the stepper" apart from
+     * "a selector is wrong", and those need opposite responses. A silent skip
+     * would be worse than either: this file's whole purpose is that a missing
+     * surface fails instead of quietly producing nothing.
+     */
+    let stepperPresent = false;
+    await capture(PHONE_CONTEXT, async page => {
+      await open(page, '/setup');
+      stepperPresent = await page
+        .locator(SETUP_ROOT)
+        .first()
+        .waitFor({ state: 'attached', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+    });
+
+    if (!stepperPresent) {
+      process.stdout.write(
+        '⏭️  SKIPPED the 5 setup captures: this bundle serves no [data-onboarding="setup"] root at\n' +
+          '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
+          '    setup-mobile, setup-desktop, setup-pair-mobile, setup-pair-keyboard-mobile and\n' +
+          '    setup-done-mobile were NOT produced.\n',
+      );
+    } else {
+      // 1 + 2. FIRST RUN, both viewports. Fresh state is what makes this the
+      // first-run frame: the progress store is empty, so the stepper opens on
+      // `install` rather than wherever a previous visit left it.
+      for (const viewport of VIEWPORTS) {
+        const options =
+          viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
+        await capture(options, async page => {
+          await open(page, '/setup');
+          await page.locator(setupStep('install')).waitFor({ state: 'visible' });
+          await shot(page, `setup-${viewport.name}`);
         });
-        const page = await context.newPage();
-        try {
-          await page.goto(new URL('/app/', server.url).toString(), { waitUntil: 'load' });
-          const target = join(outDir, `header-lockup-${scheme}.png`);
-          // The lockup is the mark plus the word, so the mark's own size and its
-          // optical weight beside the type are both in frame.
-          await page.getByText('Ferretry', { exact: true }).locator('..').screenshot({ path: target });
-          process.stdout.write(`📸 header lockup at 4x ${scheme} -> ${target}\n`);
-        } finally {
-          await page.close();
-        }
-      } finally {
-        await context.close();
       }
+
+      // 3. THE PAIR STEP, reached the way a reader reaches it. Driving the real
+      // control rather than seeding the store is the point: it proves the two
+      // advances actually land on `pair`, which a seeded state would assume.
+      const toPairStep = async (page: Page): Promise<void> => {
+        await open(page, '/setup');
+        await page.locator(setupStep('install')).waitFor({ state: 'visible' });
+        for (let advance = 0; advance < 2; advance += 1) {
+          await page.locator('[data-onboarding-next]').first().click();
+        }
+        await page.locator(setupStep('pair')).waitFor({ state: 'visible' });
+      };
+
+      await capture(PHONE_CONTEXT, async page => {
+        await toPairStep(page);
+        await shot(page, 'setup-pair-mobile');
+      });
+
+      // 4. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
+      // this is a synthetic visual viewport and not a smaller window.
+      await capture(PHONE_CONTEXT, async page => {
+        await page.addInitScript(VISUAL_VIEWPORT_SCRIPT);
+        await toPairStep(page);
+
+        // The paste form is revealed by that button only when there is a camera to
+        // prefer over it (`pasting || scanHost === null` in `pairing-screen.tsx`).
+        // Headless Chrome has none, so the form is already rendered and the button
+        // does not exist. Both are real states, so the reveal is conditional — but
+        // the FIELD is not: it has to be there either way or there is nothing to
+        // focus and no keyboard to raise.
+        const reveal = page.getByRole('button', { name: 'Paste a link instead' });
+        if ((await reveal.count()) > 0) await reveal.click();
+        const field = page.locator('#pairing-link');
+        await field.waitFor({ state: 'visible' });
+        await field.focus();
+
+        // Asserted BEFORE the change, so a driver that silently stopped installing
+        // the synthetic viewport cannot pass by starting from the wrong numbers.
+        const before = await readGeometry(page);
+        if (before.innerHeight !== PHONE.height || before.visualHeight !== PHONE.height) {
+          fail(`the synthetic viewport did not start at ${PHONE.height}: ${JSON.stringify(before)}`);
+        }
+
+        await page.evaluate(height => {
+          (window as unknown as { __setVisualViewportHeight: (next: number) => void }).__setVisualViewportHeight(
+            height,
+          );
+        }, KEYBOARD_VISUAL_HEIGHT);
+
+        // Wait for the PRODUCTION signal, not for a timeout. `use-app-viewport.ts`
+        // writes `data-keyboard="open"` on the root and `use-keyboard-open.ts`
+        // observes it; if that attribute never arrives, the app did not believe the
+        // keyboard and this would be a screenshot of the wrong state.
+        await page.locator('html[data-keyboard="open"]').waitFor({ state: 'attached' });
+
+        // And asserted after: the three layout-viewport facts a real keyboard
+        // leaves alone must still be untouched, or this is the short-window state
+        // wearing the keyboard's name.
+        const after = await readGeometry(page);
+        if (
+          after.innerHeight !== PHONE.height ||
+          after.screenHeight !== PHONE.height ||
+          after.orientation !== 'portrait-primary' ||
+          after.visualHeight !== KEYBOARD_VISUAL_HEIGHT
+        ) {
+          fail(`the keyboard state moved the wrong viewport: ${JSON.stringify(after)}`);
+        }
+        process.stdout.write(
+          `   keyboard geometry: innerHeight=${after.innerHeight} screen.height=${after.screenHeight} ` +
+            `orientation=${after.orientation} visualViewport.height=${String(after.visualHeight)} ` +
+            `--app-h=${after.appHeight}\n`,
+        );
+
+        // THE POINT OF THIS CAPTURE. A focused text field the keyboard is covering
+        // is the bug this state exists to expose, so the field's box is measured
+        // against the visible region — NOT scrolled into view. A
+        // `scrollIntoViewIfNeeded` here would produce a reassuring screenshot of a
+        // state no reader can reach, which is worse than no screenshot.
+        //
+        // `getBoundingClientRect` is relative to the layout viewport, and
+        // `offsetTop` is 0, so the visible band is [0, visualViewport.height].
+        const fit = await page.evaluate(() => {
+          const field = document.getElementById('pairing-link');
+          const box = field?.getBoundingClientRect();
+          return {
+            top: box?.top ?? Number.NaN,
+            bottom: box?.bottom ?? Number.NaN,
+            visible: window.visualViewport?.height ?? Number.NaN,
+          };
+        });
+
+        // Screenshot FIRST: if the field is off-screen, this image is the evidence.
+        await shot(page, 'setup-pair-keyboard-mobile');
+
+        const inside = fit.top >= 0 && fit.bottom <= fit.visible;
+        process.stdout.write(
+          `   focused field: top=${fit.top.toFixed(1)} bottom=${fit.bottom.toFixed(1)} ` +
+            `visible=${fit.visible.toFixed(1)} -> ${inside ? 'inside' : 'COVERED BY THE KEYBOARD'}\n`,
+        );
+        if (!inside) {
+          defects.push(
+            `#pairing-link is not inside the visual viewport with the keyboard open: ` +
+              `box [${fit.top.toFixed(1)}, ${fit.bottom.toFixed(1)}] against a visible ` +
+              `[0, ${fit.visible.toFixed(1)}]. See harness/out/setup-pair-keyboard-mobile.png. ` +
+              `This is a production behaviour, not a harness problem — it is deliberately NOT ` +
+              `worked around here with a scroll.`,
+          );
+        }
+      });
+
+      // 5. A SUCCESSFUL PAIRING, ending on `done`. The arrival seeds the stepper
+      // at `pair`, so this is the path a phone's ordinary camera app produces.
+      await capture(PHONE_CONTEXT, async page => {
+        await page.addInitScript(PAIR_RESPONSE_SCRIPT);
+        await open(page, PAIRING_ARRIVAL);
+        await page.getByText('Pair this device?').waitFor({ state: 'visible' });
+        await page.getByRole('button', { name: 'Pair this device' }).click();
+        await page.locator(setupStep('done')).waitFor({ state: 'visible' });
+        await shot(page, 'setup-done-mobile');
+      });
     }
   } finally {
     await browser.close();
   }
-  // Reported after the browser is down so the failure cannot leak a Chromium.
+  // Both reported after the browser is down so a failure cannot leak a Chromium.
   if (missing.length > 0) fail(`the page asked for files the bundle does not serve:\n  ${missing.join('\n  ')}`);
   process.stdout.write('✅ every reference the app requested resolved\n');
+  // Non-zero, but only after every capture is on disk: the images of the broken
+  // states are the point, and they would be lost by throwing at the assertion.
+  if (defects.length > 0) fail(`${defects.length} captured state(s) are wrong:\n  ${defects.join('\n  ')}`);
+  process.stdout.write('✅ every captured state holds\n');
 } finally {
   server.stop(true);
 }
