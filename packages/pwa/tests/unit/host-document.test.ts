@@ -39,6 +39,13 @@ const attribute = (attributes: string, name: string): string | undefined =>
 describe('the host document', () => {
   it('gives the app the one mount point main.tsx demands', () => {
     expect(document).toInclude('<div id="root"></div>');
+    // The demand is read rather than assumed. Nothing in the suite executes the
+    // entry point — importing it calls `createRoot` against the live document —
+    // so the only honest way to pair the two halves of this contract is to read
+    // the id the entry module looks up and compare it to the id the document
+    // declares. A mount that starts querying something else fails here.
+    const entry = readFileSync(join(packageDir, 'src/main.tsx'), 'utf8');
+    expect(entry).toInclude("getElementById('root')");
   });
 
   it('boots the entry module that exists on disk', () => {

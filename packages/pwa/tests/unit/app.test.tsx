@@ -24,6 +24,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
+import type { SessionStatus } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { StrictMode } from 'react';
 
@@ -124,6 +125,12 @@ interface ShellOptions {
    * the state the live-region tests are about.
    */
   readonly sessionGate?: Promise<void>;
+  /**
+   * The status `list` answers with, read on EVERY call so a test can drive a
+   * real status transition through two hydrations. The notification watch is
+   * silent on first sight, so a transition is the only thing that delivers.
+   */
+  readonly sessionStatus?: () => SessionStatus;
 }
 
 const appStore = async (reads: string[], options: ShellOptions = {}): Promise<AppStore> =>
@@ -142,7 +149,10 @@ const appStore = async (reads: string[], options: ShellOptions = {}): Promise<Ap
             },
           });
         },
-        list: async () => (options.sessions ?? []).map(id => sessionView(id)),
+        list: async () =>
+          (options.sessions ?? []).map(id =>
+            sessionView(id, { state: { status: options.sessionStatus?.() ?? 'running' } }),
+          ),
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
       }) as unknown as FyApiClient,
@@ -753,31 +763,74 @@ describe('the fleet notification watch', () => {
   const undo: (() => void)[] = [];
   afterEach(() => {
     while (undo.length > 0) undo.pop()?.();
+    FakeNotification.permission = 'default';
     FakeNotification.shown.length = 0;
   });
 
-  it('subscribes to the fleet and reads the document’s own visibility once permission is granted', async () => {
+  /**
+   * Mounts the shell with delivery possible and the fleet's status baseline
+   * already taken, and answers the handle that moves that status.
+   *
+   * `hidden` is the whole point of the two tests below: the watch takes it from
+   * `document.hidden`, and the default preference is to stay quiet while the
+   * reader can see the page, so the same transition must deliver hidden and stay
+   * silent visible.
+   */
+  const watchingShell = async (hidden: boolean) => {
     FakeNotification.permission = 'granted';
     undo.push(patchGlobal(globalThis, 'Notification', FakeNotification));
-    // Hidden, so a transition is a notification rather than something the
-    // reader is already looking at.
-    undo.push(patchGlobal(document, 'hidden', true));
+    undo.push(patchGlobal(document, 'hidden', hidden));
 
-    const { store, view } = await renderShell('/d/alpha', [alpha.daemonId], { sessions: ['one'] });
-    await settle();
-    // Granted permission is what mounts the watch; the shell reads it from the
-    // real API rather than assuming.
-    expect(view.container.querySelector('[data-route]')).not.toBeNull();
-
-    store.notificationPreferences.set(alpha.daemonId, { enabled: true });
-    await interact(async () => {
-      await store.fleet.hydrate(alpha);
+    let status: SessionStatus = 'running';
+    const { store, view } = await renderShell('/d/alpha', [alpha.daemonId], {
+      sessions: ['one'],
+      sessionStatus: () => status,
     });
     await settle();
+    store.notificationPreferences.set(alpha.daemonId, { enabled: true });
 
+    const moveTo = async (next: SessionStatus): Promise<void> => {
+      status = next;
+      await interact(async () => {
+        await store.fleet.hydrate(alpha);
+      });
+      await settle();
+    };
+    // First sight is deliberately silent, so the baseline is taken here rather
+    // than in the tests, which are about the transition off it.
+    await moveTo('running');
+    return { moveTo, store, view };
+  };
+
+  it('delivers a hidden reader’s session transition through the document’s own Notification', async () => {
+    const { moveTo, store, view } = await watchingShell(true);
+
+    // Granted permission is what mounts the watch, and the shell reads it from
+    // the real API rather than assuming; a baseline hydration is not news.
+    expect(FakeNotification.shown).toEqual([]);
     // The watch is wired to THIS store's fleet: a refresh has to reach it
     // through the subscription the shell handed over.
     expect(store.fleet.getSnapshot().daemons.get(alpha.daemonId)?.sessions?.length).toBe(1);
+
+    await moveTo('awaiting_question');
+
+    // Delivered, and named after the session rather than the daemon: this is the
+    // only assertion in the file that proves the whole chain — fleet diff, the
+    // preference read, the surface, and the page-level constructor.
+    expect(FakeNotification.shown).toEqual(['Session one']);
+
+    await view.unmount();
+  });
+
+  it('stays silent on the same transition while the reader is looking at the page', async () => {
+    const { moveTo, view } = await watchingShell(false);
+
+    await moveTo('awaiting_question');
+
+    // Nothing about the transition changed — only `document.hidden`. So a
+    // notification here would mean the watch is reading some other visibility,
+    // or none at all.
+    expect(FakeNotification.shown).toEqual([]);
 
     await view.unmount();
   });

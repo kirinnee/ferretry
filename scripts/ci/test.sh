@@ -42,9 +42,17 @@ if [[ ${mode} == "unit" ]]; then
   # it, yet it is the most consequential production module in the package: it
   # is where routes, stores, notification surfaces and browser capabilities are
   # wired together. Named explicitly so it carries the same 100% obligation as
-  # everything it composes. `src/main.tsx` is deliberately absent — importing it
-  # calls `createRoot`, so it is proved by `tests/unit/host-document.test.ts`
-  # against the document instead.
+  # everything it composes.
+  #
+  # `src/main.tsx` is deliberately absent, and the honest reason is that nothing
+  # executes it: importing it calls `createRoot` against the live document, and
+  # re-importing it to reach its missing-`#root` branch would need module-cache
+  # tricks. So its body — the throw, the stylesheet import, the render — is
+  # UNPROVED, which is affordable only while the entry point stays this small.
+  # What `tests/unit/host-document.test.ts` does prove is narrower and is about
+  # the document: `#root` is present, the id the entry module looks up is that
+  # same id, and the one module the page boots is this exact file. Any decision
+  # worth testing belongs in `App.tsx`, which is in the ledger.
   scope_dirs+=("packages/pwa/src/App.tsx")
 fi
 [[ ${#scope_dirs[@]} -eq 0 ]] && echo "❌ no workspace source directories found for ${scope}" >&2 && exit 1
