@@ -7,6 +7,7 @@ export * from './catalog.ts';
 export * from './client.ts';
 export * from './common.ts';
 export * from './learning.ts';
+export * from './pairing.ts';
 export * from './pins.ts';
 export * from './push.ts';
 export * from './service.ts';
