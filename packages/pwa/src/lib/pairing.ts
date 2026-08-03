@@ -51,6 +51,54 @@ export const pairingSeedFromUrl = (value: string): PairingSeed => {
 };
 
 /**
+ * How this tab was opened, as far as pairing is concerned.
+ *
+ * `none` is a COLD OPEN — nothing claimed to be a pairing link, so the screen
+ * offers its one action. `unreadable` is the damaged case and is deliberately
+ * NOT folded into it: a fragment that announces itself as `v1` and then fails
+ * to parse is evidence of a broken or truncated link, and showing the ordinary
+ * cold screen there would quietly tell a reader their link was never there.
+ */
+export type PairingArrival =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'seed'; readonly seed: PairingSeed }
+  | { readonly kind: 'unreadable'; readonly reason: string };
+
+/** Only a `v1` fragment is a pairing claim; any other hash belongs to something else. */
+const PAIRING_FRAGMENT = /^#?v1(;|$)/u;
+
+/**
+ * Reads a pairing link out of the address the reader arrived at.
+ *
+ * The overwhelmingly common arrival is a QR scanned with the phone's own
+ * camera app, which lands here pre-filled. Parsing it is pure so the screen can
+ * be proved against an address rather than against a browser.
+ */
+export const pairingArrival = (href: string): PairingArrival => {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return { kind: 'none' };
+  }
+  if (!PAIRING_FRAGMENT.test(url.hash)) return { kind: 'none' };
+  try {
+    return { kind: 'seed', seed: pairingSeedFromUrl(href) };
+  } catch (reason) {
+    return { kind: 'unreadable', reason: reason instanceof Error ? reason.message : 'the pairing link is malformed' };
+  }
+};
+
+/**
+ * The part of a daemon address a reader can recognise before trusting it.
+ *
+ * A confirmation that says only "pair?" is not a confirmation, and the whole
+ * origin is too long to read on a phone; the host is the piece that identifies
+ * the machine.
+ */
+export const pairingDaemonHost = (seed: PairingSeed): string => new URL(seed.daemonUrl).host;
+
+/**
  * Binds the daemon's pairing response to the fingerprint carried out of band
  * by the pairing link before the PWA stores or uses its device token.
  */

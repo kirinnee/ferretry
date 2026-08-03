@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { pairedDaemonConnection, pairingSeedFromUrl } from '../../src/lib/pairing.ts';
+import {
+  pairedDaemonConnection,
+  pairingArrival,
+  pairingDaemonHost,
+  pairingSeedFromUrl,
+} from '../../src/lib/pairing.ts';
 
 describe('pairing seed', () => {
   it('should read runtime daemon connection values from the fragment', () => {
@@ -38,6 +43,52 @@ describe('pairing seed', () => {
     should(repeated).throw('pairing URL repeats code');
     should(extended).throw('pairing URL must include url, code, and fp only');
     should(invalidField).throw('pairing URL contains an invalid field');
+  });
+});
+
+describe('pairing arrival', () => {
+  const link = 'https://app.example.test/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=7F3K-Q2ND;fp=daemon-fp';
+
+  it('should read a pre-filled arrival straight out of the fragment', () => {
+    // Act
+    const actual = pairingArrival(link);
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'seed',
+      seed: { daemonUrl: 'https://daemon.example.test', daemonId: 'daemon-fp', code: '7F3K-Q2ND' },
+    });
+  });
+
+  it('should treat an address that claims no pairing link as a cold open', () => {
+    // Assert
+    should(pairingArrival('https://app.example.test/')).deepEqual({ kind: 'none' });
+    should(pairingArrival('https://app.example.test/pair#')).deepEqual({ kind: 'none' });
+    should(pairingArrival('https://app.example.test/pair#palette')).deepEqual({ kind: 'none' });
+    // `v10;` is a different, later version — not a v1 link with junk after it.
+    should(pairingArrival('https://app.example.test/pair#v10;url=a')).deepEqual({ kind: 'none' });
+    should(pairingArrival('not-a-url#v1;url=a')).deepEqual({ kind: 'none' });
+  });
+
+  it('should refuse rather than silently show a cold screen when a v1 link is damaged', () => {
+    // Act
+    const truncated = pairingArrival('https://app.example.test/pair#v1;url=https%3A%2F%2Fd.test;code=abc');
+    const versionOnly = pairingArrival('https://app.example.test/pair#v1');
+
+    // Assert
+    should(truncated).deepEqual({ kind: 'unreadable', reason: 'pairing URL must include url, code, and fp only' });
+    should(versionOnly.kind).equal('unreadable');
+  });
+
+  it('should name the daemon by the host a reader can recognise', () => {
+    // Arrange
+    const arrival = pairingArrival(link);
+
+    // Act
+    const actual = arrival.kind === 'seed' ? pairingDaemonHost(arrival.seed) : null;
+
+    // Assert
+    should(actual).equal('daemon.example.test');
   });
 });
 

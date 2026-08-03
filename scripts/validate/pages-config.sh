@@ -19,6 +19,10 @@ jq -e '
 
 rg -q '^/\*$' "${headers}"
 rg -q "^  Content-Security-Policy: .*connect-src 'self' https: wss: http://localhost:\* http://127.0.0.1:\* ws://localhost:\* ws://127.0.0.1:\*;" "${headers}"
+# The pairing scanner needs the camera on this origin and nowhere else. Pinned
+# because `camera=()` silently disables `getUserMedia` for the whole site, and
+# the symptom is a scan button that does nothing rather than a build failure.
+rg -q '^  Permissions-Policy: camera=\(self\), geolocation=\(\), microphone=\(self\)$' "${headers}"
 rg -q '^/index\.html$' "${headers}"
 rg -q '^/sw\.\*$' "${headers}"
 rg -q '^/manifest\*\.webmanifest$' "${headers}"

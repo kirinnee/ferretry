@@ -240,9 +240,37 @@ try {
           const pinsTarget = join(outDir, `pins-${viewport.name}.png`);
           await page.getByLabel('Pins ledger').screenshot({ path: pinsTarget });
           process.stdout.write(`📸 Pins ledger -> ${pinsTarget}\n`);
-          const pairingTarget = join(outDir, `pairing-${viewport.name}.png`);
-          await page.getByLabel('Daemon pairing').screenshot({ path: pairingTarget });
-          process.stdout.write(`📸 pairing ${viewport.name} -> ${pairingTarget}\n`);
+          // Three pairing screens, because they are three different screens: the
+          // cold open a first-timer sees, the confirmation a scanned QR lands
+          // on, and what the surface becomes once a daemon is connected.
+          for (const [label, slug] of [
+            ['Daemon pairing', 'pairing'],
+            ['Pairing confirmation', 'pairing-confirm'],
+            ['Paired daemon list', 'pairing-list'],
+          ] as const) {
+            const pairingTarget = join(outDir, `${slug}-${viewport.name}.png`);
+            await page.getByLabel(label, { exact: true }).screenshot({ path: pairingTarget });
+            process.stdout.write(`📸 ${label} ${viewport.name} -> ${pairingTarget}\n`);
+          }
+
+          // AND IN LIGHT. Pairing is the first screen a new reader ever sees,
+          // and half of them are not in dark mode. The rest of this harness page
+          // is captured dark only; this one surface is worth both.
+          await page.evaluate(() => {
+            document.documentElement.dataset.theme = 'studio-light';
+          });
+          for (const [label, slug] of [
+            ['Daemon pairing', 'pairing'],
+            ['Pairing confirmation', 'pairing-confirm'],
+            ['Paired daemon list', 'pairing-list'],
+          ] as const) {
+            const lightTarget = join(outDir, `${slug}-light-${viewport.name}.png`);
+            await page.getByLabel(label, { exact: true }).screenshot({ path: lightTarget });
+            process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
+          }
+          await page.evaluate(() => {
+            document.documentElement.dataset.theme = 'studio-dark';
+          });
           const wardenAttentionTarget = join(outDir, `warden-attention-${viewport.name}.png`);
           await page
             .locator('[aria-labelledby="warden-attention-heading"]')

@@ -77,6 +77,8 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
+import type { QrScanHost } from '../src/lib/pair-scan.ts';
+import type { PairingArrival } from '../src/lib/pairing.ts';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
@@ -574,6 +576,15 @@ const LEARNING_PROPOSALS: readonly ProposalView[] = [
 
 /** Frozen so the screenshots of two runs are byte-identical. */
 const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
+
+/** A camera that never decodes: the harness needs the control enabled, not a scan. */
+const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await new Promise<string>(() => {}) };
+
+/** The pre-filled arrival a phone's own camera app produces. */
+const HARNESS_ARRIVAL: PairingArrival = {
+  kind: 'seed',
+  seed: { daemonUrl: 'https://studio.tail1234.ts.net', daemonId: 'sha256:8f2c…41ab', code: 'harness-code' },
+};
 
 /**
  * The thumbnail's picture is supplied as an INLINE image and the document card
@@ -1533,6 +1544,37 @@ function Shell() {
       render: () => (
         <Card aria-label="Daemon pairing" className="min-w-0 overflow-hidden">
           <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {}}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Pairing confirmation',
+      render: () => (
+        <Card aria-label="Pairing confirmation" className="min-w-0 overflow-hidden">
+          <PairingScreen
+            connections={[]}
+            selectedDaemonId={null}
+            arrival={HARNESS_ARRIVAL}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => await new Promise(() => {})}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        </Card>
+      ),
+    },
+    {
+      label: 'Paired daemon list',
+      render: () => (
+        <Card aria-label="Paired daemon list" className="min-w-0 overflow-hidden">
+          <PairingScreen
             connections={[
               { ...daemon, label: 'Harness daemon', pairedAt: HARNESS_NOW - 3_600_000, lastSelectedAt: HARNESS_NOW },
               {
@@ -1545,6 +1587,7 @@ function Shell() {
               },
             ]}
             selectedDaemonId={daemon.daemonId}
+            scanHost={HARNESS_SCAN_HOST}
             onPair={async () => {}}
             onRemove={() => {}}
             onSelect={() => {}}
