@@ -1,4 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
+import { chmod } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import {
@@ -22,14 +23,8 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
  * runner's own timeout must always be the one that expires, which means every test here has to
  * outlast it.
  *
- * The slack is for the FIXTURES, and it has to be generous. Each test builds a real repository
- * first — `git init`, a config write, an add and a commit — and none of that runs through the
- * runner, so none of it is covered by `DEFAULT_GIT_TIMEOUT_MS`. A budget of runner + 10s assumed
- * that setup was free; on a loaded CI runner it is not, and the whole budget expired during
- * fixture work while the assertion never ran. The symptom is a test that fails at exactly its
- * budget, which reads like a hang in the code under test and is not one.
  */
-const GIT_TEST_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_MS + 50_000;
+const GIT_TEST_TIMEOUT_MS = DEFAULT_GIT_TIMEOUT_MS + 10_000;
 
 describe('BunGitRunner', () => {
   afterAll(async () => {
@@ -186,7 +181,9 @@ describe('BunGitRunner', () => {
     async () => {
       // Arrange — a stub `git` that never returns, so the timeout is the only way this finishes.
       const repository = await tempRepository('runner-timeout');
-      const stubs = await stubGitDirectory('#!/bin/sh\nsleep 60\n');
+      // `exec` makes the sleeping process the direct child. Killing a shell wrapper alone would
+      // orphan `sleep`, which Bun later reaps against an unrelated test's timeout budget.
+      const stubs = await stubGitDirectory('#!/bin/sh\nexec sleep 60\n');
       const subject = new BunGitRunner(() => ({ PATH: `${stubs}:${process.env.PATH ?? ''}` }));
 
       // Act
@@ -267,18 +264,27 @@ describe('BunGitRunner', () => {
       // Arrange
       const repository = await tempRepository('runner-hooks');
       const marker = path.join(repository.root, 'hook-ran');
+      const pagerMarker = path.join(repository.root, 'pager-ran');
       const hooks = path.join(repository.root, '.git', 'hooks');
       await Bun.write(path.join(hooks, 'post-checkout'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\n`);
-      await setupGit(repository.root, 'config', 'core.pager', 'false');
+      await chmod(path.join(hooks, 'post-checkout'), 0o700);
+      const pagers = await stubGitDirectory(`#!/bin/sh\ntouch ${JSON.stringify(pagerMarker)}\ncat\n`);
+      await setupGit(repository.root, 'config', 'core.pager', path.join(pagers, 'git'));
       const subject = new BunGitRunner();
 
       // Act
-      const actual = await subject.run({ cwd: repository.root, args: ['log', '--oneline'] });
+      const checkout = await subject.run({
+        cwd: repository.root,
+        args: ['checkout', '--quiet', '-b', 'runner-checkout'],
+      });
+      const actual = await subject.run({ cwd: repository.root, args: ['--paginate', 'log', '--oneline'] });
 
       // Assert
+      should(checkout.exitCode).equal(0);
       should(actual.exitCode).equal(0);
       should(decode(actual.stdout)).containEql('chore: seed');
       should(await Bun.file(marker).exists()).be.false();
+      should(await Bun.file(pagerMarker).exists()).be.false();
     },
     GIT_TEST_TIMEOUT_MS,
   );
