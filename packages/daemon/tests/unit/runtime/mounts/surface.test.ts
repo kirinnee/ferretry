@@ -8,6 +8,7 @@ import {
   mountedDaemonRoutes,
   mountedRawRoutes,
   mountedSocketRoutes,
+  type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
@@ -20,7 +21,6 @@ import {
   attentionService,
   CREDENTIALS,
   emptyFeed,
-  fleetEventSubsystem,
   FakeBrowserLogin,
   FakeSessionControl,
   FakeSessionMigrate,
@@ -29,8 +29,9 @@ import {
   FakeSessionSignal,
   FakeStt,
   FakeTaskBoards,
-  FakeWarden,
   FakeTerminals,
+  FakeWarden,
+  fleetEventSubsystem,
   healthSubsystem,
   human,
   learningSubsystem,
@@ -51,8 +52,17 @@ import {
 
 const base = { credentials: CREDENTIALS, usage: emptyFeed, clock: fixedClock(1_700_000_000_000), startedAtMs: 0 };
 
+const pairingSubsystem = (): PairingSubsystem => ({
+  mint: () => {
+    throw new Error('not exercised by the surface inventory');
+  },
+  status: () => undefined,
+  redeem: async () => ({ kind: 'refused' }),
+});
+
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
+  pairing: pairingSubsystem(),
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -105,6 +115,9 @@ describe('the mounted daemon surface', () => {
       'GET /usage',
       'GET /v1/usage',
       'GET /metrics',
+      'POST /v1/pair',
+      'POST /v1/pair/code',
+      'GET /v1/pair/code/:pairingId',
       'GET /v1/health',
       'GET /v1/gc',
       'POST /v1/gc',

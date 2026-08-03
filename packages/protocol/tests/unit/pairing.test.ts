@@ -29,11 +29,14 @@ describe('pairing protocol', () => {
       code: '7F3K-Q2ND',
       deviceName: 'Ernest phone',
     });
+    should(PairingRequestSchema.parse({ code: '  7f3k q2nd ', deviceName: 'phone' }).code).equal('7F3K-Q2ND');
+    should(PairingRequestSchema.parse({ code: '7f3kq2nd', deviceName: 'phone' }).code).equal('7F3K-Q2ND');
   });
 
   it('should refuse malformed codes and unbounded or extra input', () => {
-    should(PairingRequestSchema.safeParse({ code: '7F3KQ2ND', deviceName: 'phone' }).success).be.false();
+    should(PairingRequestSchema.safeParse({ code: '7F3KQ2N', deviceName: 'phone' }).success).be.false();
     should(PairingRequestSchema.safeParse({ code: '7F3K-Q2N0', deviceName: 'phone' }).success).be.false();
+    should(PairingRequestSchema.safeParse({ code: '7F3K-Q2NU', deviceName: 'phone' }).success).be.false();
     should(PairingRequestSchema.safeParse({ code: '7F3K-Q2ND', deviceName: '' }).success).be.false();
     should(
       PairingRequestSchema.safeParse({
@@ -44,6 +47,14 @@ describe('pairing protocol', () => {
     should(PairingRequestSchema.safeParse({ code: '7F3K-Q2ND', deviceName: 'phone', admin: true }).success).be.false();
   });
 
+  it('should reject terminal and bidi injection while preserving bounded international names', () => {
+    for (const deviceName of ['phone\x1b[31m', 'phone\rreplacement', 'phone\u202Ename', 'phone\u200B']) {
+      should(PairingRequestSchema.safeParse({ code: '7F3K-Q2ND', deviceName }).success).be.false();
+    }
+    const boundary = '界'.repeat(PAIRING_DEVICE_NAME_MAX_LENGTH);
+    should(PairingRequestSchema.parse({ code: '7F3K-Q2ND', deviceName: boundary }).deviceName).equal(boundary);
+  });
+
   it('should validate the complete successful response and typed credentials', () => {
     const response = { deviceToken, daemonId, daemonName: 'workstation', capabilities: ['daemon-api'] };
 
@@ -52,6 +63,7 @@ describe('pairing protocol', () => {
     should(DaemonIdSchema.parse(daemonId)).equal(daemonId);
     should(DeviceTokenSchema.safeParse('device-token').success).be.false();
     should(DaemonIdSchema.safeParse('fingerprint').success).be.false();
+    should(PairingResponseSchema.safeParse({ ...response, daemonName: 'workstation\u202E' }).success).be.false();
   });
 
   it('should validate the bodyless local mint contract and its expiry metadata', () => {
@@ -80,6 +92,44 @@ describe('pairing protocol', () => {
       pairUrl:
         'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     });
+    should(
+      PairingCodeMintResponseSchema.safeParse({
+        pairingId,
+        code: '7F3K-Q2ND',
+        ttlSeconds: 120,
+        expiresAt: '2026-08-03T12:02:00.000Z',
+        daemonId,
+        daemonName: 'workstation',
+        daemonUrl: 'https://workstation.example.test',
+        pairUrl: 'https://ferretry.pages.dev/pair?code=7F3K-Q2ND',
+      }).success,
+    ).be.false();
+    should(
+      PairingCodeMintResponseSchema.safeParse({
+        pairingId,
+        code: '7F3K-Q2ND',
+        ttlSeconds: 120,
+        expiresAt: '2026-08-03T12:02:00.000Z',
+        daemonId,
+        daemonName: 'workstation',
+        daemonUrl: 'https://workstation.example.test',
+        pairUrl:
+          'https://ferretry.pages.dev/pair?hint=7F3K%2DQ2ND#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }).success,
+    ).be.false();
+    should(
+      PairingCodeMintResponseSchema.safeParse({
+        pairingId,
+        code: '7F3K-Q2ND',
+        ttlSeconds: 120,
+        expiresAt: '2026-08-03T12:02:00.000Z',
+        daemonId,
+        daemonName: 'workstation',
+        daemonUrl: 'https://workstation.example.test',
+        pairUrl:
+          'https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fworkstation.example.test;code=7F3K-Q2ND;fp=fy_daemon_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz',
+      }).success,
+    ).be.false();
   });
 
   it('should distinguish local countdown state from a successful redemption acknowledgement', () => {

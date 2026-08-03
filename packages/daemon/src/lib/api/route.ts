@@ -10,11 +10,12 @@ import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
  * route that says nothing is admin-only by construction and forgetting to think about scope fails
  * closed instead of open.
  *
- * - `public` — no token at all. Reserved for the machine feeds external tools scrape.
- * - `warden` — the warden-scoped token, or the admin token.
- * - `admin` — the admin token only.
+ * - `public` — no token at all. Reserved for machine feeds and one-time-code redemption.
+ * - `warden` — any authenticated caller, including the capability-scoped warden.
+ * - `admin` — a host admin or paired device acting as the operator.
+ * - `host` — the host's admin token only; never a remote device or warden.
  */
-export type RouteScope = 'public' | 'warden' | 'admin';
+export type RouteScope = 'public' | 'warden' | 'admin' | 'host';
 
 /** Everything a handler is allowed to know about the caller. */
 export interface RouteContext {

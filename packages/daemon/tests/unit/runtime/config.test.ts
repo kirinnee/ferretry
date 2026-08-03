@@ -5,9 +5,17 @@ import { defaultDaemonConfig, parseDaemonConfig } from '../../../src/lib/runtime
 describe('daemon configuration', () => {
   it('should derive a local public URL while rejecting unsafe host and port values', () => {
     // Act + Assert
-    should(defaultDaemonConfig()).containDeep({ host: '127.0.0.1', publicUrl: 'http://127.0.0.1:7337' });
+    should(defaultDaemonConfig()).containDeep({
+      host: '127.0.0.1',
+      publicUrl: 'http://127.0.0.1:7337',
+      corsOrigins: ['https://ferretry.pages.dev'],
+    });
     should(parseDaemonConfig({ host: 'localhost', port: 9000 })).containDeep({ publicUrl: 'http://localhost:9000' });
     should(parseDaemonConfig({ projectRoots: ['~/Work'] }).projectRoots).deepEqual(['~/Work']);
+    should(parseDaemonConfig({ corsOrigins: ['https://example.test/'] }).corsOrigins).deepEqual([
+      'https://example.test',
+    ]);
+    should(() => parseDaemonConfig({ corsOrigins: ['https://example.test/path'] })).throw();
     should(() => parseDaemonConfig({ host: '', port: 0 })).throw();
     should(() => parseDaemonConfig({ host: 'localhost', port: 7337, unknown: true })).throw();
   });

@@ -22,6 +22,7 @@ export type ApiActor = string;
 
 export const WARDEN_ACTOR_PREFIX = 'warden:';
 export const PEER_ACTOR_PREFIX = 'peer:';
+export const DEVICE_ACTOR_PREFIX = 'device:';
 
 /** A warden's action, tagged with the warden's OWN session id. */
 export function wardenActor(sessionId: string): `warden:${string}` {
@@ -33,11 +34,18 @@ export function peerActor(sessionId: string): `peer:${string}` {
   return `${PEER_ACTOR_PREFIX}${sessionId}`;
 }
 
+/** A paired browser acting under its own revocable credential. */
+export function deviceActor(deviceId: string): `device:${string}` {
+  return `${DEVICE_ACTOR_PREFIX}${deviceId}`;
+}
+
 /** Which bearer token authenticated the request. */
-export type TokenClass = 'admin' | 'warden';
+export type TokenClass = 'admin' | 'warden' | 'device';
 
 export interface ApiActorInput {
   readonly tokenClass: TokenClass;
+  /** Registry-derived identity, present only for a device token. */
+  readonly deviceId?: string;
   /** The acting pane's own session id, present when the request originates inside a teammate or
    *  warden pane. Absent for the human's own shell and for the browser UI. */
   readonly sessionId?: string;
@@ -53,6 +61,10 @@ export interface ApiActorInput {
  * client header.
  */
 export function resolveApiActor(input: ApiActorInput): ApiActor {
+  if (input.tokenClass === 'device') {
+    const deviceId = input.deviceId?.trim();
+    return deviceId === undefined || deviceId === '' ? 'device' : deviceActor(deviceId);
+  }
   const sessionId = input.sessionId?.trim();
   if (input.tokenClass === 'warden')
     return sessionId === undefined || sessionId === '' ? 'warden' : wardenActor(sessionId);

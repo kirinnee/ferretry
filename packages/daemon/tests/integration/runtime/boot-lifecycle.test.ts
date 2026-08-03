@@ -5,15 +5,18 @@ import { join } from 'node:path';
 import {
   AnalyticsResponseSchema,
   BrowserLoginStatusSchema,
-  FyEventStreamFrameSchema,
   type FyEventStreamFrame,
+  FyEventStreamFrameSchema,
   HealthViewSchema,
   LearningConfigSchema,
-  RunManifestSchema,
   LearningPatchResponseSchema,
   LearningStatusSchema,
   NameSuggestionsSchema,
+  PairingCodeMintResponseSchema,
+  PairingCodeStatusResponseSchema,
+  PairingResponseSchema,
   ProposalViewSchema,
+  RunManifestSchema,
   SessionConfigSchema,
   SessionListSchema,
   SessionStateSchema,
@@ -585,6 +588,88 @@ describe('daemon boot lifecycle', () => {
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
+  });
+
+  it('should mint, redeem, persist and authenticate a pairing through the production composition root', async () => {
+    const home = await tempDirectory('fyd-pairing');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const exit = start(world, cleanups);
+    const base = `http://127.0.0.1:${port}`;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const admin = { authorization: `Bearer ${adminToken}` };
+    const origin = 'https://ferretry.pages.dev';
+
+    const preflight = await fetch(`${base}/v1/pair`, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'content-type',
+      },
+    });
+    const mintedResponse = await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: admin });
+    const minted = PairingCodeMintResponseSchema.parse(await mintedResponse.json());
+    const pairedResponse = await fetch(`${base}/v1/pair`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ code: minted.code, deviceName: '  Browser phone  ' }),
+    });
+    const paired = PairingResponseSchema.parse(await pairedResponse.json());
+    const replay = await fetch(`${base}/v1/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: minted.code, deviceName: 'Browser phone' }),
+    });
+    const statusResponse = await fetch(`${base}/v1/pair/code/${minted.pairingId}`, { headers: admin });
+    const status = PairingCodeStatusResponseSchema.parse(await statusResponse.json());
+    const devicePreflight = await fetch(`${base}/v1/usage`, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'GET',
+        'access-control-request-headers': 'authorization, x-fy-request-id, x-fy-version',
+      },
+    });
+    const asDevice = await fetch(`${base}/v1/usage`, {
+      headers: { origin, authorization: `Bearer ${paired.deviceToken}` },
+    });
+    const deviceDocument = await readFile(join(home, 'state', 'devices.json'), 'utf8');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    should(code).equal(0);
+    should(preflight.status).equal(204);
+    should(preflight.headers.get('access-control-allow-origin')).equal(origin);
+    should(mintedResponse.status).equal(201);
+    should(minted.ttlSeconds).equal(120);
+    should(new URL(minted.pairUrl).hash).containEql(minted.code);
+    should(new URL(minted.pairUrl).search).not.containEql(minted.code);
+    should(pairedResponse.status).equal(200);
+    should(pairedResponse.headers.get('access-control-allow-origin')).equal(origin);
+    should(paired.daemonId).equal(minted.daemonId);
+    should(replay.status).equal(403);
+    should(status.status).equal('redeemed');
+    if (status.status !== 'redeemed') throw new Error('expected a redeemed pairing status');
+    should(status.deviceName).equal('Browser phone');
+    should(devicePreflight.status).equal(204);
+    should(devicePreflight.headers.get('access-control-allow-credentials')).equal('true');
+    should(asDevice.status).equal(200);
+    should(asDevice.headers.get('access-control-allow-origin')).equal(origin);
+    should(asDevice.headers.get('access-control-allow-credentials')).equal('true');
+    should(deviceDocument).containEql('Browser phone');
+    should(deviceDocument).not.containEql(paired.deviceToken);
   });
 
   /**

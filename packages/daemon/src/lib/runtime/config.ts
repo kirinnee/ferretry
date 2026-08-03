@@ -2,6 +2,13 @@ import { z } from 'zod';
 
 const HostSchema = z.string().trim().min(1).max(255);
 const PortSchema = z.number().int().min(1).max(65_535);
+const CorsOriginSchema = z
+  .url()
+  .refine(value => {
+    const origin = new URL(value).origin;
+    return value === origin || value === `${origin}/`;
+  }, 'CORS entry must be an origin without a path, query, or fragment')
+  .transform(value => new URL(value).origin);
 
 /**
  * Where the daemon reads account health from.
@@ -31,6 +38,8 @@ export const DaemonConfigSchema = z
     host: HostSchema.default('127.0.0.1'),
     port: PortSchema.default(7337),
     publicUrl: z.url().optional(),
+    /** Exact browser origins allowed to call this daemon, including the public pairing exchange. */
+    corsOrigins: z.array(CorsOriginSchema).max(32).readonly().default(['https://ferretry.pages.dev']),
     secretsFile: z.string().trim().min(1).optional(),
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),

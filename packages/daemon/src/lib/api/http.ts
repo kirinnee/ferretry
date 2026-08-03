@@ -24,6 +24,8 @@ export interface ApiRequest {
   readonly path: string;
   readonly query: QueryParameters;
   readonly headers: ApiHeaders;
+  /** Transport-observed peer address, used only as a rate-limit bucket key. */
+  readonly clientAddress?: string;
   /** Whether the peer is on the loopback interface. Query-parameter tokens are honoured only for
    *  loopback peers, so a token can never travel in a loggable URL across a network hop. */
   readonly loopback: boolean;

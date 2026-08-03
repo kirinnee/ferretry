@@ -1,7 +1,7 @@
 import { resolveApiActor } from './actor.ts';
-import { authenticate, bearerToken, type ApiCredentials } from './authentication.ts';
+import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
 import { ApiError } from './error.ts';
-import { headerValue, queryValue, type ApiRequest, type ApiResponse } from './http.ts';
+import { type ApiRequest, type ApiResponse, headerValue, queryValue } from './http.ts';
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type { ApiRoute, RouteContext, ScopedRoute } from './route.ts';
 import type { ApiRouter } from './router.ts';
@@ -66,12 +66,15 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
     };
 
-  if (lookup.route.scope === 'admin' && authentication.tokenClass === 'warden')
+  if (
+    (lookup.route.scope === 'host' && authentication.tokenClass !== 'admin') ||
+    (lookup.route.scope === 'admin' && authentication.tokenClass === 'warden')
+  )
     return {
       kind: 'refused',
       response: errorResponse(
         403,
-        `the warden-scoped token may not use ${request.method} ${request.path}`,
+        `the presented credential may not use ${request.method} ${request.path}`,
         'forbidden',
       ),
     };
@@ -82,6 +85,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   // had its own actions journalled as the warden's.
   const actor = resolveApiActor({
     tokenClass: authentication.tokenClass,
+    deviceId: authentication.tokenClass === 'device' ? authentication.deviceId : undefined,
     sessionId: headerValue(request, SESSION_ID_HEADER),
     client: headerValue(request, CLIENT_HEADER),
   });

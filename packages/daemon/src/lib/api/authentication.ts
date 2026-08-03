@@ -1,5 +1,3 @@
-import type { TokenClass } from './actor.ts';
-
 /**
  * The tokens the daemon accepts.
  *
@@ -10,6 +8,12 @@ import type { TokenClass } from './actor.ts';
 export interface ApiCredentials {
   readonly admin: string;
   readonly warden?: string;
+  /** Per-device credentials are hashed and resolved by the daemon-local registry. */
+  readonly devices?: DeviceCredentialVerifier;
+}
+
+export interface DeviceCredentialVerifier {
+  identify(token: string): string | undefined;
 }
 
 /** What a request presented. Assembled by the dispatcher from headers and, for loopback WebSocket
@@ -22,7 +26,8 @@ export interface PresentedToken {
 
 export type Authentication =
   | { readonly kind: 'anonymous' }
-  | { readonly kind: 'authenticated'; readonly tokenClass: TokenClass };
+  | { readonly kind: 'authenticated'; readonly tokenClass: 'admin' | 'warden' }
+  | { readonly kind: 'authenticated'; readonly tokenClass: 'device'; readonly deviceId: string };
 
 /**
  * Compares two secrets without leaking WHERE they differ through timing.
@@ -67,5 +72,11 @@ export function authenticate(credentials: ApiCredentials, presented: PresentedTo
     return { kind: 'authenticated', tokenClass: 'admin' };
   if (warden !== undefined && warden !== '' && candidates.some(candidate => secretsMatch(candidate, warden)))
     return { kind: 'authenticated', tokenClass: 'warden' };
+  if (credentials.devices !== undefined) {
+    for (const candidate of candidates) {
+      const deviceId = credentials.devices.identify(candidate);
+      if (deviceId !== undefined) return { kind: 'authenticated', tokenClass: 'device', deviceId };
+    }
+  }
   return { kind: 'anonymous' };
 }
