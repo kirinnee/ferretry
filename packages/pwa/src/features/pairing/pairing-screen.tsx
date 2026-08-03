@@ -25,7 +25,7 @@
  * there is something in it.
  */
 import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from 'react';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -53,6 +53,22 @@ export interface PairingScreenProps {
    * should now leave the address bar. Called once, on first render.
    */
   readonly onArrivalTaken?: () => void;
+  /**
+   * Opens the setup guide. Absent while this screen IS a step of that guide —
+   * a link back into the stepper from inside the stepper is a loop.
+   */
+  readonly onOpenSetup?: () => void;
+  /**
+   * Renders inside a host that already owns the page.
+   *
+   * The pairing ARC — scan, paste, confirm, exchange, fail, retry — is the same
+   * in both housings and is deliberately not forked. What changes is only the
+   * housing: a standalone screen is the page's `<main>` with the brand, the
+   * heading and the run-`fy pair` line; embedded in the setup stepper it is a
+   * plain section, because the stepper has already said all three and a second
+   * `<main>` inside the first is not a landmark, it is a bug.
+   */
+  readonly embedded?: boolean;
 }
 
 /**
@@ -94,6 +110,8 @@ export function PairingScreen({
   onSelect,
   onRemove,
   onArrivalTaken,
+  onOpenSetup,
+  embedded = false,
 }: PairingScreenProps) {
   const [stage, setStage] = useState<Stage>(() => initialStage(arrival));
   const [pasting, setPasting] = useState(false);
@@ -158,31 +176,34 @@ export function PairingScreen({
         onPair={seed => void pair(seed)}
         onCancel={startOver}
         paired={connections.length > 0}
+        embedded={embedded}
       />
     );
   }
 
   const first = connections.length === 0;
   return (
-    <main className={SHELL} aria-labelledby="pairing-title">
-      <header className="min-w-0">
-        <div className="flex items-center gap-2 text-accent">
-          <BrandMark size={20} />
-          <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
-        </div>
-        <h1 id="pairing-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
-          {first ? 'Connect a daemon' : 'Your daemons'}
-        </h1>
-        <p className="m-0 text-ui leading-base text-muted">
-          {first ? (
-            <>
-              Run <code className="font-mono text-fg">fy pair</code> on your computer, then scan the code.
-            </>
-          ) : (
-            'Choose where this tab works. Each daemon keeps separate data.'
-          )}
-        </p>
-      </header>
+    <PairingFrame embedded={embedded}>
+      {!embedded && (
+        <header className="min-w-0">
+          <div className="flex items-center gap-2 text-accent">
+            <BrandMark size={20} />
+            <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
+          </div>
+          <h1 id="pairing-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
+            {first ? 'Connect a daemon' : 'Your daemons'}
+          </h1>
+          <p className="m-0 text-ui leading-base text-muted">
+            {first ? (
+              <>
+                Run <code className="font-mono text-fg">fy pair</code> on your computer, then scan the code.
+              </>
+            ) : (
+              'Choose where this tab works. Each daemon keeps separate data.'
+            )}
+          </p>
+        </header>
+      )}
 
       {connections.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Paired daemons">
@@ -271,10 +292,50 @@ export function PairingScreen({
         </button>
       )}
 
+      {/*
+        Quiet on purpose. Someone with a working pairing is here to choose a
+        daemon; setting up another machine is a real errand but not this
+        screen's errand, so it is a link at the end rather than a second hero.
+      */}
+      {onOpenSetup !== undefined && (
+        <button
+          type="button"
+          className="min-h-[44px] self-center text-ui font-medium text-muted underline hover:text-accent focus-visible:outline-focus focus-visible:outline-offset-focus"
+          onClick={onOpenSetup}
+          data-pairing-setup=""
+        >
+          Set up another machine
+        </button>
+      )}
+
       <HowThisWorks />
+    </PairingFrame>
+  );
+}
+
+interface PairingFrameProps {
+  readonly embedded: boolean;
+  readonly children: ReactNode;
+}
+
+/** The housing, and the only thing the embedded seam actually changes. */
+function PairingFrame({ embedded, children }: PairingFrameProps) {
+  if (embedded) {
+    return (
+      <section className={EMBEDDED_SHELL} aria-label="Pair this device">
+        {children}
+      </section>
+    );
+  }
+  return (
+    <main className={SHELL} aria-labelledby="pairing-title">
+      {children}
     </main>
   );
 }
+
+/** No page spacing, no max width, no safe-area padding: the host owns all three. */
+const EMBEDDED_SHELL = 'flex min-w-0 flex-col gap-4';
 
 const SHELL =
   'mx-auto flex min-h-full w-full max-w-[520px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
@@ -310,6 +371,7 @@ interface PairingFocusProps {
   readonly onCancel: () => void;
   /** Whether anything is paired yet, so the cancel control names the right place. */
   readonly paired: boolean;
+  readonly embedded: boolean;
 }
 
 /**
@@ -319,10 +381,21 @@ interface PairingFocusProps {
  * from a QR has exactly one thing to decide, and every other control on the
  * page is a way to get that wrong.
  */
-function PairingFocus({ stage, onPair, onCancel, paired }: PairingFocusProps) {
+function PairingFocus({ stage, onPair, onCancel, paired, embedded }: PairingFocusProps) {
+  /*
+   * Headings step DOWN when embedded, they do not repeat.
+   * The setup stepper's stage heading is the `<h2>` above this component, so a
+   * confirmation titled `<h2>` here would read as a sibling of the stage rather
+   * than as part of it — and a second `<h1>` would be an outline bug outright.
+   */
+  const Title = embedded ? 'h3' : 'h1';
+  const TargetTitle = embedded ? 'h3' : 'h2';
+  const titleClass = embedded
+    ? 'm-0 font-display text-title font-bold tracking-display text-fg'
+    : 'm-0 font-display text-display font-bold tracking-display text-fg';
   if (stage.kind === 'paired') {
     return (
-      <main className={SHELL} aria-labelledby="pairing-title">
+      <PairingFrame embedded={embedded}>
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <span
             className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-ok bg-ok-bg text-ok"
@@ -330,23 +403,23 @@ function PairingFocus({ stage, onPair, onCancel, paired }: PairingFocusProps) {
           >
             <Check size={34} strokeWidth={3} />
           </span>
-          <h1 id="pairing-title" className="m-0 font-display text-display font-bold tracking-display text-fg">
+          <Title id="pairing-title" className={titleClass}>
             Connected
-          </h1>
+          </Title>
           <p className="m-0 text-ui leading-base text-muted" role="status">
             Paired with <span className="font-mono text-fg">{stage.host}</span>.
           </p>
         </div>
-      </main>
+      </PairingFrame>
     );
   }
 
   if (stage.kind === 'failed') {
     return (
-      <main className={SHELL} aria-labelledby="pairing-title">
-        <h1 id="pairing-title" className="m-0 font-display text-display font-bold tracking-display text-fg">
+      <PairingFrame embedded={embedded}>
+        <Title id="pairing-title" className={titleClass}>
           Pairing failed
-        </h1>
+        </Title>
         <p className="m-0 text-ui leading-base text-err" role="alert">
           {stage.message}
         </p>
@@ -362,28 +435,30 @@ function PairingFocus({ stage, onPair, onCancel, paired }: PairingFocusProps) {
         >
           {paired ? 'Back to my daemons' : 'Start over'}
         </button>
-      </main>
+      </PairingFrame>
     );
   }
 
   const { seed } = stage;
   const busy = stage.kind === 'pairing';
   return (
-    <main className={SHELL} aria-labelledby="pairing-title">
+    <PairingFrame embedded={embedded}>
       <header className="min-w-0">
-        <div className="flex items-center gap-2 text-accent">
-          <BrandMark size={20} />
-          <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
-        </div>
-        <h1 id="pairing-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
+        {!embedded && (
+          <div className="mb-2 flex items-center gap-2 text-accent">
+            <BrandMark size={20} />
+            <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
+          </div>
+        )}
+        <Title id="pairing-title" className={titleClass}>
           Pair this device?
-        </h1>
+        </Title>
       </header>
 
       <section className="kt-panel p-panel" aria-labelledby="pairing-target">
-        <h2 id="pairing-target" className="sr-only">
+        <TargetTitle id="pairing-target" className="sr-only">
           The daemon this link points at
-        </h2>
+        </TargetTitle>
         <p className="m-0 break-all font-mono text-title font-semibold text-fg">{pairingDaemonHost(seed)}</p>
         <p className="m-0 mt-1 break-all font-mono text-meta text-faint">
           <span className="sr-only">Daemon fingerprint: </span>
@@ -411,6 +486,6 @@ function PairingFocus({ stage, onPair, onCancel, paired }: PairingFocusProps) {
       >
         Not now
       </button>
-    </main>
+    </PairingFrame>
   );
 }

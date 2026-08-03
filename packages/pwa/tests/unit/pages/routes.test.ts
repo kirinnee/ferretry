@@ -10,6 +10,7 @@ import {
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
+  setupPath,
   decodeRouteSegment,
   parseRoute,
   routePageKey,
@@ -130,6 +131,16 @@ describe('route parsing', () => {
     ]);
   });
 
+  it('should give first-run setup its own durable address', () => {
+    // Act — trailing slashes and sub-paths all land on the one guide, because
+    // a reader who reloads mid-setup must not be told the page is gone.
+    const actual = [parseRoute('/setup'), parseRoute('/setup/'), parseRoute('/setup/install')];
+
+    // Assert
+    should(actual).deepEqual([{ kind: 'setup' }, { kind: 'setup' }, { kind: 'setup' }]);
+    should(setupPath()).equal('/setup');
+  });
+
   it('should never throw when a pathname has malformed percent escapes', () => {
     // Act
     const actual = [decodeRouteSegment('%E0%A4%A'), parseRoute('/d/daemon-b/session/%E0%A4%A')];
@@ -146,6 +157,7 @@ describe('route identity', () => {
     const daemonASession = parseRoute('/d/daemon%2Fa/session/same');
     const routes = [
       parseRoute('/'),
+      parseRoute('/setup'),
       parseRoute('/d/daemon-b'),
       parseRoute('/d/daemon-b/new'),
       daemonBSession,
@@ -162,6 +174,7 @@ describe('route identity', () => {
     // Assert
     should(actual).deepEqual([
       ['/', 'connection-picker'],
+      ['/setup', 'setup'],
       ['/d/daemon-b', 'sessions:"daemon-b"'],
       ['/d/daemon-b/new', 'new-session:"daemon-b"'],
       ['/d/daemon-b/session/same', 'session:["daemon-b","same"]'],

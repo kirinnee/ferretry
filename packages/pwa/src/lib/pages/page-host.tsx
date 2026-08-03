@@ -14,6 +14,8 @@ export interface SessionChatPageProps extends DaemonPageProps {
 
 export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
+  /** First-run setup. Connection-free: it exists precisely because there is none yet. */
+  readonly Setup: ComponentType;
   readonly Sessions: ComponentType<DaemonPageProps>;
   readonly NewSession: ComponentType<DaemonPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
@@ -45,6 +47,7 @@ const requireRouteConnection = (
  */
 export function PageHost({ route, connection, slots }: PageHostProps) {
   if (route.kind === 'connection-picker') return <slots.ConnectionPicker />;
+  if (route.kind === 'setup') return <slots.Setup />;
 
   const matchedConnection = requireRouteConnection(route.daemonId, connection);
   switch (route.kind) {

@@ -41,6 +41,7 @@ describe('PageHost', () => {
     };
     const slots: PageHostSlots = {
       ConnectionPicker: () => <div data-page="connections">connections</div>,
+      Setup: () => <div data-page="setup">setup</div>,
       Sessions: daemonPage('sessions'),
       NewSession: daemonPage('new-session'),
       SessionChat,
@@ -87,6 +88,7 @@ describe('PageHost', () => {
     };
     const slots: PageHostSlots = {
       ConnectionPicker: () => <p>Pair a daemon</p>,
+      Setup: () => <p>Set up Ferretry</p>,
       Sessions: unusedDaemonPage,
       NewSession: unusedDaemonPage,
       SessionChat: unusedDaemonPage,
@@ -98,9 +100,13 @@ describe('PageHost', () => {
 
     // Act
     const html = renderToStaticMarkup(<PageHost route={pageRoute('/')} slots={slots} />);
+    const setup = renderToStaticMarkup(<PageHost route={pageRoute('/setup')} slots={slots} />);
 
     // Assert
     should(html).equal('<p>Pair a daemon</p>');
+    // Setup is connection-free for the same reason: it is the screen someone
+    // sees precisely because they have no daemon yet.
+    should(setup).equal('<p>Set up Ferretry</p>');
   });
 
   it('should reject absent and cross-daemon connections before rendering a daemon page', () => {
@@ -114,6 +120,7 @@ describe('PageHost', () => {
     const daemonPage = () => <p>must not render</p>;
     const slots: PageHostSlots = {
       ConnectionPicker: daemonPage,
+      Setup: daemonPage,
       Sessions: daemonPage,
       NewSession: daemonPage,
       SessionChat: daemonPage,

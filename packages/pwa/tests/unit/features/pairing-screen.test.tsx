@@ -306,3 +306,53 @@ describe('PairingScreen scanned and pasted links', () => {
     await screen.unmount();
   });
 });
+
+describe('the embedded presentation', () => {
+  it('drops the page chrome the host already owns, and keeps the whole flow', async () => {
+    const screen = await screenWith({ embedded: true, scanHost: null });
+
+    // No second landmark, no second `<h1>`, no repeated brand or instruction:
+    // the setup stepper has already said all of it.
+    expect(screen.container.querySelector('main')).toBeNull();
+    expect(screen.container.querySelector('h1')).toBeNull();
+    expect(screen.container.textContent).not.toContain('Connect a daemon');
+    expect(screen.container.textContent).not.toContain('Run fy pair on your computer');
+    const frame = must(screen.container.querySelector('section'), 'the embedded frame');
+    expect(frame.getAttribute('aria-label')).toBe('Pair this device');
+
+    // The arc itself is untouched: paste, parse, confirm.
+    await typeLink(screen.container, LINK);
+    await submitForm(screen.container);
+    expect(screen.container.textContent).toContain('Pair this device?');
+    // Nested titles step down rather than competing with the host's stage heading.
+    expect(screen.container.querySelector('h2')).toBeNull();
+    expect(must(screen.container.querySelector('h3'), 'the confirmation title').textContent).toBe('Pair this device?');
+    await screen.unmount();
+  });
+
+  it('keeps the standalone screen exactly as it was', async () => {
+    const screen = await screenWith({ scanHost: null });
+
+    expect(screen.container.querySelector('main')).not.toBeNull();
+    expect(must(screen.container.querySelector('h1'), 'the page title').textContent).toBe('Connect a daemon');
+    expect(screen.container.querySelector('[data-pairing-setup]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('offers the setup guide only where a host asked for the link', async () => {
+    let opened = 0;
+    const screen = await screenWith({
+      connections: records,
+      selectedDaemonId: alpha.daemonId,
+      onOpenSetup: () => {
+        opened += 1;
+      },
+    });
+
+    const link = must(screen.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link');
+    expect(link.className).toContain('min-h-[44px]');
+    await interact(() => link.click());
+    expect(opened).toBe(1);
+    await screen.unmount();
+  });
+});
