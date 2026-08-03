@@ -16,9 +16,9 @@ import type {
 
 export const DAEMON_ID = `fy_daemon_${'a'.repeat(43)}`;
 export const PAIRING_ID = `fy_pair_${'c'.repeat(22)}` as PairingId;
-export const DAEMON_URL = 'https://box.tailnet-abc.ts.net';
+const DAEMON_URL = 'https://box.tailnet-abc.ts.net';
 export const CODE = '7F3K-Q2ND';
-export const PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)}`;
+const PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent(DAEMON_URL)};code=${CODE};fp=${encodeURIComponent(DAEMON_ID)}`;
 
 /**
  * A mint as the daemon really answers it — built through the protocol schema, so a fixture can never
