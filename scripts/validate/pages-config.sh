@@ -6,6 +6,7 @@ cd "${root_dir}"
 
 config="wrangler.jsonc"
 headers="packages/pwa/public/_headers"
+redirects="packages/pwa/public/_redirects"
 
 jq -e '
   .name == "ferretry"
@@ -24,5 +25,6 @@ rg -q '^/manifest\*\.webmanifest$' "${headers}"
 rg -q '^/assets/\*$' "${headers}"
 rg -q '^  Cache-Control: no-cache, no-store, must-revalidate$' "${headers}"
 rg -q '^  Cache-Control: public, max-age=31536000, immutable$' "${headers}"
+test "$(<"${redirects}")" = '/* /index.html 200'
 
 echo "✅ Cloudflare Pages configuration is static, scoped, and cache-safe"

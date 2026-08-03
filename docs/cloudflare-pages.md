@@ -23,8 +23,9 @@ runtime pairing flow.
 
 - Pull requests receive no Pages preview URL. This keeps unreviewed branches from becoming public
   deployment surfaces; CI still validates pull requests.
-- `_headers` keeps `index.html`, manifests, and the service worker fresh so an installed PWA can
-  discover a new release. Hashed Vite assets stay immutable.
+- `_redirects` makes client-side routes serve `index.html`. `_headers` keeps `index.html` and the
+  future generated manifests and service worker fresh so an installed PWA can discover a new
+  release. Hashed Vite assets stay immutable.
 - The CSP permits daemon connections to any secure HTTPS/WSS origin because pairing chooses that
   origin at runtime. It permits HTTP/WS only for localhost and `127.0.0.1`, which supports local
   pairing without granting arbitrary insecure-network access. Scripts remain restricted to this
