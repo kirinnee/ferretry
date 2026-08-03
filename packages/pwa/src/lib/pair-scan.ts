@@ -17,6 +17,15 @@
  * THE CODE IS NEVER READ HERE. A decoded QR is raw text handed straight back to
  * the caller, which parses it with `pairingSeedFromUrl`. This module has no
  * opinion about pairing and never holds a single-use code.
+ *
+ * NO SOFTWARE DECODER, DELIBERATELY. `BarcodeDetector` is Chromium-only, so
+ * WebKit gets no in-app scanner. That is not the blocked path it looks like:
+ * the design's carrier is a QR scanned with the phone's OWN camera app, which
+ * opens this PWA already pre-filled on every platform, and the in-app scanner
+ * only serves someone who opened the app first. Those readers get the paste
+ * field instead of a bundled decoder that every visitor would have to download.
+ * If that trade ever changes, `QrScanEnvironment.detector` is the seam: hand it
+ * a decoder built over a canvas grab and nothing else here moves.
  */
 
 /** Why a scan ended without a code, as a closed vocabulary. */
