@@ -37,6 +37,8 @@ import type {
   PageNotificationLike,
 } from './lib/notify.ts';
 import { installPortraitLock } from './lib/orientation-lock.ts';
+import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
+import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import {
   type DaemonPageProps,
   PageHost,
@@ -197,12 +199,50 @@ export const routeAnnouncement = (route: PageRoute): string =>
     .map(crumb => crumb.label)
     .join(', ');
 
+/**
+ * The camera, wired to the real browser — or `null`, which is an honest answer.
+ *
+ * Two capabilities are needed and neither is universal: `getUserMedia` is
+ * ABSENT (not merely refused) outside a secure context, and `BarcodeDetector`
+ * ships in Chromium and not in WebKit. A browser missing either gets no scan
+ * button at all rather than one that fails when pressed; the pairing screen
+ * shows its paste field instead.
+ */
+export const browserQrScan = (): QrScanHost | null => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
+  const detector = (window as { BarcodeDetector?: new (options: { formats: string[] }) => QrDetectorLike })
+    .BarcodeDetector;
+  const host = browserQrScanHost({
+    media: navigator.mediaDevices,
+    detector: detector === undefined ? undefined : () => new detector({ formats: ['qr_code'] }),
+    delay: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
+  });
+  return host.supported ? host : null;
+};
+
+/** The pairing link this tab was opened with, if it was opened with one. */
+const arrivalFromLocation = (): PairingArrival => pairingArrival(window.location.href);
+
 function ConnectionPicker() {
   const store = useAppStore();
   const snapshot = useConnectionSnapshot();
   const { navigate } = useRouter();
+  // Read ONCE, at mount. A later render must not re-read an address the screen
+  // has already emptied, and must not resurrect a code the reader declined.
+  const [arrival] = useState(arrivalFromLocation);
+  const scanHost = useMemo(browserQrScan, []);
+  // The single-use code leaves the address bar as soon as the screen holds it,
+  // so it cannot be reloaded, bookmarked, shared or screenshotted afterwards.
+  // `replaceState`, not `pushState`: a back button that restored the code would
+  // undo exactly this.
+  const takeArrival = useCallback(() => {
+    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+  }, []);
   return (
     <PairingScreen
+      arrival={arrival}
+      scanHost={scanHost}
+      onArrivalTaken={takeArrival}
       connections={snapshot.connections}
       selectedDaemonId={snapshot.selectedDaemonId}
       onPair={async seed => {

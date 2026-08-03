@@ -33,6 +33,7 @@ import {
   AppShell,
   browserNotificationSurface,
   browserPushEnrolment,
+  browserQrScan,
   installOnce,
   isTextEntryTarget,
   routeAnnouncement,
@@ -197,7 +198,9 @@ describe('AppShell', () => {
     const { reads, view } = await renderShell('/');
 
     expect(view.container.querySelector('h1')?.textContent).toBe('Connect a daemon');
-    expect(view.container.textContent).toContain('No daemons are paired yet');
+    // The first run is one action and no empty-state card.
+    expect(view.container.textContent).toContain('Run fy pair on your computer, then scan the code.');
+    expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(reads).toEqual([]);
     await view.unmount();
@@ -207,7 +210,9 @@ describe('AppShell', () => {
     const { reads, view } = await renderShell('/d/missing/session/shared', [alpha.daemonId, beta.daemonId]);
 
     expect(view.container.querySelector('[role="alert"]')?.textContent).toContain('not paired in this browser');
-    expect(view.container.querySelector('h1')?.textContent).toBe('Connect a daemon');
+    // Two daemons ARE paired here — just not the one the route named — so the
+    // picker leads with them rather than with a first-run screen.
+    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
     expect(view.container.querySelector('[data-session="shared"]')).toBeNull();
     expect(reads).toEqual([]);
     await view.unmount();
@@ -719,6 +724,13 @@ describe('the connection picker slot', () => {
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    // A pasted link is confirmed against the daemon it names before anything is
+    // exchanged, so the reader can check the host they are about to trust.
+    const confirm = must(
+      [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+      'the confirmation control',
+    );
+    await interact(() => confirm.click());
     await settle();
 
     // The root must land on the daemon the exchange returned, not on whichever
@@ -728,6 +740,61 @@ describe('the connection picker slot', () => {
     expect(requestedUrls.some(url => url.endsWith('/v1/pair'))).toBe(false);
 
     await view.unmount();
+  });
+
+  it('confirms a pre-filled arrival and empties the address bar of its one-time code', async () => {
+    const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
+
+    // Reading the fragment is the whole arrival: the screen shows a
+    // confirmation, and the code is gone from the address before anything else.
+    expect(view.container.textContent).toContain('Pair this device?');
+    expect(view.container.textContent).toContain('gamma.example.test');
+    expect(window.location.hash).toBe('');
+    expect(window.location.pathname).toBe('/pair');
+
+    const confirm = must(
+      [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+      'the confirmation control',
+    );
+    await interact(() => confirm.click());
+    await settle();
+
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma']);
+    expect(window.location.pathname).toBe('/d/gamma');
+    await view.unmount();
+  });
+
+  it('offers the camera only when the browser has both halves of a scan', async () => {
+    const win = window as unknown as { BarcodeDetector?: unknown };
+    // This DOM has no `BarcodeDetector`, which is exactly what WebKit looks
+    // like: no scan host at all, so the screen shows its paste field instead.
+    expect(browserQrScan()).toBeNull();
+
+    const formats: string[][] = [];
+    win.BarcodeDetector = class {
+      constructor(options: { formats: string[] }) {
+        formats.push(options.formats);
+      }
+      async detect(): Promise<readonly { readonly rawValue: string }[]> {
+        return [{ rawValue: 'https://pwa.example.test/pair#v1;url=x;code=y;fp=z' }];
+      }
+    };
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({ getTracks: () => [] }) },
+    });
+    try {
+      const host = must(browserQrScan(), 'the browser scan host');
+      expect(host.supported).toBe(true);
+      await expect(host.scan({ show: () => 'source', clear: () => {} }, new AbortController().signal)).resolves.toBe(
+        'https://pwa.example.test/pair#v1;url=x;code=y;fp=z',
+      );
+      expect(formats).toEqual([['qr_code']]);
+    } finally {
+      win.BarcodeDetector = undefined;
+      delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
+    expect(browserQrScan()).toBeNull();
   });
 
   it('selects and forgets a pairing without leaving the picker', async () => {
