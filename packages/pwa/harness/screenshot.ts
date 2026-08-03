@@ -13,6 +13,7 @@
  *
  *   bun harness/screenshot.ts            # writes harness/out/*.png
  *   bun harness/screenshot.ts --serve    # leave it running to look at by hand
+ *   bun harness/screenshot.ts --landing-only # capture the built landing at both viewports
  */
 
 import { spawnSync } from 'node:child_process';
@@ -58,6 +59,57 @@ function run(command: string, args: readonly string[]): void {
 }
 
 mkdirSync(outDir, { recursive: true });
+
+/**
+ * The public landing is intentionally outside the React harness: proving that
+ * it never loads the app bundle means shooting the real Vite build instead of a
+ * component rendition. Keep this narrow mode in the existing harness so it
+ * inherits the same loopback-only browser lifecycle and cleanup guarantees.
+ */
+if (process.argv.includes('--landing-only')) {
+  process.stdout.write('📦 building the public landing…\n');
+  run('bun', ['run', 'build']);
+  const landingDir = join(packageDir, 'dist');
+  const landingServer = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      return new Response(Bun.file(path === '/' ? join(landingDir, 'index.html') : join(landingDir, path)));
+    },
+  });
+  const chrome = Bun.which('google-chrome') ?? Bun.which('chromium');
+  if (chrome === null) {
+    landingServer.stop();
+    fail('no system Chrome or Chromium found');
+  }
+  const browser = await chromium.launch({ executablePath: chrome, headless: true });
+  try {
+    for (const viewport of VIEWPORTS) {
+      const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+      try {
+        await context.route('**/*', async route => {
+          if (new URL(route.request().url()).origin !== landingServer.url.origin) {
+            await route.abort();
+            return;
+          }
+          await route.continue();
+        });
+        const page = await context.newPage();
+        await page.goto(landingServer.url.toString());
+        const target = join(outDir, `landing-${viewport.name}.png`);
+        await page.screenshot({ path: target, fullPage: true });
+        process.stdout.write(`📸 landing ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+      } finally {
+        await context.close();
+      }
+    }
+  } finally {
+    await browser.close();
+    landingServer.stop();
+  }
+  process.exit(0);
+}
 
 process.stdout.write('📦 bundling the harness page…\n');
 run('bun', ['build', 'harness/main.tsx', '--outdir', 'harness/out', '--target', 'browser']);

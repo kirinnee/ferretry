@@ -327,6 +327,26 @@ describe('StoreProvider', () => {
     await view.unmount();
   });
 
+  it('keeps the public landing marker content-free and in sync with pairing changes', async () => {
+    const values = new Map<string, string>();
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => client('unused'),
+      fetcher: async () => Response.json({}),
+      landingMarkerStorage: {
+        getItem: key => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, value),
+        removeItem: key => values.delete(key),
+      },
+    });
+
+    store.connections.add(alpha);
+    expect([...values.entries()]).toEqual([['fy-has-pairings-v1', '1']]);
+
+    store.connections.remove(alpha.daemonId);
+    expect([...values.entries()]).toEqual([]);
+  });
+
   it('shows an honest local-state failure and rejects consumers outside the provider', async () => {
     const failure = await mount(
       <StoreProvider createStore={async () => Promise.reject(new Error('database denied'))}>

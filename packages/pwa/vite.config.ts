@@ -36,15 +36,16 @@
  */
 
 import autoprefixer from 'autoprefixer';
+import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 
 export default defineConfig({
-  // Every asset URL is root-absolute. The app is served from the apex of its own
-  // Pages project, and its routes are daemon-qualified paths two or more
-  // segments deep (`/d/<daemonId>/…`, `lib/pages/routes.ts`), so a relative base
-  // would resolve chunks against whatever route was deep-linked.
+  // The static landing owns `/` and the PWA document is `/app/`, but their
+  // public assets are emitted once at the site root. Keep every generated chunk
+  // root-absolute: that lets the app load on daemon-qualified deep links without
+  // rewriting shared icons or the manifest to a nonexistent `/app/...` copy.
   base: '/',
   build: {
     outDir: 'dist',
@@ -65,6 +66,12 @@ export default defineConfig({
     // whose only purpose is to be minified, and shipping them without
     // publishing them makes the build slower for nobody's benefit.
     sourcemap: false,
+    rollupOptions: {
+      input: {
+        landing: fileURLToPath(new URL('./index.html', import.meta.url)),
+        app: fileURLToPath(new URL('./app/index.html', import.meta.url)),
+      },
+    },
   },
   css: {
     postcss: {

@@ -65,24 +65,31 @@ if (build.error) fail(`vite could not be started: ${build.error.message}`);
 if (build.status !== 0) fail(`vite build exited ${build.status}`);
 
 /**
- * `dist/` served the way Cloudflare Pages serves it, because the app's routes are
- * client-side: `public/_redirects` is `/* /index.html 200`, so any path that is
- * not a real file has to come back as the document rather than a 404. Getting
- * this wrong would make every screenshot below a screenshot of an error page.
+ * `dist/` served the way Cloudflare Pages serves it. `/` is the static landing;
+ * `/app/`, daemon routes and pairing routes are the PWA document. Getting that
+ * split wrong would make every screenshot below a screenshot of the wrong page.
  */
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
   async fetch(request) {
     const path = new URL(request.url).pathname;
-    const file = Bun.file(join(distDir, path === '/' ? 'index.html' : path));
+    const appPath =
+      path === '/app' || path === '/app/' ? '/app/index.html' : path.startsWith('/app/') ? path.slice(4) : path;
+    const file = Bun.file(join(distDir, appPath === '/' ? 'index.html' : appPath));
     if (await file.exists()) {
       // Bun has no type for `.webmanifest`, and a manifest served as
       // `application/octet-stream` is ignored outright by Chrome.
       const type = path.endsWith('.webmanifest') ? 'application/manifest+json' : undefined;
       return new Response(file, type ? { headers: { 'content-type': type } } : undefined);
     }
-    return new Response(Bun.file(join(distDir, 'index.html')), {
+    const appRoute =
+      path.startsWith('/app/') ||
+      path.startsWith('/d/') ||
+      path === '/setup' ||
+      path === '/pair' ||
+      path.startsWith('/pair/');
+    return new Response(Bun.file(join(distDir, appRoute ? 'app/index.html' : 'index.html')), {
       headers: { 'content-type': 'text/html; charset=utf-8' },
     });
   },
@@ -118,7 +125,7 @@ try {
             page.on('response', response => {
               if (response.status() >= 400) missing.push(`${response.status()} ${response.url()}`);
             });
-            await page.goto(server.url.toString(), { waitUntil: 'load' });
+            await page.goto(new URL('/app/', server.url).toString(), { waitUntil: 'load' });
             const target = join(outDir, `app-${viewport.name}-${scheme}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(
@@ -187,6 +194,54 @@ try {
         }
       }
     }
+    // Exercise the built documents, not just their source contracts. The pairing
+    // QR opens `/pair#v1;…`, which must receive the app entry and its fragment;
+    // the landing's marker redirect must still take an already-paired reader to
+    // `/app/`, while unavailable storage is deliberately a fail-open landing.
+    const routeContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    try {
+      const pairingPage = await routeContext.newPage();
+      try {
+        await pairingPage.goto(
+          new URL('/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a', server.url).toString(),
+          { waitUntil: 'load' },
+        );
+        await pairingPage.getByRole('heading', { name: 'Pair this device?' }).waitFor();
+        if (new URL(pairingPage.url()).pathname !== '/pair')
+          fail('QR pairing deep link did not retain the pairing route');
+      } finally {
+        await pairingPage.close();
+      }
+
+      const pairedLanding = await routeContext.newPage();
+      try {
+        await pairedLanding.addInitScript(() => localStorage.setItem('fy-has-pairings-v1', '1'));
+        await pairedLanding.goto(server.url.toString(), { waitUntil: 'load' });
+        await pairedLanding.waitForURL('**/app/');
+      } finally {
+        await pairedLanding.close();
+      }
+
+      const failOpenLanding = await routeContext.newPage();
+      try {
+        await failOpenLanding.addInitScript(() => {
+          Object.defineProperty(window, 'localStorage', {
+            configurable: true,
+            get: () => {
+              throw new Error('storage unavailable');
+            },
+          });
+        });
+        await failOpenLanding.goto(server.url.toString(), { waitUntil: 'load' });
+        if (new URL(failOpenLanding.url()).pathname !== '/')
+          fail('landing did not fail open when browser storage was unavailable');
+      } finally {
+        await failOpenLanding.close();
+      }
+      process.stdout.write('✅ QR pairing route and landing redirect/fail-open behaviour verified\n');
+    } finally {
+      await routeContext.close();
+    }
     // THE HEADER LOCKUP, MAGNIFIED. The mark renders at 20px next to the
     // wordmark, and 20px of grid is too small to judge in a 390px page
     // screenshot — which is exactly the size at which a 3x3 grid's cells start
@@ -209,7 +264,7 @@ try {
         });
         const page = await context.newPage();
         try {
-          await page.goto(server.url.toString(), { waitUntil: 'load' });
+          await page.goto(new URL('/app/', server.url).toString(), { waitUntil: 'load' });
           const target = join(outDir, `header-lockup-${scheme}.png`);
           // The lockup is the mark plus the word, so the mark's own size and its
           // optical weight beside the type are both in frame.

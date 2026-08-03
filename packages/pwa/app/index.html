@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>Ferretry</title>
+    <!-- iOS ignores the web manifest for Add-to-Home-Screen and reads these
+         instead. Everything here is snapshotted at add time; `black-translucent`
+         lets the app paint beneath the status bar while the app CSS pays the
+         safe-area insets back where they matter. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Ferretry" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- Fleet Grid is shipped as same-origin public assets: the deployment's
+         `default-src 'self'` would reject an external icon host. The unsized SVG
+         comes first because it follows the reader's colour scheme in browser
+         chrome; the 32px PNG is a self-contained fallback for browsers without
+         SVG favicon support. iOS needs its own touch-icon link because it does
+         not read the manifest when adding the app to the home screen. -->
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- One static manifest carries the id `useTheme` looks up. The unported
+         generated themed manifests are still optional: manifestHrefFor leaves
+         this href unchanged, so it is safe today and ready for that generator.
+         There is no static theme_color because a resolved runtime theme supplies
+         it; background_color is the maskable icon's launch-splash field. -->
+    <link id="fy-manifest" rel="manifest" href="/manifest.webmanifest" />
+    <!-- No service worker is registered: no worker is built yet. Pre-paint stays
+         classic and same-origin so it can run before first paint under CSP. -->
+    <script src="/pre-paint.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
