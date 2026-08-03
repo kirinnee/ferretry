@@ -505,13 +505,13 @@ export function AppShell() {
    */
   const pageKey = routePageKey(pageRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
-  const loaded = useRef(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pageKey is the navigation signal, not a value this effect reads
+  // Seed the previous key during render instead of latching the first effect.
+  // StrictMode replays mount effects in development; an effect-owned latch
+  // mistakes that replay for a navigation and steals focus on first paint.
+  const previousPageKey = useRef(pageKey);
   useEffect(() => {
-    if (!loaded.current) {
-      loaded.current = true;
-      return;
-    }
+    if (previousPageKey.current === pageKey) return;
+    previousPageKey.current = pageKey;
     routeAnnouncer.current?.focus();
   }, [pageKey]);
 

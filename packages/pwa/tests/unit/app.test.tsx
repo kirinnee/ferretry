@@ -25,6 +25,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
+import { StrictMode } from 'react';
 
 import {
   App,
@@ -272,6 +273,31 @@ describe('route change accessibility', () => {
     // A page LOAD is not a navigation: the browser has already placed focus.
     expect(document.activeElement).not.toBe(announcer);
 
+    await view.unmount();
+  });
+
+  it('does not mistake StrictMode mount-effect replay for a navigation', async () => {
+    const reads: string[] = [];
+    const store = await appStore(reads);
+    store.connections.add(alpha);
+    setPath('/d/alpha');
+    const view = await mount(
+      <StrictMode>
+        <RouterProvider>
+          <StoreProvider store={store}>
+            <AppShell />
+          </StoreProvider>
+        </RouterProvider>
+      </StrictMode>,
+    );
+    await settle();
+
+    const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
+    expect(document.activeElement).not.toBe(announcer);
+
+    await popTo('/d/alpha/settings');
+    await settle();
+    expect(document.activeElement).toBe(announcer);
     await view.unmount();
   });
 
