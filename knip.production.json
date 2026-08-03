@@ -22,7 +22,7 @@
       "project": ["src/**/*.ts"]
     },
     "packages/pwa": {
-      "entry": ["src/lib/index.ts"],
+      "entry": ["src/main.tsx", "src/lib/index.ts"],
       "project": ["src/**/*.{ts,tsx}"]
     }
   },

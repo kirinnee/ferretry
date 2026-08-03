@@ -22,8 +22,14 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/pwa": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "harness/screenshot.ts", "harness/main.tsx"],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "harness/**/*.{ts,tsx}"]
+      "entry": [
+        "src/main.tsx",
+        "vite.config.ts",
+        "tests/**/*.test.{ts,tsx}",
+        "harness/screenshot.ts",
+        "harness/main.tsx"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "harness/**/*.{ts,tsx}", "vite.config.ts"]
     }
   },
   "rules": {

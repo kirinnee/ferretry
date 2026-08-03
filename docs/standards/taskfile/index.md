@@ -19,6 +19,7 @@ assumes it is running inside the nix devshell — see [Nix](../nix/index.md).
 | `task check`             | typecheck the workspace (`tsc --noEmit`)                 |
 | `task lint`              | run every repository gate (`pre-commit run --all-files`) |
 | `task build`             | build the Bun bundle into `dist/`                        |
+| `task build:pwa`         | build the PWA static bundle into `packages/pwa/dist/`    |
 | `task clean`             | remove build, dependency, and coverage artifacts         |
 | `task deadcode`          | review strict and LLM-assisted dead-code findings        |
 | `task run -- <args>`     | run the CLI source entry point                           |

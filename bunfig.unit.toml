@@ -7,4 +7,17 @@ coverageReporter = ["lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true
 # Unit ledger = the domain tier only (src/lib, 100% goal); adapters/glue belong to other tiers, tests/** never counts.
-coveragePathIgnorePatterns = ["packages/*/bin/**", "packages/*/src/adapters/**", "packages/*/tests/**"]
+#
+# A package-root `*.config.ts` is build configuration, classified exactly like `bin/**`: a
+# declaration a tool reads, not behaviour the product runs. It is still worth a test —
+# `packages/pwa/tests/unit/build-contract.test.ts` imports `vite.config.ts` and asserts the output
+# contract the Pages deployment depends on — and importing it is what puts it in front of the
+# instrumenter. The glob is the whole family, not just that one file, because importing one config
+# drags in the others: `vite.config.ts` imports `tailwind.config.ts` so the PostCSS plugin and the
+# Tailwind config cannot drift, which lands BOTH in the ledger from a single import.
+coveragePathIgnorePatterns = [
+  "packages/*/bin/**",
+  "packages/*/src/adapters/**",
+  "packages/*/tests/**",
+  "packages/*/*.config.ts",
+]

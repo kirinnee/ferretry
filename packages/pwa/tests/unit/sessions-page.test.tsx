@@ -150,6 +150,15 @@ const elapse = async (ms: number): Promise<void> => {
   });
 };
 
+/**
+ * The usage cadence these assertions drive, and a window several ticks wide.
+ * Real timers can only ever fire MORE often than the window promises, so every
+ * assertion made across one must be a lower bound — an upper bound belongs
+ * behind the store's visibility gate, which no elapsed time can defeat.
+ */
+const POLL_MS = 5;
+const POLL_WINDOW_MS = 26;
+
 const sessions = (prefix: string): readonly SessionView[] => [
   sessionView('shared', {
     config: { teammate: `${prefix}-team`, name: `${prefix} task`, cwd: `/${prefix}/repo`, mode: 'auto' },
@@ -497,6 +506,14 @@ describe('SessionsPage', () => {
 
   it('polls usage only while full density is mounted and leaves it stopped after unmount', async () => {
     const reads: string[] = [];
+    /**
+     * The store's visibility gate is this test's clock control. The read that
+     * follows `watch()` is unconditional, while every TICK is skipped while the
+     * tab is hidden — so entering full density hidden makes "mounting reads
+     * once" a lifecycle fact, instead of a race between a 5ms poll and however
+     * long a loaded machine takes to reach the next assertion.
+     */
+    let hidden = true;
     const props = pageProps({
       usage: new DaemonUsageStore(
         {
@@ -505,7 +522,7 @@ describe('SessionsPage', () => {
             return Promise.resolve({ at: '2026-08-01T11:59:00.000Z', stale: false, accounts: [] });
           },
         },
-        { pollMs: 5, isHidden: () => false },
+        { pollMs: POLL_MS, isHidden: () => hidden },
       ),
     });
     props.controls.setDeviceControls({ density: 'compact' });
@@ -513,31 +530,39 @@ describe('SessionsPage', () => {
     let atUnmount = 0;
     try {
       await settle();
+      await elapse(POLL_WINDOW_MS);
       expect(reads).toEqual([]);
 
       await interact(() => props.controls.setDeviceControls({ density: 'full' }));
       await settle();
       expect(reads).toEqual([alpha.daemonId]);
-      await elapse(26);
+      // Mounting reads once and once only: a hidden tab adds nothing to that,
+      // however many tick deadlines pass before the tab is looked at again.
+      await elapse(POLL_WINDOW_MS);
+      expect(reads).toEqual([alpha.daemonId]);
+
+      hidden = false;
+      await elapse(POLL_WINDOW_MS);
       const polled = reads.length;
       expect(polled).toBeGreaterThan(1);
+      expect(reads.every(read => read === alpha.daemonId)).toBe(true);
 
       await interact(() => props.controls.setDeviceControls({ density: 'minimal' }));
       await settle();
       const lean = reads.length;
-      await elapse(26);
+      await elapse(POLL_WINDOW_MS);
       expect(reads).toHaveLength(lean);
 
       // Re-enter full so unmount has a live poll to tear down, not a dead one.
       await interact(() => props.controls.setDeviceControls({ density: 'full' }));
       await settle();
-      await elapse(26);
+      await elapse(POLL_WINDOW_MS);
       expect(reads.length).toBeGreaterThan(lean + 1);
     } finally {
       await page.unmount();
       atUnmount = reads.length;
     }
-    await elapse(26);
+    await elapse(POLL_WINDOW_MS);
     expect(reads).toHaveLength(atUnmount);
   });
 

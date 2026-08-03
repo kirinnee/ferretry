@@ -3,6 +3,10 @@ version: '3'
 vars:
   # The CLI package's bin key is the ONLY place the product name is written; everything derives it.
   CLI_PKG: packages/cli
+  # The PWA is a browser bundle, not a Bun program: it builds through its own package script
+  # (Vite) rather than through scripts/local/build.sh. The separately owned Pages deployment will
+  # publish this package's documented output once its configuration lands.
+  PWA_PKG: packages/pwa
   ARTIFACT_PREFIX:
     sh: jq -r '.bin | to_entries[0].key' {{.CLI_PKG}}/package.json
   ARTIFACT: '{{.ARTIFACT_PREFIX}}-{{OS}}-{{if eq ARCH "arm64"}}arm64{{else}}x64-baseline{{end}}'
@@ -41,13 +45,22 @@ tasks:
   clean:
     desc: Remove Bun build, dependency, and coverage artifacts
     cmds:
-      - rm -rf dist prebuilt coverage
+      - rm -rf dist prebuilt coverage {{.PWA_PKG}}/dist
       - '[ -d node_modules ] && find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true'
 
   build:
     desc: Build the Bun bundle to dist/
     cmds:
       - ./scripts/local/build.sh
+
+  build:pwa:
+    desc: Build the PWA static bundle to packages/pwa/dist
+    dir: '{{.PWA_PKG}}'
+    cmds:
+      # `bun run build`, not `vite build`: the package script is the one build command the pending
+      # Pages workflow must invoke too. Two spellings of the same build are how a local bundle and
+      # a deployed bundle start differing.
+      - bun run build
 
   deadcode:
     desc: Review strict and LLM-assisted dead-code findings
