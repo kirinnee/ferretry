@@ -2,8 +2,15 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // `bun` because the tests and the harness are Bun programs; `vite/client`
+    // because the app is a Vite bundle. The second one is what gives a type to
+    // the things the bundler — not the language — resolves: the side-effect CSS
+    // import in `src/main.tsx`, asset URLs, and `import.meta.env`. Without it a
+    // stylesheet import is an untyped module and the typecheck gate fails on the
+    // one line that puts the design system in the bundle.
+    "types": ["bun", "vite/client"]
   },
-  "include": ["src", "tests", "harness"],
+  "include": ["src", "tests", "harness", "vite.config.ts"],
   "exclude": []
 }

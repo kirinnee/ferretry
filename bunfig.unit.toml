@@ -7,4 +7,15 @@ coverageReporter = ["lcov"]
 coverageDir = "coverage/unit"
 coverageSkipTestFiles = true
 # Unit ledger = the domain tier only (src/lib, 100% goal); adapters/glue belong to other tiers, tests/** never counts.
-coveragePathIgnorePatterns = ["packages/*/bin/**", "packages/*/src/adapters/**", "packages/*/tests/**"]
+#
+# `vite.config.ts` is build configuration, classified exactly like `bin/**`: it is a declaration the
+# bundler reads, not behaviour the product runs, and it never reaches a browser. It is still worth a
+# test — `packages/pwa/tests/unit/build-contract.test.ts` imports it and asserts the output contract
+# the Pages deployment depends on — and importing it is what puts it in front of the instrumenter,
+# so without this line the ledger would reject the very path that test exists to pin.
+coveragePathIgnorePatterns = [
+  "packages/*/bin/**",
+  "packages/*/src/adapters/**",
+  "packages/*/tests/**",
+  "packages/*/vite.config.ts",
+]
