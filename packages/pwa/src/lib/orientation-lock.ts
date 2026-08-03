@@ -14,17 +14,60 @@ export async function attemptPortraitLock(screenLike: { orientation?: ScreenOrie
   }
 }
 
-/** Phones in a short, coarse-pointer landscape viewport need the rotate-back gate. */
-export function isPhoneLandscape(view: {
-  readonly innerWidth: number;
-  readonly innerHeight: number;
+/**
+ * What the platform can tell us about how the device is actually held.
+ *
+ * `innerWidth`/`innerHeight` are deliberately absent. A software keyboard collapses the
+ * viewport — an upright 360x800 phone reports 360x345 with the keyboard open — so viewport
+ * arithmetic reads a portrait phone as landscape and mounts the rotate-back gate on top of
+ * the page the person is typing into. Only evidence a keyboard cannot move is admissible.
+ */
+export interface OrientationEvidence {
   readonly matchMedia?: typeof matchMedia;
-}): boolean {
-  if (view.innerWidth <= view.innerHeight || view.innerHeight > 500) return false;
-  return view.matchMedia?.('(pointer: coarse)').matches ?? false;
+  readonly screen?: {
+    readonly orientation?: { readonly type?: string };
+    readonly width?: number;
+    readonly height?: number;
+  };
 }
 
-const GATE_ID = 'ferretry-portrait-gate';
+/** Phones stop here; a tablet held sideways is a supported layout, not a mistake. */
+const PHONE_SHORT_SIDE_MAX_PX = 500;
+
+/** Landscape as the platform reports it, or `undefined` when it reports nothing usable. */
+function readLandscape(view: OrientationEvidence): boolean | undefined {
+  const reported = view.screen?.orientation?.type;
+  if (typeof reported === 'string' && reported !== '') return reported.startsWith('landscape');
+  const media = view.matchMedia?.('(orientation: landscape)');
+  return media === undefined ? undefined : media.matches;
+}
+
+/** The shorter side of the screen itself, which no on-screen keyboard can shrink. */
+function readShortScreenSide(view: OrientationEvidence): number | undefined {
+  const width = view.screen?.width;
+  const height = view.screen?.height;
+  if (typeof width !== 'number' || typeof height !== 'number') return undefined;
+  const shortest = Math.min(width, height);
+  return Number.isFinite(shortest) && shortest > 0 ? shortest : undefined;
+}
+
+/**
+ * A phone held sideways, judged only on evidence a software keyboard cannot move.
+ *
+ * Ambiguity refuses the gate rather than assuming it: an overlay wrongly mounted over a
+ * working page is precisely the failure this answer exists to prevent, and a device that
+ * hides its orientation has given us no grounds to interrupt anyone.
+ */
+export function isPhoneLandscape(view: OrientationEvidence): boolean {
+  if (view.matchMedia?.('(pointer: coarse)').matches !== true) return false;
+  const shortSide = readShortScreenSide(view);
+  if (shortSide === undefined || shortSide > PHONE_SHORT_SIDE_MAX_PX) return false;
+  return readLandscape(view) === true;
+}
+
+/** Must match the `#fy-portrait-gate` rule in `styles/index.css`; a mismatched id ships the
+ *  gate as unstyled block text interleaved with the page instead of a layer over it. */
+const GATE_ID = 'fy-portrait-gate';
 
 /** Mounts at most one honest rotate-back gate, leaving desktop/tablet landscape untouched. */
 export function syncPortraitGate(doc: Document = document, view: Window = window): void {
