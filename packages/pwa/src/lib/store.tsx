@@ -234,12 +234,30 @@ const openingSentence = (attempt: number): string =>
  * trees moves a screen reader's live regions in and out of the document — a
  * region added in the same commit as its text is unreliably announced — and
  * destroys the retry control the reader just pressed, so the retry drops focus
- * to the body. Here the status region, the alert region and the retry control
- * are the same three nodes from the first paint until the store is open.
+ * to the body. Here the status region and the alert region are the same two
+ * nodes from the first paint until the store is open, and the retry control is
+ * the same node from the first failure onward.
+ *
+ * THE RETRY CONTROL DOES NOT EXIST BEFORE THE FIRST FAILURE. Keeping it
+ * mounted is worth a permanent node only because it preserves the control a
+ * reader just pressed, and while nothing has failed there is nothing to
+ * preserve. Offering "Try again" during an ordinary open would claim a failure
+ * that has not happened, and would cost a reader a tab stop announced as
+ * unavailable on every boot.
  *
  * The status region owns the progress sentence and falls silent on failure;
  * the alert region owns the failure sentence. They never both speak, because
  * two live regions carrying the same sentence announce it twice.
+ *
+ * A RECOVERED BOOT HANDS THE READER OVER. Opening the store replaces this
+ * whole surface, including the retry control the reader is standing on, so
+ * focus would otherwise fall to the body with nothing said — the same silent
+ * drop the persistent control exists to prevent. A reader who has seen a
+ * failure therefore gets one focused status line on the successful open. It is
+ * FOCUS that makes the sentence reliably read: the region is inserted in the
+ * same commit as its text, which is exactly the case a live region announces
+ * unreliably. An open that never failed says nothing and moves nothing — the
+ * browser has already placed focus and there is no failure to close out.
  *
  * A failed open is reported, never smoothed over: no empty store is published
  * in its place, so no consumer can mistake damaged local state for an
@@ -250,6 +268,8 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
   const [resolved, setResolved] = useState<AppStore | null>(store ?? null);
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const openedAnnouncer = useRef<HTMLParagraphElement>(null);
+  const handedOver = useRef(false);
 
   useEffect(() => {
     if (store !== undefined) {
@@ -278,9 +298,40 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
     };
   }, [attempt, createStore, store]);
 
-  if (resolved !== null) return <StoreContext.Provider value={resolved}>{children}</StoreContext.Provider>;
+  // The handover is latched rather than keyed on a render, because a mount
+  // effect runs twice under StrictMode and a reader may only be moved once.
+  useEffect(() => {
+    if (resolved === null || attempt === 0 || handedOver.current) return;
+    handedOver.current = true;
+    openedAnnouncer.current?.focus();
+  }, [attempt, resolved]);
+
+  if (resolved !== null)
+    return (
+      <StoreContext.Provider value={resolved}>
+        {attempt === 0 ? null : (
+          // `tabIndex={-1}` takes the focus this surface is about to destroy
+          // without adding a tab stop of its own, and `sr-only` keeps a
+          // sentence that is only about the boot out of the visual design.
+          <p
+            ref={openedAnnouncer}
+            tabIndex={-1}
+            className="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            Ferretry is open.
+          </p>
+        )}
+        {children}
+      </StoreContext.Provider>
+    );
 
   const opening = failure === null;
+  // A press is what the control has to survive, so it appears with the first
+  // failure and stays for every attempt after it.
+  const failedBefore = attempt > 0 || failure !== null;
   return (
     <div>
       <p role="status" aria-live="polite" aria-atomic="true">
@@ -295,17 +346,19 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
         exactly the focus loss a persistent control exists to prevent. The
         handler enforces the same refusal the attribute announces.
       */}
-      <button
-        type="button"
-        aria-disabled={opening}
-        onClick={() => {
-          if (opening) return;
-          setFailure(null);
-          setAttempt(count => count + 1);
-        }}
-      >
-        Try again
-      </button>
+      {failedBefore ? (
+        <button
+          type="button"
+          aria-disabled={opening}
+          onClick={() => {
+            if (opening) return;
+            setFailure(null);
+            setAttempt(count => count + 1);
+          }}
+        >
+          Try again
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -362,11 +362,11 @@ describe('StoreProvider', () => {
 
     expect(attempts).toBe(2);
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
-    expect(view.container.textContent).toBe('unpaired');
+    expect(must(view.container.querySelector('button'), 'the probe').textContent).toBe('unpaired');
 
     // The recovered store is the live one, not a snapshot taken before the retry.
     await interact(() => view.container.querySelector('button')?.click());
-    expect(view.container.textContent).toBe('alpha');
+    expect(must(view.container.querySelector('button'), 'the probe').textContent).toBe('alpha');
     await view.unmount();
   });
 
@@ -386,46 +386,141 @@ describe('StoreProvider', () => {
     );
     const status = must(view.container.querySelector('[role="status"]'), 'the status region');
     const alert = must(view.container.querySelector('[role="alert"]'), 'the alert region');
-    const retry = must(view.container.querySelector('button'), 'the retry control');
 
     expect(status.textContent).toBe('Opening Ferretry…');
     expect(alert.textContent).toBe('');
-    expect(retry.getAttribute('aria-disabled')).toBe('true');
-
-    // Pressing a control the reader has been told is disabled starts nothing.
-    retry.focus();
-    await interact(() => retry.click());
-    expect(attempts).toHaveLength(1);
 
     must(attempts[0], 'the first open').reject(new Error('database denied'));
     await settle();
 
-    // Same three nodes: the live regions were never remounted under the reader.
+    // Same live regions: neither was remounted under the reader.
     expect(view.container.querySelector('[role="status"]')).toBe(status);
     expect(view.container.querySelector('[role="alert"]')).toBe(alert);
-    expect(view.container.querySelector('button')).toBe(retry);
     expect(status.textContent).toBe('');
     expect(alert.textContent).toBe('Could not open local PWA state: database denied');
+
+    const retry = must(view.container.querySelector('button'), 'the retry control');
     expect(retry.getAttribute('aria-disabled')).toBe('false');
-    expect(document.activeElement).toBe(retry);
+    retry.focus();
 
     await interact(() => retry.click());
 
+    // The control the reader pressed survived its own press, so the focus did.
     expect(attempts).toHaveLength(2);
+    expect(view.container.querySelector('button')).toBe(retry);
     expect(document.activeElement).toBe(retry);
     expect(status.textContent).toBe('Retrying: opening Ferretry…');
     expect(alert.textContent).toBe('');
     expect(retry.getAttribute('aria-disabled')).toBe('true');
 
-    // A second press while that retry is in flight opens nothing further.
+    // Pressing a control the reader has been told is disabled starts nothing.
     await interact(() => retry.click());
     expect(attempts).toHaveLength(2);
 
     must(attempts[1], 'the second open').resolve(store);
     await settle();
 
-    expect(view.container.textContent).toBe('unpaired');
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
+    expect(must(view.container.querySelector('button'), 'the probe').textContent).toBe('unpaired');
+    await view.unmount();
+  });
+
+  it('offers no retry control until an open has actually failed', async () => {
+    const attempts: Gate<AppStore>[] = [];
+    const createStore = async (): Promise<AppStore> => {
+      const opening = gate<AppStore>();
+      attempts.push(opening);
+      return await opening.promise;
+    };
+
+    const view = await mount(
+      <StoreProvider createStore={createStore}>
+        <StoreProbe />
+      </StoreProvider>,
+    );
+
+    // An ordinary boot: a progress sentence, a silent alert region waiting in
+    // the document, and nothing a reader can tab to, press or be told is
+    // unavailable. Offering "Try again" here would claim a failure that has
+    // not happened.
+    expect(must(view.container.querySelector('[role="status"]'), 'the status region').textContent).toBe(
+      'Opening Ferretry…',
+    );
+    expect(view.container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(view.container.querySelector('button')).toBeNull();
+    expect(view.container.textContent).toBe('Opening Ferretry…');
+
+    must(attempts[0], 'the first open').reject(new Error('database denied'));
+    await settle();
+
+    // It exists from the moment there is something to try again.
+    const retry = must(view.container.querySelector('button'), 'the retry control');
+    expect(retry.textContent).toBe('Try again');
+    expect(retry.getAttribute('aria-disabled')).toBe('false');
+    await view.unmount();
+  });
+
+  it('hands a recovered boot back to the reader instead of dropping focus to the body', async () => {
+    const store = await memoryStore();
+    let attempts = 0;
+    const createStore = async (): Promise<AppStore> => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('database denied');
+      return store;
+    };
+
+    const view = await mount(
+      <StoreProvider createStore={createStore}>
+        <StoreProbe />
+      </StoreProvider>,
+    );
+    await settle();
+
+    const retry = must(view.container.querySelector('button'), 'the retry control');
+    retry.focus();
+    await interact(() => retry.click());
+    await settle();
+
+    // The surface the reader was standing on is destroyed by the open, so the
+    // reader is moved to a sentence that closes out the failure rather than
+    // being dropped at the top of the document with nothing said.
+    const opened = must(
+      view.container.querySelector<HTMLParagraphElement>('[role="status"]'),
+      'the opened announcement',
+    );
+    expect(opened.textContent).toBe('Ferretry is open.');
+    expect(opened.getAttribute('tabindex')).toBe('-1');
+    expect(document.activeElement).toBe(opened);
+    // First in document order, ahead of everything the app itself renders.
+    expect(view.container.firstElementChild).toBe(opened);
+    expect(must(view.container.querySelector('button'), 'the probe').textContent).toBe('unpaired');
+
+    // Moved once. A later render of the opened app leaves the reader wherever
+    // they have since gone.
+    opened.blur();
+    await interact(() => must(view.container.querySelector('button'), 'the probe').click());
+    expect(must(view.container.querySelector('button'), 'the probe').textContent).toBe('alpha');
+    expect(document.activeElement).not.toBe(opened);
+    await view.unmount();
+  });
+
+  it('neither announces nor moves the reader when the first open succeeds', async () => {
+    const store = await memoryStore();
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    const view = await mount(
+      <StoreProvider createStore={async () => store}>
+        <StoreProbe />
+      </StoreProvider>,
+    );
+    await settle();
+
+    // Nothing failed, so there is nothing to close out: the browser's own
+    // focus placement stands and the app renders alone.
+    expect(view.container.querySelector('[role="status"]')).toBeNull();
+    expect(view.container.textContent).toBe('unpaired');
+    expect(document.activeElement).toBe(document.body);
     await view.unmount();
   });
 
