@@ -34,10 +34,11 @@ describe('the bundler contract', () => {
     expect(build.sourcemap).toBe(false);
   });
 
-  it('resolves assets from the site root, not from the current route', () => {
-    // Routes are `/d/<daemonId>/…`, so an app-rooted base keeps chunks away from
-    // inside a daemon-scoped path.
-    expect(viteConfig.base).toBe('/app/');
+  it('resolves shared assets from the site root, not from either document route', () => {
+    // `/app/` and `/d/<daemonId>/…` are both application routes. The landing
+    // and the app share one root-level public icon/manifest set, so an `/app/`
+    // base would rewrite those links to files the build does not emit.
+    expect(viteConfig.base).toBe('/');
   });
 
   it('runs the design system through Tailwind and Autoprefixer', () => {

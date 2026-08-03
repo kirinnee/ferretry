@@ -42,9 +42,11 @@ import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 
 export default defineConfig({
-  // The static landing document owns `/`; the PWA is a separate entry below
-  // `/app/`, so its chunks remain rooted there even on a daemon-qualified route.
-  base: '/app/',
+  // The static landing owns `/` and the PWA document is `/app/`, but their
+  // public assets are emitted once at the site root. Keep every generated chunk
+  // root-absolute: that lets the app load on daemon-qualified deep links without
+  // rewriting shared icons or the manifest to a nonexistent `/app/...` copy.
+  base: '/',
   build: {
     outDir: 'dist',
     // Named, not defaulted: the pending `public/_headers` (not yet in this repo)
