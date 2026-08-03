@@ -16,6 +16,28 @@ describe('the static landing document', () => {
     expect(landing).toContain('href="/?stay"');
   });
 
+  it('positions the shipped product as the self-hosted Claude Code and Codex operating layer', () => {
+    expect(landing).toContain('the agent operating system for Claude Code + Codex');
+    expect(landing).toContain('Claude + Codex.');
+    expect(landing).toContain('It does not replace either harness.');
+    expect(landing).toContain('No Ferretry server.');
+    expect(landing).toContain('fy send');
+    expect(landing).toContain('Operator-triggered / target chosen explicitly');
+    expect(landing).toContain('Daemon-side / not browser-local');
+    expect(landing).toContain('On Linux hosts');
+    expect(landing).toContain('tailnet or tunnel');
+  });
+
+  it('does not market known unmounted or unenforced surfaces as complete', () => {
+    expect(landing).not.toContain('Agent-to-agent messages');
+    expect(landing).not.toContain('Peer messages carry their sender');
+    expect(landing).not.toContain('same-kind accounts');
+    expect(landing).not.toContain('automatic failover');
+    expect(landing).not.toContain('remote browser');
+    expect(landing).not.toContain('structured question');
+    expect(landing).not.toContain('spend and tokens');
+  });
+
   it('keeps a tab favicon without presenting itself as the installable app', () => {
     expect(landing).toContain('rel="icon" href="/icons/favicon.svg"');
     expect(landing).toContain('rel="icon" href="/icons/favicon-32.png"');
