@@ -202,6 +202,27 @@ function StoreProbe() {
 }
 
 describe('StoreProvider', () => {
+  it('invalidates notification preferences and push devices for only the removed daemon', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => client('unused'),
+      fetcher: async () => Response.json({}),
+    });
+    store.connections.add(alpha);
+    store.connections.add(beta);
+    store.notificationPreferences.set(alpha.daemonId, { enabled: true });
+    store.notificationPreferences.set(beta.daemonId, { enabled: true });
+    store.pushDevices.remember(alpha.daemonId, 'alpha-device');
+    store.pushDevices.remember(beta.daemonId, 'beta-device');
+
+    store.connections.remove(alpha.daemonId);
+
+    expect(store.notificationPreferences.get(alpha.daemonId).enabled).toBe(false);
+    expect(store.pushDevices.get(alpha.daemonId)).toBeNull();
+    expect(store.notificationPreferences.get(beta.daemonId).enabled).toBe(true);
+    expect(store.pushDevices.get(beta.daemonId)).toBe('beta-device');
+  });
+
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
     const store = await createAppStore({
       repository: new MemoryRepository(),

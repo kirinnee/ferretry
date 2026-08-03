@@ -44,7 +44,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey } from './lib/pages/routes.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
-import { getForegroundPinScope } from './lib/pin-bridge.ts';
+import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
 import {
   daemonPushService,
   type PushEnrolment,
@@ -214,6 +214,12 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       current = false;
     };
   }, [connection, daemonId, sessionId, store.fleet]);
+
+  useEffect(() => {
+    const foreground = { daemonId, sessionId };
+    setForegroundPinScope(foreground);
+    return () => clearForegroundPinScope(foreground);
+  }, [daemonId, sessionId]);
 
   return (
     <main
