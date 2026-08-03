@@ -14,10 +14,10 @@ The product is **ferretry**; the CLI binary is **`fy`**. It ships as a standalon
 
 ## Debian / Ubuntu (apt)
 
-Releases push `.deb` packages to the `kirinnee` Gemfury repository:
+Releases push `.deb` packages to the `kirinnee97` Gemfury repository:
 
 ```bash
-echo "deb [trusted=yes] https://apt.fury.io/kirinnee/ /" | sudo tee /etc/apt/sources.list.d/fury.list
+echo "deb [trusted=yes] https://apt.fury.io/kirinnee97/ /" | sudo tee /etc/apt/sources.list.d/fury.list
 sudo apt update
 sudo apt install fy
 ```
@@ -29,8 +29,8 @@ The same releases push `.rpm` packages to the matching Yum repository:
 ```bash
 sudo tee /etc/yum.repos.d/fury.repo <<'EOF'
 [fury]
-name=Gemfury kirinnee
-baseurl=https://yum.fury.io/kirinnee/
+name=Gemfury kirinnee97
+baseurl=https://yum.fury.io/kirinnee97/
 enabled=1
 gpgcheck=0
 EOF

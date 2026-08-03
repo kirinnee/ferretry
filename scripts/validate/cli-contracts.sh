@@ -142,10 +142,15 @@ installation-parity)
     (.nfpms[0].package_name == $name) and
     (.nfpms[0].file_name_template == "{{ .PackageName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}") and
     ((.nfpms[0].formats | sort) == ["deb", "rpm"])' >/dev/null
-  rg -qF 'endpoint="push.fury.io/kirinnee"' scripts/release/fury.sh
+  # The account is kirinnee97. It was kirinnee here and in fury.sh until 2026-08-03, which is why
+  # every release since the channel was added returned `403 account access denied`: the token
+  # authenticated fine and then pushed at an account it does not own. The three literals below must
+  # keep naming ONE account — an installer pointed at a repository the release never publishes to is
+  # the same defect wearing different clothes.
+  rg -qF 'endpoint="push.fury.io/kirinnee97"' scripts/release/fury.sh
   rg -qF './scripts/release/fury.sh' scripts/release/publish.sh
-  rg -qF 'deb [trusted=yes] https://apt.fury.io/kirinnee/ /' INSTALLATION.md
-  rg -qF 'https://yum.fury.io/kirinnee/' INSTALLATION.md
+  rg -qF 'deb [trusted=yes] https://apt.fury.io/kirinnee97/ /' INSTALLATION.md
+  rg -qF 'https://yum.fury.io/kirinnee97/' INSTALLATION.md
   rg -qF "apt install ${name}" INSTALLATION.md
   rg -qF "dnf install ${name}" INSTALLATION.md
   ;;
