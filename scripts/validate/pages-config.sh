@@ -31,4 +31,14 @@ rg -q '^  Cache-Control: no-cache, no-store, must-revalidate$' "${headers}"
 rg -q '^  Cache-Control: public, max-age=31536000, immutable$' "${headers}"
 test "$(<"${redirects}")" = '/* /index.html 200'
 
+# The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages
+# project by hostname, and neither the daemon nor the CLI can read wrangler.jsonc at runtime. Pinned
+# because a renamed project would leave every minted pairing link addressing a site that no longer
+# exists, and nothing would fail until somebody scanned one.
+pair_service="packages/daemon/src/lib/pairing/service.ts"
+rg -qF "https://$(jq -r '.name' "${config}").pages.dev/pair" "${pair_service}" || {
+  echo "❌ ${pair_service} does not address the Pages project named in ${config}" >&2
+  exit 1
+}
+
 echo "✅ Cloudflare Pages configuration is static, scoped, and cache-safe"
