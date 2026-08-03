@@ -50,9 +50,11 @@
              families. -->
     <!-- Pre-paint theme + text-scale bootstrap. Classic and same-origin ON
          PURPOSE: it must run before first paint (so `defer`/`type="module"` are
-         both wrong), and the Pages deployment sends `script-src 'self'` — an
-         inline script, which is what kteam used, would be blocked outright.
-         See `public/pre-paint.js` for the contract it restates. -->
+         both wrong), and the pending Cloudflare Pages deployment (not yet in
+         this repo; a separate unit owns it) is meant to send `script-src
+         'self'` — an inline script, which is what kteam used, would be blocked
+         outright under that policy. See `public/pre-paint.js` for the contract
+         it restates. -->
     <script src="/pre-paint.js"></script>
   </head>
   <body>

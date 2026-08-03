@@ -86,11 +86,11 @@ const patchGlobal = (host: object, name: string, value: unknown): (() => void) =
 const setPath = (path: string): void => window.history.replaceState({}, '', path);
 
 /**
- * The composition root builds its push service on the GLOBAL fetch rather than
- * on the store's injected one, so a settings render would otherwise reach the
- * network for a daemon that does not exist. Stubbed for the whole file: no test
- * in here is about transport, and a suite that can dial out is a suite that can
- * hang.
+ * Global fetch is a tripwire for accidental ambient transport. The root must
+ * consume the push service already bound to its store's injected fetcher, and
+ * pairing must use that same injected fetcher; any URL recorded here is a
+ * regression. It is also stubbed because a suite that can dial out is a suite
+ * that can hang.
  */
 let restoreFetch: (() => void) | undefined;
 const requestedUrls: string[] = [];

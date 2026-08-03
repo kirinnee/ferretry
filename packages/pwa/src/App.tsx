@@ -46,12 +46,7 @@ import {
 import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey } from './lib/pages/routes.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
-import {
-  daemonPushService,
-  type PushEnrolment,
-  type PushRegistrationLike,
-  supportsWebPush,
-} from './lib/push-enrolment.ts';
+import { type PushEnrolment, type PushRegistrationLike, supportsWebPush } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
@@ -461,11 +456,11 @@ export function AppShell() {
     () => ({
       preferences: store.notificationPreferences,
       surface: notificationSurface,
-      service: daemonPushService(),
+      service: store.pushService,
       devices: store.pushDevices,
       enrolment: browserPushEnrolment(),
     }),
-    [notificationSurface, store.notificationPreferences, store.pushDevices],
+    [notificationSurface, store.notificationPreferences, store.pushDevices, store.pushService],
   );
   const notificationWatchHost = useMemo(
     () => ({

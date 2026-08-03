@@ -10,9 +10,11 @@
    change to either side without the other cannot ship.
 
    WHY IT IS A FILE AND NOT AN INLINE `<script>` IN index.html — the one real
-   departure from kteam, which inlined it. The Cloudflare Pages deployment sends
-   `script-src 'self'` (`public/_headers`), so an inline script would be blocked
-   outright and the app would boot with no theme resolved at all. A classic,
+   departure from kteam, which inlined it. The pending Cloudflare Pages
+   deployment (not yet in this repo; a separate unit owns it) is meant to send
+   `script-src 'self'` via a `public/_headers` that does not exist here yet, so
+   an inline script would be blocked outright under that policy and the app
+   would boot with no theme resolved at all. A classic,
    same-origin, parser-blocking script satisfies the CSP and still runs before
    paint. It must therefore stay CLASSIC (no `type="module"`, no `defer`): a
    module script is deferred by definition and would run after first paint,

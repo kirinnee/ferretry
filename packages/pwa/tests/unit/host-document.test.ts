@@ -4,12 +4,14 @@
  *
  * It is not typechecked, not linted and not imported, so a wrong path in it is a
  * blank page discovered by a deploy rather than by a build. Worse, its most
- * important clause is a NEGATIVE one: the Pages deployment sends
- * `script-src 'self'` (`public/_headers`), which makes an inline `<script>` —
- * the shape kteam's document used for its theme bootstrap — not merely untidy
- * but dead. It fails closed, and the app boots with no theme resolved at all.
- * That is asserted here as a positive invariant rather than trusted to whoever
- * edits the document next.
+ * important clause is a NEGATIVE one: the pending Cloudflare Pages deployment
+ * (not yet in this repo; a separate unit owns it) is meant to send
+ * `script-src 'self'` via a `public/_headers` that does not exist here yet,
+ * which would make an inline `<script>` — the shape kteam's document used for
+ * its theme bootstrap — not merely untidy but dead under that policy. This
+ * file asserts the document is already built as if that policy were live
+ * (no inline script, a classic same-origin bootstrap) as a positive invariant,
+ * rather than trusted to whoever edits the document next.
  */
 
 import { describe, expect, it } from 'bun:test';

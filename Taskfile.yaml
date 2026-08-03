@@ -4,7 +4,8 @@ vars:
   # The CLI package's bin key is the ONLY place the product name is written; everything derives it.
   CLI_PKG: packages/cli
   # The PWA is a browser bundle, not a Bun program: it builds through its own package script
-  # (Vite) rather than through scripts/local/build.sh, and `wrangler.jsonc` names its output.
+  # (Vite) rather than through scripts/local/build.sh. The separately owned Pages deployment will
+  # publish this package's documented output once its configuration lands.
   PWA_PKG: packages/pwa
   ARTIFACT_PREFIX:
     sh: jq -r '.bin | to_entries[0].key' {{.CLI_PKG}}/package.json
@@ -56,9 +57,9 @@ tasks:
     desc: Build the PWA static bundle to packages/pwa/dist
     dir: '{{.PWA_PKG}}'
     cmds:
-      # `bun run build`, not `vite build`: the package script is the one build command, and it is
-      # what the Pages workflow invokes too (scripts/ci/build-pwa.sh). Two spellings of the same
-      # build is how a local bundle and a deployed bundle start differing.
+      # `bun run build`, not `vite build`: the package script is the one build command the pending
+      # Pages workflow must invoke too. Two spellings of the same build are how a local bundle and
+      # a deployed bundle start differing.
       - bun run build
 
   deadcode:

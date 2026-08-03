@@ -2,12 +2,11 @@
  * The Vite config decides directory names that things OUTSIDE this package
  * independently hardcode, so a rename here is not a local change.
  *
- * `wrangler.jsonc` names the directory Cloudflare Pages publishes, and
- * `public/_headers` gives `/assets/*` an immutable year. Rename `outDir` and the
- * deploy publishes an empty directory; rename `assetsDir` and unfingerprinted
- * files inherit a one-year cache. Neither failure is visible in a build log, so
- * the contract is pinned against the real config object rather than described in
- * a comment.
+ * The separately owned Cloudflare Pages deployment is still pending. Its
+ * declared contract is to publish `packages/pwa/dist/` and apply immutable
+ * caching only beneath `assets/`. Rename either directory here and that deploy
+ * will be wrong when it lands. Neither failure is visible in a build log, so
+ * this package pins the values it owns against the real config object.
  *
  * The config is IMPORTED, not text-matched: what matters is the value Vite
  * resolves, including that the PostCSS pipeline really has Tailwind in it. A
@@ -16,11 +15,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import viteConfig from '../../vite.config.ts';
-
-const repoRoot = join(import.meta.dir, '../../../..');
 
 describe('the bundler contract', () => {
   const build = viteConfig.build ?? {};
@@ -58,16 +53,5 @@ describe('the bundler contract', () => {
   it('refuses to move its dev port', () => {
     expect(viteConfig.server?.port).toBe(5173);
     expect(viteConfig.server?.strictPort).toBe(true);
-  });
-
-  it('agrees with the Pages output directory once that config is in the tree', () => {
-    // The deployment lands on its own branch, so this activates when the two
-    // meet rather than failing whichever arrives first. `wrangler.jsonc` is the
-    // only place the deployed path is written; if it disagrees with `outDir`,
-    // Pages publishes an empty directory.
-    const wrangler = join(repoRoot, 'wrangler.jsonc');
-    if (!existsSync(wrangler)) return;
-    const declared = /"pages_build_output_dir"\s*:\s*"([^"]+)"/.exec(readFileSync(wrangler, 'utf8'))?.[1];
-    expect(declared).toBe(`./packages/pwa/${build.outDir}`);
   });
 });

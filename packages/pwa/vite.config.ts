@@ -2,12 +2,14 @@
  * The PWA's production bundle and dev server.
  *
  * Ported from kteam `ui/vite.config.ts`, with its release machinery deliberately
- * left behind — see the four departures below. The output contract is fixed by
- * the Cloudflare Pages deployment (`wrangler.jsonc` names
- * `./packages/pwa/dist`, and `packages/pwa/public/_headers` gives
- * `/assets/*` an immutable year), so `outDir`, `assetsDir` and `publicDir` are
- * not free choices: changing one breaks the deploy's cache policy or drops the
- * headers file from the bundle.
+ * left behind — see the four departures below. `outDir`, `assetsDir` and
+ * `publicDir` are not free choices even though the Cloudflare Pages deployment
+ * is not in this repo yet (a separate unit owns it): the PENDING contract is a
+ * `wrangler.jsonc` naming `./packages/pwa/dist` as the published directory and
+ * a `packages/pwa/public/_headers` giving `/assets/*` an immutable year.
+ * Neither file exists here today — changing `outDir` or `assetsDir` now would
+ * still break that deploy the moment it lands, so these are fixed against the
+ * contract this package will have to honour, not against files present today.
  *
  * 1. NO RELEASE FINGERPRINT. kteam's config was a child of
  *    `scripts/build-pwa.ts`, which minted one release id and threaded it through
@@ -46,8 +48,9 @@ export default defineConfig({
   base: '/',
   build: {
     outDir: 'dist',
-    // Named, not defaulted: `public/_headers` gives `/assets/*` an immutable
-    // year, so the directory this writes into IS the cache-policy boundary.
+    // Named, not defaulted: the pending `public/_headers` (not yet in this repo)
+    // is meant to give `/assets/*` an immutable year, so the directory this
+    // writes into is the cache-policy boundary that contract will name.
     assetsDir: 'assets',
     // The bundle is a deployment artifact, not an accumulation of them: a stale
     // chunk left behind by an earlier build would be served as immutable.
