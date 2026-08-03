@@ -5,7 +5,7 @@ set -euo pipefail
 # (see INSTALLATION.md). Idempotent: a 409 (version already exists) is a warning, not a failure.
 [ -z "${FURY_PUSH_TOKEN:-}" ] && echo "❌ 'FURY_PUSH_TOKEN' env var not set" >&2 && exit 1
 
-endpoint="push.fury.io/kirinnee"
+endpoint="push.fury.io/kirinnee97"
 
 # Keep the token out of argv and process listings. curl reads the equivalent
 # Basic-auth setting from a mode-0600 config that is removed on every exit.
