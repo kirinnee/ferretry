@@ -187,6 +187,41 @@ try {
         }
       }
     }
+    // THE HEADER LOCKUP, MAGNIFIED. The mark renders at 20px next to the
+    // wordmark, and 20px of grid is too small to judge in a 390px page
+    // screenshot — which is exactly the size at which a 3x3 grid's cells start
+    // merging into a blob. Captured at deviceScaleFactor 4 so the review is of
+    // real rendered pixels enlarged, not of a re-render at a size nothing ships.
+    for (const scheme of SCHEMES) {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        colorScheme: scheme,
+        reducedMotion: 'reduce',
+        deviceScaleFactor: 4,
+      });
+      try {
+        await context.route('**/*', async route => {
+          if (new URL(route.request().url()).origin !== server.url.origin) {
+            await route.abort();
+            return;
+          }
+          await route.continue();
+        });
+        const page = await context.newPage();
+        try {
+          await page.goto(server.url.toString(), { waitUntil: 'load' });
+          const target = join(outDir, `header-lockup-${scheme}.png`);
+          // The lockup is the mark plus the word, so the mark's own size and its
+          // optical weight beside the type are both in frame.
+          await page.getByText('Ferretry', { exact: true }).locator('..').screenshot({ path: target });
+          process.stdout.write(`📸 header lockup at 4x ${scheme} -> ${target}\n`);
+        } finally {
+          await page.close();
+        }
+      } finally {
+        await context.close();
+      }
+    }
   } finally {
     await browser.close();
   }

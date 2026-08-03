@@ -24,13 +24,14 @@
  * a sentence explaining that it is 0 is noise; the list earns its place once
  * there is something in it.
  */
-import { Check, ChevronRight, Link2, Radio, ShieldCheck, Trash2 } from 'lucide-react';
+import { Check, ChevronRight, Link2, ShieldCheck, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
+import { BrandMark } from '../../shell/brand-mark.tsx';
 import { PairScanner } from './pair-scanner.tsx';
 
 export type PairingExchange = (seed: PairingSeed) => Promise<void>;
@@ -166,7 +167,7 @@ export function PairingScreen({
     <main className={SHELL} aria-labelledby="pairing-title">
       <header className="min-w-0">
         <div className="flex items-center gap-2 text-accent">
-          <Radio size={20} aria-hidden="true" />
+          <BrandMark size={20} />
           <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
         </div>
         <h1 id="pairing-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
@@ -371,7 +372,7 @@ function PairingFocus({ stage, onPair, onCancel, paired }: PairingFocusProps) {
     <main className={SHELL} aria-labelledby="pairing-title">
       <header className="min-w-0">
         <div className="flex items-center gap-2 text-accent">
-          <Radio size={20} aria-hidden="true" />
+          <BrandMark size={20} />
           <span className="text-meta font-semibold uppercase tracking-label">Ferretry</span>
         </div>
         <h1 id="pairing-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
