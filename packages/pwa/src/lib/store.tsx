@@ -30,6 +30,41 @@ import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 const CONNECTION_DATABASE = 'ferretry-pwa';
 const CONNECTION_OBJECT_STORE = 'connections';
 
+/**
+ * The landing page reads just this synchronous, content-free hint to decide
+ * whether opening the app is more useful than repeating the product pitch. It
+ * is never a pairing record: no daemon address, identity, or credential enters
+ * localStorage.
+ */
+export const LANDING_MARKER_KEY = 'fy-has-pairings-v1';
+const PAIRED_MARKER = '1';
+
+export interface LandingMarkerStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+/** Safely finds browser storage without making a storage refusal fatal to the app. */
+const browserLandingMarkerStorage = (): LandingMarkerStorage | undefined => {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Mirrors only the empty/non-empty shape of the runtime pairing registry. */
+export const syncLandingMarker = (storage: LandingMarkerStorage | undefined, pairingCount: number): void => {
+  if (storage === undefined) return;
+  try {
+    if (pairingCount > 0) storage.setItem(LANDING_MARKER_KEY, PAIRED_MARKER);
+    else storage.removeItem(LANDING_MARKER_KEY);
+  } catch {
+    // Private browsing and storage policies must fail open to the landing page.
+  }
+};
+
 const requestResult = <T,>(request: IDBRequest<T>): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
@@ -161,6 +196,8 @@ export interface CreateAppStoreOptions {
   readonly repository?: DaemonConnectionRepository;
   readonly fetcher?: DaemonFetch;
   readonly connectClient?: ConnectDaemonClient;
+  /** A deliberately content-free hint used only by the static landing page. */
+  readonly landingMarkerStorage?: LandingMarkerStorage;
 }
 
 /** Builds the document-lifetime stores and registers every daemon cache together. */
@@ -184,6 +221,13 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     repository: options.repository ?? browserConnectionRepository(),
     caches: [clients, fleet, controls, projects, usage, notificationPreferences, pushDevices],
   });
+  const landingMarkerStorage = options.landingMarkerStorage ?? browserLandingMarkerStorage();
+  const syncLandingPage = (): void =>
+    syncLandingMarker(landingMarkerStorage, connections.getSnapshot().connections.length);
+  syncLandingPage();
+  // The document-lifetime store owns this document-lifetime convenience. Every
+  // add, eviction, and explicit unpair now keeps the marker honest.
+  connections.subscribe(syncLandingPage);
 
   return {
     connections,

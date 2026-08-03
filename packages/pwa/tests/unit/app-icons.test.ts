@@ -2,7 +2,7 @@
  * The app's identity is a set of static files nothing else in the repo checks.
  *
  * `tests/unit/host-document.test.ts` already proves every root-absolute reference
- * in `index.html` resolves to a file the bundle contains. That is necessary and
+ * in `app/index.html` resolves to a file the bundle contains. That is necessary and
  * not sufficient: the icon set can be complete, resolvable and still wrong in
  * three ways a build would never notice.
  *
@@ -32,15 +32,15 @@ import { join } from 'node:path';
 import {
   MANIFEST_LINK_ID,
   manifestHrefFor,
-  THEME_FAMILIES,
   type ResolvedMode,
+  THEME_FAMILIES,
 } from '../../src/lib/theme-preferences.ts';
 
 const packageDir = join(import.meta.dir, '../..');
 const publicDir = join(packageDir, 'public');
 
 /** Comments carry example markup; none of it is what the browser sees. */
-const document = readFileSync(join(packageDir, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+const document = readFileSync(join(packageDir, 'app/index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
 
 /** A `public/`-relative read of a root-absolute reference, the way Vite serves it. */
 const publicFile = (reference: string): Buffer => readFileSync(join(publicDir, reference.slice(1)));

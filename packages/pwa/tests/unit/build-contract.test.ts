@@ -35,9 +35,9 @@ describe('the bundler contract', () => {
   });
 
   it('resolves assets from the site root, not from the current route', () => {
-    // Routes are `/d/<daemonId>/…`, so a relative base would look for chunks
+    // Routes are `/d/<daemonId>/…`, so an app-rooted base keeps chunks away from
     // inside a daemon-scoped path.
-    expect(viteConfig.base).toBe('/');
+    expect(viteConfig.base).toBe('/app/');
   });
 
   it('runs the design system through Tailwind and Autoprefixer', () => {

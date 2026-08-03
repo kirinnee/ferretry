@@ -2,92 +2,500 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- `interactive-widget=resizes-content`: Android's software keyboard must
-         RESIZE the layout viewport rather than pan over it, so the composer stays
-         inside the shell. iOS ignores this and pans instead — that half is
-         handled by sizing the shell from `window.visualViewport`
-         (`src/hooks/use-app-viewport.ts`).
-         `viewport-fit=cover` lets the app paint into the notch / home-indicator
-         area; `src/styles/index.css` pays the safe-area insets back where they
-         matter.
-         NO `maximum-scale` / `user-scalable=no`: pinch-zoom must keep working
-         (WCAG 1.4.4). iOS focus-zoom is prevented the correct way instead — by
-         never rendering a text field below 16px on a phone. -->
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <!-- Both modes are real here, and every one of the seven families ships a
-         light and a dark token set, so the UA is told to expect either rather
-         than being handed a single scheme it would then have to fight. -->
     <meta name="color-scheme" content="light dark" />
-    <title>Ferretry</title>
-    <!-- iOS ignores the web manifest for Add-to-Home-Screen and reads these
-         instead. Everything here is SNAPSHOTTED AT ADD TIME and effectively
-         frozen: a later release cannot change the installed title.
-         `black-translucent` lets the app paint under the status bar, which is
-         what makes the notch area take the theme's `--bg` rather than a black
-         band — `styles/index.css` pays back the safe-area insets. -->
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="Ferretry" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <!-- THE BRAND MARK. Fleet Grid, from `docs/brand/fleet-grid/`. Every file
-         here is a committed static asset under `public/`, copied verbatim into
-         the bundle, so all four references are same-origin — which they have to
-         be: the deployment sends `default-src 'self'` and an external icon host
-         would simply not load.
-
-         `favicon.svg` FIRST and unsized, because a browser that understands it
-         should prefer it: it is the only one of these that follows the reader's
-         colour scheme, which a favicon needs and cannot get from the page (see
-         the file's own comment). The 32px PNG is the fallback for browsers with
-         no SVG favicon support, and is a self-contained dark tile for the same
-         reason — a PNG cannot switch ink.
-
-         `apple-touch-icon` is a separate link rather than a manifest entry
-         because iOS does not read the manifest for Add-to-Home-Screen; like the
-         `apple-mobile-web-app-*` metas above, it is snapshotted at add time. -->
+    <title>Ferretry — run your agent fleet from your own machines</title>
+    <meta
+      name="description"
+      content="Ferretry is a phone app and daemon for watching and steering your own agent sessions, without a Ferretry server in the middle."
+    />
+    <!-- The landing page is browsed in a tab, so it keeps the scheme-aware Fleet
+         Grid favicon and its raster fallback. It is not the installed app:
+         manifest and Apple standalone metadata intentionally live in app/index.html. -->
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32" />
-    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <!-- ONE STATIC MANIFEST, carrying the id `useTheme` looks up.
-
-         kteam generated 14 (seven families × light/dark) from its release
-         orchestrator, and that orchestrator is still unported (HANDOFF.md §14).
-         `useTheme` was already written for both worlds: it repoints this link by
-         id, and `manifestHrefFor` returns a href unchanged unless it matches the
-         generated `manifest-<family>-<mode>.` shape. `/manifest.webmanifest` does
-         not match, so the effect is a no-op rather than a 404 — asserted in
-         `tests/unit/app-icons.test.ts` for every family and mode, so the day the
-         generator lands the swap starts working without touching this line's id.
-
-         The manifest declares NO `theme_color`, for the reason given below: a
-         static one would be wrong for six of the seven families, and `useTheme`
-         mints the meta from the resolved theme's own `--bg`. It does declare
-         `background_color`, which is not a theme claim — it is the field colour
-         the maskable icon already paints, and the launch splash sits directly
-         behind that icon. -->
-    <link id="fy-manifest" rel="manifest" href="/manifest.webmanifest" />
-    <!-- STILL NOT LINKED HERE, and the absence is deliberate rather than
-         forgotten: a service-worker registration. No worker is built yet, so
-         there is nothing to register — and no `theme-color` meta either, because
-         `useTheme` creates that one on demand from the resolved theme's own
-         `--bg` and a static value would be wrong for six of the seven
-         families. -->
-    <!-- Pre-paint theme + text-scale bootstrap. Classic and same-origin ON
-         PURPOSE: it must run before first paint (so `defer`/`type="module"` are
-         both wrong), and the pending Cloudflare Pages deployment (not yet in
-         this repo; a separate unit owns it) is meant to send `script-src
-         'self'` — an inline script, which is what kteam used, would be blocked
-         outright under that policy. See `public/pre-paint.js` for the contract
-         it restates. -->
-    <script src="/pre-paint.js"></script>
+    <script>
+      !(function () {
+        try {
+          if (!new URLSearchParams(location.search).has('stay') && localStorage.getItem('fy-has-pairings-v1') === '1')
+            location.replace('/app/');
+        } catch (_) {}
+      })();
+    </script>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17171b;
+        --paper: #f7f6f1;
+        --line: #deddd4;
+        --live: #4f52d6;
+        --muted: #67676c;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: var(--paper);
+        font-family: Georgia, 'Times New Roman', serif;
+      }
+      a {
+        color: inherit;
+      }
+      .page {
+        overflow: hidden;
+      }
+      .topbar,
+      .hero,
+      .section,
+      .footer {
+        width: min(1120px, calc(100% - 40px));
+        margin: auto;
+      }
+      .topbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 76px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        text-decoration: none;
+        font:
+          700 18px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        letter-spacing: -0.06em;
+      }
+      .brand img {
+        width: 29px;
+        height: 29px;
+      }
+      .quiet-link {
+        color: var(--muted);
+        font:
+          600 13px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 4px;
+      }
+      .hero {
+        position: relative;
+        padding: 63px 0 78px;
+      }
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin: 0 0 27px;
+        color: var(--live);
+        font:
+          700 12px/1.2 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--live);
+        box-shadow: 0 0 0 5px #4f52d620;
+      }
+      h1 {
+        max-width: 900px;
+        margin: 0;
+        font-size: clamp(3.35rem, 11vw, 8.7rem);
+        font-weight: 500;
+        letter-spacing: -0.076em;
+        line-height: 0.85;
+      }
+      h1 em {
+        color: var(--live);
+        font-style: normal;
+      }
+      .intro {
+        max-width: 560px;
+        margin: 33px 0 0;
+        color: #39393e;
+        font-size: clamp(1.16rem, 3vw, 1.5rem);
+        line-height: 1.37;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 15px;
+        align-items: center;
+        margin-top: 36px;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 52px;
+        padding: 0 20px;
+        border-radius: 7px;
+        background: var(--ink);
+        color: white;
+        font:
+          700 14px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        text-decoration: none;
+        box-shadow: 4px 4px 0 var(--live);
+      }
+      .button:focus-visible,
+      .quiet-link:focus-visible,
+      .brand:focus-visible,
+      .text-link:focus-visible {
+        outline: 3px solid var(--live);
+        outline-offset: 4px;
+      }
+      .text-link {
+        color: var(--muted);
+        font:
+          600 14px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        text-underline-offset: 4px;
+      }
+      .grid-mark {
+        position: absolute;
+        top: 65px;
+        right: max(-70px, 1vw);
+        display: grid;
+        grid-template-columns: repeat(3, 44px);
+        gap: 9px;
+        opacity: 0.95;
+        transform: rotate(8deg);
+      }
+      .grid-mark i {
+        display: block;
+        width: 44px;
+        height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        background: #eeede7;
+      }
+      .grid-mark i:nth-child(5) {
+        background: var(--live);
+        border-color: var(--live);
+        box-shadow: 0 0 0 8px #4f52d612;
+      }
+      .proof {
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: #eeece5;
+      }
+      .proof-inner {
+        width: min(1120px, calc(100% - 40px));
+        margin: auto;
+        padding: 25px 0;
+        display: grid;
+        grid-template-columns: 26px 1fr;
+        gap: 15px;
+        align-items: start;
+      }
+      .proof img {
+        width: 25px;
+        height: 25px;
+      }
+      .proof p {
+        max-width: 760px;
+        margin: 0;
+        font-size: clamp(1.1rem, 3vw, 1.35rem);
+        line-height: 1.35;
+      }
+      .proof strong {
+        color: var(--live);
+        font-weight: 600;
+      }
+      .section {
+        padding: 76px 0;
+      }
+      .kicker {
+        margin: 0 0 14px;
+        color: var(--live);
+        font:
+          700 12px/1.2 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h2 {
+        max-width: 770px;
+        margin: 0;
+        font-size: clamp(2.35rem, 6vw, 4.8rem);
+        font-weight: 500;
+        letter-spacing: -0.06em;
+        line-height: 0.94;
+      }
+      .capabilities {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        margin-top: 43px;
+        border-left: 1px solid var(--line);
+        border-top: 1px solid var(--line);
+      }
+      .capability {
+        min-height: 184px;
+        padding: 23px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        background: #fbfaf6;
+      }
+      .number {
+        color: var(--live);
+        font:
+          700 12px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      h3 {
+        margin: 42px 0 9px;
+        font:
+          600 23px/1 Georgia,
+          'Times New Roman',
+          serif;
+        letter-spacing: -0.04em;
+      }
+      .capability p {
+        margin: 0;
+        color: #4d4d52;
+        font-size: 16px;
+        line-height: 1.4;
+      }
+      .method {
+        background: var(--ink);
+        color: #f5f4ef;
+      }
+      .method .section {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 72px;
+        align-items: center;
+      }
+      .method .kicker {
+        color: #aeb0ff;
+      }
+      .method h2 {
+        color: white;
+      }
+      .steps {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        counter-reset: process;
+      }
+      .steps li {
+        position: relative;
+        padding: 18px 0 18px 51px;
+        border-top: 1px solid #ffffff2b;
+        font-size: 17px;
+        line-height: 1.35;
+      }
+      .steps li::before {
+        position: absolute;
+        left: 0;
+        color: #aeb0ff;
+        content: counter(process, decimal-leading-zero);
+        counter-increment: process;
+        font:
+          700 12px/1 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+      }
+      .steps li:last-child {
+        border-bottom: 1px solid #ffffff2b;
+      }
+      .footer {
+        padding: 63px 0 42px;
+      }
+      .footer p {
+        max-width: 590px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 17px;
+        line-height: 1.45;
+      }
+      .footer .actions {
+        margin-top: 28px;
+      }
+      @media (max-width: 720px) {
+        .topbar,
+        .hero,
+        .section,
+        .footer {
+          width: min(100% - 32px, 1120px);
+        }
+        .topbar {
+          min-height: 66px;
+        }
+        .quiet-link {
+          font-size: 12px;
+        }
+        .hero {
+          padding: 46px 0 62px;
+        }
+        .grid-mark {
+          top: 39px;
+          right: -52px;
+          grid-template-columns: repeat(3, 31px);
+          gap: 6px;
+        }
+        .grid-mark i {
+          width: 31px;
+          height: 31px;
+          border-radius: 8px;
+        }
+        h1 {
+          max-width: 345px;
+        }
+        .intro {
+          max-width: 355px;
+        }
+        .capabilities {
+          grid-template-columns: 1fr;
+        }
+        .capability {
+          min-height: 157px;
+          padding: 21px;
+        }
+        h3 {
+          margin-top: 30px;
+        }
+        .method .section {
+          display: block;
+          padding-top: 61px;
+          padding-bottom: 61px;
+        }
+        .steps {
+          margin-top: 41px;
+        }
+      }
+    </style>
   </head>
   <body>
-    <!-- The one mount point. `src/main.tsx` throws if it is missing rather than
-         rendering into a document it does not recognise. -->
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <main class="page">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Ferretry home"><img src="./fleet-grid.svg" alt="" />Ferretry</a>
+        <a class="quiet-link" href="/app/">Open app ↗</a>
+      </header>
+      <section class="hero" aria-labelledby="hero-title">
+        <p class="eyebrow"><span class="pulse"></span> A fleet, on your terms</p>
+        <h1 id="hero-title">Your agents run <em>there.</em><br />Ferretry watches <em>here.</em></h1>
+        <p class="intro">
+          A phone app for starting, following and steering agent sessions on your own machines — with no Ferretry server
+          in between.
+        </p>
+        <div class="actions">
+          <a class="button" href="/setup">Get started in the app →</a><a class="text-link" href="#how">How it works</a>
+        </div>
+        <div class="grid-mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </section>
+      <section class="proof" aria-label="Privacy architecture">
+        <div class="proof-inner">
+          <img src="./fleet-grid.svg" alt="" />
+          <p>
+            <strong>There is no Ferretry server.</strong> This page is static. Your daemon stays on your machine.
+            Pairing hands your phone a token directly, so session content, transcripts and credentials do not pass
+            through anything Ferretry operates.
+          </p>
+        </div>
+      </section>
+      <section class="section" aria-labelledby="control-title">
+        <p class="kicker">One live cell in the grid</p>
+        <h2 id="control-title">See what your agents are doing. Step in when it matters.</h2>
+        <div class="capabilities">
+          <article class="capability">
+            <span class="number">01</span>
+            <h3>Run the work</h3>
+            <p>
+              Start sessions on fleet accounts, inspect them, send a message, answer a structured question, or interrupt
+              a turn.
+            </p>
+          </article>
+          <article class="capability">
+            <span class="number">02</span>
+            <h3>Follow live</h3>
+            <p>Stream a session, wait for it to finish, or attach to its terminal when the work needs your eyes.</p>
+          </article>
+          <article class="capability">
+            <span class="number">03</span>
+            <h3>Know what needs you</h3>
+            <p>Keep tasks and attention in one board, and review analytics for spend, tokens, duration and outcomes.</p>
+          </article>
+          <article class="capability">
+            <span class="number">04</span>
+            <h3>Move safely</h3>
+            <p>
+              Migrate a session to another compatible account when needed, with the daemon keeping the work’s state in
+              view.
+            </p>
+          </article>
+          <article class="capability">
+            <span class="number">05</span>
+            <h3>Supervise with evidence</h3>
+            <p>
+              The warden reports what it can actually prove. Session working trees are read-only and
+              descriptor-confined.
+            </p>
+          </article>
+          <article class="capability">
+            <span class="number">06</span>
+            <h3>Carry the overview</h3>
+            <p>Install the phone app to watch the fleet while the daemon continues to run on your own machine.</p>
+          </article>
+        </div>
+      </section>
+      <section class="method" id="how" aria-labelledby="how-title">
+        <div class="section">
+          <div>
+            <p class="kicker">The shape of it</p>
+            <h2 id="how-title">A direct line from your machine to your phone.</h2>
+          </div>
+          <ol class="steps">
+            <li>Run Ferretry’s daemon on the machine that runs your agents.</li>
+            <li>Pair your phone with the daemon using its QR code or pairing link.</li>
+            <li>Open the app to follow the work, respond to a question, or take control.</li>
+          </ol>
+        </div>
+      </section>
+      <footer class="footer">
+        <p>
+          Ferretry is for people who want to keep their agent fleet close: on their own machines, with a clear view from
+          their phone.
+        </p>
+        <div class="actions">
+          <a class="button" href="/app/">Open Ferretry →</a><a class="text-link" href="/?stay">Read this page again</a>
+        </div>
+      </footer>
+    </main>
+    <noscript
+      ><p style="margin: 0; padding: 12px; background: #17171b; color: white; font-family: sans-serif">
+        JavaScript is optional here. This landing page stays readable without it; use
+        <a href="/app/" style="color: white">Open Ferretry</a> to continue to the app.
+      </p></noscript
+    >
   </body>
 </html>

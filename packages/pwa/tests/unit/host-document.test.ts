@@ -1,5 +1,5 @@
 /**
- * `index.html` is a contract with the browser that nothing else in the repo
+ * `app/index.html` is a contract with the browser that nothing else in the repo
  * checks.
  *
  * It is not typechecked, not linted and not imported, so a wrong path in it is a
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 const packageDir = join(import.meta.dir, '../..');
 
 /** Comments carry example markup and paths; none of it is what the browser sees. */
-const document = readFileSync(join(packageDir, 'index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
+const document = readFileSync(join(packageDir, 'app/index.html'), 'utf8').replace(/<!--[\s\S]*?-->/g, '');
 
 interface ScriptTag {
   readonly attributes: string;

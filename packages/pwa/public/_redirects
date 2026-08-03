@@ -1,1 +1,6 @@
+/app/* /app/index.html 200
+/d/* /app/index.html 200
+/setup /app/index.html 200
+/pair /app/index.html 200
+/pair/* /app/index.html 200
 /* /index.html 200

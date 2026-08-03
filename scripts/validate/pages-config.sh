@@ -29,7 +29,14 @@ rg -q '^/manifest\*\.webmanifest$' "${headers}"
 rg -q '^/assets/\*$' "${headers}"
 rg -q '^  Cache-Control: no-cache, no-store, must-revalidate$' "${headers}"
 rg -q '^  Cache-Control: public, max-age=31536000, immutable$' "${headers}"
-test "$(<"${redirects}")" = '/* /index.html 200'
+# The static landing owns `/`; the app and its durable daemon/pair/setup routes
+# are selectively rewritten to the PWA entry before the landing fallback.
+rg -q '^/app/\* /app/index\.html 200$' "${redirects}"
+rg -q '^/d/\* /app/index\.html 200$' "${redirects}"
+rg -q '^/setup /app/index\.html 200$' "${redirects}"
+rg -q '^/pair /app/index\.html 200$' "${redirects}"
+rg -q '^/pair/\* /app/index\.html 200$' "${redirects}"
+tail -n 1 "${redirects}" | grep -qx '/\* /index.html 200'
 
 # The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages
 # project by hostname, and neither the daemon nor the CLI can read wrangler.jsonc at runtime. Pinned
