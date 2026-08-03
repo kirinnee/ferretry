@@ -91,8 +91,7 @@ const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-step=
 const PAIRING_ARRIVAL = '/pair#v1;url=https%3A%2F%2Fdaemon.example.test;code=single-use;fp=daemon-a';
 
 function fail(message: string): never {
-  process.stderr.write(`❌ ${message}\n`);
-  process.exit(1);
+  throw new Error(`❌ ${message}`);
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -528,8 +527,29 @@ try {
         // `scrollIntoViewIfNeeded` here would produce a reassuring screenshot of a
         // state no reader can reach, which is worse than no screenshot.
         //
+        // The production response is deliberately one animation frame behind the
+        // root attribute: React observes `data-keyboard`, commits its effect, then
+        // waits a frame so `scrollIntoView` measures the shortened shell. Waiting
+        // for the resulting geometry is therefore required; measuring immediately
+        // after the attribute catches a real but transient pre-effect frame.
+        //
         // `getBoundingClientRect` is relative to the layout viewport, and
         // `offsetTop` is 0, so the visible band is [0, visualViewport.height].
+        const settled = await page
+          .waitForFunction(
+            () => {
+              const field = document.getElementById('pairing-link');
+              const box = field?.getBoundingClientRect();
+              const visible = window.visualViewport?.height;
+              return box !== undefined && visible !== undefined && box.top >= 0 && box.bottom <= visible;
+            },
+            undefined,
+            { timeout: 5_000 },
+          )
+          .then(
+            () => true,
+            () => false,
+          );
         const fit = await page.evaluate(() => {
           const field = document.getElementById('pairing-link');
           const box = field?.getBoundingClientRect();
@@ -537,16 +557,19 @@ try {
             top: box?.top ?? Number.NaN,
             bottom: box?.bottom ?? Number.NaN,
             visible: window.visualViewport?.height ?? Number.NaN,
+            focused: document.activeElement?.id ?? null,
+            gate: document.getElementById('fy-portrait-gate') !== null,
           };
         });
 
         // Screenshot FIRST: if the field is off-screen, this image is the evidence.
         await shot(page, 'setup-pair-keyboard-mobile');
 
-        const inside = fit.top >= 0 && fit.bottom <= fit.visible;
+        const inside = settled && fit.top >= 0 && fit.bottom <= fit.visible;
         process.stdout.write(
           `   focused field: top=${fit.top.toFixed(1)} bottom=${fit.bottom.toFixed(1)} ` +
-            `visible=${fit.visible.toFixed(1)} -> ${inside ? 'inside' : 'COVERED BY THE KEYBOARD'}\n`,
+            `visible=${fit.visible.toFixed(1)} -> ${inside ? 'inside' : 'COVERED BY THE KEYBOARD'}; ` +
+            `focus=#${String(fit.focused)}; portrait gate mounted=${fit.gate}\n`,
         );
         if (!inside) {
           defects.push(
@@ -557,6 +580,8 @@ try {
               `worked around here with a scroll.`,
           );
         }
+        if (fit.focused !== 'pairing-link') defects.push('the pairing field lost focus before the keyboard capture');
+        if (fit.gate) defects.push('the portrait gate mounted over an upright phone with its keyboard open');
       });
 
       // 5. A SUCCESSFUL PAIRING, ending on `done`. The arrival seeds the stepper
