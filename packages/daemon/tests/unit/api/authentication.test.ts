@@ -49,7 +49,11 @@ describe('bearerToken', () => {
 });
 
 describe('authenticate', () => {
-  const credentials = { admin: 'admin-secret', warden: 'warden-secret' };
+  const credentials = {
+    admin: 'admin-secret',
+    warden: 'warden-secret',
+    devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+  };
 
   it('should classify the admin token as admin', () => {
     // Arrange / Act
@@ -65,6 +69,12 @@ describe('authenticate', () => {
 
     // Assert
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'warden' });
+  });
+
+  it('should classify a hashed-registry match as its own device', () => {
+    const result = authenticate(credentials, { bearer: 'device-secret' });
+
+    should(result).deepEqual({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
   });
 
   it('should accept a query token, which is how a WebSocket upgrade authenticates', () => {
@@ -123,5 +133,18 @@ describe('authenticate', () => {
 
     // Assert
     should(result).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
+  });
+
+  it('should prefer the host tokens over a registry that also claims them', () => {
+    const greedy = { ...credentials, devices: { identify: () => 'device-1' } };
+
+    should(authenticate(greedy, { bearer: 'admin-secret' })).deepEqual({
+      kind: 'authenticated',
+      tokenClass: 'admin',
+    });
+    should(authenticate(greedy, { bearer: 'warden-secret' })).deepEqual({
+      kind: 'authenticated',
+      tokenClass: 'warden',
+    });
   });
 });

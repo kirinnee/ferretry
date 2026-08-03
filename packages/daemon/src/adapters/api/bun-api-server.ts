@@ -1,16 +1,16 @@
 import {
-  admitPendingSocketFrame,
-  errorResponse,
-  headersFrom,
-  queryFrom,
-  SOCKET_CLOSES,
-  SOCKET_MAX_FRAME_BYTES,
   type ApiBindOptions,
   type ApiRequest,
   type ApiResponse,
   type ApiServerHandle,
   type ApiServerPort,
   type ApiSurface,
+  admitPendingSocketFrame,
+  errorResponse,
+  headersFrom,
+  queryFrom,
+  SOCKET_CLOSES,
+  SOCKET_MAX_FRAME_BYTES,
   type SocketAttachment,
   type SocketClose,
   type SocketDownstream,
@@ -139,6 +139,13 @@ export class BunApiServer implements ApiServerPort {
       maxFrameBytes: SOCKET_MAX_FRAME_BYTES,
       fetch: async (request: Request) => {
         const apiRequest = toApiRequest(request, server.requestIp(request));
+        const presentedOrigin = request.headers.get('origin');
+        const origin =
+          presentedOrigin === null || presentedOrigin === new URL(request.url).origin ? null : presentedOrigin;
+        if (origin !== null && !surface.corsOrigins.includes(origin)) return corsRefusal();
+        const preflight = origin === null ? undefined : corsPreflight(request, origin);
+        if (preflight !== undefined) return preflight;
+        const respond = (response: Response): Response => (origin === null ? response : corsResponse(response, origin));
         // `claims` is asked before `upgrade`, and deliberately before authentication, so a public
         // HTTP route that arrives with a stray `Upgrade` header is still served as HTTP rather than
         // judged against a socket table it has nothing to do with.
@@ -149,8 +156,8 @@ export class BunApiServer implements ApiServerPort {
         if (upgrade?.outcome === 'accepted')
           return server.upgrade(request, { attach: upgrade.attach, pending: [], closed: false })
             ? undefined
-            : toResponse(errorResponse(400, 'the websocket upgrade failed', 'upgrade_failed'));
-        if (upgrade?.outcome === 'refused') return toResponse(upgrade.response);
+            : respond(toResponse(errorResponse(400, 'the websocket upgrade failed', 'upgrade_failed')));
+        if (upgrade?.outcome === 'refused') return respond(toResponse(upgrade.response));
         // The byte-shaped routes are offered the request BEFORE the string-bodied ones, and are
         // handed the transport request itself: an audio body must never be buffered into an
         // `ApiRequest.text()` on its way to a subsystem whose whole job is to refuse it unread when
@@ -158,10 +165,10 @@ export class BunApiServer implements ApiServerPort {
         // does not claim reaches the HTTP dispatcher under ITS rules, public ones included.
         if (surface.raw.claims(apiRequest)) {
           const raw = await surface.raw.serve(apiRequest, request);
-          if (raw.kind === 'served') return raw.response;
-          if (raw.kind === 'refused') return toResponse(raw.response);
+          if (raw.kind === 'served') return respond(raw.response);
+          if (raw.kind === 'refused') return respond(toResponse(raw.response));
         }
-        return toResponse(await surface.http.dispatch(apiRequest));
+        return respond(toResponse(await surface.http.dispatch(apiRequest)));
       },
       websocket: {
         open: socket => sockets.opened(socket),
@@ -202,6 +209,64 @@ function wantsSocket(request: Request): boolean {
 
 function toResponse(response: ApiResponse): Response {
   return new Response(response.body, { status: response.status, headers: Object.fromEntries(response.headers) });
+}
+
+const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);
+const CORS_REQUEST_HEADERS = new Set([
+  'authorization',
+  'content-type',
+  'range',
+  'x-ferretry-client',
+  'x-ferretry-session-id',
+  'x-fy-board-capability',
+  'x-fy-request-id',
+  'x-fy-version',
+]);
+const CORS_EXPOSE_HEADERS = 'accept-ranges, content-range, etag, x-ferretry-version';
+
+/** Refuses a browser origin before any route can observe or spend its request. */
+function corsRefusal(): Response {
+  const response = toResponse(errorResponse(403, 'origin not allowed', 'origin_not_allowed'));
+  response.headers.set('vary', 'Origin');
+  return response;
+}
+
+/** Answers the browser's unauthenticated permission probe without weakening route authentication. */
+function corsPreflight(request: Request, origin: string): Response | undefined {
+  const requestedMethod = request.headers.get('access-control-request-method')?.trim().toUpperCase();
+  if (request.method !== 'OPTIONS' || requestedMethod === undefined) return undefined;
+  const requestedHeaders = (request.headers.get('access-control-request-headers') ?? '')
+    .split(',')
+    .map(value => value.trim().toLowerCase())
+    .filter(value => value !== '');
+  if (!CORS_METHODS.has(requestedMethod) || requestedHeaders.some(header => !CORS_REQUEST_HEADERS.has(header))) {
+    const response = toResponse(errorResponse(403, 'CORS preflight refused', 'cors_preflight_refused'));
+    response.headers.set('vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+    return response;
+  }
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      'access-control-allow-methods': requestedMethod,
+      'access-control-allow-headers': requestedHeaders.join(', '),
+      'access-control-max-age': '600',
+      vary: 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers',
+    },
+  });
+}
+
+/** Makes an allowed response readable to the exact configured credentialed browser origin. */
+function corsResponse(response: Response, origin: string): Response {
+  const headers = new Headers(response.headers);
+  headers.set('access-control-allow-origin', origin);
+  headers.set('access-control-allow-credentials', 'true');
+  headers.set('access-control-expose-headers', CORS_EXPOSE_HEADERS);
+  const vary = headers.get('vary');
+  if (vary === null || !vary.split(',').some(value => value.trim().toLowerCase() === 'origin'))
+    headers.set('vary', vary === null ? 'Origin' : `${vary}, Origin`);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 /**
@@ -325,6 +390,7 @@ export function toApiRequest(request: Request, remoteAddress: string | undefined
     path: url.pathname,
     query: queryFrom(url.searchParams),
     headers: headersFrom(Object.fromEntries(request.headers)),
+    clientAddress: remoteAddress,
     loopback: remoteAddress !== undefined && LOOPBACK.has(remoteAddress),
     text: () => request.text(),
   };

@@ -9,6 +9,7 @@ export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';
 export * from './migrate/file-migration-report.ts';
 export * from './names/index.ts';
+export * from './pairing/index.ts';
 export * from './pins/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';

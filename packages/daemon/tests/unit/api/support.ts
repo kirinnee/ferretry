@@ -1,10 +1,11 @@
-import { headersFrom, queryFrom, type ApiRequest, type ApiResponse } from '../../../src/lib/api/index.ts';
+import { type ApiRequest, type ApiResponse, headersFrom, queryFrom } from '../../../src/lib/api/index.ts';
 
 export interface RequestOverrides {
   readonly method?: string;
   readonly path?: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly query?: readonly (readonly [string, string])[];
+  readonly clientAddress?: string;
   readonly loopback?: boolean;
   readonly body?: string;
   /** Makes the body reader fail, standing in for a client that vanished mid-upload. */
@@ -17,6 +18,7 @@ export function request(overrides: RequestOverrides = {}): ApiRequest {
     path: overrides.path ?? '/healthz',
     query: queryFrom(overrides.query ?? []),
     headers: headersFrom(overrides.headers ?? {}),
+    clientAddress: overrides.clientAddress,
     loopback: overrides.loopback ?? false,
     text: async () => {
       if (overrides.unreadableBody === true) throw new Error('the connection dropped');

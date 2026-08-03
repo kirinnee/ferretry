@@ -3,16 +3,20 @@ import should from 'should';
 import {
   ApiDispatcher,
   ApiError,
+  type ApiRoute,
   ApiRouter,
   CLIENT_HEADER,
   jsonResponse,
-  SESSION_ID_HEADER,
-  type ApiRoute,
   type RouteScope,
+  SESSION_ID_HEADER,
 } from '../../../src/lib/api/index.ts';
 import { jsonBody, request } from './support.ts';
 
-const credentials = { admin: 'admin-secret', warden: 'warden-secret' };
+const credentials = {
+  admin: 'admin-secret',
+  warden: 'warden-secret',
+  devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+};
 
 /** Echoes back what the dispatcher decided, so a test asserts the decision rather than a mock call. */
 const echo = (path: string, scope: RouteScope, method = 'GET'): ApiRoute => ({
@@ -123,6 +127,30 @@ describe('ApiDispatcher authorization', () => {
     should(asAdmin.status).equal(200);
   });
 
+  it('should let a paired device use operator routes but never host-only routes', async () => {
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'), echo('/v1/pair/code', 'host', 'POST'));
+
+    const operator = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: 'Bearer device-secret' } }),
+    );
+    const hostOnly = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/pair/code',
+        headers: { authorization: 'Bearer device-secret' },
+      }),
+    );
+    const hostAdmin = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/pair/code', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    should(operator.status).equal(200);
+    should(jsonBody(operator).actor).equal('device:device-1');
+    should(hostOnly.status).equal(403);
+    should(jsonBody(hostOnly).error).equal('the presented credential may not use POST /v1/pair/code');
+    should(hostAdmin.status).equal(200);
+  });
+
   it('should honour a query token only for a loopback peer', async () => {
     // A token in a URL is logged by every proxy on the path.
     // Arrange
@@ -202,6 +230,23 @@ describe('ApiDispatcher attribution', () => {
 
     // Assert
     should(jsonBody(response).actor).equal('warden:w-1');
+  });
+
+  it('should ignore spoofed actor headers on a device credential', async () => {
+    const dispatcher = dispatcherFor(echo('/v1/sessions', 'admin'));
+
+    const response = await dispatcher.dispatch(
+      request({
+        path: '/v1/sessions',
+        headers: {
+          authorization: 'Bearer device-secret',
+          [SESSION_ID_HEADER]: 'spoofed-peer',
+          [CLIENT_HEADER]: 'cli',
+        },
+      }),
+    );
+
+    should(jsonBody(response).actor).equal('device:device-1');
   });
 
   it('should not let a stop-capability header relabel an admin caller as the warden', async () => {

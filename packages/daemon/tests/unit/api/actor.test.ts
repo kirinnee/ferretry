@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  type ApiActorInput,
+  deviceActor,
   isHumanAdminActor,
   parseActor,
   peerActor,
   resolveApiActor,
   wardenActor,
-  type ApiActorInput,
 } from '../../../src/lib/api/index.ts';
 
 describe('resolveApiActor', () => {
@@ -20,6 +21,8 @@ describe('resolveApiActor', () => {
     ['a blank session id is no session id', { tokenClass: 'admin', sessionId: '   ' }, 'admin-ui'],
     ['a blank warden session id falls back to the generic warden', { tokenClass: 'warden', sessionId: ' ' }, 'warden'],
     ['an unknown client is the UI, not an invented kind', { tokenClass: 'admin', client: 'curl' }, 'admin-ui'],
+    ['a paired device is its registry identity', { tokenClass: 'device', deviceId: 'device-1' }, 'device:device-1'],
+    ['a blank device identity fails closed to the generic device', { tokenClass: 'device' }, 'device'],
   ];
 
   for (const [name, input, expected] of cases) {
@@ -45,10 +48,11 @@ describe('resolveApiActor', () => {
 });
 
 describe('actor helpers', () => {
-  it('should build prefixed warden and peer actors', () => {
+  it('should build prefixed warden, peer and device actors', () => {
     // Arrange / Act / Assert
     should(wardenActor('abc')).equal('warden:abc');
     should(peerActor('abc')).equal('peer:abc');
+    should(deviceActor('abc')).equal('device:abc');
   });
 
   it('should split a structured actor into kind and id', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   type LearningConfig,
@@ -46,6 +46,7 @@ import {
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
   NodeCatalog,
+  NodePairingCryptography,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -58,6 +59,7 @@ import {
   StateFileSystemFactory,
   StateHomeLayout,
   StateHomeLockedError,
+  StatePairingRepository,
   SttModelStore,
   SttService,
   SttWorkerClient,
@@ -205,8 +207,8 @@ import {
   doneMarkerCertifiesTurn,
   EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
-  FleetEventStreamService,
   type FinishedAnalyticsSession,
+  FleetEventStreamService,
   type FoundationPaths,
   HarnessQuirkService,
   InitialAttachmentError,
@@ -227,6 +229,8 @@ import {
   normalizeCallsign,
   type ObservedSession,
   OperatorReadService,
+  PairingDeviceRegistry,
+  PairingService,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -248,12 +252,12 @@ import {
   SelfRestartCoordinator,
   SendPending,
   SendRefused,
+  SessionAttachService,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
   type SessionDirectorySubsystem,
   SessionFilesystem,
-  SessionAttachService,
   SessionHealthService,
   type SessionHealthSettings,
   type SessionId,
@@ -459,6 +463,14 @@ export interface DaemonWorld {
    *  instead of one probe per session. Its sources are configured, so it is
    *  built once configuration has loaded. */
   readonly createUsageFeed: (config: DaemonConfig) => UsageFeedPort;
+  /** Opens this daemon's durable identity and device grants before any remote route is served. */
+  readonly createPairing: (
+    config: DaemonConfig,
+    clock: MillisecondClockPort,
+  ) => Promise<{
+    readonly subsystem: PairingService;
+    readonly credentials: PairingDeviceRegistry;
+  }>;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
@@ -548,6 +560,8 @@ export interface DaemonWorld {
     stt: SttSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
+    /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
+    pairing: PairingService,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -2382,6 +2396,11 @@ function createRecommendSubsystem(
   };
 }
 
+/** The hosted PWA and this daemon's own published origin may both drive browser requests. */
+function browserOrigins(config: DaemonConfig): readonly string[] {
+  return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin])];
+}
+
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(): DaemonWorld {
   const clock = new SystemClock();
@@ -2787,6 +2806,24 @@ export function buildWorld(): DaemonWorld {
         { refreshMs: config.usage.refreshSeconds * 1_000 },
       );
     },
+    createPairing: async (config, pairingClock) => {
+      const cryptography = new NodePairingCryptography();
+      const repository = new StatePairingRepository(paths, stateFiles, cryptography);
+      const state = await repository.open(hostname());
+      const credentials = new PairingDeviceRegistry(state.daemonId, cryptography, state.devices);
+      return {
+        credentials,
+        subsystem: new PairingService({
+          daemonId: state.daemonId,
+          daemonName: state.daemonName,
+          daemonUrl: config.publicUrl,
+          clock: pairingClock,
+          cryptography,
+          devices: repository,
+          credentials,
+        }),
+      };
+    },
     sessions: planner,
     provenance: new SessionProvenanceStamper(clock),
     harness: new HarnessQuirkService(
@@ -2824,6 +2861,7 @@ export function buildWorld(): DaemonWorld {
       browserLogin,
       stt,
       catalogs,
+      pairing,
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
@@ -2977,6 +3015,7 @@ export function buildWorld(): DaemonWorld {
       const wardenPaths = createWardenPaths(paths.home);
       return {
         health: createHealthSubsystem(health, scratch),
+        pairing,
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory
@@ -3196,7 +3235,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
-  const base = { credentials: await world.credentials.load(), usage, clock: world.clock, startedAtMs };
+  const pairing = await world.createPairing(config, world.clock);
+  const base = {
+    credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
+    usage,
+    clock: world.clock,
+    startedAtMs,
+  };
   // `healthIntervalSeconds` was declared in `config/daemon.json` and read by nothing, because no
   // self-check ran to have a cadence. It is the operator's number now — and the wedge threshold moves
   // WITH it, because "the event loop stopped running" means three missed ticks rather than a fixed
@@ -3219,6 +3264,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLogin.window,
     world.stt,
     catalogs,
+    pairing.subsystem,
   );
   // Registered with the other host acquisitions: the dictation surface spawns a Whisper worker on
   // the first transcription and holds it loaded for the next one, so a daemon that exited without
@@ -3253,6 +3299,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
           http: createMountedDispatcher(base, subsystems),
           sockets: createMountedSocketDispatcher(base, subsystems),
           raw: createMountedRawDispatcher(base, subsystems),
+          corsOrigins: browserOrigins(config),
         },
         { host: config.host, port: config.port },
       ),

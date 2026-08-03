@@ -14,15 +14,16 @@ import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
-import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
+import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
+import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
-import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
+import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { sessionReadRoutes } from './session-reads.ts';
@@ -57,6 +58,8 @@ import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;
+  /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
+  readonly pairing: PairingSubsystem;
   readonly attention: AttentionService;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
@@ -139,6 +142,9 @@ export interface MountedSubsystems {
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
   return [
     ...daemonApiRoutes(base),
+    // Pairing is three fixed paths: public redemption and two host-local admin operations. It sits
+    // beside the base surface because it establishes the credential every remote route later sees.
+    ...pairingRoutes(subsystems.pairing),
     // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.

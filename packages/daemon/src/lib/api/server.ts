@@ -1,13 +1,13 @@
+import type { MillisecondClockPort } from '../runtime/boot.ts';
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
 import { ApiDispatcher } from './dispatcher.ts';
 import type { ApiRawDispatcher } from './raw.ts';
 import type { ApiRoute } from './route.ts';
-import type { ApiSocketDispatcher } from './socket.ts';
-import type { MillisecondClockPort } from '../runtime/boot.ts';
+import { ApiRouter } from './router.ts';
 import { healthRoutes } from './routes/health.ts';
 import { usageRoutes } from './routes/usage.ts';
-import { ApiRouter } from './router.ts';
+import type { ApiSocketDispatcher } from './socket.ts';
 
 /** Where the HTTP host should listen. */
 export interface ApiBindOptions {
@@ -50,6 +50,8 @@ export interface ApiSurface {
   /** Routes whose request or response cannot be a string — audio in, a ranged model file out. See
    *  `api/raw.ts`. */
   readonly raw: ApiRawDispatcher;
+  /** Exact browser origins admitted by the transport-level CORS boundary. */
+  readonly corsOrigins: readonly string[];
 }
 
 /** The transport seam. Implemented by an adapter around whatever server the runtime offers. */

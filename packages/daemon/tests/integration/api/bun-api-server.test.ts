@@ -4,18 +4,18 @@ import { BunApiServer, toApiRequest } from '../../../src/adapters/api/index.ts';
 import {
   ApiDispatcher,
   ApiError,
-  ApiRouter,
   ApiRawDispatcher,
+  type ApiRoute,
+  ApiRouter,
+  type ApiServerHandle,
   ApiSocketDispatcher,
   jsonResponse,
+  type RawRoute,
   SOCKET_MAX_PENDING_FRAMES,
-  textResponse,
-  type ApiRoute,
-  type ApiServerHandle,
   type SocketDownstream,
   type SocketHandler,
-  type RawRoute,
   type SocketRoute,
+  textResponse,
 } from '../../../src/lib/api/index.ts';
 
 /**
@@ -42,6 +42,7 @@ function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] 
     http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
     sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS),
     raw: new ApiRawDispatcher(new ApiRouter(raw), CREDENTIALS),
+    corsOrigins: ['https://ferretry.pages.dev'],
   };
 }
 
@@ -62,6 +63,7 @@ const mirror: ApiRoute = {
       path: context.request.path,
       id: context.params.get('id'),
       loopback: context.request.loopback,
+      clientAddress: context.request.clientAddress ?? null,
       client: context.request.headers.get('x-ferretry-client') ?? null,
       after: context.request.query.get('after') ?? null,
     }),
@@ -113,6 +115,14 @@ describe('BunApiServer', () => {
 
     // Assert
     should(((await response.json()) as Record<string, unknown>).loopback).be.true();
+  });
+
+  it('should carry the transport-observed peer address for rate limiting', async () => {
+    const handle = await serve(mirror);
+
+    const response = await fetch(`${handle.url}/mirror/x`);
+
+    should(((await response.json()) as Record<string, unknown>).clientAddress).equal('127.0.0.1');
   });
 
   it('should leave a percent-encoded path segment encoded', async () => {
@@ -181,6 +191,96 @@ describe('BunApiServer', () => {
     // Assert
     should(anonymous.status).equal(401);
     should(authorized.status).equal(200);
+  });
+
+  it('should keep same-origin browser mutations working without a CORS allowlist entry', async () => {
+    let calls = 0;
+    const handle = await serve({
+      method: 'POST',
+      path: '/same-origin',
+      scope: 'public',
+      handle: async () => {
+        calls += 1;
+        return jsonResponse({ ok: true });
+      },
+    });
+
+    const response = await fetch(`${handle.url}/same-origin`, {
+      method: 'POST',
+      headers: { origin: new URL(handle.url).origin },
+    });
+
+    should(response.status).equal(200);
+    should(response.headers.get('access-control-allow-origin')).be.null();
+    should(calls).equal(1);
+  });
+
+  it('should admit credentialed PWA preflights and expose daemon response metadata', async () => {
+    const handle = await serve({
+      method: 'POST',
+      path: '/v1/private',
+      scope: 'admin',
+      handle: async () => jsonResponse({ ok: true }),
+    });
+    const origin = 'https://ferretry.pages.dev';
+
+    const preflight = await fetch(`${handle.url}/v1/private`, {
+      method: 'OPTIONS',
+      headers: {
+        origin,
+        'access-control-request-method': 'POST',
+        'access-control-request-headers': 'Authorization, Content-Type, X-Fy-Request-Id, X-Fy-Version',
+      },
+    });
+    const response = await fetch(`${handle.url}/v1/private`, {
+      method: 'POST',
+      headers: { origin, authorization: 'Bearer admin-secret' },
+    });
+
+    should(preflight.status).equal(204);
+    should(preflight.headers.get('access-control-allow-origin')).equal(origin);
+    should(preflight.headers.get('access-control-allow-credentials')).equal('true');
+    should(preflight.headers.get('access-control-allow-methods')).equal('POST');
+    should(preflight.headers.get('access-control-allow-headers')).equal(
+      'authorization, content-type, x-fy-request-id, x-fy-version',
+    );
+    should(response.status).equal(200);
+    should(response.headers.get('access-control-allow-origin')).equal(origin);
+    should(response.headers.get('access-control-allow-credentials')).equal('true');
+    should(response.headers.get('access-control-expose-headers')).containEql('x-ferretry-version');
+    should(response.headers.get('vary')).equal('Origin');
+  });
+
+  it('should refuse unlisted origins and unsupported preflight capabilities before dispatch', async () => {
+    let calls = 0;
+    const handle = await serve({
+      method: 'POST',
+      path: '/effect',
+      scope: 'public',
+      handle: async () => {
+        calls += 1;
+        return jsonResponse({ ok: true });
+      },
+    });
+
+    const unlisted = await fetch(`${handle.url}/effect`, {
+      method: 'POST',
+      headers: { origin: 'https://evil.example.test' },
+    });
+    const unsupported = await fetch(`${handle.url}/effect`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://ferretry.pages.dev',
+        'access-control-request-method': 'PUT',
+        'access-control-request-headers': 'x-not-allowed',
+      },
+    });
+
+    should(unlisted.status).equal(403);
+    should(unsupported.status).equal(403);
+    should(unlisted.headers.get('vary')).equal('Origin');
+    should(unsupported.headers.get('vary')).containEql('Access-Control-Request-Headers');
+    should(calls).equal(0);
   });
 
   it('should release the port when stopped', async () => {
