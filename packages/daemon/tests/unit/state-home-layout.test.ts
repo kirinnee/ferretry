@@ -80,6 +80,9 @@ describe('foundation paths', () => {
       routingCatalog: '/tmp/fy-home/config/routing.json',
       fleet: '/tmp/fy-home/fleet',
       fleetManifest: '/tmp/fy-home/fleet/manifest.json',
+      // Declared even though this package never writes here: the CLI creates it before it launches
+      // the daemon, so it is the one entry an otherwise-fresh state home can legitimately hold.
+      logs: '/tmp/fy-home/logs',
       state: '/tmp/fy-home/state',
       index: '/tmp/fy-home/state/index',
       sessionIndex: '/tmp/fy-home/state/index/sessions.sqlite',
@@ -93,6 +96,7 @@ describe('foundation paths', () => {
       '/tmp/fy-home',
       '/tmp/fy-home/config',
       '/tmp/fy-home/fleet',
+      '/tmp/fy-home/logs',
       '/tmp/fy-home/state',
       '/tmp/fy-home/state/index',
       '/tmp/fy-home/state/sessions',

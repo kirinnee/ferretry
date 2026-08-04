@@ -658,6 +658,17 @@ export class E2eEnvironment {
     this.portsReleased = true;
   }
 
+  /**
+   * Releases the leased loopback ports so something other than `startDaemon` can bind one.
+   *
+   * A journey that brings the daemon up THROUGH the CLI never calls `startDaemon`, so the reservation
+   * that guarantees the port is free would otherwise be the very thing holding it. Idempotent, and
+   * already implied by `startDaemon`.
+   */
+  async releasePorts(): Promise<void> {
+    await this.releasePortLeases();
+  }
+
   async startDaemon(options: StartDaemonOptions): Promise<void> {
     if (this.daemon !== undefined) throw new Error('E2E daemon is already running');
     if (!isAbsolute(options.command[0])) throw new Error('E2E daemon command must use an explicit absolute path');

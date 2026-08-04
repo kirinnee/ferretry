@@ -37,6 +37,7 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 | `arch`                     | the CLI entry and terminal adapter exist, and every package's `src/lib/` contains no terminal IO (`console.*`, `process.*`, chalk/ora/cli-progress/inquirer) and no imports from `adapters/`                |
 | `workspace-package-scopes` | every non-CLI workspace package is named `@<PRODUCT>/<directory>`; the load-bearing CLI name remains equal to its `bin` key                                                                                 |
 | `name-single-source`       | the Taskfile and the compile/shim/smoke scripts derive the binary name from `bin`, and every static file that must spell a name out (GoReleaser, cask, `go.mod`, installer) agrees with its source of truth |
+| `state-home-log-directory` | the CLI and the daemon name the same `<state home>/logs` directory, and the daemon both requires it and admits it to its bootstrap shape                                                                    |
 | `release-backup-order`     | the first `@semantic-release/exec` step is the changelog backup, and `@semantic-release/github` is absent                                                                                                   |
 | `changelog-asset`          | `Changelog.old.md` is committed by the release commit and `publish.sh` passes `--release-notes ./IncrementalChangelog.md`                                                                                   |
 | `release-artifacts`        | GoReleaser produces archives and a checksum file, and ships `install.sh` as a release extra file                                                                                                            |
@@ -48,7 +49,10 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 Why these and not others: each one has a failure mode that is invisible locally and expensive
 remotely. A missing checksum verification ships a silently corruptible installer; a renamed
 binary with a stale cask produces a release that installs nothing; a reordered plugin chain
-produces release notes containing the entire changelog.
+produces release notes containing the entire changelog. `state-home-log-directory` is here for a
+fourth reason: the CLI and the daemon are separate packages with no dependency between them, so a
+path one creates and the other classifies has no compiler and no test that a single package could
+own — and when they disagreed, no fresh machine could start the daemon at all.
 
 ## Composition-root reachability
 

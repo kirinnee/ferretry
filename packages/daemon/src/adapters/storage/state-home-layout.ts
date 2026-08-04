@@ -32,6 +32,17 @@ function bootstrapDirectory(
   return { path, directories: new Map(children.map(child => [basename(child.path), child])), file };
 }
 
+/**
+ * The log directory holds log files and nothing else.
+ *
+ * Whoever supervises the daemon — launchd, systemd, or the CLI's own detached spawn — points both of
+ * its streams at a single `<daemon>.log` here. A subdirectory, or a file that is not a log, is not
+ * something our tooling produces, so it still reads as foreign state.
+ */
+function logFileOnly(name: string): boolean {
+  return name.length > '.log'.length && name.endsWith('.log');
+}
+
 /** Atomic writes name their scratch file `<target>.<id>.tmp`, and bootstrap only writes the marker. */
 function markerScratchFile(paths: FoundationPaths): (name: string) => boolean {
   const prefix = `${basename(paths.layoutVersion)}.`;
@@ -58,6 +69,7 @@ export class StateHomeLayout {
       [
         bootstrapDirectory(paths.config),
         bootstrapDirectory(paths.fleet),
+        bootstrapDirectory(paths.logs, [], logFileOnly),
         bootstrapDirectory(paths.state, [
           bootstrapDirectory(paths.index),
           bootstrapDirectory(paths.sessions),
@@ -66,6 +78,18 @@ export class StateHomeLayout {
       ],
       name => name === lockName,
     );
+  }
+
+  /**
+   * The shape that exists before bootstrap has run even once: the log directory, and its logs.
+   *
+   * The CLI creates this so the service manager has somewhere to write, which happens BEFORE the
+   * daemon is launched and therefore before any lock, directory or marker of ours exists. It is
+   * deliberately narrower than the bootstrap shape — without the lock there is no evidence that a
+   * bootstrap of ours ever started, so a scaffold directory here is still foreign state.
+   */
+  private preBootstrapShape(paths: FoundationPaths): BootstrapDirectory {
+    return bootstrapDirectory(paths.home, [bootstrapDirectory(paths.logs, [], logFileOnly)]);
   }
 
   private async holdsOnlyBootstrapEntries(node: BootstrapDirectory, fileSystem: FileSystemPort): Promise<boolean> {
@@ -81,10 +105,13 @@ export class StateHomeLayout {
   }
 
   private async isRecoverableBootstrap(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<boolean> {
-    // The lifetime lock is the first entry bootstrap puts in the home, so a non-empty unmarked home
-    // without it was never produced by an interrupted bootstrap of ours.
-    if ((await fileSystem.information(paths.daemonLock)) === undefined) return false;
-    return await this.holdsOnlyBootstrapEntries(this.bootstrapShape(paths), fileSystem);
+    // The lifetime lock is the first entry BOOTSTRAP puts in the home, so an unmarked home without it
+    // was never produced by an interrupted bootstrap of ours. That reasoning does not cover the log
+    // directory: the CLI writes that one earlier, before it ever launches us, so a home holding only
+    // logs and no lock is a legitimate pre-bootstrap state rather than somebody else's data.
+    const held = (await fileSystem.information(paths.daemonLock)) !== undefined;
+    const shape = held ? this.bootstrapShape(paths) : this.preBootstrapShape(paths);
+    return await this.holdsOnlyBootstrapEntries(shape, fileSystem);
   }
 
   async inspect(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<LayoutDecision> {
