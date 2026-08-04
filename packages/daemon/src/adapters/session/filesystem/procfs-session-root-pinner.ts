@@ -1,4 +1,4 @@
-import { constants, type Stats } from 'node:fs';
+import { constants } from 'node:fs';
 import { type FileHandle, lstat, open, opendir, readlink, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -15,6 +15,15 @@ import {
   type SessionRootPinner,
   unsupportedPlatform,
 } from '../../../lib/session/filesystem/index.ts';
+import {
+  canonicalRel,
+  componentIdentity,
+  contains,
+  direntType,
+  errorCode,
+  isMissing,
+  pinnedMetadata,
+} from './pin-support.ts';
 
 /**
  * Containment by DESCRIPTOR, which is the only containment this subsystem has.
@@ -52,57 +61,6 @@ const HAS_PROCFS_PIN = process.platform === 'linux';
 
 function procPath(fd: number): string {
   return `/proc/${process.pid}/fd/${fd}`;
-}
-
-function errorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' ? code : undefined;
-}
-
-/** Every way the kernel says "there is nothing usable at that name". */
-function isMissing(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP' || code === 'ENAMETOOLONG';
-}
-
-function componentIdentity(metadata: Stats): ComponentIdentity {
-  return { dev: metadata.dev, ino: metadata.ino, ctimeMs: metadata.ctimeMs, mode: metadata.mode };
-}
-
-function pinnedMetadata(metadata: Stats): PinnedMetadata {
-  const type = metadata.isDirectory() ? 'dir' : metadata.isFile() ? 'file' : 'other';
-  return { type, size: metadata.size, mtime: metadata.mtime.toISOString(), mode: metadata.mode };
-}
-
-function contains(rootReal: string, targetReal: string): boolean {
-  return targetReal === rootReal || targetReal.startsWith(`${rootReal}${path.sep}`);
-}
-
-/**
- * Root-relative CANONICAL path of a contained target, in the slash-joined shape the gates expect.
- *
- * This is what stops an in-root symlinked directory from laundering a denied or ignored target: `alias ->
- * .git` passes containment (its target IS inside the root) while the lexical path `alias/config` matches
- * no denylist entry and no ignore rule.
- */
-function canonicalRel(rootReal: string, targetReal: string): string | undefined {
-  if (targetReal === rootReal) return undefined;
-  return targetReal
-    .slice(rootReal.length + 1)
-    .split(path.sep)
-    .join('/');
-}
-
-function direntType(entry: {
-  isFile(): boolean;
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-}): FsEntryType | undefined {
-  if (entry.isSymbolicLink()) return 'symlink';
-  if (entry.isDirectory()) return 'dir';
-  if (entry.isFile()) return 'file';
-  return undefined; // fifo, socket, device — nothing a viewer can show
 }
 
 /** Was this component a symlink? Message fidelity only; the link is already refused. */
