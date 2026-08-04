@@ -910,6 +910,7 @@ const HARNESS_TERMINAL_DECK: TerminalDeckDependencies = {
   streamUrl: async () => 'wss://harness.invalid/stream',
   openSocket: () => ({ binaryType: 'arraybuffer', addEventListener() {}, close() {}, send() {} }) as never,
   loadXterm: () => new Promise(() => {}),
+  watchTheme: () => () => {},
   confirmClose: () => false,
   writeClipboard: async () => undefined,
 };
