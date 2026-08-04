@@ -179,6 +179,7 @@ export * from './attention-store.ts';
 export * from './browser-login.ts';
 export * from './callsign.ts';
 export * from './class-names.ts';
+export * from './code-span-references.ts';
 export * from './composer-markdown.ts';
 export * from './connections.ts';
 export * from './context-menu-policy.ts';

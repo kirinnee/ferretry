@@ -36,9 +36,10 @@
  */
 
 import type { AttentionId } from '@ferretry/protocol';
-import { type MouseEvent, memo, useEffect, useMemo, useState } from 'react';
+import { type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
@@ -53,6 +54,7 @@ import {
   type ResolvedReference,
   referenceHref,
   referenceIdentity,
+  referenceTitle,
   remarkReferences,
   revalidateReference,
   type SkillReferenceResolver,
@@ -242,6 +244,56 @@ export const Markdown = memo(function Markdown({
   const destination = (target: ResolvedReference): string =>
     target.kind === 'agent' ? daemonSessionPath(target.daemonId, target.sessionId) : referenceHref(target);
 
+  /**
+   * THE one click behaviour, shared by prose links and code decorations. A
+   * modifier or non-primary click is the reader asking the browser for a new
+   * tab, and is never intercepted.
+   */
+  const referenceClick =
+    (target: ResolvedReference, chain?: (event: MouseEvent<HTMLAnchorElement>) => void) =>
+    (event: MouseEvent<HTMLAnchorElement>): void => {
+      chain?.(event);
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+      openReference(target, event.currentTarget);
+    };
+
+  /**
+   * Render decorated code back out. Text arrives as strings, so the code's own
+   * bytes reach the DOM through React's own escaping; highlighter tokens keep
+   * their class and their nesting, which is what preserves the theme colours.
+   */
+  const renderCodeNodes = (nodes: readonly CodeNode[], path: string): ReactNode[] =>
+    nodes.map((node, index) => {
+      const key = `${path}.${index}`;
+      if (node.kind === 'text') return node.text;
+      if (node.kind === 'span')
+        return (
+          <span className={node.className} key={key}>
+            {renderCodeNodes(node.children, key)}
+          </span>
+        );
+      return (
+        <a
+          data-fy-reference={referenceIdentity(node.reference)}
+          href={destination(node.reference)}
+          key={key}
+          onClick={referenceClick(node.reference)}
+          title={referenceTitle(node.reference)}
+        >
+          {node.text}
+        </a>
+      );
+    });
+
   return (
     <div className={`md min-w-0 max-w-full ${className ?? ''}`}>
       <ReactMarkdown
@@ -261,22 +313,7 @@ export const Markdown = memo(function Markdown({
               <a
                 data-fy-reference={referenceIdentity(target)}
                 href={destination(target)}
-                onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-                  onClick?.(event);
-                  // A modifier or non-primary click is the reader asking the
-                  // browser for a new tab; never intercept it.
-                  if (
-                    event.defaultPrevented ||
-                    event.button !== 0 ||
-                    event.metaKey ||
-                    event.ctrlKey ||
-                    event.shiftKey ||
-                    event.altKey
-                  )
-                    return;
-                  event.preventDefault();
-                  openReference(target, event.currentTarget);
-                }}
+                onClick={referenceClick(target, onClick)}
                 {...rest}
               >
                 {children}
@@ -297,6 +334,33 @@ export const Markdown = memo(function Markdown({
             const language = fenceLanguage(fenceClassName);
             const source = language ? String(children).replace(/\n$/u, '') : '';
             const html = language ? highlightToHtml(source, language) : null;
+            // REFERENCES INSIDE CODE. The code text is decorated, never
+            // rewritten: `decoratedCodeNodes` answers null unless it can slice
+            // this exact source — and for a highlighted fence, unless the
+            // highlighter's markup reassembles into it byte for byte. Null keeps
+            // the two renderings below exactly as they were.
+            //
+            // Only a literal string is offered for decoration. `String(children)`
+            // is a lossy reading of anything else, and a reference is not worth
+            // a corrupted snippet.
+            const decoratable = typeof children === 'string' ? (language ? source : children) : null;
+            const decorated =
+              decoratable === null
+                ? null
+                : decoratedCodeNodes({
+                    code: decoratable,
+                    html,
+                    resolvers: trustedResolvers,
+                    isOpenable: hasOpener,
+                  });
+            if (decorated !== null)
+              return html === null ? (
+                <code className={fenceClassName} {...rest}>
+                  {renderCodeNodes(decorated, 'code')}
+                </code>
+              ) : (
+                <code className={`hljs language-${language}`}>{renderCodeNodes(decorated, 'code')}</code>
+              );
             // No language (inline code, bare fence) or an unknown one: hand it
             // back to react-markdown, which escapes it. Never raw HTML.
             if (html === null) {

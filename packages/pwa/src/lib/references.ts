@@ -561,7 +561,8 @@ export function revalidateReference(
   }
 }
 
-function referenceTitle(reference: ResolvedReference): string {
+/** The hover sentence a proved reference carries, in its own kind's voice. */
+export function referenceTitle(reference: ResolvedReference): string {
   switch (reference.kind) {
     case 'agent':
       return `Open :${reference.name}'s session`;
@@ -597,13 +598,32 @@ interface MdNode {
 // reference inside them is content, not a destination.
 const SKIP_CHILDREN = new Set(['link', 'linkReference', 'code', 'inlineCode', 'html']);
 
+/** One proved reference and the exact bytes of the token that proved it. */
+export interface ProvenReference {
+  readonly reference: ResolvedReference;
+  readonly raw: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The one scan-then-prove pass every surface shares: prose linkification and
+ * code-span decoration must agree about which tokens are live, so neither owns
+ * its own loop over `findReferences`.
+ */
+export function provenReferences(value: string, resolvers: ReferenceResolvers): ProvenReference[] {
+  return findReferences(value).flatMap(match => {
+    const reference = resolveReference(match.reference, resolvers);
+    return reference ? [{ reference, raw: match.raw, start: match.start, end: match.end }] : [];
+  });
+}
+
 function linkifyText(value: string, resolvers: ReferenceResolvers): MdNode[] | null {
   const output: MdNode[] = [];
   let cursor = 0;
   let changed = false;
-  for (const match of findReferences(value)) {
-    const resolved = resolveReference(match.reference, resolvers);
-    if (!resolved) continue;
+  for (const match of provenReferences(value, resolvers)) {
+    const resolved = match.reference;
     if (match.start > cursor) output.push({ type: 'text', value: value.slice(cursor, match.start) });
     output.push({
       type: 'link',
