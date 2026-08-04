@@ -54,6 +54,8 @@ describe('parseReferenceToken', () => {
     ['&F12', { kind: 'task', id: 'F12' }],
     ['&f12', { kind: 'task', id: 'F12' }],
     ['!A3', { kind: 'attention', id: 'A3' }],
+    ['/liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
+    ['$liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
   ];
 
   for (const [raw, expected] of canonical) {
@@ -89,6 +91,17 @@ describe('parseReferenceToken', () => {
     '&A3',
     '!A0',
     'pin:thing',
+    '/',
+    '$',
+    '/1skill',
+    '/skill_name',
+    // Lowercase only: `$HOME` is a shell variable, not the `home` skill.
+    '/Liftoff-Ops',
+    '$HOME',
+    // A harness may accept these invocation forms; this grammar does not,
+    // because `:` and `/` are its own boundaries.
+    '/plugin:skill',
+    '$apps/web:deploy',
   ];
 
   for (const raw of rejected) {
@@ -193,6 +206,16 @@ describe('formatReference', () => {
     // Assert
     should(formatCodeReference({ path: 'src/api.ts', line: 4 })).equal('@src/api.ts:4');
   });
+
+  test('should answer with the sigil a reader can type on either harness', () => {
+    // Assert — `$name` is an accepted authored alias, never the canonical form.
+    should(formatReference({ kind: 'skill', name: 'liftoff-ops' })).equal('/liftoff-ops');
+  });
+
+  test('should refuse to format an instance or skill reference it could not have parsed', () => {
+    // Assert
+    should(() => formatReference({ kind: 'skill', name: 'not a skill' })).throw(TypeError);
+  });
 });
 
 describe('resolveReference', () => {
@@ -285,6 +308,7 @@ describe('referenceHref and parseReferenceHref', () => {
     { kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 },
     { kind: 'task', id: 'F12' },
     { kind: 'attention', id: 'A3' as AttentionId },
+    { kind: 'skill', name: 'summary' },
   ];
 
   for (const reference of roundTrip) {
@@ -378,6 +402,7 @@ describe('referenceIdentity', () => {
     should(referenceIdentity({ kind: 'file', path: 'a.ts' })).equal('file:a.ts::');
     should(referenceIdentity({ kind: 'task', id: 'F12' })).equal('task:F12');
     should(referenceIdentity({ kind: 'attention', id: 'A3' as AttentionId })).equal('attention:A3');
+    should(referenceIdentity({ kind: 'skill', name: 'summary' })).equal('skill:summary');
   });
 });
 
@@ -462,6 +487,62 @@ describe('revalidateReference', () => {
     ).be.null();
   });
 });
+describe('skill references', () => {
+  test('should read both skill sigils as the same reference and keep the authored bytes', () => {
+    // Arrange
+    const text = 'Run /summary now, or $summary on Codex.';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual.map(match => match.raw)).deepEqual(['/summary', '$summary']);
+    should(actual.map(match => match.reference)).deepEqual([
+      { kind: 'skill', name: 'summary' },
+      { kind: 'skill', name: 'summary' },
+    ]);
+  });
+
+  test('should leave a path-shaped or shell-shaped token alone entirely', () => {
+    // Arrange — `/home/kirin` is a path and `$HOME` is a variable. Neither is a
+    // skill name, so neither is even a candidate.
+    const text = 'look in /home/kirin and $HOME';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  test("should prove a skill only through this session's own catalog", () => {
+    // Assert
+    should(resolveReference({ kind: 'skill', name: 'summary' }, { skill: name => name === 'summary' })).deepEqual({
+      kind: 'skill',
+      name: 'summary',
+    });
+    should(resolveReference({ kind: 'skill', name: 'summary' }, {})).be.null();
+    should(resolveReference({ kind: 'skill', name: 'summary' }, { skill: () => false })).be.null();
+  });
+
+  test('should re-prove a skill at click time', () => {
+    // Assert
+    should(revalidateReference({ kind: 'skill', name: 'summary' }, { skill: () => true })).deepEqual({
+      kind: 'skill',
+      name: 'summary',
+    });
+    should(revalidateReference({ kind: 'skill', name: 'summary' }, { skill: () => false })).be.null();
+  });
+
+  test('should refuse to encode or decode a skill payload the grammar rejects', () => {
+    // Assert
+    should(() => referenceHref({ kind: 'skill', name: 'not a skill' })).throw(TypeError);
+    should(parseReferenceHref('#fy-reference?kind=skill&name=summary&extra=1')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=skill&name=not%20a%20skill')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=skill')).be.null();
+  });
+});
+
 describe('remarkReferences', () => {
   /** The minimal mdast a paragraph of prose produces. */
   const paragraph = (value: string): MdTree => ({

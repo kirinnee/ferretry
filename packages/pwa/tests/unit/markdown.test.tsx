@@ -146,7 +146,9 @@ describe('Markdown references', () => {
 
   test('should link a proved agent reference to its own daemon session path', () => {
     // Act
-    const tree = render(<Markdown agentReferenceResolver={agentResolver(daemonA)} text="ping :zelda" />);
+    const tree = render(
+      <Markdown agentReferenceResolver={agentResolver(daemonA)} onNavigate={() => undefined} text="ping :zelda" />,
+    );
 
     // Assert
     const anchor = anchorsOf(tree.root)[0];
@@ -274,6 +276,36 @@ describe('Markdown references', () => {
     should(anchorsOf(tree.root)).be.empty();
   });
 
+  test('should hand a proved skill reference to its opener under either sigil', () => {
+    // Arrange
+    const opened: string[] = [];
+    const tree = render(
+      <Markdown
+        onSkillOpen={name => opened.push(name)}
+        skillReferenceResolver={name => name === 'summary'}
+        text="run /summary or $summary, never /missing"
+      />,
+    );
+
+    // Act
+    const anchors = anchorsOf(tree.root);
+    for (const anchor of anchors) anchor.props.onClick(primaryClick());
+
+    // Assert
+    should(anchors.map(anchor => textOf(anchor))).deepEqual(['/summary', '$summary']);
+    should(anchors[0]?.props.href).equal('#fy-reference?kind=skill&name=summary');
+    should(opened).deepEqual(['summary', 'summary']);
+  });
+
+  test('should keep a proved agent reference as prose when it has nowhere to navigate', () => {
+    // Act — the click handler prevents the browser's own navigation, so an
+    // anchor without `onNavigate` would swallow the press and do nothing.
+    const tree = render(<Markdown agentReferenceResolver={agentResolver(daemonA)} text="ping :zelda" />);
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
   test('should let a modifier click fall through to the browser', () => {
     // Arrange
     const opened: string[] = [];
@@ -321,6 +353,134 @@ describe('Markdown references', () => {
   });
 });
 
+describe('Markdown escaped references', () => {
+  const proved = (text: string) =>
+    render(
+      <Markdown
+        agentReferenceResolver={agentResolver(daemonA)}
+        onNavigate={() => undefined}
+        onTaskOpen={() => undefined}
+        taskReferenceResolver={() => true}
+        text={text}
+      />,
+    );
+
+  test('should keep an escaped sigil literal even though Markdown ate the backslash', () => {
+    // Act
+    const tree = proved('write \\:zelda to name an agent');
+
+    // Assert — the reader escaped it, so it is prose, and the backslash is gone
+    // exactly as Markdown intends.
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findByType('p'))).equal('write :zelda to name an agent');
+  });
+
+  test('should still link the unescaped tokens around an escaped one', () => {
+    // Act
+    const tree = proved('\\:zelda names :zelda');
+
+    // Assert
+    should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual([':zelda']);
+  });
+
+  test('should honour an escape on a continuation line of a block', () => {
+    // Act — the source carries `> ` prefixes the parsed text does not.
+    const tree = proved('> ping :zelda\n> and \\&F12\n');
+
+    // Assert
+    should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual([':zelda']);
+  });
+
+  test('should refuse to link past source it cannot align rather than guess', () => {
+    // Act — a character reference makes every later offset ambiguous, and
+    // ambiguity about an author's escape is not proof they did not write one.
+    const tree = proved('&amp; then :zelda');
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findByType('p'))).equal('& then :zelda');
+  });
+});
+
+describe('Markdown references inside code', () => {
+  const agentInCode = (text: string) =>
+    render(<Markdown agentReferenceResolver={agentResolver(daemonA)} onNavigate={() => undefined} text={text} />);
+
+  test('should make a proved reference clickable inside an inline backtick span', () => {
+    // Act
+    const tree = agentInCode('run `send :zelda "hi"` now');
+
+    // Assert
+    const code = tree.root.findAllByType('code')[0] as ReactTestInstance;
+    const anchor = anchorsOf(code)[0];
+    should(anchor?.props['data-fy-reference']).equal('agent:daemon-a:s1');
+    should(anchor?.props.title).equal("Open :zelda's session");
+    should(textOf(anchor as ReactTestInstance)).equal(':zelda');
+    // Every surrounding byte, including the quotes the code carries.
+    should(textOf(code)).equal('send :zelda "hi"');
+  });
+
+  test('should open a code reference through the same click behaviour as prose', () => {
+    // Arrange
+    const visited: string[] = [];
+    const tree = render(
+      <Markdown agentReferenceResolver={agentResolver(daemonB)} onNavigate={to => visited.push(to)} text="`:zelda`" />,
+    );
+
+    // Act
+    const anchor = anchorsOf(tree.root)[0];
+    anchor?.props.onClick(primaryClick());
+    anchor?.props.onClick({ ...primaryClick(), metaKey: true });
+
+    // Assert — one navigation, and the modifier click fell through.
+    should(visited).deepEqual(['/d/daemon-b/session/s1']);
+  });
+
+  test('should keep fence highlighting and byte-exact content while decorating', () => {
+    // Arrange — `&&`, `<` and quotes all arrive as highlighter entities.
+    const source = 'const a = b && c < 1 ? ":zelda" : \'x\';';
+
+    // Act
+    const tree = agentInCode(`\`\`\`ts\n${source}\n\`\`\``);
+
+    // Assert
+    const code = tree.root.findAllByType('code')[0] as ReactTestInstance;
+    should(code.props.className).equal('hljs language-ts');
+    should(code.props.dangerouslySetInnerHTML).be.undefined();
+    should(textOf(code)).equal(source);
+    should(code.findAllByType('span').some(span => String(span.props.className).startsWith('hljs-'))).be.true();
+    should(anchorsOf(code)).have.length(1);
+    should(textOf(anchorsOf(code)[0] as ReactTestInstance)).equal(':zelda');
+  });
+
+  test('should keep a fence untouched when no reference in it can be proved', () => {
+    // Act
+    const tree = render(<Markdown text={'```ts\nconst a = ":zelda";\n```'} />);
+
+    // Assert — the highlighted-markup path is unchanged for ordinary code.
+    const code = tree.root.findAllByType('code')[0];
+    should(String(code?.props.dangerouslySetInnerHTML.__html)).containEql('hljs-string');
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
+  test('should leave an escaped token inside code literal, backslash included', () => {
+    // Act
+    const tree = agentInCode('`ping \\:zelda`');
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findAllByType('code')[0] as ReactTestInstance)).equal('ping \\:zelda');
+  });
+
+  test('should leave a code reference inert when the host offers no opener for its kind', () => {
+    // Act — proved, but this surface cannot open a task.
+    const tree = render(<Markdown taskReferenceResolver={() => true} text="`see &F12`" />);
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findAllByType('code')[0] as ReactTestInstance)).equal('see &F12');
+  });
+});
 describe('Markdown file references', () => {
   const text = 'open @src/api.ts:12 please';
 

@@ -4,6 +4,11 @@ import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useStat
 import { Composer } from '../../components/composer.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
+import {
+  type ReferenceSurface,
+  ReferenceSurfaceProvider,
+  sessionReferenceSurface,
+} from '../../components/reference-surface.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
 import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
@@ -15,6 +20,7 @@ import { type SessionAction, sessionActionSpecs } from '../../shell/session-acti
 import { type SidePaneSurfaceProps, SidePaneWorkspace, useSidePane } from '../../shell/side-pane.tsx';
 import type { SidePaneTabDefinition, SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
+import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
@@ -44,6 +50,15 @@ export interface SessionChatPageProps {
   readonly onRefresh?: () => void;
   /** Test seam for the read-only terminal fallback. */
   readonly readSnapshot?: PaneSnapshotReader;
+  /**
+   * This daemon's own fleet slice, for proving `:callsign` references.
+   * `undefined` means the fleet has not been read yet — deliberately NOT an
+   * empty array, because an unread fleet is not a fleet with nobody in it, and
+   * the difference decides whether a callsign is unproved or absent.
+   */
+  readonly daemonSessions?: readonly SessionView[];
+  /** In-app navigation for a proved agent reference. */
+  readonly onNavigate?: (to: string) => void;
 }
 
 const actionFailureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -87,12 +102,15 @@ interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly connection: DaemonConnection;
   readonly session: SessionView;
   readonly readSnapshot?: PaneSnapshotReader;
+  /** The one reference surface this session reads with, files included. */
+  readonly references: ReferenceSurface;
 }
 
 function WorkspaceSurface({
   connection,
   session,
   readSnapshot,
+  references,
   scope,
   tab,
   presentation,
@@ -102,7 +120,10 @@ function WorkspaceSurface({
 }: WorkspaceSurfaceProps) {
   let body: ReactNode;
   if (tab.id === 'files' || tab.instance?.kind === 'file') {
-    body = <FilesTab daemon={connection} scope={scope} cwd={session.config.cwd} />;
+    // Markdown a file preview renders is the SAME reference surface the
+    // transcript reads with, so a path in a README behaves like a path in a
+    // message rather than being inert text in a viewer.
+    body = <FilesTab daemon={connection} scope={scope} cwd={session.config.cwd} markdown={references} />;
   } else if (tab.id === 'terminals' || tab.instance?.kind === 'terminal') {
     body = (
       <SessionTerminalSurface
@@ -164,8 +185,28 @@ export function SessionChatPage({
   onSessionChange,
   onRefresh,
   readSnapshot,
+  daemonSessions,
+  onNavigate,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
+  // THE session's one reference surface. The memo key over the fleet is the
+  // identity of the fields the resolver actually copies, so status and activity
+  // churn cannot rebuild the surface and re-parse every rendered Markdown block
+  // in the transcript (`agentReferenceIdentityKey`).
+  const fleetIdentity =
+    daemonSessions === undefined ? null : agentReferenceIdentityKey(connection.daemonId, daemonSessions);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity is the stable memo key for daemonSessions
+  const references = useMemo(
+    () =>
+      sessionReferenceSurface({
+        connection,
+        scope,
+        ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
+        ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
+        ...(onNavigate === undefined ? {} : { onNavigate }),
+      }),
+    [connection, scope, session.config.cwd, fleetIdentity, onNavigate],
+  );
   const detailsId = useId();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
@@ -288,114 +329,120 @@ export function SessionChatPage({
         <WorkspaceSurface
           {...props}
           connection={connection}
+          references={references}
           session={session}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
         />
       )}
     >
-      <main
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
-        data-daemon={connection.daemonId}
-        data-session={session.config.id}
-      >
-        <SessionHeader
-          daemonId={connection.daemonId}
-          session={session}
-          onBack={onBack}
-          onOpenFleet={onBack}
-          onOpenDetails={() => setDetailsOpen(true)}
-        />
-        {/* One compact row. On a phone it carries the pane openers ONLY: the
+      {/* Every Markdown reader inside the conversation — transcript prose,
+          notices, and whatever a later item renders here — reads references
+          through this one surface. */}
+      <ReferenceSurfaceProvider surface={references}>
+        <main
+          className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+          data-daemon={connection.daemonId}
+          data-session={session.config.id}
+        >
+          <SessionHeader
+            daemonId={connection.daemonId}
+            session={session}
+            onBack={onBack}
+            onOpenFleet={onBack}
+            onOpenDetails={() => setDetailsOpen(true)}
+          />
+          {/* One compact row. On a phone it carries the pane openers ONLY: the
             lifecycle buttons wrapped to four bands here — 149px of an 844px
             screen, measured — and they are reachable in Session Details
             instead, which is where the source keeps them on compact. */}
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-soft px-2 py-1">
-          {compact ? null : lifecycleActions}
-          <PaneLaunchers />
-        </div>
-        {/* NOT a live region. App.tsx owns the single announcement for a refresh
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-soft px-2 py-1">
+            {compact ? null : lifecycleActions}
+            <PaneLaunchers />
+          </div>
+          {/* NOT a live region. App.tsx owns the single announcement for a refresh
             failure and hands down a finished sentence; a second `role=status`
             here made assistive tech say it twice, and a prefix added here would
             have made the two disagree. Rendered only when there is something to
             render, precisely because it announces nothing. */}
-        {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
-        {/* The action alert belongs beside the actions, so it is rendered inside
+          {refreshError === null ? null : <p className="m-0 px-3 py-1 text-ui text-warn">{refreshError}</p>}
+          {/* The action alert belongs beside the actions, so it is rendered inside
             the details sheet on compact — one alert region either way. */}
-        {compact ? null : actionAlert}
-        {/* THE CHAT MEASURE, applied to transcript and composer TOGETHER so the
+          {compact ? null : actionAlert}
+          {/* THE CHAT MEASURE, applied to transcript and composer TOGETHER so the
             two never disagree about where the column ends. `full` is the shipped
             default and is deliberately uncapped, exactly as the source is; the
             reader's `balanced`/`readable` choice now actually narrows this page,
             which it could not do before because nothing here carried the
             surface class. The side pane is a sibling of `<main>`, so a max-width
             here cannot touch the split. */}
-        <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
-          <div className="grid min-h-0 flex-1">
-            <Transcript busy={busy} daemonId={connection.daemonId} entries={entries} sessionId={session.config.id} />
-          </div>
-          <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
-            {awaitingAnswer ? (
-              /* THE ANSWER ROUTE IS NOT MOUNTED on this daemon, so no form here
+          <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth}>
+            <div className="grid min-h-0 flex-1">
+              <Transcript busy={busy} daemonId={connection.daemonId} entries={entries} sessionId={session.config.id} />
+            </div>
+            <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
+              {awaitingAnswer ? (
+                /* THE ANSWER ROUTE IS NOT MOUNTED on this daemon, so no form here
                  could submit. Rendering one anyway would be a control that looks
                  live, takes a choice, and throws — so the state says what it is
                  and points at the one action that DOES work. Interrupt stays
                  reachable: in the row on a desktop, in Session Details on a
                  phone. */
-              <section
-                aria-label="Structured question"
-                className="fy-question-form"
-                data-question-unavailable=""
-                role="status"
-              >
-                <p className="m-0">
-                  This session is waiting on a structured question. This build cannot answer one — the paired daemon
-                  does not serve the answer route — so the question can only be cleared by interrupting the turn.
-                </p>
-              </section>
-            ) : (
-              <Composer
-                api={client}
-                busy={busy}
-                compact={compact}
-                daemon={connection}
-                disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-                onSent={onRefresh}
-                quota={session.state.quota}
-                sessionId={session.config.id}
-              />
-            )}
+                <section
+                  aria-label="Structured question"
+                  className="fy-question-form"
+                  data-question-unavailable=""
+                  role="status"
+                >
+                  <p className="m-0">
+                    This session is waiting on a structured question. This build cannot answer one — the paired daemon
+                    does not serve the answer route — so the question can only be cleared by interrupting the turn.
+                  </p>
+                </section>
+              ) : (
+                <Composer
+                  api={client}
+                  busy={busy}
+                  compact={compact}
+                  daemon={connection}
+                  disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
+                  onSent={onRefresh}
+                  quota={session.state.quota}
+                  sessionId={session.config.id}
+                />
+              )}
+            </div>
           </div>
-        </div>
-        <BottomSheet
-          ariaLabel="Session details"
-          closeLabel="Close session details"
-          id={detailsId}
-          onClose={() => setDetailsOpen(false)}
-          open={detailsOpen}
-          panelClassName="kt-details bg-surface"
-        >
-          <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
-          {/* Compact's home for the lifecycle controls. The sheet is already a
+          <BottomSheet
+            ariaLabel="Session details"
+            closeLabel="Close session details"
+            id={detailsId}
+            onClose={() => setDetailsOpen(false)}
+            open={detailsOpen}
+            panelClassName="kt-details bg-surface"
+          >
+            <SessionDetails daemonId={connection.daemonId} onClose={() => setDetailsOpen(false)} session={session} />
+            {/* Compact's home for the lifecycle controls. The sheet is already a
               focus-trapped dialog with an Escape path and restored focus, so the
               controls keep a robust home instead of a wrapped row that cost a
               sixth of the screen on every session. */}
-          {compact ? (
-            <div className="flex flex-col gap-2 px-4 pb-4">
-              {lifecycleActions}
-              {actionAlert}
-            </div>
-          ) : null}
-        </BottomSheet>
-        <MigrateSheet
-          canMutate={canControl}
-          connection={connection}
-          onClose={() => setMigrateOpen(false)}
-          onMigrated={(_daemon, _scope, view) => publish(view)}
-          open={migrateOpen}
-          scope={scope}
-          view={session}
-        />
-      </main>
+            {compact ? (
+              <div className="flex flex-col gap-2 px-4 pb-4">
+                {lifecycleActions}
+                {actionAlert}
+              </div>
+            ) : null}
+          </BottomSheet>
+          <MigrateSheet
+            canMutate={canControl}
+            connection={connection}
+            onClose={() => setMigrateOpen(false)}
+            onMigrated={(_daemon, _scope, view) => publish(view)}
+            open={migrateOpen}
+            scope={scope}
+            view={session}
+          />
+        </main>
+      </ReferenceSurfaceProvider>
     </SidePaneWorkspace>
   );
 }

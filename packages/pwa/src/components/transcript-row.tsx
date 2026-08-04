@@ -2,6 +2,7 @@ import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { LedgerMessage } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
+import { useReferenceSurface } from './reference-surface.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -57,9 +58,23 @@ function TranscriptTextRow({ entry }: { readonly entry: TranscriptEntry }) {
         <span>{label}</span>
         {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
       </header>
-      {entry.kind === 'assistant' ? <Markdown text={entry.text} /> : <p>{entry.text}</p>}
+      {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
     </article>
   );
+}
+
+/**
+ * Assistant prose, read through THIS session's reference surface.
+ *
+ * The surface arrives from context rather than as a prop because a transcript
+ * row is rendered by a virtualised list that already threads enough state; a
+ * seventh resolver prop per row is how the transcript and the file preview would
+ * end up proving references differently. Outside a session workspace the context
+ * is empty and reference-shaped text stays prose, which is correct: nothing there
+ * can prove a callsign or a path.
+ */
+function AssistantProse({ text }: { readonly text: string }) {
+  return <Markdown text={text} {...useReferenceSurface()} />;
 }
 
 const defaultLabel = (kind: TranscriptEntry['kind']): string => {

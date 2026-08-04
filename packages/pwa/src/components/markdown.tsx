@@ -36,9 +36,10 @@
  */
 
 import type { AttentionId } from '@ferretry/protocol';
-import { type MouseEvent, memo, useEffect, useMemo, useState } from 'react';
+import { type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
@@ -53,8 +54,10 @@ import {
   type ResolvedSurfaceReference,
   referenceHref,
   referenceIdentity,
+  referenceTitle,
   remarkReferences,
   revalidateReference,
+  type SkillReferenceResolver,
   type SurfaceReferenceResolver,
   type TaskReferenceResolver,
 } from '../lib/references.ts';
@@ -107,6 +110,8 @@ export interface MarkdownProps {
    *  makes a tombstone possible: only this resolver can say "closed" rather than
    *  "unknown". */
   readonly surfaceReferenceResolver?: SurfaceReferenceResolver;
+  /** Proves `/skill` and `$skill` against this session's own skills catalog. */
+  readonly skillReferenceResolver?: SkillReferenceResolver;
   /** Session filesystem context. Without it, code-shaped text stays plain. */
   readonly resolveFilePaths?: FilePathResolver;
   readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
@@ -116,6 +121,7 @@ export interface MarkdownProps {
    *  Without it a proved surface stays inert text, exactly like a task reference
    *  in a surface that cannot open a task board. */
   readonly onSurfaceOpen?: (reference: ResolvedSurfaceReference, opener?: HTMLElement | null) => void;
+  readonly onSkillOpen?: (name: string, opener?: HTMLElement | null) => void;
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
 }
@@ -127,11 +133,13 @@ export const Markdown = memo(function Markdown({
   taskReferenceResolver,
   attentionReferenceResolver,
   surfaceReferenceResolver,
+  skillReferenceResolver,
   resolveFilePaths,
   onTaskOpen,
   onCodeReferenceOpen,
   onAttentionOpen,
   onSurfaceOpen,
+  onSkillOpen,
   onNavigate,
 }: MarkdownProps) {
   const codeReferenceCandidates = useMemo(
@@ -171,6 +179,7 @@ export const Markdown = memo(function Markdown({
     task: taskReferenceResolver,
     attention: attentionReferenceResolver,
     surface: surfaceReferenceResolver,
+    skill: skillReferenceResolver,
   };
   // Re-proving a rendered link asks whether its CANONICAL path is still one we
   // resolved, not whether the authored candidate maps to it again.
@@ -203,13 +212,19 @@ export const Markdown = memo(function Markdown({
       case 'surface':
         onSurfaceOpen?.(target, opener);
         break;
+      case 'skill':
+        onSkillOpen?.(target.name, opener);
+        break;
     }
   };
 
   const hasOpener = (target: ResolvedReference): boolean => {
     switch (target.kind) {
       case 'agent':
-        return true;
+        // A proved agent whose destination cannot be reached is still a dead
+        // link: the click handler prevents the browser's own navigation, so
+        // without `onNavigate` the anchor would swallow the press and do nothing.
+        return onNavigate !== undefined;
       case 'file':
         return onCodeReferenceOpen !== undefined;
       case 'task':
@@ -218,11 +233,63 @@ export const Markdown = memo(function Markdown({
         return onAttentionOpen !== undefined;
       case 'surface':
         return onSurfaceOpen !== undefined;
+      case 'skill':
+        return onSkillOpen !== undefined;
     }
   };
 
   const destination = (target: ResolvedReference): string =>
     target.kind === 'agent' ? daemonSessionPath(target.daemonId, target.sessionId) : referenceHref(target);
+
+  /**
+   * THE one click behaviour, shared by prose links and code decorations. A
+   * modifier or non-primary click is the reader asking the browser for a new
+   * tab, and is never intercepted.
+   */
+  const referenceClick =
+    (target: ResolvedReference, chain?: (event: MouseEvent<HTMLAnchorElement>) => void) =>
+    (event: MouseEvent<HTMLAnchorElement>): void => {
+      chain?.(event);
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+      openReference(target, event.currentTarget);
+    };
+
+  /**
+   * Render decorated code back out. Text arrives as strings, so the code's own
+   * bytes reach the DOM through React's own escaping; highlighter tokens keep
+   * their class and their nesting, which is what preserves the theme colours.
+   */
+  const renderCodeNodes = (nodes: readonly CodeNode[], path: string): ReactNode[] =>
+    nodes.map((node, index) => {
+      const key = `${path}.${index}`;
+      if (node.kind === 'text') return node.text;
+      if (node.kind === 'span')
+        return (
+          <span className={node.className} key={key}>
+            {renderCodeNodes(node.children, key)}
+          </span>
+        );
+      return (
+        <a
+          data-fy-reference={referenceIdentity(node.reference)}
+          href={destination(node.reference)}
+          key={key}
+          onClick={referenceClick(node.reference)}
+          title={referenceTitle(node.reference)}
+        >
+          {node.text}
+        </a>
+      );
+    });
 
   return (
     <div className={`md min-w-0 max-w-full ${className ?? ''}`}>
@@ -243,22 +310,7 @@ export const Markdown = memo(function Markdown({
               <a
                 data-fy-reference={referenceIdentity(target)}
                 href={destination(target)}
-                onClick={(event: MouseEvent<HTMLAnchorElement>) => {
-                  onClick?.(event);
-                  // A modifier or non-primary click is the reader asking the
-                  // browser for a new tab; never intercept it.
-                  if (
-                    event.defaultPrevented ||
-                    event.button !== 0 ||
-                    event.metaKey ||
-                    event.ctrlKey ||
-                    event.shiftKey ||
-                    event.altKey
-                  )
-                    return;
-                  event.preventDefault();
-                  openReference(target, event.currentTarget);
-                }}
+                onClick={referenceClick(target, onClick)}
                 {...rest}
               >
                 {children}
@@ -279,6 +331,33 @@ export const Markdown = memo(function Markdown({
             const language = fenceLanguage(fenceClassName);
             const source = language ? String(children).replace(/\n$/u, '') : '';
             const html = language ? highlightToHtml(source, language) : null;
+            // REFERENCES INSIDE CODE. The code text is decorated, never
+            // rewritten: `decoratedCodeNodes` answers null unless it can slice
+            // this exact source — and for a highlighted fence, unless the
+            // highlighter's markup reassembles into it byte for byte. Null keeps
+            // the two renderings below exactly as they were.
+            //
+            // Only a literal string is offered for decoration. `String(children)`
+            // is a lossy reading of anything else, and a reference is not worth a
+            // corrupted snippet.
+            const decoratable = typeof children === 'string' ? (language ? source : children) : null;
+            const decorated =
+              decoratable === null
+                ? null
+                : decoratedCodeNodes({
+                    code: decoratable,
+                    html,
+                    resolvers: trustedResolvers,
+                    isOpenable: hasOpener,
+                  });
+            if (decorated !== null)
+              return html === null ? (
+                <code className={fenceClassName} {...rest}>
+                  {renderCodeNodes(decorated, 'code')}
+                </code>
+              ) : (
+                <code className={`hljs language-${language}`}>{renderCodeNodes(decorated, 'code')}</code>
+              );
             // No language (inline code, bare fence) or an unknown one: hand it
             // back to react-markdown, which escapes it. Never raw HTML.
             if (html === null) {

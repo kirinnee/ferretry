@@ -3,6 +3,19 @@
  *
  * References are authored as plain sigil tokens:
  *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `%surface:key`
+ *   `/skill` or `$skill`
+ *
+ * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
+ * written by hand is not a reference and never becomes one: the renderer only
+ * trusts links this module's own transform produced. The whole grammar, with
+ * authoring examples and the click contract, is `docs/reference-standard.md`.
+ *
+ * SKILLS ACCEPT TWO SIGILS AND MEAN ONE THING. Claude invokes a skill as
+ * `/name` and Codex as `$name` (`features/skills/skills-catalog.ts` owns that
+ * insertion contract), so both parse to the same `skill` reference and the
+ * authored bytes are what the reader keeps seeing. `formatReference` answers
+ * with the `/name` form because it is the one a reader can type on either
+ * harness.
  *
  * **Syntax is never existence proof.** `findReferences` reports lexical
  * candidates; `resolveReference` requires the appropriate live resolver; and
@@ -97,7 +110,19 @@ export interface SurfaceReference {
   readonly key: string;
 }
 
-export type Reference = AgentReference | FileReference | TaskReference | AttentionReference | SurfaceReference;
+export interface SkillReference {
+  readonly kind: 'skill';
+  /** Canonical lowercase skill name, without either sigil. */
+  readonly name: string;
+}
+
+export type Reference =
+  | AgentReference
+  | FileReference
+  | TaskReference
+  | AttentionReference
+  | SurfaceReference
+  | SkillReference;
 
 /** An agent reference that a live fleet has proved, daemon and session both. */
 export interface ResolvedAgentReference extends AgentReference {
@@ -124,7 +149,8 @@ export type ResolvedReference =
   | FileReference
   | TaskReference
   | AttentionReference
-  | ResolvedSurfaceReference;
+  | ResolvedSurfaceReference
+  | SkillReference;
 
 export interface ReferenceMatch {
   readonly reference: Reference;
@@ -151,6 +177,15 @@ const ATTENTION_TOKEN = /^!(A[1-9][0-9]*)$/u;
  */
 const SURFACE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu;
+// LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,
+// not a daemon-normalised identity, and `$HOME`/`$PATH` are far more common in
+// prose and in code than a capitalised skill invocation is. Reading `$HOME` as
+// `$home` would make the reference layer volunteer a candidate for every shell
+// variable a message contains. Namespaced invocation forms a harness may accept
+// elsewhere (`plugin:skill`, `apps/web:deploy`) are NOT references, because
+// their separators are this grammar's own boundaries.
+const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
+const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
 
 // Each alternative owns its right boundary. A colon may naturally follow
 // agent/task/attention prose, but it cannot terminate a file candidate because
@@ -158,8 +193,24 @@ const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu
 // exactly one interior colon and is bounded like the others — `%` is otherwise a
 // percentage, and `50%` never opens a candidate because a digit is not a left
 // boundary.
-const REFERENCE_CANDIDATE =
-  /(^|[\s([{"'`<>=—–])(?:(:[a-z][a-z0-9-]{0,31})(?=$|[\s)\]}"'`,;!?<>:.=—–])|(&[BFIC][0-9]{1,9})(?=$|[\s)\]}"'`,;!?<>:.=—–])|(!A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])|(%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63})(?=$|[\s)\]}"'`,;!?<>:.=—–])|(@(?!@)[/.\p{L}\p{N}_+@#-]*[\p{L}\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?)(?=$|[\s)\]}"'`,;!?<>.=—–]))/giu;
+//
+// Composed rather than written as one 600-character literal: six alternatives
+// sharing two boundary sets is exactly the shape a single literal hides. Ordinary
+// quoted strings, not `String.raw`, because a backtick is one of the boundary
+// characters and `String.raw` would keep the backslash escaping it needs — which
+// a `u`-mode character class rejects as an invalid escape.
+const BOUNDARY_BEFORE = '(^|[\\s([{"\'`<>=—–])';
+const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
+const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
+const CANDIDATE_ALTERNATIVES = [
+  `:[a-z][a-z0-9-]{0,31}${BOUNDARY_AFTER}`,
+  `&[BFIC][0-9]{1,9}${BOUNDARY_AFTER}`,
+  `!A[1-9][0-9]*${BOUNDARY_AFTER}`,
+  `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
+  `[/$][a-z][a-z0-9-]{0,63}${BOUNDARY_AFTER}`,
+  `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
+];
+const REFERENCE_CANDIDATE = new RegExp(`${BOUNDARY_BEFORE}(${CANDIDATE_ALTERNATIVES.join('|')})`, 'giu');
 
 function positiveInteger(value: string | undefined): number | undefined {
   if (!value || !INTEGER.test(value)) return undefined;
@@ -213,6 +264,9 @@ export function parseReferenceToken(raw: string): Reference | null {
   if (surface?.[1] && surface[2])
     return { kind: 'surface', surface: surface[1].toLowerCase() as SurfaceKind, key: surface[2] };
 
+  const skill = raw.match(SKILL_TOKEN);
+  if (skill?.[1]) return { kind: 'skill', name: skill[1] };
+
   const file = raw.match(FILE_TOKEN);
   if (!file?.[1]) return null;
   const line = positiveInteger(file[2]);
@@ -231,7 +285,7 @@ export function findReferences(value: string): ReferenceMatch[] {
   const matches: ReferenceMatch[] = [];
   for (const match of value.matchAll(REFERENCE_CANDIDATE)) {
     const prefix = match[1] ?? '';
-    const raw = match[2] ?? match[3] ?? match[4] ?? match[5] ?? match[6];
+    const raw = match[2];
     if (!raw || match.index === undefined) continue;
     const reference = parseReferenceToken(raw);
     if (!reference) continue;
@@ -260,6 +314,8 @@ export type AgentReferenceResolver = (lookup: AgentReferenceLookup) => ResolvedA
 export type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
 export type TaskReferenceResolver = (id: string) => boolean;
 export type AttentionReferenceResolver = (id: AttentionId) => boolean;
+/** Answers whether this session's own skills catalog carries that name. */
+export type SkillReferenceResolver = (name: string) => boolean;
 
 /** What a live surface owner answers with: the daemon AND the session it proved. */
 export interface ResolvedSurface {
@@ -295,6 +351,7 @@ export interface ReferenceResolvers {
   readonly task?: TaskReferenceResolver;
   readonly attention?: AttentionReferenceResolver;
   readonly surface?: SurfaceReferenceResolver;
+  readonly skill?: SkillReferenceResolver;
 }
 
 export interface RemarkReferencesOptions {
@@ -336,6 +393,13 @@ export function formatReference(reference: Reference | ResolvedReference): strin
     case 'surface':
       if (!validSurfaceReference(reference)) throw new TypeError('invalid surface reference');
       return `%${reference.surface}:${reference.key}`;
+    case 'skill':
+      // `/name` over `$name`: it is the form the shipped harness invokes and the
+      // one the composer's `/` trigger inserts. `$name` remains a valid AUTHORED
+      // alias — this is the canonical rendering, not a rewrite of what a reader
+      // typed.
+      if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid skill reference');
+      return `/${reference.name}`;
   }
 }
 
@@ -416,6 +480,8 @@ export function resolveReference(reference: Reference, resolvers: ReferenceResol
         return validSurfaceReference(reference) && resolvers.surface
           ? resolvedSurface(reference, resolvers.surface(reference))
           : null;
+      case 'skill':
+        return resolvers.skill?.(reference.name) ? reference : null;
     }
   } catch {
     return null;
@@ -471,6 +537,10 @@ export function referenceHref(reference: ResolvedReference): string {
       query.set('surface', reference.surface);
       query.set('key', reference.key);
       break;
+    case 'skill':
+      if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid resolved skill reference');
+      query.set('name', reference.name);
+      break;
   }
   return `${REFERENCE_HREF_PREFIX}${query}`;
 }
@@ -525,6 +595,11 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
     const asked: SurfaceReference = { kind: 'surface', surface, key };
     return resolvedSurface(asked, { state: 'open', daemonId: daemon as DaemonId, sessionId, surface, key });
   }
+  if (kind === 'skill') {
+    if (!exactKeys(query, ['kind', 'name'])) return null;
+    const name = one(query, 'name');
+    return name && SKILL_NAME.test(name) ? { kind: 'skill', name } : null;
+  }
   return null;
 }
 
@@ -543,6 +618,8 @@ export function referenceIdentity(reference: ResolvedReference): string {
       // Identity is (daemon, session, kind, key) — the same four facts the
       // envelope carries, and nothing that a rename can move.
       return `surface:${reference.daemonId}:${reference.sessionId}:${reference.surface}:${reference.key}`;
+    case 'skill':
+      return `skill:${reference.name}`;
   }
 }
 
@@ -579,13 +656,16 @@ export function revalidateReference(
         // terminal with that id.
         return current?.daemonId === reference.daemonId && current.sessionId === reference.sessionId ? current : null;
       }
+      case 'skill':
+        return resolvers.skill?.(reference.name) ? reference : null;
     }
   } catch {
     return null;
   }
 }
 
-function referenceTitle(reference: ResolvedReference): string {
+/** The hover sentence a proved reference carries, in its own kind's voice. */
+export function referenceTitle(reference: ResolvedReference): string {
   switch (reference.kind) {
     case 'agent':
       return `Open :${reference.name}'s session`;
@@ -600,6 +680,8 @@ function referenceTitle(reference: ResolvedReference): string {
       return `Open attention !${reference.id}`;
     case 'surface':
       return `Open this session's ${reference.surface} ${reference.key}`;
+    case 'skill':
+      return `Open the /${reference.name} skill`;
   }
 }
 
@@ -621,17 +703,107 @@ interface MdNode {
   title?: string;
   data?: { hProperties?: Record<string, string> };
   children?: MdNode[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
 }
 
-// Already-linked text, code and raw HTML are left exactly as authored: a
-// reference inside them is content, not a destination.
+/** The vfile subset this transform reads: the document it was parsed from. */
+interface MdFile {
+  value?: unknown;
+}
+
+// Already-linked text and raw HTML are left exactly as authored: a reference
+// inside them is content, not a destination. CODE IS IN THIS SET FOR A DIFFERENT
+// REASON — a fence's content is not mdast children at all, so it is decorated by
+// the renderer through `code-span-references.ts` instead, which can slice code
+// text without an mdast round trip that would re-escape it.
 const SKIP_CHILDREN = new Set(['link', 'linkReference', 'code', 'inlineCode', 'html']);
 
-function linkifyText(value: string, resolvers: ReferenceResolvers): MdNode[] | null {
+/** One proved reference and the exact bytes of the token that proved it. */
+export interface ProvenReference {
+  readonly reference: ResolvedReference;
+  readonly raw: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Scan and prove in one pass, for a surface that can only ever paint a LINK.
+ *
+ * The code-span renderer uses this rather than the prose walk below, because a
+ * code span has no room for the tombstone: striking a token through inside a
+ * snippet would misrepresent the code as containing a `<del>`. A closed surface
+ * therefore stays literal inside code, exactly like an unproved one.
+ */
+export function provenReferences(value: string, resolvers: ReferenceResolvers): ProvenReference[] {
+  return findReferences(value).flatMap(match => {
+    const reference = resolveReference(match.reference, resolvers);
+    return reference ? [{ reference, raw: match.raw, start: match.start, end: match.end }] : [];
+  });
+}
+
+/**
+ * Which sigils in a parsed text node the author had escaped, and how far the
+ * source could be trusted at all.
+ *
+ * WHY THIS EXISTS. Markdown eats a backslash escape before the transform ever
+ * runs: `\:zelda` reaches this module as the text `:zelda`, indistinguishable
+ * from an authored reference. The node's position still points at the original
+ * bytes, so the escape is recoverable — but only by walking the source and the
+ * parsed value together.
+ *
+ * `limit` is the fail-closed half. The walk understands exactly two things: a
+ * character escape, and the block prefixes (`>` and indentation) a continuation
+ * line carries in the source but not in the value. Anything else it meets — a
+ * character reference like `&amp;`, most likely — makes every later offset
+ * ambiguous, so it stops and REFUSES to link from there on. Ambiguous evidence
+ * about whether an author suppressed a reference is not evidence that they
+ * didn't.
+ */
+interface SourceAlignment {
+  /** Value offsets whose sigil was backslash-escaped in the source. */
+  readonly escaped: ReadonlySet<number>;
+  /** The value offset from which the source could no longer be aligned. */
+  readonly limit: number;
+}
+
+const WHOLE: SourceAlignment = { escaped: new Set(), limit: Number.POSITIVE_INFINITY };
+const BLOCK_PREFIX = /[ \t>]/u;
+
+function alignSource(source: string, value: string): SourceAlignment {
+  if (source === value) return WHOLE;
+  const escaped = new Set<number>();
+  let at = 0;
+  let cursor = 0;
+  while (cursor < value.length) {
+    if (source[at] === value[cursor]) {
+      at += 1;
+      cursor += 1;
+      continue;
+    }
+    if (source[at] === '\\' && source[at + 1] === value[cursor]) {
+      escaped.add(cursor);
+      at += 2;
+      cursor += 1;
+      continue;
+    }
+    // A continuation line's own prefix belongs to the block, not to the prose.
+    if (cursor > 0 && value[cursor - 1] === '\n' && at < source.length && BLOCK_PREFIX.test(source[at] ?? '')) {
+      at += 1;
+      continue;
+    }
+    return { escaped, limit: cursor };
+  }
+  return { escaped, limit: Number.POSITIVE_INFINITY };
+}
+
+function linkifyText(value: string, resolvers: ReferenceResolvers, alignment: SourceAlignment): MdNode[] | null {
   const output: MdNode[] = [];
   let cursor = 0;
   let changed = false;
   for (const match of findReferences(value)) {
+    // An escaped token is prose the author asked for, so it is not a link and not
+    // a tombstone either: the reader wrote the bytes on purpose.
+    if (match.start >= alignment.limit || alignment.escaped.has(match.start)) continue;
     const resolved = resolveReference(match.reference, resolvers);
     // A surface the owner proved GONE is the one case where absence is itself
     // evidence worth painting. It is a `delete` node, so it is inert by
@@ -669,15 +841,27 @@ function linkifyText(value: string, resolvers: ReferenceResolvers): MdNode[] | n
   return output;
 }
 
-function transformNode(node: MdNode, resolvers: ReferenceResolvers): void {
+/** The source bytes a text node was parsed from, when it can be recovered. */
+function nodeSource(node: MdNode, source: string | null): string | null {
+  const start = node.position?.start?.offset;
+  const end = node.position?.end?.offset;
+  if (source === null || typeof start !== 'number' || typeof end !== 'number' || end < start) return null;
+  return source.slice(start, end);
+}
+
+function transformNode(node: MdNode, resolvers: ReferenceResolvers, source: string | null): void {
   if (SKIP_CHILDREN.has(node.type) || !node.children) return;
   const children: MdNode[] = [];
   for (const child of node.children) {
     if (child.type === 'text' && typeof child.value === 'string') {
-      children.push(...(linkifyText(child.value, resolvers) ?? [child]));
+      const raw = nodeSource(child, source);
+      // No recoverable source is not evidence of an escape: a synthesised node
+      // carries no author's backslash to honour.
+      const alignment = raw === null ? WHOLE : alignSource(raw, child.value);
+      children.push(...(linkifyText(child.value, resolvers, alignment) ?? [child]));
       continue;
     }
-    transformNode(child, resolvers);
+    transformNode(child, resolvers, source);
     children.push(child);
   }
   node.children = children;
@@ -687,11 +871,14 @@ function transformNode(node: MdNode, resolvers: ReferenceResolvers): void {
  * remark plugin: turn PROVED reference tokens in prose into links carrying the
  * reserved envelope and the transform-origin mark. With no resolvers it is a
  * no-op, which is the correct behaviour for a surface that cannot prove anything.
+ *
+ * The document is read as well as the tree, because an escaped sigil only exists
+ * in the source: see `alignSource`.
  */
 export function remarkReferences(options: RemarkReferencesOptions = {}) {
   const { resolvers } = options;
-  return (tree: MdNode): void => {
+  return (tree: MdNode, file?: MdFile): void => {
     if (!resolvers) return;
-    transformNode(tree, resolvers);
+    transformNode(tree, resolvers, typeof file?.value === 'string' ? file.value : null);
   };
 }

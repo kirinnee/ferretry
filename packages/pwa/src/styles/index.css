@@ -465,6 +465,18 @@ pre,
 .md a:hover {
   text-decoration-color: var(--accent);
 }
+/* A reference inside code — inline span or fence — keeps the CODE's colour,
+   including whichever highlight token it landed in. The accent colour that
+   marks a prose link would repaint a keyword or a string and quietly undo the
+   highlighting the fence is there to show, so clickability is carried by the
+   underline alone. */
+.md code a[data-fy-reference] {
+  color: inherit;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.md code a[data-fy-reference]:hover {
+  text-decoration-color: currentColor;
+}
 .md strong {
   font-weight: 650;
   color: var(--fg);

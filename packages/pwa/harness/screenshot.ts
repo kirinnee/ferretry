@@ -35,6 +35,7 @@ const VIEWPORTS = [
 const SECTIONS = [
   'harness-new-session',
   'harness-session-screen',
+  'harness-references',
   'harness-composer-markdown',
   'harness-lineage',
   'harness-marks',

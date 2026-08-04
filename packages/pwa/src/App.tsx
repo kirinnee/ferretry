@@ -463,7 +463,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const controls = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(daemonId));
-  const session = fleet.daemons.get(scope.daemonId)?.byId.get(scope.sessionId);
+  const fleetSlice = fleet.daemons.get(scope.daemonId);
+  const session = fleetSlice?.byId.get(scope.sessionId);
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -537,8 +538,15 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           chatWidth={controls.chatWidth}
           client={client}
           connection={connection}
+          // Only THIS daemon's slice, and only once it has actually been read:
+          // `sessions === null` is "not read yet", which must not reach the
+          // reference surface as a fleet with nobody in it.
+          {...(fleetSlice?.sessions === null || fleetSlice?.sessions === undefined
+            ? {}
+            : { daemonSessions: fleetSlice.sessions })}
           entries={entries}
           onBack={() => navigate(daemonSessionsPath(connection.daemonId))}
+          onNavigate={navigate}
           onRefresh={refresh}
           onSessionChange={publishSession}
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
