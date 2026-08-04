@@ -429,7 +429,11 @@ you carry.
 
 **You can see:**
 
-- the **daemon fingerprint** in the URL — it is what addresses the rendezvous;
+- the **daemon fingerprint** in the URL — it is what addresses the rendezvous, and it is a stable
+  pseudonymous identifier for one machine;
+- the **daemon's long-term Ed25519 public key**, which it presents in the claim before any session
+  exists. The fingerprint is a hash of it, so this is the same identity in unhashed form, and it is
+  public by design — it is what proves the rendezvous belongs to that daemon;
 - the **IP addresses** of both ends, when each connected, and for how long;
 - **frame counts, frame sizes and timing** — enough to tell a burst of typing from a screenshot,
   because there is no padding or cover traffic in this version;

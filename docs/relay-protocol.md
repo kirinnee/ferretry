@@ -591,6 +591,35 @@ control frame and then closes with `4432` or `4433`, including the reason (and, 
 reset timestamp in the control-plane decision). Failure to reach or parse the meter is `4500` and is
 also a refusal. Nothing degrades into an unmetered path.
 
+### How long per-daemon rows are kept
+
+`maxTrackedDaemons` is a **recoverable ceiling on stored rows, not a lifetime lockout**. A bound that
+only ever fills would eventually refuse every daemon that had never connected before — permanently,
+and for no reason anyone could see.
+
+So when the census is full and a daemon with no row asks for a connection, admission first
+**re-counts every stored row and checks the total against the recorded census**. Only if the two
+agree does it delete up to **64** rows, and only rows that are all of:
+
+- holding **no** connections (`concurrentConnections == 0`);
+- past their accounting day — the row's byte window began before the current **UTC** day; and
+- carrying a **non-null** last-activity stamp that is also before the current UTC day.
+
+Both time conditions are required because a refusal can stamp activity on a row without rolling its
+window, and either test alone would let today's traffic be forgotten out from under its own caps. A
+row with no activity stamp is kept, not reclaimed: every stored row has been through admission or
+metering, both of which stamp it, so an unstamped row is evidence nobody can account for, and the
+fail-closed reading of that is "still in use".
+
+**If the recount disagrees with the census, or any row is damaged or ambiguous, the request is
+refused and nothing is deleted.** Reclaiming never runs on evidence that does not add up.
+
+What reclaiming costs is visible and worth stating: **deleting a row discards that daemon's
+historical per-daemon counters** — its request count, bytes relayed, refusals, peak concurrency and
+activity stamps are gone from `GET /v1/operator/metrics`. **Account-wide cumulative totals are not
+touched.** A bill already run up does not shrink because a quiet daemon's row was tidied away, and
+only `trackedDaemons` — the count of stored rows — goes down.
+
 ### What an open relay costs, stated plainly
 
 A self-hosted deployment refuses an unlisted fingerprint in the stateless Worker. The hosted one
