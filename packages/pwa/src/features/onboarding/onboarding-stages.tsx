@@ -312,10 +312,8 @@ export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) 
     <div className={STAGE}>
       <p className="m-0 text-meta leading-base text-muted">
         Paste it into Claude, Codex or any agent with a terminal{' '}
-        <strong className="font-semibold text-fg">
-          on {target === 'this' ? 'this computer' : 'that computer'}
-        </strong>{' '}
-        — not into anything on this page.
+        <strong className="font-semibold text-fg">on {target === 'this' ? 'this computer' : 'that computer'}</strong> —
+        not into anything on this page.
       </p>
       <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
         <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">

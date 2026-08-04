@@ -76,6 +76,7 @@ import {
   onboardingStep,
   onboardingStepCount,
   onboardingStepIndex,
+  pairingOnboardingStep,
   pathConnection,
   previousOnboardingStep,
   questionBehindDoer,
@@ -650,10 +651,9 @@ function Stage({
             THE PAIRING STEP OF THIS JOURNEY, WHICHEVER ONE THAT IS. It used to be
             a two-way guess between `scan` and `local`, which was wrong for the
             agent answer — whose pairing step is `agent-pair` — and would be wrong
-            again for the next journey added. The step before the end IS the
-            pairing step on every list here, and the model already knows it.
+            again for the next journey added. The model owns the answer.
           */
-          onBackToPairing={() => onGoTo(previousOnboardingStep(path, 'done'))}
+          onBackToPairing={() => onGoTo(pairingOnboardingStep(path))}
         />
       );
   }

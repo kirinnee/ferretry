@@ -562,6 +562,30 @@ export const firstOnboardingStep = (path: OnboardingPath): OnboardingStepId => {
   return first ?? 'done';
 };
 
+/**
+ * The steps on which a daemon actually answers this browser.
+ *
+ * Every journey ends with exactly one of them, and which one is the whole subject
+ * of this flow: `local` when the daemon is on this machine, `agent-pair` when an
+ * agent printed the code, `scan` when the reader carried it here.
+ */
+const PAIRING_STEPS: readonly OnboardingStepId[] = Object.freeze(['local', 'agent-pair', 'scan']);
+
+/**
+ * WHERE A JOURNEY PAIRS, for the last screen's way back to it.
+ *
+ * Not "the step before the end": on the journey that offers the reader's phone
+ * afterwards, the step before the end is that optional offer, and a reader who
+ * pressed "back to pairing" would land on a screen with no pairing on it. Not a
+ * two-way guess between `local` and `scan` either — that was wrong for the agent
+ * answer, whose pairing step is neither. The journey knows, so it is asked.
+ */
+export const pairingOnboardingStep = (path: OnboardingPath): OnboardingStepId => {
+  const steps = onboardingRouteSteps(path);
+  /* Unreachable: every list above ends in a pairing step and then `done`. */
+  return [...steps].reverse().find(step => PAIRING_STEPS.includes(step)) ?? firstOnboardingStep(path);
+};
+
 /** Is this a step the reader has been to, is on, or has not reached? */
 export type OnboardingStepStatus = 'completed' | 'current' | 'upcoming';
 

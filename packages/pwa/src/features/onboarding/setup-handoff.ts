@@ -33,7 +33,7 @@
  */
 
 import qrcode from 'qrcode-generator';
-
+import type { DeviceKind } from './device-kind.ts';
 import {
   type ConnectionMethodId,
   firstOnboardingStep,
@@ -54,7 +54,6 @@ import {
   presumedTarget,
   type SetupTargetId,
 } from './onboarding-model.ts';
-import type { DeviceKind } from './device-kind.ts';
 
 /** The fragment key. Distinct from the `#v1;` a pairing link uses — these are not the same claim. */
 export const SETUP_HANDOFF_KEY = 'fy-setup';

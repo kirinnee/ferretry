@@ -209,7 +209,7 @@ const settle = async (): Promise<void> => {
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
   container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
 
-/** Answers the FIRST question — who is doing this — the way a reader does. */
+/** Answers WHO INSTALLS IT the way a reader does. */
 const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> => {
   await interact(() =>
     must(
@@ -220,20 +220,26 @@ const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> =
 };
 
 /**
- * Answers the DEVICE question, getting past the first one if it is still up.
+ * Answers the ENTRY question, and then the daemon subflow's own question.
  *
- * The device question is one answer in now — "I do it myself" — and every caller
- * here is a reader who is about to type commands, so this walks both rather than
- * making each test remember the order.
+ * Every caller here is a reader who is about to type commands on the machine
+ * holding the page, and this walks the whole way rather than making each test
+ * remember which questions that combination is asked. A phone would be asked one
+ * fewer, which is the model's business and is tested there.
  */
 const chooseRoute = async (container: HTMLElement, route: string): Promise<void> => {
-  if (stepOfSetup(container) === 'who') await chooseDoer(container, 'self');
   await interact(() =>
     must(
       container.querySelector<HTMLButtonElement>(`button[data-onboarding-route="${route}"]`),
       `the ${route} answer`,
     ).click(),
   );
+  if (stepOfSetup(container) === 'target') {
+    await interact(() =>
+      must(container.querySelector<HTMLButtonElement>('button[data-onboarding-target="this"]'), 'this machine').click(),
+    );
+  }
+  if (stepOfSetup(container) === 'doer') await chooseDoer(container, 'self');
 };
 
 /** Moves on from a stage that has a Next, which is every stage the page cannot check. */
@@ -292,26 +298,22 @@ const popTo = async (path: string): Promise<void> => {
 };
 
 describe('AppShell', () => {
-  it('asks an unpaired first run who is doing the setup', async () => {
+  it('asks an unpaired first run what it has, and then who installs it', async () => {
     const { reads, view } = await renderShell('/');
 
-    // A cold visitor might have an agent standing by on the machine, or might be
-    // about to type the commands themselves — and those are different journeys,
-    // not different orderings of one. The root cannot know which, so the first
-    // screen asks that rather than assuming an answer.
+    // A cold visitor might be holding a link, might be starting from nothing, or
+    // might be adding a machine to a fleet — and only they know which. What the
+    // root must never ask is what this DEVICE is: it can see that.
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
-    expect(stepOfSetup(view.container)).toBe('who');
-    expect(view.container.querySelectorAll('button[data-onboarding-doer]')).toHaveLength(2);
-    expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(0);
-    await chooseDoer(view.container, 'self');
-    expect(stepOfSetup(view.container)).toBe('choose');
+    expect(stepOfSetup(view.container)).toBe('entry');
     expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(3);
+    expect(view.container.querySelectorAll('button[data-onboarding-doer]')).toHaveLength(0);
     expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(reads).toEqual([]);
 
-    // Answering "first time" is what puts the install step, and the diagram
-    // that used to carry this sentence, on the glass.
+    // Answering "first time" asks the one question that changes every screen
+    // after it, with the machine this device settles already stated.
     await chooseRoute(view.container, 'first-time');
     expect(stepOfSetup(view.container)).toBe('install');
     expect(view.container.querySelector('[data-onboarding-diagram]')?.getAttribute('aria-label')).toContain(
@@ -325,15 +327,23 @@ describe('AppShell', () => {
     // that — holds nothing. A cleared registry, another profile, an abandoned
     // attempt: all of them make the stored claim unbelievable.
     localStorage.setItem(
-      'fy-onboarding-v3',
-      JSON.stringify({ v: 3, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+      'fy-onboarding-v4',
+      JSON.stringify({
+        v: 4,
+        stage: 'walk',
+        route: 'first-time',
+        target: 'this',
+        doer: 'self',
+        current: 'done',
+        furthest: 'done',
+      }),
     );
 
     const { view } = await renderShell('/');
 
     // Back to the first question, which is the honest reading of a claim no
     // other store supports.
-    expect(stepOfSetup(view.container)).toBe('who');
+    expect(stepOfSetup(view.container)).toBe('entry');
     expect(view.container.textContent).not.toContain('You are set up');
     await view.unmount();
   });
@@ -365,8 +375,16 @@ describe('AppShell', () => {
     // first-time setup for that machine, so "set up another machine" must not
     // resume the last screen of a journey completed for a laptop.
     localStorage.setItem(
-      'fy-onboarding-v3',
-      JSON.stringify({ v: 3, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+      'fy-onboarding-v4',
+      JSON.stringify({
+        v: 4,
+        stage: 'walk',
+        route: 'first-time',
+        target: 'this',
+        doer: 'self',
+        current: 'done',
+        furthest: 'done',
+      }),
     );
     const { view } = await renderShell('/', [alpha.daemonId]);
     // Opening the app took them to their fleet; asking for the picker is what a
@@ -379,7 +397,7 @@ describe('AppShell', () => {
 
     // Replayed from the very first question: a second machine may well be set up
     // by an agent even if the first one was not.
-    expect(stepOfSetup(view.container)).toBe('who');
+    expect(stepOfSetup(view.container)).toBe('entry');
 
     // And the instructions are the same ones, replayed rather than a second copy
     // of them: install, the daemon, the carrier choice, then pairing.

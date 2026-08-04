@@ -19,7 +19,8 @@ const click = async (target: Element): Promise<void> => {
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 };
 
-const DESKTOP: OnboardingPath = { route: 'first-time', device: 'desktop' };
+/** The longest journey there is: a daemon standing up here, installed by hand. */
+const DESKTOP: OnboardingPath = { route: 'first-time', target: 'this', doer: 'self', device: 'desktop' };
 
 describe('the step track', () => {
   it('is a real ordered list with one current step', async () => {

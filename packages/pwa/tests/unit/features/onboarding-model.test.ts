@@ -7,18 +7,20 @@
  * `wrangler.jsonc` for the relay ones, and against a list of things the agent
  * prompt must never contain, because that prompt ships inside a public bundle.
  *
- * The route tests exist for a different reason: the step list is a function of
- * the ROUTE AND THE DEVICE, and the two mistakes it can make are both bad in a
- * way coverage cannot see. Offering a phone a step it cannot act on sends a
- * reader to a screen full of commands with nowhere to type them; making a
- * desktop pair by scanning its own screen is the indignity this rewrite exists
- * to remove. So both devices are asserted for every route.
+ * The journey tests exist for a different reason: the step list is a function of
+ * WHICH COMPUTER runs the daemon, WHO INSTALLS IT and WHAT THIS DEVICE IS, and the
+ * mistakes it can make are all bad in a way coverage cannot see. Offering a phone
+ * a step it cannot act on sends a reader to a screen full of commands with nowhere
+ * to type them; making a desktop pair by scanning its own screen is the indignity
+ * this rewrite exists to remove; and explaining an install on a machine the reader
+ * is not sitting at is a second copy of the instructions that will go wrong. So
+ * every combination is asserted, on both devices.
  */
 
 import { describe, expect, it } from 'bun:test';
 
 import {
-  AGENT_SETUP_PROMPT,
+  agentSetupPrompt,
   CONNECTION_METHODS,
   connectionMethod,
   DAEMON_INSTALL_COMMAND,
@@ -27,34 +29,44 @@ import {
   DAEMON_STATUS_COMMAND,
   DEFAULT_CONNECTION_METHOD,
   detectInstallChannel,
-  doerRoute,
   firstOnboardingStep,
   furthestOnboardingStep,
   handoffTarget,
   INSTALL_CHANNELS,
   installChannel,
   isConnectionMethodId,
+  isDaemonRouteId,
   isLastOnboardingStep,
   isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
+  isSetupTargetId,
   isStepOfRoute,
+  isTargetPossible,
+  journeyLabel,
   nextOnboardingStep,
-  ONBOARDING_DOERS,
+  ONBOARDING_ROUTES,
   onboardingDoer,
+  onboardingDoers,
   type OnboardingPath,
   onboardingRoute,
-  onboardingRoutes,
   onboardingRouteSteps,
   onboardingStep,
   onboardingStepCount,
   onboardingStepIndex,
   onboardingStepStatus,
+  pairingOnboardingStep,
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
   PAIR_PRINT_COMMAND,
+  pathConnection,
+  presumedTarget,
   previousOnboardingStep,
+  questionBehindDoer,
   questionBehindRoute,
+  SETUP_TARGETS,
+  setupTarget,
+  targetBasis,
   VERIFY_COMMAND,
 } from '../../../src/features/onboarding/onboarding-model.ts';
 
@@ -63,24 +75,88 @@ const repoFile = async (path: string): Promise<string> =>
 
 const installationDoc = await repoFile('INSTALLATION.md');
 
-const desktop = (route: OnboardingPath['route'], connection?: OnboardingPath['connection']): OnboardingPath => ({
+/** A daemon standing up on the machine reading the page, installed by hand. */
+const here = (route: 'first-time' | 'add-daemon' = 'first-time', connection?: 'own-relay'): OnboardingPath => ({
   route,
+  target: 'this',
+  doer: 'self',
   device: 'desktop',
-  connection,
+  ...(connection === undefined ? {} : { connection }),
 });
 
-const mobile = (route: OnboardingPath['route']): OnboardingPath => ({ route, device: 'mobile' });
+/** The same by hand, but the daemon lives somewhere the reader has to walk to. */
+const away = (device: 'desktop' | 'mobile' = 'mobile', route: 'first-time' | 'add-daemon' = 'first-time') =>
+  ({ route, target: 'other', doer: 'self', device }) as OnboardingPath;
 
-describe('the first question — who does the work', () => {
-  it('offers two answers, agent first, and both say where the work happens', () => {
-    expect(ONBOARDING_DOERS.map(doer => doer.id)).toEqual(['agent', 'self']);
-    for (const doer of ONBOARDING_DOERS) {
-      expect(onboardingDoer(doer.id)).toBe(doer);
-      // One line each, and each one names the machine rather than "this device":
-      // a reader who pastes the prompt into the wrong terminal gets nothing.
-      expect(doer.answer).not.toContain('\n');
-      expect(doer.answer).toContain('machine that will run your agents');
+/** An agent doing it, on either machine. */
+const byAgent = (target: 'this' | 'other', device: 'desktop' | 'mobile' = 'desktop'): OnboardingPath => ({
+  route: 'first-time',
+  target,
+  doer: 'agent',
+  device,
+});
+
+const client = (device: 'desktop' | 'mobile' = 'desktop'): OnboardingPath => ({ route: 'add-client', device });
+
+describe('which computer runs the daemon', () => {
+  it('offers two answers, this machine first, and says what each means', () => {
+    expect(SETUP_TARGETS.map(target => target.id)).toEqual(['this', 'other']);
+    for (const target of SETUP_TARGETS) {
+      expect(setupTarget(target.id)).toBe(target);
+      expect(target.answer).not.toContain('\n');
     }
+    expect(setupTarget('this').title).toBe('This computer');
+    expect(setupTarget('other').title).toBe('Another computer');
+  });
+
+  it('accepts only the two answers back from storage or a link', () => {
+    expect(isSetupTargetId('this')).toBe(true);
+    expect(isSetupTargetId('other')).toBe(true);
+    expect(isSetupTargetId('the-cloud')).toBe(false);
+    expect(isSetupTargetId(null)).toBe(false);
+  });
+
+  it('refuses to let a phone be the daemon, whatever asked for it', () => {
+    // Agents need a terminal. This is the one rule the whole flow turns on, and
+    // it is stated once rather than re-derived by every reader of an answer.
+    expect(isTargetPossible('this', 'desktop')).toBe(true);
+    expect(isTargetPossible('other', 'desktop')).toBe(true);
+    expect(isTargetPossible('other', 'mobile')).toBe(true);
+    expect(isTargetPossible('this', 'mobile')).toBe(false);
+  });
+
+  it('is FORCED on a phone, ASSUMED from scratch, and ASKED when a fleet exists', () => {
+    // A phone is never asked something the hardware answers; a reader setting up
+    // for the first time on a computer is overwhelmingly at the machine they mean;
+    // a reader adding to a fleet has a real choice between machines they own.
+    expect(targetBasis('first-time', 'mobile')).toBe('forced');
+    expect(targetBasis('add-daemon', 'mobile')).toBe('forced');
+    expect(targetBasis('first-time', 'desktop')).toBe('assumed');
+    expect(targetBasis('add-daemon', 'desktop')).toBe('chosen');
+    expect(presumedTarget('first-time', 'mobile')).toBe('other');
+    expect(presumedTarget('add-daemon', 'mobile')).toBe('other');
+    expect(presumedTarget('first-time', 'desktop')).toBe('this');
+    expect(presumedTarget('add-daemon', 'desktop')).toBeUndefined();
+  });
+});
+
+describe('who installs it', () => {
+  it('offers two answers, agent first, worded for the machine already chosen', () => {
+    for (const target of ['this', 'other'] as const) {
+      expect(onboardingDoers(target).map(doer => doer.id)).toEqual(['agent', 'self']);
+      for (const doer of onboardingDoers(target)) {
+        expect(onboardingDoer(doer.id, target)).toBe(doer);
+        expect(doer.answer).not.toContain('\n');
+      }
+    }
+    // Concrete about the host, because pasting the prompt into an agent on the
+    // wrong machine installs Ferretry on the wrong machine.
+    expect(onboardingDoer('agent', 'this').answer).toContain('this computer');
+    expect(onboardingDoer('agent', 'other').answer).toContain('that computer');
+    expect(onboardingDoer('self', 'this').answer).toContain('terminal on this computer');
+    expect(onboardingDoer('self', 'other').answer).toContain('Open Ferretry on that computer');
+    // The default exists so a caller with only an id still gets a real answer.
+    expect(onboardingDoer('self')).toBe(onboardingDoer('self', 'this'));
   });
 
   it('accepts only the two answers back from storage or a link', () => {
@@ -89,106 +165,109 @@ describe('the first question — who does the work', () => {
     expect(isOnboardingDoerId('someone-else')).toBe(false);
     expect(isOnboardingDoerId(null)).toBe(false);
   });
+});
 
-  it('turns only the agent answer into a route, because the other one asks a second question', () => {
-    expect(doerRoute('agent')).toBe('agent');
-    expect(doerRoute('self')).toBeUndefined();
-  });
-
-  it('walks one journey on every device, because none of it happens on this one', () => {
-    // No install to be impossible here, no platform to pick, nothing about this
-    // device left to decide: the agent has the terminal, somewhere else.
-    for (const device of ['desktop', 'mobile'] as const) {
-      expect(onboardingRouteSteps({ route: 'agent', device })).toEqual(['brief', 'agent-pair', 'done']);
+describe('the entry question', () => {
+  it('asks what the reader HAS, and never what this device is', () => {
+    expect(ONBOARDING_ROUTES.map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
+    for (const route of ONBOARDING_ROUTES) {
+      expect(onboardingRoute(route.id)).toBe(route);
+      expect(route.answer).not.toContain('\n');
+      expect(route.answer.length).toBeGreaterThan(0);
     }
-    expect(firstOnboardingStep(desktop('agent'))).toBe('brief');
-    // The connection chooser is a daemon-side decision the agent never surfaces.
-    expect(onboardingRouteSteps(desktop('agent', 'own-relay'))).toEqual(['brief', 'agent-pair', 'done']);
-    expect(onboardingStepCount(desktop('agent'))).toBe(3);
+    // The answer a reader holding a live code recognises instantly.
+    expect(onboardingRoute('add-client').title).toBe('I have a link or QR');
+    // And the one that no longer claims THIS machine becomes anything.
+    expect(onboardingRoute('add-daemon').title).toBe('Add another daemon');
+    expect(onboardingRoute('add-daemon').answer).not.toContain('This machine');
   });
 
-  it('sends Back to the question that actually opened each route', () => {
-    // The agent route was opened by the FIRST question; the three device answers
-    // were opened one question later. Landing on a question the reader never
-    // answered is how two questions start feeling like a maze.
-    expect(questionBehindRoute('agent')).toBe('who');
-    for (const route of ['first-time', 'add-client', 'add-daemon'] as const) {
-      expect(questionBehindRoute(route)).toBe('choose');
-    }
+  it('is the same three answers on a phone, because none of them is impossible there', () => {
+    // The defect this replaced: a phone was offered "add this as a daemon" and had
+    // it withdrawn a screen later, which is a page arguing with itself.
+    expect(ONBOARDING_ROUTES.map(route => route.title).join(' ')).not.toContain('this as a daemon');
   });
 
-  it('names the agent route on the glass without offering it as a device answer', () => {
-    expect(onboardingRoute('agent').title).toBe('An agent sets it up');
-    expect(onboardingRoutes('desktop').map(route => route.id)).not.toContain('agent');
-    expect(onboardingRoutes('mobile').map(route => route.id)).not.toContain('agent');
+  it('accepts only the three entry ids back from storage', () => {
+    expect(isOnboardingRouteId('add-daemon')).toBe(true);
+    expect(isOnboardingRouteId('first-time')).toBe(true);
+    expect(isOnboardingRouteId('add-client')).toBe(true);
+    // Both routes this replaced: a stored place inside either names a journey gone.
+    expect(isOnboardingRouteId('have-link')).toBe(false);
+    expect(isOnboardingRouteId('agent')).toBe(false);
+    expect(isOnboardingRouteId(1)).toBe(false);
+    expect(isOnboardingRouteId(undefined)).toBe(false);
   });
 
-  it('names the two agent steps in words that say where the work is', () => {
-    expect(onboardingStep('brief').title).toBe('Give your agent the prompt');
-    expect(onboardingStep('brief').summary).toContain('that machine');
-    expect(onboardingStep('agent-pair').short).toBe('Pair');
+  it('knows which entries lead into the daemon subflow', () => {
+    expect(isDaemonRouteId('first-time')).toBe(true);
+    expect(isDaemonRouteId('add-daemon')).toBe(true);
+    expect(isDaemonRouteId('add-client')).toBe(false);
+  });
+
+  it('names the subflow on the step header rather than the entry', () => {
+    // "I have a link or QR · step 1 of 3" describes what the reader was holding
+    // rather than what they are doing.
+    expect(journeyLabel(client())).toBe('Pair this browser');
+    expect(journeyLabel(here())).toBe('Get a daemon running');
+    expect(journeyLabel(here('add-daemon'))).toBe('Add another daemon');
   });
 });
 
-describe('the three answers', () => {
-  it('asks what the device is, not what the reader is holding', () => {
-    expect(onboardingRoutes('desktop').map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
-    for (const route of onboardingRoutes('desktop')) {
-      expect(onboardingRoute(route.id)).toBe(route);
-      // Every answer says what happens, in one line rather than a paragraph.
-      expect(route.answer.length).toBeGreaterThan(0);
-      expect(route.answer).not.toContain('\n');
+describe('the steps each set of answers walks', () => {
+  it('collapses pairing when the daemon is on the machine reading the page', () => {
+    // No `pair`, no `scan`: this browser IS a client of that daemon already.
+    expect(onboardingRouteSteps(here('add-daemon'))).toEqual(['install', 'daemon', 'connect', 'local', 'done']);
+    expect(onboardingRouteSteps(here('add-daemon'))).not.toContain('scan');
+    expect(onboardingRouteSteps(here())).toEqual(['install', 'daemon', 'connect', 'local', 'handoff', 'done']);
+  });
+
+  it('offers the phone afterwards only when the reader is standing at the daemon', () => {
+    expect(onboardingRouteSteps(here())).toContain('handoff');
+    expect(onboardingRouteSteps(here('add-daemon'))).not.toContain('handoff');
+    expect(onboardingRouteSteps(away())).not.toContain('handoff');
+  });
+
+  it('spends ONE screen on a daemon that lives somewhere else, and teaches nothing there', () => {
+    // The recursion: that computer opens this page and walks the list above,
+    // answering "this one". A second copy of the install instructions written
+    // about somebody else's keyboard is a copy that goes wrong.
+    for (const device of ['desktop', 'mobile'] as const) {
+      expect(onboardingRouteSteps(away(device))).toEqual(['elsewhere', 'scan', 'done']);
+      expect(onboardingRouteSteps(away(device))).not.toContain('install');
+      expect(onboardingRouteSteps(away(device, 'add-daemon'))).toEqual(['elsewhere', 'scan', 'done']);
     }
   });
 
-  it('offers a phone the daemon answer, and tells it the truth about it', () => {
-    const [, , daemonAnswer] = onboardingRoutes('mobile');
-    // Still THREE answers: an option that vanishes reads as a broken page.
-    expect(onboardingRoutes('mobile').map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
-    expect(daemonAnswer?.answer).toContain('computer');
-    // And it is not the desktop wording pretending this device can host one.
-    expect(daemonAnswer).not.toBe(onboardingRoute('add-daemon', 'desktop'));
-    expect(onboardingRoute('add-daemon', 'desktop').answer).toContain('terminal');
+  it('reads the same on a phone and on a computer, which is the point of that screen', () => {
+    // `need-computer` existed only on a phone and its subject was this device's
+    // unsuitability. A laptop standing up a home server reaches the same screen
+    // and is not being refused anything.
+    expect(onboardingRouteSteps(away('desktop'))).toEqual(onboardingRouteSteps(away('mobile')));
   });
 
-  it('collapses pairing when the daemon is on the machine reading the page', () => {
-    // No `pair`, no `scan`: this browser IS a client of that daemon already.
-    expect(onboardingRouteSteps(desktop('add-daemon'))).toEqual(['install', 'daemon', 'connect', 'local', 'done']);
-    expect(onboardingRouteSteps(desktop('add-daemon'))).not.toContain('scan');
-    expect(onboardingRouteSteps(desktop('first-time'))).toEqual([
-      'install',
-      'daemon',
-      'connect',
-      'local',
-      'handoff',
-      'done',
-    ]);
-  });
-
-  it('makes first-time setup the only route that spans two devices', () => {
-    // Only first-time offers the phone afterwards; adding one more daemon does not.
-    expect(onboardingRouteSteps(desktop('first-time'))).toContain('handoff');
-    expect(onboardingRouteSteps(desktop('add-daemon'))).not.toContain('handoff');
-    // And on a phone it is the route that hands the daemon half away, then waits.
-    expect(onboardingRouteSteps(mobile('first-time'))).toEqual(['need-computer', 'scan', 'done']);
-  });
-
-  it('refuses to start a daemon on a phone rather than pretending to', () => {
-    // One honest screen. A `Next` that advanced to itself would read as stuck.
-    expect(onboardingRouteSteps(mobile('add-daemon'))).toEqual(['need-computer']);
-    expect(isLastOnboardingStep(mobile('add-daemon'), 'need-computer')).toBe(true);
-    expect(onboardingRouteSteps(mobile('add-daemon'))).not.toContain('install');
+  it('walks one agent journey wherever the reader is standing', () => {
+    // No install to be impossible here, no platform to pick: the agent has the
+    // terminal, and this browser only has to end up paired with the daemon.
+    for (const target of ['this', 'other'] as const) {
+      for (const device of ['desktop', 'mobile'] as const) {
+        if (!isTargetPossible(target, device)) continue;
+        expect(onboardingRouteSteps(byAgent(target, device))).toEqual(['brief', 'agent-pair', 'done']);
+      }
+    }
+    expect(firstOnboardingStep(byAgent('this'))).toBe('brief');
+    expect(onboardingStepCount(byAgent('other', 'mobile'))).toBe(3);
   });
 
   it('gives a reader who already has a daemon nothing to install', () => {
     for (const device of ['desktop', 'mobile'] as const) {
-      expect(onboardingRouteSteps({ route: 'add-client', device })).toEqual(['pair', 'scan', 'done']);
-      expect(onboardingStepCount({ route: 'add-client', device })).toBe(3);
+      expect(onboardingRouteSteps(client(device))).toEqual(['pair', 'scan', 'done']);
+      expect(onboardingStepCount(client(device))).toBe(3);
     }
   });
 
   it('shows the self-host detour on the track rather than hiding it', () => {
-    expect(onboardingRouteSteps(desktop('first-time', 'own-relay'))).toEqual([
+    expect(onboardingRouteSteps(here('first-time', 'own-relay'))).toEqual([
       'install',
       'daemon',
       'connect',
@@ -200,58 +279,70 @@ describe('the three answers', () => {
       'handoff',
       'done',
     ]);
-    expect(onboardingStepCount(desktop('first-time', 'own-relay'))).toBeGreaterThan(
-      onboardingStepCount(desktop('first-time')),
-    );
-    // The relay detour is a desktop-only decision: a phone never reaches `connect`.
-    expect(onboardingRouteSteps({ route: 'first-time', device: 'mobile', connection: 'own-relay' })).toEqual([
-      'need-computer',
-      'scan',
-      'done',
-    ]);
+    expect(onboardingStepCount(here('first-time', 'own-relay'))).toBeGreaterThan(onboardingStepCount(here()));
   });
 
-  it('opens each route on its own first step, per device', () => {
-    expect(firstOnboardingStep(desktop('first-time'))).toBe('install');
-    expect(firstOnboardingStep(mobile('first-time'))).toBe('need-computer');
-    expect(firstOnboardingStep(desktop('add-client'))).toBe('pair');
-    expect(firstOnboardingStep(desktop('add-daemon'))).toBe('install');
-    expect(firstOnboardingStep(mobile('add-daemon'))).toBe('need-computer');
+  it('reports a carrier answer only for a journey that has one', () => {
+    expect(pathConnection(here('first-time', 'own-relay'))).toBe('own-relay');
+    expect(pathConnection(here())).toBeUndefined();
+    // The pairing entry is never asked, so it cannot report one either.
+    expect(pathConnection(client())).toBeUndefined();
   });
 
-  it('knows which steps belong to which route on which device', () => {
-    expect(isStepOfRoute(desktop('first-time'), 'connect')).toBe(true);
-    // `connect` is a daemon-side decision; a client never chooses a carrier.
-    expect(isStepOfRoute(desktop('add-client'), 'connect')).toBe(false);
-    // The same route, the same step, a different answer — because of the device.
-    expect(isStepOfRoute(desktop('first-time'), 'install')).toBe(true);
-    expect(isStepOfRoute(mobile('first-time'), 'install')).toBe(false);
-    expect(onboardingStepIndex(desktop('first-time'), 'local')).toBe(3);
-    expect(onboardingStepIndex(desktop('first-time', 'own-relay'), 'relay-deploy')).toBe(6);
-    expect(onboardingStepIndex(desktop('add-client'), 'install')).toBe(-1);
+  it('opens every journey on its own first step', () => {
+    expect(firstOnboardingStep(here())).toBe('install');
+    expect(firstOnboardingStep(away())).toBe('elsewhere');
+    expect(firstOnboardingStep(away('desktop', 'add-daemon'))).toBe('elsewhere');
+    expect(firstOnboardingStep(client())).toBe('pair');
+    expect(firstOnboardingStep(here('add-daemon'))).toBe('install');
   });
 
-  it('clamps at both ends of a route rather than falling off it', () => {
-    expect(nextOnboardingStep(desktop('first-time'), 'install')).toBe('daemon');
-    expect(nextOnboardingStep(desktop('first-time'), 'local')).toBe('handoff');
-    expect(nextOnboardingStep(desktop('first-time', 'own-relay'), 'connect')).toBe('relay-fingerprint');
-    expect(nextOnboardingStep(desktop('add-client'), 'done')).toBe('done');
-    expect(nextOnboardingStep(mobile('add-daemon'), 'need-computer')).toBe('need-computer');
-    expect(previousOnboardingStep(desktop('first-time'), 'local')).toBe('connect');
-    expect(previousOnboardingStep(desktop('first-time', 'own-relay'), 'local')).toBe('relay-deploy');
-    expect(previousOnboardingStep(desktop('add-client'), 'pair')).toBe('pair');
-    expect(furthestOnboardingStep(desktop('first-time'), 'daemon', 'local')).toBe('local');
-    expect(furthestOnboardingStep(desktop('first-time'), 'done', 'install')).toBe('done');
+  it('knows which steps belong to which journey', () => {
+    expect(isStepOfRoute(here(), 'connect')).toBe(true);
+    // `connect` is a daemon-side decision; a client never chooses a carrier, and
+    // neither does a reader whose daemon is on another machine.
+    expect(isStepOfRoute(client(), 'connect')).toBe(false);
+    expect(isStepOfRoute(away(), 'connect')).toBe(false);
+    expect(isStepOfRoute(here(), 'install')).toBe(true);
+    expect(isStepOfRoute(away('desktop'), 'install')).toBe(false);
+    expect(onboardingStepIndex(here(), 'local')).toBe(3);
+    expect(onboardingStepIndex(here('first-time', 'own-relay'), 'relay-deploy')).toBe(6);
+    expect(onboardingStepIndex(client(), 'install')).toBe(-1);
   });
 
-  it('knows the last step of every route, so nothing offers a way onward from it', () => {
-    expect(isLastOnboardingStep(desktop('first-time'), 'done')).toBe(true);
-    expect(isLastOnboardingStep(desktop('first-time'), 'handoff')).toBe(false);
-    expect(isLastOnboardingStep(mobile('first-time'), 'done')).toBe(true);
+  it('clamps at both ends of a journey rather than falling off it', () => {
+    expect(nextOnboardingStep(here(), 'install')).toBe('daemon');
+    expect(nextOnboardingStep(here(), 'local')).toBe('handoff');
+    expect(nextOnboardingStep(here('first-time', 'own-relay'), 'connect')).toBe('relay-fingerprint');
+    expect(nextOnboardingStep(client(), 'done')).toBe('done');
+    expect(nextOnboardingStep(away(), 'elsewhere')).toBe('scan');
+    expect(previousOnboardingStep(here(), 'local')).toBe('connect');
+    expect(previousOnboardingStep(here('first-time', 'own-relay'), 'local')).toBe('relay-deploy');
+    expect(previousOnboardingStep(client(), 'pair')).toBe('pair');
+    expect(furthestOnboardingStep(here(), 'daemon', 'local')).toBe('local');
+    expect(furthestOnboardingStep(here(), 'done', 'install')).toBe('done');
+  });
+
+  it('names where each journey PAIRS, which is not the step before the end', () => {
+    // The last screen offers a way back to pairing when nothing is paired. On the
+    // journey that offers the reader's phone afterwards, the step before the end
+    // is that optional offer — a screen with no pairing on it.
+    expect(pairingOnboardingStep(here())).toBe('local');
+    expect(pairingOnboardingStep(here('add-daemon'))).toBe('local');
+    expect(pairingOnboardingStep(byAgent('this'))).toBe('agent-pair');
+    expect(pairingOnboardingStep(away())).toBe('scan');
+    expect(pairingOnboardingStep(client())).toBe('scan');
+  });
+
+  it('knows the last step of every journey, so nothing offers a way onward from it', () => {
+    expect(isLastOnboardingStep(here(), 'done')).toBe(true);
+    expect(isLastOnboardingStep(here(), 'handoff')).toBe(false);
+    expect(isLastOnboardingStep(away(), 'done')).toBe(true);
+    expect(isLastOnboardingStep(away(), 'elsewhere')).toBe(false);
   });
 
   it('keeps a step reachable after the reader steps back from it', () => {
-    const path = desktop('first-time');
+    const path = here();
     expect(onboardingStepStatus(path, 'install', 'install', 'local')).toBe('current');
     expect(onboardingStepStatus(path, 'daemon', 'install', 'local')).toBe('completed');
     // The furthest point is still somewhere they have been, so it stays jumpable.
@@ -259,44 +350,80 @@ describe('the three answers', () => {
     expect(onboardingStepStatus(path, 'done', 'install', 'local')).toBe('upcoming');
   });
 
-  it('sends a hand-off to the half the other device can actually do', () => {
-    // A phone cannot install anything, so it hands the whole journey to a computer.
-    expect(handoffTarget(mobile('first-time'))).toEqual({ route: 'first-time', step: 'install' });
-    // A computer with a daemon has only membership to offer, and the phone needs a code.
-    expect(handoffTarget(desktop('first-time'))).toEqual({ route: 'add-client', step: 'pair' });
-  });
-
   it('names every step it can put on the glass, and nothing else', () => {
     expect(onboardingStep('connect').title).toBe('Choose a connection');
     expect(onboardingStep('local').summary).toContain('nothing to scan');
-    expect(onboardingStep('need-computer').title).toBe('You will need a computer');
+    expect(onboardingStep('elsewhere').title).toBe('Open Ferretry on that computer');
     expect(onboardingStep('handoff').short).toBe('Phone');
+    expect(onboardingStep('brief').title).toBe('Give your agent the prompt');
+    expect(onboardingStep('agent-pair').short).toBe('Pair');
     expect(isOnboardingStepId('local')).toBe(true);
-    // The agent route's two steps are real places now, not the names of a
-    // journey that was deleted.
-    expect(isOnboardingStepId('brief')).toBe(true);
-    expect(isOnboardingStepId('agent-pair')).toBe(true);
+    expect(isOnboardingStepId('elsewhere')).toBe(true);
+    // The step this replaced, whose subject was the wrong machine entirely.
+    expect(isOnboardingStepId('need-computer')).toBe(false);
     expect(isOnboardingStepId('bribe')).toBe(false);
     expect(isOnboardingStepId(2)).toBe(false);
     expect(isOnboardingStepId(null)).toBe(false);
   });
+});
 
-  it('accepts only the four route ids back from storage', () => {
-    expect(isOnboardingRouteId('add-daemon')).toBe(true);
-    // Not one of the device answers, but a route a stored place can name.
-    expect(isOnboardingRouteId('agent')).toBe(true);
-    // The route this replaced. A stored `have-link` describes a journey that is gone.
-    expect(isOnboardingRouteId('have-link')).toBe(false);
-    expect(isOnboardingRouteId(1)).toBe(false);
-    expect(isOnboardingRouteId(undefined)).toBe(false);
+describe('going back', () => {
+  it('lands on the question that actually opened this journey', () => {
+    // Every daemon journey was opened by answering who installs it; the pairing
+    // entry was opened by the entry question itself.
+    expect(questionBehindRoute('first-time')).toBe('doer');
+    expect(questionBehindRoute('add-daemon')).toBe('doer');
+    expect(questionBehindRoute('add-client')).toBe('entry');
   });
 
-  it('accepts only the three connection ids back from storage', () => {
-    expect(isConnectionMethodId('own-relay')).toBe(true);
-    expect(isConnectionMethodId('tunnel')).toBe(false);
-    expect(isConnectionMethodId(null)).toBe(false);
+  it('skips the question this device never asked', () => {
+    // A Back that lands on a question the reader never saw is the same defect as
+    // one that skips the question they did answer.
+    expect(questionBehindDoer('add-daemon', 'desktop')).toBe('target');
+    expect(questionBehindDoer('first-time', 'desktop')).toBe('entry');
+    expect(questionBehindDoer('first-time', 'mobile')).toBe('entry');
+    expect(questionBehindDoer('add-daemon', 'mobile')).toBe('entry');
   });
 });
+
+describe('handing the setup to the other device', () => {
+  it('sends a computer words and a phone a QR, decided by who RECEIVES', () => {
+    // Nothing on a desk points a camera at another screen. Keying this off the
+    // sender drew an unreadable QR whenever a laptop handed a server its setup.
+    expect(handoffTarget(away('mobile'))).toEqual({
+      receiver: 'computer',
+      journey: { route: 'first-time', target: 'this', doer: 'self' },
+      step: 'install',
+    });
+    expect(handoffTarget(away('desktop', 'add-daemon'))).toEqual({
+      receiver: 'computer',
+      journey: { route: 'add-daemon', target: 'this', doer: 'self' },
+      step: 'install',
+    });
+    // A computer with a daemon has only membership to offer, and the phone needs
+    // a code somebody must print — which at that moment is this computer.
+    expect(handoffTarget(here())).toEqual({
+      receiver: 'phone',
+      journey: { route: 'add-client' },
+      step: 'pair',
+    });
+    expect(handoffTarget(client())).toEqual({
+      receiver: 'phone',
+      journey: { route: 'add-client' },
+      step: 'pair',
+    });
+  });
+
+  it('tells the receiving computer to install BY HAND on ITSELF, which is the recursion', () => {
+    // One place teaches installation, and it is always teaching the machine the
+    // reader is sitting at.
+    const sent = handoffTarget(away('mobile'));
+    expect(sent.journey.route === 'add-client' ? undefined : sent.journey.target).toBe('this');
+    expect(sent.journey.route === 'add-client' ? undefined : sent.journey.doer).toBe('self');
+    expect(isStepOfRoute({ ...sent.journey, device: 'desktop' }, sent.step)).toBe(true);
+  });
+});
+
 describe('install channels', () => {
   it('shows every documented route, and only documented commands', () => {
     expect(INSTALL_CHANNELS.map(channel => channel.id)).toEqual(['apt', 'dnf', 'brew', 'nix', 'curl']);
@@ -386,46 +513,66 @@ describe('the connection chooser', () => {
   it('makes self-hosting a longer route, not a hidden paragraph', () => {
     const own = connectionMethod('own-relay');
     expect(own.title).toContain('own relay');
-    expect(onboardingStepCount({ route: 'first-time', device: 'desktop', connection: 'own-relay' })).toBeGreaterThan(
-      onboardingStepCount({ route: 'first-time', device: 'desktop' }),
-    );
+    expect(onboardingStepCount(here('first-time', 'own-relay'))).toBeGreaterThan(onboardingStepCount(here()));
     expect(PAIR_PRINT_COMMAND).toBe('fy pair --no-wait');
+  });
+
+  it('accepts only the three connection ids back from storage', () => {
+    expect(isConnectionMethodId('own-relay')).toBe(true);
+    expect(isConnectionMethodId('tunnel')).toBe(false);
+    expect(isConnectionMethodId(null)).toBe(false);
   });
 });
 
 describe('the agent setup prompt', () => {
+  const both = [agentSetupPrompt('this'), agentSetupPrompt('other')];
+
   it('carries the same commands the page displays', () => {
-    for (const channel of INSTALL_CHANNELS) {
-      expect(AGENT_SETUP_PROMPT).toContain(channel.label);
-      for (const line of channel.command.split('\n')) expect(AGENT_SETUP_PROMPT).toContain(line);
-    }
-    for (const command of [VERIFY_COMMAND, DAEMON_START_COMMAND, DAEMON_STATUS_COMMAND, PAIR_COMMAND]) {
-      expect(AGENT_SETUP_PROMPT).toContain(command);
+    for (const prompt of both) {
+      for (const channel of INSTALL_CHANNELS) {
+        expect(prompt).toContain(channel.label);
+        for (const line of channel.command.split('\n')) expect(prompt).toContain(line);
+      }
+      for (const command of [VERIFY_COMMAND, DAEMON_START_COMMAND, DAEMON_STATUS_COMMAND]) {
+        expect(prompt).toContain(command);
+      }
     }
   });
 
   it('tells the agent to stop and report rather than improvise', () => {
-    expect(AGENT_SETUP_PROMPT).toContain('stop and report');
-    expect(AGENT_SETUP_PROMPT).toContain('Do not improvise');
+    for (const prompt of both) {
+      expect(prompt).toContain('stop and report');
+      expect(prompt).toContain('Do not improvise');
+    }
   });
 
-  it('tells the agent HOW TO REPORT BACK, both ways, and to ask which', () => {
-    // Without this the person who pasted it is left wondering whether anything
-    // worked. Which report is right depends on where they are reading the page,
-    // the agent cannot know, and guessing spends a single-use code.
-    expect(AGENT_SETUP_PROMPT).toContain('Ask me whether I am reading the Ferretry setup page');
-    expect(AGENT_SETUP_PROMPT).toContain(PAIR_OPEN_COMMAND);
-    expect(AGENT_SETUP_PROMPT).toContain('show me the QR code and the');
-    expect(AGENT_SETUP_PROMPT).toContain('single-use');
-    expect(AGENT_SETUP_PROMPT).toContain('Do not guess');
+  it('names ONE pairing command, because the reader already answered where they are', () => {
+    // It used to make the agent ASK whether the human was on this machine, since
+    // it could not know and guessing spends a single-use code. The first question
+    // settles that before an agent is offered at all.
+    const onThisMachine = agentSetupPrompt('this');
+    expect(onThisMachine).toContain(PAIR_OPEN_COMMAND);
+    expect(onThisMachine).not.toContain('Ask me whether');
+    // With the one fallback that is not hedging: a headless host cannot launch a
+    // browser, and an agent that hits that with no instructions stops dead.
+    expect(onThisMachine).toContain('cannot open a browser');
+    expect(onThisMachine).toContain(PAIR_COMMAND);
+
+    const fromElsewhere = agentSetupPrompt('other');
+    expect(fromElsewhere).toContain(PAIR_COMMAND);
+    expect(fromElsewhere).not.toContain(PAIR_OPEN_COMMAND);
+    expect(fromElsewhere).toContain('show me');
+    expect(fromElsewhere).toContain('single-use');
   });
 
   it('is self-contained: it says what Ferretry is before asking for anything', () => {
     // The agent may know nothing about this project and must not have to browse
     // documentation to follow it.
-    expect(AGENT_SETUP_PROMPT).toContain('Ferretry is a CLI');
-    expect(AGENT_SETUP_PROMPT).toContain('Detect the operating system and CPU architecture');
-    expect(AGENT_SETUP_PROMPT).toContain('Linux amd64');
+    for (const prompt of both) {
+      expect(prompt).toContain('Ferretry is a CLI');
+      expect(prompt).toContain('Detect the operating system and CPU architecture');
+      expect(prompt).toContain('Linux amd64');
+    }
   });
 
   it('says nothing about the person holding the page', () => {
@@ -442,9 +589,11 @@ describe('the agent setup prompt', () => {
       '$HOME',
       '~/.ferretry',
     ];
-    for (const secret of forbidden) expect(AGENT_SETUP_PROMPT).not.toContain(secret);
-    // No absolute URL beyond the documented package sources.
-    const urls = AGENT_SETUP_PROMPT.match(/https?:\/\/[^\s"']+/g) ?? [];
-    for (const url of urls) expect(installationDoc).toContain(url);
+    for (const prompt of both) {
+      for (const secret of forbidden) expect(prompt).not.toContain(secret);
+      // No absolute URL beyond the documented package sources.
+      const urls = prompt.match(/https?:\/\/[^\s"']+/g) ?? [];
+      for (const url of urls) expect(installationDoc).toContain(url);
+    }
   });
 });

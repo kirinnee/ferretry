@@ -27,7 +27,7 @@ const EVERY_STEP: readonly OnboardingStepId[] = [
   'daemon',
   'connect',
   'local',
-  'need-computer',
+  'elsewhere',
   'handoff',
   'pair',
   'done',
@@ -96,8 +96,9 @@ describe('the setup diagram', () => {
     expect(await lit('install')).toEqual([true, false]);
     // The same-machine collapse lights BOTH ends: they are one machine.
     expect(await lit('local')).toEqual([true, true]);
-    // A phone cannot be the machine, so that end is not lit at all.
-    expect(await lit('need-computer')).toEqual([false, true]);
+    // The machine that will run the agents is elsewhere and has nothing on it yet,
+    // so that end is not lit at all — on a phone or on a second computer.
+    expect(await lit('elsewhere')).toEqual([false, true]);
     // `fy pair` is on the computer; scanning is the first time both devices act.
     expect(await lit('pair')).toEqual([true, false]);
     expect(await lit('scan')).toEqual([true, true]);
