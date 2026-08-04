@@ -92,17 +92,22 @@ export function OnboardingDoerChooser({
 }: OnboardingDoerChooserProps) {
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-doer-title">
-      <div className="min-w-0 flex-col gap-1">
+      <div className="flex min-w-0 flex-col gap-1">
         {/*
           THE MACHINE, BEFORE THE QUESTION. It is read first because it is the
           thing the reader has to disagree with if we got it wrong, and a reader
           who reads it after choosing an answer has already spent a tap.
+
+          `items-start` rather than centred: the line wraps to two on a phone, and
+          a glyph centred against two lines floats between them.
         */}
         <p
-          className="m-0 flex min-w-0 items-center gap-1 text-meta leading-base text-fg"
+          className="m-0 flex min-w-0 items-start gap-1 text-meta leading-base text-fg"
           data-onboarding-where={`${basis}:${target}`}
         >
-          {basis === 'forced' ? <Smartphone size={16} aria-hidden="true" className="shrink-0 text-accent" /> : null}
+          {basis === 'forced' ? (
+            <Smartphone size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+          ) : null}
           <span className="min-w-0">{WHERE[basis][target]}</span>
         </p>
         <h2 id="onboarding-doer-title" className="m-0 font-display text-title font-bold tracking-display text-fg">

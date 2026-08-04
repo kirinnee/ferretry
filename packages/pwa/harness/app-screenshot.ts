@@ -681,20 +681,37 @@ try {
           await toEntry(page);
           await expectDevice(page, viewport, 'entry');
           await shot(page, `setup-entry-${viewport.name}`);
-          /* Adding a daemon from a computer is the one entry that asks outright. */
-          await page.locator('button[data-onboarding-route="add-daemon"]').click();
-          const asked = (await page.locator(SETUP_TARGET).count()) > 0;
-          if (asked) {
-            await shot(page, `setup-target-${viewport.name}`);
-            await page.locator('button[data-onboarding-target="this"]').click();
-          } else {
-            process.stdout.write(
-              `⏭️  setup-target-${viewport.name} not captured: this device settles which computer runs the\n` +
-                '    daemon without asking, which is the behaviour under test rather than a gap.\n',
-            );
-          }
+          /*
+           * THE COMMON PATH FIRST: nothing installed yet. On a computer this is
+           * the frame that carries the STATED ASSUMPTION and the way out of it; on
+           * a phone it is the same screen carrying the STATED FACT instead, which
+           * is the pair a reviewer has to see side by side.
+           */
+          await page.locator('button[data-onboarding-route="first-time"]').click();
           await page.locator(SETUP_DOER).waitFor({ state: 'visible' });
           await shot(page, `setup-doer-${viewport.name}`);
+        });
+
+        /*
+         * And the reader who is adding to a fleet, who IS asked which computer and
+         * therefore sees a receipt rather than an offer on the next screen. A phone
+         * is not asked even here, so that frame is skipped loudly.
+         */
+        await capture(contextFor(viewport), async page => {
+          await toEntry(page);
+          await page.locator('button[data-onboarding-route="add-daemon"]').click();
+          if ((await page.locator(SETUP_TARGET).count()) === 0) {
+            process.stdout.write(
+              `⏭️  setup-target-${viewport.name} and setup-doer-chosen-${viewport.name} not captured: this\n` +
+                '    device settles which computer runs the daemon without asking, which is the behaviour\n' +
+                '    under test rather than a gap.\n',
+            );
+            return;
+          }
+          await shot(page, `setup-target-${viewport.name}`);
+          await page.locator('button[data-onboarding-target="other"]').click();
+          await page.locator(SETUP_DOER).waitFor({ state: 'visible' });
+          await shot(page, `setup-doer-chosen-${viewport.name}`);
         });
       }
 
