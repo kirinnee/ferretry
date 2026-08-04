@@ -14,6 +14,7 @@ import {
   CapturedOutput,
   FakeHealth,
   FakeLogs,
+  FakeNixGcRoot,
   FakeSupervisor,
   failedReport,
   health,
@@ -30,6 +31,7 @@ interface Harness {
   readonly direct: FakeSupervisor;
   readonly logs: FakeLogs;
   readonly clock: SteppingClock;
+  readonly nix: FakeNixGcRoot;
 }
 
 function harness(options: {
@@ -42,6 +44,7 @@ function harness(options: {
   withoutService?: boolean;
   logs?: FakeLogs;
   step?: number;
+  nix?: FakeNixGcRoot;
   overrides?: Partial<DaemonControllerDeps>;
 }): Harness {
   const service = new FakeSupervisor('systemd', options.serviceFallback ?? runningReport);
@@ -53,19 +56,21 @@ function harness(options: {
   const out = new CapturedOutput();
   const logs = options.logs ?? new FakeLogs();
   const clock = new SteppingClock(options.step ?? 100);
+  const nix = options.nix ?? new FakeNixGcRoot();
   const controller = new DaemonController({
     layout: layout(),
     service: options.withoutService === true ? undefined : service,
     direct,
     health: new FakeHealth(options.probes ?? [health()]),
     logs,
+    nix,
     clock,
     out,
     readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, clock };
+  return { controller, out, service, direct, logs, clock, nix };
 }
 
 describe('daemon install', () => {
@@ -433,6 +438,104 @@ describe('daemon logs', () => {
   });
 });
 
+/**
+ * `nix shell github:…` is a supported way to run this, and it leaves the executable in the Nix store
+ * with nothing rooting it — so a later `nix-collect-garbage` deletes it out from under an installed
+ * service, which then breaks with no user action. The CLI holds the root itself rather than refusing
+ * the install, because refusing would be pushing our convenience onto the operator.
+ */
+describe('nix garbage-collection root', () => {
+  const STORE_BINARY = '/nix/store/q1w2e3r4t5y6u7i8o9p0asdfghjklzxc-ferretry-0.125.0/bin/fyd';
+  const STORE_PATH = '/nix/store/q1w2e3r4t5y6u7i8o9p0asdfghjklzxc-ferretry-0.125.0';
+
+  /** A harness whose daemon executable resolves into the Nix store, as `nix shell` leaves it. */
+  function fromTheStore(options: Parameters<typeof harness>[0] = {}): ReturnType<typeof harness> {
+    const nix = new FakeNixGcRoot();
+    nix.links.set(layout().daemonBinary, STORE_BINARY);
+    return harness({ ...options, nix });
+  }
+
+  it.each([
+    { verb: 'install' as const, options: { serviceInstalled: false } },
+    { verb: 'start' as const, options: { probes: [undefined, health()] } },
+    {
+      verb: 'restart' as const,
+      options: {
+        probes: [health(), undefined, health()],
+        serviceReports: [stoppedReport] as DaemonSupervisorReport[],
+        serviceFallback: stoppedReport,
+      },
+    },
+  ])('should pin the store path on $verb', async ({ verb, options }) => {
+    // Arrange
+    const subject = fromTheStore(options);
+
+    // Act
+    await subject.controller[verb]();
+
+    // Assert — the ROOT of the store output, not the executable inside it: `nix-store --realise`
+    // takes a store path, and rooting the output is what keeps the whole install alive.
+    should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
+    should(subject.out.text).not.containEql('could not be pinned');
+  });
+
+  it('should keep the root outside the state home, which the daemon refuses to share', async () => {
+    // Arrange — a CLI-created path inside the state home is the defect that stopped every fresh
+    // machine from starting the daemon, and this root is a symbolic link besides, which the daemon's
+    // filesystem port refuses anywhere under its home.
+    const subject = fromTheStore({ probes: [undefined, health()] });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(layout().nixGcRoot).equal('/tmp/fy-home/.local/state/ferretry/nix/fyd');
+    should(layout().nixGcRoot.startsWith(`${layout().stateHome}/`)).be.false();
+  });
+
+  it('should leave a binary that does not come from the store untouched', async () => {
+    // Arrange — the fixture's daemon is a plain /opt install, as brew or GoReleaser would leave it.
+    const subject = harness({ probes: [undefined, health()] });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.nix.pinned).deepEqual([]);
+    should(subject.out.text).containEql('fyd ready');
+  });
+
+  it('should start the daemon anyway when the pin fails, and say so', async () => {
+    // Arrange — no `nix-store` on PATH is the ordinary case here, and it must not fail the start.
+    const nix = new FakeNixGcRoot();
+    nix.links.set(layout().daemonBinary, STORE_BINARY);
+    nix.failure = 'nix-store is not on PATH';
+    const subject = harness({ probes: [undefined, health()], nix });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert
+    should(subject.out.text).containEql('could not be pinned against garbage collection');
+    should(subject.out.text).containEql('nix-store is not on PATH');
+    should(subject.out.text).containEql('nix profile install');
+    should(subject.out.text).containEql('fyd ready');
+    should(subject.out.exitCode).be.undefined();
+  });
+
+  it('should release the root on uninstall so the store path is no longer held', async () => {
+    // Arrange
+    const subject = fromTheStore();
+
+    // Act
+    await subject.controller.uninstall();
+
+    // Assert
+    should(subject.nix.released).deepEqual([layout().nixGcRoot]);
+    should(subject.out.text).containEql('user service removed');
+  });
+});
+
 describe('daemon controller defaults', () => {
   it('should fall back to the shipped policies when none are injected', async () => {
     // Arrange
@@ -443,6 +546,7 @@ describe('daemon controller defaults', () => {
       direct: new FakeSupervisor('direct', absentReport),
       health: new FakeHealth([health()]),
       logs: new FakeLogs(),
+      nix: new FakeNixGcRoot(),
       clock: new SteppingClock(),
       out: new CapturedOutput(),
     });

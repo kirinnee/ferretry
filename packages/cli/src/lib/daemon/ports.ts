@@ -68,6 +68,31 @@ export interface IDaemonHealthPort {
   probe(): Promise<HealthView | undefined>;
 }
 
+/**
+ * Pinning a Nix store path so it cannot be garbage-collected.
+ *
+ * A daemon installed with `nix shell` has no garbage-collection root of its own: the store path is
+ * live only while that shell is open, so a later `nix-collect-garbage` deletes the executable out
+ * from under an installed service, which then breaks with no user action. Running from an ephemeral
+ * `nix shell` is a supported way to use this, so the fix is to hold the root ourselves rather than to
+ * refuse the install.
+ *
+ * Every method reports rather than throws. A daemon that runs but is unpinned is strictly better than
+ * a daemon that refuses to start because a pin did not take.
+ */
+export interface INixGcRootPort {
+  /** Resolve symbolic links, so a profile or shim path is classified by what it actually points at. */
+  realPath(path: string): Promise<string>;
+  /**
+   * Register an indirect GC root at `rootPath` for `storePath`.
+   *
+   * `undefined` on success; otherwise the reason it could not, for the caller to warn with.
+   */
+  pin(storePath: string, rootPath: string): Promise<string | undefined>;
+  /** Drop a root. An absent root is success — an uninstall must release the store path, not fail. */
+  release(rootPath: string): Promise<void>;
+}
+
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */
 export interface IClockPort {
   now(): number;

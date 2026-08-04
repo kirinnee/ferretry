@@ -949,6 +949,24 @@ export class DaemonStorage {
     });
   }
 
+  /**
+   * Prove that this daemon's own durable journal remains available for a transcript digest.
+   *
+   * A transcript by itself is not enough to restart a session: the daemon's marker is the durable
+   * witness that this state directory owes a journal.  In particular, a version-2 marker with no
+   * `events.jsonl` is lost coordination history, never an empty session that may be restarted.
+   */
+  async assertJournalReadable(id: SessionId): Promise<void> {
+    this.assertOpen();
+    await this.serial.run(id, async () => {
+      const paths = createSessionPaths(this.paths, id);
+      const marker = await this.fileSystem.readText(paths.marker);
+      const journal = await this.fileSystem.information(paths.events);
+      this.assertExpectedJournal(id, marker, this.index.findSession(id), journal !== undefined);
+      if (!sessionJournalRequired(marker)) throw new MissingSessionJournalError(id, paths.events);
+    });
+  }
+
   /** Subscribe to this daemon instance's successful durable appends. */
   subscribeEvents(listener: (event: SessionEvent) => void): () => void {
     this.assertOpen();

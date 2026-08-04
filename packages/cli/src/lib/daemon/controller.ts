@@ -7,8 +7,10 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonSupervisor,
+  INixGcRootPort,
   IServiceDefinitionSupervisor,
 } from './ports.ts';
+import { nixStorePathOf } from './nix-store.ts';
 import { livenessOf } from './probe.ts';
 import {
   beginReadinessWait,
@@ -59,6 +61,8 @@ export interface DaemonControllerDeps {
   readonly direct: IDaemonSupervisor;
   readonly health: IDaemonHealthPort;
   readonly logs: IDaemonLogPort;
+  /** Holds a Nix-store daemon against garbage collection; a no-op for any other installation. */
+  readonly nix: INixGcRootPort;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   readonly readiness?: ReadinessPolicy;
@@ -84,6 +88,8 @@ export class DaemonController {
 
   async install(): Promise<void> {
     const service = this.#service();
+    // Before the definition is written, so a unit file never names a store path nothing is holding.
+    await this.#pinDaemonBinary();
     await service.install();
     const health = await this.#awaitReady(service, {});
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
@@ -92,6 +98,13 @@ export class DaemonController {
   async uninstall(): Promise<void> {
     const service = this.#service();
     await service.uninstall();
+    // Uninstall is the ONLY verb that releases, and the asymmetry with `start` is deliberate.
+    //
+    // Releasing on `stop` would look tidier and is dangerously wrong: in a `nix shell`, start pins,
+    // stop releases, a garbage collection runs, and the next `start` finds no executable at all —
+    // manufacturing precisely the failure the pin exists to prevent, for the user who most needs it.
+    // A root held too long costs one store path; a root released too early costs a working daemon.
+    await this.deps.nix.release(this.deps.layout.nixGcRoot);
     this.deps.out.success(`${this.#name} user service removed`);
   }
 
@@ -102,6 +115,7 @@ export class DaemonController {
       return;
     }
     const owner = await this.#owner();
+    await this.#pinDaemonBinary();
     const handle = await owner.start();
     const health = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
@@ -123,6 +137,8 @@ export class DaemonController {
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
+    // Restart is when an upgraded executable is picked up, so the root is re-pointed here too.
+    await this.#pinDaemonBinary();
     const handle = await owner.start();
     const ready = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
@@ -155,6 +171,27 @@ export class DaemonController {
 
   get #name(): string {
     return this.deps.layout.daemonName;
+  }
+
+  /**
+   * Hold a Nix-store daemon against garbage collection, or say why we could not.
+   *
+   * `nix shell github:…` is a supported way to run this, and it leaves the executable in the store
+   * with nothing rooting it — so a later `nix-collect-garbage` deletes it out from under an installed
+   * service, which then breaks with no user action. Any other installation resolves outside the store
+   * and is left alone. A failure is reported and the verb continues: an unpinned daemon that runs
+   * beats a working install refused over a pin that did not take.
+   */
+  async #pinDaemonBinary(): Promise<void> {
+    const resolved = await this.deps.nix.realPath(this.deps.layout.daemonBinary);
+    const storePath = nixStorePathOf(resolved);
+    if (storePath === undefined) return;
+    const failure = await this.deps.nix.pin(storePath, this.deps.layout.nixGcRoot);
+    if (failure === undefined) return;
+    this.deps.out.warn(
+      `${this.#name} runs from the Nix store but could not be pinned against garbage collection (${failure}); ` +
+        `a later nix-collect-garbage may delete it — install with \`nix profile install\` to have Nix hold it instead`,
+    );
   }
 
   /** The supervisor that currently owns the daemon: the service manager when one is installed. */

@@ -32,6 +32,7 @@ import {
   StateFileSystemFactory,
   StateHomeLayout,
   StateHomeLockedError,
+  StorageTranscriptDigestJournal,
   SystemClock,
 } from '../../src/adapters/index.ts';
 import {
@@ -675,6 +676,27 @@ describe('journal storage', () => {
     should(reconciliation.problems[0]?.message).containEql('has lost its durable journal');
     should(opened.storage.findSession(id)).be.undefined();
     should(await exists(eventsFile)).be.false();
+  });
+
+  it('should prove the version-2 journal for a transcript digest and refuse loss or an invalid daemon key', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('digest-journal');
+    await opened.storage.writeConfig(id, { label: 'restartable' });
+    const journal = new StorageTranscriptDigestJournal(opened.storage);
+
+    // Act
+    await journal.assertReadable(id);
+    await rm(createSessionPaths(opened.paths, id).events);
+    const loss = await capturedError(async () => await journal.assertReadable(id));
+    const invalid = await capturedError(async () => await journal.assertReadable('../another-daemon'));
+
+    // Assert
+    should(loss instanceof MissingSessionJournalError).be.true();
+    should(invalid instanceof Error).be.true();
+    if (!(invalid instanceof Error)) throw new Error('invalid digest journal key did not refuse');
+    should(invalid.name).equal('ConversationDigestError');
   });
 
   it('should survive losing a journal and every index file without fabricating an empty session', async () => {
