@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import type { GitExecution, GitInvocation, GitRunner } from '../../lib/worktrees/ports.ts';
+import type { GitExecution, GitInvocation, GitRunner, PinnedWorkingDirectory } from '../../lib/worktrees/ports.ts';
 
 export const DEFAULT_GIT_TIMEOUT_MS = 10_000;
 export const DEFAULT_GIT_STDOUT_LIMIT = 1024 * 1024;
@@ -140,15 +140,25 @@ export class BunGitRunner implements GitRunner {
     const timeoutMs = checkedLimit(invocation.timeoutMs, DEFAULT_GIT_TIMEOUT_MS, 'Git timeout');
     const maxStdoutBytes = checkedLimit(invocation.maxStdoutBytes, DEFAULT_GIT_STDOUT_LIMIT, 'Git stdout limit');
 
-    await checkWorkingDirectory(invocation.cwd);
+    // A pin is NOT stat'ed first. The directory is already open, so a check by name could only ask a
+    // question about a different object than the one the child will be started in — which is the entire
+    // hole a pin exists to close.
+    const named: string | undefined = typeof invocation.cwd === 'string' ? invocation.cwd : undefined;
+    const pinned: PinnedWorkingDirectory | undefined = typeof invocation.cwd === 'string' ? undefined : invocation.cwd;
+    if (named !== undefined) await checkWorkingDirectory(named);
 
     // Git is given stdin only when the caller has bytes for it. Every command this daemon runs is
     // non-interactive, so an open stdin with nothing written could only ever hang the daemon on a prompt —
     // a supplied buffer is closed by the runtime once written, which is a different thing.
     let child: Bun.Subprocess<'ignore' | Blob, 'pipe', 'pipe'>;
+    // The bracket is exactly one statement wide and holds no await, so nothing else in the runtime can
+    // observe the installed directory. `.` is then the ONLY cwd that names the pin: the child inherits
+    // the installed directory and resolves `.` against it in its own address space, so the tree Git
+    // reads is the object the walk opened rather than a name re-resolved after the fact.
+    const release = pinned?.install();
     try {
       child = Bun.spawn(['git', ...HARDENED_GIT_ARGUMENTS, ...invocation.args], {
-        cwd: invocation.cwd,
+        cwd: named ?? '.',
         env: gitEnvironment(this.inheritedEnvironment(), invocation.literalPathspecs ?? true),
         stdin: invocation.stdin ? new Blob([invocation.stdin]) : 'ignore',
         stdout: 'pipe',
@@ -156,6 +166,8 @@ export class BunGitRunner implements GitRunner {
       });
     } catch (error) {
       throw new GitProcessError('spawn_failed', 'could not start Git', { cause: error });
+    } finally {
+      release?.();
     }
 
     let timedOut = false;
