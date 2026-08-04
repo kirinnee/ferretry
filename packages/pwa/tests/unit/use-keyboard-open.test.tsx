@@ -7,17 +7,6 @@ const Probe = () => <span data-open={String(useKeyboardOpen())} />;
 const openOf = (container: HTMLElement): string | null =>
   container.querySelector('span')?.getAttribute('data-open') ?? null;
 
-/**
- * The observer answers on a microtask the test cannot await directly, and under
- * coverage instrumentation one turn of the loop is not always enough. Settle
- * until the probe agrees rather than guessing a number of turns.
- */
-const settle = async (until: () => boolean, turns = 20): Promise<void> => {
-  for (let turn = 0; turn < turns && !until(); turn++) {
-    await interact(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
-  }
-};
-
 afterEach(() => {
   document.documentElement.removeAttribute(KEYBOARD_ATTRIBUTE);
 });
@@ -73,12 +62,31 @@ describe('useKeyboardOpen', () => {
 
   it('detaches its observer with the component, so an unmounted probe never updates', async () => {
     // Arrange
-    const view = await mount(<Probe />);
-    await view.unmount();
+    let observer: { disconnected: boolean } | undefined;
+    const globals = globalThis as typeof globalThis & { MutationObserver: typeof MutationObserver };
+    const original = globals.MutationObserver;
+    class ProbeObserver {
+      disconnected = false;
+      constructor(_callback: MutationCallback) {
+        observer = this;
+      }
+      observe(): void {}
+      disconnect(): void {
+        this.disconnected = true;
+      }
+    }
+    globals.MutationObserver = ProbeObserver as unknown as typeof MutationObserver;
 
-    // Act + Assert — a write after unmount must not throw a React update warning.
-    document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'open');
-    await settle(() => false, 3);
-    expect(document.documentElement.getAttribute(KEYBOARD_ATTRIBUTE)).toBe('open');
+    try {
+      const view = await mount(<Probe />);
+
+      // Act
+      await view.unmount();
+
+      // Assert — a disconnected observer cannot schedule a state update after unmount.
+      expect(observer?.disconnected).toBe(true);
+    } finally {
+      globals.MutationObserver = original;
+    }
   });
 });
