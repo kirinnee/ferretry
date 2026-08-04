@@ -1,5 +1,6 @@
 import { daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { RunOverrides } from './arguments.ts';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
 
@@ -256,4 +257,46 @@ export function defaultDaemonConfig(): DaemonConfig {
  */
 export function advertisesForeignAddress(config: DaemonConfig): boolean {
   return new URL(config.publicUrl).origin !== new URL(config.bindUrl).origin;
+}
+
+/**
+ * The configuration one run actually uses, once the command line has had its say.
+ *
+ * A PORT NAMED ON THE COMMAND LINE IS A CLAIM, exactly like a recorded one: somebody who pins an
+ * address is telling you something, and they get that address or a clear failure — never a silent
+ * fallback to somewhere else. It is not written down, because it was said about this run only.
+ */
+export function overriddenBy(config: DaemonConfig, overrides: RunOverrides): DaemonConfig {
+  if (overrides.host === undefined && overrides.port === undefined) return config;
+  const host = overrides.host ?? config.host;
+  const port = overrides.port ?? config.port;
+  const bindUrl = daemonAddress(host, port);
+  return {
+    ...config,
+    host,
+    port,
+    portIsRecorded: overrides.port !== undefined || config.portIsRecorded,
+    bindUrl,
+    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+  };
+}
+
+/**
+ * Reading and recording this daemon's configuration document.
+ *
+ * AN INTERFACE rather than the one adapter, because `--config` names a document outside the state
+ * home and the state home's filesystem port refuses every path outside it — correctly, since that
+ * confinement is what stops the daemon's own state escaping. An operator naming their own file is a
+ * different act from the daemon addressing its own state, so it gets a different adapter and the
+ * boot depends on neither.
+ */
+export interface DaemonConfigStore {
+  /** The document an operator edits, so a refusal can name the file rather than describe it. */
+  readonly path: string;
+  /** What is on disk right now, parsed and raw, writing nothing. */
+  peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }>;
+  /** The configuration to run on, seeding the document when the state home has none. */
+  load(): Promise<DaemonConfig>;
+  /** Writes down the address this daemon took, so it is the same one next time. */
+  record(port: number): Promise<void>;
 }

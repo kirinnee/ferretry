@@ -29,6 +29,24 @@ export class FileDaemonConfig {
    * at the old one. Editing `port` therefore appeared to do nothing at all. Derived values are
    * recomputed on every load instead, which is the only arrangement in which the two cannot disagree.
    */
+  /**
+   * The configuration as it stands, WITHOUT writing anything.
+   *
+   * A separate verb from `load` because `load` seeds the document on a state home that has none, and
+   * a question must never provision. `fyd --print-config` and `fyd --check` exist precisely for the
+   * operator who cannot get a boot to work; creating their state home as a side effect of asking
+   * would be the `--version` defect all over again.
+   *
+   * The RAW document comes back beside the parsed one because provenance needs it: whether a value
+   * was written down or defaulted is exactly the question, and the parsed form has already lost it.
+   */
+  async peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    if (text === undefined) return { document: undefined, config: parseDaemonConfig({}) };
+    const document = JSON.parse(text) as Record<string, unknown>;
+    return { document, config: parseDaemonConfig(document) };
+  }
+
   async load(): Promise<DaemonConfig> {
     const text = await this.files.readText(this.paths.daemonConfig);
     if (text === undefined) {

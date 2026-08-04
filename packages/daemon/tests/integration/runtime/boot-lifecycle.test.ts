@@ -37,7 +37,9 @@ import {
   BrowserProfileStore,
 } from '../../../src/adapters/index.ts';
 import {
+  type BootNoticePort,
   DEFAULT_CALLSIGN_POOL,
+  EXIT_ADDRESS_CONFLICT,
   EXIT_ALREADY_RUNNING,
   MigrationPreflight,
   type PaneObservation,
@@ -55,6 +57,7 @@ import {
 } from '../../../src/lib/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
+import { healthViewFixture } from '../../fixtures/health-view.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -554,6 +557,37 @@ class RecordingSttSurface {
 async function worldAt(home: string, port: number, untilShutdown: () => Promise<void>): Promise<DaemonWorld> {
   await seedHome(home, port);
   return { ...buildWorld(), untilShutdown };
+}
+
+/**
+ * Everything a boot said, so a refusal is asserted on its MESSAGE and not only on its exit code.
+ *
+ * The entire defect these tests guard was an exit code with no message — a launcher telling an
+ * operator to inspect a log file that was empty — so a test that checked the code alone would have
+ * passed against the broken daemon.
+ */
+function recordingNotices(): { readonly port: BootNoticePort; readonly steps: string[]; readonly stated: string[] } {
+  const steps: string[] = [];
+  const stated: string[] = [];
+  return {
+    steps,
+    stated,
+    port: {
+      step: (name, detail) => steps.push(detail === undefined ? name : `${name} — ${detail}`),
+      state: message => stated.push(message),
+    },
+  };
+}
+
+/**
+ * A state home with its layout but NO recorded port, which is what a machine that has never started
+ * a daemon actually looks like — and the only state in which a boot may choose its own address.
+ */
+async function seedHomeWithoutPort(home: string): Promise<void> {
+  process.env.FY_HOME = home;
+  const opened = await buildWorld().storage.open();
+  await opened.storage.close();
+  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1' }), { mode: 0o600 });
 }
 
 async function runCleanups(cleanups: ReadonlyArray<() => void | Promise<void>>): Promise<void> {
@@ -3186,30 +3220,42 @@ describe('daemon boot lifecycle', () => {
     should(second).equal(0);
   });
 
-  it('should report already-running when another owner holds the home lock', async () => {
+  it('should report already-running when another owner holds the home lock, and say so', async () => {
     // Arrange
     const home = await tempDirectory('fyd-locked');
     const port = await freeLoopbackPort();
     await seedHome(home, port);
     const incumbent = await buildWorld().storage.open();
     const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
 
     // Act
-    const code = await start({ ...buildWorld(), untilShutdown: async () => {} }, cleanups);
+    const code = await start({ ...buildWorld(), notices: said.port, untilShutdown: async () => {} }, cleanups);
     await incumbent.storage.close();
 
     // Assert
     should(code).equal(EXIT_ALREADY_RUNNING);
     // The open failed, so nothing was acquired and there is nothing to release.
     should(cleanups).be.empty();
+    // THE MESSAGE, not just the code: this branch used to return 78 and write nothing, so the
+    // launcher pointed the operator at a log file that was empty.
+    should(said.stated).have.length(1);
+    should(said.stated[0]).match(/state home/u);
+    should(said.stated[0]).match(/daemon\.lock/u);
   });
 
-  it('should refuse to boot when the configured address already has a responder', async () => {
-    // Arrange
+  it('should refuse a recorded address held by another of these daemons, and name it', async () => {
+    // Arrange: an incumbent that serves this product's own health report, which is the only evidence
+    // that identifies one. Nothing weaker may be believed.
     const home = await tempDirectory('fyd-incumbent');
-    const incumbent = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => Response.json({ status: 'ok' }) });
+    const incumbent = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => Response.json(healthViewFixture({ version: '9.9.9', pid: 4_242 })),
+    });
     const cleanups: Array<() => void | Promise<void>> = [];
-    const world = await worldAt(home, boundPort(incumbent), async () => {});
+    const said = recordingNotices();
+    const world = { ...(await worldAt(home, boundPort(incumbent), async () => {})), notices: said.port };
 
     // Act
     const code = await start(world, cleanups);
@@ -3220,5 +3266,154 @@ describe('daemon boot lifecycle', () => {
     should(code).equal(EXIT_ALREADY_RUNNING);
     // The home was opened before the address was probed, so its release is the one registered step.
     should(cleanups).have.length(1);
+    should(said.stated).have.length(1);
+    should(said.stated[0]).match(/9\.9\.9/u);
+    should(said.stated[0]).match(/pid 4242/u);
+    should(said.stated[0]).match(/daemon stop/u);
+  });
+
+  it('should report a stranger on a recorded address as a conflict rather than as itself', async () => {
+    // Arrange: exactly the reported failure — a different fleet's supervisor answering 401 on the
+    // address this daemon was configured for. It answered, so the boot used to call it an incumbent
+    // and exit 78 in silence.
+    const home = await tempDirectory('fyd-stranger');
+    const stranger = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => Response.json({ error: 'unauthorized' }, { status: 401 }),
+    });
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    const world = { ...(await worldAt(home, boundPort(stranger), async () => {})), notices: said.port };
+
+    // Act
+    const code = await start(world, cleanups);
+    await runCleanups(cleanups);
+    await stranger.stop(true);
+
+    // Assert — a DIFFERENT non-zero code, because the remedy is different.
+    should(code).not.equal(0);
+    should(code).not.equal(EXIT_ALREADY_RUNNING);
+    should(code).equal(EXIT_ADDRESS_CONFLICT);
+    // NON-EMPTY OUTPUT is the point of this whole test: the defect was an exit code with no message.
+    should(said.stated).have.length(1);
+    should(said.stated[0]).match(/HTTP 401/u);
+    should(said.stated[0]).match(new RegExp(`127\\.0\\.0\\.1:${String(boundPort(stranger))}`, 'u'));
+    // It names the edit that fixes it, in the file that holds it.
+    should(said.stated[0]).match(/"port" in .*config\/daemon\.json/u);
+  });
+
+  it('should fail closed when the address is held by something that never answers', async () => {
+    // Arrange: a listener that accepts the connection and says nothing, so identification cannot
+    // complete. Booting over a live daemon because the probe was inconclusive is unrecoverable —
+    // both would own state neither can see the other writing.
+    const home = await tempDirectory('fyd-silent');
+    const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => {} } });
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    const world = { ...(await worldAt(home, silent.port, async () => {})), notices: said.port };
+
+    // Act
+    const code = await start(world, cleanups);
+    await runCleanups(cleanups);
+    silent.stop(true);
+
+    // Assert
+    should(code).equal(EXIT_ADDRESS_CONFLICT);
+    should(said.stated).have.length(1);
+    should(said.stated[0]).match(/did not answer/u);
+  });
+
+  it('should take the next free address when no port is recorded, and write the choice down', async () => {
+    // Arrange: a state home that has never started a daemon, with something already on the address
+    // this boot prefers. A first run has to succeed on a machine like that.
+    const home = await tempDirectory('fyd-fallback');
+    const occupied = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => Response.json({ error: 'unauthorized' }, { status: 401 }),
+    });
+    const preferredPort = boundPort(occupied);
+    await seedHomeWithoutPort(home);
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    let release = (): void => {};
+    const stopped = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const world = buildWorld();
+    const booting = start(
+      {
+        ...world,
+        boot: { ...world.boot, preferredPort },
+        notices: said.port,
+        untilShutdown: async () => await stopped,
+      },
+      cleanups,
+    );
+
+    // Act — the daemon answers on the address it took, which is not the one it preferred.
+    let health: Response | undefined;
+    for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
+      health = await fetch(`http://127.0.0.1:${String(preferredPort + 1)}/healthz`).catch(() => undefined);
+      if (health === undefined) await Bun.sleep(25);
+    }
+    const recorded = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<string, unknown>;
+    release();
+    const code = await booting;
+    await runCleanups(cleanups);
+    await occupied.stop(true);
+
+    // Assert
+    should(code).equal(0);
+    should(health?.status).equal(200);
+    // RECORDED, so it is the same address next time: a daemon whose address moves on its own is
+    // worse than one that fails, and every client that learned where it lived would be wrong.
+    should(recorded).have.property('port', preferredPort + 1);
+    // Still nothing derived in the document, so the recorded port cannot freeze an advertisement.
+    should(recorded).not.have.property('publicUrl');
+    // And it said which address it skipped and why, in the log the operator is already reading.
+    should(said.steps.join('\n')).match(/address in use/u);
+    should(said.steps.join('\n')).match(new RegExp(`address chosen.*${String(preferredPort + 1)}`, 'u'));
+  });
+
+  it('should trace every boot milestone so a stall names the step it stalled on', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-journal');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    let release = (): void => {};
+    const stopped = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const world = { ...(await worldAt(home, port, async () => await stopped)), notices: said.port };
+
+    // Act
+    const booting = start(world, cleanups);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(25);
+    }
+    release();
+    const code = await booting;
+    await runCleanups(cleanups);
+
+    // Assert — before this trail existed, a daemon that failed and a daemon that spent ninety
+    // seconds initializing successfully produced the same zero bytes.
+    should(code).equal(0);
+    const trail = said.steps.map(step => step.split(' — ')[0]);
+    should(trail).containDeepOrdered([
+      'starting',
+      'state home opened',
+      'configuration loaded',
+      'address is free',
+      'subsystems mounted',
+      'listening',
+      'ready',
+    ]);
+    // The state home and the address it serves are named, not merely implied.
+    should(said.steps.join('\n')).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
+    should(said.steps.join('\n')).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(port)}`, 'u'));
   });
 });
