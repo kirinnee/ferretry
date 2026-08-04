@@ -49,8 +49,10 @@ task preview -- --help
 
 The browser tries a **direct** connection first and falls back to Ferretry's **hosted relay** when
 the daemon has no inbound route. Neither is a question anyone is asked during setup, and the live
-carrier is always named on screen. [docs/relay-protocol.md](docs/relay-protocol.md) is the wire
-contract and the disclosure of what a relay operator can and cannot observe.
+carrier is always named on screen. That is the required behaviour, not yet the shipped one: **the
+client transport is not wired** — neither `fyd` nor the PWA can route through a relay today, and
+[docs/relay-protocol.md](docs/relay-protocol.md) §13 names the remaining pieces. That document is
+also the wire contract and the disclosure of what a relay operator can and cannot observe.
 
 Running a relay of your own is supported but is an **expert opt-in path**, not part of setup:
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md) is the runbook.
