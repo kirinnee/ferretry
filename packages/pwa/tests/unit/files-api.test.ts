@@ -100,6 +100,40 @@ describe('files API', () => {
     expect(fsTabAvailable('ready')).toBeTrue();
     expect(fsTabAvailable('error')).toBeTrue();
     expect(fsTabAvailable('absent')).toBeFalse();
+    // A daemon that cannot serve the surface KEEPS the tab: the reason has to be stated somewhere,
+    // and a silently missing tab states nothing.
+    expect(fsTabAvailable('unsupported')).toBeTrue();
+  });
+
+  it('settles on unsupported and keeps the daemon’s own reason for the disclosure', async () => {
+    resetFsProbes();
+    const original = globalThis.fetch;
+    let asked = 0;
+    globalThis.fetch = (async () => {
+      asked += 1;
+      return new Response(
+        JSON.stringify({ error: 'file browsing is not available on macOS yet', code: 'unsupported' }),
+        {
+          status: 501,
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      await loadFsChanges(daemonA, scopeA);
+      expect(readFsProbe(scopeA)).toMatchObject({
+        state: 'unsupported',
+        changes: null,
+        error: 'file browsing is not available on macOS yet',
+      });
+      // Settled, not merely failed: re-asking a machine what it is spends a request to hear the same
+      // answer, so only a forced refresh may repeat it.
+      await loadFsChanges(daemonA, scopeA);
+      expect(asked).toBe(1);
+    } finally {
+      globalThis.fetch = original;
+      resetFsProbes();
+    }
   });
 
   it('keeps failed lookups absent and supports cancellable proof resolution', async () => {

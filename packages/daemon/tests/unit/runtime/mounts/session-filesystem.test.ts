@@ -216,6 +216,8 @@ describe('the file route', () => {
       [new FsError('escapes_root', 'outside'), 403],
       [new FsError('denied', 'never'), 403],
       [new FsError('ignored', 'ignored'), 403],
+      // Not a 403: the caller's authority is not what is missing, the implementation is.
+      [new FsError('unsupported', 'this machine cannot'), 501],
     ];
 
     // Act / Assert

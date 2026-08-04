@@ -13,6 +13,7 @@ import {
   type PinnedTarget,
   rootIsDenied,
   type SessionRootPinner,
+  unsupportedPlatform,
 } from '../../../lib/session/filesystem/index.ts';
 
 /**
@@ -322,7 +323,7 @@ export class ProcfsSessionRootPinner implements SessionRootPinner {
     // A security precondition, not an optimisation: listings, Git and the component walk all need a path
     // alias for an already-open descriptor, and using `cwd` as a fallback would validate one tree and
     // serve another after a rename or symlink swap.
-    if (!HAS_PROCFS_PIN) throw new FsError('denied', 'filesystem viewing requires descriptor-backed procfs support');
+    if (!HAS_PROCFS_PIN) throw unsupportedPlatform(process.platform);
 
     const handle = await this.openRoot(cwd);
     try {
