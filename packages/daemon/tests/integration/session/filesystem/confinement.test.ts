@@ -37,8 +37,13 @@ import { cleanupTempDirectories, tempDirectory } from '../../support/repository.
  * because a confinement claim that has never met a real symlink is not a claim. Any escape either
  * mechanism allows shows up as the same named failure, and neither can quietly become the weaker one.
  */
+const PROCFS_PINNER = ['pinned through a procfs descriptor alias', new ProcfsSessionRootPinner()] as const;
 const PINNERS: readonly (readonly [string, SessionRootPinner])[] = [
-  ['pinned through a procfs descriptor alias', new ProcfsSessionRootPinner()],
+  // The procfs one only exists where `/proc/<pid>/fd/<n>` does, and refuses everywhere else BY DESIGN
+  // — running its cases off Linux would assert that a deliberate refusal is a failure. The POSIX one
+  // is exercised on every platform, which is the point: Linux is where its logic is proved, and the
+  // macOS job is where the kernel and the C library it depends on are.
+  ...(process.platform === 'linux' ? [PROCFS_PINNER] : []),
   ['pinned through the kernel working directory', new PosixSessionRootPinner()],
 ];
 
@@ -663,6 +668,25 @@ const suite = (label: string, pinner: SessionRootPinner) =>
   });
 
 for (const [label, pinner] of PINNERS) suite(label, pinner);
+
+describe.if(process.platform !== 'linux')('the procfs pinner where there is no procfs', () => {
+  it('should refuse the whole surface rather than fall back to the pathname it was given', async () => {
+    // Arrange: the judgement PR #150 made, still held — this implementation has no weaker mode.
+    const [, procfs] = PROCFS_PINNER;
+    const root = await tempDirectory('no-procfs');
+
+    // Act
+    let refusal: FsError | undefined;
+    try {
+      await procfs.pin(root);
+    } catch (error) {
+      refusal = error as FsError;
+    }
+
+    // Assert
+    should(refusal?.code).eql('unsupported');
+  });
+});
 
 describe('a runtime that cannot reach the calls a pin needs', () => {
   it('should refuse the whole surface rather than fall back to checking pathnames', async () => {
