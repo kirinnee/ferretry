@@ -1,5 +1,13 @@
-import type { ProjectList, SessionSkills, SessionView } from '@ferretry/protocol';
+import {
+  RegisterProjectRequestSchema,
+  type ProjectInfo,
+  type ProjectList,
+  type RegisterProjectRequest,
+  type SessionSkills,
+  type SessionView,
+} from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
+import { parseBody } from '../../api/body.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
@@ -8,7 +16,21 @@ import type { SessionDirectorySubsystem } from './sessions.ts';
 /** The daemon-local catalogs that are safe to project to an authenticated paired client. */
 export interface CatalogSubsystem {
   projects(): Promise<ProjectList>;
+  registerProject(request: RegisterProjectRequest): Promise<ProjectInfo>;
   skills(session: SessionView): Promise<SessionSkills>;
+}
+
+async function registerProject(catalogs: CatalogSubsystem, context: RouteContext): Promise<ApiResponse> {
+  try {
+    return jsonResponse(await catalogs.registerProject(await parseBody(context.request, RegisterProjectRequestSchema)));
+  } catch (error) {
+    if (error instanceof ApiError) throw error;
+    throw new ApiError(
+      422,
+      error instanceof Error ? error.message : 'the project could not be registered',
+      'project_registration_failed',
+    );
+  }
 }
 
 function sessionId(context: RouteContext): string {
@@ -41,6 +63,13 @@ export function catalogRoutes(catalogs: CatalogSubsystem, sessions: SessionDirec
       scope: 'admin',
       noStore: true,
       handle: async () => jsonResponse(await catalogs.projects()),
+    },
+    {
+      method: 'POST',
+      path: '/v1/projects',
+      scope: 'admin',
+      noStore: true,
+      handle: async context => await registerProject(catalogs, context),
     },
     {
       method: 'GET',

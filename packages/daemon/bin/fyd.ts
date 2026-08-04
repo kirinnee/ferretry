@@ -42,6 +42,7 @@ import {
   daemonSecretSourceProgram,
   FetchEnhancementTransport,
   FileDaemonConfig,
+  FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
   FileRoutingCatalog,
@@ -3725,7 +3726,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
-  const catalogs = new NodeCatalog({ home: homedir(), projectRoots: config.projectRoots });
+  const skills = new NodeCatalog({ home: homedir() });
+  const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
+  const catalogs = {
+    projects: () => projects.projects(),
+    registerProject: request => projects.register(request),
+    skills: session => skills.skills(session),
+  };
   /**
    * The analytics materialization, opened under the lifetime lock this boot is already holding and
    * through the same confined filesystem port.
