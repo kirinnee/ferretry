@@ -305,6 +305,55 @@ describe('Markdown references', () => {
   });
 });
 
+describe('Markdown escaped references', () => {
+  const proved = (text: string) =>
+    render(
+      <Markdown
+        agentReferenceResolver={agentResolver(daemonA)}
+        onNavigate={() => undefined}
+        onTaskOpen={() => undefined}
+        taskReferenceResolver={() => true}
+        text={text}
+      />,
+    );
+
+  test('should keep an escaped sigil literal even though Markdown ate the backslash', () => {
+    // Act
+    const tree = proved('write \\:zelda to name an agent');
+
+    // Assert — the reader escaped it, so it is prose, and the backslash is gone
+    // exactly as Markdown intends.
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findByType('p'))).equal('write :zelda to name an agent');
+  });
+
+  test('should still link the unescaped tokens around an escaped one', () => {
+    // Act
+    const tree = proved('\\:zelda names :zelda');
+
+    // Assert
+    should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual([':zelda']);
+  });
+
+  test('should honour an escape on a continuation line of a block', () => {
+    // Act — the source carries `> ` prefixes the parsed text does not.
+    const tree = proved('> ping :zelda\n> and \\&F12\n');
+
+    // Assert
+    should(anchorsOf(tree.root).map(anchor => textOf(anchor))).deepEqual([':zelda']);
+  });
+
+  test('should refuse to link past source it cannot align rather than guess', () => {
+    // Act — a character reference makes every later offset ambiguous, and
+    // ambiguity about an author's escape is not proof they did not write one.
+    const tree = proved('&amp; then :zelda');
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(textOf(tree.root.findByType('p'))).equal('& then :zelda');
+  });
+});
+
 describe('Markdown references inside code', () => {
   const agentInCode = (text: string) =>
     render(<Markdown agentReferenceResolver={agentResolver(daemonA)} onNavigate={() => undefined} text={text} />);

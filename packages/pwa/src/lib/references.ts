@@ -592,10 +592,19 @@ interface MdNode {
   title?: string;
   data?: { hProperties?: Record<string, string> };
   children?: MdNode[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
 }
 
-// Already-linked text, code and raw HTML are left exactly as authored: a
-// reference inside them is content, not a destination.
+/** The vfile subset this transform reads: the document it was parsed from. */
+interface MdFile {
+  value?: unknown;
+}
+
+// Already-linked text and raw HTML are left exactly as authored: a reference
+// inside them is content, not a destination. CODE IS NOT IN THIS SET by
+// accident — a fence's content is not mdast children at all, so it is decorated
+// by the renderer through `code-span-references.ts` instead, which can slice
+// code text without an mdast round trip that would re-escape it.
 const SKIP_CHILDREN = new Set(['link', 'linkReference', 'code', 'inlineCode', 'html']);
 
 /** One proved reference and the exact bytes of the token that proved it. */
@@ -618,11 +627,67 @@ export function provenReferences(value: string, resolvers: ReferenceResolvers): 
   });
 }
 
-function linkifyText(value: string, resolvers: ReferenceResolvers): MdNode[] | null {
+/**
+ * Which sigils in a parsed text node the author had escaped, and how far the
+ * source could be trusted at all.
+ *
+ * WHY THIS EXISTS. Markdown eats a backslash escape before the transform ever
+ * runs: `\:zelda` reaches this module as the text `:zelda`, indistinguishable
+ * from an authored reference. The node's position still points at the original
+ * bytes, so the escape is recoverable — but only by walking the source and the
+ * parsed value together.
+ *
+ * `limit` is the fail-closed half. The walk understands exactly two things: a
+ * character escape, and the block prefixes (`>` and indentation) a continuation
+ * line carries in the source but not in the value. Anything else it meets — a
+ * character reference like `&amp;`, most likely — makes every later offset
+ * ambiguous, so it stops and REFUSES to link from there on. Ambiguous evidence
+ * about whether an author suppressed a reference is not evidence that they
+ * didn't.
+ */
+interface SourceAlignment {
+  /** Value offsets whose sigil was backslash-escaped in the source. */
+  readonly escaped: ReadonlySet<number>;
+  /** The value offset from which the source could no longer be aligned. */
+  readonly limit: number;
+}
+
+const WHOLE: SourceAlignment = { escaped: new Set(), limit: Number.POSITIVE_INFINITY };
+const BLOCK_PREFIX = /[ \t>]/u;
+
+function alignSource(source: string, value: string): SourceAlignment {
+  if (source === value) return WHOLE;
+  const escaped = new Set<number>();
+  let at = 0;
+  let cursor = 0;
+  while (cursor < value.length) {
+    if (source[at] === value[cursor]) {
+      at += 1;
+      cursor += 1;
+      continue;
+    }
+    if (source[at] === '\\' && source[at + 1] === value[cursor]) {
+      escaped.add(cursor);
+      at += 2;
+      cursor += 1;
+      continue;
+    }
+    // A continuation line's own prefix belongs to the block, not to the prose.
+    if (cursor > 0 && value[cursor - 1] === '\n' && at < source.length && BLOCK_PREFIX.test(source[at] ?? '')) {
+      at += 1;
+      continue;
+    }
+    return { escaped, limit: cursor };
+  }
+  return { escaped, limit: Number.POSITIVE_INFINITY };
+}
+
+function linkifyText(value: string, resolvers: ReferenceResolvers, alignment: SourceAlignment): MdNode[] | null {
   const output: MdNode[] = [];
   let cursor = 0;
   let changed = false;
   for (const match of provenReferences(value, resolvers)) {
+    if (match.start >= alignment.limit || alignment.escaped.has(match.start)) continue;
     const resolved = match.reference;
     if (match.start > cursor) output.push({ type: 'text', value: value.slice(cursor, match.start) });
     output.push({
@@ -640,15 +705,27 @@ function linkifyText(value: string, resolvers: ReferenceResolvers): MdNode[] | n
   return output;
 }
 
-function transformNode(node: MdNode, resolvers: ReferenceResolvers): void {
+/** The source bytes a text node was parsed from, when it can be recovered. */
+function nodeSource(node: MdNode, source: string | null): string | null {
+  const start = node.position?.start?.offset;
+  const end = node.position?.end?.offset;
+  if (source === null || typeof start !== 'number' || typeof end !== 'number' || end < start) return null;
+  return source.slice(start, end);
+}
+
+function transformNode(node: MdNode, resolvers: ReferenceResolvers, source: string | null): void {
   if (SKIP_CHILDREN.has(node.type) || !node.children) return;
   const children: MdNode[] = [];
   for (const child of node.children) {
     if (child.type === 'text' && typeof child.value === 'string') {
-      children.push(...(linkifyText(child.value, resolvers) ?? [child]));
+      const raw = nodeSource(child, source);
+      // No recoverable source is not evidence of an escape: a synthesised node
+      // carries no author's backslash to honour.
+      const alignment = raw === null ? WHOLE : alignSource(raw, child.value);
+      children.push(...(linkifyText(child.value, resolvers, alignment) ?? [child]));
       continue;
     }
-    transformNode(child, resolvers);
+    transformNode(child, resolvers, source);
     children.push(child);
   }
   node.children = children;
@@ -658,11 +735,14 @@ function transformNode(node: MdNode, resolvers: ReferenceResolvers): void {
  * remark plugin: turn PROVED reference tokens in prose into links carrying the
  * reserved envelope and the transform-origin mark. With no resolvers it is a
  * no-op, which is the correct behaviour for a surface that cannot prove anything.
+ *
+ * The document is read as well as the tree, because an escaped sigil only exists
+ * in the source: see `alignSource`.
  */
 export function remarkReferences(options: RemarkReferencesOptions = {}) {
   const { resolvers } = options;
-  return (tree: MdNode): void => {
+  return (tree: MdNode, file?: MdFile): void => {
     if (!resolvers) return;
-    transformNode(tree, resolvers);
+    transformNode(tree, resolvers, typeof file?.value === 'string' ? file.value : null);
   };
 }
