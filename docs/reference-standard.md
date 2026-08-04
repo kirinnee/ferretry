@@ -120,6 +120,7 @@ one of the tokens in section 2.
 | `&`     | Tasks        | `&ID`                               |
 | `!`     | Attention    | `!AN`                               |
 | `/`     | Skills       | `/name` on Claude, `$name` on Codex |
+
 | `# The Ferretry reference standard
 
 `fy-reference/1`
@@ -232,18 +233,18 @@ new tab.
 Triggers are how a picker is opened. They are not authored syntax: what the picker inserts is always
 one of the tokens in section 2.
 
-| Trigger | Menu         | Inserts                             |
-| ------- | ------------ | ----------------------------------- |
-| `@`     | Files        | `@path`                             |
-| `@@`    | Fleet agents | `:name`                             |
-| `@@@`   | Tasks        | `&ID`                               |
-| `@@@@`  | Attention    | `!AN`                               |
-| `:`     | Fleet agents | `:name`                             |
-| `&`     | Tasks        | `&ID`                               |
-| `!`     | Attention    | `!AN`                               |
-| `/`     | Skills       | `/name` on Claude, `$name` on Codex |
-     | Skills       | as above                            |
-| `%`     | Live surfaces | `%terminal:<key>`                  |
+| Trigger | Menu          | Inserts                             |
+| ------- | ------------- | ----------------------------------- |
+| `@`     | Files         | `@path`                             |
+| `@@`    | Fleet agents  | `:name`                             |
+| `@@@`   | Tasks         | `&ID`                               |
+| `@@@@`  | Attention     | `!AN`                               |
+| `:`     | Fleet agents  | `:name`                             |
+| `&`     | Tasks         | `&ID`                               |
+| `!`     | Attention     | `!AN`                               |
+| `/`     | Skills        | `/name` on Claude, `$name` on Codex |
+| Skills  | as above      |
+| `%`     | Live surfaces | `%terminal:<key>`                   |
 
 There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
@@ -376,6 +377,7 @@ one of the tokens in section 2.
 | `&`     | Tasks        | `&ID`                               |
 | `!`     | Attention    | `!AN`                               |
 | `/`     | Skills       | `/name` on Claude, `$name` on Codex |
+
 | `# The Ferretry reference standard
 
 `fy-reference/1`
@@ -488,18 +490,18 @@ new tab.
 Triggers are how a picker is opened. They are not authored syntax: what the picker inserts is always
 one of the tokens in section 2.
 
-| Trigger | Menu         | Inserts                             |
-| ------- | ------------ | ----------------------------------- |
-| `@`     | Files        | `@path`                             |
-| `@@`    | Fleet agents | `:name`                             |
-| `@@@`   | Tasks        | `&ID`                               |
-| `@@@@`  | Attention    | `!AN`                               |
-| `:`     | Fleet agents | `:name`                             |
-| `&`     | Tasks        | `&ID`                               |
-| `!`     | Attention    | `!AN`                               |
-| `/`     | Skills       | `/name` on Claude, `$name` on Codex |
-     | Skills       | as above                            |
-| `%`     | Live surfaces | `%terminal:<key>`                  |
+| Trigger | Menu          | Inserts                             |
+| ------- | ------------- | ----------------------------------- |
+| `@`     | Files         | `@path`                             |
+| `@@`    | Fleet agents  | `:name`                             |
+| `@@@`   | Tasks         | `&ID`                               |
+| `@@@@`  | Attention     | `!AN`                               |
+| `:`     | Fleet agents  | `:name`                             |
+| `&`     | Tasks         | `&ID`                               |
+| `!`     | Attention     | `!AN`                               |
+| `/`     | Skills        | `/name` on Claude, `$name` on Codex |
+| Skills  | as above      |
+| `%`     | Live surfaces | `%terminal:<key>`                   |
 
 There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
@@ -510,7 +512,8 @@ references, and `$` skills. All default on. **A disabled switch suppresses the m
 grammar**: an authored reference still parses, still proves, and still links, `/` remains available,
 and a skill may still be written either way.
 
- triggers, the Settings switches, and the
+triggers, the Settings switches, and the
+
 > removal of the `@@@@@` Pins tier are handover #33 and #63. The `@`, `/` and `%` triggers are live.
 > The token grammar in this document is settled and implemented; those are the menus around it.
 

@@ -1935,7 +1935,13 @@ function Shell() {
             taskReferenceResolver={id => id === 'F12'}
             surfaceReferenceResolver={lookup =>
               lookup.key === '0a1b2c3d4e5f'
-                ? { state: 'open', daemonId: daemon.daemonId, sessionId: scope.sessionId, surface: lookup.surface, key: lookup.key }
+                ? {
+                    state: 'open',
+                    daemonId: daemon.daemonId,
+                    sessionId: scope.sessionId,
+                    surface: lookup.surface,
+                    key: lookup.key,
+                  }
                 : { state: 'closed' }
             }
             text={HARNESS_REFERENCE_PROSE}

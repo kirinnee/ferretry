@@ -515,7 +515,7 @@ describe('skill references', () => {
     should(actual).deepEqual([]);
   });
 
-  test('should prove a skill only through this session\'s own catalog', () => {
+  test("should prove a skill only through this session's own catalog", () => {
     // Assert
     should(resolveReference({ kind: 'skill', name: 'summary' }, { skill: name => name === 'summary' })).deepEqual({
       kind: 'skill',
