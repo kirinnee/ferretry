@@ -2,31 +2,165 @@
  * The daemon-scoped Settings route surface.
  *
  * Preferences such as theme and density belong to the reader's browser, but
- * destinations that name daemon state (the Warden configuration) are built
- * from the explicit daemon id. That distinction lets this page be mounted for
- * any paired daemon without retaining a previous daemon's link.
+ * destinations and live state that name a daemon are built from explicit
+ * connections. That distinction lets this page switch pairings without
+ * retaining the previous daemon's link, health result, or action target.
  */
 
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { type ReactNode, useMemo, useSyncExternalStore } from 'react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import { cn } from '../../lib/class-names.ts';
+import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import { type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
-import { SETTINGS_DEFINITIONS, SETTINGS_LINKS, type SettingDefinition, type SettingId } from './settings-catalog.ts';
+import {
+  isSettingId,
+  isSettingsSectionId,
+  SETTINGS_LINKS,
+  SETTINGS_SECTIONS,
+  type SettingDefinition,
+  type SettingId,
+  type SettingsSectionDefinition,
+  type SettingsSectionId,
+  settingDefinition,
+  settingsSectionDefinition,
+  settingsSectionForSetting,
+} from './settings-catalog.ts';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
   { id: 'large', label: 'Large', description: '112% of default.' },
   { id: 'larger', label: 'Larger', description: '125% of default.' },
 ] as const;
+
+const SETTINGS_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
+
+const settingFromHash = (): SettingId | null => {
+  if (typeof window === 'undefined') return null;
+  const value = window.location.hash.replace(/^#/, '');
+  return isSettingId(value) ? value : null;
+};
+
+const sectionFromHash = (): SettingsSectionId | null => {
+  if (typeof window === 'undefined') return null;
+  const value = window.location.hash.replace(/^#/, '');
+  if (isSettingsSectionId(value)) return value;
+  return isSettingId(value) ? settingsSectionForSetting(value) : null;
+};
+
+function SettingsSectionChoices({
+  active,
+  onSelect,
+}: {
+  readonly active: SettingsSectionId;
+  readonly onSelect: (id: SettingsSectionId) => void;
+}) {
+  return (
+    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+      {SETTINGS_SECTIONS.map(section => {
+        const selected = section.id === active;
+        return (
+          <li key={section.id}>
+            <button
+              type="button"
+              data-settings-section-choice={section.id}
+              aria-current={selected ? 'page' : undefined}
+              onClick={() => onSelect(section.id)}
+              className={cn(
+                'flex min-h-[52px] w-full items-center gap-2 rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus',
+                selected
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-transparent text-muted hover:border-border hover:bg-surface-2 hover:text-fg',
+              )}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-ui font-semibold">{section.label}</span>
+                <span className="mt-0.5 block text-meta leading-tight text-faint">{section.description}</span>
+              </span>
+              {selected ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function MobileSettingsSectionPicker({
+  active,
+  definition,
+  open,
+  onOpen,
+  onClose,
+  onSelect,
+}: {
+  readonly active: SettingsSectionId;
+  readonly definition: SettingsSectionDefinition;
+  readonly open: boolean;
+  readonly onOpen: () => void;
+  readonly onClose: () => void;
+  readonly onSelect: (id: SettingsSectionId) => void;
+}) {
+  const titleId = useId();
+  return (
+    <div className="md:hidden">
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls="settings-section-picker"
+        onClick={onOpen}
+        data-settings-section-trigger=""
+        className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
+      >
+        <SlidersHorizontal size={17} className="shrink-0 text-accent" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-meta font-semibold uppercase tracking-label text-faint">Settings section</span>
+          <span className="block text-ui font-semibold text-fg">{definition.label}</span>
+        </span>
+        <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
+      </button>
+      <BottomSheet
+        id="settings-section-picker"
+        open={open}
+        onClose={onClose}
+        labelledBy={titleId}
+        closeLabel="Close settings section picker"
+        panelClassName="bg-surface"
+        maxHeight={SETTINGS_PICKER_HEIGHT}
+        zIndexClass="z-50"
+      >
+        <div className="min-h-0 overflow-y-auto px-panel pb-4">
+          <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
+            Choose a settings section
+          </h2>
+          <p className="mb-3 mt-1 text-ui leading-base text-muted">
+            Pick one area; the settings underneath stay on this page.
+          </p>
+          <nav aria-label="Settings sections">
+            <SettingsSectionChoices
+              active={active}
+              onSelect={id => {
+                onSelect(id);
+                onClose();
+              }}
+            />
+          </nav>
+        </div>
+      </BottomSheet>
+    </div>
+  );
+}
 
 export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
@@ -45,9 +179,9 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
       aria-labelledby={headingId}
     >
-      <h2 id={headingId} className="m-0 text-title font-semibold text-fg">
+      <h3 id={headingId} className="m-0 text-title font-semibold text-fg">
         {definition.label}
-      </h2>
+      </h3>
       <p className="mt-1 text-ui leading-base text-muted">{definition.description}</p>
       <div className="mt-3">{children}</div>
     </section>
@@ -97,28 +231,43 @@ export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
 export interface SettingsPageProps {
   /** The paired daemon whose Warden link this page exposes. */
   readonly daemonId: DaemonId;
+  /** Every runtime pairing currently remembered by this browser. */
+  readonly connections: readonly DaemonConnectionRecord[];
   /** Reader-local controls; only device fields are edited here. */
   readonly controls: DaemonControlsStore;
   /** The daemon-scoped dictation surface: engine readiness, chord, enhancer. */
   readonly dictation: DictationSettingsProps;
   /** The daemon-aware notification host, supplied by the composition root. */
   readonly notifications?: ReactNode;
+  /** A live, credential-scoped read of the typed daemon health endpoint. */
+  readonly probeDaemon: DaemonReachabilityProbe;
+  readonly onSelectDaemon: (daemonId: DaemonId) => void;
+  readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
+  readonly onRemoveDaemon: (daemonId: DaemonId) => void;
+  /** Opens the app's existing connection picker and pairing flow. */
+  readonly onAddDaemon: () => void;
   /** Called for the header's in-app Back action. */
   readonly onNavigate?: (to: string) => void;
   readonly className?: string;
 }
 
 /**
- * One Settings implementation for desktop and narrow screens. Its single
- * scroll owner and `sm:` grids preserve the original 390px/1440px behavior:
- * controls stack touch-first on a phone and become three-column cards on wider
- * screens.
+ * One Settings implementation for desktop and narrow screens. Desktop keeps a
+ * vertical section list beside the active content; narrow screens replace that
+ * persistent list with the app's shared BottomSheet picker. The page keeps one
+ * scroll owner on both layouts.
  */
 export function SettingsPage({
   daemonId,
+  connections,
   controls,
   dictation,
   notifications,
+  probeDaemon,
+  onSelectDaemon,
+  onRenameDaemon,
+  onRemoveDaemon,
+  onAddDaemon,
   onNavigate,
   className,
 }: SettingsPageProps) {
@@ -131,6 +280,43 @@ export function SettingsPage({
   const densityState = useDensity(controls);
   const density = densityState.density;
   const theme = useTheme();
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(() => sectionFromHash() ?? 'appearance');
+  const [sectionPickerOpen, setSectionPickerOpen] = useState(false);
+  const followedHash = useRef<string | null>(null);
+  const focusFrame = useRef<number | undefined>(undefined);
+
+  const followHash = useCallback((): void => {
+    if (followedHash.current === window.location.hash) return;
+    followedHash.current = window.location.hash;
+    const nextSection = sectionFromHash();
+    const target = settingFromHash();
+    if (nextSection === null) return;
+    setActiveSection(nextSection);
+    if (target === null) return;
+    if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current);
+    focusFrame.current = requestAnimationFrame(() => {
+      const setting = document.getElementById(`settings-${target}`);
+      setting?.focus({ preventScroll: false });
+    });
+  }, []);
+
+  // Router.navigate uses pushState, which causes a React render but no native
+  // hashchange. Compare the hash after every commit so a same-route palette
+  // deep link still opens its owning section.
+  useEffect(followHash);
+
+  useEffect(() => {
+    followHash();
+    window.addEventListener('hashchange', followHash);
+    window.addEventListener('popstate', followHash);
+    return () => {
+      window.removeEventListener('hashchange', followHash);
+      window.removeEventListener('popstate', followHash);
+      if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current);
+    };
+  }, [followHash]);
+
+  const section = settingsSectionDefinition(activeSection);
 
   const controlsById = useMemo<Record<SettingId, ReactNode>>(
     () => ({
@@ -216,9 +402,12 @@ export function SettingsPage({
     <main
       data-settings-scroller
       data-density={density}
-      className={cn('h-full min-h-0 w-full overflow-y-auto overscroll-contain px-panel pb-4', className)}
+      className={cn(
+        'scroll-thin h-full min-h-0 w-full overflow-y-auto overscroll-contain px-panel pb-4 [touch-action:pan-y]',
+        className,
+      )}
     >
-      <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 py-2">
+      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-3 py-2">
         <header className="flex min-w-0 flex-wrap items-center gap-2">
           <RouteLink
             to={`/d/${encodeURIComponent(daemonId)}`}
@@ -231,31 +420,97 @@ export function SettingsPage({
           </RouteLink>
           <div className="min-w-0">
             <h1 className="m-0 font-display text-display font-bold tracking-display">Settings</h1>
-            <p className="mt-0.5 text-ui text-muted">Appearance and dashboard detail for this browser.</p>
+            <p className="mt-0.5 text-ui text-muted">Browser preferences and daemon connections.</p>
           </div>
         </header>
 
-        {SETTINGS_DEFINITIONS.map(definition => (
-          <SettingsSection key={definition.id} definition={definition}>
-            {controlsById[definition.id]}
-          </SettingsSection>
-        ))}
+        <div className="grid min-w-0 grid-cols-1 items-start gap-3 md:grid-cols-[224px_minmax(0,1fr)] md:gap-5">
+          <nav
+            className="sticky top-2 hidden rounded-panel border border-border bg-surface p-2 shadow-panel md:block"
+            aria-label="Settings sections"
+          >
+            <SettingsSectionChoices active={activeSection} onSelect={setActiveSection} />
+          </nav>
 
-        {SETTINGS_LINKS.map(link => (
-          <section key={link.id} id={`settings-${link.id}`} className="kt-panel p-panel" aria-label={link.label}>
-            <RouteLink
-              to={link.href(daemonId)}
-              onNavigate={onNavigate}
-              className="group flex min-h-[44px] w-full items-center justify-between gap-2 text-left"
+          <div className="min-w-0">
+            <MobileSettingsSectionPicker
+              active={activeSection}
+              definition={section}
+              open={sectionPickerOpen}
+              onOpen={() => setSectionPickerOpen(true)}
+              onClose={() => setSectionPickerOpen(false)}
+              onSelect={setActiveSection}
+            />
+
+            <section
+              id="settings-section-panel"
+              aria-labelledby={`settings-section-heading-${section.id}`}
+              data-settings-section={section.id}
+              className="mt-3 min-w-0 md:mt-0"
             >
-              <span className="min-w-0">
-                <span className="block text-title font-semibold text-fg group-hover:text-accent">{link.label}</span>
-                <span className="mt-1 block text-ui leading-base text-muted">{link.description}</span>
-              </span>
-              <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted group-hover:text-accent" />
-            </RouteLink>
-          </section>
-        ))}
+              <header className="mb-3 px-1">
+                <h2
+                  id={`settings-section-heading-${section.id}`}
+                  className="m-0 font-display text-title font-bold tracking-display text-fg"
+                >
+                  {section.label}
+                </h2>
+                <p className="mb-0 mt-1 text-ui leading-base text-muted">{section.description}</p>
+              </header>
+
+              <div className="flex min-w-0 flex-col gap-3">
+                {section.settingIds.map(id => {
+                  const definition = settingDefinition(id);
+                  return (
+                    <SettingsSection key={definition.id} definition={definition}>
+                      {controlsById[definition.id]}
+                    </SettingsSection>
+                  );
+                })}
+
+                {section.id === 'daemons' ? (
+                  <>
+                    <DaemonSettings
+                      activeDaemonId={daemonId}
+                      connections={connections}
+                      probeDaemon={probeDaemon}
+                      onSelectDaemon={onSelectDaemon}
+                      onRenameDaemon={onRenameDaemon}
+                      onRemoveDaemon={onRemoveDaemon}
+                      onAddDaemon={onAddDaemon}
+                    />
+                    {SETTINGS_LINKS.map(link => (
+                      <section
+                        key={link.id}
+                        id={`settings-${link.id}`}
+                        className="kt-panel p-panel"
+                        aria-label={link.label}
+                      >
+                        <RouteLink
+                          to={link.href(daemonId)}
+                          onNavigate={onNavigate}
+                          className="group flex min-h-[44px] w-full items-center justify-between gap-2 text-left"
+                        >
+                          <span className="min-w-0">
+                            <span className="block text-title font-semibold text-fg group-hover:text-accent">
+                              {link.label}
+                            </span>
+                            <span className="mt-1 block text-ui leading-base text-muted">{link.description}</span>
+                          </span>
+                          <ChevronRight
+                            size={16}
+                            aria-hidden="true"
+                            className="shrink-0 text-muted group-hover:text-accent"
+                          />
+                        </RouteLink>
+                      </section>
+                    ))}
+                  </>
+                ) : null}
+              </div>
+            </section>
+          </div>
+        </div>
       </div>
     </main>
   );

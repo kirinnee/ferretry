@@ -179,6 +179,9 @@ export const settingsSectionDefinition = (id: SettingsSectionId): SettingsSectio
   return definition;
 };
 
+export const isSettingsSectionId = (value: string | null | undefined): value is SettingsSectionId =>
+  Boolean(value && SETTINGS_SECTION_BY_ID.has(value as SettingsSectionId));
+
 export const settingsSectionForSetting = (id: SettingId): SettingsSectionId => {
   const section = SETTINGS_SECTION_BY_SETTING.get(id);
   if (section === undefined) throw new Error(`Setting ${id} does not belong to a settings section`);
@@ -188,8 +191,8 @@ export const settingsSectionForSetting = (id: SettingId): SettingsSectionId => {
 export const SETTINGS_DESTINATION = {
   id: 'open-settings',
   label: 'Open settings',
-  description: 'Appearance, text size, conversation width, theme, and dashboard density.',
-  keywords: ['preferences', 'options', 'appearance', 'configure'],
+  description: 'Appearance, behaviour, and connected daemons for this browser.',
+  keywords: ['preferences', 'options', 'appearance', 'behaviour', 'daemon', 'pairing', 'configure'],
 } as const;
 
 export interface SettingsLinkDefinition {
