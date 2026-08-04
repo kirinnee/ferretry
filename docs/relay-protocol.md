@@ -38,10 +38,19 @@ plumbing that calls them** — see "What is not built yet" in §13 for the exact
 prerequisite. Read this section as the contract both ends are being built against, not as a
 description of what a phone does today.
 
-There is **no relay address compiled into the application or this package**. The relay address is a
-runtime value: the hosted Worker serves a no-store advertisement whose `relayUrl` is either an
-operator-set address or `null`. Changing it, including disabling the default entirely, needs no app
-release and no Worker deploy. Section 13 is the hosted operating contract.
+Three addresses are involved and they are deliberately not the same thing:
+
+| Address              | Where it comes from                                                                                                                                | Compiled in? |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| **Discovery origin** | Where the relay advertisement is read from. The relay has its own hostname, and the PWA is a static bundle, so the browser build carries this one. | **Yes**      |
+| **Relay endpoint**   | The carrier actually used, served at runtime by that advertisement as `relayUrl` — or `null`, meaning no hosted carrier.                           | No           |
+| **Daemon URL**       | Where one daemon lives. Handed to the browser by pairing, per user.                                                                                | No           |
+
+The discovery origin names a **service**, not a person: it identifies the relay, and it is the same
+string for everybody, so it discloses nothing about who is running a daemon or where. The address
+that actually carries traffic is the runtime one, which is why changing the relay — including
+disabling it entirely — needs no app release and no Worker deploy. Section 13 is the hosted
+operating contract.
 
 Anyone who would rather run the carrier themselves still can — the Worker in this repository deploys
 to any Cloudflare account, and this document is the contract, so it can also be reimplemented from

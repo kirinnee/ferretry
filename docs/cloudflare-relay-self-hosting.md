@@ -51,6 +51,37 @@ If that is not useful to you yet, stop here and come back when the prerequisite 
 Wrangler is not vendored. It is fetched from npm on first use by `bunx`, so the first `task
 relay:check` may take a minute and needs network access to the npm registry.
 
+### Getting the code
+
+Every command in this runbook runs from the repository root, inside its devshell. Nothing here needs
+Cloudflare credentials yet.
+
+```bash
+git clone https://github.com/kirinnee/ferretry
+cd ferretry
+direnv allow            # or, without direnv: nix develop
+```
+
+`direnv allow` prints the shell loading, once per new environment:
+
+```
+direnv: loading ~/ferretry/.envrc
+direnv: using flake
+```
+
+Confirm you are actually in the devshell before going further — the relay tasks are the check:
+
+```bash
+task --list | grep relay
+```
+
+```
+* relay:check:              Expert: compile the relay Worker and print its bindings without deploying anything
+* relay:deploy:             Expert: deploy the rendezvous relay to your own Cloudflare account
+```
+
+If `task` is not found, the devshell is not loaded and nothing below will work.
+
 ---
 
 ## Cost, and what drives it
@@ -90,7 +121,13 @@ Worker requests **$0.30 / million** and Worker CPU **$0.02 / million CPU ms**.
    be billed for waiting — Cloudflare says hibernation _"can dramatically reduce duration-related
    charges"_. An idle-but-connected session costing nothing is a claim only your own bill can settle;
    [relay-protocol.md](relay-protocol.md) §12 says the same, and says it has not been measured here.
-2. **Requests.** One per socket open, one per frame. Chatty terminal output is many small frames.
+2. **Requests — cheaper than "one per frame".** WebSocket traffic is not billed message-for-message.
+   Cloudflare: _"a request is needed to create a WebSocket connection"_, and then for compute-request
+   billing _"a 20:1 ratio is applied to incoming WebSocket messages … For example, 100 WebSocket
+   incoming messages would be charged as 5 requests for billing purposes."_ Outgoing messages and
+   incoming protocol pings are free: _"there is no charge for outgoing WebSocket messages, nor for
+   incoming WebSocket protocol pings."_ So chatty terminal output is far less expensive than the
+   frame count suggests, and the socket opens themselves are what you count.
 3. **Storage.** One small state document per rendezvous. Effectively free at personal scale.
 
 For one person with a handful of machines, the Free plan's 100,000 Durable Object requests per day is
@@ -105,9 +142,11 @@ rendezvous is one object per daemon, so that is a per-daemon ceiling, not an acc
 
 ## Step 1 — Create a narrowly scoped API token
 
-Do **not** use a Global API Key, and do not reach for the "Edit Cloudflare Workers" template: it
-grants KV, R2, D1 and Workers Routes across every zone on the account. This deployment needs one
-permission.
+Do **not** use a Global API Key, and do not reach for the "Edit Cloudflare Workers" template.
+Cloudflare documents that template as granting _"Workers Routes Write, Workers Scripts Write, Workers
+KV Storage Write, Workers Tail Read, Workers R2 Storage Write, Account Settings Read, User Details
+Read, and User Memberships Read"_. This deployment needs exactly one of those, binds no KV and no R2,
+and adds no route.
 
 In the Cloudflare dashboard, go to **Manage Account → API Tokens** and create a **custom token**
 (account-owned, so it survives you losing access to a personal login):
@@ -121,7 +160,13 @@ In the Cloudflare dashboard, go to **Manage Account → API Tokens** and create 
 | **TTL**                         | Optional, and worth setting. A deploy token does not need to be immortal. |
 
 `Workers Scripts: Edit` is what uploads the script and creates its Durable Object namespaces. You do
-not need `Workers KV Storage`, `Workers R2 Storage` or `D1` — this Worker binds none of them.
+not need `Workers KV Storage` or `Workers R2 Storage` — this Worker binds neither.
+
+**One deliberate consequence: this token cannot run `wrangler tail`.** Log tailing is a separate
+permission, `Account · Workers Tail · Read`. Add it only if you want the live log described in
+[step 5](#step-5--verify-at-the-worker), and consider putting it on a second, shorter-lived token
+rather than widening your deploy token — a credential that can read live request logs is a different
+thing from one that can upload a script.
 
 Then, in your shell:
 
@@ -218,8 +263,9 @@ URL, of the form:
 https://ferretry-relay.<your-subdomain>.workers.dev
 ```
 
-`workers_dev` _"enables use of `_.workers.dev`subdomain to deploy your Worker"* and Cloudflare
-documents it as defaulting to`true`, which is why no route configuration is needed. Note that URL —
+Cloudflare documents the `workers_dev` configuration key as enabling use of the `*.workers.dev`
+subdomain to deploy your Worker, and as defaulting to `true`. That is why no route configuration is
+needed here. Note that URL —
 it is the relay address, and everything below uses it as `$RELAY`.
 
 ```bash
@@ -496,3 +542,5 @@ you depend on any figure above.
   the exact permission names and their Read/Edit variants
 - [Create an API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/) —
   where account-owned tokens live and how they are scoped
+- [API token templates](https://developers.cloudflare.com/fundamentals/api/reference/template/) —
+  what the "Edit Cloudflare Workers" template actually grants

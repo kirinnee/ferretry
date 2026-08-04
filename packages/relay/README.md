@@ -21,7 +21,11 @@ Running a relay of your own is still possible and still supported, but it is an 
 path** with its own runbook — [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md) —
 not an onboarding option.
 
-There is no relay address compiled into this package. The hosted Worker serves a no-store
+No **carrier** address is compiled into this package. The client build does carry one address — the
+**discovery origin** it reads the advertisement from, because the relay has its own hostname and the
+PWA is a static bundle — and that names a service, never a user or a daemon. The relay endpoint it
+ends up using, and the daemon URL it dials, are both runtime values. The hosted Worker serves a
+no-store
 `/v1/default-relay` advertisement whose address can be changed or set to `null` without releasing or
 deploying code. A relay you run yourself still serves exactly the daemon fingerprints its deployer
 listed. `docs/relay-protocol.md` §§9, 11 and 13 define both operating modes and their disclosure.
