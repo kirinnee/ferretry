@@ -543,15 +543,29 @@ describe('SessionTerminalDeck theming', () => {
     // The pane is not a DOM node with classes — xterm holds its own colour
     // table, so a theme switch that only changed CSS variables would leave a
     // dark shell sitting in a light page.
-    const spy = xtermSpy();
-    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    let markTerminalOpened: () => void = () => {};
+    const terminalOpened = new Promise<void>(resolve => {
+      markTerminalOpened = resolve;
+    });
+    const spy = xtermSpy({ onOpen: markTerminalOpened });
+    let repaint: () => void = () => {};
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      loadXterm: async () => spy.modules,
+      watchTheme: callback => {
+        repaint = callback;
+        return () => {
+          repaint = () => {};
+        };
+      },
+    });
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    // A document mutation is observable only after xterm has opened and the
+    // canvas has subscribed to it.
     await settle();
+    await terminalOpened;
 
     document.documentElement.setAttribute('data-theme', 'studio-light');
-    await runAsync(async () => {
-      await new Promise(resolve => setTimeout(resolve, 20));
-    });
+    run(repaint);
 
     expect(spy.themes.length).toBeGreaterThan(0);
     run(() => page.unmount());

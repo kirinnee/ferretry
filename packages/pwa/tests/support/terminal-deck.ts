@@ -126,6 +126,7 @@ export const fakeDeck = (
     // tests are about xterm's rendering — they are about what the deck does
     // around it. A test that wants the load to FAIL patches this.
     loadXterm: async () => fakeXterm(),
+    watchTheme: () => () => {},
     confirmClose: () => deck.confirm,
     writeClipboard: async text => {
       deck.copied.push(text);
@@ -167,7 +168,13 @@ export interface XtermInstance {
  * reader's keystroke, and what a test asserts is that it reached the socket
  * whoever else owns the shell.
  */
-export function xtermSpy(options: { readonly fitThrows?: boolean; readonly selection?: string } = {}): {
+export function xtermSpy(
+  options: {
+    readonly fitThrows?: boolean;
+    readonly selection?: string;
+    readonly onOpen?: () => void;
+  } = {},
+): {
   readonly modules: {
     Terminal: typeof import('@xterm/xterm').Terminal;
     FitAddon: typeof import('@xterm/addon-fit').FitAddon;
@@ -208,7 +215,9 @@ export function xtermSpy(options: { readonly fitThrows?: boolean; readonly selec
     }
 
     loadAddon(): void {}
-    open(): void {}
+    open(): void {
+      options.onOpen?.();
+    }
     write(bytes: Uint8Array): void {
       this.written.push(bytes);
     }
