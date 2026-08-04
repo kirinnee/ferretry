@@ -98,7 +98,12 @@ export class DaemonController {
   async uninstall(): Promise<void> {
     const service = this.#service();
     await service.uninstall();
-    // An uninstall must genuinely release the store path rather than pin it forever.
+    // Uninstall is the ONLY verb that releases, and the asymmetry with `start` is deliberate.
+    //
+    // Releasing on `stop` would look tidier and is dangerously wrong: in a `nix shell`, start pins,
+    // stop releases, a garbage collection runs, and the next `start` finds no executable at all —
+    // manufacturing precisely the failure the pin exists to prevent, for the user who most needs it.
+    // A root held too long costs one store path; a root released too early costs a working daemon.
     await this.deps.nix.release(this.deps.layout.nixGcRoot);
     this.deps.out.success(`${this.#name} user service removed`);
   }
