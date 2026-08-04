@@ -219,19 +219,43 @@ const chooseRoute = async (container: HTMLElement, route: string): Promise<void>
   );
 };
 
+/** Moves on from a stage that has a Next, which is every stage the page cannot check. */
+const advanceStep = async (container: HTMLElement): Promise<void> => {
+  await interact(() =>
+    must(container.querySelector<HTMLButtonElement>('[data-onboarding-next]'), 'the next control').click(),
+  );
+};
+
+/** Answers the second chooser, which is what moves the reader off `connect`. */
+const chooseConnection = async (container: HTMLElement, connection: string): Promise<void> => {
+  await interact(() =>
+    must(
+      container.querySelector<HTMLButtonElement>(`button[data-onboarding-connection="${connection}"]`),
+      `the ${connection} answer`,
+    ).click(),
+  );
+};
+
 /**
- * Walks the LONG route to pairing: the question, then install, daemon and the
- * carrier choice. Deliberately not the two-tap "I have a link" answer — these
- * tests are about the pairing surface behaving the same at the end of the full
- * journey as it does in the picker.
+ * Walks the LONG route to the browser's half of pairing: the question, install,
+ * daemon, the carrier choice, then `fy pair` on the computer. Deliberately not
+ * the two-tap "I have a link" answer — these tests are about the pairing surface
+ * behaving the same at the end of the full journey as it does in the picker.
+ *
+ * Two of these hops are not a `Next`. The carrier question is answered by
+ * picking a carrier, and the stage that answer opens is what the reader has to
+ * pass through before the scan surface exists; walking it here is what keeps
+ * these tests on the REAL long route rather than on a shortcut into `scan`.
  */
 const advanceToPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'first-time');
-  for (let step = 0; step < 3; step += 1) {
-    await interact(() =>
-      must(container.querySelector<HTMLButtonElement>('[data-onboarding-next]'), 'the next control').click(),
-    );
-  }
+  /* install → daemon → connect */
+  await advanceStep(container);
+  await advanceStep(container);
+  /* connect → pair, by answering rather than by advancing */
+  await chooseConnection(container, 'default-relay');
+  /* pair → scan */
+  await advanceStep(container);
 };
 
 /** Drives a browser history navigation the way the back button does. */
@@ -335,10 +359,12 @@ describe('AppShell', () => {
       alpha.daemonId,
     ]);
 
-    // A camera app opening this link IS the setup journey arriving at its third
-    // stage — not a picker with a banner on it.
+    // A camera app opening this link IS the setup journey, arriving on the stage
+    // that redeems a code — not a picker with a banner on it. That stage is now
+    // `scan`: `pair` became the terminal half, which somebody holding a link has
+    // by definition already had run for them.
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'pair',
+      'scan',
     );
     expect(window.location.hash).toBe('');
 
@@ -370,7 +396,7 @@ describe('AppShell', () => {
   it('stops substituting setup once the reader has left it for their fleet', async () => {
     const { view } = await renderShell('/');
     await advanceToPairing(view.container);
-    expect(stepOfSetup(view.container)).toBe('pair');
+    expect(stepOfSetup(view.container)).toBe('scan');
 
     // Pair it for real, finish, and leave for the fleet.
     const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
@@ -1050,10 +1076,10 @@ describe('the connection picker slot', () => {
     const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
 
     // An unpaired browser opened from a QR is in the setup guide — but the
-    // arrival puts it straight on the pairing stage, with the confirmation and
-    // the fragment hygiene of the standalone screen unchanged.
+    // arrival puts it straight on the stage that redeems the code, with the
+    // confirmation and the fragment hygiene of the standalone screen unchanged.
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
-      'pair',
+      'scan',
     );
     expect(view.container.textContent).toContain('Pair this device?');
     expect(view.container.textContent).toContain('gamma.example.test');
