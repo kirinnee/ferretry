@@ -264,7 +264,11 @@ function AttentionRow({
         <p className="m-0 text-meta text-faint" data-attention-action>
           {kind.action}.
         </p>
-        {item.ask ? (
+        {kind.tone === 'unknown' ? (
+          <p role="alert" className="m-0 text-meta text-err">
+            Cannot offer a response for this damaged attention item. Repair it before treating it as resolved.
+          </p>
+        ) : item.ask ? (
           <AnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
         ) : (
           <>

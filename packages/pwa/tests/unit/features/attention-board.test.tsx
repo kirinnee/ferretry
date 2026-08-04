@@ -200,6 +200,25 @@ describe('AttentionBoard', () => {
     expect(damaged.container.textContent).not.toContain('Nothing needs attention.');
   });
 
+  it('fails closed for an attention kind a newer or damaged runtime sends directly to the board', async () => {
+    const unknownSnapshot = {
+      ...snapshot(),
+      items: [{ ...item, ask: { kind: 'future-kind' } }],
+    } as unknown as AttentionSnapshot;
+    const { container } = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={unknownSnapshot}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(container.textContent).toContain('Damaged attention');
+    expect(container.textContent).toContain('Cannot offer a response for this damaged attention item.');
+    expect(container.textContent).not.toContain('Send answer');
+  });
+
   it('shows source-matched icons and action lines for every requested action before a person opens an item', async () => {
     const asks = [
       { kind: 'permission' as const },
