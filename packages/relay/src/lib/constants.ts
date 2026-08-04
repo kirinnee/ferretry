@@ -161,6 +161,12 @@ export const RELAY_CLOSE_CODES = {
   rendezvousBusy: 4429,
   /** A sender exceeded its credit window. */
   flowViolation: 4430,
+  /** The operator disabled the hosted relay through its runtime kill switch. */
+  hostedDisabled: 4431,
+  /** A per-daemon or account-wide hosted connection ceiling was reached. */
+  hostedCapacity: 4432,
+  /** A per-daemon or account-wide hosted bandwidth ceiling was reached. */
+  hostedBandwidth: 4433,
   /** The rendezvous itself failed. */
   relayInternal: 4500,
 } as const;

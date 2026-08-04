@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
-  chooseConnection,
   type ConnectionMethod,
   ConnectionMethodSchema,
+  chooseConnection,
   connectionPreferenceOrder,
   connectionSocketUrl,
   describeConnectionMethod,
@@ -14,6 +14,7 @@ import should from 'should';
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
 const direct: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.tailnet.example' };
 const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example' };
+const hosted: ConnectionMethod = { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' };
 
 describe('socket endpoints', () => {
   it('should accept secure schemes anywhere and insecure ones only on loopback', () => {
@@ -31,7 +32,12 @@ describe('socket endpoints', () => {
   it('should store a carrier per daemon, with no relay address baked in', () => {
     should(ConnectionMethodSchema.parse(direct)).deepEqual(direct);
     should(ConnectionMethodSchema.parse(relay)).deepEqual(relay);
+    should(ConnectionMethodSchema.parse(hosted)).deepEqual(hosted);
     should(ConnectionMethodSchema.safeParse({ kind: 'relay' }).success).be.false();
+    should(
+      ConnectionMethodSchema.safeParse({ kind: 'relay', relayUrl: 'https://relay.example', operator: 'somebody' })
+        .success,
+    ).be.false();
     should(ConnectionMethodSchema.safeParse({ kind: 'hosted', relayUrl: 'https://relay.example' }).success).be.false();
   });
 });
@@ -80,6 +86,11 @@ describe('carrier disclosure and choice', () => {
     should(relayed.label).equal('Your own relay');
     should(relayed.observers.join(' ')).match(/cannot read a frame/u);
     should(relayed.requires.join(' ')).match(/fingerprint listed/u);
+
+    const hostedDisclosure = describeConnectionMethod(hosted);
+    should(hostedDisclosure.label).equal('Hosted relay');
+    should(hostedDisclosure.observers.join(' ')).match(/cannot read frame payloads/u);
+    should(hostedDisclosure.requires.join(' ')).match(/global ceilings/u);
   });
 
   it('should always try direct first', () => {
