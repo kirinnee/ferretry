@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
@@ -13,7 +14,12 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
-import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
+import {
+  openSidePaneFileTab,
+  openSidePaneTab,
+  registerSidePaneTab,
+  resetSidePaneTabsStates,
+} from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -315,6 +321,13 @@ describe('SessionChatPage', () => {
 
       run(() => openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'tasks'));
       expect(JSON.stringify(page.toJSON())).toContain('Tasks is ported but is not connected');
+
+      // ONE TAB PER FILE (#35): a file tab renders ITS file, not the picker.
+      run(() => openSidePaneFileTab(daemonSessionScope(alpha, 'shared'), 'docs/design.md'));
+      await runAsync(async () => await Promise.resolve());
+      expect(page.root.findAllByType(FileInstanceSurface)).toHaveLength(1);
+      expect(page.root.findAllByType(FileInstanceSurface)[0]?.props.instance.key).toBe('docs/design.md');
+      expect(page.root.findAllByType(FilesTab)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
       globalThis.fetch = originalFetch;

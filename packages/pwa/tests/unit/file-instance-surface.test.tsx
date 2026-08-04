@@ -289,3 +289,20 @@ describe('a file instance tab body', () => {
     }
   });
 });
+
+describe('a file instance tab body reading a binary diff', () => {
+  it('says git calls the pair binary rather than rendering an empty diff', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.diffs = { 'logo.png': 'diff --git a/logo.png b/logo.png\nGIT binary patch\nliteral 4812\n' };
+    const view = await open(<FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('logo.png')} />);
+    try {
+      await click(view.container, 'Show git diff for logo.png');
+      await settle();
+
+      expect(view.container.textContent).toContain('binary');
+      expect(view.container.textContent).not.toContain('No textual changes in this file.');
+    } finally {
+      await view.unmount();
+    }
+  });
+});
