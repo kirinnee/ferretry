@@ -24,8 +24,8 @@ interface DiagramState {
   readonly machine: string;
   /** Under the browser. */
   readonly browser: string;
-  /** Which end the current step acts on, so attention lands there first. */
-  readonly focus: 'machine' | 'browser' | 'link';
+  /** Whether each part is what the current step acts on — lit rather than resting. */
+  readonly lit: { readonly machine: boolean; readonly browser: boolean; readonly link: boolean };
   /** Whether the two ends are actually joined yet. */
   readonly linked: boolean;
   /** The figure's accessible name — the same fact, in a sentence. */
@@ -36,28 +36,29 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
   install: {
     machine: 'installing fy',
     browser: 'waiting',
-    focus: 'machine',
+    lit: { machine: true, browser: false, link: false },
     linked: false,
     label: 'Your machine, where Ferretry is being installed, is not yet linked to this browser.',
   },
   daemon: {
     machine: 'fyd running',
     browser: 'waiting',
-    focus: 'machine',
+    lit: { machine: true, browser: false, link: false },
     linked: false,
     label: 'The daemon is starting on your machine. This browser is not linked to it yet.',
   },
   pair: {
     machine: 'fyd running',
     browser: 'pairing',
-    focus: 'link',
+    // Both ends, because pairing is the one step that is about the pair of them.
+    lit: { machine: true, browser: true, link: true },
     linked: false,
     label: 'Your machine is running the daemon and this browser is being linked to it.',
   },
   done: {
     machine: 'fyd running',
     browser: 'linked',
-    focus: 'browser',
+    lit: { machine: true, browser: true, link: true },
     linked: true,
     label: 'This browser is linked to the daemon running on your machine.',
   },
@@ -85,14 +86,14 @@ export function SetupDiagram({ step }: SetupDiagramProps) {
         icon={<Laptop size={20} aria-hidden="true" />}
         title="your machine"
         detail={state.machine}
-        focused={state.focus === 'machine'}
+        focused={state.lit.machine}
       />
-      <DiagramLink focused={state.focus === 'link'} linked={state.linked} />
+      <DiagramLink focused={state.lit.link} linked={state.linked} />
       <DiagramNode
         icon={<Smartphone size={20} aria-hidden="true" />}
         title="this browser"
         detail={state.browser}
-        focused={state.focus === 'browser'}
+        focused={state.lit.browser}
       />
     </div>
   );

@@ -430,43 +430,57 @@ try {
 
     if (!stepperPresent) {
       process.stdout.write(
-        '⏭️  SKIPPED the 5 setup captures: this bundle serves no [data-onboarding="setup"] root at\n' +
+        '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-mobile, setup-desktop, setup-pair-mobile, setup-pair-keyboard-mobile and\n' +
-          '    setup-done-mobile were NOT produced.\n',
+          '    setup-<install|daemon|pair|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
+          '    were NOT produced.\n',
       );
     } else {
-      // 1 + 2. FIRST RUN, both viewports. Fresh state is what makes this the
-      // first-run frame: the progress store is empty, so the stepper opens on
-      // `install` rather than wherever a previous visit left it.
-      for (const viewport of VIEWPORTS) {
-        const options =
-          viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
-        await capture(options, async page => {
-          await open(page, '/setup');
-          await page.locator(setupStep('install')).waitFor({ state: 'visible' });
-          await shot(page, `setup-${viewport.name}`);
-        });
-      }
-
-      // 3. THE PAIR STEP, reached the way a reader reaches it. Driving the real
-      // control rather than seeding the store is the point: it proves the two
-      // advances actually land on `pair`, which a seeded state would assume.
-      const toPairStep = async (page: Page): Promise<void> => {
+      /*
+       * A STEP, REACHED THE WAY A READER REACHES IT.
+       *
+       * Driving the real control rather than seeding the store is the point: it
+       * proves the advances actually land where they claim, which a seeded state
+       * would assume. Fresh storage is what makes each of these a first-run
+       * frame — the stepper opens on `install` rather than wherever a previous
+       * visit left it.
+       */
+      const ADVANCES = { install: 0, daemon: 1, pair: 2 } as const;
+      const toStep = async (page: Page, step: keyof typeof ADVANCES): Promise<void> => {
         await open(page, '/setup');
         await page.locator(setupStep('install')).waitFor({ state: 'visible' });
-        for (let advance = 0; advance < 2; advance += 1) {
+        for (let advance = 0; advance < ADVANCES[step]; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
         }
-        await page.locator(setupStep('pair')).waitFor({ state: 'visible' });
+        await page.locator(setupStep(step)).waitFor({ state: 'visible' });
       };
 
-      await capture(PHONE_CONTEXT, async page => {
-        await toPairStep(page);
-        await shot(page, 'setup-pair-mobile');
-      });
+      /**
+       * The context for a viewport.
+       *
+       * Mobile is an EMULATED PHONE rather than a 390px window: touch, the
+       * coarse pointer and the device scale all change what the stylesheet
+       * resolves, and the reader this screen was rebuilt for is on one.
+       */
+      const contextFor = (viewport: (typeof VIEWPORTS)[number]): BrowserContextOptions =>
+        viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
 
-      // 4. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
+      // 1. EVERY STEP THE READER CLICKS TO, AT BOTH VIEWPORTS. `done` is not one
+      // of them: it is reached by a daemon answering, and is captured below.
+      for (const step of ['install', 'daemon', 'pair'] as const) {
+        for (const viewport of VIEWPORTS) {
+          await capture(contextFor(viewport), async page => {
+            await toStep(page, step);
+            await shot(page, `setup-${step}-${viewport.name}`);
+          });
+        }
+      }
+
+      const toPairStep = async (page: Page): Promise<void> => {
+        await toStep(page, 'pair');
+      };
+
+      // 2. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
       // this is a synthetic visual viewport and not a smaller window.
       await capture(PHONE_CONTEXT, async page => {
         await page.addInitScript(VISUAL_VIEWPORT_SCRIPT);
@@ -584,16 +598,20 @@ try {
         if (fit.gate) defects.push('the portrait gate mounted over an upright phone with its keyboard open');
       });
 
-      // 5. A SUCCESSFUL PAIRING, ending on `done`. The arrival seeds the stepper
-      // at `pair`, so this is the path a phone's ordinary camera app produces.
-      await capture(PHONE_CONTEXT, async page => {
-        await page.addInitScript(PAIR_RESPONSE_SCRIPT);
-        await open(page, PAIRING_ARRIVAL);
-        await page.getByText('Pair this device?').waitFor({ state: 'visible' });
-        await page.getByRole('button', { name: 'Pair this device' }).click();
-        await page.locator(setupStep('done')).waitFor({ state: 'visible' });
-        await shot(page, 'setup-done-mobile');
-      });
+      // 3. A SUCCESSFUL PAIRING, ending on `done`, at both viewports. The arrival
+      // seeds the stepper at `pair`, so this is the path a phone's ordinary
+      // camera app produces — and the only honest way to reach `done`, which no
+      // button on this page may declare.
+      for (const viewport of VIEWPORTS) {
+        await capture(contextFor(viewport), async page => {
+          await page.addInitScript(PAIR_RESPONSE_SCRIPT);
+          await open(page, PAIRING_ARRIVAL);
+          await page.getByText('Pair this device?').waitFor({ state: 'visible' });
+          await page.getByRole('button', { name: 'Pair this device' }).click();
+          await page.locator(setupStep('done')).waitFor({ state: 'visible' });
+          await shot(page, `setup-done-${viewport.name}`);
+        });
+      }
     }
   } finally {
     await browser.close();

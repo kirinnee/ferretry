@@ -96,7 +96,13 @@ export function InstallStage({
         rather than a tablist: there is no tab panel per option, and rather than
         a bare labelled div, which is not a nameable element.
       */}
-      <div role="toolbar" aria-label="Install method" className="flex flex-wrap gap-1">
+      {/*
+        A GRID, NOT A WRAPPING ROW. Four labels of different widths wrap into a
+        ragged 3 + 1 on a phone, which reads as a mistake rather than a choice.
+        Two even columns are the same information with no ambiguity, and the row
+        the widths do fit on gets all four.
+      */}
+      <div role="toolbar" aria-label="Install method" className="grid grid-cols-2 gap-1 sm:grid-cols-4">
         {INSTALL_CHANNELS.map(option => (
           <button
             key={option.id}
