@@ -56,6 +56,9 @@ const SECTIONS = [
   'harness-onboarding-who',
   'harness-onboarding-brief',
   'harness-onboarding-agent-pair',
+  // The phone reading of that step: no "already open in another tab", because on
+  // a phone that tab opened on a machine the reader is not holding.
+  'harness-onboarding-agent-pair-mobile',
   'harness-onboarding-choose',
   // The phone reading of the same question: still three answers, and the daemon
   // one saying why it needs a computer rather than pretending this device can.

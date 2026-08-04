@@ -679,6 +679,7 @@ type HarnessOnboardingScreen =
   | 'who'
   | 'brief'
   | 'agent-pair'
+  | 'agent-pair-mobile'
   | 'choose'
   | 'choose-mobile'
   | 'install'
@@ -697,6 +698,14 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   /* The agent route, whose two steps are shared with nothing else in the gallery. */
   brief: harnessOnboarding('agent', 'brief'),
   'agent-pair': harnessOnboarding('agent', 'agent-pair'),
+  /*
+   * The phone reading of the same step, which is here because it is the one place
+   * the agent route differs by device: `fy pair --open` opens a browser on the
+   * DAEMON'S machine, so "you may already be connected in another tab" is true on
+   * a computer and a lie on a phone. A gallery that only showed the desktop
+   * reading could not tell those two apart.
+   */
+  'agent-pair-mobile': harnessOnboarding('agent', 'agent-pair', 'mobile'),
   choose: harnessQuestion('choose'),
   'choose-mobile': harnessQuestion('choose', 'mobile'),
   install: harnessOnboarding('first-time', 'install'),
@@ -1824,6 +1833,33 @@ function Shell() {
         <section aria-label="Setup agent pairing step" id="harness-onboarding-agent-pair">
           <OnboardingPage
             progress={HARNESS_ONBOARDING['agent-pair']}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => (
+              <PairingScreen
+                embedded
+                connections={[]}
+                selectedDaemonId={null}
+                scanHost={HARNESS_SCAN_HOST}
+                onPair={async () => {}}
+                onRemove={() => {}}
+                onSelect={() => {}}
+              />
+            )}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — pair with what the agent printed (phone)',
+      render: () => (
+        <section aria-label="Setup agent pairing step on a phone" id="harness-onboarding-agent-pair-mobile">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING['agent-pair-mobile']}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="apt"

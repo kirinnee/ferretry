@@ -488,7 +488,14 @@ try {
         { name: 'install', doer: 'self', route: 'first-time', advances: 0, screen: 'install' },
         { name: 'daemon', doer: 'self', route: 'first-time', advances: 1, screen: 'daemon' },
         { name: 'connect', doer: 'self', route: 'first-time', advances: 2, screen: 'connect' },
-        { name: 'pair', doer: 'self', route: 'first-time', advances: 2, screen: 'pair', connection: 'direct' },
+        /*
+         * `pair` — run `fy pair` somewhere else — belongs to the CLIENT route.
+         * It was pointed at first-time with a carrier answer, which since the
+         * same-machine collapse lands on `local` and waited thirty seconds for a
+         * step that route does not have.
+         */
+        { name: 'pair', doer: 'self', route: 'add-client', advances: 0, screen: 'pair' },
+        { name: 'local', doer: 'self', route: 'first-time', advances: 2, screen: 'local', connection: 'direct' },
         /* The agent route: one answer to the FIRST question, and no device question at all. */
         { name: 'brief', doer: 'agent', advances: 0, screen: 'brief' },
         { name: 'agent-pair', doer: 'agent', advances: 1, screen: 'agent-pair' },
