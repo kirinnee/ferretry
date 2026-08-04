@@ -9,7 +9,7 @@
  * daemon's own `DaemonStorageFactory` exactly as `packages/daemon/bin/fyd.ts` does.
  *
  * What it deliberately does NOT do is boot the real daemon. The daemon's API address comes from
- * `config/daemon.json`, whose default is a fixed `127.0.0.1:7337` with no environment override — and
+ * `config/daemon.json`, whose default address has no environment override — and
  * that file cannot be seeded ahead of time, because a config document in an unmarked home is exactly
  * the foreign state bootstrap must refuse. A real `fyd` in a test would therefore have to bind a known
  * port and could answer the CLI's health probe from the host's live daemon. This serves health on the

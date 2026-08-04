@@ -71,7 +71,7 @@ describe('pairing routes', () => {
         method: 'POST',
         path: '/v1/pair',
         clientAddress: '198.51.100.7',
-        headers: { origin: 'http://127.0.0.1:7337' },
+        headers: { origin: 'http://127.0.0.1:7431' },
         body: JSON.stringify({ code: '7F3K-Q2ND', deviceName: 'phone' }),
       }),
     );

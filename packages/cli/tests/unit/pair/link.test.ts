@@ -42,7 +42,7 @@ describe('pairing link check', () => {
   });
 
   it('should accept a loopback daemon address, which is the ordinary on-host case', () => {
-    should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7337' }))).equal(MINT.pairUrl);
+    should(checkedPairUrl(bent({ daemonUrl: 'http://127.0.0.1:7431' }))).equal(MINT.pairUrl);
   });
 
   it('should refuse a pairing URL that is not a v1 pairing claim at all', () => {
@@ -62,6 +62,6 @@ describe('pairing link check', () => {
 
   it('should name the host, which is the part of an address a human can recognise', () => {
     should(pairingDaemonHost(MINT.daemonUrl)).equal('box.tailnet-abc.ts.net');
-    should(pairingDaemonHost('http://127.0.0.1:7337')).equal('127.0.0.1:7337');
+    should(pairingDaemonHost('http://127.0.0.1:7431')).equal('127.0.0.1:7431');
   });
 });
