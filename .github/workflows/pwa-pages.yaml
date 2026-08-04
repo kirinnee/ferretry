@@ -37,7 +37,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          origin="$(nix develop .#ci -c ./scripts/ci/relay-directory-origin.sh --require)"
+          # `tail -n 1` because the devshell hook writes to stdout as a side effect — git-hooks.nix
+          # announces itself and prints "pre-commit installed at .git/hooks/pre-commit". A plain
+          # command substitution swallows those lines into the value, and GITHUB_ENV then rejects
+          # the whole thing with "Invalid format", which is what broke this build. The script emits
+          # exactly one line of its own and sends every diagnostic to stderr, so the last line is
+          # the origin.
+          origin="$(nix develop .#ci -c ./scripts/ci/relay-directory-origin.sh --require | tail -n 1)"
           printf 'FY_RELAY_DIRECTORY_ORIGIN=%s\n' "${origin}" >>"${GITHUB_ENV}"
           echo "relay discovery origin for this build: ${origin:-<none>}"
       - name: Build static PWA bundle
