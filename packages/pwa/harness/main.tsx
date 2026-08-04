@@ -51,6 +51,7 @@ import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
+import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
@@ -786,6 +787,27 @@ const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
 
 /** Two terminals the harness owns outright, so the addressing card renders its
  *  rows — reference, viewer count, ownership — with no daemon in reach. */
+/**
+ * A deck with a scripted shell behind it.
+ *
+ * The card is about how the deck READS — the tab strip, the ownership-coloured
+ * co-control line, the toolbar, the ledger — so it must never depend on a daemon
+ * being reachable, and it must never open a socket from a screenshot run. The
+ * emulator is a stub for the same reason: xterm paints into a canvas, which a
+ * screenshot diff cannot compare meaningfully anyway.
+ */
+const HARNESS_TERMINAL_DECK: TerminalDeckDependencies = {
+  list: async () => HARNESS_TERMINAL_LISTING,
+  create: async () => HARNESS_TERMINAL_LISTING.terminals[0] as never,
+  rename: async () => HARNESS_TERMINAL_LISTING.terminals[0] as never,
+  close: async () => ({ closed: true }),
+  streamUrl: async () => 'wss://harness.invalid/stream',
+  openSocket: () => ({ binaryType: 'arraybuffer', addEventListener() {}, close() {}, send() {} }) as never,
+  loadXterm: () => new Promise(() => {}),
+  confirmClose: () => false,
+  writeClipboard: async () => undefined,
+};
+
 const HARNESS_TERMINAL_LISTING: TerminalListView = {
   sessionId: 'harness-session',
   terminals: [
@@ -797,6 +819,7 @@ const HARNESS_TERMINAL_LISTING: TerminalListView = {
       cols: 100,
       rows: 30,
       viewers: 1,
+      openedBy: { by: 'agent', sessionId: 'mse7wwti-2a75bd9c' },
       createdAt: '2026-08-04T09:00:00.000Z',
       lastActivityAt: '2026-08-04T09:41:00.000Z',
     },
@@ -808,6 +831,7 @@ const HARNESS_TERMINAL_LISTING: TerminalListView = {
       cols: 100,
       rows: 30,
       viewers: 0,
+      openedBy: { by: 'human', deviceId: 'harness-device' },
       createdAt: '2026-08-04T09:05:00.000Z',
       lastActivityAt: '2026-08-04T09:39:00.000Z',
       idleDeadline: '2026-08-04T10:39:00.000Z',
@@ -2857,6 +2881,21 @@ function Shell() {
               readSnapshot={HARNESS_PANE_SNAPSHOT}
             />
           </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Co-controlled terminal',
+      render: () => (
+        <Card aria-label="Co-controlled terminal" className="min-w-0" id="harness-terminal-deck">
+          <PanelBody className="flex h-[22rem] min-w-0 flex-col p-0">
+            <SessionTerminalDeck
+              connection={daemon}
+              cwd="/home/harness/workspace/ferretry"
+              dependencies={HARNESS_TERMINAL_DECK}
+              scope={scope}
+            />
+          </PanelBody>
         </Card>
       ),
     },

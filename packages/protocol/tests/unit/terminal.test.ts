@@ -27,6 +27,7 @@ const viewedTerminal = {
   cols: size.cols,
   rows: size.rows,
   viewers: 2,
+  openedBy: { by: 'agent', sessionId: 'mse7wwti-2a75bd9c' },
   createdAt: INSTANT,
   lastActivityAt: LATER_INSTANT,
 } satisfies TerminalView;
@@ -277,6 +278,65 @@ describe('terminal schemas', () => {
     // Assert
     should(parsed.viewers).equal(0);
     should(parsed.state).equal('running');
+    assertRejects(cases);
+  });
+
+  it('should carry an opener when one was recorded and stay silent when none was', () => {
+    // Arrange — absence is the fourth answer: a terminal opened before this
+    // daemon recorded provenance has no opener, and a reader must be told that
+    // rather than shown a default. `openedBy: null` is NOT that answer; a
+    // daemon that means "unrecorded" omits the field.
+    const unrecorded = { ...viewedTerminal, openedBy: undefined };
+    const cases: SchemaCase[] = [
+      { name: 'null opener', schema: terminal.TerminalViewSchema, value: { ...viewedTerminal, openedBy: null } },
+      {
+        name: 'opener without a class',
+        schema: terminal.TerminalViewSchema,
+        value: { ...viewedTerminal, openedBy: { deviceId: 'device-7f3a' } },
+      },
+      {
+        name: 'agent opener without a session',
+        schema: terminal.TerminalViewSchema,
+        value: { ...viewedTerminal, openedBy: { by: 'agent' } },
+      },
+    ];
+
+    // Act
+    const parsed = terminal.TerminalViewSchema.parse(viewedTerminal);
+    const silent = terminal.TerminalViewSchema.parse(unrecorded);
+
+    // Assert
+    should(parsed.openedBy).deepEqual({ by: 'agent', sessionId: 'mse7wwti-2a75bd9c' });
+    should(silent.openedBy).be.undefined();
+    should(terminal.TerminalViewSchema.parse({ ...viewedTerminal, openedBy: { by: 'local' } }).openedBy).deepEqual({
+      by: 'local',
+    });
+    assertRejects(cases);
+  });
+
+  it('should let a create request name the agent it is opening a terminal for', () => {
+    // Arrange — the request states WHICH agent, never that the caller IS one:
+    // the daemon derives the class from the credential that authenticated it.
+    const forAgent = { agentSessionId: 'mse7wwti-2a75bd9c' } satisfies CreateTerminalRequest;
+    const cases: SchemaCase[] = [
+      { name: 'empty agent session', schema: terminal.CreateTerminalRequestSchema, value: { agentSessionId: '' } },
+      { name: 'blank agent session', schema: terminal.CreateTerminalRequestSchema, value: { agentSessionId: '   ' } },
+      {
+        name: 'agent session beyond the maximum',
+        schema: terminal.CreateTerminalRequestSchema,
+        value: { agentSessionId: 'a'.repeat(129) },
+      },
+      // A caller may not hand the daemon a finished opener: doing so would let a
+      // paired device label its own shell as an agent's.
+      { name: 'a whole opener', schema: terminal.CreateTerminalRequestSchema, value: { openedBy: { by: 'local' } } },
+    ];
+
+    // Act
+    const parsed = terminal.CreateTerminalRequestSchema.parse(forAgent);
+
+    // Assert
+    should(parsed).deepEqual(forAgent);
+    should(terminal.CreateTerminalRequestSchema.parse({}).agentSessionId).be.undefined();
     assertRejects(cases);
   });
 

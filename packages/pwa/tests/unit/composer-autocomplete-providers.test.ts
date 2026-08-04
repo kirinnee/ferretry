@@ -496,7 +496,7 @@ describe('composer session surfaces', () => {
     expect(result.candidates[0]?.detail).toContain('0 viewers');
     expect(result.candidates[0]?.detail).toContain('owner unrecorded');
     expect(result.contextLabel).toBe('% session surfaces');
-    expect(result.notice).toContain('does not record who opened a terminal');
+    expect(result.notice).toContain('reads as unrecorded');
   });
 
   it('says the session has no addressable terminal rather than offering an empty list silently', async () => {

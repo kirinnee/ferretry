@@ -5,6 +5,7 @@ import {
   RenameTerminalRequestSchema,
   SOCKET_TICKET_TTL_SECONDS,
   SocketTicketResponseSchema,
+  type SurfaceOpener,
   type TerminalErrorCode,
   TerminalIdSchema,
   type TerminalListView,
@@ -17,6 +18,7 @@ import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketDownstream, SocketHandler, SocketRoute } from '../../api/socket.ts';
 import type { SocketTicketBroker } from '../../api/socket-ticket.ts';
+import { decideTerminalOpener } from '../../terminal/ownership.ts';
 import { TerminalPolicyError } from '../../terminal/policy.ts';
 
 /**
@@ -46,7 +48,12 @@ import { TerminalPolicyError } from '../../terminal/policy.ts';
  */
 export interface TerminalSubsystem {
   list(sessionId: string): Promise<TerminalListView>;
-  create(sessionId: string, input: CreateTerminalRequest): Promise<TerminalView>;
+  /**
+   * Opens a terminal, recording the opener the MOUNT derived — not one the body
+   * asked for. The request's `agentSessionId` never reaches the service; it is an
+   * input to that derivation and nothing more.
+   */
+  create(sessionId: string, input: CreateTerminalRequest, openedBy?: SurfaceOpener): Promise<TerminalView>;
   get(sessionId: string, terminalId: string): Promise<TerminalView>;
   rename(sessionId: string, terminalId: string, title: string): Promise<TerminalView>;
   close(sessionId: string, terminalId: string): Promise<void>;
@@ -143,13 +150,28 @@ async function list(subsystem: TerminalSubsystem, context: RouteContext): Promis
   return jsonResponse(await subsystem.list(sessionId).catch(reraise));
 }
 
-/** Opens one terminal in the session's own working directory. */
+/**
+ * Opens one terminal in the session's own working directory, and records who opened it.
+ *
+ * OWNERSHIP IS DECIDED HERE BECAUSE THIS IS WHERE THE CREDENTIAL IS. `context.credential` is
+ * server-derived — the dispatcher sets it from the token that authenticated the request — so a class
+ * derived from it is evidence, while anything read out of the body would be a claim. The refusal
+ * matters as much as the derivation: a paired device that names an agent owner is answered 403
+ * rather than silently recorded as a human, because a reader who consults ownership before typing
+ * into a shell is owed a refusal instead of a plausible wrong answer.
+ */
 async function create(subsystem: TerminalSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   // Every field is optional, so an empty body means "open me a terminal, you choose" rather than a
   // malformed request — which is exactly what a PWA button sends.
   const request = await parseOptionalBody(context.request, CreateTerminalRequestSchema);
-  return jsonResponse(await subsystem.create(sessionId, request).catch(reraise), 201);
+  const decision = decideTerminalOpener(context.credential, request.agentSessionId);
+  if (decision.outcome === 'refused') throw new ApiError(403, decision.reason, 'forbidden');
+  const opened =
+    decision.outcome === 'attributed'
+      ? await subsystem.create(sessionId, request, decision.openedBy).catch(reraise)
+      : await subsystem.create(sessionId, request).catch(reraise);
+  return jsonResponse(opened, 201);
 }
 
 /** One terminal, as it stands now. */

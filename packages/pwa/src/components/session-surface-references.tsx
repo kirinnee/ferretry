@@ -14,18 +14,14 @@
  * also why a reference survives a phone sleeping and waking: the id was minted by
  * the daemon and outlives every reconnect.
  *
- * OWNERSHIP IS SHOWN AS UNRECORDED, WHICH IS THE HONEST READING. Handover #34
- * asks for durable, visible ownership of agent-launched surfaces. This daemon
- * records no provenance for a terminal, and no agent can open one through the
- * API today, so a row states that plainly instead of printing "you opened this" —
- * a guess that is usually right is still a claim made without evidence, and
- * ownership is exactly the fact a reader consults before typing into a shell an
- * agent may be driving.
- *
- * WHAT IS NOT HERE. There is no live terminal renderer in the PWA yet (see
- * `SessionTerminalSurface`), so this pane addresses and attributes terminals; it
- * does not stream one. Co-control — the agent driving while the human watches and
- * takes over — needs that renderer and is the next unit's work.
+ * OWNERSHIP IS THE DAEMON'S OWN ATTESTATION. Handover #34 asks for durable,
+ * visible ownership of agent-launched surfaces, and the daemon now records it on
+ * the pane itself, derived from the credential that opened it. A row prints that
+ * class — an agent, a paired device, the daemon host — and prints "unrecorded"
+ * only when the daemon carries no opener at all. Absence is never rendered as
+ * "you opened this": a guess that is usually right is still a claim made without
+ * evidence, and ownership is exactly the fact a reader consults before typing
+ * into a shell an agent may be driving.
  */
 
 import type { TerminalListView } from '@ferretry/protocol';
@@ -35,7 +31,12 @@ import { addReferenceMessage, addReferenceToComposer } from '../lib/composer-ref
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
-import { type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
+import {
+  describeSurfaceOwnership,
+  type SessionSurface,
+  sessionSurfaces,
+  type SurfaceOwnership,
+} from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { Badge, Button } from '../shell/primitives.tsx';
 
@@ -64,6 +65,23 @@ const viewerLabel = (viewers: number): string => {
   if (viewers === 0) return 'No viewer attached';
   return viewers === 1 ? '1 viewer attached' : `${viewers} viewers attached`;
 };
+
+/**
+ * One badge stating who opened this surface.
+ *
+ * The identity behind the class rides in `title` rather than the badge text: a
+ * session id is long enough to wrap the row on a phone, and the CLASS is what
+ * decides whether the reader hesitates. The identity is still there for anyone
+ * who needs to match it against a specific agent.
+ */
+function OwnershipBadge({ ownership }: { readonly ownership: SurfaceOwnership }) {
+  const label = describeSurfaceOwnership(ownership);
+  return (
+    <span data-surface-owner={ownership.by} {...(label.detail === undefined ? {} : { title: label.detail })}>
+      <Badge tone={label.tone}>{label.text}</Badge>
+    </span>
+  );
+}
 
 export function SessionSurfaceReferences({
   connection,
@@ -124,8 +142,8 @@ export function SessionSurfaceReferences({
         </h3>
         <p className="mb-0 mt-1 text-ui text-muted">
           Each terminal carries a stable reference for this session. Add it to your message and the agent acts on that
-          exact shell — never on whichever one happens to be in front of it. This daemon does not record who opened a
-          terminal, so ownership below reads as unrecorded.
+          exact shell — never on whichever one happens to be in front of it. Each row states who opened it, as the
+          daemon recorded it at the time; a terminal it carries no record for reads as unrecorded rather than as yours.
         </p>
       </div>
 
@@ -165,7 +183,7 @@ export function SessionSurfaceReferences({
                   this row exists to hand over. */}
               <code className="mono min-w-0 truncate text-meta text-faint">{surface.token}</code>
               <Badge tone="pend">{viewerLabel(surface.viewers)}</Badge>
-              <Badge tone="warn">Owner unrecorded</Badge>
+              <OwnershipBadge ownership={surface.ownership} />
               <Button onClick={() => add(surface)} size="sm" type="button" variant="primary">
                 Add to chat
               </Button>

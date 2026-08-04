@@ -14,6 +14,7 @@ export * from './service.ts';
 export * from './session.ts';
 export * from './socket-ticket.ts';
 export * from './stt.ts';
+export * from './surface.ts';
 export * from './task-boards.ts';
 export * from './tasks.ts';
 export * from './terminal.ts';

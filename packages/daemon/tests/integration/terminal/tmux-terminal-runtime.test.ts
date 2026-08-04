@@ -38,12 +38,14 @@ describe('TmuxTerminalRuntime', () => {
       terminal.title,
       '1970-01-01T00:00:01.000Z',
       terminal.root,
+      // A pane that predates the opener option answers with the empty string.
+      '',
       '2',
       '100',
       '30',
     ].join('\t');
     const fake = new FakeTmux([
-      ok(`${line}\nother\t\t\t\t\t\t\t\t\n`),
+      ok(`${line}\nother\t\t\t\t\t\t\t\t\t\n`),
       { code: 1, stdout: '', stderr: 'no server running' },
     ]);
     const subject = new TmuxTerminalRuntime(fake, () => 9_000);
@@ -55,6 +57,69 @@ describe('TmuxTerminalRuntime', () => {
     // Assert
     should(found).deepEqual([{ ...terminal, lastActivityAtMs: 2_000 }]);
     should(absent).deepEqual([]);
+  });
+
+  it('should carry ownership on the pane itself, and read an unknown one as unrecorded', async () => {
+    // Ownership has to survive a daemon restart to be worth reading, so it lives
+    // in a tmux user option beside the terminal's own id rather than in daemon
+    // memory. A value this build cannot read contributes NO opener rather than a
+    // guessed one — a reader consults this before typing into a live shell.
+    // Arrange
+    const row = (openedBy: string): string =>
+      [
+        terminal.tmuxSession,
+        terminal.ownerId,
+        terminal.id,
+        terminal.title,
+        '1970-01-01T00:00:01.000Z',
+        terminal.root,
+        openedBy,
+        '2',
+        '100',
+        '30',
+      ].join('\t');
+    const fake = new FakeTmux([ok(`${row('agent:mse7wwti')}\n`), ok(`${row('starfleet:picard')}\n`), ok()]);
+    const subject = new TmuxTerminalRuntime(fake, () => 9_000);
+
+    // Act
+    const owned = await subject.list();
+    const unknown = await subject.list();
+    const created = await subject.create({
+      ownerId: terminal.ownerId,
+      id: terminal.id,
+      title: terminal.title,
+      cwd: terminal.root,
+      size: { cols: 100, rows: 30 },
+      openedBy: { by: 'agent', sessionId: 'mse7wwti' },
+    });
+
+    // Assert
+    should(owned[0]?.openedBy).deepEqual({ by: 'agent', sessionId: 'mse7wwti' });
+    should(unknown[0]).not.have.property('openedBy');
+    should(created.openedBy).deepEqual({ by: 'agent', sessionId: 'mse7wwti' });
+    // Written in the SAME tmux invocation as the pane, so no list can observe a
+    // terminal that exists but claims no owner.
+    should(fake.received[2]?.filter(argument => argument === '@fy_terminal_opened_by')).have.length(1);
+    should(fake.received[2]).containEql('agent:mse7wwti');
+  });
+
+  it('should open a terminal with no opener when the caller could not be attested', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok()]);
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000);
+
+    // Act
+    const created = await subject.create({
+      ownerId: terminal.ownerId,
+      id: terminal.id,
+      title: terminal.title,
+      cwd: terminal.root,
+      size: { cols: 100, rows: 30 },
+    });
+
+    // Assert
+    should(created).not.have.property('openedBy');
+    should(fake.received[0]).not.containEql('@fy_terminal_opened_by');
   });
 
   it('should refuse an unexpected list failure instead of treating it as no terminal', async () => {

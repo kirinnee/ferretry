@@ -1,4 +1,4 @@
-import type { TerminalListView, TerminalSize, TerminalView } from '@ferretry/protocol';
+import type { SurfaceOpener, TerminalListView, TerminalSize, TerminalView } from '@ferretry/protocol';
 import {
   DEFAULT_TERMINAL_SIZE,
   idleDeadline,
@@ -76,6 +76,9 @@ export class ManagedTerminalService {
       cols: record.cols,
       rows: record.rows,
       viewers: 0,
+      // Spread rather than assigned: `openedBy: undefined` is a present key with
+      // no value, and the wire's "unrecorded" is an ABSENT key.
+      ...(record.openedBy === undefined ? {} : { openedBy: record.openedBy }),
       createdAt: new Date(record.createdAtMs).toISOString(),
       lastActivityAt: new Date(record.lastActivityAtMs).toISOString(),
       idleDeadline: new Date(idleDeadline(record.lastActivityAtMs, 0, this.idleTimeoutMs) ?? 0).toISOString(),
@@ -112,7 +115,18 @@ export class ManagedTerminalService {
 
   async create(
     sessionReference: string,
-    input: { readonly title?: unknown; readonly cols?: number; readonly rows?: number } = {},
+    input: {
+      readonly title?: unknown;
+      readonly cols?: number;
+      readonly rows?: number;
+      /**
+       * Already DERIVED by the caller from the credential that authenticated the
+       * request — this service never sees a request body, so it cannot decide
+       * ownership itself and must not appear to. Absent means the caller could
+       * attest nothing.
+       */
+      readonly openedBy?: SurfaceOpener;
+    } = {},
   ): Promise<TerminalView> {
     const session = await this.session(sessionReference);
     await this.refresh();
@@ -138,6 +152,7 @@ export class ManagedTerminalService {
       title,
       cwd: session.cwd,
       size,
+      ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
     });
     this.records.set(key(record.ownerId, record.id), record);
     return this.view(record);

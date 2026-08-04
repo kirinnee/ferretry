@@ -19,7 +19,7 @@ import { pinReferenceMarkdown } from '../lib/pin-links.ts';
 import { resolvedPinReference } from '../lib/pin-reference-context.ts';
 import { formatReference } from '../lib/references.ts';
 import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
-import { type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
+import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
@@ -124,13 +124,14 @@ export interface ComposerAutocompleteProvidersOptions extends ComposerReferenceP
 /**
  * The one thing a row must not leave unsaid.
  *
- * The daemon does not record who opened a terminal, so a reader choosing between
- * two shells cannot be told whether an agent or their own phone opened either.
- * Saying so is the honest reading; printing "you opened this" would be a guess
- * that happens to be right most of the time, which is worse.
+ * A reader choosing between two shells is choosing whether to type into one an
+ * agent is driving. The daemon attests who opened each, so the row says which —
+ * and says "unrecorded" for a pane it carries no record of. Printing "you opened
+ * this" in that case would be a guess that happens to be right most of the time,
+ * which is worse than the absence.
  */
 const SURFACE_PROVENANCE_NOTICE =
-  'This daemon does not record who opened a terminal, so ownership is shown as unrecorded.';
+  'Ownership is what the daemon recorded when the terminal was opened; one it has no record for reads as unrecorded.';
 
 const surfaceCandidate =
   (scope: DaemonSessionScope) =>
@@ -138,9 +139,11 @@ const surfaceCandidate =
     id: scopedId('surface', scope, `${surface.surface}:${surface.key}`),
     kind: 'surface',
     label: surface.title,
-    detail: [surface.token, surface.viewers === 1 ? '1 viewer' : `${surface.viewers} viewers`, 'owner unrecorded'].join(
-      ' · ',
-    ),
+    detail: [
+      surface.token,
+      surface.viewers === 1 ? '1 viewer' : `${surface.viewers} viewers`,
+      describeSurfaceOwnership(surface.ownership).text.toLowerCase(),
+    ].join(' · '),
     keywords: `${surface.key} ${surface.title} ${surface.surface}`,
     group: 'Surfaces',
     // Small, named, session-owned sets stay above anything fuzzier.

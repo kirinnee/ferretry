@@ -5,6 +5,7 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { fakeDeck, terminalListing } from '../support/terminal-deck.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -17,11 +18,19 @@ const beta = daemonConnection({
   deviceToken: 'beta-token',
 });
 
+type Rendered = ReturnType<typeof render>;
+
+/** The deck's canvas ref needs a measurable host; react-test-renderer has none. */
+const mount = (element: Parameters<typeof render>[0]): Rendered =>
+  render(element, { createNodeMock: () => ({ clientWidth: 800, clientHeight: 400 }) });
+
 describe('SessionTerminalSurface', () => {
   test('shows a paired-device snapshot without asking the loopback-only attach route', async () => {
-    const page = render(
+    const page = mount(
       <SessionTerminalSurface
         connection={alpha}
+        deck={fakeDeck(async () => terminalListing([])).dependencies}
+        listTerminals={async () => terminalListing([])}
         readSnapshot={async (daemon, scope) => `${daemon.daemonId}:${scope.sessionId}:snapshot`}
         scope={daemonSessionScope(alpha, 'shared')}
       />,
@@ -35,15 +44,19 @@ describe('SessionTerminalSurface', () => {
     expect(output).toContain('managed session pane');
     expect(output).not.toContain('tmux: shared');
     expect(output).toContain('alpha:shared:snapshot');
-    expect(output).toContain('can mint a one-time terminal ticket');
-    expect(output).toContain('no interactive terminal renderer');
+    // The live deck is the surface's headline now, not a paragraph explaining
+    // that there is not one.
+    expect(output).toContain('No shell terminals open');
+    expect(output).toContain('the agent’s own managed pane');
     run(() => page.unmount());
   });
 
   test("never paints one daemon's proved pane after switching to another daemon with the same session id", async () => {
-    const page = render(
+    const page = mount(
       <SessionTerminalSurface
         connection={alpha}
+        deck={fakeDeck(async () => terminalListing([])).dependencies}
+        listTerminals={async () => terminalListing([])}
         readSnapshot={async () => 'alpha output'}
         scope={daemonSessionScope(alpha, 'shared')}
       />,
@@ -58,6 +71,8 @@ describe('SessionTerminalSurface', () => {
       page.update(
         <SessionTerminalSurface
           connection={beta}
+          deck={fakeDeck(async () => terminalListing([])).dependencies}
+          listTerminals={async () => terminalListing([])}
           readSnapshot={async () => 'beta output'}
           scope={daemonSessionScope(beta, 'shared')}
         />,
@@ -70,9 +85,11 @@ describe('SessionTerminalSurface', () => {
   });
 
   test('reports a snapshot failure without inventing a tmux identity', async () => {
-    const page = render(
+    const page = mount(
       <SessionTerminalSurface
         connection={alpha}
+        deck={fakeDeck(async () => terminalListing([])).dependencies}
+        listTerminals={async () => terminalListing([])}
         readSnapshot={async () => {
           throw new Error('snapshot unavailable');
         }}
