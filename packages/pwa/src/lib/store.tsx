@@ -10,6 +10,11 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import {
+  bundledRelayDirectory,
+  type HostedRelayFallback,
+  readHostedRelayFallback,
+} from '../features/onboarding/hosted-relay.ts';
 import { daemonApiClient } from './api-client.ts';
 import {
   type DaemonConnectionRepository,
@@ -190,6 +195,14 @@ export interface AppStore {
    */
   readonly pushService: DaemonPushService;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
+  /**
+   * Whether Ferretry's default relay is advertising itself right now.
+   *
+   * Bound to the SAME injected fetcher as pairing and push, for the same reason:
+   * a suite or an offline shell that injects a fetcher must not get the real
+   * network back for one read. Never throws — "could not find out" is a state.
+   */
+  readonly readDefaultRelay: () => Promise<HostedRelayFallback>;
 }
 
 export interface CreateAppStoreOptions {
@@ -240,6 +253,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     notificationPreferences,
     pushDevices,
     pushService,
+    // The directory origin is the build constant and nothing else: no literal, no
+    // relative path, no guess. Unset ships no directory and answers without
+    // dialling, which is what a local build or a fork honestly is.
+    readDefaultRelay: async () => await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher }),
     pair: async seed => {
       const connection = await exchangePairing(seed, fetcher);
       connections.add(connection);

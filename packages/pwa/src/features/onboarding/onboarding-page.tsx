@@ -43,6 +43,7 @@ import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
+import { activeCarrierStatus, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
 import {
   type ConnectionMethodId,
@@ -89,8 +90,17 @@ export interface OnboardingPageProps {
   readonly onOpenFleet: () => void;
   /** Whether there is a paired daemon for the final action to open. */
   readonly fleetReady: boolean;
-  /** The carrier selected by the paired connection, never a preference control. */
+  /**
+   * The carrier a paired connection is actually using.
+   *
+   * Optional, and defaulted from `activeCarrierStatus` rather than from a caller:
+   * the composition root used to pass the literal 'Direct', which was a claim
+   * nothing had measured. A host may still override it — the review harness does
+   * — but nobody has to invent one to render this screen.
+   */
   readonly connectionStatus?: string | null;
+  /** What the runtime advertisement said about the default relay. */
+  readonly fallback: HostedRelayFallback;
 }
 
 /**
@@ -119,6 +129,7 @@ export function OnboardingPage({
   onOpenFleet,
   fleetReady,
   connectionStatus = null,
+  fallback,
 }: OnboardingPageProps) {
   const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
   /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
@@ -216,6 +227,7 @@ export function OnboardingPage({
           onOpenFleet={onOpenFleet}
           fleetReady={fleetReady}
           connectionStatus={connectionStatus}
+          fallback={fallback}
           onGoTo={step => {
             progress.goTo(step);
           }}
@@ -240,6 +252,7 @@ interface RouteFlowProps {
   readonly onOpenFleet: () => void;
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
+  readonly fallback: HostedRelayFallback;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   /** Back out of the route entirely, to the question. */
@@ -262,6 +275,7 @@ function RouteFlow({
   onOpenFleet,
   fleetReady,
   connectionStatus,
+  fallback,
   onGoTo,
   onChooseConnection,
   onLeaveRoute,
@@ -307,6 +321,7 @@ function RouteFlow({
           pairing={pairing}
           fleetReady={fleetReady}
           connectionStatus={connectionStatus}
+          fallback={fallback}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
           onChooseConnection={onChooseConnection}
@@ -368,6 +383,7 @@ interface StageProps {
   readonly pairing: ReactNode;
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
+  readonly fallback: HostedRelayFallback;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
@@ -387,6 +403,7 @@ function Stage({
   pairing,
   fleetReady,
   connectionStatus,
+  fallback,
   onOpenFleet,
   onGoTo,
   onChooseConnection,
@@ -397,7 +414,7 @@ function Stage({
     case 'daemon':
       return <DaemonStage write={write} />;
     case 'connect':
-      return <OnboardingConnectionChooser onChoose={onChooseConnection} />;
+      return <OnboardingConnectionChooser onChoose={onChooseConnection} fallback={fallback} />;
     case 'relay-fingerprint':
       return <RelayFingerprintStage write={write} />;
     case 'relay-source':
@@ -416,7 +433,13 @@ function Stage({
       return (
         <DoneStage
           fleetReady={fleetReady}
-          connectionStatus={connectionStatus}
+          /*
+            THE CARRIER IN USE, DERIVED RATHER THAN ASSERTED. A host may still
+            override it; nobody has to invent one. The default names the carrier
+            the app actually dials and, for a reader who chose a relay, says
+            plainly that their choice is not yet what carries the connection.
+          */
+          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(at.connection)) : null}
           onOpenFleet={onOpenFleet}
           onBackToPairing={() => onGoTo('scan')}
         />
