@@ -7,9 +7,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleHelp,
   Clock3,
+  ListChecks,
   LoaderCircle,
   MessageCircleQuestion,
+  ShieldQuestion,
   UserRoundCheck,
   X,
 } from 'lucide-react';
@@ -32,22 +35,28 @@ type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean
 
 const kindMeta = (
   item: Pick<AttentionItem, 'source' | 'ask'>,
-): { tone: AttentionTone; label: string; action: string } => {
+): { tone: AttentionTone; label: string; icon: typeof CircleAlert; action: string } => {
   if (!item.ask)
-    return { tone: 'none', label: sourceLabel(item.source), action: 'No answer shape recorded — clear it by acting' };
+    return {
+      tone: 'none',
+      label: sourceLabel(item.source),
+      icon: CircleHelp,
+      action: 'No answer shape recorded — clear it by acting',
+    };
   switch (item.ask.kind) {
     case 'permission':
-      return { tone: 'permission', label: 'Permission', action: 'Approve or deny this request' };
+      return { tone: 'permission', label: 'Permission', icon: ShieldQuestion, action: 'Approve or reject' };
     case 'multiple-choice':
-      return { tone: 'multiple-choice', label: 'Choice', action: 'Choose one offered option' };
+      return { tone: 'multiple-choice', label: 'Pick one', icon: ListChecks, action: 'Choose an answer' };
     case 'answer-review':
-      return { tone: 'answer-review', label: 'Answer review', action: 'Accept the answer, or send it back' };
+      return { tone: 'answer-review', label: 'Review answer', icon: BadgeCheck, action: 'Accept it, or ask for more' };
     case 'open-question':
-      return { tone: 'open-question', label: 'Open response', action: 'Write a free-text response' };
+      return { tone: 'open-question', label: 'Open question', icon: MessageCircleQuestion, action: 'Write an answer' };
     default:
       return {
         tone: 'unknown',
         label: 'Damaged attention',
+        icon: CircleHelp,
         action: 'The requested action is malformed. Repair it before treating this as resolved',
       };
   }
@@ -209,6 +218,7 @@ function AttentionRow({
   readonly onAction: Action;
 }) {
   const kind = kindMeta(item);
+  const KindIcon = kind.icon;
   return (
     <li
       data-kind={kind.tone}
@@ -217,6 +227,7 @@ function AttentionRow({
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs">
         <span className="kt-attn-chip kt-label inline-flex shrink-0 items-center gap-1 px-badge-x py-0.5">
+          <KindIcon size={11} aria-hidden="true" />
           {kind.label}
         </span>
         <span className="mono text-meta text-faint">{attentionReference(item.id)}</span>
@@ -250,11 +261,13 @@ function AttentionRow({
         {prose(item.howToResolve, 'mt-0.5 text-cell leading-base text-muted')}
       </Part>
       <div className="mt-sm flex flex-col gap-xs">
+        <p className="m-0 text-meta text-faint" data-attention-action>
+          {kind.action}.
+        </p>
         {item.ask ? (
           <AnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
         ) : (
           <>
-            <p className="m-0 text-meta text-faint">{kind.action}.</p>
             <div className="flex justify-end">
               <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => onAction(item.id, null)}>
                 {busy ? (

@@ -200,7 +200,7 @@ describe('AttentionBoard', () => {
     expect(damaged.container.textContent).not.toContain('Nothing needs attention.');
   });
 
-  it('labels every requested action before a person opens an item', async () => {
+  it('shows source-matched icons and action lines for every requested action before a person opens an item', async () => {
     const asks = [
       { kind: 'permission' as const },
       { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] },
@@ -225,9 +225,16 @@ describe('AttentionBoard', () => {
       />,
     );
     expect(container.textContent).toContain('Permission');
-    expect(container.textContent).toContain('Choice');
-    expect(container.textContent).toContain('Answer review');
-    expect(container.textContent).toContain('Open response');
+    expect(container.textContent).toContain('Pick one');
+    expect(container.textContent).toContain('Review answer');
+    expect(container.textContent).toContain('Open question');
+    expect(Array.from(container.querySelectorAll('[data-attention-action]')).map(node => node.textContent)).toEqual([
+      'Approve or reject.',
+      'Choose an answer.',
+      'Accept it, or ask for more.',
+      'Write an answer.',
+    ]);
+    expect(container.querySelectorAll('.kt-attn-chip svg')).toHaveLength(4);
   });
 
   it('keeps a legacy no-ask item actionable and makes pending work visibly busy', async () => {
