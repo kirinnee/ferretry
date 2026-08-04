@@ -42,6 +42,7 @@ const SECTIONS = [
   'harness-chat-width',
   'harness-dead-pane',
   'harness-fleet-sidebar',
+  'harness-terminal-deck',
   'harness-surface-references',
   'harness-runtime-controls',
   'harness-pending-sends',
