@@ -211,6 +211,7 @@ import {
   type FinishedAnalyticsSession,
   FleetEventStreamService,
   type FoundationPaths,
+  harnessMigrationRefusal,
   HarnessQuirkService,
   InitialAttachmentError,
   InvalidDeadlineRefused,
@@ -1821,6 +1822,17 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         throw new SessionMigrateError(failure, error.message);
       },
     );
+    // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
+    // other work at all. Everything below it either reads the host or writes the session: the planner,
+    // the transcript capture that inspects the target's harness home, the report, the restamp and the
+    // kill. Refusing at this point is what makes the refusal cost nothing and leave nothing behind, so
+    // the caller may present the same request id again against an account of the right family.
+    const mismatch = harnessMigrationRefusal({
+      sourceHarness: config.harness,
+      targetHarness: account.kind,
+      targetAgent: account.agent,
+    });
+    if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
     // The same planner the start uses, so the model a migration records and the window it is measured
     // against come from the one decision rather than two that can disagree.
     const plan = parts.planner.plan({
@@ -2648,6 +2660,10 @@ export function buildWorld(): DaemonWorld {
           tmuxSession: config.tmuxSession,
           cwd: config.cwd,
           command: relaunchCommand(config.command, started),
+          // The SAME store the launch path reads, for the same reason it reads it per launch: a
+          // replacement pane must carry the session's CURRENT environment. Read here rather than
+          // captured at construction, and merged with the derived session id by the launcher.
+          env: await sessionEnvironments.read(id),
         };
       },
       new TmuxPaneDelivery(controller, milliseconds => Bun.sleep(milliseconds)),
@@ -2735,8 +2751,9 @@ export function buildWorld(): DaemonWorld {
       // tmux server the host already runs.
       launchTmux,
       new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
-      // The pane is handed its own credential through `tmux -e`, never through argv: argv is
-      // world-readable on this host through /proc, and the fleet wrappers read the value from their
+      // The pane is handed its own credential — and its own session id, which is what lets a
+      // teammate attribute a message to itself — through `tmux -e`, never through argv: argv is
+      // world-readable on this host through /proc, and the fleet wrappers read the values from their
       // environment anyway.
       sessionEnvironments,
       new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),

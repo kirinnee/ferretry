@@ -9,6 +9,8 @@ import {
   firstTurnInstruction,
   lifecycleSessionId,
   MAX_ASSIGNED_TASK_LENGTH,
+  SESSION_ID_VARIABLE,
+  sessionPaneEnvironment,
   sessionTmuxName,
   transitionSessionRecord,
   type CreateSessionLifecycleRequest,
@@ -263,5 +265,30 @@ describe('session lifecycle policy', () => {
     );
     should(lifecycleSessionId('session-1')).equal('session-1');
     should(() => lifecycleSessionId('../escape')).throw(/path-safe/u);
+  });
+
+  it('should give every pane its own session id, derived from the record rather than from the store', () => {
+    // A pane that cannot name itself cannot be attributed: the CLI sends this value as
+    // `x-ferretry-session-id`, and the send domain takes `from` from the actor that header produces.
+    // Arrange
+    const id = parseSessionId('session-1');
+
+    // Act
+    const withNothingStored = sessionPaneEnvironment(id, {});
+    const beside = sessionPaneEnvironment(id, { FY_SESSION_BOARD_CAPABILITY: 'secret', TASK_BOARD: 'board-7' });
+    // A stored document is read-modify-written by the task-board delivery, so it CAN come back
+    // carrying this name. The record wins: a merge must not be able to rename a live session.
+    const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' });
+
+    // Assert
+    should(withNothingStored).deepEqual({ FY_SESSION_ID: 'session-1' });
+    should(beside).deepEqual({
+      FY_SESSION_BOARD_CAPABILITY: 'secret',
+      TASK_BOARD: 'board-7',
+      FY_SESSION_ID: 'session-1',
+    });
+    should(contradicted).deepEqual({ FY_SESSION_ID: 'session-1' });
+    // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
+    should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
   });
 });

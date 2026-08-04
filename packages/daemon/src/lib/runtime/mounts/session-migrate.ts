@@ -31,6 +31,13 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * still has its `forced` branch because kteam's CLI had `--force-inflight`; adding one here is a WIRE
  * change, and a route that quietly forced past a refusal would make the whole preflight decorative.
  *
+ * A MIGRATION IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
+ * always described this operation as continuing a session on another same-kind account while the
+ * daemon checked nothing, so the constraint the product promised was the one constraint it did not
+ * have. It is decided where the account is resolved — the only place that knows both families — and it
+ * is a pre-destruction refusal like the two gates above: nothing is written, and the same request id
+ * may be presented again once the caller names an account of the right family.
+ *
  * `allowContextDowngrade` is NOT that force flag: it answers a different question — whether the
  * caller accepts a target whose context window is smaller than the one this session is running in,
  * which silently truncates the conversation the migration exists to preserve.
@@ -50,6 +57,12 @@ export type SessionMigrateFailure =
   | 'unavailable'
   /** The preflight found in-flight work it will not destroy, or could not rule some out. */
   | 'refused'
+  /**
+   * The account is not the session's own harness family, or one of the two families could not be
+   * recognised. See {@link harnessMigrationRefusal} for why crossing families is unrecoverable
+   * rather than merely untidy.
+   */
+  | 'harness_mismatch'
   /** The target's context window is smaller and the caller did not accept the truncation. */
   | 'context_downgrade'
   /** The relaunch under the new account was attempted and failed. The session records why. */
@@ -91,6 +104,10 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   // 409 rather than 403: the session's own condition refuses this, and it is answerable — the
   // caller waits for the work to finish, or stops it deliberately, and asks again.
   refused: { status: 409, code: 'migration_refused' },
+  // 409 rather than 404 or 400: the account exists, is available, and is a perfectly good target for
+  // a NEW session — it is this session that cannot go there. The caller's remedy is to name an
+  // account of the same family, which is a different request, not a different spelling of this one.
+  harness_mismatch: { status: 409, code: 'harness_mismatch' },
   context_downgrade: { status: 409, code: 'context_downgrade_refused' },
   failed: { status: 500, code: 'session_migrate_failed' },
 };
@@ -122,9 +139,10 @@ function refuse(error: unknown): never {
  * failed. The session records why" — the kill and the restamp are already behind it, so an automatic
  * retry would relaunch a session that has no pane left. Every other failure in the taxonomy is
  * decided before anything is touched: `invalid` and `not_found` never reach the session, `unusable`
- * is refused precisely because nothing can be restamped safely, `unknown_agent` and `unavailable`
- * reject the target, and `refused`/`context_downgrade` are the two gates that exist to stop the
- * destruction happening. Those must stay retryable so the sheet's "Retry safety check" re-evaluates.
+ * is refused precisely because nothing can be restamped safely, `unknown_agent`, `unavailable` and
+ * `harness_mismatch` reject the target before the session is read for anything, and
+ * `refused`/`context_downgrade` are the two gates that exist to stop the destruction happening. Those
+ * must stay retryable so the sheet's "Retry safety check" re-evaluates.
  *
  * An error outside the taxonomy — a bug, an I/O fault mid-relaunch — is retained. It cannot be
  * placed relative to the point of no return, and the safe assumption about an unplaceable failure in

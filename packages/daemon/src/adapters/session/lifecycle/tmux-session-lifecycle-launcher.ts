@@ -1,7 +1,8 @@
-import type {
-  SessionEnvironmentStore,
-  SessionLifecycleLauncher,
-  SessionLifecycleRecord,
+import {
+  sessionPaneEnvironment,
+  type SessionEnvironmentStore,
+  type SessionLifecycleLauncher,
+  type SessionLifecycleRecord,
 } from '../../../lib/session/lifecycle/index.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { TmuxController } from '../../../lib/tmux/index.ts';
@@ -36,12 +37,16 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     if (program === undefined) throw new Error('session command is empty');
     // Read per launch rather than cached at construction: a relaunch after a rotated credential must
     // hand the pane the CURRENT secret, and one launcher instance serves every session.
-    const env = await this.environment.read(record.config.id);
+    //
+    // The env is never empty now — `sessionPaneEnvironment` always contributes the session's own id —
+    // so the branch that omitted it entirely is gone. A pane launched without it is a teammate that
+    // cannot name itself in a single request.
+    const env = sessionPaneEnvironment(record.config.id, await this.environment.read(record.config.id));
     await this.tmux.launch({
       session: record.config.tmuxSession,
       cwd: record.config.cwd,
       command: [program, ...arguments_],
-      ...(Object.keys(env).length === 0 ? {} : { env }),
+      env,
     });
     await this.registrar?.register(record);
   }

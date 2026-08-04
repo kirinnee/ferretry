@@ -355,6 +355,43 @@ describe('tmux resume launcher', () => {
     should(new Set(addressed)).deepEqual(new Set(['fy-session-1']));
   });
 
+  it('should hand the replacement pane the session identity and the environment it already had', async () => {
+    // A PANE READS ITS ENVIRONMENT AT LAUNCH, so whatever a revive omits is gone for the rest of that
+    // incarnation. This path passed no environment at all: a revived teammate lost its board
+    // capability, and — with `FY_SESSION_ID` now the way an agent names itself — would have come back
+    // unable to attribute a single message, which reads as the peer having gone quiet rather than as a
+    // relaunch defect. The identity is derived from the id, so it survives an absent spec environment.
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const withStoredEnvironment = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+    );
+
+    // Act — the controller refuses to launch over a live name, so the pane is gone in both cases.
+    port.alive = false;
+    await withStoredEnvironment.relaunch(ID);
+    // The same revive for a session that has no stored environment at all, which is the normal case.
+    await launcher(port).relaunch(ID);
+
+    // Assert
+    const launches = port.calls.filter(call => call[0] === 'new-session');
+    should(launches).have.length(2);
+    should(launches[0]).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=stored-secret']);
+    should(launches[0]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
+    should(launches[1]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
+    // `-e` is an option of new-session, so it has to precede the agent word to be an environment entry
+    // at all rather than an argument handed to the agent.
+    should(launches[1]?.indexOf('-e')).be.below(launches[1]?.indexOf('/opt/fleet/bin/agent') ?? -1);
+  });
+
   it('should refuse to relaunch a session whose command is empty', async () => {
     // Arrange
     const subject = new TmuxResumeLauncher(

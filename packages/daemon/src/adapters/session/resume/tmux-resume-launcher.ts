@@ -1,3 +1,4 @@
+import { sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import type { PaneObservation, ResumeLauncher } from '../../../lib/session/resume/types.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
@@ -9,6 +10,14 @@ export interface ResumeLaunchSpec {
   readonly tmuxSession: string;
   readonly cwd: string;
   readonly command: readonly string[];
+  /**
+   * The session's stored environment — its board capability, and any variable a grant delivered.
+   *
+   * Absent is the honest answer for a session that has none, and it is NOT the same as absent
+   * identity: `relaunch` derives the session id itself, so a replacement pane can always name
+   * itself even when the spec carries no environment at all.
+   */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -40,11 +49,23 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     await this.tmux.stop((await this.spec(id)).tmuxSession);
   }
 
+  /**
+   * Replaces the pane, with the environment the session is entitled to.
+   *
+   * A pane reads its environment AT LAUNCH, so a revive that dropped it would hand a working agent a
+   * replacement that has lost its own name and its board capability — a teammate that stops being
+   * able to attribute a message, or accept an invitation, at the exact moment it is recovered.
+   */
   async relaunch(id: SessionId): Promise<void> {
     const spec = await this.spec(id);
     const [program, ...arguments_] = spec.command;
     if (program === undefined) throw new Error(`session ${id} has an empty command and cannot be relaunched`);
-    await this.tmux.launch({ session: spec.tmuxSession, cwd: spec.cwd, command: [program, ...arguments_] });
+    await this.tmux.launch({
+      session: spec.tmuxSession,
+      cwd: spec.cwd,
+      command: [program, ...arguments_],
+      env: sessionPaneEnvironment(id, spec.env ?? {}),
+    });
   }
 
   /**

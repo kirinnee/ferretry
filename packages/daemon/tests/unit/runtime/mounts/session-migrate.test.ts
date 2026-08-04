@@ -151,6 +151,10 @@ describe('the session migrate mount', () => {
         nosuch: new SessionMigrateError('unknown_agent', 'no account is published as "ghost"'),
         spent: new SessionMigrateError('unavailable', 'account ghost cannot serve a session'),
         smaller: new SessionMigrateError('context_downgrade', 'the conversation would be truncated'),
+        crossed: new SessionMigrateError(
+          'harness_mismatch',
+          'this session runs the claude harness and codex-auto-target is a codex account',
+        ),
         stuck: new SessionMigrateError('failed', 'the replacement pane never became ready'),
         weird: new SessionMigrateError('invalid', '"weird" is not a usable session id'),
       }),
@@ -158,7 +162,7 @@ describe('the session migrate mount', () => {
 
     // Act
     const answers = await Promise.all(
-      ['busy', 'broken', 'nosuch', 'spent', 'smaller', 'stuck', 'weird', 'absent'].map(
+      ['busy', 'broken', 'nosuch', 'spent', 'smaller', 'crossed', 'stuck', 'weird', 'absent'].map(
         async id => await subject.dispatch(migrateRequest(id)),
       ),
     );
@@ -170,6 +174,9 @@ describe('the session migrate mount', () => {
       [404, 'unknown_agent'],
       [503, 'agent_unavailable'],
       [409, 'context_downgrade_refused'],
+      // The account exists and is available; it is simply not this session's harness family. 409
+      // rather than 404 or 400, because the request is well formed and names a real account.
+      [409, 'harness_mismatch'],
       [500, 'session_migrate_failed'],
       [400, 'invalid_session_id'],
       [404, 'not-found'],
@@ -327,6 +334,31 @@ describe('the session migrate mount, replayed', () => {
     should(refused.status).equal(409);
     should((JSON.parse(refused.body) as { code: string }).code).equal('migration_refused');
     should(retried.status).equal(200);
+    should(migrator.calls).equal(2);
+  });
+
+  it('should let a cross-family refusal be re-evaluated under the same request id', async () => {
+    // A mismatch is decided BEFORE the pane is touched, exactly like the preflight's refusal above, so
+    // it must behave like one in the ledger: the request id is not spent, and the same id presented
+    // again after the caller corrects the account is a migration that runs rather than a cached 409.
+    // If this were treated as post-destruction the operator's only remedy would be a new request id
+    // for a session nothing had touched.
+    // Arrange
+    const migrator = new CountingMigrate([
+      new SessionMigrateError('harness_mismatch', 'this session runs the claude harness and X is a codex account'),
+      'ok',
+    ]);
+    const subject = mounted(migrator);
+    const headers = withRequestId(human, 'req-crossed');
+
+    // Act
+    const refused = await subject.dispatch(migrateRequest('s1', headers, { agent: 'codex-auto-target' }));
+    const corrected = await subject.dispatch(migrateRequest('s1', headers, { agent: 'claude-auto-target' }));
+
+    // Assert
+    should(refused.status).equal(409);
+    should((JSON.parse(refused.body) as { code: string }).code).equal('harness_mismatch');
+    should(corrected.status).equal(200);
     should(migrator.calls).equal(2);
   });
 
