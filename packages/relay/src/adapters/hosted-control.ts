@@ -536,9 +536,8 @@ async function sweepDaemonRows(
   let scannedThrough = cursor.scannedThrough;
   let observed = 0;
   let exhausted = false;
-  let batched = false;
 
-  for (let page = 0; page < RECLAIM_SCAN_PAGES && !exhausted && !batched; page += 1) {
+  for (let page = 0; page < RECLAIM_SCAN_PAGES && !exhausted; page += 1) {
     const rows = await storage.list<unknown>({
       prefix: DAEMON_METRICS_PREFIX,
       limit: LIST_PAGE_SIZE,
@@ -551,16 +550,12 @@ async function sweepDaemonRows(
       }
       observed += 1;
       scannedThrough = key;
-      if (reclaimableHostedRelayDaemon(parsed.data, at)) keys.push(key);
-      if (keys.length === RECLAIM_BATCH) {
-        batched = true;
-        break;
-      }
+      // Filling the batch stops the deleting, never the counting. A pass that abandoned its page
+      // early would report a partial count as if it were the durable row total, and would leave the
+      // cursor mid-page for no gain — reading the rest of the page it already fetched is nearly free.
+      if (keys.length < RECLAIM_BATCH && reclaimableHostedRelayDaemon(parsed.data, at)) keys.push(key);
     }
-    // A short page means the end of the prefix only when the pass actually read all of it. Stopping
-    // mid-page on a full batch leaves rows behind, and calling that a complete census would both
-    // lose the cursor's place and let a partial count masquerade as the durable row total.
-    if (!batched && rows.size < LIST_PAGE_SIZE) exhausted = true;
+    if (rows.size < LIST_PAGE_SIZE) exhausted = true;
   }
 
   return {

@@ -457,9 +457,9 @@ describe('hosted relay daemon row cap recovery', () => {
     should((await harness.object.fetch(request('/operator/metrics'))).status).equal(200);
   });
 
-  it('should treat a batch that stops mid-page as an unfinished census, not a complete one', async () => {
-    // More stale rows than one batch may forget, all inside a single short page. The sweep must stop
-    // on its batch limit without concluding it has seen the whole census.
+  it('should count the whole census even when it may only forget one batch of it', async () => {
+    // More stale rows than one batch may forget. Filling the batch must not make the sweep abandon
+    // the rest of the page and report 64 as if it were the durable row total.
     const crowded = Array.from({ length: 70 }, (_unused, index) =>
       staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
     );
@@ -469,15 +469,35 @@ describe('hosted relay daemon row cap recovery', () => {
       request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
     );
     should(await admitted.json()).deepEqual({ ok: true });
+    // The pass read the whole prefix, so it wrapped rather than stopping where the batch filled.
+    should(harness.storage.values.get('control:reclaim-cursor')).deepEqual({ scannedThrough: null });
 
-    // 64 forgotten, 6 left, plus the daemon just admitted.
-    const cursor = harness.storage.values.get('control:reclaim-cursor') as { scannedThrough: string | null };
-    should(cursor.scannedThrough).be.a.String();
+    // 64 forgotten, 6 left, plus the daemon just admitted — and the census still agrees with storage.
     const snapshot = await harness.object.fetch(request('/operator/metrics'));
     should(snapshot.status).equal(200);
     const body = (await snapshot.json()) as { global: { trackedDaemons: number }; daemons: unknown[] };
     should(body.daemons.length).equal(7);
     should(body.global.trackedDaemons).equal(7);
+  });
+
+  it('should leave the next pass a new place to look when the census outruns one sweep budget', async () => {
+    // A census larger than a single sweep can read: the pass must stop somewhere concrete rather than
+    // wrap, or every later attempt would re-read the same rows and the ceiling would never recover.
+    const beyondBudget = Array.from({ length: 12_001 }, (_unused, index) =>
+      staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
+    );
+    const harness = await atRowCap(beyondBudget, []);
+
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+    const cursor = harness.storage.values.get('control:reclaim-cursor') as { scannedThrough: string | null };
+    should(cursor.scannedThrough).be.a.String();
+    should(cursor.scannedThrough).startWith('metrics:daemon:');
   });
 
   it('should fail closed on a damaged sweep cursor instead of restarting from the top', async () => {
