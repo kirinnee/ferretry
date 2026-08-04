@@ -22,11 +22,14 @@ import {
 } from '../../../src/features/onboarding/onboarding-model.ts';
 import {
   BriefStage,
-  ConnectStage,
   DaemonStage,
   DoneStage,
   InstallStage,
   PairStage,
+  RelayAllowStage,
+  RelayDeployStage,
+  RelayFingerprintStage,
+  RelaySourceStage,
   ScanStage,
 } from '../../../src/features/onboarding/onboarding-stages.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
@@ -77,46 +80,24 @@ describe('the install stage', () => {
   });
 });
 
-describe('the connect stage', () => {
-  it('opens on direct and needs nothing deployed for it', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="direct" />);
-    const toolbar = must(view.container.querySelector('[role="toolbar"]'), 'the carrier switcher');
+describe('the self-hosted relay steps', () => {
+  it('keeps each deploy operation on its own stage', async () => {
+    const fingerprint = await mount(<RelayFingerprintStage write={async () => {}} />);
+    expect(fingerprint.container.textContent).toContain('fy pair --no-wait');
+    await fingerprint.unmount();
 
-    expect(toolbar.getAttribute('aria-label')).toBe('Connection method');
-    expect(toolbar.querySelectorAll('button')).toHaveLength(3);
-    expect(must(toolbar.querySelector('[aria-pressed="true"]'), 'the chosen carrier').textContent).toBe('Direct');
-    expect(view.container.textContent).toContain('Nothing to deploy');
-    expect(view.container.querySelector('[data-onboarding-method-caveat]')).toBeNull();
-    await view.unmount();
-  });
+    const source = await mount(<RelaySourceStage write={async () => {}} />);
+    expect(source.container.textContent).toContain('git clone https://github.com/kirinnee/ferretry');
+    await source.unmount();
 
-  it('rewrites the steps, not just a label, when the carrier changes', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="direct" />);
-    const steps = (): number => must(view.container.querySelector('ol'), 'the steps').querySelectorAll('li').length;
-    const before = steps();
+    const allow = await mount(<RelayAllowStage />);
+    expect(allow.container.textContent).toContain('RELAY_DAEMON_IDS');
+    expect(asideOf(allow.container).open).toBe(false);
+    await allow.unmount();
 
-    await click(must(view.container.querySelector('[data-onboarding-method="own-relay"]'), 'your own relay'));
-
-    expect(steps()).toBeGreaterThan(before);
-    expect(view.container.textContent).toContain('task relay:deploy');
-    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
-    // The honest limit, said where the reader is deciding rather than after.
-    expect(must(view.container.querySelector('[data-onboarding-method-caveat]'), 'the caveat').textContent).toContain(
-      'not wired up yet',
-    );
-    await view.unmount();
-  });
-
-  it('keeps the reason there is no default relay one tap away', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="own-protocol" />);
-    const aside = asideOf(view.container);
-
-    expect(aside.open).toBe(false);
-    expect(aside.textContent).toContain('no relay address');
-    // A carrier a reader must build has nothing to copy, and prints nothing.
-    expect(view.container.querySelector('[data-onboarding-copy]')).toBeNull();
-    expect(view.container.textContent).toContain('docs/relay-protocol.md');
-    await view.unmount();
+    const deploy = await mount(<RelayDeployStage write={async () => {}} />);
+    expect(deploy.container.textContent).toContain('task relay:deploy');
+    await deploy.unmount();
   });
 });
 
@@ -144,10 +125,8 @@ describe('the scan stage', () => {
     expect(must(view.container.querySelector('[data-onboarding-pairing]'), 'the pairing slot').textContent).toBe(
       'the real pairing screen',
     );
-    // Still said once, folded away, for somebody who turns out not to have one.
-    const aside = asideOf(view.container);
-    expect(aside.open).toBe(false);
-    expect(aside.textContent).toContain(PAIR_COMMAND);
+    expect(view.container.textContent).toContain('single-use');
+    expect(view.container.textContent).toContain(PAIR_COMMAND);
     await view.unmount();
   });
 });
@@ -165,14 +144,12 @@ describe('the daemon stage', () => {
 });
 
 describe('the pair stage', () => {
-  it('keeps the expiry on the glass, because an expired code cannot be diagnosed', async () => {
-    const view = await mount(<PairStage write={async () => {}} pairing={<p>the real pairing screen</p>} />);
+  it('only asks the computer to make a code; scanning is the next stage', async () => {
+    const view = await mount(<PairStage write={async () => {}} />);
 
     expect(view.container.querySelector('details')).toBeNull();
-    expect(view.container.textContent).toContain('One use, about two minutes');
-    expect(must(view.container.querySelector('[data-onboarding-pairing]'), 'the pairing slot').textContent).toBe(
-      'the real pairing screen',
-    );
+    expect(view.container.textContent).toContain('computer where the daemon is running');
+    expect(view.container.querySelector('[data-onboarding-pairing]')).toBeNull();
     await view.unmount();
   });
 });
@@ -181,10 +158,17 @@ describe('the done stage', () => {
   it('offers the fleet when there is one', async () => {
     const opened: string[] = [];
     const view = await mount(
-      <DoneStage fleetReady onOpenFleet={() => opened.push('fleet')} onBackToPairing={() => opened.push('pair')} />,
+      <DoneStage
+        fleetReady
+        connectionStatus="Direct"
+        onOpenFleet={() => opened.push('fleet')}
+        onBackToPairing={() => opened.push('pair')}
+      />,
     );
 
-    expect(view.container.querySelector('[role="status"]')).toBeNull();
+    expect(must(view.container.querySelector('[role="status"]'), 'the carrier indicator').textContent).toContain(
+      'Connection in use: Direct',
+    );
     await click(must(view.container.querySelector('[data-onboarding-open-fleet]'), 'the final action'));
     expect(opened).toEqual(['fleet']);
     await view.unmount();
@@ -195,6 +179,7 @@ describe('the done stage', () => {
     const view = await mount(
       <DoneStage
         fleetReady={false}
+        connectionStatus={null}
         onOpenFleet={() => opened.push('fleet')}
         onBackToPairing={() => opened.push('pair')}
       />,

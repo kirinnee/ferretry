@@ -629,8 +629,8 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
   connect: harnessOnboarding('first-time', 'connect'),
   brief: harnessOnboarding('agent', 'brief'),
   pair: harnessOnboarding('first-time', 'pair'),
-  /* The same step on the route that arrives holding a link: no `fy pair` to run. */
-  scan: harnessOnboarding('have-link', 'pair'),
+  /* The same scan step on the route that arrives holding a link: no `fy pair` to run. */
+  scan: harnessOnboarding('have-link', 'scan'),
   done: harnessOnboarding('first-time', 'done'),
 };
 
@@ -1642,7 +1642,7 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — choose how to reach it',
+      label: 'Setup — choose a connection',
       render: () => (
         <section aria-label="Setup connect step" id="harness-onboarding-connect">
           <OnboardingPage
@@ -1697,7 +1697,7 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — pair this device',
+      label: 'Setup — run fy pair',
       render: () => (
         <section aria-label="Setup pair step" id="harness-onboarding-pair">
           <OnboardingPage
@@ -3458,7 +3458,7 @@ function SessionWorkspaceHarness() {
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
-  '#onboarding-keyboard': 'pair',
+  '#onboarding-keyboard': 'scan',
 };
 
 const host = document.getElementById('root');

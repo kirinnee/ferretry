@@ -65,6 +65,7 @@ const pageWith = async (options: PageOptions = {}) => {
       write={async () => {}}
       channel="apt"
       fleetReady={options.fleetReady ?? false}
+      connectionStatus={null}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
       renderPairing={({ onPaired }) => (
         <>
@@ -86,6 +87,10 @@ const enter = async (container: HTMLElement, route: string): Promise<void> => {
 
 const next = async (container: HTMLElement): Promise<void> => {
   await click(buttonWith(container, '[data-onboarding-next]'));
+};
+
+const chooseConnection = async (container: HTMLElement, connection: string): Promise<void> => {
+  await click(buttonWith(container, `[data-onboarding-connection="${connection}"]`));
 };
 
 describe('the opening question', () => {
@@ -120,7 +125,7 @@ describe('the opening question', () => {
     const link = await pageWith();
     await enter(link.view.container, 'have-link');
     // Straight to pairing: no install, no daemon, no carrier choice.
-    expect(screenOf(link.view.container)).toBe('pair');
+    expect(screenOf(link.view.container)).toBe('scan');
     expect(link.view.container.textContent).not.toContain('sudo apt install fy');
     await link.view.unmount();
 
@@ -166,11 +171,11 @@ describe('the opening question', () => {
 });
 
 describe('the first-time route', () => {
-  it('walks install, daemon, reach and pair, with the whole track visible', async () => {
+  it('walks the default path and puts fy pair before scanning, with the whole track visible', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
 
-    expect(view.container.textContent).toContain('step 1 of 5');
+    expect(view.container.textContent).toContain('step 1 of 6');
     const diagram = must(view.container.querySelector('[role="img"]'), 'the arrangement diagram');
     expect(diagram.getAttribute('data-onboarding-diagram')).toBe('install');
     expect(diagram.getAttribute('aria-label')).toContain('not yet linked');
@@ -178,7 +183,7 @@ describe('the first-time route', () => {
 
     // A real ordered list, not a row of divs pretending to be one.
     const track = must(view.container.querySelector('[aria-label="Setup steps"]'), 'the step track');
-    expect(track.querySelectorAll('li')).toHaveLength(5);
+    expect(track.querySelectorAll('li')).toHaveLength(6);
     expect(must(track.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Install');
     // Only the steps already reached are jumpable, and none have been yet.
     expect(track.querySelectorAll('[data-onboarding-jump]')).toHaveLength(0);
@@ -190,10 +195,14 @@ describe('the first-time route', () => {
     expect(screenOf(view.container)).toBe('daemon');
     await next(view.container);
     expect(screenOf(view.container)).toBe('connect');
-    await next(view.container);
+    expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
+    await chooseConnection(view.container, 'default-relay');
     expect(screenOf(view.container)).toBe('pair');
+    expect(view.container.textContent).toContain('Run this on the computer');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('scan');
 
-    // Pair IS verifiable — the daemon answers in this tab — so there is no
+    // Scan IS verifiable — the daemon answers in this tab — so there is no
     // button here that could declare a browser paired with nothing "done".
     expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
     expect(buttonWith(view.container, '[data-onboarding-back]').getAttribute('data-onboarding-back')).toBe('step');
@@ -218,7 +227,7 @@ describe('the first-time route', () => {
     await enter(view.container, 'first-time');
     await next(view.container);
     await next(view.container);
-    await next(view.container);
+    await chooseConnection(view.container, 'direct');
     expect(screenOf(view.container)).toBe('pair');
 
     await click(buttonWith(view.container, '[data-onboarding-jump="install"]'));
@@ -234,8 +243,9 @@ describe('the first-time route', () => {
     await enter(view.container, 'first-time');
     await next(view.container);
     await next(view.container);
-    await next(view.container);
+    await chooseConnection(view.container, 'default-relay');
     expect(view.container.textContent).toContain('fy pair');
+    await next(view.container);
 
     await click(buttonWith(view.container, '[data-test-pair]'));
 
@@ -254,7 +264,7 @@ describe('the first-time route', () => {
     // Damaged or half-finished setup must not offer a fleet that cannot open.
     expect(unpaired.view.container.textContent).toContain('Nothing is paired in this browser yet');
     await click(buttonWith(unpaired.view.container, '[data-onboarding-open-fleet]'));
-    expect(screenOf(unpaired.view.container)).toBe('pair');
+    expect(screenOf(unpaired.view.container)).toBe('scan');
     await unpaired.view.unmount();
 
     // `paired` is what makes a stored "finished" believable: without a pairing
@@ -353,60 +363,50 @@ describe('the reach-it step', () => {
     await next(container);
   };
 
-  it('opens on direct, which needs nothing deployed', async () => {
+  it('is a second chooser led by the recommended default relay', async () => {
     const { view } = await pageWith();
     await toConnect(view.container);
 
     expect(screenOf(view.container)).toBe('connect');
     expect(
-      must(
-        view.container.querySelector('[data-onboarding-method][aria-pressed="true"]'),
-        'the chosen method',
-      ).getAttribute('data-onboarding-method'),
-    ).toBe('direct');
-    expect(view.container.textContent).toContain('Nothing to deploy');
-    // Direct involves no relay, so it carries no relay caveat.
-    expect(view.container.querySelector('[data-onboarding-method-caveat]')).toBeNull();
+      [...view.container.querySelectorAll('[data-onboarding-connection]')].map(node =>
+        node.getAttribute('data-onboarding-connection'),
+      ),
+    ).toEqual(['default-relay', 'own-relay', 'direct']);
+    expect(view.container.textContent).toContain('Recommended');
+    expect(view.container.textContent).toContain('Direct is used whenever it is reachable');
     await view.unmount();
   });
 
-  it('changes the commands and the steps when the carrier changes', async () => {
+  it('expands the self-hosted route into separately tracked operations', async () => {
     const { view } = await pageWith();
     await toConnect(view.container);
-    const steps = () => [...view.container.querySelectorAll('ol[class*="list-decimal"] > li')].length;
+    await chooseConnection(view.container, 'own-relay');
 
-    const directSteps = steps();
-    await click(buttonWith(view.container, '[data-onboarding-method="own-relay"]'));
-
-    // The whole point of the choice: different work, so different instructions.
-    expect(steps()).toBeGreaterThan(directSteps);
-    expect(view.container.textContent).toContain('task relay:deploy');
-    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
+    expect(screenOf(view.container)).toBe('relay-fingerprint');
+    expect(view.container.textContent).toContain('step 4 of 10');
+    expect(view.container.querySelectorAll('[aria-label="Setup steps"] li')).toHaveLength(10);
     expect(view.container.textContent).toContain('fy pair --no-wait');
-    // And the honest limit: the relay deploys, the two ends do not speak it yet.
-    expect(must(view.container.querySelector('[data-onboarding-method-caveat]'), 'the caveat').textContent).toContain(
-      'not wired up yet',
-    );
-
-    await click(buttonWith(view.container, '[data-onboarding-method="own-protocol"]'));
-    expect(view.container.textContent).toContain('docs/relay-protocol.md');
-    // Nothing to run, so nothing is printed as though it could be run.
-    expect(view.container.textContent).not.toContain('task relay:deploy');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('relay-source');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('relay-allow');
+    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('relay-deploy');
+    expect(view.container.textContent).toContain('task relay:deploy');
     await view.unmount();
   });
 
-  it('offers no default relay, and says why rather than leaving a gap', async () => {
+  it('takes the direct and default choices straight to fy pair', async () => {
     const { view } = await pageWith();
     await toConnect(view.container);
-
-    const methods = [...view.container.querySelectorAll('[data-onboarding-method]')].map(node =>
-      node.getAttribute('data-onboarding-method'),
-    );
-    expect(methods).toEqual(['direct', 'own-relay', 'own-protocol']);
-    // No fourth option, and no address anywhere on the screen to be one.
-    expect(view.container.textContent).toContain('no relay address');
-    expect(view.container.innerHTML).not.toMatch(/wss?:\/\//);
-    expect(view.container.textContent).not.toContain('workers.dev');
+    await chooseConnection(view.container, 'direct');
+    expect(screenOf(view.container)).toBe('pair');
+    await click(buttonWith(view.container, '[data-onboarding-back]'));
+    expect(screenOf(view.container)).toBe('connect');
+    await chooseConnection(view.container, 'default-relay');
+    expect(screenOf(view.container)).toBe('pair');
     await view.unmount();
   });
 });
@@ -416,7 +416,7 @@ describe('the agent route', () => {
     const { view } = await pageWith();
     await enter(view.container, 'agent');
 
-    expect(view.container.textContent).toContain('step 1 of 3');
+    expect(view.container.textContent).toContain('step 1 of 4');
     const prompt = must(view.container.querySelector('[data-onboarding-prompt]'), 'the prompt');
     // On the glass, not behind a disclosure: it is about to be handed to
     // something with a shell on the reader's machine.
@@ -440,16 +440,15 @@ describe('the have-a-link route', () => {
     const { view } = await pageWith();
     await enter(view.container, 'have-link');
 
-    expect(screenOf(view.container)).toBe('pair');
-    expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('Pair this device');
+    expect(screenOf(view.container)).toBe('scan');
+    expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('Scan QR or paste link');
     // The pairing surface itself, unforked.
     expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
     // A two-step route gets no track: "Pair · Done" tells this reader nothing.
     expect(view.container.querySelector('[aria-label="Setup steps"]')).toBeNull();
     // And no `fy pair` block, because it has already been run elsewhere.
     expect(view.container.querySelector('[data-onboarding-copy="Copy pair command"]')).toBeNull();
-    // It is still SAID, once, for somebody who turns out not to have a link.
-    expect(view.container.textContent).toContain('No link yet?');
+    expect(view.container.textContent).toContain('single-use');
     await view.unmount();
   });
 
@@ -469,6 +468,7 @@ describe('with the software keyboard open', () => {
     await enter(container, 'first-time');
     await next(container);
     await next(container);
+    await chooseConnection(container, 'default-relay');
     await next(container);
   };
 
@@ -477,7 +477,7 @@ describe('with the software keyboard open', () => {
     await toPair(view.container);
 
     // The pairing field's step is still fully operable.
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('scan');
     expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
     expect(view.container.querySelector('[aria-label="Setup steps"]')).not.toBeNull();
     expect(view.container.querySelector('[data-onboarding-back]')).not.toBeNull();

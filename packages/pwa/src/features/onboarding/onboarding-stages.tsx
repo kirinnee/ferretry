@@ -30,9 +30,6 @@ import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
   AGENT_SETUP_PROMPT,
-  CONNECTION_METHODS,
-  type ConnectionMethodId,
-  connectionMethod,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
@@ -40,8 +37,8 @@ import {
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
-  NO_DEFAULT_RELAY_NOTE,
   PAIR_COMMAND,
+  PAIR_PRINT_COMMAND,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
 
@@ -157,80 +154,59 @@ export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
   );
 }
 
-export interface ConnectStageProps {
-  readonly write: ClipboardWriter;
-  /** Which carrier is shown first. Direct, because direct is better whenever it works. */
-  readonly method: ConnectionMethodId;
-}
-
-/**
- * HOW A BROWSER REACHES A DAEMON — and the one choice that rewrites the rest.
- *
- * There are three carriers and they do not need the same work: direct needs
- * nothing deployed, your own relay needs four commands and a Cloudflare account,
- * your own implementation needs the protocol document. So this stage does not
- * merely record a preference — the instructions BELOW the choice are the
- * choice's, and they change with it. That is why this is its own step rather
- * than a switch inside the daemon step: a set of instructions that changes is a
- * page, not a toggle.
- *
- * There is deliberately no fourth option reading "use the Ferretry relay",
- * because there is no such thing. `NO_DEFAULT_RELAY_NOTE` says why, in the
- * disclosure, rather than leaving a reader to wonder what the default is.
- */
-export function ConnectStage({ write, method }: ConnectStageProps) {
-  const [selected, setSelected] = useState<ConnectionMethodId>(method);
-  const chosen = connectionMethod(selected);
+/** The detailed self-host path mirrors the relay runbook one operation at a time. */
+export function RelayFingerprintStage({ write }: { readonly write: ClipboardWriter }) {
   return (
     <div className={STAGE}>
-      <div role="toolbar" aria-label="Connection method" className="grid grid-cols-1 gap-1 sm:grid-cols-3">
-        {CONNECTION_METHODS.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off}`}
-            aria-pressed={option.id === selected}
-            onClick={() => setSelected(option.id)}
-            data-onboarding-method={option.id}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      <p className="m-0 text-meta leading-base text-muted" data-onboarding-method-answer={chosen.id}>
-        {chosen.answer}
+      <CommandBlock command={PAIR_PRINT_COMMAND} copyLabel="Copy fingerprint command" write={write} />
+      <p className="m-0 text-meta leading-base text-muted">
+        Copy the <code className="font-mono text-syn-string">fy_daemon_…</code> fingerprint it prints. You will allow it
+        at your relay next; make a fresh pairing code later.
       </p>
+    </div>
+  );
+}
 
-      {/*
-        A REAL ORDERED LIST. These are numbered steps in a sequence, so they are
-        an `<ol>`; the numbers are the marker rather than something drawn, and a
-        reader who hears the page hears "3 of 4" without us saying it.
-      */}
-      <ol className="m-0 flex list-decimal flex-col gap-2 pl-5 text-meta leading-base text-muted">
-        {chosen.instructions.map(instruction => (
-          <li key={instruction.text} className="min-w-0">
-            <p className="m-0 mb-1 text-meta leading-base text-fg">{instruction.text}</p>
-            {instruction.command === undefined ? null : (
-              <CommandBlock
-                command={instruction.command}
-                copyLabel={instruction.copyLabel ?? 'Copy command'}
-                write={write}
-              />
-            )}
-          </li>
-        ))}
-      </ol>
+export function RelaySourceStage({ write }: { readonly write: ClipboardWriter }) {
+  return (
+    <div className={STAGE}>
+      <CommandBlock
+        command="git clone https://github.com/kirinnee/ferretry"
+        copyLabel="Copy clone command"
+        write={write}
+      />
+      <p className="m-0 text-meta leading-base text-muted">
+        Run the remaining relay commands from that checkout, using your own Cloudflare account.
+      </p>
+    </div>
+  );
+}
 
-      {chosen.caveat === undefined ? null : (
-        <p className="m-0 text-meta leading-base text-warn" data-onboarding-method-caveat="">
-          {chosen.caveat}
+export function RelayAllowStage() {
+  return (
+    <div className={STAGE}>
+      <p className="m-0 text-meta leading-base text-muted">
+        In <code className="font-mono text-syn-string">packages/relay/wrangler.jsonc</code>, set{' '}
+        <code className="font-mono text-syn-string">vars.RELAY_DAEMON_IDS</code> to the fingerprint you copied. An empty
+        list serves nobody.
+      </p>
+      <Aside summary="Why this is required">
+        <p className="m-0 text-meta leading-base text-muted">
+          Your relay cannot read what it carries, so the fingerprint list is its access control. Read the relay protocol
+          runbook before making the deployment public.
         </p>
-      )}
-
-      <Aside summary="Why is there no default relay?">
-        <p className="m-0 text-meta leading-base text-muted">{NO_DEFAULT_RELAY_NOTE}</p>
       </Aside>
+    </div>
+  );
+}
+
+export function RelayDeployStage({ write }: { readonly write: ClipboardWriter }) {
+  return (
+    <div className={STAGE}>
+      <CommandBlock command="task relay:deploy" copyLabel="Copy deploy command" write={write} />
+      <p className="m-0 text-meta leading-base text-muted">
+        This deploys a Worker and Durable Object to your account. Continue when the deploy has finished.
+      </p>
     </div>
   );
 }
@@ -270,26 +246,19 @@ export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
   );
 }
 
-export function PairStage({ write, pairing }: { readonly write: ClipboardWriter; readonly pairing: ReactNode }) {
+export function PairStage({ write }: { readonly write: ClipboardWriter }) {
   return (
     <div className={STAGE}>
       <CommandBlock command={PAIR_COMMAND} copyLabel="Copy pair command" write={write} />
-      {/*
-        Kept on the glass rather than folded away: a code that has quietly
-        expired is the one failure on this screen a reader cannot diagnose.
-      */}
       <p className="m-0 text-meta leading-base text-muted">
-        It prints a QR code and a link. One use, about two minutes.
+        Run this on the computer where the daemon is running. Keep the QR code or link it prints on that screen.
       </p>
-      <div className="min-w-0" data-onboarding-pairing="">
-        {pairing}
-      </div>
     </div>
   );
 }
 
 /**
- * The pair step WITHOUT the command, for the reader who already has a link.
+ * The phone/browser half of pairing, without the command.
  *
  * Somebody whose camera just opened this page has nothing to run: printing
  * `fy pair` at them describes a thing that has already happened, on a machine
@@ -302,29 +271,34 @@ export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
       <div className="min-w-0" data-onboarding-pairing="">
         {pairing}
       </div>
-      <Aside summary="No link yet?">
-        <p className="m-0 text-meta leading-base text-muted">
-          Run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> on the machine that runs the daemon. It
-          prints a QR code and a link — one use, about two minutes.
-        </p>
-      </Aside>
+      <p className="m-0 text-meta leading-base text-muted">
+        This code is single-use and expires after about two minutes. If it has expired, go back to your computer, run{' '}
+        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again, then return here with the fresh QR or
+        link.
+      </p>
     </div>
   );
 }
 
 export interface DoneStageProps {
   readonly fleetReady: boolean;
+  readonly connectionStatus: string | null;
   readonly onOpenFleet: () => void;
   readonly onBackToPairing: () => void;
 }
 
-export function DoneStage({ fleetReady, onOpenFleet, onBackToPairing }: DoneStageProps) {
+export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToPairing }: DoneStageProps) {
   return (
     <div className={STAGE}>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
         <li>This browser remembers the pairing.</li>
         <li>Pair another machine later — each keeps its own data.</li>
       </ul>
+      {connectionStatus === null ? null : (
+        <p className="m-0 text-2xs leading-base text-faint" role="status">
+          Connection in use: {connectionStatus}
+        </p>
+      )}
       {/*
         DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired
         in this browser is not a fleet to open; it is a step that has to be done

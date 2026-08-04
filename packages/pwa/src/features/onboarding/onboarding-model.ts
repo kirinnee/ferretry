@@ -22,7 +22,18 @@
 export type OnboardingRouteId = 'have-link' | 'first-time' | 'agent';
 
 /** Every stage that any route can put on the glass, in no particular order. */
-export type OnboardingStepId = 'install' | 'daemon' | 'connect' | 'brief' | 'pair' | 'done';
+export type OnboardingStepId =
+  | 'install'
+  | 'daemon'
+  | 'connect'
+  | 'relay-fingerprint'
+  | 'relay-source'
+  | 'relay-allow'
+  | 'relay-deploy'
+  | 'brief'
+  | 'pair'
+  | 'scan'
+  | 'done';
 
 export interface OnboardingStep {
   readonly id: OnboardingStepId;
@@ -54,9 +65,33 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
   }),
   connect: Object.freeze({
     id: 'connect' as const,
-    title: 'Choose how to reach it',
-    short: 'Reach',
-    summary: 'How this browser gets to that daemon.',
+    title: 'Choose a connection',
+    short: 'Connect',
+    summary: 'Choose how this browser will reach your machine.',
+  }),
+  'relay-fingerprint': Object.freeze({
+    id: 'relay-fingerprint' as const,
+    title: 'Get its fingerprint',
+    short: 'Fingerprint',
+    summary: 'On your computer, print the daemon identity your relay will allow.',
+  }),
+  'relay-source': Object.freeze({
+    id: 'relay-source' as const,
+    title: 'Get relay source',
+    short: 'Source',
+    summary: 'On your computer, get the deployment source.',
+  }),
+  'relay-allow': Object.freeze({
+    id: 'relay-allow' as const,
+    title: 'Allow your daemon',
+    short: 'Allow',
+    summary: 'Add that fingerprint to your relay configuration.',
+  }),
+  'relay-deploy': Object.freeze({
+    id: 'relay-deploy' as const,
+    title: 'Deploy your relay',
+    short: 'Deploy',
+    summary: 'Deploy the Cloudflare Worker from your account.',
   }),
   brief: Object.freeze({
     id: 'brief' as const,
@@ -66,9 +101,15 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
   }),
   pair: Object.freeze({
     id: 'pair' as const,
-    title: 'Pair this device',
+    title: 'Run fy pair',
     short: 'Pair',
-    summary: 'Scan the QR, or paste the link.',
+    summary: 'On your computer, print a fresh QR code and pairing link.',
+  }),
+  scan: Object.freeze({
+    id: 'scan' as const,
+    title: 'Scan QR or paste link',
+    short: 'Scan',
+    summary: 'On this phone or browser, use the fresh code from your computer.',
   }),
   done: Object.freeze({
     id: 'done' as const,
@@ -103,19 +144,19 @@ const ROUTES: Readonly<Record<OnboardingRouteId, OnboardingRoute>> = Object.free
     id: 'have-link' as const,
     title: 'I have a link or QR',
     answer: 'Scan or paste it. Nothing to install, nothing to start.',
-    steps: Object.freeze(['pair', 'done'] as const),
+    steps: Object.freeze(['scan', 'done'] as const),
   }),
   'first-time': Object.freeze({
     id: 'first-time' as const,
     title: 'First time setup',
-    answer: 'Install, start the daemon, choose how to reach it, pair. Every new machine starts here.',
-    steps: Object.freeze(['install', 'daemon', 'connect', 'pair', 'done'] as const),
+    answer: 'Install, start the daemon, choose a connection, then pair this browser. Every new machine starts here.',
+    steps: Object.freeze(['install', 'daemon', 'connect', 'pair', 'scan', 'done'] as const),
   }),
   agent: Object.freeze({
     id: 'agent' as const,
     title: 'Let an agent set it up',
     answer: 'Copy a prompt for an agent that already has a terminal on that machine.',
-    steps: Object.freeze(['brief', 'pair', 'done'] as const),
+    steps: Object.freeze(['brief', 'pair', 'scan', 'done'] as const),
   }),
 });
 
@@ -133,18 +174,84 @@ export const isOnboardingRouteId = (value: unknown): value is OnboardingRouteId 
   typeof value === 'string' && ONBOARDING_ROUTES.some(route => route.id === value);
 
 /** The steps of one route. */
-export const onboardingRouteSteps = (id: OnboardingRouteId): readonly OnboardingStepId[] => ROUTES[id].steps;
+export type ConnectionMethodId = 'default-relay' | 'own-relay' | 'direct';
+
+export interface ConnectionMethod {
+  readonly id: ConnectionMethodId;
+  readonly title: string;
+  readonly answer: string;
+  readonly recommended?: true;
+}
+
+const CONNECTIONS: Readonly<Record<ConnectionMethodId, ConnectionMethod>> = Object.freeze({
+  'default-relay': Object.freeze({
+    id: 'default-relay' as const,
+    title: 'Use the default relay',
+    answer: 'Recommended. Works from anywhere, with nothing for you to deploy.',
+    recommended: true as const,
+  }),
+  'own-relay': Object.freeze({
+    id: 'own-relay' as const,
+    title: 'Set up my own relay',
+    answer: 'Deploy a Cloudflare relay in your own account, step by step.',
+  }),
+  direct: Object.freeze({
+    id: 'direct' as const,
+    title: 'Direct connection',
+    answer: 'Use the same network, a VPN, or any daemon host this browser can reach.',
+  }),
+});
+
+export const CONNECTION_METHODS: readonly ConnectionMethod[] = Object.freeze([
+  CONNECTIONS['default-relay'],
+  CONNECTIONS['own-relay'],
+  CONNECTIONS.direct,
+]);
+
+export const DEFAULT_CONNECTION_METHOD: ConnectionMethodId = 'default-relay';
+
+export const connectionMethod = (id: ConnectionMethodId): ConnectionMethod => CONNECTIONS[id];
+
+export const isConnectionMethodId = (value: unknown): value is ConnectionMethodId =>
+  typeof value === 'string' && CONNECTION_METHODS.some(method => method.id === value);
+
+const SELF_HOSTED_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
+  'install',
+  'daemon',
+  'connect',
+  'relay-fingerprint',
+  'relay-source',
+  'relay-allow',
+  'relay-deploy',
+  'pair',
+  'scan',
+  'done',
+]);
+
+/** The self-host path alone grows: its extra work is visible on the track. */
+export const onboardingRouteSteps = (
+  id: OnboardingRouteId,
+  connection?: ConnectionMethodId,
+): readonly OnboardingStepId[] =>
+  id === 'first-time' && connection === 'own-relay' ? SELF_HOSTED_RELAY_STEPS : ROUTES[id].steps;
 
 /** Position within a route, or `-1` for a step that route never walks. */
-export const onboardingStepIndex = (route: OnboardingRouteId, step: OnboardingStepId): number =>
-  onboardingRouteSteps(route).indexOf(step);
+export const onboardingStepIndex = (
+  route: OnboardingRouteId,
+  step: OnboardingStepId,
+  connection?: ConnectionMethodId,
+): number => onboardingRouteSteps(route, connection).indexOf(step);
 
 /** Whether this step belongs to this route at all — the guard every stored pair must pass. */
-export const isStepOfRoute = (route: OnboardingRouteId, step: OnboardingStepId): boolean =>
-  onboardingStepIndex(route, step) >= 0;
+export const isStepOfRoute = (
+  route: OnboardingRouteId,
+  step: OnboardingStepId,
+  connection?: ConnectionMethodId,
+): boolean => onboardingStepIndex(route, step, connection) >= 0;
 
 /** How many steps this route walks, for a track that has to say "step 2 of 5". */
-export const onboardingStepCount = (route: OnboardingRouteId): number => onboardingRouteSteps(route).length;
+export const onboardingStepCount = (route: OnboardingRouteId, connection?: ConnectionMethodId): number =>
+  onboardingRouteSteps(route, connection).length;
 
 /** The step a route opens on. */
 export const firstOnboardingStep = (route: OnboardingRouteId): OnboardingStepId => {
@@ -168,21 +275,32 @@ export const onboardingStepStatus = (
   step: OnboardingStepId,
   current: OnboardingStepId,
   furthest: OnboardingStepId,
+  connection?: ConnectionMethodId,
 ): OnboardingStepStatus => {
   if (step === current) return 'current';
-  return onboardingStepIndex(route, step) <= onboardingStepIndex(route, furthest) ? 'completed' : 'upcoming';
+  return onboardingStepIndex(route, step, connection) <= onboardingStepIndex(route, furthest, connection)
+    ? 'completed'
+    : 'upcoming';
 };
 
 /** The next step of this route, or the same one at the end of it. */
-export const nextOnboardingStep = (route: OnboardingRouteId, id: OnboardingStepId): OnboardingStepId => {
-  const steps = onboardingRouteSteps(route);
-  return steps[Math.min(onboardingStepIndex(route, id) + 1, steps.length - 1)] ?? id;
+export const nextOnboardingStep = (
+  route: OnboardingRouteId,
+  id: OnboardingStepId,
+  connection?: ConnectionMethodId,
+): OnboardingStepId => {
+  const steps = onboardingRouteSteps(route, connection);
+  return steps[Math.min(onboardingStepIndex(route, id, connection) + 1, steps.length - 1)] ?? id;
 };
 
 /** The previous step of this route, or the same one at the start of it. */
-export const previousOnboardingStep = (route: OnboardingRouteId, id: OnboardingStepId): OnboardingStepId => {
-  const steps = onboardingRouteSteps(route);
-  return steps[Math.max(onboardingStepIndex(route, id) - 1, 0)] ?? id;
+export const previousOnboardingStep = (
+  route: OnboardingRouteId,
+  id: OnboardingStepId,
+  connection?: ConnectionMethodId,
+): OnboardingStepId => {
+  const steps = onboardingRouteSteps(route, connection);
+  return steps[Math.max(onboardingStepIndex(route, id, connection) - 1, 0)] ?? id;
 };
 
 /** The later of two steps of one route, so progress can only ever move forward. */
@@ -190,7 +308,9 @@ export const furthestOnboardingStep = (
   route: OnboardingRouteId,
   left: OnboardingStepId,
   right: OnboardingStepId,
-): OnboardingStepId => (onboardingStepIndex(route, left) >= onboardingStepIndex(route, right) ? left : right);
+  connection?: ConnectionMethodId,
+): OnboardingStepId =>
+  onboardingStepIndex(route, left, connection) >= onboardingStepIndex(route, right, connection) ? left : right;
 
 /** Whether a value read back from storage is still one of the steps we ship. */
 export const isOnboardingStepId = (value: unknown): value is OnboardingStepId =>
@@ -303,133 +423,6 @@ export const PAIR_COMMAND = 'fy pair';
 export const PAIR_PRINT_COMMAND = 'fy pair --no-wait';
 /** What a serving daemon prints, so the reader knows what they are looking for. */
 export const DAEMON_SERVING_OUTPUT = 'fyd is serving';
-
-/* ---------- how a browser reaches a daemon, from docs/relay-protocol.md ---- */
-
-export type ConnectionMethodId = 'direct' | 'own-relay' | 'own-protocol';
-
-export interface ConnectionInstruction {
-  /** What to do. A command may sit under it; text alone means "go and look". */
-  readonly text: string;
-  readonly command?: string;
-  /** Names the block for its copy control. Required with a command, absurd without one. */
-  readonly copyLabel?: string;
-}
-
-export interface ConnectionMethod {
-  readonly id: ConnectionMethodId;
-  /** Two or three words: three of these share a 390px row. */
-  readonly label: string;
-  /** When this is the right answer. */
-  readonly answer: string;
-  /** The steps THIS method needs. The whole point of the choice. */
-  readonly instructions: readonly ConnectionInstruction[];
-  /** Something true the reader would otherwise discover the hard way. Never a warning we invented. */
-  readonly caveat?: string;
-}
-
-/**
- * WHY THERE IS NO DEFAULT RELAY ADDRESS.
- *
- * `docs/relay-protocol.md` §1 and §9: Ferretry ships no hosted relay and no
- * relay address compiled into anything. A single default would route every
- * user's traffic through one account, and because the carrier is end-to-end
- * encrypted that account could not police what it was carrying even in
- * principle. So the page offers a relay you DEPLOY, never a relay you are
- * silently already using.
- */
-export const NO_DEFAULT_RELAY_NOTE =
-  'Ferretry ships no relay address. There is no shared relay to fall back on: one default would carry ' +
-  'everyone through a single account, and the traffic is encrypted end to end, so that account could ' +
-  'not police what it carried.';
-
-/**
- * The relay is deployable and tested; the two ends that speak it are not wired.
- *
- * `packages/relay/README.md` — "Status" — says so plainly, and repeating it here
- * is the difference between a page that documents a route and a page that
- * promises one. Somebody who deploys a relay today gets a working relay and a
- * daemon that does not yet dial it.
- */
-export const RELAY_NOT_WIRED_CAVEAT =
-  'The relay itself is complete and tested, but the daemon and browser ends that speak to it are separate ' +
-  'work and are not wired up yet. Deploying one today gets you a relay, not yet a remote connection.';
-
-const METHODS: Readonly<Record<ConnectionMethodId, ConnectionMethod>> = Object.freeze({
-  direct: Object.freeze({
-    id: 'direct' as const,
-    label: 'Direct',
-    answer: 'Same network, a VPN, or any host this browser can already reach. Fewest parties, nothing to deploy.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: 'Nothing to deploy. Keep this browser and that machine on one network — same Wi-Fi, a VPN, or a host with a route to it.',
-      }),
-      Object.freeze({
-        text: 'Check the daemon is still serving, then pair.',
-        command: DAEMON_STATUS_COMMAND,
-        copyLabel: 'Copy status command',
-      }),
-    ] as const),
-  }),
-  'own-relay': Object.freeze({
-    id: 'own-relay' as const,
-    label: 'Your own relay',
-    answer: 'The daemon is behind NAT. Deploy the rendezvous Worker to your own Cloudflare account.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: "Print this daemon's fingerprint. It is public — it is in the pairing QR.",
-        command: PAIR_PRINT_COMMAND,
-        copyLabel: 'Copy fingerprint command',
-      }),
-      Object.freeze({
-        text: 'Get the relay source. It deploys from this repository.',
-        command: 'git clone https://github.com/kirinnee/ferretry',
-        copyLabel: 'Copy clone command',
-      }),
-      Object.freeze({
-        text: 'Put that fingerprint in packages/relay/wrangler.jsonc under vars.RELAY_DAEMON_IDS. A relay carries the daemons its operator listed and nobody else, so an empty list serves nobody.',
-      }),
-      Object.freeze({
-        text: 'Deploy it to your account. One command, and it bills to you.',
-        command: 'task relay:deploy',
-        copyLabel: 'Copy deploy command',
-      }),
-    ] as const),
-    caveat: RELAY_NOT_WIRED_CAVEAT,
-  }),
-  'own-protocol': Object.freeze({
-    id: 'own-protocol' as const,
-    label: 'Your own build',
-    answer: 'The wire contract is documented, so a relay can be implemented in any language, by anyone.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: 'Implement docs/relay-protocol.md. It is the contract, written so it can be implemented without reading this repository.',
-      }),
-      Object.freeze({
-        text: 'Read "Running your own relay" first. Sections 9 to 11 cover what a relay operator can and cannot see, and what you are taking on.',
-      }),
-    ] as const),
-    caveat: RELAY_NOT_WIRED_CAVEAT,
-  }),
-});
-
-export const CONNECTION_METHODS: readonly ConnectionMethod[] = Object.freeze([
-  METHODS.direct,
-  METHODS['own-relay'],
-  METHODS['own-protocol'],
-]);
-
-/** Total, because the id is a closed union. */
-export const connectionMethod = (id: ConnectionMethodId): ConnectionMethod => METHODS[id];
-
-/**
- * Direct is what the page opens on.
- *
- * `docs/relay-protocol.md` §1: direct is preferred whenever it is configured and
- * reachable, and an implementation must not make somebody opt out of a relay to
- * get the simple thing. So the simple thing is the one already selected.
- */
-export const DEFAULT_CONNECTION_METHOD: ConnectionMethodId = 'direct';
 
 /**
  * A public, self-contained brief for an AI coding agent.

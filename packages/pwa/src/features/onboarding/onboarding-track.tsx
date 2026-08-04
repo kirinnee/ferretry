@@ -20,11 +20,12 @@
 import { Check } from 'lucide-react';
 
 import {
-  onboardingRouteSteps,
+  type ConnectionMethodId,
   type OnboardingRouteId,
-  onboardingStep,
   type OnboardingStepId,
   type OnboardingStepStatus,
+  onboardingRouteSteps,
+  onboardingStep,
   onboardingStepStatus,
 } from './onboarding-model.ts';
 
@@ -53,17 +54,18 @@ const LABEL_TONE: Record<OnboardingStepStatus, string> = {
 export interface OnboardingTrackProps {
   /** Which route's steps this is a track OF. Each route has its own list. */
   readonly route: OnboardingRouteId;
+  readonly connection?: ConnectionMethodId;
   readonly current: OnboardingStepId;
   readonly furthest: OnboardingStepId;
   readonly onJump: (id: OnboardingStepId) => void;
 }
 
-export function OnboardingTrack({ route, current, furthest, onJump }: OnboardingTrackProps) {
+export function OnboardingTrack({ route, connection, current, furthest, onJump }: OnboardingTrackProps) {
   return (
     <ol className="m-0 flex list-none items-start gap-1 p-0" aria-label="Setup steps">
-      {onboardingRouteSteps(route).map((id, index) => {
+      {onboardingRouteSteps(route, connection).map((id, index) => {
         const step = onboardingStep(id);
-        const status = onboardingStepStatus(route, step.id, current, furthest);
+        const status = onboardingStepStatus(route, step.id, current, furthest, connection);
         const body = (
           <>
             <span className={`${MARKER} ${MARKER_TONE[status]}`} aria-hidden="true">
