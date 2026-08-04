@@ -339,10 +339,9 @@ export function AppBar({
   return (
     // Not sticky: the shell does not scroll, so the bar is simply the first row
     // of a flex column that fills the viewport. Full bleed — no centred wrapper.
-    <header
-      data-density-region="app-bar"
-      className="shrink-0 border-b border-border bg-[var(--bar-bg)] backdrop-blur-sm"
-    >
+    // Do not add filter/backdrop-filter/transform here: BottomSheet is a child,
+    // and a new stacking context would trap its fixed overlay under page content.
+    <header data-density-region="app-bar" className="shrink-0 border-b border-border bg-[var(--bar-bg)]">
       <div
         className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-sm font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md md:py-md"
         data-app-bar-primary=""

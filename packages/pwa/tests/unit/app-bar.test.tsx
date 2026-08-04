@@ -379,9 +379,13 @@ describe('AppBar phone destination selector', () => {
     setViewport(PHONE);
     const mounted = await mount(bar());
     const trigger = byLabel('Choose destination') as HTMLButtonElement;
+    const header = mounted.container.querySelector('header') as HTMLElement;
 
     expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
     expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    // The sheet is nested under this header. A backdrop/filter/transform utility
+    // would create a stacking context and put the visible sheet below the page.
+    expect(header.className).not.toMatch(/backdrop|filter|transform/u);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
