@@ -96,7 +96,7 @@ describe('paired daemon connection', () => {
   it('should only accept a pairing response for the fingerprint in the pairing link', () => {
     // Arrange
     const seed = pairingSeedFromUrl(
-      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7337;code=a;fp=loopback',
+      'https://app.example.test/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431;code=a;fp=loopback',
     );
 
     // Act
@@ -105,7 +105,7 @@ describe('paired daemon connection', () => {
       pairedDaemonConnection(seed, { daemonId: 'different', deviceToken: 'device-token' });
 
     // Assert
-    should(actual).deepEqual({ daemonId: 'loopback', baseUrl: 'http://127.0.0.1:7337', deviceToken: 'device-token' });
+    should(actual).deepEqual({ daemonId: 'loopback', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'device-token' });
     should(mismatch).throw('pairing response daemon ID does not match its fingerprint');
   });
 });

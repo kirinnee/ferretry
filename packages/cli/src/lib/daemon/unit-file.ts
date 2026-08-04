@@ -1,9 +1,23 @@
 /**
- * The exit code the daemon uses to say "a healthy responder already owns this address". It is a
+ * The exit code the daemon uses to say "another one of me already owns this address". It is a
  * published part of the daemon's boot contract; the CLI mirrors the constant rather than importing
  * the daemon package, because the CLI depends on the protocol and nothing else in this workspace.
  */
 export const EXIT_ALREADY_RUNNING = 78;
+
+/**
+ * The exit code for an address held by a responder that is NOT one of these daemons, mirrored from
+ * the same boot contract for the same reason.
+ *
+ * It is a SEPARATE code because the remedy is a separate one — a human must free the address or
+ * choose another — and it prevents restarts for the same reason 78 does: no amount of respawning
+ * clears a port somebody else's program is holding.
+ *
+ * Module-private: only the rendered unit needs it, and the rendered unit is what a test should be
+ * asserting on anyway — a constant a test reads back from its own source proves nothing about the
+ * file systemd will load.
+ */
+const EXIT_ADDRESS_CONFLICT = 69;
 
 export class InvalidUnitValueError extends Error {
   constructor(
@@ -99,9 +113,10 @@ Type=simple
 ExecStart=${systemdQuote(spec.daemonBinary)}
 Restart=always
 RestartSec=2
-# The daemon exits with this code when a healthy responder already owns its address. Re-spawning
-# against a working daemon every RestartSec accomplishes nothing but noise.
-RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)}
+# The daemon exits with the first code when another one of it already owns the address, and with the
+# second when something else does. Re-spawning against a working daemon every RestartSec accomplishes
+# nothing but noise, and no restart can take an address a different program is holding.
+RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)} ${String(EXIT_ADDRESS_CONFLICT)}
 # The terminal multiplexer server hosting every session pane is spawned from this unit and therefore
 # lives in its control group. The default control-group kill erased the whole fleet on every daemon
 # restart. Signal only the daemon; panes survive and boot recovery re-adopts them.

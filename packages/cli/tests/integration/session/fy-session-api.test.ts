@@ -193,7 +193,7 @@ describe('createFyClientConnector', () => {
 
   it('should refuse to build a client with no token configured', async () => {
     // Arrange
-    const connector = createFyClientConnector({ url: 'http://127.0.0.1:7337', version: '1.2.3' });
+    const connector = createFyClientConnector({ url: 'http://127.0.0.1:7431', version: '1.2.3' });
 
     // Act
     const failure = await connector().catch((error: unknown) => error);

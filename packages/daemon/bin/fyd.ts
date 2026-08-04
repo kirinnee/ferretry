@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
+  FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   type MigrateSessionRequest,
   SessionConfigSchema,
@@ -46,6 +48,7 @@ import {
   FileScratchCollector,
   HttpUsageSource,
   KeyedSerialExecutor,
+  ExplicitDaemonConfig,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
   NodeCatalog,
@@ -187,9 +190,14 @@ import {
   type AnalyticsTranscriptEvidenceSource,
   type ApiServerHandle,
   type ApiServerPort,
+  answerArguments,
+  type ArgumentAnswer,
   type AssigneeObservation,
   AttentionService,
+  advertisesForeignAddress,
   authorizeSessionCommand,
+  type BootRefusal,
+  type BootNoticePort,
   type BrowserLoginLifecycle,
   type BrowserViewerHost,
   BrowserViewerStream,
@@ -202,6 +210,7 @@ import {
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
+  configuredAt,
   contextWindowForSession,
   createFoundationPaths,
   createMountedDispatcher,
@@ -211,6 +220,7 @@ import {
   createSttPaths,
   createWardenPaths,
   type DaemonConfig,
+  type DaemonConfigStore,
   type DaemonHealthSubsystem,
   type DecodedInitialAttachment,
   DONE_MARKER_FILENAME,
@@ -221,10 +231,10 @@ import {
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
   doneMarkerCertifiesTurn,
-  EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
   FleetEventStreamService,
   type FoundationPaths,
+  foreignAdvertisementNotice,
   HarnessQuirkService,
   harnessMigrationRefusal,
   InitialAttachmentError,
@@ -232,6 +242,7 @@ import {
   isTaskBoardError,
   jsonObject,
   type LearningSubsystem,
+  type LogLevel,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
@@ -244,6 +255,7 @@ import {
   type NameSubsystem,
   normalizeCallsign,
   type ObservedSession,
+  overriddenBy,
   type OpenedAnalyticsIndexStore,
   OperatorReadService,
   PairingDeviceRegistry,
@@ -255,16 +267,24 @@ import {
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
+  portCandidates,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RecommendError,
   type RecommendSubsystem,
+  describeConfiguration,
+  refuseExhaustedCandidates,
+  refuseHeldStateHome,
+  refuseOccupiedAddress,
+  refuseUnbindableAddress,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
   type RoutingCatalogPort,
   relaunchCommand,
+  renderConfiguration,
+  type RunOverrides,
   renderInitialAttachmentSection,
   resolveStateHome,
   type ScratchReclamation,
@@ -340,6 +360,7 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
+import { daemonVersion } from '../src/lib/version.ts';
 import { startSttWorker } from './stt-worker.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -401,8 +422,40 @@ export interface DaemonWorld {
   readonly boot: {
     readonly probe: DaemonHealthProbe;
     readonly binder: DaemonBinder;
+    /**
+     * The address a boot tries FIRST when the configuration document records none.
+     *
+     * A WORLD FIELD rather than a constant read where it is used, and the reason is a test one: the
+     * fallback walk is the behaviour that has to be proved, and proving it against the real
+     * well-known port would mean a test binding the address a developer's own daemon lives at. A
+     * test substitutes an ephemeral port and drives the identical code path.
+     *
+     * It is only ever consulted for an UNRECORDED port. A recorded one is a claim — bound or refused
+     * — so no default may quietly stand in for it.
+     */
+    readonly preferredPort: number;
   };
-  readonly config: FileDaemonConfig;
+  readonly config: DaemonConfigStore;
+  /** What this invocation said on the command line, overriding the document for this run only. */
+  readonly overrides: RunOverrides;
+  /**
+   * The state home this invocation would own, and whether the environment named it.
+   *
+   * Reported rather than derived at the point of use, because `--print-config` has to say WHERE each
+   * value came from and "the environment chose this" is the answer an operator most often needs — a
+   * daemon looking at a different state home than the one they are editing explains almost every
+   * otherwise inexplicable configuration.
+   */
+  readonly stateHome: { readonly path: string; readonly fromEnvironment: boolean };
+  /**
+   * Where a boot states what stopped it.
+   *
+   * A WORLD FIELD so the refusals below are provable without reading a real log file, and a port
+   * rather than a direct write because `src/lib` owns the decision about what is said and may not
+   * reach a stream. Every non-zero return from `start` writes through this first: an exit code that
+   * explains nothing is the defect this seam exists to prevent recurring.
+   */
+  readonly notices: BootNoticePort;
   readonly secrets: DaemonSecretsLoader;
   /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
    *  a session whose work cannot be shown to survive the relaunch. */
@@ -2597,13 +2650,116 @@ function createRecommendSubsystem(
   };
 }
 
-/** The hosted PWA and this daemon's own published origin may both drive browser requests. */
+/**
+ * Which address this boot will serve, or the refusal that stops it.
+ *
+ * TWO PATHS, and which one applies is decided by whether the configuration document RECORDS a port.
+ *
+ *   * A RECORDED PORT IS A CLAIM. An operator typed it, or an earlier boot wrote down what it took,
+ *     and either way something out there has been told this daemon lives at that address. So it is
+ *     bound or the boot refuses — never silently moved. The occupant is identified first so the
+ *     refusal can say whether it is another of these daemons (nothing to do) or a stranger (a human
+ *     must act), because those are different remedies.
+ *   * NO RECORDED PORT IS A PREFERENCE. This is a state home that has never started a daemon, and a
+ *     first run must succeed on a machine that happens to have something on the preferred port. It
+ *     walks a short consecutive sequence, takes the first free address, and the caller records it —
+ *     after which every later boot is in the first case.
+ *
+ * FAIL CLOSED on the claimed path: `identify` treats anything it cannot positively recognise as this
+ * product — including a probe that could not complete — as an occupant, so an inconclusive answer
+ * refuses rather than booting a second daemon over a live one.
+ */
+async function decideAddress(
+  world: DaemonWorld,
+  loaded: DaemonConfig,
+): Promise<{ readonly config: DaemonConfig } | BootRefusal> {
+  if (loaded.portIsRecorded) {
+    const occupant = await world.boot.probe.identify({ url: loaded.bindUrl });
+    if (occupant.kind !== 'vacant')
+      return refuseOccupiedAddress({
+        daemonName: DAEMON_NAME,
+        clientName: CLIENT_NAME,
+        url: loaded.bindUrl,
+        configFile: world.config.path,
+        occupant,
+      });
+    world.notices.step('address is free', loaded.bindUrl);
+    return { config: configuredAt(loaded, loaded.port) };
+  }
+  const candidates = portCandidates(world.boot.preferredPort);
+  for (const port of candidates) {
+    const config = configuredAt(loaded, port);
+    const occupant = await world.boot.probe.identify({ url: config.bindUrl });
+    if (occupant.kind === 'vacant') {
+      world.notices.step('address chosen', `${config.bindUrl} (no port was recorded yet)`);
+      return { config };
+    }
+    // Said out loud rather than passed over silently: an operator who expected the preferred port
+    // and finds the daemon one along deserves to read why in the same log they are already reading.
+    world.notices.step(
+      'address in use',
+      `${config.bindUrl} — ${occupant.kind === 'daemon' ? `another ${DAEMON_NAME} is serving it` : occupant.evidence}`,
+    );
+  }
+  return refuseExhaustedCandidates(DAEMON_NAME, candidates, world.config.path);
+}
+
+/**
+ * The daemon's startup account, on the standard error stream.
+ *
+ * `writeSync` ON THE DESCRIPTOR, not the stream object, and that is the point rather than a detail.
+ * A launcher hands the daemon a file for both its streams, and the operator is then told to inspect
+ * that file when something goes wrong — so anything that could leave a written line sitting in a
+ * userspace buffer at the moment the daemon wedges or exits would reproduce the very symptom being
+ * fixed. A descriptor write is handed to the kernel before it returns; there is nothing left to
+ * flush. (Measured on this runtime, a stream write to a redirected descriptor reaches the file
+ * immediately too — this simply removes the question rather than depending on the answer.)
+ *
+ * EVERY LINE CARRIES ELAPSED MILLISECONDS, because the failure that prompted this was a ninety-second
+ * initialization that produced no output at all. A trail whose last entry is a step name and a
+ * timestamp turns "it hung" into "it hung opening the state home", which is the whole difference
+ * between a report someone can act on and a report that ends at an empty file.
+ *
+ * A FAILED WRITE IS SWALLOWED. Losing the log is bad; refusing to boot because the log could not be
+ * written is worse, and a daemon that died writing about its own startup would be the least
+ * debuggable outcome of all.
+ */
+function bootJournal(level: LogLevel = 'info'): BootNoticePort {
+  const startedAtMs = Date.now();
+  // Milestones are `info`; the things a human must act on are `warn` and are never filtered out —
+  // a log level that could hide the reason a boot refused would recreate the empty-log defect on
+  // purpose. `debug` selects the same records as `info` because nothing emits below it yet, which
+  // the usage text says rather than implying a level that does something.
+  const showSteps = level === 'debug' || level === 'info';
+  const line = (text: string): void => {
+    try {
+      writeSync(2, `${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
+    } catch {
+      // Intentionally ignored: a stream this daemon cannot write to must not stop it starting.
+    }
+  };
+  return {
+    step: (name, detail) => {
+      if (showSteps) line(detail === undefined ? name : `${name} — ${detail}`);
+    },
+    state: message => line(`! ${message}`),
+  };
+}
+
+/**
+ * The hosted PWA and this daemon's own origins may all drive browser requests.
+ *
+ * BOTH addresses, because they are two different ways a browser reaches this daemon and either may
+ * be the one in the address bar: the advertised origin is what a pairing link hands out, and the
+ * bound one is what a person types on the host itself. They are the same string unless an operator
+ * set `publicUrl`, in which case the set collapses back to one.
+ */
 function browserOrigins(config: DaemonConfig): readonly string[] {
-  return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin])];
+  return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin, new URL(config.bindUrl).origin])];
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
-export function buildWorld(): DaemonWorld {
+export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   const clock = new SystemClock();
   const environment = new RuntimeEnvironment();
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
@@ -2943,8 +3099,18 @@ export function buildWorld(): DaemonWorld {
     boot: {
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
+      preferredPort: FY_DEFAULT_DAEMON_PORT,
     },
-    config: new FileDaemonConfig(paths, stateFiles),
+    // An operator's own document when they named one, and the state home's otherwise. The confined
+    // filesystem port refuses every path outside the home, which is right for the daemon's own state
+    // and wrong for a file a person named, so the two are different adapters.
+    config:
+      overrides.configFile === undefined
+        ? new FileDaemonConfig(paths, stateFiles)
+        : new ExplicitDaemonConfig(overrides.configFile),
+    overrides,
+    stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
+    notices: bootJournal(overrides.logLevel),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -3480,15 +3646,24 @@ export function buildWorld(): DaemonWorld {
  * home as foreign state: a first boot on a fresh home could not get past its own configuration
  * step. Owning the home before writing into it removes the whole class.
  *
- * A held lifetime lock is then the same answer as a responder on the address — another daemon is
- * already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them surfacing as a
- * crash about SQLite.
+ * A held lifetime lock is then the same answer as one of THESE daemons responding on the address —
+ * another one is already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them
+ * surfacing as a crash about SQLite. A responder that cannot be identified as one of these daemons
+ * is a different thing entirely, and reports the address conflict it actually is.
+ *
+ * EVERY ONE OF THOSE EXITS SAYS SOMETHING FIRST. They used to return their code and write nothing at
+ * all, so the launcher pointed the operator at a log file that was empty and a person who had done
+ * everything right learned nothing.
  *
  * The socket comes last, and every acquisition registers its release as it is made rather than in
  * one block at the end, so a failure part-way through unwinds exactly what succeeded.
  */
 export async function start(world: DaemonWorld, cleanups: Array<() => void | Promise<void>> = []): Promise<number> {
-  if (world.role !== 'daemon') return 1;
+  if (world.role !== 'daemon') {
+    world.notices.state(`this build is packaged as ${world.role} rather than a daemon and cannot serve`);
+    return 1;
+  }
+  world.notices.step('starting', `${DAEMON_NAME} ${daemonVersion}, pid ${String(process.pid)}`);
 
   // Registered for release immediately: an exception from anything below must not leave the lock
   // behind, because a stale lock fails the NEXT start for a reason unrelated to what broke.
@@ -3496,18 +3671,47 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   try {
     opened = await world.storage.open();
   } catch (error) {
-    if (error instanceof StateHomeLockedError) return EXIT_ALREADY_RUNNING;
+    if (error instanceof StateHomeLockedError) {
+      const refusal = refuseHeldStateHome(DAEMON_NAME, CLIENT_NAME, error.lockFile);
+      world.notices.state(refusal.message);
+      return refusal.exitCode;
+    }
     throw error;
   }
   cleanups.push(() => opened.storage.close());
+  world.notices.step('state home opened', opened.paths.home);
 
-  const config = await world.config.load();
-  await world.secrets.load(config.secretsFile);
-  if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
+  const loaded = overriddenBy(await world.config.load(), world.overrides);
+  world.notices.step('configuration loaded', world.config.path);
+  await world.secrets.load(loaded.secretsFile);
+  if (loaded.secretsFile !== undefined) world.notices.step('secrets loaded', loaded.secretsFile);
+  // BEFORE the subsystems, because everything below assembles addresses from this document — the
+  // pairing link, the browser origins, the advertised URL. A boot that only learned its real port at
+  // bind time would have handed every one of them the port it did not take.
+  const decided = await decideAddress(world, loaded);
+  if ('exitCode' in decided) {
+    world.notices.state(decided.message);
+    return decided.exitCode;
+  }
+  const config = decided.config;
+  // Recorded exactly when THIS BOOT chose the address, which is the only case where the document
+  // does not already say it: a recorded port is already written, and a port named on the command
+  // line was said about this run only and must not be turned into a claim on disk behind the
+  // operator's back. Recording is what makes choosing safe — the next boot binds this or refuses.
+  if (!loaded.portIsRecorded) {
+    await world.config.record(config.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  }
+  // Stated rather than refused: advertising an address other than the bound one is a real deployment
+  // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
+  // persisted looks like. Either way the operator is the one who can tell which, so say it.
+  if (advertisesForeignAddress(config))
+    world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock);
+  world.notices.step('pairing identity opened');
   const base = {
     credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
     usage,
@@ -3537,6 +3741,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    */
   const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
   cleanups.push(() => analyticsStore.store.close());
+  world.notices.step('analytics index opened', analyticsStore.rebuildRequired ? 'a rebuild is required' : undefined);
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -3573,7 +3778,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // directories. A failure is swallowed for the same reason the ticks below swallow theirs — a
   // self-check that could not run is reported by the next one's freshness, and refusing to serve
   // because the daemon could not measure itself is strictly worse than serving and saying so.
+  world.notices.step('subsystems mounted');
   await health.selfCheck().catch(() => undefined);
+  world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
@@ -3582,23 +3789,39 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // ALL THREE parts of the surface are served by the one host, from the one credential set: the
   // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
   // routes that carry dictation audio.
-  const server: ApiServerHandle = await world.boot.binder.bind(
-    async () =>
-      await world.api.listen(
-        {
-          http: createMountedDispatcher(base, subsystems),
-          sockets: createMountedSocketDispatcher(base, subsystems),
-          raw: createMountedRawDispatcher(base, subsystems),
-          corsOrigins: browserOrigins(config),
-        },
-        { host: config.host, port: config.port },
-      ),
-  );
+  let server: ApiServerHandle;
+  try {
+    server = await world.boot.binder.bind(
+      async () =>
+        await world.api.listen(
+          {
+            http: createMountedDispatcher(base, subsystems),
+            sockets: createMountedSocketDispatcher(base, subsystems),
+            raw: createMountedRawDispatcher(base, subsystems),
+            corsOrigins: browserOrigins(config),
+          },
+          { host: config.host, port: config.port },
+        ),
+    );
+  } catch (error) {
+    // A REFUSAL, not a crash. The address was probed and looked free, so arriving here means the
+    // host will not let this daemon listen there — a privileged port, a host name that resolves to
+    // no local interface, or something that took the address in the interval. All three are the
+    // operator's to resolve, and a stack trace about a socket says none of it.
+    const refusal = refuseUnbindableAddress(
+      config.bindUrl,
+      error instanceof Error ? error.message : String(error),
+      world.config.path,
+    );
+    world.notices.state(refusal.message);
+    return refusal.exitCode;
+  }
   // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
   // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
   // stream is over while the socket it writes to still exists.
   cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
+  world.notices.step('listening', config.bindUrl);
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period
@@ -3702,16 +3925,114 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     .arm()
     .then(disarm => cleanups.push(disarm))
     .catch(() => undefined);
+  // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
+  // here and stops is a daemon that is serving, which is a completely different report from one that
+  // stops at "state home opened" — and before any of this existed the two were the same empty file.
+  world.notices.step('ready', `serving ${config.bindUrl}`);
   await world.untilShutdown();
+  world.notices.step('stopping', 'releasing everything this boot acquired');
   return 0;
 }
 
-async function execute(): Promise<number> {
+/**
+ * `--print-config`: every effective value and where it came from, creating nothing.
+ *
+ * THIS IS THE COMMAND THAT WOULD HAVE SAVED AN EVENING. A person spent one on `port` and `publicUrl`
+ * silently disagreeing — the daemon held both values and every reason for them and had no way to say
+ * so, so the whole evening went on guessing at state the binary already knew. Printing values alone
+ * would not have been enough; the ORIGIN column is what turns two numbers into "this one I chose and
+ * this one was chosen for me".
+ *
+ * It PEEKS rather than loads, so asking the question does not seed a document, and it never opens
+ * storage, so it does not create a state home either.
+ */
+export async function printConfiguration(world: DaemonWorld): Promise<number> {
+  const peeked = await world.config.peek();
+  const config = overriddenBy(peeked.config, world.overrides);
+  const rows = describeConfiguration({
+    document: peeked.document,
+    config,
+    overrides: world.overrides,
+    configFile: world.config.path,
+    stateHome: world.stateHome.path,
+    stateHomeFromEnvironment: world.stateHome.fromEnvironment,
+  });
+  writeSync(1, `${renderConfiguration(rows, config, world.config.path)}\n`);
+  return 0;
+}
+
+/**
+ * `--check`: whether this daemon would start, and what it would do, without doing any of it.
+ *
+ * NO DIRECTORY, NO LOCK, NO BIND. The address is probed — a request to an address is not a change to
+ * this machine — and everything else is read. It exists for the same reason the argument surface
+ * does: "tell me if this will work" was precisely what was missing when asking the binary its
+ * version silently provisioned a state home.
+ *
+ * IT REPORTS THE OCCUPANT RATHER THAN A VERDICT ALONE, because "it would not start" is not useful on
+ * its own and "another daemon is already serving that address" and "something unidentified holds it"
+ * need different things done about them.
+ */
+export async function checkConfiguration(world: DaemonWorld): Promise<number> {
+  const peeked = await world.config.peek();
+  const config = overriddenBy(peeked.config, world.overrides);
+  const say = (text: string): void => void writeSync(1, `${text}\n`);
+  say(`state home   ${world.stateHome.path}`);
+  say(`config file  ${world.config.path}${peeked.document === undefined ? '  (not written yet)' : ''}`);
+  if (config.portIsRecorded) {
+    const occupant = await world.boot.probe.identify({ url: config.bindUrl });
+    if (occupant.kind === 'vacant') {
+      say(`address      ${config.bindUrl}  (free — this daemon would bind it)`);
+      return 0;
+    }
+    const refusal = refuseOccupiedAddress({
+      daemonName: DAEMON_NAME,
+      clientName: CLIENT_NAME,
+      url: config.bindUrl,
+      configFile: world.config.path,
+      occupant,
+    });
+    say(`address      ${config.bindUrl}  (taken)`);
+    say('');
+    say(`! ${refusal.message}`);
+    return refusal.exitCode;
+  }
+  // No port is recorded, so this reports the walk a first boot would take rather than one address.
+  const candidates = portCandidates(world.boot.preferredPort);
+  for (const port of candidates) {
+    const candidate = configuredAt(config, port);
+    const occupant = await world.boot.probe.identify({ url: candidate.bindUrl });
+    if (occupant.kind === 'vacant') {
+      say(`address      ${candidate.bindUrl}  (free — this daemon would take and record it)`);
+      return 0;
+    }
+    say(
+      `address      ${candidate.bindUrl}  (taken — ${occupant.kind === 'daemon' ? `another ${DAEMON_NAME}` : occupant.evidence})`,
+    );
+  }
+  const refusal = refuseExhaustedCandidates(DAEMON_NAME, candidates, world.config.path);
+  say('');
+  say(`! ${refusal.message}`);
+  return refusal.exitCode;
+}
+
+async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check' | 'print-config' }): Promise<number> {
   const cleanups: Array<() => void | Promise<void>> = [];
+  // ONE journal for the whole invocation, built before the world so a world that throws while it is
+  // being assembled is still reported. `buildWorld` resolves the state home and opens a filesystem;
+  // when that failed, the only thing this daemon had ever written was nothing at all.
+  const notices = bootJournal(answer.overrides.logLevel);
   try {
-    return await start(buildWorld(), cleanups);
+    const world = { ...buildWorld(answer.overrides), notices };
+    // The two queries answer from the same world the boot would have used, so what they report is
+    // what would actually happen — and neither of them opens storage, so neither creates anything.
+    if (answer.kind === 'print-config') return await printConfiguration(world);
+    if (answer.kind === 'check') return await checkConfiguration(world);
+    return await start(world, cleanups);
   } catch (error) {
-    process.stderr.write(`${DAEMON_NAME}: ${error instanceof Error ? error.message : String(error)}\n`);
+    // The stack too, not just the message: this is the branch a crash during startup lands in, and a
+    // one-line message with no frames is the difference between a bug report and a shrug.
+    notices.state(error instanceof Error ? (error.stack ?? error.message) : String(error));
     return 1;
   } finally {
     // Each cleanup runs in its own try/catch so a failing one never masks the exit code.
@@ -3725,6 +4046,26 @@ async function execute(): Promise<number> {
   }
 }
 
+/**
+ * The command line, answered before anything is built.
+ *
+ * FIRST, and that is the whole point: `buildWorld` resolves a state home and opens a filesystem, and
+ * `start` creates the directory tree, takes the lifetime lock and probes the address. Asking this
+ * binary its version used to do all of that. Nothing below this branch runs for a query.
+ */
 if (import.meta.main) {
-  process.exit(await execute());
+  const answer = answerArguments(process.argv.slice(2), {
+    daemonName: DAEMON_NAME,
+    clientName: CLIENT_NAME,
+    version: daemonVersion,
+  });
+  if (answer.kind === 'print') {
+    writeSync(1, `${answer.text}\n`);
+    process.exit(answer.exitCode);
+  }
+  if (answer.kind === 'refuse') {
+    writeSync(2, `${answer.text}\n`);
+    process.exit(answer.exitCode);
+  }
+  process.exit(await execute(answer));
 }

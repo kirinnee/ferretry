@@ -2,36 +2,88 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { DaemonBinder, DaemonHealthProbe } from '../../../src/adapters/runtime/daemon-boot.ts';
 import type { DaemonFetchPort } from '../../../src/lib/runtime/boot.ts';
+import { healthViewFixture } from '../../fixtures/health-view.ts';
 
-describe('daemon boot adapters', () => {
-  it('should probe the health endpoint with an optional bearer token and treat any response as occupied', async () => {
-    // Arrange
-    const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
-    const fetcher: DaemonFetchPort = {
+/** A responder that always answers the same way, recording what it was asked. */
+function fixedResponder(response: () => Response): {
+  readonly fetcher: DaemonFetchPort;
+  readonly calls: Array<{ readonly url: string; readonly init: RequestInit }>;
+} {
+  const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+  return {
+    calls,
+    fetcher: {
       async fetch(url, init) {
         calls.push({ url, init });
-        return new Response(null, { status: 401 });
+        return response();
       },
-    };
+    },
+  };
+}
+
+describe('daemon boot adapters', () => {
+  it('should identify a responder that serves this product health report as one of these daemons', async () => {
+    // Arrange
+    const responder = fixedResponder(() => Response.json(healthViewFixture({ version: '9.9.9', pid: 4_242 })));
 
     // Act
-    const occupied = await new DaemonHealthProbe(fetcher).responds({ url: 'http://127.0.0.1:7337/', token: 'token' });
+    const occupant = await new DaemonHealthProbe(responder.fetcher).identify({
+      url: 'http://127.0.0.1:7089/',
+      token: 'token',
+    });
 
     // Assert
-    should(occupied).be.true();
-    should(calls).have.length(1);
-    should(calls[0]).containDeep({
-      url: 'http://127.0.0.1:7337/v1/health',
+    should(occupant).deepEqual({ kind: 'daemon', version: '9.9.9', pid: 4_242 });
+    should(responder.calls).have.length(1);
+    should(responder.calls[0]).containDeep({
+      url: 'http://127.0.0.1:7089/v1/health',
       init: { headers: { authorization: 'Bearer token' } },
     });
   });
 
-  it('should clear the way only when a probe fails', async () => {
-    // Arrange
-    const rejected: DaemonFetchPort = { fetch: async () => await Promise.reject(new Error('connection refused')) };
+  it('should refuse to call a foreign responder its own incumbent', async () => {
+    // Arrange: exactly what the agent supervisor this product coexists with answers on its own port.
+    const unauthorized = fixedResponder(() => Response.json({ error: 'unauthorized' }, { status: 401 }));
+    const notJson = fixedResponder(() => new Response('<html>hello</html>', { status: 200 }));
 
-    // Act + Assert
-    should(await new DaemonHealthProbe(rejected).responds({ url: 'http://127.0.0.1:7337' })).be.false();
+    // Act
+    const foreign = await new DaemonHealthProbe(unauthorized.fetcher).identify({ url: 'http://127.0.0.1:7089' });
+    const webPage = await new DaemonHealthProbe(notJson.fetcher).identify({ url: 'http://127.0.0.1:7089' });
+
+    // Assert
+    should(foreign.kind).equal('stranger');
+    should(webPage.kind).equal('stranger');
+    // The evidence names what was actually seen, because 401 and "not our JSON" are different faults.
+    should(foreign)
+      .have.property('evidence')
+      .match(/HTTP 401/u);
+    should(webPage)
+      .have.property('evidence')
+      .match(/HTTP 200/u);
+  });
+
+  it('should clear the way only for an actively refused connection', async () => {
+    // Arrange: the runtime reports a vacant port by error CODE; everything else leaves it open.
+    const refused: DaemonFetchPort = {
+      fetch: async () =>
+        await Promise.reject(Object.assign(new Error('Unable to connect.'), { code: 'ConnectionRefused' })),
+    };
+    const timedOut: DaemonFetchPort = {
+      fetch: async () =>
+        await Promise.reject(Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' })),
+    };
+
+    // Act
+    const vacant = await new DaemonHealthProbe(refused).identify({ url: 'http://127.0.0.1:7089' });
+    const held = await new DaemonHealthProbe(timedOut).identify({ url: 'http://127.0.0.1:7089' });
+
+    // Assert
+    should(vacant).deepEqual({ kind: 'vacant' });
+    // FAIL CLOSED: a probe that could not finish is not evidence of a free address.
+    should(held.kind).equal('stranger');
+    should(held)
+      .have.property('evidence')
+      .match(/timed out/u);
   });
 
   it('should retry an address conflict but preserve terminal binding errors', async () => {

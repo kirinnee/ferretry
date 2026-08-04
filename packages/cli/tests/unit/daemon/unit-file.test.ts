@@ -104,12 +104,13 @@ describe('systemd unit rendering', () => {
     should(actual).match(/^Environment="PATH=\/usr\/bin:\/bin"$/mu);
   });
 
-  it('should refuse to restart on the incumbent-already-running exit code', () => {
+  it('should refuse to restart on either address-is-taken exit code', () => {
     // Act
     const actual = renderSystemdUnit(spec);
 
-    // Assert
-    should(actual).match(new RegExp(`^RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)}$`, 'mu'));
+    // Assert — BOTH codes, because respawning fixes neither. 78 is another of these daemons already
+    // serving; 69 is a different program holding the address, which no restart can take from it.
+    should(actual).match(new RegExp(`^RestartPreventExitStatus=${String(EXIT_ALREADY_RUNNING)} 69$`, 'mu'));
     should(EXIT_ALREADY_RUNNING).equal(78);
   });
 
