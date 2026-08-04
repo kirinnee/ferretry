@@ -404,6 +404,7 @@ describe('SessionsPage', () => {
         route={{ kind: 'sessions', daemonId: alpha.daemonId }}
         slots={{
           ConnectionPicker: Empty,
+          Setup: Empty,
           Sessions: connection => <SessionsPage {...props} connection={connection.connection} />,
           NewSession: Empty,
           SessionChat: Session,

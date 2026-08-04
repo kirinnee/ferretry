@@ -76,7 +76,12 @@ import {
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
+import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
+import type { OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
+import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
+import { OnboardingProgressStore } from '../src/features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
+import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
 import type { QrScanHost } from '../src/lib/pair-scan.ts';
 import type { PairingArrival } from '../src/lib/pairing.ts';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
@@ -580,6 +585,25 @@ const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
 /** A camera that never decodes: the harness needs the control enabled, not a scan. */
 const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await new Promise<string>(() => {}) };
+
+/**
+ * One store per setup stage, so each card is a different point in the arc.
+ *
+ * Storage is deliberately absent: a review page must not write, or read, the
+ * real reader's `fy-onboarding-v1` progress.
+ */
+const harnessOnboarding = (entry: OnboardingStepId): OnboardingProgressStore =>
+  new OnboardingProgressStore({ storage: undefined, entry });
+
+const HARNESS_ONBOARDING: Readonly<Record<OnboardingStepId, OnboardingProgressStore>> = {
+  install: harnessOnboarding('install'),
+  daemon: harnessOnboarding('daemon'),
+  pair: harnessOnboarding('pair'),
+  done: harnessOnboarding('done'),
+};
+
+/** A clipboard the review page never actually needs to reach. */
+const HARNESS_CLIPBOARD: ClipboardWriter = async () => {};
 
 /** The pre-filled arrival a phone's own camera app produces. */
 const HARNESS_ARRIVAL: PairingArrival = {
@@ -1536,6 +1560,76 @@ function Shell() {
             usage={DASHBOARD_USAGE}
             wardenStatus={null}
             wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — install',
+      render: () => (
+        <section aria-label="Setup install step" id="harness-onboarding-install">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.install}
+            write={HARNESS_CLIPBOARD}
+            channel="apt"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — start the daemon',
+      render: () => (
+        <section aria-label="Setup daemon step" id="harness-onboarding-daemon">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.daemon}
+            write={HARNESS_CLIPBOARD}
+            channel="brew"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — pair this device',
+      render: () => (
+        <section aria-label="Setup pair step" id="harness-onboarding-pair">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.pair}
+            write={HARNESS_CLIPBOARD}
+            channel="curl"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => (
+              <PairingScreen
+                embedded
+                connections={[]}
+                selectedDaemonId={null}
+                scanHost={HARNESS_SCAN_HOST}
+                onPair={async () => {}}
+                onRemove={() => {}}
+                onSelect={() => {}}
+              />
+            )}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — done',
+      render: () => (
+        <section aria-label="Setup done step" id="harness-onboarding-done">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.done}
+            write={HARNESS_CLIPBOARD}
+            channel="apt"
+            fleetReady
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
           />
         </section>
       ),
@@ -2979,5 +3073,57 @@ function Shell() {
   );
 }
 
+/**
+ * One setup stage, alone on the page, in the production shell.
+ *
+ * Two reasons this is a root of its own rather than another gallery card.
+ *
+ * It mounts the PRODUCTION viewport producer (`useAppViewport`), which writes
+ * `--app-h` and `data-keyboard` on `<html>` — correct for a page that IS the
+ * app, wrong to install for every other capture in the gallery. That is what
+ * lets the keyboard shot exercise the shipped geometry path from
+ * `window.visualViewport` instead of a shrunken browser window: the page
+ * declares `interactive-widget=resizes-content`, so the question is precisely
+ * what happens when the VISUAL viewport shrinks under a portrait phone.
+ *
+ * And a stage taller than the phone cannot be captured honestly inside the
+ * stacked gallery: Chrome clips the element shot to the fixed scroller, which
+ * silently drops the top of the Install stage — brand, heading and all.
+ */
+function OnboardingStageHarness({ step }: { readonly step: OnboardingStepId }) {
+  useAppViewport();
+  return (
+    <div className="kt-shell overflow-y-auto" id={`harness-onboarding-${step}-page`}>
+      <OnboardingPage
+        progress={HARNESS_ONBOARDING[step]}
+        write={HARNESS_CLIPBOARD}
+        channel="curl"
+        fleetReady={step === 'done'}
+        onOpenFleet={() => {}}
+        renderPairing={() => (
+          <PairingScreen
+            embedded
+            connections={[]}
+            selectedDaemonId={null}
+            scanHost={HARNESS_SCAN_HOST}
+            onPair={async () => {}}
+            onRemove={() => {}}
+            onSelect={() => {}}
+          />
+        )}
+      />
+    </div>
+  );
+}
+
+/** Hash fragments that replace the whole gallery with one setup stage. */
+const ONBOARDING_FRAGMENTS: Readonly<Record<string, OnboardingStepId>> = {
+  '#onboarding-install': 'install',
+  '#onboarding-keyboard': 'pair',
+};
+
 const host = document.getElementById('root');
-if (host) createRoot(host).render(<Shell />);
+if (host) {
+  const stage = ONBOARDING_FRAGMENTS[window.location.hash];
+  createRoot(host).render(stage === undefined ? <Shell /> : <OnboardingStageHarness step={stage} />);
+}

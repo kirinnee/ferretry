@@ -14,6 +14,10 @@ import { NewSessionPage } from './components/new-session-page.tsx';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
+import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
+import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
+import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
+import { OnboardingProgressStore } from './features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -45,7 +49,7 @@ import {
   type PageHostSlots,
   type SessionChatPageProps,
 } from './lib/pages/page-host.tsx';
-import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey } from './lib/pages/routes.ts';
+import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey, setupPath } from './lib/pages/routes.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
 import { type PushEnrolment, type PushRegistrationLike, supportsWebPush } from './lib/push-enrolment.ts';
@@ -167,6 +171,7 @@ const useNotificationControlsHost = (): NotificationControlsHost => {
 
 const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
   if (route.kind === 'connection-picker') return [{ label: 'Daemons' }];
+  if (route.kind === 'setup') return [{ label: 'Set up' }];
   const sessions = daemonSessionsPath(route.daemonId);
   switch (route.kind) {
     case 'sessions':
@@ -223,6 +228,21 @@ export const browserQrScan = (): QrScanHost | null => {
 /** The pairing link this tab was opened with, if it was opened with one. */
 const arrivalFromLocation = (): PairingArrival => pairingArrival(window.location.href);
 
+/**
+ * The one-time code leaves the address bar as soon as a screen holds it, so it
+ * cannot be reloaded, bookmarked, shared or screenshotted afterwards.
+ * `replaceState`, not `pushState`: a back button that restored the code would
+ * undo exactly this.
+ */
+const takeArrivalFromLocation = (): void => {
+  window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
+};
+
+/** The real clipboard, resolved once: the setup screen is the only page that copies. */
+const clipboardWriter = browserClipboardWriter();
+
+const SETUP_ROUTE: PageRoute = { kind: 'setup' };
+
 function ConnectionPicker() {
   const store = useAppStore();
   const snapshot = useConnectionSnapshot();
@@ -231,13 +251,7 @@ function ConnectionPicker() {
   // has already emptied, and must not resurrect a code the reader declined.
   const [arrival] = useState(arrivalFromLocation);
   const scanHost = useMemo(browserQrScan, []);
-  // The single-use code leaves the address bar as soon as the screen holds it,
-  // so it cannot be reloaded, bookmarked, shared or screenshotted afterwards.
-  // `replaceState`, not `pushState`: a back button that restored the code would
-  // undo exactly this.
-  const takeArrival = useCallback(() => {
-    window.history.replaceState({}, '', `${window.location.pathname}${window.location.search}`);
-  }, []);
+  const takeArrival = useCallback(takeArrivalFromLocation, []);
   return (
     <PairingScreen
       arrival={arrival}
@@ -256,6 +270,81 @@ function ConnectionPicker() {
       onRemove={daemonId => {
         store.connections.remove(daemonId);
       }}
+      onOpenSetup={() => navigate(setupPath())}
+    />
+  );
+}
+
+/**
+ * FIRST RUN, COMPOSED.
+ *
+ * The stepper owns the journey; everything daemon-shaped still comes from the
+ * same store seam the picker uses, and the pair stage is the SAME
+ * `PairingScreen` — embedded rather than forked, so its confirmation, failure
+ * and single-use-code behaviour are the ones already proved.
+ *
+ * The two navigations differ on purpose. Selecting an existing daemon leaves
+ * immediately, exactly as it does from the picker; pairing during setup does
+ * NOT, because the reader has one stage left and being teleported out of it
+ * would hide the only screen that says they are finished.
+ */
+function SetupGuide() {
+  const store = useAppStore();
+  const snapshot = useConnectionSnapshot();
+  const { navigate } = useRouter();
+  const [arrival] = useState(arrivalFromLocation);
+  const scanHost = useMemo(browserQrScan, []);
+  const takeArrival = useCallback(takeArrivalFromLocation, []);
+  /*
+   * A tab opened FROM a pairing link is past install and daemon whatever
+   * storage remembers, so the arrival decides where it lands.
+   *
+   * `paired` is read here, at hydration, and deliberately not tracked: it
+   * decides only whether a stored "finished" is believable for a browser that
+   * holds no daemon. A pairing removed later, with the last stage already on
+   * the glass, is that stage's own problem to state honestly.
+   */
+  const [progress] = useState(
+    () =>
+      new OnboardingProgressStore({
+        paired: snapshot.connections.length > 0,
+        ...(arrival.kind === 'none' ? {} : { entry: 'pair' as const }),
+      }),
+  );
+  const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
+  const selected = snapshot.selectedDaemonId;
+  return (
+    <OnboardingPage
+      progress={progress}
+      write={clipboardWriter}
+      channel={channel}
+      fleetReady={selected !== null}
+      onOpenFleet={() => {
+        // The selected daemon IS the one just paired: adding a connection
+        // selects it. Never a hardcoded prefix — the app's own route helper.
+        if (selected !== null) navigate(daemonSessionsPath(selected));
+      }}
+      renderPairing={({ onPaired }) => (
+        <PairingScreen
+          embedded
+          arrival={arrival}
+          scanHost={scanHost}
+          onArrivalTaken={takeArrival}
+          connections={snapshot.connections}
+          selectedDaemonId={selected}
+          onPair={async seed => {
+            await store.pair(seed);
+            onPaired();
+          }}
+          onSelect={daemonId => {
+            store.connections.select(daemonId);
+            navigate(daemonSessionsPath(daemonId));
+          }}
+          onRemove={daemonId => {
+            store.connections.remove(daemonId);
+          }}
+        />
+      )}
     />
   );
 }
@@ -450,6 +539,7 @@ function LearningRoute({ connection }: DaemonPageProps) {
 
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
+  Setup: SetupGuide,
   Sessions: SessionsRoute,
   NewSession: NewSessionRoute,
   SessionChat: SessionRoute,
@@ -467,10 +557,42 @@ export function AppShell() {
   const { route, navigate } = useRouter();
   const pageRoute: PageRoute = route.kind === 'legacy-tasks-redirect' ? route.to : route;
   const connection =
-    pageRoute.kind === 'connection-picker'
+    pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
       ? undefined
       : connectionSnapshot.connections.find(candidate => candidate.daemonId === pageRoute.daemonId);
   const [permission, setPermission] = useState<NotificationPermissionState>(notificationPermission);
+  /*
+   * THE SETUP JOURNEY IS DECIDED AT ENTRY, AND HELD ONLY WHILE IT LASTS.
+   *
+   * Two ways in. Nothing paired: the store is already hydrated on this first
+   * render (`StoreProvider` holds the tree back until IndexedDB opens), so zero
+   * connections is a true "nothing here" and not a not-loaded-yet flash. Or a
+   * pairing code in the address — a phone's camera app opening `/pair#v1;…` —
+   * which is the setup journey arriving at its third stage, whether or not this
+   * browser already has daemons.
+   *
+   * It is HELD because pairing adds a connection synchronously: re-deciding on
+   * that render would swap the guide out at the exact moment the reader earned
+   * the stage that tells them it worked. It is RELEASED as soon as they leave
+   * for a daemon page, so coming back to `/` later is ordinary browsing and
+   * shows the picker rather than the guide they already finished.
+   */
+  const [setupJourney, setSetupJourney] = useState(
+    () => connectionSnapshot.connections.length === 0 || arrivalFromLocation().kind !== 'none',
+  );
+  useEffect(() => {
+    if (pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup') return;
+    setSetupJourney(false);
+  }, [pageRoute.kind]);
+  /*
+   * The screen a reader HEARS must be the screen they SEE.
+   *
+   * A cold `/` renders the setup guide, so the crumb, the page key and the live
+   * announcement all have to come from that, not from the picker route the URL
+   * still literally names. Deriving them from one effective route is what keeps
+   * the two descriptions from drifting apart.
+   */
+  const effectiveRoute: PageRoute = pageRoute.kind === 'connection-picker' && setupJourney ? SETUP_ROUTE : pageRoute;
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -543,7 +665,7 @@ export function AppShell() {
    * the browser has already placed focus, and stealing it would skip whatever
    * the reader was given.
    */
-  const pageKey = routePageKey(pageRoute);
+  const pageKey = routePageKey(effectiveRoute);
   const routeAnnouncer = useRef<HTMLParagraphElement>(null);
   // Seed the previous key during render instead of latching the first effect.
   // StrictMode replays mount effects in development; an effect-owned latch
@@ -569,7 +691,16 @@ export function AppShell() {
   }, [openPalette]);
 
   let content: ReactNode;
-  if (pageRoute.kind === 'connection-picker') {
+  if (effectiveRoute.kind === 'setup') {
+    // `/setup` is reachable at any time — a paired reader setting up a second
+    // machine asked for it. What never happens is ordinary browsing dropping a
+    // paired reader back into the guide.
+    content = (
+      <div className="kt-shell overflow-y-auto">
+        <SetupGuide />
+      </div>
+    );
+  } else if (effectiveRoute.kind === 'connection-picker') {
     content = (
       <div className="kt-shell overflow-y-auto">
         <ConnectionPicker />
@@ -633,7 +764,7 @@ export function AppShell() {
         aria-atomic="true"
         data-route={pageKey}
       >
-        {routeAnnouncement(pageRoute)}
+        {routeAnnouncement(effectiveRoute)}
       </p>
       {content}
     </NotificationControlsContext.Provider>

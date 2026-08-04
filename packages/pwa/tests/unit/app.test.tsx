@@ -187,6 +187,19 @@ const settle = async (): Promise<void> => {
   });
 };
 
+/** Which stage of the setup guide is on the glass, if it is on the glass at all. */
+const stepOfSetup = (container: HTMLElement): string | null | undefined =>
+  container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step');
+
+/** Walks the setup stepper from install to the pairing stage. */
+const advanceToPairing = async (container: HTMLElement): Promise<void> => {
+  for (let step = 0; step < 2; step += 1) {
+    await interact(() =>
+      must(container.querySelector<HTMLButtonElement>('[data-onboarding-next]'), 'the next control').click(),
+    );
+  }
+};
+
 /** Drives a browser history navigation the way the back button does. */
 const popTo = async (path: string): Promise<void> => {
   window.history.pushState({}, '', path);
@@ -194,15 +207,164 @@ const popTo = async (path: string): Promise<void> => {
 };
 
 describe('AppShell', () => {
-  it('renders the unpaired first run as the normal connection screen', async () => {
+  it('renders the unpaired first run as the setup stepper', async () => {
     const { reads, view } = await renderShell('/');
 
-    expect(view.container.querySelector('h1')?.textContent).toBe('Connect a daemon');
-    // The first run is one action and no empty-state card.
-    expect(view.container.textContent).toContain('Run fy pair on your computer, then scan the code.');
+    // A cold visitor has installed nothing, so the first screen teaches setup
+    // rather than demanding a pairing link they cannot produce yet.
+    expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+      'install',
+    );
+    expect(view.container.textContent).toContain('Ferretry runs on your own machine');
     expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(reads).toEqual([]);
+    await view.unmount();
+  });
+
+  it('never greets an unpaired browser with "you are set up", however stale storage reads', async () => {
+    // Progress says the arc finished; the pairing registry — the authority on
+    // that — holds nothing. A cleared registry, another profile, an abandoned
+    // attempt: all of them make the stored claim unbelievable.
+    localStorage.setItem('fy-onboarding-v1', JSON.stringify({ v: 1, current: 'done', furthest: 'done' }));
+
+    const { view } = await renderShell('/');
+
+    expect(stepOfSetup(view.container)).toBe('install');
+    expect(view.container.textContent).not.toContain('You are set up');
+    await view.unmount();
+  });
+
+  it('leaves a paired browser on its daemons, with setup one quiet link away', async () => {
+    const { view } = await renderShell('/', [alpha.daemonId]);
+
+    // Ordinary browsing never re-shows the guide to someone already set up.
+    expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
+    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link').click(),
+    );
+
+    expect(window.location.pathname).toBe('/setup');
+    expect(view.container.querySelector('[data-onboarding="setup"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('keeps /setup reachable, and reload-durable, for a browser that is already paired', async () => {
+    const { view } = await renderShell('/setup', [alpha.daemonId]);
+
+    expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
+    expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Set up');
+    await view.unmount();
+  });
+
+  it('takes a scanned pairing link through setup even when daemons already exist', async () => {
+    const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma', [
+      alpha.daemonId,
+    ]);
+
+    // A camera app opening this link IS the setup journey arriving at its third
+    // stage — not a picker with a banner on it.
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+      'pair',
+    );
+    expect(window.location.hash).toBe('');
+
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+        'the confirmation control',
+      ).click(),
+    );
+    await settle();
+
+    // Finishes in the guide, keeps the daemon this browser already had, and
+    // leaves only when the reader says so.
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+      'done',
+    );
+    const snapshot = store.connections.getSnapshot();
+    expect(snapshot.connections.map(one => String(one.daemonId))).toEqual(['gamma', 'alpha']);
+    expect(String(snapshot.selectedDaemonId)).toBe('gamma');
+    expect(window.location.pathname).toBe('/pair');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
+    );
+    expect(window.location.pathname).toBe('/d/gamma');
+    await view.unmount();
+  });
+
+  it('stops substituting setup once the reader has left it for their fleet', async () => {
+    const { view } = await renderShell('/');
+    await advanceToPairing(view.container);
+    expect(stepOfSetup(view.container)).toBe('pair');
+
+    // Pair it for real, finish, and leave for the fleet.
+    const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
+    await interact(() => {
+      const setter = must(
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set,
+        'the input value setter',
+      );
+      setter.call(field, 'https://pwa.example.test/#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(field.closest('form'), 'the pairing form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
+        'the confirmation control',
+      ).click(),
+    );
+    await settle();
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
+    );
+    await settle();
+    expect(window.location.pathname).toBe('/d/gamma');
+
+    // Coming back to the root later is ordinary browsing, not a second first run.
+    await popTo('/');
+    expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
+    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
+    expect(view.container.querySelector('[data-pairing-setup]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('still opens an existing daemon immediately from the pairing stage of setup', async () => {
+    const { view } = await renderShell('/setup', [alpha.daemonId]);
+    await advanceToPairing(view.container);
+
+    // Choosing a daemon that already exists is not part of the setup journey,
+    // so it behaves exactly as it does in the picker: it leaves at once.
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('ul[aria-label="Paired daemons"] button'),
+        'the daemon row',
+      ).click(),
+    );
+
+    expect(window.location.pathname).toBe('/d/alpha');
+    await view.unmount();
+  });
+
+  it('forgets a daemon from the pairing stage without leaving setup', async () => {
+    const { store, view } = await renderShell('/setup', [alpha.daemonId]);
+    await advanceToPairing(view.container);
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[aria-label^="Forget"]'), 'the forget control').click(),
+    );
+
+    expect(store.connections.getSnapshot().connections).toEqual([]);
+    expect(window.location.pathname).toBe('/setup');
     await view.unmount();
   });
 
@@ -338,6 +500,7 @@ describe('route change accessibility', () => {
     const announcements = (
       [
         { kind: 'connection-picker' },
+        { kind: 'setup' },
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
@@ -350,6 +513,7 @@ describe('route change accessibility', () => {
 
     expect(announcements).toEqual([
       'Daemons',
+      'Set up',
       'Sessions',
       'Sessions, New',
       'Sessions, shared',
@@ -711,7 +875,9 @@ describe('browserPushEnrolment', () => {
 
 describe('the connection picker slot', () => {
   it('pairs a fresh daemon and opens the daemon it just paired', async () => {
-    const { store, view } = await renderShell('/');
+    // A browser with a pairing already gets the picker, and pairing from the
+    // picker still leaves immediately — that behaviour is unchanged by setup.
+    const { store, view } = await renderShell('/', [alpha.daemonId]);
     const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
     const form = must(field.closest('form'), 'the pairing form');
 
@@ -736,7 +902,8 @@ describe('the connection picker slot', () => {
     // The root must land on the daemon the exchange returned, not on whichever
     // pairing happened to be selected before.
     expect(window.location.pathname).toBe('/d/gamma');
-    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma']);
+    // The new pairing joins the existing one and becomes the selected daemon.
+    expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma', 'alpha']);
     expect(requestedUrls.some(url => url.endsWith('/v1/pair'))).toBe(false);
 
     await view.unmount();
@@ -745,12 +912,19 @@ describe('the connection picker slot', () => {
   it('confirms a pre-filled arrival and empties the address bar of its one-time code', async () => {
     const { store, view } = await renderShell('/pair#v1;url=https%3A%2F%2Fgamma.example.test;code=one-time;fp=gamma');
 
-    // Reading the fragment is the whole arrival: the screen shows a
-    // confirmation, and the code is gone from the address before anything else.
+    // An unpaired browser opened from a QR is in the setup guide — but the
+    // arrival puts it straight on the pairing stage, with the confirmation and
+    // the fragment hygiene of the standalone screen unchanged.
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+      'pair',
+    );
     expect(view.container.textContent).toContain('Pair this device?');
     expect(view.container.textContent).toContain('gamma.example.test');
     expect(window.location.hash).toBe('');
     expect(window.location.pathname).toBe('/pair');
+    // Embedded: the host page owns the only `<main>` and the only `<h1>`.
+    expect(view.container.querySelectorAll('main')).toHaveLength(1);
+    expect(view.container.querySelectorAll('h1')).toHaveLength(1);
 
     const confirm = must(
       [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Pair this device')),
@@ -760,6 +934,16 @@ describe('the connection picker slot', () => {
     await settle();
 
     expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma']);
+    // Setup finishes on its own last stage rather than teleporting the reader
+    // out of the guide the moment the exchange lands.
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+      'done',
+    );
+    expect(window.location.pathname).toBe('/pair');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
+    );
     expect(window.location.pathname).toBe('/d/gamma');
     await view.unmount();
   });
@@ -909,8 +1093,9 @@ describe('App', () => {
     const view = await mount(<App />);
     await settle();
 
-    expect(view.container.querySelector('h1')?.textContent).toBe('Connect a daemon');
-    expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Daemons');
+    expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
+    // What a reader HEARS names the screen they are actually on.
+    expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Set up');
     await view.unmount();
   });
 });

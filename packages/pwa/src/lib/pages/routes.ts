@@ -6,6 +6,18 @@ export interface ConnectionPickerRoute {
   readonly kind: 'connection-picker';
 }
 
+/**
+ * The first-run setup guide, as a real route.
+ *
+ * Setup is a journey through a terminal on another machine: the reader leaves,
+ * runs a command, and comes back — sometimes by reloading, sometimes hours
+ * later. A component-local step would not survive that, and a landing page
+ * cannot link to a state that has no address, so the stepper gets a pathname.
+ */
+export interface SetupRoute {
+  readonly kind: 'setup';
+}
+
 export interface DaemonSessionsRoute {
   readonly kind: 'sessions';
   readonly daemonId: DaemonId;
@@ -51,7 +63,7 @@ export type DaemonPageRoute =
   | DaemonAnalyticsRoute
   | DaemonLearningRoute;
 
-export type PageRoute = ConnectionPickerRoute | DaemonPageRoute;
+export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
 
 /** A compatibility result that callers can replace with its canonical target. */
 export interface LegacyTasksRedirectRoute {
@@ -62,6 +74,7 @@ export interface LegacyTasksRedirectRoute {
 export type Route = PageRoute | LegacyTasksRedirectRoute;
 
 const connectionPicker: ConnectionPickerRoute = { kind: 'connection-picker' };
+const setup: SetupRoute = { kind: 'setup' };
 
 /** Decodes a single URL pathname segment without allowing malformed input to escape the router. */
 export const decodeRouteSegment = (segment: string): string => {
@@ -91,6 +104,9 @@ const parsedSessionId = (segment: string | undefined): string | undefined => {
 /** Builds the canonical connection-picker pathname. */
 export const connectionPickerPath = (): '/' => '/';
 
+/** Builds the canonical setup pathname. The one address a landing page may link to. */
+export const setupPath = (): '/setup' => '/setup';
+
 /** Builds the canonical sessions pathname for one daemon. */
 export const daemonSessionsPath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
 
@@ -118,6 +134,7 @@ export const daemonLearningPath = (id: DaemonId): string => `${daemonSessionsPat
 /** Resolves a browser pathname to the page model, without consulting browser globals. */
 export const parseRoute = (pathname: string): Route => {
   const [first, daemonSegment, destination, sessionSegment, ...remainder] = pathname.split('/').filter(Boolean);
+  if (first === 'setup') return setup;
   if (first !== 'd') return connectionPicker;
 
   const id = parsedDaemonId(daemonSegment);
@@ -145,6 +162,8 @@ export const routePath = (route: Route): string => {
   switch (route.kind) {
     case 'connection-picker':
       return connectionPickerPath();
+    case 'setup':
+      return setupPath();
     case 'sessions':
       return daemonSessionsPath(route.daemonId);
     case 'new-session':
@@ -170,7 +189,7 @@ export const routePath = (route: Route): string => {
  */
 export const routePageKey = (route: Route): string => {
   if (route.kind === 'legacy-tasks-redirect') return routePageKey(route.to);
-  if (route.kind === 'connection-picker') return route.kind;
+  if (route.kind === 'connection-picker' || route.kind === 'setup') return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;
 };

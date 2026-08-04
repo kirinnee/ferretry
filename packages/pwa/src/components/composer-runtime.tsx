@@ -131,6 +131,11 @@ export interface ComposerRuntimeProps {
   readonly renderEffortControls?: (lifecycle: RuntimeSwitchLifecycle) => ReactNode;
 }
 
+export interface ComposerRuntimeWithKeyboardProps extends ComposerRuntimeProps {
+  /** The already-observed shared keyboard signal. */
+  readonly keyboardOpen: boolean;
+}
+
 interface ChipProps {
   readonly id: string;
   readonly sheetId: string;
@@ -214,13 +219,25 @@ function SheetHead({ title, harness }: { readonly title: string; readonly harnes
   );
 }
 
-export function ComposerRuntime({
+/** Production wrapper: there is exactly one keyboard signal and every host observes it. */
+export function ComposerRuntime(props: ComposerRuntimeProps) {
+  const keyboardOpen = useKeyboardOpen();
+  return <ComposerRuntimeWithKeyboard {...props} keyboardOpen={keyboardOpen} />;
+}
+
+/**
+ * The runtime controls after the shared keyboard signal has been observed.
+ * Keeping this seam explicit lets the behavior suite drive a transition
+ * without racing other DOM suites over the process-wide `<html>` attribute.
+ */
+export function ComposerRuntimeWithKeyboard({
   view,
   canControl,
   busy,
   renderModelControls,
   renderEffortControls,
-}: ComposerRuntimeProps) {
+  keyboardOpen,
+}: ComposerRuntimeWithKeyboardProps) {
   const { config, state } = view;
   const baseId = useId();
   const modelTriggerId = `${baseId}-model`;
@@ -235,7 +252,6 @@ export function ComposerRuntime({
   // subtree class must never hide with an open panel inside it. In practice a chip
   // tap blurs the composer so the keyboard is already down when a sheet is open,
   // but close defensively if the keyboard ever rises under an open sheet.
-  const keyboardOpen = useKeyboardOpen();
   useEffect(() => {
     if (keyboardOpen) {
       setModelOpen(false);
