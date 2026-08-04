@@ -950,8 +950,8 @@ const confirmHarness = (step: number): readonly string[] => [
   '   neither of them — and a daemon with both missing starts perfectly and can run nothing.',
   '   - You are one of them, so CHECK rather than assume: an IDE extension, a wrapper or a remote',
   "     session can all reach me without either executable being on this machine's PATH.",
-  `   - Run ${AGENT_HARNESSES.map(harness => harness.check).join(' and ')}. If at least one of them`,
-  '     answers, that is enough — tell me which, and go on.',
+  `   - Run ${AGENT_HARNESSES.map(harness => harness.check).join(' and ')}. If at least one answers, that`,
+  '     is enough — tell me which, and go on.',
   '   - If neither answers, install exactly one of these and tell me which you chose:',
   '',
   /* Nested one level deeper than the `fy` channels above, because it is inside a sub-bullet. */

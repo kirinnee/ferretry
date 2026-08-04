@@ -650,7 +650,7 @@ describe('the agent setup prompt', () => {
         expect(prompt).toContain(harness.label);
       }
       // At least one, never both.
-      expect(prompt).toContain('If at least one of them');
+      expect(prompt).toContain('If at least one answers');
       expect(prompt).toContain('install exactly one of these');
       // And it happens before the daemon boots, so the daemon's own report at boot
       // is about a machine that can already run something.
