@@ -18,9 +18,11 @@ import {
   DAEMON_SERVING_OUTPUT,
   DAEMON_STATUS_COMMAND,
   PAIR_COMMAND,
+  PAIR_OPEN_COMMAND,
   VERIFY_COMMAND,
 } from '../../../src/features/onboarding/onboarding-model.ts';
 import {
+  AgentPairStage,
   BriefStage,
   DaemonStage,
   DoneStage,
@@ -54,23 +56,34 @@ const visibleCommand = (container: HTMLElement): string =>
 
 describe('the install stage', () => {
   it('puts one command on the glass and folds the check away, still there', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="apt" />);
+    const view = await mount(<InstallStage write={async () => {}} channel="apt" onAgentInstead={() => {}} />);
 
-    // One command block visible; the check and the agent brief are each folded away.
-    expect(view.container.querySelectorAll('pre')).toHaveLength(3);
+    // One command block visible, and the check folded away beside it.
+    expect(view.container.querySelectorAll('pre')).toHaveLength(2);
     const aside = asideOf(view.container);
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(VERIFY_COMMAND);
-    // The agent path is an alternative to THIS command, and it gets a disclosure
-    // of its own rather than sharing one with a version check.
+    // The agent path is a ROUTE now, so this step offers a way to change answer
+    // rather than a second copy of the prompt that route hands over.
     expect(view.container.querySelectorAll('details')).toHaveLength(2);
     expect(view.container.querySelector('[data-onboarding-aside="Rather have an agent do it?"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('changes answer to the agent route instead of restating it', async () => {
+    const switched: string[] = [];
+    const view = await mount(
+      <InstallStage write={async () => {}} channel="apt" onAgentInstead={() => switched.push('agent')} />,
+    );
+
+    await click(must(view.container.querySelector('[data-onboarding-agent-instead]'), 'the change-answer control'));
+    expect(switched).toEqual(['agent']);
     await view.unmount();
   });
 
   it('offers the named routes as an even grid, with the script spanning beneath them', async () => {
-    const view = await mount(<InstallStage write={async () => {}} channel="brew" />);
+    const view = await mount(<InstallStage write={async () => {}} channel="brew" onAgentInstead={() => {}} />);
     const toolbar = must(view.container.querySelector('[role="toolbar"]'), 'the route switcher');
 
     expect(toolbar.getAttribute('aria-label')).toBe('Install method');
@@ -126,6 +139,45 @@ describe('the brief stage', () => {
     // action off a phone.
     expect(prompt.className).toContain('overflow-auto');
     expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('says where the prompt goes, because that is the one way to get nothing from it', async () => {
+    const view = await mount(<BriefStage write={async () => {}} />);
+
+    // The work happens on ANOTHER machine, and the reader cannot be told that by
+    // the text they are pasting — they read this page, not the thing they paste.
+    expect(view.container.textContent).toContain('on the machine that will run your agents');
+    expect(view.container.textContent).toContain('not into anything on this page');
+    // And how the agent will report back, so nobody is left wondering.
+    expect(view.container.textContent).toContain(PAIR_COMMAND);
+    await view.unmount();
+  });
+});
+
+describe('the agent pairing stage', () => {
+  it('asks for no commands, because the reader never had the terminal', async () => {
+    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} device="mobile" />);
+
+    expect(view.container.querySelector('pre')).toBeNull();
+    expect(must(view.container.querySelector('[data-onboarding-pairing]'), 'the pairing slot').textContent).toBe(
+      'the real pairing screen',
+    );
+    // An expired code is the agent's to reproduce, not the reader's.
+    expect(view.container.textContent).toContain('ask your agent to run');
+    expect(view.container.textContent).toContain('single-use');
+    // On a phone, `fy pair --open` opened a browser on a machine the reader is
+    // not holding, so claiming they may already be connected would be a lie.
+    expect(view.container.querySelector('[data-onboarding-agent-opened]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('tells a computer that the journey may already be finished in another tab', async () => {
+    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} device="desktop" />);
+
+    const opened = must(view.container.querySelector('[data-onboarding-agent-opened]'), 'the already-paired note');
+    expect(opened.textContent).toContain(PAIR_OPEN_COMMAND);
+    expect(opened.textContent).toContain('another tab');
     await view.unmount();
   });
 });

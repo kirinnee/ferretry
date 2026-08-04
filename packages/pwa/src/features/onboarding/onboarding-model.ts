@@ -12,18 +12,76 @@
  * that must not drift: the same block is displayed, copied, and pasted into the
  * agent prompt, so there is exactly one copy of each.
  *
- * THERE IS NO ONE ARC, AND THE AXIS IS THE DEVICE. Ferretry has two roles — a
- * daemon that runs agents and needs a terminal, and a client that only watches —
- * so the first question is which of those this device is about to become, and the
- * answer decides both the steps AND whether some of them are possible here at all.
- * A route therefore owns its own list of steps, and that list is a function of the
- * device as much as of the answer.
+ * THE FIRST QUESTION IS WHO DOES THE WORK, AND THE SECOND IS ABOUT THE DEVICE.
+ * If an agent does the setup the whole journey is different — no platform picker,
+ * no commands to copy, no `fy pair` to run by hand, and nothing left to ask about
+ * this device, because the agent is ON the machine that becomes the daemon and
+ * this browser is therefore the client. Only a reader who is typing the commands
+ * themselves is asked the device question: Ferretry has two roles — a daemon that
+ * runs agents and needs a terminal, and a client that only watches — and which of
+ * those this device is about to become decides both the steps AND whether some of
+ * them are possible here at all. A route therefore owns its own list of steps,
+ * and that list is a function of the device as much as of the answer.
  */
 
 import type { DeviceKind } from './device-kind.ts';
 
 /**
- * WHAT IS THIS DEVICE, AND WHAT IS IT FOR? — the question the chooser asks.
+ * WHO IS DOING THIS? — the first question, and the one that changes the most.
+ *
+ * It was an aside on the install step for one release, on the argument that
+ * letting an agent do it is merely a way of PERFORMING that step. That was wrong.
+ * An agent path has no platform picker, no commands on the glass, no `fy pair` to
+ * run by hand and no device question at all — the agent is on the target machine,
+ * so that machine is the daemon and this browser is the client. It is a different
+ * journey, not a shortcut through the same one, and a difference that large
+ * belongs before everything it changes.
+ */
+export type OnboardingDoerId = 'agent' | 'self';
+
+export interface OnboardingDoer {
+  readonly id: OnboardingDoerId;
+  /** What the reader recognises themselves as. */
+  readonly title: string;
+  /** What happens if they pick it. One line, because the two are compared at a glance. */
+  readonly answer: string;
+}
+
+/**
+ * The two answers, agent first.
+ *
+ * Agent leads because it is the shorter journey and the one a reader with an
+ * agent open in another window will recognise instantly; "I do it myself" is the
+ * answer that needs no recognising at all. Both name THE MACHINE THAT WILL RUN
+ * YOUR AGENTS rather than "this machine": on the agent path the work happens
+ * somewhere else, and a reader who misses that pastes a prompt into the wrong
+ * terminal.
+ */
+const DOERS: Readonly<Record<OnboardingDoerId, OnboardingDoer>> = Object.freeze({
+  agent: Object.freeze({
+    id: 'agent' as const,
+    title: 'An agent does it',
+    answer: 'You already have Claude or Codex on the machine that will run your agents. Give it one prompt.',
+  }),
+  self: Object.freeze({
+    id: 'self' as const,
+    title: 'I do it myself',
+    answer: 'Copy commands into a terminal on the machine that will run your agents, one step at a time.',
+  }),
+});
+
+/** Both answers, in the order they are read. */
+export const ONBOARDING_DOERS: readonly OnboardingDoer[] = Object.freeze([DOERS.agent, DOERS.self]);
+
+/** Total, because the id is a closed union. */
+export const onboardingDoer = (id: OnboardingDoerId): OnboardingDoer => DOERS[id];
+
+/** Whether a value read back from storage or a link is still one of the two answers. */
+export const isOnboardingDoerId = (value: unknown): value is OnboardingDoerId =>
+  typeof value === 'string' && Object.hasOwn(DOERS, value);
+
+/**
+ * WHAT IS THIS DEVICE, AND WHAT IS IT FOR? — the question the second screen asks.
  *
  * The first version of this screen asked what the reader was HOLDING: a link, no
  * link, or an agent. That is not a fact about the system. Ferretry has exactly
@@ -31,11 +89,21 @@ import type { DeviceKind } from './device-kind.ts';
  * CLIENT, a browser that watches one — and every real question is about which of
  * those this device is about to become. One machine can be both, and the ordinary
  * desktop first run is exactly that.
+ *
+ * `agent` is a route rather than a fourth answer to that question: nobody is ever
+ * shown it beside the three, because choosing it is what makes the device
+ * question disappear. That is a TYPE, not a convention — the device question is
+ * handed `OnboardingDeviceRouteId`s, so an agent row cannot be added to it by
+ * accident.
  */
-export type OnboardingRouteId = 'first-time' | 'add-client' | 'add-daemon';
+export type OnboardingDeviceRouteId = 'first-time' | 'add-client' | 'add-daemon';
+
+export type OnboardingRouteId = 'agent' | OnboardingDeviceRouteId;
 
 /** Every stage that any route can put on the glass, in no particular order. */
 export type OnboardingStepId =
+  | 'brief'
+  | 'agent-pair'
   | 'install'
   | 'daemon'
   | 'connect'
@@ -66,6 +134,18 @@ export interface OnboardingStep {
 }
 
 const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze({
+  brief: Object.freeze({
+    id: 'brief' as const,
+    title: 'Give your agent the prompt',
+    short: 'Prompt',
+    summary: 'Copy it, then paste it into your agent on that machine.',
+  }),
+  'agent-pair': Object.freeze({
+    id: 'agent-pair' as const,
+    title: 'Pair when your agent is done',
+    short: 'Pair',
+    summary: 'It shows you a QR code and a link. Use them here.',
+  }),
   install: Object.freeze({
     id: 'install' as const,
     title: 'Install Ferretry',
@@ -157,15 +237,28 @@ export interface OnboardingRoute {
   readonly answer: string;
 }
 
+/** A route the DEVICE question may offer. The agent route is not one of them. */
+export interface OnboardingDeviceRoute extends OnboardingRoute {
+  readonly id: OnboardingDeviceRouteId;
+}
+
 /**
- * The three answers, in the order they are read.
+ * Every route, including the one the device question never offers.
  *
- * NOT "simplest first" and not "most common first": first-time setup leads
- * because it is the only answer somebody who knows nothing yet can recognise as
- * theirs, and the other two are for readers who already have a fleet and know
- * exactly which half they are adding.
+ * The three device answers are ordered as they are read, and NOT "simplest first"
+ * or "most common first": first-time setup leads because it is the only answer
+ * somebody who knows nothing yet can recognise as theirs, and the other two are
+ * for readers who already have a fleet and know exactly which half they are
+ * adding. `agent` is not among them — it is reached by answering the FIRST
+ * question, and its title exists for the one line above every step that names
+ * which journey the reader is on.
  */
-const ROUTES: Readonly<Record<OnboardingRouteId, OnboardingRoute>> = Object.freeze({
+const ROUTES: { readonly [Id in OnboardingRouteId]: OnboardingRoute & { readonly id: Id } } = Object.freeze({
+  agent: Object.freeze({
+    id: 'agent' as const,
+    title: 'An agent sets it up',
+    answer: 'An agent on the machine that will run your agents installs Ferretry and starts its daemon.',
+  }),
   'first-time': Object.freeze({
     id: 'first-time' as const,
     title: 'First time setup',
@@ -191,7 +284,7 @@ const ROUTES: Readonly<Record<OnboardingRouteId, OnboardingRoute>> = Object.free
  * the page rather than as a fact about the phone. It is offered, it says plainly
  * why it cannot happen here, and choosing it hands the job to a computer.
  */
-const DAEMON_ON_MOBILE: OnboardingRoute = Object.freeze({
+const DAEMON_ON_MOBILE: OnboardingRoute & { readonly id: 'add-daemon' } = Object.freeze({
   id: 'add-daemon' as const,
   title: 'Add a daemon',
   answer: 'Agents run in a terminal, so this needs a computer. Send the setup there.',
@@ -201,9 +294,29 @@ const DAEMON_ON_MOBILE: OnboardingRoute = Object.freeze({
 export const onboardingRoute = (id: OnboardingRouteId, device: DeviceKind = 'desktop'): OnboardingRoute =>
   id === 'add-daemon' && device === 'mobile' ? DAEMON_ON_MOBILE : ROUTES[id];
 
-/** The three answers as this device should read them. */
-export const onboardingRoutes = (device: DeviceKind): readonly OnboardingRoute[] =>
-  Object.freeze([ROUTES['first-time'], ROUTES['add-client'], onboardingRoute('add-daemon', device)]);
+/** The three DEVICE answers as this device should read them. Never the agent route. */
+export const onboardingRoutes = (device: DeviceKind): readonly OnboardingDeviceRoute[] =>
+  Object.freeze([
+    ROUTES['first-time'],
+    ROUTES['add-client'],
+    device === 'mobile' ? DAEMON_ON_MOBILE : ROUTES['add-daemon'],
+  ]);
+
+/**
+ * WHICH QUESTION IS BEHIND THIS ROUTE — the one Back has to reach.
+ *
+ * The agent route was opened by answering who does the work, so backing out of it
+ * lands on that question; the three device routes were opened one question later.
+ * Returning a reader to a question they never answered is how a two-question flow
+ * starts feeling like a maze, and it is a fact about the route rather than a
+ * decision for the page to make twice.
+ */
+export const questionBehindRoute = (route: OnboardingRouteId): 'who' | 'choose' =>
+  route === 'agent' ? 'who' : 'choose';
+
+/** The route an answer to the first question opens, when it opens one at all. */
+export const doerRoute = (doer: OnboardingDoerId): OnboardingRouteId | undefined =>
+  doer === 'agent' ? 'agent' : undefined;
 
 /** Whether a value read back from storage or a link is still one of the routes we ship. */
 export const isOnboardingRouteId = (value: unknown): value is OnboardingRouteId =>
@@ -305,6 +418,14 @@ const daemonSteps = (connection: ConnectionMethodId | undefined): readonly Onboa
  * to start; it says what is needed and sends the job somewhere it can happen.
  */
 export const onboardingRouteSteps = ({ route, device, connection }: OnboardingPath): readonly OnboardingStepId[] => {
+  /*
+   * THE AGENT ROUTE IS THE SAME ON EVERY DEVICE, and that is the point of asking
+   * who does the work first. The agent has the terminal, on the machine that
+   * becomes the daemon; this browser only has to end up paired with it. So there
+   * is no install to be impossible here, no platform to pick, and nothing about
+   * this device left to decide — a phone walks exactly the journey a laptop does.
+   */
+  if (route === 'agent') return Object.freeze(['brief', 'agent-pair', 'done'] as OnboardingStepId[]);
   if (route === 'add-client') return Object.freeze(['pair', 'scan', 'done'] as OnboardingStepId[]);
   if (device === 'mobile') {
     return route === 'first-time'
@@ -521,7 +642,8 @@ export const PAIR_OPEN_COMMAND = 'fy pair --open';
 export const DAEMON_SERVING_OUTPUT = 'fyd is serving';
 
 /**
- * A public, self-contained brief for an AI coding agent.
+ * A public, self-contained brief for an AI coding agent — THE PRODUCT of the
+ * agent route, not a convenience beside it.
  *
  * The reader asked for a prompt they can paste into whatever agent already has a
  * terminal on the target machine. It therefore describes a STRANGER'S machine:
@@ -529,6 +651,14 @@ export const DAEMON_SERVING_OUTPUT = 'fyd is serving';
  * to anyone and this text is baked into the bundle. It also refuses to improvise
  * — an agent that cannot follow it must stop and report, since a half-installed
  * daemon is worse than an unstarted one.
+ *
+ * IT MUST SAY HOW TO REPORT BACK, or the person who pasted it is left wondering
+ * whether anything worked. Which report depends on where they are reading this
+ * page: on the daemon's own machine `fy pair --open` finishes the job outright,
+ * and from a phone or another computer the QR and the link are the only way the
+ * code can travel. The agent cannot know which, and guessing burns a single-use
+ * code — so the prompt makes it ask, which is the one question the human can
+ * always answer.
  */
 export const AGENT_SETUP_PROMPT = [
   'Set up Ferretry on this machine. Ferretry is a CLI (`fy`) plus a local daemon (`fyd`) that runs',
@@ -543,7 +673,12 @@ export const AGENT_SETUP_PROMPT = [
   `3. Verify the install: ${VERIFY_COMMAND}`,
   `4. Start the daemon: ${DAEMON_START_COMMAND}`,
   `5. Confirm it is running: ${DAEMON_STATUS_COMMAND} — it should print "${DAEMON_SERVING_OUTPUT}".`,
-  `6. Run ${PAIR_COMMAND} and show me the QR code and the pairing link it prints, exactly as printed.`,
+  '6. Ask me whether I am reading the Ferretry setup page in a browser ON THIS MACHINE, and pair the',
+  '   way my answer requires. Do not guess: a pairing code is single-use, and the wrong one is spent.',
+  `   - If I am on this machine: run ${PAIR_OPEN_COMMAND}. It opens Ferretry in this machine's browser,`,
+  '     already paired, and there is nothing for me to type.',
+  `   - If I am on a phone or another computer: run ${PAIR_COMMAND} and show me the QR code and the`,
+  '     pairing link it prints, exactly as printed, so I can scan or paste it there.',
   '   The code is single-use and expires in about two minutes, so show it as soon as it appears.',
   '',
   'If any command fails, stop and report the exact command and the exact error. Do not improvise a',

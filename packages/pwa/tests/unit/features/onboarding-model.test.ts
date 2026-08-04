@@ -27,6 +27,7 @@ import {
   DAEMON_STATUS_COMMAND,
   DEFAULT_CONNECTION_METHOD,
   detectInstallChannel,
+  doerRoute,
   firstOnboardingStep,
   furthestOnboardingStep,
   handoffTarget,
@@ -34,10 +35,13 @@ import {
   installChannel,
   isConnectionMethodId,
   isLastOnboardingStep,
+  isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isStepOfRoute,
   nextOnboardingStep,
+  ONBOARDING_DOERS,
+  onboardingDoer,
   type OnboardingPath,
   onboardingRoute,
   onboardingRoutes,
@@ -50,6 +54,7 @@ import {
   PAIR_OPEN_COMMAND,
   PAIR_PRINT_COMMAND,
   previousOnboardingStep,
+  questionBehindRoute,
   VERIFY_COMMAND,
 } from '../../../src/features/onboarding/onboarding-model.ts';
 
@@ -65,6 +70,65 @@ const desktop = (route: OnboardingPath['route'], connection?: OnboardingPath['co
 });
 
 const mobile = (route: OnboardingPath['route']): OnboardingPath => ({ route, device: 'mobile' });
+
+describe('the first question — who does the work', () => {
+  it('offers two answers, agent first, and both say where the work happens', () => {
+    expect(ONBOARDING_DOERS.map(doer => doer.id)).toEqual(['agent', 'self']);
+    for (const doer of ONBOARDING_DOERS) {
+      expect(onboardingDoer(doer.id)).toBe(doer);
+      // One line each, and each one names the machine rather than "this device":
+      // a reader who pastes the prompt into the wrong terminal gets nothing.
+      expect(doer.answer).not.toContain('\n');
+      expect(doer.answer).toContain('machine that will run your agents');
+    }
+  });
+
+  it('accepts only the two answers back from storage or a link', () => {
+    expect(isOnboardingDoerId('agent')).toBe(true);
+    expect(isOnboardingDoerId('self')).toBe(true);
+    expect(isOnboardingDoerId('someone-else')).toBe(false);
+    expect(isOnboardingDoerId(null)).toBe(false);
+  });
+
+  it('turns only the agent answer into a route, because the other one asks a second question', () => {
+    expect(doerRoute('agent')).toBe('agent');
+    expect(doerRoute('self')).toBeUndefined();
+  });
+
+  it('walks one journey on every device, because none of it happens on this one', () => {
+    // No install to be impossible here, no platform to pick, nothing about this
+    // device left to decide: the agent has the terminal, somewhere else.
+    for (const device of ['desktop', 'mobile'] as const) {
+      expect(onboardingRouteSteps({ route: 'agent', device })).toEqual(['brief', 'agent-pair', 'done']);
+    }
+    expect(firstOnboardingStep(desktop('agent'))).toBe('brief');
+    // The connection chooser is a daemon-side decision the agent never surfaces.
+    expect(onboardingRouteSteps(desktop('agent', 'own-relay'))).toEqual(['brief', 'agent-pair', 'done']);
+    expect(onboardingStepCount(desktop('agent'))).toBe(3);
+  });
+
+  it('sends Back to the question that actually opened each route', () => {
+    // The agent route was opened by the FIRST question; the three device answers
+    // were opened one question later. Landing on a question the reader never
+    // answered is how two questions start feeling like a maze.
+    expect(questionBehindRoute('agent')).toBe('who');
+    for (const route of ['first-time', 'add-client', 'add-daemon'] as const) {
+      expect(questionBehindRoute(route)).toBe('choose');
+    }
+  });
+
+  it('names the agent route on the glass without offering it as a device answer', () => {
+    expect(onboardingRoute('agent').title).toBe('An agent sets it up');
+    expect(onboardingRoutes('desktop').map(route => route.id)).not.toContain('agent');
+    expect(onboardingRoutes('mobile').map(route => route.id)).not.toContain('agent');
+  });
+
+  it('names the two agent steps in words that say where the work is', () => {
+    expect(onboardingStep('brief').title).toBe('Give your agent the prompt');
+    expect(onboardingStep('brief').summary).toContain('that machine');
+    expect(onboardingStep('agent-pair').short).toBe('Pair');
+  });
+});
 
 describe('the three answers', () => {
   it('asks what the device is, not what the reader is holding', () => {
@@ -208,16 +272,21 @@ describe('the three answers', () => {
     expect(onboardingStep('need-computer').title).toBe('You will need a computer');
     expect(onboardingStep('handoff').short).toBe('Phone');
     expect(isOnboardingStepId('local')).toBe(true);
-    expect(isOnboardingStepId('brief')).toBe(false);
+    // The agent route's two steps are real places now, not the names of a
+    // journey that was deleted.
+    expect(isOnboardingStepId('brief')).toBe(true);
+    expect(isOnboardingStepId('agent-pair')).toBe(true);
+    expect(isOnboardingStepId('bribe')).toBe(false);
     expect(isOnboardingStepId(2)).toBe(false);
     expect(isOnboardingStepId(null)).toBe(false);
   });
 
-  it('accepts only the three route ids back from storage', () => {
+  it('accepts only the four route ids back from storage', () => {
     expect(isOnboardingRouteId('add-daemon')).toBe(true);
-    // The routes this replaced. A stored `have-link` describes a journey that is gone.
+    // Not one of the device answers, but a route a stored place can name.
+    expect(isOnboardingRouteId('agent')).toBe(true);
+    // The route this replaced. A stored `have-link` describes a journey that is gone.
     expect(isOnboardingRouteId('have-link')).toBe(false);
-    expect(isOnboardingRouteId('agent')).toBe(false);
     expect(isOnboardingRouteId(1)).toBe(false);
     expect(isOnboardingRouteId(undefined)).toBe(false);
   });
@@ -338,6 +407,25 @@ describe('the agent setup prompt', () => {
   it('tells the agent to stop and report rather than improvise', () => {
     expect(AGENT_SETUP_PROMPT).toContain('stop and report');
     expect(AGENT_SETUP_PROMPT).toContain('Do not improvise');
+  });
+
+  it('tells the agent HOW TO REPORT BACK, both ways, and to ask which', () => {
+    // Without this the person who pasted it is left wondering whether anything
+    // worked. Which report is right depends on where they are reading the page,
+    // the agent cannot know, and guessing spends a single-use code.
+    expect(AGENT_SETUP_PROMPT).toContain('Ask me whether I am reading the Ferretry setup page');
+    expect(AGENT_SETUP_PROMPT).toContain(PAIR_OPEN_COMMAND);
+    expect(AGENT_SETUP_PROMPT).toContain('show me the QR code and the');
+    expect(AGENT_SETUP_PROMPT).toContain('single-use');
+    expect(AGENT_SETUP_PROMPT).toContain('Do not guess');
+  });
+
+  it('is self-contained: it says what Ferretry is before asking for anything', () => {
+    // The agent may know nothing about this project and must not have to browse
+    // documentation to follow it.
+    expect(AGENT_SETUP_PROMPT).toContain('Ferretry is a CLI');
+    expect(AGENT_SETUP_PROMPT).toContain('Detect the operating system and CPU architecture');
+    expect(AGENT_SETUP_PROMPT).toContain('Linux amd64');
   });
 
   it('says nothing about the person holding the page', () => {

@@ -18,6 +18,7 @@ import { describe, expect, it } from 'bun:test';
 import type { DeviceKind } from '../../../src/features/onboarding/device-kind.ts';
 import {
   browserOnboardingStorage,
+  DEVICE_QUESTION_PROGRESS,
   enterOnboardingRoute,
   FRESH_ONBOARDING_PROGRESS,
   ONBOARDING_PROGRESS_KEY,
@@ -111,9 +112,9 @@ describe('parseOnboardingProgress', () => {
       stored({ v: 1, current: 'pair', furthest: 'done' }),
       stored({ v: 2, stage: 'walk', route: 'have-link', current: 'scan', furthest: 'done' }),
       stored({ v: 4, stage: 'walk', route: 'first-time', current: 'local', furthest: 'done' }),
-      // A stage this store does not ship, and the chooser itself.
+      // A stage this store does not ship, and the first question itself.
       stored({ v: 3, stage: 'browse' }),
-      stored({ v: 3, stage: 'choose' }),
+      stored({ v: 3, stage: 'who' }),
       // Unknown route, unknown steps, missing fields.
       walking('stepper', 'install'),
       walking('first-time', 'billing', 'done'),
@@ -272,16 +273,60 @@ describe('OnboardingProgressStore', () => {
   it('answers the question, and lets the reader take the answer back', () => {
     const storage = new MemoryStorage();
     const store = onDevice('desktop', { storage });
+    // The FIRST question, not the device one: nothing is stored yet.
     expect(store.snapshot()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
 
+    store.chooseDoer('self');
+    expect(store.snapshot()).toEqual({ ...DEVICE_QUESTION_PROGRESS });
     store.choose('add-daemon');
     expect(store.snapshot()).toEqual(enterOnboardingRoute('add-daemon', 'desktop'));
 
     // Picking the wrong answer has to be survivable: back out and pick again.
-    store.backToChooser();
-    expect(store.snapshot()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+    // A device route came from the DEVICE question, so that is where Back lands.
+    store.leaveRoute();
+    expect(store.snapshot()).toEqual({ ...DEVICE_QUESTION_PROGRESS });
     store.choose('add-client');
     expect(store.snapshot()).toEqual(enterOnboardingRoute('add-client', 'desktop'));
+  });
+
+  it('sends "an agent does it" straight into its own route, with no device question', () => {
+    // The agent is on the machine that becomes the daemon, so this browser is the
+    // client and there is nothing left to ask.
+    const store = onDevice('mobile', { storage: undefined });
+    expect(store.chooseDoer('agent')).toEqual(enterOnboardingRoute('agent', 'mobile'));
+    expect(store.snapshot()).toMatchObject({ route: 'agent', current: 'brief' });
+
+    // And Back out of it reaches the question that OPENED it — the first one,
+    // which is a screen this reader has actually seen.
+    store.leaveRoute();
+    expect(store.snapshot()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+  });
+
+  it('walks the agent route identically on a phone and on a computer', () => {
+    // Nothing on this route happens on the device holding the page, so nothing
+    // about that device changes the journey.
+    for (const device of ['desktop', 'mobile'] as const) {
+      const store = onDevice(device, { storage: undefined });
+      store.chooseDoer('agent');
+      store.goTo('agent-pair');
+      expect(store.snapshot()).toMatchObject({ route: 'agent', current: 'agent-pair' });
+    }
+  });
+
+  it('leaves the device question by the first question, and refuses to leave a question as a route', () => {
+    const store = onDevice('desktop', { storage: undefined });
+    store.chooseDoer('self');
+    store.backToWho();
+    expect(store.snapshot()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+    // Nothing is being walked, so there is no route to leave: refused, not coerced.
+    expect(store.leaveRoute()).toEqual({ ...FRESH_ONBOARDING_PROGRESS });
+  });
+
+  it('resumes a reader who was AT the device question, rather than asking again', () => {
+    // The one v3 state with no direct successor: it is now one question in, and
+    // it survives as exactly that, with the first question one Back away.
+    const storage = new MemoryStorage(stored({ v: 3, stage: 'choose' }));
+    expect(onDevice('desktop', { storage }).snapshot()).toEqual({ ...DEVICE_QUESTION_PROGRESS });
   });
 
   it('persists the second chooser answer with the expanded self-hosted route', () => {
