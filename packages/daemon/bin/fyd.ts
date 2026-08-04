@@ -286,6 +286,7 @@ import {
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SignalRefused,
+  type SocketTicketBroker,
   SocketTicketRegistry,
   SttEnhancementService,
   type SttSubsystem,
@@ -499,6 +500,10 @@ export interface DaemonWorld {
    * the session resolver over real storage — exactly as production builds them.
    */
   readonly terminalRuntime: TerminalRuntimePort;
+  /** Creates the one memory-only ticket registry for one daemon start. It is a world seam so the
+   * production socket path can be exercised at an elapsed deadline without making an integration
+   * test sleep for the public thirty-second ticket lifetime. */
+  readonly createSocketTickets: () => SocketTicketBroker;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -564,6 +569,7 @@ export interface DaemonWorld {
     catalogs: CatalogSubsystem,
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
+    socketTickets: SocketTicketBroker,
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -2851,6 +2857,7 @@ export function buildWorld(): DaemonWorld {
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
     browserLogin: createBrowserLoginWorld(paths),
     createSubsystems: (
       storage,
@@ -2864,6 +2871,7 @@ export function buildWorld(): DaemonWorld {
       stt,
       catalogs,
       pairing,
+      socketTickets,
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
@@ -3185,10 +3193,7 @@ export function buildWorld(): DaemonWorld {
         // dispatcher that spends it must be the same outstanding set, or every ticket a browser buys
         // is redeemed against a registry that never issued it. Memory-only and per-daemon by
         // construction — see the domain's own header for why it is never persisted.
-        // Its own millisecond clock, not the instant clock the journal writes with: a ticket's whole
-        // life is an elapsed-time question, and the world's `clock` field below reads the wall the
-        // same way for the same reason.
-        socketTickets: new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
+        socketTickets,
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -3275,6 +3280,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.stt,
     catalogs,
     pairing.subsystem,
+    world.createSocketTickets(),
   );
   // Registered with the other host acquisitions: the dictation surface spawns a Whisper worker on
   // the first transcription and holds it loaded for the next one, so a daemon that exited without

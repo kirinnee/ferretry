@@ -36,7 +36,7 @@ import { type SocketTicketSubsystem, socketTicketRoutes } from './socket-tickets
 import { type SttSubsystem, sttRawRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
-import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
+import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes, terminalTicketRoutes } from './terminals.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 
 /**
@@ -192,6 +192,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...taskBoardRoutes(subsystems.taskBoards),
     ...analyticsRoutes(subsystems.analytics),
     ...terminalRoutes(subsystems.terminals),
+    ...terminalTicketRoutes(subsystems.terminals, subsystems.socketTickets),
     // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
     // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
     // literal `browser`, which distinguishes it from every other `/v1/sessions/:id/...` route above.
@@ -213,9 +214,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
     // transcript it authorizes a local process action, and its mount revalidates the pane identity.
     ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),
-    // The ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that only the
-    // request/response table carries — the socket table's `/v1/events` matches GET on one segment
-    // less — so the two cannot shadow each other and a POST here is never mistaken for an upgrade.
+    // The event ticket counter for the socket table. `/v1/events/ticket` is a fixed literal that
+    // only the request/response table carries — the socket table's `/v1/events` matches GET on one
+    // segment less — so the two cannot shadow each other and a POST here is never an upgrade.
     ...socketTicketRoutes(subsystems.socketTickets),
   ];
 }

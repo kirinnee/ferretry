@@ -1,20 +1,21 @@
 import {
+  type CloseTerminalResponse,
   CloseTerminalResponseSchema,
+  type CreateTerminalRequest,
   CreateTerminalRequestSchema,
   FY_REQUEST_ID_HEADER,
   RenameTerminalRequestSchema,
+  SocketTicketResponseSchema,
   TerminalIdSchema,
-  TerminalListViewSchema,
-  TerminalViewSchema,
-  type CloseTerminalResponse,
-  type CreateTerminalRequest,
   type TerminalListView,
+  TerminalListViewSchema,
   type TerminalView,
+  TerminalViewSchema,
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
@@ -129,6 +130,26 @@ export const closeSessionTerminal = async (
   const closed = CloseTerminalResponseSchema.parse(body);
   if (closed.id !== terminalId) throw new DaemonResponseError(502, 'daemon closed another terminal');
   return closed;
+};
+
+/**
+ * Buys the short-lived credential a browser WebSocket can actually carry.
+ *
+ * The device token remains in this header-carrying request; it is never copied into the resulting
+ * stream URL. The daemon binds the ticket to this exact `(daemon, session, terminal)` stream, and
+ * the local scope assertion prevents a same-named session on another pairing from being substituted.
+ */
+export const daemonTerminalTicket = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  terminalId: string,
+  fetcher: DaemonFetch = fetch,
+): Promise<string> => {
+  assertScopeDaemon(daemon, scope);
+  const request = daemonRequest(daemon, `${terminalPath(scope, terminalId)}/stream/ticket`, { method: 'POST' });
+  const response = await fetcher(request.url, request.init);
+  if (!response.ok) throw await responseError(response);
+  return SocketTicketResponseSchema.parse(await response.json()).ticket;
 };
 
 /**

@@ -31,7 +31,7 @@ export function socketTicketRoutes(subsystem: SocketTicketSubsystem): readonly A
         // rather than inventing an authority, because the alternative to knowing WHICH credential
         // asked is minting one that answers to nobody.
         if (credential === undefined) return errorResponse(401, 'unauthorized', 'unauthorized');
-        const grant = subsystem.issue(credential);
+        const grant = subsystem.issue(credential, '/v1/events');
         return jsonResponse(
           SocketTicketResponseSchema.parse({
             ticket: grant.ticket,

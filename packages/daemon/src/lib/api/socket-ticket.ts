@@ -54,18 +54,23 @@ export interface SocketTicketGrant {
   readonly expiresAtMs: number;
 }
 
+/** The one socket route a ticket may buy. Kept separate from the ticket value so a URL-borne
+ * credential cannot be replayed against a neighbouring route that accepts the same bearer class. */
+export type SocketTicketAudience = string;
+
 /** Turning a ticket back into the credential that bought it. The upgrade boundary holds one of these;
  *  the request/response boundary deliberately does not. */
 export interface SocketTicketRedeemer {
-  redeem(ticket: string): AuthenticatedCredential | undefined;
+  redeem(ticket: string, audience: SocketTicketAudience): AuthenticatedCredential | undefined;
 }
 
 export interface SocketTicketBroker extends SocketTicketRedeemer {
-  issue(credential: AuthenticatedCredential): SocketTicketGrant;
+  issue(credential: AuthenticatedCredential, audience: SocketTicketAudience): SocketTicketGrant;
 }
 
 interface OutstandingTicket {
   readonly credential: AuthenticatedCredential;
+  readonly audience: SocketTicketAudience;
   readonly expiresAtMs: number;
 }
 
@@ -83,7 +88,7 @@ export class SocketTicketRegistry implements SocketTicketBroker {
     private readonly compare: (left: string, right: string) => boolean = secretsMatch,
   ) {}
 
-  issue(credential: AuthenticatedCredential): SocketTicketGrant {
+  issue(credential: AuthenticatedCredential, audience: SocketTicketAudience): SocketTicketGrant {
     const now = this.clock.now();
     this.forget(now);
     const ticket = this.secrets.ticket();
@@ -91,11 +96,11 @@ export class SocketTicketRegistry implements SocketTicketBroker {
     // blank-secret rule at the other end of the same exchange: no credential, no authentication.
     if (ticket.trim() === '') throw new Error('the socket ticket generator produced no ticket');
     const expiresAtMs = now + this.ttlMs;
-    this.outstanding.set(ticket, { credential, expiresAtMs });
+    this.outstanding.set(ticket, { credential, audience, expiresAtMs });
     return { ticket, expiresAtMs };
   }
 
-  redeem(ticket: string): AuthenticatedCredential | undefined {
+  redeem(ticket: string, audience: SocketTicketAudience): AuthenticatedCredential | undefined {
     // Nothing is not a credential: `?ticket=` arrives as ''.
     if (ticket.trim() === '') return undefined;
     const now = this.clock.now();
@@ -104,9 +109,10 @@ export class SocketTicketRegistry implements SocketTicketBroker {
     let matched: readonly [string, OutstandingTicket] | undefined;
     for (const entry of this.outstanding) if (this.compare(ticket, entry[0])) matched = entry;
     if (matched === undefined) return undefined;
-    // Spent whether or not it proves to still be valid, so an expiring ticket cannot be probed twice.
+    // Spent whether or not it proves to still be valid OR correctly addressed, so a ticket copied
+    // from a URL cannot be probed against neighbouring terminals and then used on its owner.
     this.outstanding.delete(matched[0]);
-    return now >= matched[1].expiresAtMs ? undefined : matched[1].credential;
+    return now >= matched[1].expiresAtMs || matched[1].audience !== audience ? undefined : matched[1].credential;
   }
 
   /** Drops what has expired, then makes room for one more. */

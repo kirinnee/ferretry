@@ -288,7 +288,10 @@ describe('the mounted fleet event feed', () => {
     // its `WebSocket` cannot carry a header, so before the ticket it had no way to authenticate here
     // at all.
     const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
+    const { ticket } = tickets.issue(
+      { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' },
+      '/v1/events',
+    );
 
     // Act
     const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', ticket]] }));
@@ -302,7 +305,10 @@ describe('the mounted fleet event feed', () => {
   it('should let a ticket carry the cursor the caller asked for', async () => {
     // Arrange
     const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' });
+    const { ticket } = tickets.issue(
+      { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' },
+      '/v1/events',
+    );
 
     // Act
     const decision = await dispatcher.upgrade(
@@ -324,7 +330,7 @@ describe('the mounted fleet event feed', () => {
   it('should spend the ticket, so a captured URL cannot reopen the feed', async () => {
     // Arrange — the URL reaches every proxy log on the path, so replay is the threat that matters.
     const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' });
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' }, '/v1/events');
     const url = () => request({ path: '/v1/events', query: [['ticket', ticket]] });
 
     // Act
@@ -359,7 +365,7 @@ describe('the mounted fleet event feed', () => {
     // Arrange — a warden may not read the whole fleet's lifecycle, and buying a ticket must not be a
     // way around that. The refusal is a 403, exactly as it is for the bearer itself.
     const { events, dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'warden' });
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'warden' }, '/v1/events');
 
     // Act
     const decision = await dispatcher.upgrade(request({ path: '/v1/events', query: [['ticket', ticket]] }));
@@ -372,7 +378,7 @@ describe('the mounted fleet event feed', () => {
   it('should prefer a presented bearer over a ticket, so a real credential never spends one', async () => {
     // Arrange
     const { dispatcher, tickets } = fixture();
-    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' });
+    const { ticket } = tickets.issue({ kind: 'authenticated', tokenClass: 'admin' }, '/v1/events');
 
     // Act — the CLI holds a header AND happens to carry a ticket in the URL.
     const decision = await dispatcher.upgrade(
@@ -381,7 +387,7 @@ describe('the mounted fleet event feed', () => {
 
     // Assert — accepted on the header, and the ticket is still unspent afterwards.
     should(decision.outcome).equal('accepted');
-    should(tickets.redeem(ticket)).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
+    should(tickets.redeem(ticket, '/v1/events')).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
   it('should claim only its own path', () => {

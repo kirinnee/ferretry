@@ -1,18 +1,21 @@
 import { describe, it } from 'bun:test';
 import {
   CloseTerminalResponseSchema,
+  SocketTicketResponseSchema,
   TerminalListViewSchema,
-  TerminalViewSchema,
   type TerminalView,
+  TerminalViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { ApiSocketDispatcher, type SocketDownstream } from '../../../../src/lib/api/socket.ts';
+import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import {
+  TerminalMountError,
   terminalRoutes,
   terminalSocketRoutes,
-  TerminalMountError,
+  terminalTicketRoutes,
 } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, FakeTerminals, human, NO_TICKETS } from './support.ts';
@@ -340,6 +343,50 @@ describe('the terminal mount', () => {
       // Assert
       should(listed.status).equal(403);
     });
+  });
+});
+
+describe('the terminal stream ticket counter', () => {
+  const credentials = {
+    ...CREDENTIALS,
+    devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+  };
+  const device = { authorization: 'Bearer device-secret' } as const;
+
+  it('should sell a paired device a ticket for its one terminal stream', async () => {
+    // Arrange — devices share the terminal socket's `admin` scope; the ticket must replay the
+    // device classification rather than silently becoming the daemon owner.
+    const terminals = new FakeTerminals();
+    const created = await dispatcher(terminals).dispatch(post('/v1/sessions/s1/terminals'));
+    const terminal = TerminalViewSchema.parse(jsonBody(created));
+    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
+    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials);
+    const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
+
+    // Act
+    const sold = await counter.dispatch(post(`${path}/ticket`, undefined, device));
+    const body = SocketTicketResponseSchema.parse(jsonBody(sold));
+
+    // Assert
+    should(sold.status).equal(201);
+    should(sold.headers?.get('cache-control')).equal('no-store');
+    should(tickets.redeem(body.ticket, path)).deepEqual({
+      kind: 'authenticated',
+      tokenClass: 'device',
+      deviceId: 'device-1',
+    });
+  });
+
+  it('should refuse to mint a ticket for a terminal this daemon does not hold', async () => {
+    const terminals = new FakeTerminals();
+    const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
+    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials);
+
+    const sold = await counter.dispatch(
+      post('/v1/sessions/s1/terminals/0123456789ab/stream/ticket', undefined, device),
+    );
+
+    should(sold.status).equal(404);
   });
 });
 

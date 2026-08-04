@@ -39,7 +39,7 @@ describe('the mounted socket ticket counter', () => {
     // Assert
     should(response.status).equal(201);
     should(body.ttlSeconds).equal(30);
-    should(tickets.redeem(body.ticket)).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
+    should(tickets.redeem(body.ticket, '/v1/events')).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
   it('should sell a paired device a ticket that redeems as THAT device', async () => {
@@ -50,7 +50,7 @@ describe('the mounted socket ticket counter', () => {
     // Assert — the whole point: a ticket carries its buyer's own class and identity, so a transport
     // workaround can never be a way to reach the host's surface, and the journal still names the phone.
     should(response.status).equal(201);
-    should(tickets.redeem(body.ticket)).deepEqual({
+    should(tickets.redeem(body.ticket, '/v1/events')).deepEqual({
       kind: 'authenticated',
       tokenClass: 'device',
       deviceId: 'device-1',
@@ -71,7 +71,7 @@ describe('the mounted socket ticket counter', () => {
 
     // Assert — refused, and the ticket is still unspent because nothing here could even look at it.
     should(replayed.status).equal(401);
-    should(tickets.redeem(ticket)).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
+    should(tickets.redeem(ticket, '/v1/events')).deepEqual({ kind: 'authenticated', tokenClass: 'admin' });
   });
 
   it('should refuse an anonymous caller rather than mint a ticket with no buyer', async () => {
