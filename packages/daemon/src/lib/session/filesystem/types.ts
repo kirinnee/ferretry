@@ -93,8 +93,8 @@ export function unsupportedPlatform(platform: string): FsError {
   return new FsError(
     'unsupported',
     `file browsing is not available on ${PLATFORM_NAMES[platform] ?? platform} yet — this daemon ` +
-      'confines every read to the session folder by holding that folder open, and only Linux can ' +
-      'then hand the open folder to a directory listing and to Git',
+      'confines every read to the session folder by holding that folder open, and it has no way to ' +
+      'do that here',
   );
 }
 

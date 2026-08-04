@@ -41,10 +41,13 @@ import {
  * browse through an in-tree symlinked directory, and buys a containment proof that does not depend on
  * winning a race.
  *
- * WHY NON-LINUX FAILS CLOSED. The pin has to be handed to capabilities that only speak paths — `opendir`
- * and Git's working directory — and `/proc/<pid>/fd/<n>` is how a descriptor becomes such a path. Falling
- * back to the configured pathname would re-open the root-swap hole, so the whole surface refuses until
- * another platform has an equivalent descriptor-backed implementation.
+ * WHY THIS ONE IS LINUX-ONLY. The pin has to be handed to capabilities that only speak paths —
+ * `opendir` and Git's working directory — and `/proc/<pid>/fd/<n>` is how a descriptor becomes such a
+ * path. Falling back to the configured pathname would re-open the root-swap hole, so this
+ * implementation refuses outright anywhere that alias does not exist. Elsewhere the composition root
+ * chooses `PosixSessionRootPinner`, which reaches the same guarantee by installing the held directory
+ * rather than by naming it; that route works on Linux too, and this one is kept because a plain path
+ * alias needs no borrowing of anything global.
  *
  * ACCEPTED RESIDUAL RISKS.
  *
