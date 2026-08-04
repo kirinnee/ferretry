@@ -22,11 +22,11 @@ export interface DaemonEnvironmentInput {
   readonly stateHome?: string | undefined;
   /** `XDG_CONFIG_HOME` when set — systemd user units live under it. */
   readonly configHome?: string | undefined;
-  /** `XDG_STATE_HOME` when set — the Nix garbage-collection root lives under it. */
+  /** `XDG_STATE_HOME` when set — CLI-owned installation artifacts live under it. */
   readonly stateDirectory?: string | undefined;
   /** The invoking user's numeric id, which names the launchd domain. */
   readonly userId: number;
-  /** The daemon executable this CLI supervises. */
+  /** The complete daemon executable this CLI imports into the snapshot store. */
   readonly daemonBinary: string;
   /** Base name of that executable: it names the systemd unit and the launchd label. */
   readonly daemonName: string;
@@ -42,10 +42,17 @@ export interface DaemonLayout {
   readonly manager: DaemonManagerKind;
   /** Base name of the daemon executable — what a human calls the thing these commands manage. */
   readonly daemonName: string;
+  /** Product namespace carried in every snapshot manifest. */
+  readonly product: string;
   readonly stateHome: string;
   readonly logDirectory: string;
   readonly logFile: string;
+  /** The installed executable from which an operator deliberately builds snapshots. */
+  readonly sourceDaemonBinary: string;
+  /** Stable atomic pointer to the promoted snapshot; every supervisor executes this path. */
   readonly daemonBinary: string;
+  /** Daemon-keyed root of the CLI-owned immutable snapshot store. */
+  readonly snapshotRoot: string;
   readonly searchPath: string;
   /** `fyd.service` — the unit name every `systemctl --user` verb takes. */
   readonly systemdUnitName: string;
@@ -154,14 +161,18 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const logDirectory = join(stateHome, 'logs');
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
+  const snapshotRoot = join(stateDirectory, product, 'daemon-snapshots', daemonName);
 
   return {
     manager: managerForPlatform(input.platform),
     daemonName,
+    product,
     stateHome,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
-    daemonBinary,
+    sourceDaemonBinary: daemonBinary,
+    daemonBinary: join(snapshotRoot, 'current'),
+    snapshotRoot,
     searchPath: input.searchPath,
     systemdUnitName: `${daemonName}.service`,
     systemdUnitFile: join(configHome, 'systemd', 'user', `${daemonName}.service`),

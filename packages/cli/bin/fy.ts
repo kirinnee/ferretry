@@ -18,9 +18,11 @@ import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import { FileDaemonSnapshotStore } from '../src/adapters/daemon/snapshot-store';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
 import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
 import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
+import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
@@ -64,7 +66,6 @@ import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
-import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -344,6 +345,11 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
+    snapshots: new FileDaemonSnapshotStore({
+      root: layout.snapshotRoot,
+      daemon: { product: layout.product, name: layout.daemonName },
+      sourceBinary: layout.sourceDaemonBinary,
+    }),
     clock: new SystemMillisecondClock(),
     out,
   });

@@ -51,6 +51,12 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
   }
 
   async install(): Promise<void> {
+    await this.refresh();
+    await this.#require(['enable', this.layout.systemdUnitName]);
+    await this.#require(['restart', this.layout.systemdUnitName]);
+  }
+
+  async refresh(): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.systemdUnitFile));
     await this.files.ensureDirectory(this.layout.logDirectory);
     await this.files.writePrivate(
@@ -64,8 +70,6 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
       }),
     );
     await this.#require(['daemon-reload']);
-    await this.#require(['enable', this.layout.systemdUnitName]);
-    await this.#require(['restart', this.layout.systemdUnitName]);
   }
 
   async uninstall(): Promise<void> {
@@ -134,6 +138,13 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
   }
 
   async install(): Promise<void> {
+    await this.refresh();
+    // An unloaded job cannot be booted out, so this failure is expected and ignored.
+    await this.processes.run(['launchctl', 'bootout', this.layout.launchdServiceTarget]);
+    await this.#require(['bootstrap', this.layout.launchdDomain, this.layout.launchAgentFile]);
+  }
+
+  async refresh(): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.launchAgentFile));
     await this.files.ensureDirectory(this.layout.logDirectory);
     await this.files.writePrivate(
@@ -147,9 +158,6 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
         description: description(this.layout.daemonName),
       }),
     );
-    // An unloaded job cannot be booted out, so this failure is expected and ignored.
-    await this.processes.run(['launchctl', 'bootout', this.layout.launchdServiceTarget]);
-    await this.#require(['bootstrap', this.layout.launchdDomain, this.layout.launchAgentFile]);
   }
 
   async uninstall(): Promise<void> {

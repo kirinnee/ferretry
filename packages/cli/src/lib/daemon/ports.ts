@@ -93,6 +93,44 @@ export interface INixGcRootPort {
   release(rootPath: string): Promise<void>;
 }
 
+/** The daemon identity persisted in a snapshot, never inferred from its containing directory. */
+export interface DaemonSnapshotIdentity {
+  readonly product: string;
+  readonly name: string;
+}
+
+/** One verified immutable daemon snapshot. */
+export interface DaemonSnapshot {
+  /** Content address: `sha256-` plus the executable's lowercase digest. */
+  readonly id: string;
+  readonly daemon: DaemonSnapshotIdentity;
+  /** The resolved artifact that was complete and stable while this snapshot was built. */
+  readonly sourceBinary: string;
+  /** The immutable executable inside this snapshot. */
+  readonly binaryPath: string;
+  readonly bytes: number;
+  readonly createdAt: string;
+}
+
+/** Building an identical executable reuses its already-verified immutable snapshot. */
+export interface DaemonSnapshotBuild extends DaemonSnapshot {
+  readonly created: boolean;
+}
+
+/**
+ * Immutable daemon artifacts and their atomic promoted pointer.
+ *
+ * `undefined` from `current` means the pointer has never existed. A malformed pointer, manifest or
+ * artifact throws: damaged durable state must never be mistaken for an empty store and bootstrapped
+ * over.
+ */
+export interface IDaemonSnapshotPort {
+  build(): Promise<DaemonSnapshotBuild>;
+  promote(id: string): Promise<DaemonSnapshot>;
+  current(): Promise<DaemonSnapshot | undefined>;
+  list(): Promise<readonly DaemonSnapshot[]>;
+}
+
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */
 export interface IClockPort {
   now(): number;
@@ -151,4 +189,6 @@ export interface IDaemonSupervisor {
  */
 export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
   readonly definitionPath: string;
+  /** Rewrite the definition to the current promoted snapshot without disturbing a running daemon. */
+  refresh(): Promise<void>;
 }

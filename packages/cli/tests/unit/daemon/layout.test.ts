@@ -80,13 +80,16 @@ describe('daemon layout', () => {
     should(actual.launchAgentFile).equal(`${HOME}/Library/LaunchAgents/com.ferretry.fyd.plist`);
   });
 
-  it('should carry the daemon name, binary and search path through untouched', () => {
+  it('should separate the source executable from the promoted runtime pointer', () => {
     // Act
     const actual = layout({ daemonBinary: '/opt/other/fyd', searchPath: '/only/here' });
 
     // Assert
     should(actual.daemonName).equal('fyd');
-    should(actual.daemonBinary).equal('/opt/other/fyd');
+    should(actual.product).equal('ferretry');
+    should(actual.sourceDaemonBinary).equal('/opt/other/fyd');
+    should(actual.snapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
+    should(actual.daemonBinary).equal(`${actual.snapshotRoot}/current`);
     should(actual.searchPath).equal('/only/here');
   });
 
@@ -110,6 +113,25 @@ describe('daemon layout', () => {
     should(() => resolveDaemonLayout(environment({ stateDirectory: 'state' }))).throw(
       /XDG_STATE_HOME must be an absolute path/,
     );
+  });
+
+  it('should key snapshots by product and daemon under XDG_STATE_HOME', () => {
+    // Act
+    const first = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'one' });
+    const second = layout({ stateDirectory: '/tmp/state', product: 'alpha', daemonName: 'two' });
+
+    // Assert
+    should(first.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/one');
+    should(second.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/two');
+    should(first.daemonBinary).not.equal(second.daemonBinary);
+  });
+
+  it('should treat a blank XDG_STATE_HOME as unset', () => {
+    // Act
+    const actual = layout({ stateDirectory: '   ' });
+
+    // Assert
+    should(actual.snapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
   });
 
   it('should normalise a path with redundant segments', () => {
@@ -143,6 +165,16 @@ describe('daemon layout refusals', () => {
     // Act + Assert
     should(() => resolveDaemonLayout(environment({ configHome: 'config' }))).throw(
       /XDG_CONFIG_HOME must be an absolute path/u,
+    );
+  });
+
+  it('should refuse an unsafe XDG_STATE_HOME', () => {
+    // Act + Assert
+    should(() => resolveDaemonLayout(environment({ stateDirectory: 'state' }))).throw(
+      /XDG_STATE_HOME must be an absolute path/u,
+    );
+    should(() => resolveDaemonLayout(environment({ stateDirectory: '/' }))).throw(
+      /XDG_STATE_HOME must not be a filesystem root/u,
     );
   });
 

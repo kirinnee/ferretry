@@ -1,11 +1,13 @@
 import type { HealthView } from '@ferretry/protocol';
 import type { DaemonLayout } from './layout.ts';
 import type {
+  DaemonSnapshot,
   DaemonStartHandle,
   IClockPort,
   IDaemonHealthPort,
   IDaemonLogPort,
   IDaemonOutput,
+  IDaemonSnapshotPort,
   IDaemonSupervisor,
   INixGcRootPort,
   IServiceDefinitionSupervisor,
@@ -63,6 +65,7 @@ export interface DaemonControllerDeps {
   readonly logs: IDaemonLogPort;
   /** Holds a Nix-store daemon against garbage collection; a no-op for any other installation. */
   readonly nix: INixGcRootPort;
+  readonly snapshots: IDaemonSnapshotPort;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   readonly readiness?: ReadinessPolicy;
@@ -87,9 +90,10 @@ export class DaemonController {
   }
 
   async install(): Promise<void> {
+    const snapshot = await this.#ensurePromotedSnapshot();
     const service = this.#service();
     // Before the definition is written, so a unit file never names a store path nothing is holding.
-    await this.#pinDaemonBinary();
+    await this.#pinDaemonBinary(snapshot);
     await service.install();
     const health = await this.#awaitReady(service, {});
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
@@ -114,8 +118,10 @@ export class DaemonController {
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
       return;
     }
+    const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
-    await this.#pinDaemonBinary();
+    await this.#refreshDefinition(owner);
+    await this.#pinDaemonBinary(snapshot);
     const handle = await owner.start();
     const health = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
@@ -133,12 +139,16 @@ export class DaemonController {
   }
 
   async restart(): Promise<void> {
+    // Verify the complete promoted artifact before stopping the incumbent. Damaged snapshot state
+    // must leave the currently running daemon alone, not turn a repairable refusal into downtime.
+    const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
+    await this.#refreshDefinition(owner);
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
     // Restart is when an upgraded executable is picked up, so the root is re-pointed here too.
-    await this.#pinDaemonBinary();
+    await this.#pinDaemonBinary(snapshot);
     const handle = await owner.start();
     const ready = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
@@ -169,6 +179,36 @@ export class DaemonController {
     if (code !== 0) this.deps.out.setExitCode(code);
   }
 
+  async buildSnapshot(): Promise<void> {
+    const snapshot = await this.deps.snapshots.build();
+    this.deps.out.success(
+      `${this.#name} snapshot ${snapshot.id} ${snapshot.created ? 'built' : 'already complete'} from ${snapshot.sourceBinary}`,
+    );
+  }
+
+  async promoteSnapshot(id: string): Promise<void> {
+    const snapshot = await this.deps.snapshots.promote(id);
+    this.deps.out.success(
+      `${this.#name} snapshot ${snapshot.id} promoted; the running daemon is unchanged until restart`,
+    );
+  }
+
+  async listSnapshots(options: DaemonCommandOptions): Promise<void> {
+    const [snapshots, current] = await Promise.all([this.deps.snapshots.list(), this.deps.snapshots.current()]);
+    const views = snapshots.map(snapshot => ({ ...snapshot, current: snapshot.id === current?.id }));
+    if (options.json === true) {
+      this.deps.out.success(JSON.stringify({ daemon: this.#name, snapshots: views }));
+      return;
+    }
+    if (views.length === 0) {
+      this.deps.out.warn(`no ${this.#name} snapshots have been built`);
+      return;
+    }
+    this.deps.out.success(
+      views.map(snapshot => `${snapshot.current ? '*' : ' '} ${snapshot.id}  ${snapshot.createdAt}`).join('\n'),
+    );
+  }
+
   get #name(): string {
     return this.deps.layout.daemonName;
   }
@@ -182,8 +222,10 @@ export class DaemonController {
    * and is left alone. A failure is reported and the verb continues: an unpinned daemon that runs
    * beats a working install refused over a pin that did not take.
    */
-  async #pinDaemonBinary(): Promise<void> {
-    const resolved = await this.deps.nix.realPath(this.deps.layout.daemonBinary);
+  async #pinDaemonBinary(snapshot: DaemonSnapshot): Promise<void> {
+    // The promoted executable is a copied file outside /nix/store. Its manifest records the real
+    // source output whose loader and shared-library closure the copy still needs at runtime.
+    const resolved = await this.deps.nix.realPath(snapshot.sourceBinary);
     const storePath = nixStorePathOf(resolved);
     if (storePath === undefined) return;
     const failure = await this.deps.nix.pin(storePath, this.deps.layout.nixGcRoot);
@@ -205,6 +247,26 @@ export class DaemonController {
     const service = this.deps.service;
     if (service === undefined) throw new UnsupportedServiceManagerError();
     return service;
+  }
+
+  /**
+   * Bootstrap exactly once. Only a genuinely absent pointer takes this path; `current()` throws for
+   * every malformed, dangling or unverifiable state, so damaged evidence can never be overwritten
+   * as if this were a fresh installation.
+   */
+  async #ensurePromotedSnapshot(): Promise<DaemonSnapshot> {
+    const current = await this.deps.snapshots.current();
+    if (current !== undefined) return current;
+    const built = await this.deps.snapshots.build();
+    const promoted = await this.deps.snapshots.promote(built.id);
+    this.deps.out.warn(`no promoted ${this.#name} snapshot existed; built and promoted ${promoted.id}`);
+    return promoted;
+  }
+
+  /** A stopped legacy unit may still name live source; refresh it before the next managed start. */
+  async #refreshDefinition(owner: IDaemonSupervisor): Promise<void> {
+    const service = this.deps.service;
+    if (service !== undefined && owner === service) await service.refresh();
   }
 
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */

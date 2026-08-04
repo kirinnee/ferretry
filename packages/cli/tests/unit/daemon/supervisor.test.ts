@@ -41,7 +41,7 @@ describe('systemd supervisor install', () => {
     await supervisor.install();
 
     // Assert
-    should(files.written.get(linux.systemdUnitFile)).match(/^ExecStart="\/opt\/fy\/bin\/fyd"$/mu);
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${linux.daemonBinary}"`);
     should(processes.ran).deepEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable fyd.service',
