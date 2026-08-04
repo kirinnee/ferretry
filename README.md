@@ -20,17 +20,17 @@ from the diene `bun-cli` conventions.
 
 ## Layout
 
-| Path                | What                                                          |
-| ------------------- | ------------------------------------------------------------- |
-| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs) |
-| `packages/protocol` | Placeholder — zod schemas + typed client SDK (P1)             |
-| `packages/daemon`   | Placeholder — the per-host daemon (P1)                        |
-| `packages/fleet`    | Placeholder — fleet management library + subcommands (P1)     |
-| `packages/pwa`      | Placeholder — the web app (P1)                                |
-| `packages/relay`    | Rendezvous protocol + the Workers relay you deploy yourself   |
-| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump     |
-| `scripts/validate`  | Repo invariants run by pre-commit                             |
-| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release     |
+| Path                | What                                                                |
+| ------------------- | ------------------------------------------------------------------- |
+| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs)       |
+| `packages/protocol` | Placeholder — zod schemas + typed client SDK (P1)                   |
+| `packages/daemon`   | Placeholder — the per-host daemon (P1)                              |
+| `packages/fleet`    | Placeholder — fleet management library + subcommands (P1)           |
+| `packages/pwa`      | Placeholder — the web app (P1)                                      |
+| `packages/relay`    | Rendezvous protocol + self-hosted and metered hosted Workers relays |
+| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump           |
+| `scripts/validate`  | Repo invariants run by pre-commit                                   |
+| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release           |
 
 ## Development
 

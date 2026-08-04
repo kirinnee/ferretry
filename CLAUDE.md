@@ -67,7 +67,9 @@ Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cl
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
-There is no hosted relay and no default relay address; a relay is deployed by its own operator.
+The same encrypted carrier can be direct, self-hosted or Ferretry-hosted. No relay address is
+compiled into the product: the hosted default comes from a no-store runtime advertisement whose
+operator can change or disable it without a release. Self-hosted allowlists remain independent.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
