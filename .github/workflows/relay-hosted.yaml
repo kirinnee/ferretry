@@ -1,0 +1,148 @@
+name: Deploy Hosted Relay
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy, change the runtime kill switch, or read operator metrics
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - enable
+          - disable
+          - metrics
+      relay_url:
+        description: Optional relay origin for enable; blank uses this Worker's workers.dev origin
+        required: false
+        type: string
+
+concurrency:
+  group: hosted-relay-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy Worker and Durable Objects
+    if: github.event_name == 'push' || inputs.operation == 'deploy'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # This mirrors pwa-pages.yaml: Wrangler runs through the pinned nix shell rather than through
+      # a third-party action, and reads both Cloudflare credentials from the environment.
+      - name: Publish hosted relay
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+        run: |
+          set -euo pipefail
+
+          nix develop .#ci -c bash -c \
+            'cd packages/relay && bunx wrangler deploy --config wrangler.hosted.json'
+
+          # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
+          # Cloudflare token is never installed in the Worker; only this domain-separated digest is
+          # stored as a Worker secret. The same derivation authenticates the control-only job below.
+          operator_token="$({
+            printf 'ferretry-relay-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          printf '%s' "$operator_token" | nix develop .#ci -c bash -c \
+            'cd packages/relay && bunx wrangler secret put RELAY_OPERATOR_TOKEN --config wrangler.hosted.json'
+
+          if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
+            worker_subdomain="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+                | jq -er '.result.subdomain'
+            )"
+            HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
+          fi
+
+          current="$(
+            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 2 \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config"
+          )"
+          if [[ "$(jq -r '.configured' <<<"$current")" == "false" ]]; then
+            initial="$(jq -c --arg relay_url "$HOSTED_RELAY_ORIGIN" \
+              '.configuration | .relayUrl = $relay_url' <<<"$current")"
+            curl --fail --silent --show-error \
+              --request PUT \
+              --header "Authorization: Bearer $operator_token" \
+              --header 'Content-Type: application/json' \
+              --data-binary "$initial" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
+              | jq -e '.configured == true and .configuration.relayUrl != null' >/dev/null
+          else
+            echo "preserving existing hosted relay runtime configuration"
+          fi
+
+  control:
+    name: Runtime Control
+    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'deploy'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read or change runtime state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+          OPERATION: ${{ inputs.operation }}
+          REQUESTED_RELAY_URL: ${{ inputs.relay_url }}
+        run: |
+          set -euo pipefail
+
+          operator_token="$({
+            printf 'ferretry-relay-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
+            worker_subdomain="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+                | jq -er '.result.subdomain'
+            )"
+            HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
+          fi
+
+          if [[ "$OPERATION" == "metrics" ]]; then
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/metrics" \
+              | jq
+            exit 0
+          fi
+
+          current="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config"
+          )"
+          if [[ "$OPERATION" == "disable" ]]; then
+            next="$(jq -c '.configuration | .relayUrl = null' <<<"$current")"
+          else
+            relay_url="${REQUESTED_RELAY_URL:-$HOSTED_RELAY_ORIGIN}"
+            next="$(jq -c --arg relay_url "$relay_url" \
+              '.configuration | .relayUrl = $relay_url' <<<"$current")"
+          fi
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer $operator_token" \
+            --header 'Content-Type: application/json' \
+            --data-binary "$next" \
+            "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
+            | jq
