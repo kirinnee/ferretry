@@ -18,23 +18,36 @@ deployment is `src/adapters`.
 the browser a daemon address and a **key fingerprint**; what was missing was a way to make that
 address reachable when the daemon has no inbound route.
 
-There are three explicit connection choices, and one security model across all of them.
+There are two carriers and one security model across both.
 
-| Choice             | What it is                                                                          | When to use it                                                        |
-| ------------------ | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Direct**         | The browser opens a WebSocket straight at the daemon.                               | The daemon is reachable over a LAN, VPN, tailnet or public address.   |
-| **Your own relay** | A Cloudflare Worker + Durable Object **in your account**, forwarding opaque frames. | The daemon is behind NAT and you want to own the infrastructure.      |
-| **Hosted relay**   | The same Worker + Durable Object, operated and capped by Ferretry.                  | You want outbound-only reachability without deploying infrastructure. |
+| Carrier    | What it is                                                                    | Where it belongs                                                  |
+| ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable. |
+| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Ferretry operates one. |
 
-There is **no relay address compiled into the application or this package**. The hosted choice reads
-a no-store runtime advertisement from the hosted Worker; its `relayUrl` is either an operator-set
-address or `null`. Changing that document, including disabling the default entirely, needs no app
+**Neither is a question the product asks.** The required behaviour is: try direct first because it
+has fewer hops and fewer observers; fall back to the hosted relay when direct does not work; and
+always say which carrier is live and why the other was passed over. No carrier chooser, nothing to
+opt into, and no silent degradation — a surface that shows a connection without naming its carrier is
+not conforming.
+
+The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
+`packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
+which-carrier-and-why sentence a surface can show verbatim. **What does not exist yet is the client
+plumbing that calls them** — see "What is not built yet" in §13 for the exact gap and its
+prerequisite. Read this section as the contract both ends are being built against, not as a
+description of what a phone does today.
+
+There is **no relay address compiled into the application or this package**. The relay address is a
+runtime value: the hosted Worker serves a no-store advertisement whose `relayUrl` is either an
+operator-set address or `null`. Changing it, including disabling the default entirely, needs no app
 release and no Worker deploy. Section 13 is the hosted operating contract.
 
-All three are first-class choices in onboarding; hosted is not silently inserted ahead of direct or
-self-hosted. When more than one carrier is configured for a daemon, direct is still tried first
-because it has fewer hops and observers. A surface must not fall back silently: if one configured
-carrier failed, it says so and says why.
+Anyone who would rather run the carrier themselves still can — the Worker in this repository deploys
+to any Cloudflare account, and this document is the contract, so it can also be reimplemented from
+scratch. That is an **expert opt-in path with its own runbook**
+([`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md)), deliberately kept out of
+onboarding and ordinary setup rather than offered as a third thing to decide about.
 
 ---
 
@@ -425,9 +438,18 @@ That is the main reason to prefer it.
 
 ## 11. Running your own relay
 
+This is an **expert opt-in path**. Nothing in onboarding or ordinary setup asks anyone to do it,
+because the hosted relay in §13 is what carries anyone who does not want to operate their own. It exists
+because someone should always be able to own their own carrier — not because the product needs them
+to. The step-by-step procedure, including plan requirements, the narrowest API token that works,
+verification, teardown and what it costs, is
+[`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md). This section stays
+architectural: what a relay of your own _is_, and what you take on by running one.
+
 ```
 1. Put your daemon fingerprint in packages/relay/wrangler.jsonc → vars.RELAY_DAEMON_IDS
-2. task relay:deploy
+2. task relay:check     # compiles and prints bindings, deploys nothing
+3. task relay:deploy
 ```
 
 `RELAY_DAEMON_IDS` is a space- or comma-separated list of `fy_daemon_…` fingerprints. A fingerprint
@@ -436,7 +458,8 @@ list serves nobody**, which is the only safe reading of a relay whose operator n
 for.
 
 Then point both ends at it: the daemon's relay address and the browser's must be the same string,
-because it is the `host` the claim signature covers.
+because it is the `host` the claim signature covers. Today there is no shipped interface for saying
+so — see the client gap recorded in the runbook.
 
 ### What you are taking on
 
@@ -494,6 +517,12 @@ record layer as a relay you operate yourself. Hosted mode changes admission and 
 the stateless Worker reserves a connection with one globally named control Durable Object, then
 routes the socket to the Durable Object named by `ferretry-relay/1:<daemonId>`.
 
+**This is the carrier every installation is intended to fall back to** when direct is not reachable,
+configured entirely at runtime. Its address is seeded on the first deploy into an untouched control
+object, from that Worker's own Cloudflare origin — so even the default address is a deployment fact
+rather than a compiled constant. The server half of that is built and tested; the client half is
+not, and "What is not built yet" below says exactly what is missing.
+
 ### Runtime default and kill switch
 
 The public discovery contract is:
@@ -516,6 +545,13 @@ New sockets see the switch before a per-daemon object is allocated. Live sockets
 existing 30-second rendezvous sweep and receive `4431` before close. A control object that is absent,
 unreadable, malformed or internally inconsistent fails closed with an explicit relay error; damaged
 state is never reinterpreted as an unused account.
+
+The operator bearer that authorises those writes is derived — `sha256("ferretry-relay-operator-v1\0"
+‖ CLOUDFLARE_API_TOKEN)` — and installed as a Worker secret by the deploy job. **Rotating
+`CLOUDFLARE_API_TOKEN` therefore breaks runtime control until the next deploy**, because the workflow
+starts deriving a bearer the Worker has never been told about and every operation answers `401`. The
+recovery is one `workflow_dispatch` with `operation: deploy`, which reinstalls the derived secret;
+run it _before_ you need the kill switch, not during the incident that needs it.
 
 ### What is metered and capped
 
@@ -546,6 +582,32 @@ control frame and then closes with `4432` or `4433`, including the reason (and, 
 reset timestamp in the control-plane decision). Failure to reach or parse the meter is `4500` and is
 also a refusal. Nothing degrades into an unmetered path.
 
+### What an open relay costs, stated plainly
+
+A self-hosted deployment refuses an unlisted fingerprint in the stateless Worker. The hosted one
+cannot: it serves whoever asks, so it accepts any well-formed fingerprint and charges the reservation
+before the socket is proved. A fingerprint is public — it is in the pairing QR — and that has a
+consequence worth saying out loud rather than discovering:
+
+**Someone who knows a daemon's fingerprint can occupy that daemon's pre-claim connection slots.**
+They cannot claim the rendezvous (that needs the key), cannot open a session (that needs the
+handshake) and cannot read a byte of what the daemon is doing. What they can do is hold reservations
+the real owner then cannot have, until those sockets are swept — so the honest description is a
+**transient denial of the daemon's own capacity**, not a compromise of it.
+
+The caps in this section are what bounds it: the per-daemon ceiling means one fingerprint cannot
+consume the account, and the sweep plus reservation release means slots come back rather than
+draining away. Those two properties are the whole mitigation, and they are only worth what their
+implementation is worth — a reservation that leaked instead of being released would turn a transient
+squeeze into a permanent lockout, which is why release-on-every-close and recovery of stale rows are
+treated as correctness, not tidiness.
+
+What cannot be done about it is the point: **the relay cannot tell abuse from use.** Distinguishing
+them means reading what is being carried, and it structurally cannot. Enrolment, quotas per identity
+and abuse review are the service apparatus this design refuses. So the trade is stated rather than
+solved: an open carrier, bounded by ceilings and a kill switch, in exchange for a carrier nobody has
+to deploy.
+
 ### Honest hosted disclosure
 
 Ferretry and Cloudflare can observe the daemon fingerprint, IP addresses, connection timing and
@@ -554,3 +616,33 @@ meter persists the counts, sizes and timing fields described above. Neither part
 payloads, device tokens, session content, commands, output, daemon names or device names. The same
 X25519/Ed25519/AES-256-GCM channel described in §§2, 6 and 7 terminates only at the daemon and browser.
 The relay is incapable of decrypting content, including when a cap is hit.
+
+### What is not built yet
+
+The relay, the control plane, the caps and the disclosure text are implemented and tested. **The two
+ends that would use them are not wired.** No code outside `packages/relay` fetches
+`/v1/default-relay`, and neither `fyd` nor the PWA can route through a relay at all today: the
+browser builds every request from a single direct `baseUrl` in
+`packages/pwa/src/lib/daemon-transport.ts`, and `ConnectionMethod` — the carrier type that would
+replace it — has no consumer outside this package. The decision layer it needs already exists
+(`connectionPreferenceOrder` orders direct first, `chooseConnection` returns the
+which-carrier-and-why sentence); what is missing is the plumbing that calls them.
+
+Four named pieces, so the prerequisite is checkable rather than vague:
+
+1. **A build-time discovery origin in the PWA.** The relay lives on its own hostname, so the browser
+   cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is wrong**,
+   and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is compiled
+   into the PWA build as a constant. It is a _service_ address, not a user address: it identifies
+   the relay, never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over.
+2. **A fetch-and-parse step** that reads the advertisement through `HostedRelayAdvertisementSchema`
+   and turns it into a carrier with `hostedRelayConnection`, treating `relayUrl: null` and any
+   failure as "no hosted carrier".
+3. **A relay-capable transport.** `packages/pwa/src/lib/daemon-transport.ts` must accept a
+   `ConnectionMethod` rather than one direct `baseUrl`, and `fyd` needs the matching dial-out client.
+4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
+   `describeConnectionMethod` observer list for whichever carrier won.
+
+Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
+The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
+on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.

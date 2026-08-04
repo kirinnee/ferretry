@@ -7,19 +7,24 @@ document, not this code, is the thing to implement against.
 
 ## Why this package exists
 
-A daemon behind NAT has no inbound route, so a browser somewhere else cannot reach it. There are
-three explicit connection choices and one security model across all of them:
+A daemon behind NAT has no inbound route, so a browser somewhere else cannot reach it. There are two
+carriers and one security model across both:
 
-- **Direct** — the browser dials the daemon. Preferred whenever it is configured and reachable.
-- **Your own relay** — a Worker + Durable Object in your Cloudflare account, forwarding frames it is
-  structurally unable to read.
-- **Hosted relay** — the same encrypted carrier operated by Ferretry, with daemon-keyed metering,
-  runtime kill switch, and per-daemon plus account-wide caps.
+- **Direct** — the browser dials the daemon. Attempted first, automatically, whenever it works.
+- **Relay** — a Worker + Durable Object forwarding frames it is structurally unable to read. The
+  automatic fallback. Ferretry operates one, with daemon-keyed metering, a runtime kill switch, and
+  per-daemon plus account-wide caps.
+
+**Neither is a question a user is asked.** The carrier is behaviour: direct first, hosted relay when
+direct does not work, and the live carrier always named on screen so nothing degrades silently.
+Running a relay of your own is still possible and still supported, but it is an **expert opt-in
+path** with its own runbook — [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md) —
+not an onboarding option.
 
 There is no relay address compiled into this package. The hosted Worker serves a no-store
 `/v1/default-relay` advertisement whose address can be changed or set to `null` without releasing or
-deploying code. Your own relay still serves exactly the daemon fingerprints its deployer listed.
-`docs/relay-protocol.md` §§9, 11 and 13 define both operating modes and their disclosure.
+deploying code. A relay you run yourself still serves exactly the daemon fingerprints its deployer
+listed. `docs/relay-protocol.md` §§9, 11 and 13 define both operating modes and their disclosure.
 
 ## Layout
 
@@ -33,30 +38,49 @@ deploying code. Your own relay still serves exactly the daemon fingerprints its 
 `src/lib/rendezvous.ts` is the whole rendezvous as a pure state machine; the Durable Object around it
 moves bytes and reads clocks and decides nothing.
 
-## Deploying your own
+## Deploying one of your own (expert)
 
 ```
 1. put your daemon fingerprint in wrangler.jsonc → vars.RELAY_DAEMON_IDS   (`fy pair` prints it)
-2. task relay:deploy
+2. task relay:check     # compiles and prints bindings; publishes nothing
+3. task relay:deploy
 ```
 
-Read **"Running your own relay"** in the protocol document first. You will be operating a relay, and
-it bills to your account.
+**[docs/cloudflare-relay-self-hosting.md](../../docs/cloudflare-relay-self-hosting.md) is the
+runbook** — plan requirements, the narrowest API token that works, verification, teardown and what it
+costs. Read **"Running your own relay"** in the protocol document for what you are taking on: you
+will be operating a relay, and it bills to your account.
 
 ## Operating the hosted deployment
 
 `.github/workflows/relay-hosted.yaml` deploys the hosted Worker through the repository's nix shell,
-using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Manual `enable`, `disable` and `metrics`
-operations talk to the already-deployed control object; they do not deploy a release. The operator
-bearer is a domain-separated digest of the GitHub Cloudflare token and is installed as a Worker
-secret, so neither credential is present in this repository or browser bundle.
+using `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. It publishes to the Worker's own
+`workers.dev` origin by default; set the `HOSTED_RELAY_ORIGIN` repository variable to advertise a
+custom origin instead. Manual `enable`, `disable` and `metrics` operations talk to the
+already-deployed control object; they do not deploy a release.
 
-The metrics response contains connection requests and refusals, exact encoded bytes forwarded,
-current/peak concurrent connections, first/last activity and current minute/day windows globally and
-for every daemon. It contains no payload, device token, session content, command, output or name.
+The operator bearer is a domain-separated digest of the GitHub Cloudflare token, installed as a
+Worker secret, so neither credential is present in this repository or in a browser bundle. **After
+rotating `CLOUDFLARE_API_TOKEN`, run the `deploy` operation once** to reinstall the derived secret —
+until you do, every runtime control operation answers `401`.
+
+The metrics **API** is daemon-keyed: connection requests and refusals, exact encoded bytes forwarded,
+current/peak concurrent connections, first/last activity and current minute/day windows, globally and
+for every daemon. It contains no payload, device token, session content, command, output or name. The
+`metrics` workflow operation prints only the account-wide summary and a daemon **count** — the full
+inventory of fingerprints is not written into a public Actions log; read it from the authenticated
+endpoint instead.
 
 ## Status
 
-The protocol, both relay operating modes, the runtime control plane and operator metrics are tested.
-The `fyd` and PWA connection clients are separate units; onboarding consumes the public
-advertisement and keeps direct, self-hosted and hosted as explicit choices.
+The protocol, both relay operating modes, the runtime control plane and operator metrics are
+implemented and tested.
+
+**The client ends are not wired yet, and that is the honest limit of this package.** Nothing outside
+`packages/relay` fetches `/v1/default-relay`; `packages/pwa/src/lib/daemon-transport.ts` still builds
+every request from one direct `baseUrl`, and `ConnectionMethod` has no consumer outside this package.
+The follow-up that closes it needs a build-time discovery-origin constant in the PWA (the relay has
+its own hostname, Pages stays static, so a relative path will not do), the fetch-and-parse step, a
+relay-capable transport on both ends, and active-carrier disclosure on screen. §13 of the protocol
+document lists all four. Until that ships, deploying a relay gets you a relay, not a remote
+connection.

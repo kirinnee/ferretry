@@ -65,13 +65,29 @@ tasks:
       # a deployed bundle start differing.
       - bun run build
 
-  relay:deploy:
-    desc: Deploy the rendezvous relay to your own Cloudflare account
+  relay:check:
+    desc: 'Expert: compile the relay Worker and print its bindings without deploying anything'
     dir: '{{.RELAY_PKG}}'
     cmds:
-      # One command, and it is this one. Wrangler is fetched on demand rather than vendored: the
-      # relay is optional, and nobody who connects their daemon directly should pay for its
-      # toolchain. Fill in RELAY_DAEMON_IDS in wrangler.jsonc first — an empty list serves nobody.
+      # The rehearsal for relay:deploy. `--dry-run` compiles and resolves bindings and migrations
+      # against your wrangler.jsonc and needs no Cloudflare credentials: it publishes nothing and
+      # changes nothing in your account, so a broken config is found here rather than halfway
+      # through a real deploy. (`bunx` may still fetch Wrangler from the npm registry if it is not
+      # already cached — the "no network" part of a dry run is Cloudflare, not the package manager.)
+      - bunx wrangler deploy --dry-run
+
+  relay:deploy:
+    desc: 'Expert: deploy the rendezvous relay to your own Cloudflare account'
+    dir: '{{.RELAY_PKG}}'
+    cmds:
+      # Running a relay is an opt-in expert path, not product setup: nothing in onboarding asks for
+      # it, and the hosted default carries everyone who does not want to operate infrastructure.
+      # docs/cloudflare-relay-self-hosting.md is the runbook — plan requirements, the narrow API
+      # token, verification, teardown and what it costs. Fill in RELAY_DAEMON_IDS in wrangler.jsonc
+      # first: an empty list serves nobody. Run relay:check first.
+      #
+      # Wrangler is fetched on demand rather than vendored, because nobody who never deploys a relay
+      # should pay for its toolchain.
       - bunx wrangler deploy
 
   deadcode:
