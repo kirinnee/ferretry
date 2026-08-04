@@ -513,6 +513,22 @@ button.kt-fs-row:active {
   line-height: var(--leading-base);
 }
 
+/* The precise reason a surface is refused, folded away: a person needs the sentence above it, a
+   developer needs this. 44px of hit area so the fold is openable with a thumb. */
+.kt-fs-why > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.kt-fs-why-body {
+  margin: 0;
+  max-width: 60ch;
+}
+
 .kt-fs-note[data-tone='err'] {
   border-inline-start: 2px solid var(--err);
   background: var(--err-bg);

@@ -1,4 +1,4 @@
-import { constants, type Stats } from 'node:fs';
+import { constants } from 'node:fs';
 import { type FileHandle, lstat, open, opendir, readlink, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -13,7 +13,17 @@ import {
   type PinnedTarget,
   rootIsDenied,
   type SessionRootPinner,
+  unsupportedPlatform,
 } from '../../../lib/session/filesystem/index.ts';
+import {
+  canonicalRel,
+  componentIdentity,
+  contains,
+  direntType,
+  errorCode,
+  isMissing,
+  pinnedMetadata,
+} from './pin-support.ts';
 
 /**
  * Containment by DESCRIPTOR, which is the only containment this subsystem has.
@@ -31,10 +41,13 @@ import {
  * browse through an in-tree symlinked directory, and buys a containment proof that does not depend on
  * winning a race.
  *
- * WHY NON-LINUX FAILS CLOSED. The pin has to be handed to capabilities that only speak paths — `opendir`
- * and Git's working directory — and `/proc/<pid>/fd/<n>` is how a descriptor becomes such a path. Falling
- * back to the configured pathname would re-open the root-swap hole, so the whole surface refuses until
- * another platform has an equivalent descriptor-backed implementation.
+ * WHY THIS ONE IS LINUX-ONLY. The pin has to be handed to capabilities that only speak paths —
+ * `opendir` and Git's working directory — and `/proc/<pid>/fd/<n>` is how a descriptor becomes such a
+ * path. Falling back to the configured pathname would re-open the root-swap hole, so this
+ * implementation refuses outright anywhere that alias does not exist. Elsewhere the composition root
+ * chooses `PosixSessionRootPinner`, which reaches the same guarantee by installing the held directory
+ * rather than by naming it; that route works on Linux too, and this one is kept because a plain path
+ * alias needs no borrowing of anything global.
  *
  * ACCEPTED RESIDUAL RISKS.
  *
@@ -51,57 +64,6 @@ const HAS_PROCFS_PIN = process.platform === 'linux';
 
 function procPath(fd: number): string {
   return `/proc/${process.pid}/fd/${fd}`;
-}
-
-function errorCode(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === 'string' ? code : undefined;
-}
-
-/** Every way the kernel says "there is nothing usable at that name". */
-function isMissing(error: unknown): boolean {
-  const code = errorCode(error);
-  return code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP' || code === 'ENAMETOOLONG';
-}
-
-function componentIdentity(metadata: Stats): ComponentIdentity {
-  return { dev: metadata.dev, ino: metadata.ino, ctimeMs: metadata.ctimeMs, mode: metadata.mode };
-}
-
-function pinnedMetadata(metadata: Stats): PinnedMetadata {
-  const type = metadata.isDirectory() ? 'dir' : metadata.isFile() ? 'file' : 'other';
-  return { type, size: metadata.size, mtime: metadata.mtime.toISOString(), mode: metadata.mode };
-}
-
-function contains(rootReal: string, targetReal: string): boolean {
-  return targetReal === rootReal || targetReal.startsWith(`${rootReal}${path.sep}`);
-}
-
-/**
- * Root-relative CANONICAL path of a contained target, in the slash-joined shape the gates expect.
- *
- * This is what stops an in-root symlinked directory from laundering a denied or ignored target: `alias ->
- * .git` passes containment (its target IS inside the root) while the lexical path `alias/config` matches
- * no denylist entry and no ignore rule.
- */
-function canonicalRel(rootReal: string, targetReal: string): string | undefined {
-  if (targetReal === rootReal) return undefined;
-  return targetReal
-    .slice(rootReal.length + 1)
-    .split(path.sep)
-    .join('/');
-}
-
-function direntType(entry: {
-  isFile(): boolean;
-  isDirectory(): boolean;
-  isSymbolicLink(): boolean;
-}): FsEntryType | undefined {
-  if (entry.isSymbolicLink()) return 'symlink';
-  if (entry.isDirectory()) return 'dir';
-  if (entry.isFile()) return 'file';
-  return undefined; // fifo, socket, device — nothing a viewer can show
 }
 
 /** Was this component a symlink? Message fidelity only; the link is already refused. */
@@ -322,7 +284,7 @@ export class ProcfsSessionRootPinner implements SessionRootPinner {
     // A security precondition, not an optimisation: listings, Git and the component walk all need a path
     // alias for an already-open descriptor, and using `cwd` as a fallback would validate one tree and
     // serve another after a rename or symlink swap.
-    if (!HAS_PROCFS_PIN) throw new FsError('denied', 'filesystem viewing requires descriptor-backed procfs support');
+    if (!HAS_PROCFS_PIN) throw unsupportedPlatform(process.platform);
 
     const handle = await this.openRoot(cwd);
     try {

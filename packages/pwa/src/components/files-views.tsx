@@ -65,6 +65,26 @@ export const Loading = ({ what }: { what: string }) => (
   </Note>
 );
 
+/**
+ * The whole surface, refused by the daemon's machine — said ONCE, with nothing to press.
+ *
+ * Three panels for one condition is how this looked before, and two of them disagreed with the third
+ * about whether browsing worked. A condition that cannot change earns one statement, no Retry (a
+ * control guaranteed to fail is a lie in the shape of a button), and the daemon's own precise wording
+ * folded away for whoever needs to know WHICH mechanism is missing.
+ */
+export const Unavailable = ({ detail }: { detail: string | null }) => (
+  <Note tone="warn" role="status">
+    <span>Browsing this session’s files is not available on the computer running this daemon.</span>
+    {detail && (
+      <details className="kt-fs-why">
+        <summary>Why</summary>
+        <p className="kt-fs-why-body">{detail}</p>
+      </details>
+    )}
+  </Note>
+);
+
 export interface FailedProps {
   what: string;
   error: string;

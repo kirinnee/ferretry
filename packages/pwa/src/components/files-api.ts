@@ -207,10 +207,23 @@ export const resolveFsFilePaths = async (
 };
 export const isUnknownRoute = (error: unknown): boolean =>
   error instanceof DaemonResponseError && error.status === 404 && error.code === 'unknown_route';
+/**
+ * The daemon cannot serve this surface on the machine it runs on — a condition no retry changes.
+ *
+ * Matched on the CODE rather than on the status, because 501 is a shape a proxy or a tunnel can also
+ * produce, and prose is not a contract.
+ */
+export const isUnsupported = (error: unknown): boolean =>
+  error instanceof DaemonResponseError && error.code === 'unsupported';
 export const describeFsError = (error: unknown): string =>
   error instanceof TypeError ? 'could not reach the daemon' : error instanceof Error ? error.message : String(error);
 
-export type FsProbeState = 'probing' | 'ready' | 'absent' | 'error';
+/**
+ * `absent` is an older daemon with no such route; `unsupported` is a daemon that HAS the route and
+ * cannot serve it on its machine. They are separate because they earn different surfaces: the first
+ * hides the tab, the second states a reason once and offers nothing to retry.
+ */
+export type FsProbeState = 'probing' | 'ready' | 'absent' | 'error' | 'unsupported';
 export interface FsProbeSnapshot {
   state: FsProbeState;
   changes: FsChanges | null;
@@ -246,7 +259,9 @@ export const loadFsChanges = async (
   assertScopeDaemon(daemon, scope);
   const record = recordFor(scope);
   if (record.inflight && !force) return;
-  if (!force && (record.snapshot.state === 'ready' || record.snapshot.state === 'absent')) return;
+  // `unsupported` settles with `absent`: both are facts about the daemon rather than a moment, so
+  // re-asking only spends a request to be told the same thing.
+  if (!force && ['ready', 'absent', 'unsupported'].includes(record.snapshot.state)) return;
   const seq = ++record.seq;
   record.inflight = true;
   publish(record, record.snapshot.changes ? { refreshing: true, error: null } : { state: 'probing', error: null });
@@ -255,11 +270,15 @@ export const loadFsChanges = async (
     if (record.seq === seq) publish(record, { state: 'ready', changes, error: null, refreshing: false });
   } catch (error) {
     if (record.seq !== seq) return;
+    // The daemon's own words are KEPT for `unsupported`: they are the only place the reason is stated,
+    // and the pane shows them under a disclosure rather than dropping them.
     publish(
       record,
       isUnknownRoute(error)
         ? { state: 'absent', changes: null, error: null, refreshing: false }
-        : { state: 'error', error: describeFsError(error), refreshing: false },
+        : isUnsupported(error)
+          ? { state: 'unsupported', changes: null, error: describeFsError(error), refreshing: false }
+          : { state: 'error', error: describeFsError(error), refreshing: false },
     );
   } finally {
     if (record.seq === seq) record.inflight = false;
@@ -270,7 +289,12 @@ export const resetFsProbes = (): void => {
   probes.clear();
   pendingListings.clear();
 };
-export const fsTabAvailable = (state: FsProbeState): boolean => state === 'ready' || state === 'error';
+/**
+ * `unsupported` KEEPS the tab. A daemon that refuses the whole surface is a thing a reader has to be
+ * told once; silently dropping the tab leaves them hunting for a feature they were promised.
+ */
+export const fsTabAvailable = (state: FsProbeState): boolean =>
+  state === 'ready' || state === 'error' || state === 'unsupported';
 export interface FsProbe extends FsProbeSnapshot {
   refresh: () => void;
 }

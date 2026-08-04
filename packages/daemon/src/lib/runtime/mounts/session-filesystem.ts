@@ -34,6 +34,9 @@ const FS_ERROR_STATUS: Readonly<Record<FsErrorCode, number>> = {
   escapes_root: 403,
   denied: 403,
   ignored: 403,
+  // 501 rather than 403: the surface is not implemented on this machine, which is a statement about the
+  // daemon rather than about the caller's authority or the path they asked for.
+  unsupported: 501,
 };
 
 /** The path parameter, decoded. A parameter that regains a separator never reaches the pinner. */

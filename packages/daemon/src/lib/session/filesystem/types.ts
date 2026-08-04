@@ -51,7 +51,17 @@ export type FsErrorCode =
   | 'escapes_root'
   | 'denied'
   /** The gitignore gate, kept distinct from `denied` the same way the view flags are. */
-  | 'ignored';
+  | 'ignored'
+  /**
+   * This daemon cannot confine reads here AT ALL, so the whole surface is closed rather than a
+   * particular path refused.
+   *
+   * Kept distinct from `denied` because the two ask a client for opposite behaviour: a `denied` path is
+   * one refusal among many on a working surface, and retrying a different path is sensible. This is a
+   * property of the machine the daemon runs on, unchanged by any retry — a client that offers one is
+   * offering a control that cannot succeed.
+   */
+  | 'unsupported';
 
 /** Every refusal this subsystem raises. The code is the contract; the message is for a human. */
 export class FsError extends Error {
@@ -62,6 +72,30 @@ export class FsError extends Error {
     super(message);
     this.name = 'FsError';
   }
+}
+
+/** What a human calls the system they are running, so a refusal reads as a fact about their computer. */
+const PLATFORM_NAMES: Readonly<Record<string, string>> = { darwin: 'macOS', win32: 'Windows' };
+
+/**
+ * The one refusal a viewer shows verbatim, so it is written for BOTH of its readers.
+ *
+ * The first clause is what a person needs: the feature is missing on their machine, and it is neither
+ * their fault nor something they can configure away. The clause after the dash is what a developer
+ * needs, because a surface that only says "unavailable" sends them into the source to find out WHICH
+ * mechanism is absent. A client shows the first and folds the second away.
+ *
+ * The platform is an argument rather than something this layer reads, and an unknown one is named as
+ * the runtime spells it — a wrong-but-honest "sunos" beats inventing a friendly name for a system
+ * nobody here has tested.
+ */
+export function unsupportedPlatform(platform: string): FsError {
+  return new FsError(
+    'unsupported',
+    `file browsing is not available on ${PLATFORM_NAMES[platform] ?? platform} yet — this daemon ` +
+      'confines every read to the session folder by holding that folder open, and it has no way to ' +
+      'do that here',
+  );
 }
 
 /**
