@@ -589,6 +589,32 @@ try {
           await page.screenshot({ path: workspaceTarget });
           process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
 
+          // THE TOP BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves
+          // the bar's share of the viewport; this tighter image makes its actual
+          // spacing legible. At 390px the destination picker is a distinct state,
+          // and dismissal is part of the interaction contract, so capture both
+          // sides of the same production trigger instead of posing an already-
+          // open component in the harness.
+          const topBar = page.locator('[data-density-region="app-bar"]');
+          const topBarTarget = join(outDir, `top-bar-${viewport.name}.png`);
+          await topBar.screenshot({ path: topBarTarget });
+          process.stdout.write(`📸 top bar ${viewport.name} -> ${topBarTarget}\n`);
+          if (viewport.name === 'mobile') {
+            const destinationTrigger = page.getByRole('button', { name: 'Choose destination' });
+            await destinationTrigger.click();
+            const destinationDialog = page.getByRole('dialog', { name: 'Choose destination' });
+            await destinationDialog.waitFor({ state: 'visible' });
+            const pickerTarget = join(outDir, 'top-bar-picker-open-mobile.png');
+            await page.screenshot({ path: pickerTarget });
+            process.stdout.write(`📸 top bar picker open mobile -> ${pickerTarget}\n`);
+
+            await destinationDialog.getByRole('button', { name: 'Dismiss', exact: true }).click();
+            await destinationDialog.waitFor({ state: 'hidden' });
+            const dismissedTarget = join(outDir, 'top-bar-picker-dismissed-mobile.png');
+            await topBar.screenshot({ path: dismissedTarget });
+            process.stdout.write(`📸 top bar picker dismissed mobile -> ${dismissedTarget}\n`);
+          }
+
           // Geometry, printed rather than eyeballed. A screenshot cannot tell a
           // pinned tail apart from a transcript that happens to be short, and it
           // cannot show that the page itself never scrolls — which is the one
