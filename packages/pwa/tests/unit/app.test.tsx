@@ -453,17 +453,34 @@ describe('AppShell', () => {
 
   it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {
     const { reads, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
-    await settle();
-    const interrupt = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(button =>
-      button.textContent?.includes('Interrupt turn'),
-    );
+    try {
+      await settle();
+      const findInterrupt = () =>
+        Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(button =>
+          button.textContent?.includes('Interrupt turn'),
+        );
+      let interrupt = findInterrupt();
 
-    await interact(() => must(interrupt, 'the interrupt control').click());
-    await settle();
+      // This transport test must not depend on the process-global viewport.
+      // Compact truthfully keeps lifecycle actions in Session Details, so reach
+      // the same production control through that presentation when necessary.
+      if (interrupt === undefined) {
+        const details = must(
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="Open session details"]'),
+          'the session details control',
+        );
+        await interact(() => details.click());
+        interrupt = findInterrupt();
+      }
 
-    expect(reads).toEqual(['alpha:shared', 'alpha:shared']);
-    expect(transcriptReads).toEqual(['alpha:shared', 'alpha:shared']);
-    await view.unmount();
+      await interact(() => must(interrupt, 'the interrupt control').click());
+      await settle();
+
+      expect(reads).toEqual(['alpha:shared', 'alpha:shared']);
+      expect(transcriptReads).toEqual(['alpha:shared', 'alpha:shared']);
+    } finally {
+      await view.unmount();
+    }
   });
 
   it('mounts every daemon-qualified destination through its own slot', async () => {
