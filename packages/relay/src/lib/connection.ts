@@ -5,24 +5,26 @@
  *    address, a VPN, a public host. Fewest hops, fewest parties, lowest latency. It is the
  *    preferred carrier whenever it is configured and reachable, not a fallback, and nobody has to
  *    opt out of a relay to get it.
- * 2. **Your own relay** — the Workers rendezvous in this package, deployed to your own Cloudflare
- *    account, or reimplemented from the protocol document.
+ * 2. **Relay** — the Workers rendezvous in this package. Ferretry's metered hosted service is the
+ *    automatic fallback only after direct fails; running the same carrier in your own Cloudflare
+ *    account remains an expert override, not an onboarding choice. Who operates and pays for the
+ *    relay changes, but the wire protocol and security model do not.
  *
- * **There is no third option, and deliberately so.** A hosted relay anyone could reach would be a
- * free anonymous tunnel whose operator is structurally unable to see what it carries — the same
- * property that protects users protects abusers, and no amount of care recovers visibility the
- * design removed on purpose. Policing it would need enrolment, quotas and abuse response, which is
- * the service infrastructure this product exists to avoid. So a relay serves whoever deployed it
- * and nobody else, and there is no default relay address anywhere in this package: a relay is
- * configured, or there is no relay.
+ * A hosted relay anyone can reach is abusable precisely because its operator cannot read what it
+ * carries. Ferretry accepts that risk for its hosted deployment and bounds the bill with runtime
+ * metering and fail-safe caps. The address is still configuration: a remotely served advertisement
+ * can be changed or set to null without releasing this package, while a self-hosted address remains
+ * a value its owner supplies directly.
  *
  * The end-to-end layer is identical on both carriers. A direct socket is not "trusted because it
  * is direct": it runs the same handshake, pins the same fingerprint and authenticates every record
  * the same way. Choosing a carrier changes latency, dependency and what an onlooker can observe —
  * it never changes what protects the traffic.
  *
- * The carrier is per daemon, stored with the pairing, so one daemon can be direct on a home
- * network while another is relayed, both at once.
+ * The model is deliberately per daemon, so the future client mounting can persist one daemon as
+ * direct and another as relayed without inventing a global carrier switch. That persistence and
+ * transport are not mounted yet; this module defines the decision and disclosure contract they
+ * must consume.
  */
 
 import { z } from 'zod';
@@ -63,12 +65,22 @@ export const SocketEndpointSchema = z
 /**
  * The stored carrier choice for one daemon.
  *
- * A relay address is a field here and nowhere else. There is no default constant in this package,
- * so "bring your own relay" is not a mode to switch into — it is the only relay there is.
+ * A relay address is a field here and nowhere else. There is no default address constant in this
+ * package.
+ *
+ * `operator` selects nothing but the disclosure a surface owes the user — who runs the relay is not
+ * a wire difference, and both values take the identical path. It is optional because a stored record
+ * written before the field existed can only have described a relay its owner deployed, so absent is
+ * read as `'self'` rather than as an unknown: an old pairing keeps its exact meaning instead of
+ * being re-described as somebody else's service.
  */
 export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('direct'), daemonUrl: SocketEndpointSchema }),
-  z.strictObject({ kind: z.literal('relay'), relayUrl: SocketEndpointSchema }),
+  z.strictObject({
+    kind: z.literal('relay'),
+    relayUrl: SocketEndpointSchema,
+    operator: z.enum(['self', 'hosted']).optional(),
+  }),
 ]);
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
 
@@ -135,6 +147,24 @@ export function describeConnectionMethod(method: ConnectionMethod): ConnectionDi
       requires: [
         'The daemon address has to be reachable from wherever the browser is — same network, a VPN, a tailnet or a public host.',
         'The address must serve TLS unless it is loopback.',
+      ],
+    };
+  }
+  if (method.operator === 'hosted') {
+    return {
+      label: 'Hosted relay',
+      summary:
+        'Ferretry’s Cloudflare Worker passes ciphertext between you and the daemon. It works behind NAT without making you deploy infrastructure.',
+      observers: [
+        'Ferretry and Cloudflare see the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
+        'They see both IP addresses, when each side connects and for how long.',
+        'They see request counts, frame sizes and timing, and how many connections the daemon has.',
+        'They cannot read frame payloads, device tokens, session content, commands, output or names.',
+      ],
+      requires: [
+        'The hosted relay’s runtime advertisement must be enabled; the operator can disable it without an app release.',
+        'Traffic and connection use must remain below both the daemon’s ceilings and the hosted service’s global ceilings.',
+        'The same relay address must be configured on the daemon and this browser.',
       ],
     };
   }

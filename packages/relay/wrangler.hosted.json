@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ferretry-hosted-relay",
+  "main": "src/adapters/worker.ts",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": true,
+  "vars": {
+    "RELAY_MODE": "hosted"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RENDEZVOUS",
+        "class_name": "RendezvousDurableObject"
+      },
+      {
+        "name": "RELAY_CONTROL",
+        "class_name": "HostedRelayControlDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RendezvousDurableObject", "HostedRelayControlDurableObject"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

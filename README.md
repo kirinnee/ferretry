@@ -20,17 +20,17 @@ from the diene `bun-cli` conventions.
 
 ## Layout
 
-| Path                | What                                                          |
-| ------------------- | ------------------------------------------------------------- |
-| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs) |
-| `packages/protocol` | Placeholder — zod schemas + typed client SDK (P1)             |
-| `packages/daemon`   | Placeholder — the per-host daemon (P1)                        |
-| `packages/fleet`    | Placeholder — fleet management library + subcommands (P1)     |
-| `packages/pwa`      | Placeholder — the web app (P1)                                |
-| `packages/relay`    | Rendezvous protocol + the Workers relay you deploy yourself   |
-| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump     |
-| `scripts/validate`  | Repo invariants run by pre-commit                             |
-| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release     |
+| Path                | What                                                                           |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `packages/cli`      | The CLI binary (commander composition root, three-layer dirs)                  |
+| `packages/protocol` | Placeholder — zod schemas + typed client SDK (P1)                              |
+| `packages/daemon`   | Placeholder — the per-host daemon (P1)                                         |
+| `packages/fleet`    | Placeholder — fleet management library + subcommands (P1)                      |
+| `packages/pwa`      | Placeholder — the web app (P1)                                                 |
+| `packages/relay`    | Rendezvous protocol + the metered hosted Workers relay (and a self-hosted one) |
+| `scripts/release`   | Compile, GoReleaser shim, publish, smoke, installer, bump                      |
+| `scripts/validate`  | Repo invariants run by pre-commit                                              |
+| `Casks/`            | Homebrew cask, committed in-repo by GoReleaser on release                      |
 
 ## Development
 
@@ -44,6 +44,18 @@ task test           # unit + integration + SIT (compiled binary)
 task compile        # the 3 standalone binaries into dist/bin/
 task preview -- --help
 ```
+
+## Connecting to a daemon
+
+The browser tries a **direct** connection first and falls back to Ferretry's **hosted relay** when
+the daemon has no inbound route. Neither is a question anyone is asked during setup, and the live
+carrier is always named on screen. That is the required behaviour, not yet the shipped one: **the
+client transport is not wired** — neither `fyd` nor the PWA can route through a relay today, and
+[docs/relay-protocol.md](docs/relay-protocol.md) §13 names the remaining pieces. That document is
+also the wire contract and the disclosure of what a relay operator can and cannot observe.
+
+Running a relay of your own is supported but is an **expert opt-in path**, not part of setup:
+[docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md) is the runbook.
 
 ## Releasing
 

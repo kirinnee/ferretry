@@ -8,6 +8,7 @@ export * from './crypto.ts';
 export * from './flow.ts';
 export * from './frames.ts';
 export * from './handshake.ts';
+export * from './hosted.ts';
 export * from './identity.ts';
 export * from './rendezvous.ts';
 export * from './tenancy.ts';

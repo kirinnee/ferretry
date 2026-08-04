@@ -1,7 +1,7 @@
 {
-  // Deployment configuration for YOUR OWN relay. There is no shared deployment of this Worker and
-  // there is no relay address compiled into anything Ferretry ships: a relay is something you run,
-  // for the daemons you list, in the Cloudflare account you pay for.
+  // Deployment configuration for YOUR OWN relay. This path still serves exactly the fingerprints
+  // you list, in the Cloudflare account you pay for. Ferretry's separately operated deployment is
+  // `wrangler.hosted.json`; its mutable address, meters and caps never change this configuration.
   //
   //   1. put your daemon fingerprint in `vars.RELAY_DAEMON_IDS` below (`fy pair` prints it)
   //   2. `task relay:deploy`

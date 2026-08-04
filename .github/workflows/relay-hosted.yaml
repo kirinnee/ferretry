@@ -1,0 +1,209 @@
+name: Deploy Hosted Relay
+
+# Running a relay of your own — plans, token scopes, verification, teardown and costs — is
+# docs/cloudflare-relay-self-hosting.md. What this deployment can and cannot observe, and the wire
+# contract it serves, are docs/relay-protocol.md §13. None of this is part of ordinary product setup.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy, change the runtime kill switch, or read operator metrics
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - deploy
+          - enable
+          - disable
+          - metrics
+      relay_url:
+        description: Optional relay origin for enable; blank uses this Worker's workers.dev origin
+        required: false
+        type: string
+
+# Concurrency is deliberately per job rather than workflow-wide. A deploy publishes code; runtime
+# control flips one Durable Object value and touches no build artifact. Sharing a single group put
+# `disable` — the emergency stop — in a queue behind whatever deploy happened to be running. Each
+# group still serialises its own kind, so two deploys never race and two control writes never race.
+jobs:
+  deploy:
+    name: Deploy Worker and Durable Objects
+    # Production operations are main-only. `push` is already filtered to main; the guard is what
+    # stops a workflow_dispatch on an arbitrary ref from deploying that ref to production.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.operation == 'deploy')
+    concurrency:
+      group: hosted-relay-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # Cheap, credential-free, and the last chance to catch a config that would deploy a relay
+      # nobody can enable. It reads only files already in the checkout.
+      - name: Validate hosted relay configuration
+        run: nix develop .#ci -c ./scripts/validate/relay-config.sh
+      # This mirrors pwa-pages.yaml: Wrangler runs through the pinned nix shell rather than through
+      # a third-party action, and reads both Cloudflare credentials from the environment.
+      - name: Publish hosted relay
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+        run: |
+          set -euo pipefail
+
+          nix develop .#ci -c bash -c \
+            'cd packages/relay && bunx wrangler deploy --config wrangler.hosted.json'
+
+          # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
+          # Cloudflare token is never installed in the Worker; only this domain-separated digest is
+          # stored as a Worker secret. The same derivation authenticates the control-only job below.
+          operator_token="$({
+            printf 'ferretry-relay-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          # A derived value is not a registered secret, so GitHub masks nothing about it on its own.
+          # Register it the instant it exists, before it is used, so no later edit to this file — a
+          # `set -x`, a `curl -v`, a debugging echo — can print a live operator bearer into a log
+          # that anybody can read.
+          echo "::add-mask::$operator_token"
+          printf '%s' "$operator_token" | nix develop .#ci -c bash -c \
+            'cd packages/relay && bunx wrangler secret put RELAY_OPERATOR_TOKEN --config wrangler.hosted.json'
+
+          if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
+            worker_subdomain="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+                | jq -er '.result.subdomain'
+            )"
+            HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
+          fi
+
+          current="$(
+            curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 2 \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config"
+          )"
+          if [[ "$(jq -r '.configured' <<<"$current")" == "false" ]]; then
+            # The endpoint parses a STRICT input document — {version, relayUrl, limits} and nothing
+            # else — while GET returns the stored document, which also carries the server-owned
+            # `updatedAt`. Echoing GET back would be rejected, so project the three fields the
+            # operator actually owns. Projection rather than a delete: a field added server-side
+            # later must not silently start being sent back.
+            initial="$(jq -c --arg relay_url "$HOSTED_RELAY_ORIGIN" \
+              '.configuration | {version, relayUrl: $relay_url, limits}' <<<"$current")"
+            curl --fail --silent --show-error \
+              --request PUT \
+              --header "Authorization: Bearer $operator_token" \
+              --header 'Content-Type: application/json' \
+              --data-binary "$initial" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
+              | jq -e '.configured == true and .configuration.relayUrl != null' >/dev/null
+          else
+            echo "preserving existing hosted relay runtime configuration"
+          fi
+
+  control:
+    name: Runtime Control
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation != 'deploy'
+    # Its own group: `disable` is the emergency stop and must never wait on a deploy. Two control
+    # runs still serialise against each other, so a read never straddles a half-applied write.
+    concurrency:
+      group: hosted-relay-production-control
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read or change runtime state
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+          OPERATION: ${{ inputs.operation }}
+          REQUESTED_RELAY_URL: ${{ inputs.relay_url }}
+        run: |
+          set -euo pipefail
+
+          operator_token="$({
+            printf 'ferretry-relay-operator-v1\0'
+            printf '%s' "$CLOUDFLARE_API_TOKEN"
+          } | sha256sum | awk '{print $1}')"
+          # Same reasoning as the deploy job: mask the derived bearer before it is ever used.
+          # It is only in sync with the Worker's stored secret while CLOUDFLARE_API_TOKEN is
+          # unchanged — after rotating that token, run `deploy` once to reinstall the derived
+          # secret, or every operation here answers 401.
+          echo "::add-mask::$operator_token"
+          if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
+            worker_subdomain="$(
+              curl --fail --silent --show-error \
+                --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+                | jq -er '.result.subdomain'
+            )"
+            HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
+          fi
+
+          if [[ "$OPERATION" == "metrics" ]]; then
+            # The API stays daemon-keyed; this LOG does not. A fingerprint is public one at a time —
+            # it is printed in a pairing QR — but the full inventory of them is the list of everyone
+            # using this relay, and an Actions log on a public repository is readable by anyone. So
+            # print the operator summary and leave the per-daemon rows to the authenticated endpoint.
+            echo "per-daemon rows are omitted here on purpose; read them from" \
+              "GET \$HOSTED_RELAY_ORIGIN/v1/operator/metrics with the operator bearer"
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/metrics" \
+              | jq '{configured, configuration, global, observedAt, daemonCount: (.daemons | length)}'
+            exit 0
+          fi
+
+          current="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/config"
+          )"
+          # Both branches project the strict input document — {version, relayUrl, limits}. The stored
+          # document GET returns also carries the server-owned `updatedAt`, which the endpoint
+          # refuses, so the fields are named rather than echoed back.
+          if [[ "$OPERATION" == "disable" ]]; then
+            next="$(jq -c '.configuration | {version, relayUrl: null, limits}' <<<"$current")"
+          else
+            relay_url="${REQUESTED_RELAY_URL:-$HOSTED_RELAY_ORIGIN}"
+            # An operator-supplied origin is probed BEFORE anything is written. There is no health
+            # check behind the advertisement, so a typo would point every browser at nothing until
+            # somebody noticed. Probing first means a bad address changes no state at all: the check
+            # either passes and one PUT follows, or it fails and the stored configuration is exactly
+            # what it was. It asks only that the origin already serve this Worker — it does not ask
+            # for a deploy, and the default (this Worker's own origin) is not probed twice.
+            if [[ -n "$REQUESTED_RELAY_URL" ]]; then
+              curl --fail --silent --show-error "$relay_url/v1/default-relay" \
+                | jq -e '.version == 1 and has("relayUrl")' >/dev/null || {
+                echo "refusing to advertise ${relay_url}: it does not serve this Worker's" \
+                  "/v1/default-relay, so nothing was changed" >&2
+                exit 1
+              }
+            fi
+            next="$(jq -c --arg relay_url "$relay_url" \
+              '.configuration | {version, relayUrl: $relay_url, limits}' <<<"$current")"
+          fi
+          curl --fail --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer $operator_token" \
+            --header 'Content-Type: application/json' \
+            --data-binary "$next" \
+            "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
+            | jq
