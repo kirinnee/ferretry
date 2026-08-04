@@ -34,7 +34,7 @@ not conforming.
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
 `packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
 which-carrier-and-why sentence a surface can show verbatim. Discovery — learning the hosted relay's
-address and reading its kill switch — is provided by [PR #198](https://github.com/kirinnee/ferretry/pull/198).
+address and reading its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202).
 **What no branch has is the transport** — nothing dials or carries a relay session, so read this
 section as the contract both ends are being built against rather than as a description of what a
 phone does today. "What is not built yet" in §13 names the exact gap.
@@ -661,7 +661,7 @@ The relay is incapable of decrypting content, including when a cap is hit.
 The relay, the control plane, the caps and the disclosure text are implemented and tested. **The gap
 is the transport, and only the transport.**
 
-Discovery is answered by [PR #198](https://github.com/kirinnee/ferretry/pull/198): the PWA reads and
+Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
 parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
 the relay address and whether the operator has switched it off. What that does not do is use it.
 **Nothing dials or carries a relay session — not `fyd`, not the PWA transport, on any branch.** The
@@ -672,9 +672,9 @@ decision layer is here too (`connectionPreferenceOrder` orders direct first, `ch
 returns the which-carrier-and-why sentence); what is missing is the plumbing that would carry bytes
 over an address discovery hands it.
 
-Four named pieces. PR #198 provides the first two; the prerequisite is the other two:
+Four named pieces. PR #202 provides the first two; the prerequisite is the other two:
 
-1. **A build-time discovery origin in the PWA** — provided by #198. The relay lives on its own
+1. **A build-time discovery origin in the PWA** — provided by #202. The relay lives on its own
    hostname, so the
    browser cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is
    wrong**, and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is
@@ -682,7 +682,7 @@ Four named pieces. PR #198 provides the first two; the prerequisite is the other
    the same repository variable the relay's own deploy uses, and shipping no directory rather than
    guessing when unset. It is a _service_ address, not a user address: it identifies the relay,
    never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over.
-2. **A fetch-and-parse step** — also provided by #198 — that reads the advertisement through
+2. **A fetch-and-parse step** — also provided by #202 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
    treating `relayUrl: null` and any failure as "no hosted carrier".
 3. **A relay-capable transport on both ends** — the large piece, and entirely unstarted.
@@ -696,10 +696,10 @@ Four named pieces. PR #198 provides the first two; the prerequisite is the other
 4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for whichever carrier a live session won on.
 
-PR #198 also drops the carrier chooser from onboarding. That work is **discovery-only** and says so
-on its own screen, which is the honest description: a browser can read the address and the kill
-switch, and can do nothing with either. Combine it with this branch and the remaining gap is the
-transport, pieces 3 and 4.
+PR #202 also surfaces the live advertisement state in onboarding. That work is **discovery-only**
+and says so on its own screen, which is the honest description: a browser can read the address and
+the kill switch, and can do nothing with either. Combine it with this branch and the remaining gap
+is the transport, pieces 3 and 4.
 
 Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and

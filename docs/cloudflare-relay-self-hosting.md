@@ -353,16 +353,16 @@ request metadata.
 
 **There is no shipped interface for this step.** Nothing is missing from your relay; what is missing
 is the transport on the two ends that would dial one. Naming it precisely so you can tell when it
-lands — [PR #198](https://github.com/kirinnee/ferretry/pull/198) provides the first two, and neither
+lands — [PR #202](https://github.com/kirinnee/ferretry/pull/202) provides the first two, and neither
 helps you:
 
-1. **A build-time discovery-origin constant in the PWA** — provided by #198. The relay lives on its
+1. **A build-time discovery-origin constant in the PWA** — provided by #202. The relay lives on its
    own hostname, so the browser cannot find a relay advertisement at its own origin. A relative
    `/v1/default-relay` is wrong, and the PWA is served as a static Cloudflare Pages bundle — no
    Function, no proxy — so the discovery origin is compiled into the build as
    `FY_RELAY_DIRECTORY_ORIGIN`. That origin identifies a _service_; it is not a daemon URL and
    identifies no user.
-2. **A fetch-and-parse step** — also #198 — that reads the advertisement through
+2. **A fetch-and-parse step** — also #202 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier via `hostedRelayConnection`.
 3. **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
    - **The daemon.** `packages/daemon/src` has **no relay client and no relay configuration at
@@ -383,8 +383,8 @@ The decision layer those four would call is already written and tested in
 `packages/relay/src/lib/connection.ts`: `connectionPreferenceOrder` puts direct first,
 `chooseConnection` returns the plain sentence saying which carrier won and what it passed over.
 
-#198 also removes the carrier chooser from onboarding. It is **discovery-only**, and says on its own
-screen that nothing dials a relay, because nothing does.
+#202 also surfaces the live advertisement state in onboarding. It is **discovery-only**, and says on
+its own screen that nothing dials a relay, because nothing does.
 
 **None of that helps a relay of your own**, and it is worth being blunt about why: what a browser
 discovers is the **hosted** deployment's advertisement, and `/v1/default-relay` is a hosted-mode

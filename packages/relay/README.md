@@ -81,9 +81,9 @@ The protocol, both relay operating modes, the runtime control plane and operator
 implemented and tested.
 
 **The transport is not wired, and that is the honest limit of this package.**
-[PR #198](https://github.com/kirinnee/ferretry/pull/198) supplies the discovery half — the PWA reads
+[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies the discovery half — the PWA reads
 and parses `/v1/default-relay` from a build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
-the relay's address and whether the operator has switched it off — and drops the carrier chooser from
+the relay's address and whether the operator has switched it off — and surfaces that live state in
 onboarding. It stops there deliberately, and says so on the glass: nothing dials a relay.
 
 Nothing here does either. `packages/pwa/src/lib/daemon-transport.ts` builds every request from one
