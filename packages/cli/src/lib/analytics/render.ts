@@ -1,9 +1,16 @@
 import type { AnalyticsAggregateResult, AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
 import { DASH, compactNumber, duration, measure, percent, renderTable, usdMicros } from './format.ts';
 
-/** The one sentence every surface must print beside an equivalent cost. */
+/**
+ * The one sentence every surface must print beside an equivalent cost.
+ *
+ * It names the OPERATOR as the source of the rates because that is now where they come from, and a
+ * number attributed to a public table an operator never used is misattributed even when it happens
+ * to match. What the sentence must never stop saying is that this is not a bill: fleet accounts are
+ * commonly subscriptions, where marginal token cost is not what the human actually pays.
+ */
 export const EQUIVALENT_API_COST_CAVEAT =
-  'Equivalent API cost is what this usage would cost at public API rates — a comparison, not a bill.';
+  'Equivalent API cost is what this usage would cost at the rates this daemon’s operator configured — a comparison, not a bill.';
 
 const COVERAGE_LEGEND =
   '[known/total] marks a group the index cannot fully account for; no zero or partial value is substituted.';

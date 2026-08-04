@@ -133,6 +133,16 @@ export interface TranscriptUsageEvent extends TranscriptEventMetadata {
     readonly outputTokens?: number;
     readonly cachedInputTokens?: number;
     readonly cacheCreationInputTokens?: number;
+    /**
+     * The cache-write total split by retention, when the harness records it.
+     *
+     * Anthropic bills a 5-minute and a 1-hour cache write at DIFFERENT rates, so a total alone
+     * cannot be turned into money. These are carried separately rather than folded into
+     * `cacheCreationInputTokens` because a consumer that cannot see the split must be able to tell
+     * that it is missing and decline to price, instead of charging every write at one guessed rate.
+     */
+    readonly cacheWrite5mInputTokens?: number;
+    readonly cacheWrite1hInputTokens?: number;
     readonly reasoningTokens?: number;
     readonly contextTokens?: number;
     readonly contextWindow?: number;

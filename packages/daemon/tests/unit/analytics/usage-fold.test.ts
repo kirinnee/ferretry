@@ -1,0 +1,246 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { type AnalyticsTranscriptEvidence, foldAnalyticsSessionUsage } from '../../../src/lib/analytics/usage-fold.ts';
+import type { TranscriptEvent, TranscriptHarness } from '../../../src/lib/transcript/types.ts';
+
+type UsageFigures = NonNullable<Extract<TranscriptEvent, { kind: 'usage' }>>['usage'];
+
+const usageEvent = (usage: UsageFigures, harness: TranscriptHarness = 'claude'): TranscriptEvent => ({
+  harness,
+  role: 'system',
+  kind: 'usage',
+  usage,
+});
+
+const settingsEvent = (model: string, harness: TranscriptHarness = 'claude'): TranscriptEvent => ({
+  harness,
+  role: 'system',
+  kind: 'settings',
+  settings: { model },
+});
+
+const messageEvent = (harness: TranscriptHarness = 'claude'): TranscriptEvent => ({
+  harness,
+  role: 'assistant',
+  kind: 'message',
+  text: 'not a usage record',
+});
+
+const read = (
+  events: readonly TranscriptEvent[],
+  patch: Partial<Extract<AnalyticsTranscriptEvidence, { kind: 'read' }>> = {},
+): AnalyticsTranscriptEvidence => ({ kind: 'read', harness: 'claude', events, issues: [], pendingBytes: 0, ...patch });
+
+describe('analytics session usage fold', () => {
+  it('should sum every request a Claude session billed and report gross input', () => {
+    // Arrange: two turns, each billing its own full input. Anthropic reports uncached input only,
+    // so the gross figure has to add the cache read and the cache write back in.
+    const evidence = read([
+      settingsEvent('claude-opus-5'),
+      usageEvent({
+        inputTokens: 10,
+        outputTokens: 4,
+        cachedInputTokens: 3,
+        cacheCreationInputTokens: 2,
+        cacheWrite5mInputTokens: 2,
+        cacheWrite1hInputTokens: 0,
+        model: 'claude-opus-5',
+      }),
+      messageEvent(),
+      usageEvent({
+        inputTokens: 20,
+        outputTokens: 6,
+        cachedInputTokens: 5,
+        cacheCreationInputTokens: 1,
+        cacheWrite5mInputTokens: 1,
+        cacheWrite1hInputTokens: 0,
+        model: 'claude-opus-5',
+      }),
+    ]);
+
+    // Act
+    const actual = foldAnalyticsSessionUsage(evidence);
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'usage',
+      usage: {
+        pricingModel: 'claude-opus-5',
+        inputTokens: 15 + 26,
+        outputTokens: 10,
+        cachedInputTokens: 8,
+        cacheWriteInputTokens: 3,
+        cacheWrite5mInputTokens: 3,
+        cacheWrite1hInputTokens: 0,
+      },
+    });
+  });
+
+  it('should treat a Codex prompt total as already containing its cached portion', () => {
+    // Arrange: Codex names the cached tokens as a subset of the prompt total, so gross input is the
+    // reported figure and must not have the cached part added to it a second time. Codex records its
+    // model in the turn context rather than on the usage record.
+    const evidence = read(
+      [
+        settingsEvent('gpt-5.6-codex', 'codex'),
+        usageEvent({ inputTokens: 20, outputTokens: 5, cachedInputTokens: 10 }, 'codex'),
+      ],
+      { harness: 'codex' },
+    );
+
+    // Act
+    const actual = foldAnalyticsSessionUsage(evidence);
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'usage',
+      usage: {
+        pricingModel: 'gpt-5.6-codex',
+        inputTokens: 20,
+        outputTokens: 5,
+        cachedInputTokens: 10,
+        cacheWriteInputTokens: 0,
+        cacheWrite5mInputTokens: 0,
+        cacheWrite1hInputTokens: 0,
+      },
+    });
+  });
+
+  it('should report tokens but claim no pricing model when a session ran under several', () => {
+    // A token count does not depend on which model produced it, so the total still stands. A single
+    // price cannot be attributed across two models, so none is claimed and the cost stays unpriced.
+    const actual = foldAnalyticsSessionUsage(
+      read([
+        usageEvent({ inputTokens: 4, outputTokens: 1, model: 'claude-opus-5' }),
+        usageEvent({ inputTokens: 6, outputTokens: 2, model: 'claude-sonnet-5' }),
+      ]),
+    );
+
+    should(actual).deepEqual({
+      kind: 'usage',
+      usage: {
+        pricingModel: null,
+        inputTokens: 10,
+        outputTokens: 3,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 0,
+        cacheWrite5mInputTokens: 0,
+        cacheWrite1hInputTokens: 0,
+      },
+    });
+  });
+
+  it('should claim no pricing model when no record names one', () => {
+    const actual = foldAnalyticsSessionUsage(read([usageEvent({ inputTokens: 4, outputTokens: 1 })]));
+
+    should(actual).containDeep({ kind: 'usage', usage: { pricingModel: null } });
+  });
+
+  it('should withhold a cache-write split that does not account for the whole write', () => {
+    // A partial split priced as if it were complete would charge the remainder at nothing. Reporting
+    // it as absent makes the pricing step refuse rather than undercharge.
+    const actual = foldAnalyticsSessionUsage(
+      read([
+        usageEvent({
+          inputTokens: 10,
+          outputTokens: 1,
+          cacheCreationInputTokens: 6,
+          cacheWrite5mInputTokens: 2,
+          cacheWrite1hInputTokens: 1,
+          model: 'claude-opus-5',
+        }),
+      ]),
+    );
+
+    should(actual).containDeep({
+      kind: 'usage',
+      usage: { cacheWriteInputTokens: 6, cacheWrite5mInputTokens: null, cacheWrite1hInputTokens: null },
+    });
+  });
+
+  it('should refuse rather than report a total it cannot prove complete', () => {
+    // Every one of these is a session that spent an UNKNOWN amount. None of them is a free session,
+    // so none may fold to zero tokens.
+    should(foldAnalyticsSessionUsage({ kind: 'unresolved' })).deepEqual({
+      kind: 'refused',
+      reason: 'transcript_unresolved',
+    });
+    should(foldAnalyticsSessionUsage({ kind: 'unreadable' })).deepEqual({
+      kind: 'refused',
+      reason: 'transcript_unreadable',
+    });
+    should(
+      foldAnalyticsSessionUsage(read([usageEvent({ inputTokens: 4, outputTokens: 1 })], { issues: ['invalid-json'] })),
+    ).deepEqual({ kind: 'refused', reason: 'transcript_damaged' });
+    should(
+      foldAnalyticsSessionUsage(
+        read([usageEvent({ inputTokens: 4, outputTokens: 1 })], { issues: ['source-truncated'] }),
+      ),
+    ).deepEqual({ kind: 'refused', reason: 'transcript_damaged' });
+    should(
+      foldAnalyticsSessionUsage(read([usageEvent({ inputTokens: 4, outputTokens: 1 })], { pendingBytes: 12 })),
+    ).deepEqual({ kind: 'refused', reason: 'transcript_incomplete' });
+    should(foldAnalyticsSessionUsage(read([messageEvent()]))).deepEqual({
+      kind: 'refused',
+      reason: 'no_usage_evidence',
+    });
+  });
+
+  it('should tolerate issues about records it did inspect', () => {
+    // An unsupported or partially modelled record still PARSED, so the parser can state that it
+    // carried no usage figure. Refusing on those would make the feature answer nothing in practice.
+    const actual = foldAnalyticsSessionUsage(
+      read([usageEvent({ inputTokens: 4, outputTokens: 1, model: 'claude-opus-5' })], {
+        issues: ['unsupported-record', 'invalid-tool-input', 'invalid-record'],
+      }),
+    );
+
+    should(actual).containDeep({ kind: 'usage', usage: { inputTokens: 4 } });
+  });
+
+  it('should refuse a token figure whose accounting it cannot state', () => {
+    // A fractional or negative count is a record this daemon does not understand.
+    should(foldAnalyticsSessionUsage(read([usageEvent({ inputTokens: 1.5, outputTokens: 1 })]))).deepEqual({
+      kind: 'refused',
+      reason: 'ambiguous_token_accounting',
+    });
+    should(foldAnalyticsSessionUsage(read([usageEvent({ inputTokens: -1, outputTokens: 1 })]))).deepEqual({
+      kind: 'refused',
+      reason: 'ambiguous_token_accounting',
+    });
+    // Codex gives no basis for saying whether a cache WRITE sits inside its prompt total or beside
+    // it, and the two readings differ by the write itself.
+    should(
+      foldAnalyticsSessionUsage(
+        read([usageEvent({ inputTokens: 10, outputTokens: 1, cacheCreationInputTokens: 3 }, 'codex')], {
+          harness: 'codex',
+        }),
+      ),
+    ).deepEqual({ kind: 'refused', reason: 'ambiguous_token_accounting' });
+    // A total that has left the safe-integer range is no longer arithmetic anyone can check.
+    should(
+      foldAnalyticsSessionUsage(
+        read([
+          usageEvent({ inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 }),
+          usageEvent({ inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 1 }),
+        ]),
+      ),
+    ).deepEqual({ kind: 'refused', reason: 'ambiguous_token_accounting' });
+  });
+
+  it('should keep the last turn context when a later turn does not restate it', () => {
+    const actual = foldAnalyticsSessionUsage(
+      read(
+        [
+          settingsEvent('gpt-5.6-codex', 'codex'),
+          usageEvent({ inputTokens: 4, outputTokens: 1 }, 'codex'),
+          { harness: 'codex', role: 'system', kind: 'settings', settings: { reasoningEffort: 'high' } },
+          usageEvent({ inputTokens: 6, outputTokens: 2 }, 'codex'),
+        ],
+        { harness: 'codex' },
+      ),
+    );
+
+    should(actual).containDeep({ kind: 'usage', usage: { pricingModel: 'gpt-5.6-codex', inputTokens: 10 } });
+  });
+});

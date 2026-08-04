@@ -121,6 +121,12 @@ function claudeUsage(
   const outputTokens = transcriptNumber(usage.output_tokens);
   const cachedInputTokens = transcriptNumber(usage.cache_read_input_tokens);
   const cacheCreationInputTokens = transcriptNumber(usage.cache_creation_input_tokens);
+  // Anthropic prices a 5-minute and a 1-hour cache write differently, and reports the split in a
+  // nested `cache_creation` object beside the total. It is read HERE, at the only place that sees
+  // the harness record, because nothing downstream can recover a split from a total.
+  const cacheCreation = transcriptObject(usage.cache_creation);
+  const cacheWrite5mInputTokens = transcriptNumber(cacheCreation?.ephemeral_5m_input_tokens);
+  const cacheWrite1hInputTokens = transcriptNumber(cacheCreation?.ephemeral_1h_input_tokens);
   const tokenValues = [inputTokens, outputTokens, cachedInputTokens, cacheCreationInputTokens].filter(
     (value): value is number => value !== undefined,
   );
@@ -140,6 +146,8 @@ function claudeUsage(
       outputTokens,
       cachedInputTokens,
       cacheCreationInputTokens,
+      cacheWrite5mInputTokens,
+      cacheWrite1hInputTokens,
       contextTokens,
       model: transcriptString(message.model),
     },

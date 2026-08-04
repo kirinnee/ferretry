@@ -130,7 +130,7 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               <h1 className="m-0 mt-1 font-display text-2xl font-semibold leading-tight text-fg">Global analytics</h1>
               <p className="m-0 mt-1 max-w-[68ch] text-cell leading-base text-muted">
                 Query every indexed session. The daily default drives the charts and ledger below from one daemon
-                response; cached reads and writes retain their harness-specific public API rates.
+                response; cached reads and writes retain their harness-specific rates from the operator's catalog.
               </p>
             </div>
             <div className="flex items-center gap-2 border-t border-border-soft pt-2 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
@@ -234,8 +234,8 @@ export function GlobalAnalyticsPage({ connection, requestAnalytics = fetchAnalyt
               Index: {result.index.tokenSessions} token-complete of {result.index.sessions};{' '}
               {result.index.pendingTranscriptSources} source
               {result.index.pendingTranscriptSources === 1 ? '' : 's'} pending
-              {result.index.refreshing ? ' (backfill in progress)' : ''}. Equivalent API cost compares public API rates;
-              it is never subscription spend.
+              {result.index.refreshing ? ' (backfill in progress)' : ''}. Equivalent API cost applies the rates this
+              daemon's operator configured; it is never subscription spend.
             </p>
           )}
         </section>

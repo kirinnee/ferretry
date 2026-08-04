@@ -169,7 +169,10 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import {
   type AccountInventoryPort,
+  type AnalyticsPricingRate,
+  type AnalyticsSessionUsage,
   type AnalyticsSubsystem,
+  type AnalyticsTranscriptEvidenceSource,
   type ApiServerHandle,
   type ApiServerPort,
   type AssigneeObservation,
@@ -211,8 +214,9 @@ import {
   type FinishedAnalyticsSession,
   FleetEventStreamService,
   type FoundationPaths,
-  harnessMigrationRefusal,
+  foldAnalyticsSessionUsage,
   HarnessQuirkService,
+  harnessMigrationRefusal,
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isTaskBoardError,
@@ -307,6 +311,7 @@ import {
   TmuxController,
   type TranscriptEvent,
   type TranscriptFileResolver,
+  type TranscriptHarness,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
@@ -568,6 +573,8 @@ export interface DaemonWorld {
     stt: SttSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
+    /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
+    pricingCatalog: readonly AnalyticsPricingRate[],
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
     socketTickets: SocketTicketBroker,
@@ -2015,6 +2022,14 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
 }
 
 /**
+ * How many finished sessions may have their transcripts folded at once.
+ *
+ * Small on purpose. Each read is individually bounded, so the risk is never one enormous file — it
+ * is a fleet's worth of bounded reads resident at the same instant.
+ */
+const ANALYTICS_FOLD_CONCURRENCY = 4;
+
+/**
  * The analytics read, over the same authoritative session documents the rest of the daemon serves.
  *
  * A session counts as FINISHED when its state document carries a finish instant. Deciding it from
@@ -2025,12 +2040,31 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
  * than contributed with holes: an analytics row assembled from a config the schema rejected is a row
  * whose provenance nobody can state.
  *
- * The pricing catalog is EMPTY, and deliberately so. Rates are operator doctrine, the daemon mounts
- * no source for them, and an empty catalog makes every cost `unpriced` with a reason — which is the
+ * The pricing catalog comes from this daemon's validated operator configuration. It is never shared
+ * between daemon state homes, and an empty catalog makes every cost `unpriced` with a reason — the
  * honest answer. A hardcoded table would price historical runs off numbers nobody in this deployment
  * agreed to; a zero would read as free.
+ *
+ * TOKEN TOTALS COME FROM THE SESSION'S OWN TRANSCRIPT, folded once per session and then remembered.
+ * A session only reaches here after recording a finish instant, so its transcript is final and a
+ * second read could only produce the same answer more expensively. A fold this daemon REFUSED
+ * leaves `usage` null, which reports the session's tokens as unknown and its cost as unpriced — the
+ * two things a session with unreadable evidence actually is. It never reports them as zero.
  */
-function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
+function createAnalyticsSubsystem(
+  storage: DaemonStorage,
+  pricingCatalog: readonly AnalyticsPricingRate[],
+  evidence: AnalyticsTranscriptEvidenceSource,
+): AnalyticsSubsystem {
+  const usageBySession = new Map<string, AnalyticsSessionUsage | null>();
+  const sessionUsage = async (id: SessionId, harness: TranscriptHarness): Promise<AnalyticsSessionUsage | null> => {
+    const remembered = usageBySession.get(id);
+    if (remembered !== undefined) return remembered;
+    const fold = foldAnalyticsSessionUsage(await evidence.evidenceFor(id, harness));
+    const usage = fold.kind === 'usage' ? fold.usage : null;
+    usageBySession.set(id, usage);
+    return usage;
+  };
   const finishedRecord = async (id: SessionId): Promise<FinishedAnalyticsSession | undefined> => {
     const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
     const config = SessionConfigSchema.safeParse(rawConfig);
@@ -2061,16 +2095,27 @@ function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
       failed: state.data.status === 'failed',
       migrated: config.data.migration !== undefined,
       completed: state.data.status === 'completed',
-      // No per-session token totals are recorded anywhere the daemon can read. See the mount.
-      usage: null,
+      // Transcript evidence, folded across every request the session made. Null means this daemon
+      // could not prove a total, never that the session was free.
+      usage: await sessionUsage(id, config.data.harness === 'codex' ? 'codex' : 'claude'),
     };
   };
   return {
     finished: async () => {
-      const sessions = await Promise.all(storage.listSessions().map(session => finishedRecord(session.id)));
-      return sessions.filter((session): session is FinishedAnalyticsSession => session !== undefined);
+      // Read in bounded batches rather than all at once. Each transcript read is capped on its own,
+      // but a fleet with hundreds of finished sessions would still hold every one of those caps in
+      // memory simultaneously under an unbounded `Promise.all`.
+      const ids = storage.listSessions().map(session => session.id);
+      const sessions: FinishedAnalyticsSession[] = [];
+      for (let start = 0; start < ids.length; start += ANALYTICS_FOLD_CONCURRENCY) {
+        const batch = await Promise.all(
+          ids.slice(start, start + ANALYTICS_FOLD_CONCURRENCY).map(id => finishedRecord(id)),
+        );
+        sessions.push(...batch.filter((session): session is FinishedAnalyticsSession => session !== undefined));
+      }
+      return sessions;
     },
-    pricing: () => [],
+    pricing: () => pricingCatalog,
   };
 }
 
@@ -2610,6 +2655,39 @@ export function buildWorld(): DaemonWorld {
       },
     };
   };
+  /**
+   * A finished session's whole transcript, read once, for the analytics token total.
+   *
+   * It is a SEPARATE read from `createSessionTranscriptTail` because the two want opposite things:
+   * a tail wants the last few events and does not care what it skipped, while a bill has to account
+   * for every request the session made. This one therefore reports how the read ENDED — the issues
+   * raised and the bytes still pending — so the fold can refuse a total it cannot prove complete
+   * instead of returning a smaller number that looks like a cheaper session.
+   *
+   * The parsed events are NOT retained. The subsystem memoizes the small folded total instead, so a
+   * transcript's bytes live only as long as the fold that consumes them; holding the event list per
+   * session is how a daemon with a busy fleet runs itself out of memory.
+   */
+  const createAnalyticsTranscriptEvidence = (storage: DaemonStorage): AnalyticsTranscriptEvidenceSource => {
+    const resolver = createTranscriptFileResolver(storage);
+    return {
+      evidenceFor: async (sessionId, harness) => {
+        const file = await resolver.file(sessionId).catch(() => undefined);
+        if (file === undefined) return { kind: 'unresolved' };
+        const source = transcriptSources.find(candidate => candidate.harness === harness);
+        if (source === undefined) return { kind: 'unreadable' };
+        const batch = await source.read(file, { sessionId }).catch(() => undefined);
+        if (batch === undefined) return { kind: 'unreadable' };
+        return {
+          kind: 'read',
+          harness,
+          events: batch.events,
+          issues: batch.issues.map(issue => issue.code),
+          pendingBytes: batch.cursor.pendingBytes,
+        };
+      },
+    };
+  };
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -2887,6 +2965,7 @@ export function buildWorld(): DaemonWorld {
       browserLogin,
       stt,
       catalogs,
+      pricingCatalog,
       pairing,
       socketTickets,
     ) => {
@@ -3088,7 +3167,7 @@ export function buildWorld(): DaemonWorld {
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         taskBoards: boards,
-        analytics: createAnalyticsSubsystem(storage),
+        analytics: createAnalyticsSubsystem(storage, pricingCatalog, createAnalyticsTranscriptEvidence(storage)),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
         names: createNameSubsystem(storage),
@@ -3296,6 +3375,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLogin.window,
     world.stt,
     catalogs,
+    config.analyticsPricing,
     pairing.subsystem,
     world.createSocketTickets(),
   );

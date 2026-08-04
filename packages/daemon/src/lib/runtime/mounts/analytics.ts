@@ -23,21 +23,30 @@ import { rebuildAnalyticsSessionIndex, type FinishedAnalyticsSession } from '../
  * tens of sessions has nothing to gain from caching a derivation this cheap. `refreshing` is
  * therefore always `false`: there is no background pass that could be mid-flight.
  *
- * WHAT IS DELIBERATELY NOT SERVED HERE.
+ * WHAT IS AND IS NOT CLAIMED HERE.
  *
- * TOKEN AND COST COLUMNS ARE NULL. Per-session token totals are TRANSCRIPT evidence, and the daemon
- * mounts no analytics transcript ingestion: nothing folds a harness transcript's usage records into
- * a session total. So `usage` is reported absent, every token column comes back `null`, the
- * `token_data` label answers `unknown`, and `tokenSessions` counts what is actually known — zero
- * today. Deriving a token count from `contextTokens`, the only token-shaped number the daemon does
- * hold, would put a number on the board that measures the context window rather than the spend.
+ * TOKEN COLUMNS ARE TRANSCRIPT EVIDENCE, OR THEY ARE NULL. A session's total is folded from its own
+ * transcript's usage records, summed across every request the session made. Where that evidence is
+ * missing, damaged or ambiguous the fold REFUSES, `usage` is absent, every token column comes back
+ * `null` and the `token_data` label answers `unknown`. It is never reported as zero, because a
+ * session whose evidence could not be read spent an unknown amount rather than nothing. Deriving a
+ * count from `contextTokens` instead would put a number on the board that measures the context
+ * window rather than the spend.
  *
- * COSTS ARE UNPRICED, NOT ZERO. Pricing needs an operator-owned rate catalog and the daemon has no
- * source mounted for one, so the catalog arrives empty and every snapshot is `unpriced` with a
- * reason. An empty catalog can never produce a cost, which is the point: a zero would read as free.
+ * COSTS ARE UNPRICED, NOT ZERO. Pricing needs an operator-owned rate catalog, supplied per daemon
+ * and never guessed. A model the operator did not price stays `unpriced` with a reason, as does a
+ * session whose tokens could not be established, whose model the transcript does not name, or which
+ * ran under more than one model — that last one because a row carries a single price and charging a
+ * whole run at one of its models would misattribute the rest. An empty catalog therefore prices
+ * nothing at all, which is the point: a zero would read as free.
  *
- * `transcriptSources` and its companions are `0` for the same reason — this index reads durable
- * session documents only, so there are no transcript sources to be behind on.
+ * COST IS API-EQUIVALENT, NOT SPEND. What a priced row states is what the same tokens would have
+ * cost at the operator's per-token rates. Fleet accounts are commonly subscriptions, where marginal
+ * token cost is not what the human pays, so this number must never be presented as a bill.
+ *
+ * `transcriptSources` and its companions are `0` because this index holds no durable transcript
+ * cursor — each fold is derived on demand from the session's own file, so there is no ingestion
+ * backlog that could be behind.
  */
 
 /**
