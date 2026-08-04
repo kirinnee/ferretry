@@ -174,11 +174,13 @@ export class FakeFiles implements IServiceFilePort {
 export class FakeNixGcRoot implements INixGcRootPort {
   /** Maps a path to what it really resolves to; anything absent resolves to itself. */
   readonly links = new Map<string, string>();
+  readonly realPaths: string[] = [];
   readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
   readonly released: string[] = [];
   failure: string | undefined;
 
   realPath(path: string): Promise<string> {
+    this.realPaths.push(path);
     return Promise.resolve(this.links.get(path) ?? path);
   }
 

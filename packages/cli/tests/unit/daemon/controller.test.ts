@@ -487,7 +487,9 @@ describe('nix garbage-collection root', () => {
     await subject.controller[verb]();
 
     // Assert — the ROOT of the store output, not the executable inside it: `nix-store --realise`
-    // takes a store path, and rooting the output is what keeps the whole install alive.
+    // takes a store path. The copied current binary is outside the store, so its verified manifest
+    // source — not the runtime symlink or today's configured build input — must drive classification.
+    should(subject.nix.realPaths).deepEqual([STORE_BINARY]);
     should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
     should(subject.out.text).not.containEql('could not be pinned');
   });
@@ -516,6 +518,26 @@ describe('nix garbage-collection root', () => {
     // Assert
     should(subject.nix.pinned).deepEqual([]);
     should(subject.out.text).containEql('fyd ready');
+  });
+
+  it('should pin the snapshot returned by first-run bootstrap', async () => {
+    // Arrange — promotion returns the just-built manifest. The live source configured in the layout
+    // is deliberately /opt, proving that the promoted manifest is the authority for what will run.
+    const snapshots = new FakeSnapshots();
+    const built = daemonSnapshot({ id: `sha256-${'c'.repeat(64)}`, sourceBinary: STORE_BINARY });
+    snapshots.currentAnswer = undefined;
+    snapshots.buildAnswer = { ...built, created: true };
+    snapshots.listAnswer = [built];
+    const nix = new FakeNixGcRoot();
+    const subject = harness({ serviceInstalled: false, probes: [undefined, health()], snapshots, nix });
+
+    // Act
+    await subject.controller.install();
+
+    // Assert
+    should(snapshots.calls).deepEqual(['current', 'build', `promote:${built.id}`]);
+    should(nix.realPaths).deepEqual([STORE_BINARY]);
+    should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
   });
 
   it('should start the daemon anyway when the pin fails, and say so', async () => {
@@ -567,11 +589,12 @@ describe('daemon snapshots', () => {
     // Arrange
     const snapshots = new FakeSnapshots();
     snapshots.currentError = new Error('current snapshot digest mismatch');
-    const { controller, service } = harness({ snapshots });
+    const { controller, service, nix } = harness({ snapshots });
 
     // Act + Assert
     await should(controller.restart()).be.rejectedWith(/digest mismatch/u);
     should(service.calls).be.empty();
+    should(nix.realPaths).be.empty();
   });
 
   it('should build without promotion and say whether the content was new', async () => {

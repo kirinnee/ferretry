@@ -1,5 +1,6 @@
 import type { HealthView } from '@ferretry/protocol';
 import type { DaemonLayout } from './layout.ts';
+import { nixStorePathOf } from './nix-store.ts';
 import type {
   DaemonSnapshot,
   DaemonStartHandle,
@@ -12,7 +13,6 @@ import type {
   INixGcRootPort,
   IServiceDefinitionSupervisor,
 } from './ports.ts';
-import { nixStorePathOf } from './nix-store.ts';
 import { livenessOf } from './probe.ts';
 import {
   beginReadinessWait,
@@ -120,8 +120,8 @@ export class DaemonController {
     }
     const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
-    await this.#refreshDefinition(owner);
     await this.#pinDaemonBinary(snapshot);
+    await this.#refreshDefinition(owner);
     const handle = await owner.start();
     const health = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
@@ -214,13 +214,13 @@ export class DaemonController {
   }
 
   /**
-   * Hold a Nix-store daemon against garbage collection, or say why we could not.
+   * Hold the Nix-store closure a copied daemon snapshot still depends on, or say why we could not.
    *
-   * `nix shell github:…` is a supported way to run this, and it leaves the executable in the store
-   * with nothing rooting it — so a later `nix-collect-garbage` deletes it out from under an installed
-   * service, which then breaks with no user action. Any other installation resolves outside the store
-   * and is left alone. A failure is reported and the verb continues: an unpinned daemon that runs
-   * beats a working install refused over a pin that did not take.
+   * `nix shell github:…` is a supported way to run this. The promoted executable is an ordinary copy,
+   * but its ELF interpreter, RPATH or script interpreter can still name the Nix output recorded as
+   * `sourceBinary` in its verified manifest. Any other source resolves outside the store and is left
+   * alone. A failure is reported and the verb continues: an unpinned daemon that runs beats a working
+   * install refused over a pin that did not take.
    */
   async #pinDaemonBinary(snapshot: DaemonSnapshot): Promise<void> {
     // The promoted executable is a copied file outside /nix/store. Its manifest records the real
@@ -231,8 +231,9 @@ export class DaemonController {
     const failure = await this.deps.nix.pin(storePath, this.deps.layout.nixGcRoot);
     if (failure === undefined) return;
     this.deps.out.warn(
-      `${this.#name} runs from the Nix store but could not be pinned against garbage collection (${failure}); ` +
-        `a later nix-collect-garbage may delete it — install with \`nix profile install\` to have Nix hold it instead`,
+      `${this.#name} snapshot was built from the Nix store but its runtime closure could not be pinned ` +
+        `against garbage collection (${failure}); a later nix-collect-garbage may remove dependencies ` +
+        `the snapshot needs — install with \`nix profile install\` to have Nix hold them instead`,
     );
   }
 
