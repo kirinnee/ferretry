@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -24,19 +24,27 @@ const DAEMON_NAME = 'fyd';
 const REFUSAL = 'is non-empty but has no layout-version marker';
 
 /**
- * Points the CLI at the bootstrap-only stand-in and leaves this run's leased port where it looks.
+ * Installs the bootstrap-only stand-in and leaves its relocatable sidecars where the child looks.
  *
- * The stand-in runs where it lives: it imports the daemon package by relative path, so a copy in the
- * fixture's bin directory would not resolve. `fy daemon start` hands its child only `FY_HOME` and
- * `PATH`, so the port travels in a file in the bin directory — the first `PATH` entry.
+ * `fy daemon start` hands its child only `FY_HOME` and `PATH`, so both the leased port and repository
+ * module root travel in files in the bin directory — the first `PATH` entry. The executable is copied
+ * here and again into the snapshot store, proving neither location-relative import can sneak back in.
  */
 async function installStandInDaemon(environment: E2eEnvironment): Promise<string> {
-  const executable = await environment.assertSafePath(
+  const source = await environment.assertSafePath(
     join(environment.repositoryRoot, 'scripts', 'test', 'bootstrap-only-fyd.ts'),
-    'stand-in daemon',
+    'stand-in daemon source',
   );
+  const executable = await environment.assertSafePath(join(environment.paths.bin, DAEMON_NAME), 'stand-in daemon');
   await environment.releasePorts();
+  await copyFile(source, executable);
+  await chmod(executable, 0o700);
   await writeFile(join(environment.paths.bin, `${DAEMON_NAME}.port`), `${String(environment.ports.api)}\n`, 'utf8');
+  await writeFile(
+    join(environment.paths.bin, `${DAEMON_NAME}.repository-root`),
+    `${environment.repositoryRoot}\n`,
+    'utf8',
+  );
   return executable;
 }
 
@@ -122,9 +130,10 @@ describe('first-run daemon bootstrap', () => {
       const environmentVariables = connection(environment, daemonBinary);
       const first = await environment.runFy(['daemon', 'start'], environmentVariables);
       const stopped = await environment.runFy(['daemon', 'stop'], environmentVariables);
+      await rm(daemonBinary);
 
       try {
-        // Act — a second start reads a home carrying a marker, a lock and its own log directory.
+        // Act — the live source is gone; the second start must use the retained promoted snapshot.
         const actual = await environment.runFy(['daemon', 'start'], environmentVariables);
 
         // Assert
