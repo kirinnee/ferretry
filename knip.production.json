@@ -17,6 +17,10 @@
       "entry": ["src/lib/index.ts"],
       "project": ["src/**/*.ts"]
     },
+    "packages/relay": {
+      "entry": ["src/lib/index.ts", "src/adapters/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "packages/protocol": {
       "entry": ["src/lib/index.ts"],
       "project": ["src/**/*.ts"]

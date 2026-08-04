@@ -1,0 +1,32 @@
+{
+  // Deployment configuration for YOUR OWN relay. There is no shared deployment of this Worker and
+  // there is no relay address compiled into anything Ferretry ships: a relay is something you run,
+  // for the daemons you list, in the Cloudflare account you pay for.
+  //
+  //   1. put your daemon fingerprint in `vars.RELAY_DAEMON_IDS` below (`fy pair` prints it)
+  //   2. `task relay:deploy`
+  //
+  // See docs/relay-protocol.md — "Running your own relay" — for what you are taking on by doing so.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ferretry-relay",
+  "main": "src/adapters/worker.ts",
+  "compatibility_date": "2026-07-01",
+
+  // The fingerprints this deployment carries, separated by spaces or commas. A fingerprint is
+  // public — it is printed in the pairing QR — so this is configuration and not a secret, and
+  // there is nothing here for a public repository to leak. Leaving it empty serves nobody, which
+  // is the only safe reading of a relay whose operator never said who it is for.
+  "vars": {
+    "RELAY_DAEMON_IDS": "",
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "RENDEZVOUS", "class_name": "RendezvousDurableObject" }],
+  },
+
+  // SQLite-backed Durable Objects are the class the free plan allows, and this rendezvous keeps a
+  // single small state document, so nothing here needs more.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RendezvousDurableObject"] }],
+
+  "observability": { "enabled": true },
+}
