@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { SessionTranscriptReader, type TranscriptFileResolver } from '../../../../src/lib/session/transcript/index.ts';
+import {
+  SessionTranscriptReader,
+  type TranscriptDigestJournal,
+  type TranscriptFileResolver,
+} from '../../../../src/lib/session/transcript/index.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,
@@ -34,6 +38,12 @@ const source = (harness: TranscriptHarness, read: (file: string) => Promise<Tran
 });
 
 const resolving = (file: string | undefined): TranscriptFileResolver => ({ file: async () => file });
+
+const digestJournal = (calls: string[] = []): TranscriptDigestJournal => ({
+  assertReadable: async sessionId => {
+    calls.push(sessionId);
+  },
+});
 
 describe('SessionTranscriptReader', () => {
   it('should read the file the resolver names, through the source for that harness', async () => {
@@ -127,5 +137,53 @@ describe('SessionTranscriptReader', () => {
     // Assert
     should(resolved).be.empty();
     should(read).be.empty();
+  });
+
+  it('should require the daemon journal proof before returning a restartable digest', async () => {
+    // Arrange
+    const proofs: string[] = [];
+    const subject = new SessionTranscriptReader(
+      [
+        source('claude', async file =>
+          batch(file, [
+            {
+              kind: 'message',
+              harness: 'claude',
+              role: 'user',
+              text: 'restart from here',
+              byteOffset: 12,
+            },
+          ]),
+        ),
+      ],
+      resolving('/transcript.jsonl'),
+      digestJournal(proofs),
+    );
+
+    // Act
+    const actual = await subject.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 12 });
+
+    // Assert
+    should(proofs).eql(['session-1']);
+    should(actual.messages).eql([{ point: { byteOffset: 12 }, role: 'user', text: 'restart from here' }]);
+  });
+
+  it('should refuse a digest when no daemon journal proof or transcript can be read', async () => {
+    // Arrange
+    const withoutJournal = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []))],
+      resolving('/transcript.jsonl'),
+    );
+    const withoutTranscript = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []))],
+      resolving(undefined),
+      digestJournal(),
+    );
+
+    // Act / Assert
+    await should(withoutJournal.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 0 })).be.rejected();
+    await should(
+      withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { byteOffset: 0 }),
+    ).be.rejected();
   });
 });

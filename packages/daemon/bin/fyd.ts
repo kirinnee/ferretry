@@ -136,6 +136,7 @@ import {
   FileHarnessWrapperSource,
   NodeCodexRolloutIndex,
   StorageTranscriptClaims,
+  StorageTranscriptDigestJournal,
   StorageTranscriptProvenanceStore,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
@@ -224,7 +225,6 @@ import {
   exactWorkerAssignee,
   FleetEventStreamService,
   type FoundationPaths,
-  type OpenedAnalyticsIndexStore,
   HarnessQuirkService,
   harnessMigrationRefusal,
   InitialAttachmentError,
@@ -244,6 +244,7 @@ import {
   type NameSubsystem,
   normalizeCallsign,
   type ObservedSession,
+  type OpenedAnalyticsIndexStore,
   OperatorReadService,
   PairingDeviceRegistry,
   PairingService,
@@ -277,7 +278,6 @@ import {
   type SessionDirectorySubsystem,
   SessionFilesystem,
   SessionHealthService,
-  type SessionRootPinner,
   type SessionHealthSettings,
   type SessionId,
   type SessionIdFactory,
@@ -294,6 +294,7 @@ import {
   SessionResumeError,
   SessionResumeService,
   type SessionResumeSubsystem,
+  type SessionRootPinner,
   SessionSendError,
   SessionSendService,
   type SessionSendSubsystem,
@@ -2760,7 +2761,11 @@ export function buildWorld(): DaemonWorld {
     };
   };
   const createTranscriptReader = (storage: DaemonStorage): SessionTranscriptReader =>
-    new SessionTranscriptReader(transcriptSources, createTranscriptFileResolver(storage));
+    new SessionTranscriptReader(
+      transcriptSources,
+      createTranscriptFileResolver(storage),
+      new StorageTranscriptDigestJournal(storage),
+    );
   /**
    * The same transcript read, for an operator who asked to SEE it.
    *
