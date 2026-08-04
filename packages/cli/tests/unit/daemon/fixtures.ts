@@ -11,6 +11,7 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
+  INixGcRootPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
   StopRequest,
@@ -149,6 +150,29 @@ export class FakeFiles implements IServiceFilePort {
 
   ensureDirectory(path: string): Promise<void> {
     this.directories.push(path);
+    return Promise.resolve();
+  }
+}
+
+/** Records what would have been pinned, and can refuse the way a missing `nix-store` does. */
+export class FakeNixGcRoot implements INixGcRootPort {
+  /** Maps a path to what it really resolves to; anything absent resolves to itself. */
+  readonly links = new Map<string, string>();
+  readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
+  readonly released: string[] = [];
+  failure: string | undefined;
+
+  realPath(path: string): Promise<string> {
+    return Promise.resolve(this.links.get(path) ?? path);
+  }
+
+  pin(storePath: string, rootPath: string): Promise<string | undefined> {
+    this.pinned.push({ storePath, rootPath });
+    return Promise.resolve(this.failure);
+  }
+
+  release(rootPath: string): Promise<void> {
+    this.released.push(rootPath);
     return Promise.resolve();
   }
 }

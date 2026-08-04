@@ -54,6 +54,20 @@ The default flake package installs both executables:
 nix profile install github:kirinnee/ferretry
 ```
 
+Running straight from an ephemeral shell is also supported:
+
+```bash
+nix shell github:kirinnee/ferretry
+```
+
+A `nix shell` leaves the executables in the Nix store with nothing holding them, so a later
+`nix-collect-garbage` would delete them out from under an installed service. `fy daemon install`,
+`start` and `restart` therefore register a garbage-collection root themselves — an indirect root at
+`$XDG_STATE_HOME/ferretry/nix/fyd` (`~/.local/state/…` when that is unset), which `fy daemon
+uninstall` releases. It is a per-user operation and needs no `sudo`. If `nix-store` is unavailable the
+daemon still starts and `fy` warns that it is unpinned; a Homebrew or release-archive install is not
+in the store and is left alone.
+
 ## GitHub release (one-line installer)
 
 Downloads the right archive for your OS/arch, verifies the checksum, and installs both `fy` and

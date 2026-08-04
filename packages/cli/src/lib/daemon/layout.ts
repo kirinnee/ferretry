@@ -22,6 +22,8 @@ export interface DaemonEnvironmentInput {
   readonly stateHome?: string | undefined;
   /** `XDG_CONFIG_HOME` when set — systemd user units live under it. */
   readonly configHome?: string | undefined;
+  /** `XDG_STATE_HOME` when set — the Nix garbage-collection root lives under it. */
+  readonly stateDirectory?: string | undefined;
   /** The invoking user's numeric id, which names the launchd domain. */
   readonly userId: number;
   /** The daemon executable this CLI supervises. */
@@ -55,6 +57,16 @@ export interface DaemonLayout {
   /** `gui/501/com.ferretry.fyd` — the service target every other launchd verb takes. */
   readonly launchdServiceTarget: string;
   readonly launchAgentFile: string;
+  /**
+   * Where the Nix garbage-collection root for the daemon executable is kept.
+   *
+   * Deliberately NOT under the state home. The state home is the daemon's, and its layout model
+   * refuses any entry it has not declared — a CLI-created directory there is exactly the defect that
+   * made the daemon unable to start on a fresh machine. It is also a symbolic link, and the daemon's
+   * filesystem port refuses symbolic links anywhere inside the state home. It belongs to the CLI's
+   * own installation, so it lives beside the CLI's other installation artifacts.
+   */
+  readonly nixGcRoot: string;
 }
 
 export class InvalidDaemonEnvironmentError extends Error {
@@ -130,6 +142,10 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     input.configHome === undefined || input.configHome.trim().length === 0
       ? join(homeDirectory, '.config')
       : requireDirectory(input.configHome, 'XDG_CONFIG_HOME');
+  const stateDirectory =
+    input.stateDirectory === undefined || input.stateDirectory.trim().length === 0
+      ? join(homeDirectory, '.local', 'state')
+      : requireDirectory(input.stateDirectory, 'XDG_STATE_HOME');
   const daemonName = requireName(input.daemonName, 'daemon name');
   const product = requireName(input.product, 'product name');
   const daemonBinary = requireDirectory(input.daemonBinary, 'daemon binary');
@@ -153,5 +169,6 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     launchdDomain,
     launchdServiceTarget: `${launchdDomain}/${launchdLabel}`,
     launchAgentFile: join(homeDirectory, 'Library', 'LaunchAgents', `${launchdLabel}.plist`),
+    nixGcRoot: join(stateDirectory, product, 'nix', daemonName),
   };
 }
