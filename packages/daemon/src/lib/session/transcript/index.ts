@@ -1,5 +1,6 @@
 export * from './claude-path.ts';
 export * from './codex-rollout.ts';
+export * from './digest.ts';
 export * from './provenance.ts';
 export * from './reader.ts';
 export * from './relaunch.ts';
