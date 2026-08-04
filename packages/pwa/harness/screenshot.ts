@@ -647,7 +647,7 @@ try {
             // root only mounts on load, and an init script only runs on one.
             await page.goto(`${server.url}#onboarding-keyboard`);
             await page.reload();
-            await page.locator('#harness-onboarding-pair-page').waitFor({ state: 'visible' });
+            await page.locator('#harness-onboarding-scan-page').waitFor({ state: 'visible' });
 
             // The keyboard is only up because a FIELD has focus, so the shot has
             // to start there — an unfocused capture would look identical and
