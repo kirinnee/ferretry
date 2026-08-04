@@ -10,11 +10,20 @@
  *
  * The key moved from `v1` to `v2` when the single fixed arc became three routes,
  * and from `v2` to `v3` when those three routes stopped being about what the
- * reader was HOLDING and became about what the DEVICE IS. `have-link` and `agent`
- * no longer name anything, and a stored place inside one of them describes a
- * journey that is gone — so an older document is ignored, and its owner is asked
- * the question once. That is a lost place, not lost work: nothing on this page is
- * state the daemon does not already hold.
+ * reader was HOLDING and became about what the DEVICE IS. `have-link` and the old
+ * `agent` no longer named anything, and a stored place inside one of them
+ * describes a journey that is gone — so an older document is ignored, and its
+ * owner is asked the question once. That is a lost place, not lost work: nothing
+ * on this page is state the daemon does not already hold.
+ *
+ * IT DID NOT MOVE AGAIN when "who does the work" became the first question, and
+ * that is deliberate rather than an omission. Every place a `v3` document can
+ * name still exists and still means the same thing — `first-time` at `install` is
+ * the same screen it was — so a reader mid-install keeps their place across the
+ * change. The only `v3` state with no successor is the device question itself,
+ * which is now one question in rather than the first, and it survives as exactly
+ * that: `stage: 'choose'` still resumes on the device question, with the first
+ * question one Back away.
  *
  * THE DEVICE IS NEVER STORED. It is detected on every load, because the same
  * document can legitimately be read by two different devices — that is exactly
@@ -36,23 +45,32 @@
 import type { DeviceKind } from './device-kind.ts';
 import {
   type ConnectionMethodId,
+  doerRoute,
   firstOnboardingStep,
   furthestOnboardingStep,
   isConnectionMethodId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isStepOfRoute,
+  type OnboardingDoerId,
   type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
   onboardingStepIndex,
+  questionBehindRoute,
 } from './onboarding-model.ts';
 import { landSetupHandoff, type SetupHandoff } from './setup-handoff.ts';
 
 export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v3';
 export const ONBOARDING_PROGRESS_VERSION = 3;
 
-/** The chooser is on the glass: no route, and therefore no step. */
+/** The FIRST question is on the glass: no doer, no route, no step. */
+export interface OnboardingAsking {
+  readonly v: typeof ONBOARDING_PROGRESS_VERSION;
+  readonly stage: 'who';
+}
+
+/** The device question is on the glass: an answer to the first one, but no route yet. */
 export interface OnboardingChoosing {
   readonly v: typeof ONBOARDING_PROGRESS_VERSION;
   readonly stage: 'choose';
@@ -78,14 +96,22 @@ export interface OnboardingWalking {
  * and every reader of them has to decide what a disagreement means. A closed
  * union cannot be in that state, so nothing downstream has to handle it.
  */
-export type OnboardingProgress = OnboardingChoosing | OnboardingWalking;
+export type OnboardingProgress = OnboardingAsking | OnboardingChoosing | OnboardingWalking;
 
-export const FRESH_ONBOARDING_PROGRESS: OnboardingChoosing = Object.freeze({
+export const FRESH_ONBOARDING_PROGRESS: OnboardingAsking = Object.freeze({
+  v: ONBOARDING_PROGRESS_VERSION,
+  stage: 'who' as const,
+});
+
+/** The second question, once the first one has been answered with "I do it myself". */
+export const DEVICE_QUESTION_PROGRESS: OnboardingChoosing = Object.freeze({
   v: ONBOARDING_PROGRESS_VERSION,
   stage: 'choose' as const,
 });
 
 const fresh = (): OnboardingProgress => ({ ...FRESH_ONBOARDING_PROGRESS });
+
+const deviceQuestion = (): OnboardingProgress => ({ ...DEVICE_QUESTION_PROGRESS });
 
 /** Opening a route: its first step, and nothing remembered from any other route. */
 export const enterOnboardingRoute = (route: OnboardingRouteId, device: DeviceKind): OnboardingWalking => {
@@ -129,7 +155,9 @@ export const parseOnboardingProgress = (raw: string | null | undefined, device: 
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fresh();
   const fields = parsed as Record<string, unknown>;
   if (fields.v !== ONBOARDING_PROGRESS_VERSION) return fresh();
-  if (fields.stage === 'choose') return fresh();
+  if (fields.stage === 'who') return fresh();
+  /* A reader who answered "I do it myself" and got as far as the device question is AT it. */
+  if (fields.stage === 'choose') return deviceQuestion();
   if (fields.stage !== 'walk') return fresh();
   const { route, current, furthest, connection } = fields;
   if (!isOnboardingRouteId(route)) return fresh();
@@ -162,7 +190,7 @@ export const parseOnboardingProgress = (raw: string | null | undefined, device: 
  * that nothing is paired.
  */
 export const reconcileOnboardingProgress = (progress: OnboardingProgress, paired: boolean): OnboardingProgress => {
-  if (paired || progress.stage === 'choose') return progress;
+  if (paired || progress.stage !== 'walk') return progress;
   return progress.current === 'done' || progress.furthest === 'done' ? fresh() : progress;
 };
 
@@ -291,7 +319,20 @@ export class OnboardingProgressStore {
     };
   };
 
-  /** Answers the chooser. A route always opens on its own first step. */
+  /**
+   * Answers the FIRST question: who is doing this.
+   *
+   * "An agent does it" opens a route immediately, because there is nothing left
+   * to ask — the agent is on the machine that becomes the daemon, so this browser
+   * is the client and the device question has no work to do. "I do it myself"
+   * opens that question instead.
+   */
+  chooseDoer(doer: OnboardingDoerId): OnboardingProgress {
+    const route = doerRoute(doer);
+    return this.#commit(route === undefined ? deviceQuestion() : enterOnboardingRoute(route, this.#device));
+  }
+
+  /** Answers the device question. A route always opens on its own first step. */
   choose(route: OnboardingRouteId): OnboardingProgress {
     return this.#commit(enterOnboardingRoute(route, this.#device));
   }
@@ -311,8 +352,23 @@ export class OnboardingProgressStore {
     });
   }
 
-  /** Back to the question, keeping nothing: the next answer may be a different route. */
-  backToChooser(): OnboardingProgress {
+  /**
+   * Back out of a route, to WHICHEVER QUESTION OPENED IT.
+   *
+   * Keeping nothing, because the next answer may be a different route — and
+   * landing on the question the reader actually answered, because the agent route
+   * was opened one question earlier than the three device ones. Sending somebody
+   * back to a question they never saw is how two questions start feeling like a
+   * maze; sending them forward past the one they did answer hides their mistake.
+   */
+  leaveRoute(): OnboardingProgress {
+    const at = this.snapshot();
+    if (at.stage !== 'walk') return at;
+    return this.#commit(questionBehindRoute(at.route) === 'who' ? fresh() : deviceQuestion());
+  }
+
+  /** Back from the device question to the first one. */
+  backToWho(): OnboardingProgress {
     return this.#commit(fresh());
   }
 

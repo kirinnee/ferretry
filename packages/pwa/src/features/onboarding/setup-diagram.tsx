@@ -33,6 +33,27 @@ interface DiagramState {
 }
 
 const STATE: Record<OnboardingStepId, DiagramState> = {
+  /*
+   * THE AGENT PATH, DRAWN AS WHAT IT IS: the work is at the far end, and this
+   * browser is not the thing doing it. The reader is looking at a prompt they are
+   * about to carry to another machine, so the machine end is what is lit — the
+   * one place on this route where somebody could believe the page is installing
+   * something, and the figure says otherwise before a word is read.
+   */
+  brief: {
+    machine: 'your agent works',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'An agent on the other machine installs Ferretry and starts its daemon. This browser is not linked yet.',
+  },
+  'agent-pair': {
+    machine: 'showing QR',
+    browser: 'scanning or pasting',
+    lit: { machine: true, browser: true, link: true },
+    linked: false,
+    label: 'The agent has printed a fresh QR code and link on that machine, and this browser is using it.',
+  },
   install: {
     machine: 'installing fy',
     browser: 'waiting',

@@ -77,6 +77,7 @@ export * from '../features/onboarding/first-run-entry.ts';
 export * from '../features/onboarding/hosted-relay.ts';
 export * from '../features/onboarding/onboarding-brand.tsx';
 export * from '../features/onboarding/onboarding-chooser.tsx';
+export * from '../features/onboarding/onboarding-doer-chooser.tsx';
 export * from '../features/onboarding/onboarding-model.ts';
 export * from '../features/onboarding/onboarding-page.tsx';
 export * from '../features/onboarding/onboarding-progress.ts';

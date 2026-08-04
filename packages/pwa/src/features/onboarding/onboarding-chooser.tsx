@@ -1,5 +1,12 @@
 /**
- * THE FIRST SCREEN ASKS ONE QUESTION: what is this device going to be?
+ * THE SECOND SCREEN ASKS ONE QUESTION: what is this device going to be?
+ *
+ * It is second because it only exists for a reader who is typing the commands
+ * themselves — `onboarding-doer-chooser.tsx` asks who is doing the work first,
+ * and an agent doing it deletes this question outright. So this screen always has
+ * a way BACK to that one: a reader who answered "I do it myself" and then finds
+ * three roles they do not recognise must be able to change their mind, and a
+ * question with no way back is a trap.
  *
  * It used to ask what the reader was HOLDING — a link, nothing, or an agent —
  * which is not a fact about the system and never asked the only question that
@@ -23,11 +30,11 @@
  * either: this is a choice that navigates, not a toggle that sticks.
  */
 
-import { ChevronRight, Eye, Rocket, Server, SmartphoneNfc } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Eye, Rocket, Server, SmartphoneNfc } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { DeviceKind } from './device-kind.ts';
-import { onboardingRoutes, type OnboardingRouteId } from './onboarding-model.ts';
+import { onboardingRoutes, type OnboardingDeviceRouteId } from './onboarding-model.ts';
 
 /**
  * One glyph per answer, chosen so the shapes differ at a glance rather than
@@ -36,7 +43,7 @@ import { onboardingRoutes, type OnboardingRouteId } from './onboarding-model.ts'
  * about a machine standing here. Hidden from assistive technology — the title
  * beside each already says the same thing.
  */
-const ICON: Record<OnboardingRouteId, ReactNode> = {
+const ICON: Readonly<Record<OnboardingDeviceRouteId, ReactNode>> = {
   'first-time': <Rocket size={22} aria-hidden="true" />,
   'add-client': <Eye size={22} aria-hidden="true" />,
   'add-daemon': <Server size={22} aria-hidden="true" />,
@@ -48,12 +55,14 @@ const ROW =
   'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-bg focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 export interface OnboardingChooserProps {
-  readonly onChoose: (route: OnboardingRouteId) => void;
+  readonly onChoose: (route: OnboardingDeviceRouteId) => void;
   /** What this device is. Decides which answers are honest, never which are visible. */
   readonly device: DeviceKind;
+  /** Back to the first question — who is doing this — which is what opened this one. */
+  readonly onBack: () => void;
 }
 
-export function OnboardingChooser({ onChoose, device }: OnboardingChooserProps) {
+export function OnboardingChooser({ onChoose, device, onBack }: OnboardingChooserProps) {
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-chooser-title">
       <div className="min-w-0">
@@ -81,6 +90,23 @@ export function OnboardingChooser({ onChoose, device }: OnboardingChooserProps) 
           </li>
         ))}
       </ul>
+
+      {/*
+        Quiet, and after the answers: it is a way out rather than a way on, and
+        the one loud control per screen rule belongs to the answers themselves.
+      */}
+      <div className="flex min-w-0">
+        <button
+          type="button"
+          className="kt-btn min-h-[44px]"
+          data-variant="ghost"
+          onClick={onBack}
+          data-onboarding-back="who"
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Back
+        </button>
+      </div>
     </section>
   );
 }

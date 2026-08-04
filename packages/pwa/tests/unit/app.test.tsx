@@ -209,8 +209,25 @@ const settle = async (): Promise<void> => {
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
   container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
 
-/** Answers the opening question the way a reader does. */
+/** Answers the FIRST question — who is doing this — the way a reader does. */
+const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> => {
+  await interact(() =>
+    must(
+      container.querySelector<HTMLButtonElement>(`button[data-onboarding-doer="${doer}"]`),
+      `the ${doer} answer`,
+    ).click(),
+  );
+};
+
+/**
+ * Answers the DEVICE question, getting past the first one if it is still up.
+ *
+ * The device question is one answer in now — "I do it myself" — and every caller
+ * here is a reader who is about to type commands, so this walks both rather than
+ * making each test remember the order.
+ */
 const chooseRoute = async (container: HTMLElement, route: string): Promise<void> => {
+  if (stepOfSetup(container) === 'who') await chooseDoer(container, 'self');
   await interact(() =>
     must(
       container.querySelector<HTMLButtonElement>(`button[data-onboarding-route="${route}"]`),
@@ -275,13 +292,18 @@ const popTo = async (path: string): Promise<void> => {
 };
 
 describe('AppShell', () => {
-  it('asks an unpaired first run what this device is', async () => {
+  it('asks an unpaired first run who is doing the setup', async () => {
     const { reads, view } = await renderShell('/');
 
-    // A cold visitor might be about to stand up a daemon, or might just want
-    // this browser to watch one that exists. The root cannot know which, so the
-    // first screen asks what the DEVICE is rather than assuming an answer.
+    // A cold visitor might have an agent standing by on the machine, or might be
+    // about to type the commands themselves — and those are different journeys,
+    // not different orderings of one. The root cannot know which, so the first
+    // screen asks that rather than assuming an answer.
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
+    expect(stepOfSetup(view.container)).toBe('who');
+    expect(view.container.querySelectorAll('button[data-onboarding-doer]')).toHaveLength(2);
+    expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(0);
+    await chooseDoer(view.container, 'self');
     expect(stepOfSetup(view.container)).toBe('choose');
     expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(3);
     expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
@@ -309,9 +331,9 @@ describe('AppShell', () => {
 
     const { view } = await renderShell('/');
 
-    // Back to the question, which is the honest reading of a claim no other
-    // store supports.
-    expect(stepOfSetup(view.container)).toBe('choose');
+    // Back to the first question, which is the honest reading of a claim no
+    // other store supports.
+    expect(stepOfSetup(view.container)).toBe('who');
     expect(view.container.textContent).not.toContain('You are set up');
     await view.unmount();
   });
@@ -355,7 +377,9 @@ describe('AppShell', () => {
       must(view.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link').click(),
     );
 
-    expect(stepOfSetup(view.container)).toBe('choose');
+    // Replayed from the very first question: a second machine may well be set up
+    // by an agent even if the first one was not.
+    expect(stepOfSetup(view.container)).toBe('who');
 
     // And the instructions are the same ones, replayed rather than a second copy
     // of them: install, the daemon, the carrier choice, then pairing.

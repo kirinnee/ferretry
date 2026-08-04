@@ -51,6 +51,14 @@ const SECTIONS = [
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
+  // The first question — who does the work — and the agent journey it opens,
+  // which shares no step with any other answer.
+  'harness-onboarding-who',
+  'harness-onboarding-brief',
+  'harness-onboarding-agent-pair',
+  // The phone reading of that step: no "already open in another tab", because on
+  // a phone that tab opened on a machine the reader is not holding.
+  'harness-onboarding-agent-pair-mobile',
   'harness-onboarding-choose',
   // The phone reading of the same question: still three answers, and the daemon
   // one saying why it needs a computer rather than pretending this device can.

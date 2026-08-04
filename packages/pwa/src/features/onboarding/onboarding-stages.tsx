@@ -12,12 +12,13 @@
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
  *
- * THE AGENT PATH IS AN ASIDE ON THE INSTALL STEP, AND ITS OWN ASIDE. It was a
- * top-level answer for one release, which asked the reader to classify themselves
- * by who would type the command — a different question from what this device IS,
- * and not one anything downstream depends on. It is back beside the install
- * command it replaces, in a disclosure of its own rather than sharing one with
- * the version check, which is what made it invisible the first time.
+ * THE AGENT PATH IS A ROUTE OF ITS OWN, ASKED BEFORE ANYTHING ELSE. For one
+ * release it was a disclosure on this step, on the argument that an agent is just
+ * a way of PERFORMING the install. That was wrong: an agent doing the setup means
+ * no platform picker, no commands here, no `fy pair` by hand and no device
+ * question at all. What survives on the install step is a one-tap way to CHANGE
+ * ANSWER — not a second copy of the prompt, because two copies of the thing the
+ * agent path exists to hand over is two things to keep true.
  *
  * EVERY STAGE HERE IS REUSED BY EVERY ROUTE THAT NEEDS IT, including "set up
  * another machine" — a second copy of the daemon instructions is a second copy to
@@ -28,6 +29,7 @@ import { ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
+import type { DeviceKind } from './device-kind.ts';
 import type { CarrierDisclosure } from './hosted-relay.ts';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
@@ -76,13 +78,14 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
   );
 }
 
-export function InstallStage({
-  write,
-  channel,
-}: {
+export interface InstallStageProps {
   readonly write: ClipboardWriter;
   readonly channel: InstallChannelId;
-}) {
+  /** Change answer: hand the whole thing to an agent instead of typing it. */
+  readonly onAgentInstead: () => void;
+}
+
+export function InstallStage({ write, channel, onAgentInstead }: InstallStageProps) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
   const chosen = installChannel(selected);
   return (
@@ -135,13 +138,26 @@ export function InstallStage({
       </Aside>
 
       {/*
-        The agent path, folded into the step it is an alternative TO. It used to
-        be one of three top-level answers, which asked the reader to classify
-        themselves by who would type the command rather than by what the device
-        is — a different question, and not one the rest of the flow depends on.
+        CHANGING ANSWER, not a second copy of the agent path. A reader who is
+        looking at a command they did not want should not have to find the way
+        back to the first question and re-answer it; and the prompt itself lives
+        on the agent route's own step, where it is the whole screen rather than
+        thirty lines folded under a caret.
       */}
       <Aside summary="Rather have an agent do it?">
-        <BriefStage write={write} />
+        <p className="m-0 text-meta leading-base text-muted">
+          If you already have Claude or Codex on that machine, it can install Ferretry, start the daemon and pair with
+          this browser. You copy one prompt and nothing else.
+        </p>
+        <button
+          type="button"
+          className="kt-btn min-h-[44px] w-full"
+          data-variant="ghost"
+          onClick={onAgentInstead}
+          data-onboarding-agent-instead=""
+        >
+          Let an agent do it
+        </button>
       </Aside>
     </div>
   );
@@ -225,22 +241,28 @@ export function RelayDeployStage({ write }: { readonly write: ClipboardWriter })
 }
 
 /**
- * THE AGENT PROMPT: shown in full, one tap to copy.
+ * THE AGENT PROMPT: on this route it IS the product, so it is the whole screen.
  *
- * It is no longer a top-level answer — "let an agent do it" is not a fact about
- * what this device IS, and putting it beside the two roles made a category error
- * into a third of the first screen. It is an alternative WAY to do the install
- * step, which is exactly what a disclosure on that step is for.
+ * The reader answered "an agent does it", and everything that answer promises is
+ * carried by this text. So it is shown in full rather than behind a second tap: a
+ * person is about to hand it to something with a shell on their machine, and
+ * "copy this text I will not show you" is not a thing to ask of anybody. It is
+ * also generic by construction — it names no host, no user, no daemon and no
+ * fleet — and seeing that for themselves is the point on a page anyone can load.
  *
- * The prompt itself stays on the glass once opened, rather than behind a second
- * tap: a reader is about to hand it to something that has a shell on their
- * machine, and "copy this text I will not show you" is not a thing to ask of
- * anybody. It is also generic by construction — it names no host, no user and no
- * daemon — and seeing that for themselves is the point.
+ * WHERE IT GOES IS SAID TWICE, ABOVE AND BELOW. The one way to get nothing out of
+ * this route is to paste the prompt into an agent that is not on the machine that
+ * will run the agents, and the reader cannot be told that by the prompt itself —
+ * they read this page, not the thing they paste.
  */
 export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
   return (
     <div className={STAGE}>
+      <p className="m-0 text-meta leading-base text-muted">
+        Paste it into Claude, Codex or any agent with a terminal{' '}
+        <strong className="font-semibold text-fg">on the machine that will run your agents</strong> — not into anything
+        on this page.
+      </p>
       <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
         <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">
           <span className="min-w-0 flex-1 truncate text-meta font-semibold text-fg">Setup prompt for an AI agent</span>
@@ -258,7 +280,56 @@ export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
         </pre>
       </div>
       <p className="m-0 text-meta leading-base text-muted">
-        It says nothing about you, this browser, or any daemon. When your agent shows you the QR or the link, continue.
+        It says nothing about you, this browser, or any daemon. It ends by asking your agent to run{' '}
+        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code — come back here when it
+        does.
+      </p>
+    </div>
+  );
+}
+
+export interface AgentPairStageProps {
+  readonly pairing: ReactNode;
+  /**
+   * What this device is — which decides whether "you may already be connected"
+   * is true or a lie. `fy pair --open` opens the browser on the DAEMON'S machine,
+   * so it can only have opened this one if this one is a computer.
+   */
+  readonly device: DeviceKind;
+}
+
+/**
+ * THE END OF THE AGENT ROUTE: the code came from the agent, not from the reader.
+ *
+ * Nothing here is a command, because nobody here has a terminal open — the agent
+ * had it, on the other machine, and it was told to print a code and show it. So
+ * this stage is the same pairing surface every other route uses, with the one
+ * thing that is different about arriving here said plainly: the reader did not
+ * produce this code and cannot re-produce it, so if it has expired the fix is to
+ * ask the agent again rather than to go and type something.
+ *
+ * ON A COMPUTER THE JOURNEY MAY ALREADY BE OVER, and saying so is not optional:
+ * the prompt asks the agent to run `fy pair --open` when the reader is on the
+ * daemon's own machine, and that opens Ferretry already paired IN ANOTHER TAB.
+ * Somebody left staring at a pairing field while a finished app sits one tab away
+ * concludes the setup failed. It is said only on a computer, because on a phone
+ * that tab opened on a machine the reader is not holding.
+ */
+export function AgentPairStage({ pairing, device }: AgentPairStageProps) {
+  return (
+    <div className={STAGE}>
+      <div className="min-w-0" data-onboarding-pairing="">
+        {pairing}
+      </div>
+      {device === 'desktop' ? (
+        <p className="m-0 text-meta leading-base text-muted" data-onboarding-agent-opened="">
+          If your agent ran <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code> on this machine, it
+          has already opened Ferretry in another tab, paired. Nothing to do here — carry on there.
+        </p>
+      ) : null}
+      <p className="m-0 text-meta leading-base text-muted">
+        The code is single-use and expires after about two minutes. If it has expired, ask your agent to run{' '}
+        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> again and show you the fresh one.
       </p>
     </div>
   );

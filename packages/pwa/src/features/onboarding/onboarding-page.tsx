@@ -1,12 +1,19 @@
 /**
- * FIRST RUN: one question about this device, then the journey that answer implies.
+ * FIRST RUN: who is doing this, then — only if it is the reader — what this device is.
  *
- * Ferretry has two roles. A DAEMON runs agents and needs a terminal; a CLIENT is
- * a browser that watches one. So the question is what THIS DEVICE is about to
- * become — first-time setup, another client, or another daemon — and each answer
- * walks its own list of steps, on its own kind of hardware. A phone is never
- * offered a role it cannot hold, and a computer standing up its own daemon is
- * never asked to scan its own screen.
+ * THE FIRST QUESTION IS WHO DOES THE WORK. An agent doing it is not a shortcut
+ * through the same journey; it is a different one. No platform picker, no commands
+ * on the glass, no `fy pair` to run by hand — and no device question either,
+ * because the agent is on the machine that becomes the daemon, which makes this
+ * browser the client with nothing left to decide. Only a reader typing the
+ * commands themselves is asked the second question.
+ *
+ * THE SECOND QUESTION IS THE DEVICE. Ferretry has two roles. A DAEMON runs agents
+ * and needs a terminal; a CLIENT is a browser that watches one. So the question is
+ * what THIS DEVICE is about to become — first-time setup, another client, or
+ * another daemon — and each answer walks its own list of steps, on its own kind of
+ * hardware. A phone is never offered a role it cannot hold, and a computer
+ * standing up its own daemon is never asked to scan its own screen.
  *
  * FOUR RULES SHAPE EVERYTHING HERE.
  *
@@ -28,7 +35,8 @@
  *    could render a route without knowing the device would eventually render the
  *    wrong one, silently.
  *
- * WHAT LIVES ELSEWHERE. The question is `onboarding-chooser.tsx`, the stages are
+ * WHAT LIVES ELSEWHERE. The first question is `onboarding-doer-chooser.tsx`, the
+ * second is `onboarding-chooser.tsx`, the stages are
  * `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the picture of
  * the arrangement is `setup-diagram.tsx`. This file owns only the frame: which
  * screen is on the glass, where focus goes when that changes, and how the screen
@@ -47,6 +55,7 @@ import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
+import { OnboardingDoerChooser } from './onboarding-doer-chooser.tsx';
 import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
 import {
@@ -63,9 +72,12 @@ import {
   onboardingStepCount,
   onboardingStepIndex,
   previousOnboardingStep,
+  questionBehindRoute,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
 import {
+  AgentPairStage,
+  BriefStage,
   DaemonStage,
   DoneStage,
   HandoffStage,
@@ -158,8 +170,8 @@ export function OnboardingPage({
 }: OnboardingPageProps) {
   const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
   const device = progress.device;
-  /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
-  const screen = at.stage === 'choose' ? 'choose' : at.current;
+  /* One key for "which screen is on the glass", both questions included, so focus can follow it. */
+  const screen = at.stage === 'walk' ? at.current : at.stage;
 
   /*
    * FOCUS FOLLOWS A REAL SCREEN CHANGE, NOT THE FIRST PAINT.
@@ -213,7 +225,7 @@ export function OnboardingPage({
       aria-labelledby="onboarding-title"
       data-onboarding="setup"
       data-onboarding-screen={screen}
-      data-onboarding-route={at.stage === 'choose' ? 'none' : at.route}
+      data-onboarding-route={at.stage === 'walk' ? at.route : 'none'}
       data-onboarding-device={device}
     >
       {/*
@@ -232,17 +244,26 @@ export function OnboardingPage({
         {/*
           The picture replaces the paragraph that used to say the same thing:
           your machine does the work, this page is a window onto it. It is absent
-          from the chooser on purpose — that screen's job is three answers, and a
+          from both questions on purpose — their job is to be answered, and a
           diagram of a journey nobody has chosen yet is decoration.
         */}
-        {at.stage === 'choose' ? null : <SetupDiagram step={at.current} />}
+        {at.stage === 'walk' ? <SetupDiagram step={at.current} /> : null}
       </header>
 
-      {at.stage === 'choose' ? (
+      {at.stage === 'who' ? (
+        <OnboardingDoerChooser
+          onChoose={doer => {
+            progress.chooseDoer(doer);
+          }}
+        />
+      ) : at.stage === 'choose' ? (
         <OnboardingChooser
           device={device}
           onChoose={route => {
             progress.choose(route);
+          }}
+          onBack={() => {
+            progress.backToWho();
           }}
         />
       ) : (
@@ -269,7 +290,7 @@ export function OnboardingPage({
             progress.choose(route);
           }}
           onLeaveRoute={() => {
-            progress.backToChooser();
+            progress.leaveRoute();
           }}
         />
       )}
@@ -407,43 +428,51 @@ function RouteFlow({
           <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>
           <div className="flex min-w-0 items-center gap-2">
             {/*
-              BACK ALWAYS GOES SOMEWHERE. On the first step of a route the place
-              behind it is the question itself, which is the one screen a reader
-              needs when they picked the wrong answer — and picking the wrong
-              answer is a thing a three-way choice must survive.
+              BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a
+              route the place behind it is the question that opened THAT route —
+              the device question for the three device answers, and the very first
+              question for the agent route, which was never offered by the device
+              one. Picking the wrong answer is a thing a chooser must survive, and
+              a Back that lands on a question the reader never answered does not
+              help them survive it.
             */}
             <button
               type="button"
               className="kt-btn min-h-[44px]"
               data-variant="ghost"
               onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(path, at.current))}
-              data-onboarding-back={first ? 'chooser' : 'step'}
+              data-onboarding-back={first ? questionBehindRoute(at.route) : 'step'}
             >
               <ArrowLeft size={16} aria-hidden="true" />
               Back
             </button>
             {/*
               NEXT EXISTS ONLY WHERE THE PAGE CANNOT CHECK.
-              Install, the daemon and `fy pair` happen in a terminal
-              this page will never see, so blocking on them would block forever.
-              Pairing is the opposite: the daemon answers, in this tab, and that
-              answer is the only thing that may declare the journey finished. A
-              Next button here would manufacture a "you are set up" for a browser
-              that is paired with nothing — and on the LAST step of a route it
-              would advance to itself, which reads as a page that is stuck.
+              Install, the daemon, an agent's whole working session and `fy pair`
+              happen on a machine this page will never see, so blocking on them
+              would block forever. Pairing is the opposite: the daemon answers, in
+              this tab, and that answer is the only thing that may declare the
+              journey finished. A Next button on a pairing step would manufacture
+              a "you are set up" for a browser that is paired with nothing — and on
+              the LAST step of a route it would advance to itself, which reads as a
+              page that is stuck.
             */}
-            {at.current !== 'scan' && at.current !== 'connect' && at.current !== 'local' && !last && (
-              <button
-                type="button"
-                className="kt-btn ml-auto min-h-[44px] flex-1"
-                data-variant="primary"
-                onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
-                data-onboarding-next=""
-              >
-                Next
-                <ArrowRight size={16} aria-hidden="true" />
-              </button>
-            )}
+            {at.current !== 'scan' &&
+              at.current !== 'agent-pair' &&
+              at.current !== 'connect' &&
+              at.current !== 'local' &&
+              !last && (
+                <button
+                  type="button"
+                  className="kt-btn ml-auto min-h-[44px] flex-1"
+                  data-variant="primary"
+                  onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
+                  data-onboarding-next=""
+                >
+                  Next
+                  <ArrowRight size={16} aria-hidden="true" />
+                </button>
+              )}
           </div>
         </div>
       )}
@@ -490,8 +519,12 @@ function Stage({
   onChooseRoute,
 }: StageProps) {
   switch (at.current) {
+    case 'brief':
+      return <BriefStage write={write} />;
+    case 'agent-pair':
+      return <AgentPairStage pairing={pairing} device={path.device} />;
     case 'install':
-      return <InstallStage write={write} channel={channel} />;
+      return <InstallStage write={write} channel={channel} onAgentInstead={() => onChooseRoute('agent')} />;
     case 'daemon':
       return <DaemonStage write={write} />;
     case 'connect':
@@ -548,6 +581,8 @@ function Stage({
  * verify, so it waits for the daemon rather than for a click.
  */
 const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
+  brief: 'Nothing here watches your agent. Continue when it says it has finished.',
+  'agent-pair': 'This step finishes itself when the daemon answers. Nothing here is waiting on you.',
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
   connect: 'Choose the route that matches this machine. Direct is still preferred whenever it is reachable.',
