@@ -12,11 +12,12 @@ import {
 
 import { NewSessionPage } from './components/new-session-page.tsx';
 import {
+  type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
   startSessionWorkspaceRefresh,
+  type transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
-import { Transcript } from './components/transcript.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -30,6 +31,7 @@ import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenStrip } from './features/warden/warden-strip.tsx';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
   type NotificationControlsHost,
   useNotificationControls,
@@ -53,13 +55,13 @@ import {
   type SessionChatPageProps,
 } from './lib/pages/page-host.tsx';
 import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey, setupPath } from './lib/pages/routes.ts';
+import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
 import { type PushEnrolment, type PushRegistrationLike, supportsWebPush } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
-import type { TranscriptEntry } from './lib/session-screens.ts';
 import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
@@ -415,24 +417,29 @@ const browserWorkspaceRefreshEnvironment: SessionWorkspaceRefreshEnvironment = {
 function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
+  const layout = useLayoutMode();
   const { daemonId, sessionId } = scope;
   const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const session = fleet.daemons.get(scope.daemonId)?.byId.get(scope.sessionId);
-  const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
+  const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
+  const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
 
   useEffect(() => {
     let current = true;
-    let stop: () => void = () => undefined;
+    let control: SessionWorkspaceRefreshControl | null = null;
     setError(null);
     setEntries([]);
+    setClient(null);
     void store.clients
       .client(connection)
       .then(api => {
         if (!current) return;
-        const control = startSessionWorkspaceRefresh({
+        setClient(api);
+        control = startSessionWorkspaceRefresh({
           api: {
             logs: async id => await api.logs(id),
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
@@ -445,14 +452,15 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           },
           onError: setError,
         });
-        stop = control.stop;
+        refreshControl.current = control;
       })
       .catch(reason => {
         if (current) setError(reason instanceof Error ? reason.message : String(reason));
       });
     return () => {
       current = false;
-      stop();
+      control?.stop();
+      if (refreshControl.current === control) refreshControl.current = null;
     };
   }, [connection, daemonId, sessionId, store.clients, store.fleet]);
 
@@ -463,44 +471,57 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   }, [daemonId, sessionId]);
 
   const sessionState: SessionState = session !== undefined ? 'connected' : error !== null ? 'failed' : 'opening';
+  const refresh = useCallback(() => {
+    void refreshControl.current?.refresh();
+  }, []);
+  const publishSession = useCallback(
+    (view: NonNullable<typeof session>) => {
+      if (view.config.id === sessionId) store.fleet.upsertSession(daemonId, view);
+    },
+    [daemonId, sessionId, store.fleet],
+  );
 
   return (
-    <main
-      className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-hidden py-3"
-      data-daemon={scope.daemonId}
-      data-session={scope.sessionId}
-    >
-      <button type="button" className="kt-btn self-start" onClick={() => navigate(daemonSessionsPath(scope.daemonId))}>
-        ← Sessions
-      </button>
-      <section className="kt-panel p-panel" aria-labelledby="session-route-heading">
-        <h1 id="session-route-heading" className="m-0 font-display text-display font-bold tracking-display">
-          {session?.config.teammate || session?.config.name || scope.sessionId}
-        </h1>
-        {/*
-          BOTH LIVE REGIONS STAY MOUNTED. A live region only announces changes
-          that happen while it is already on the page, so a region added in the
-          same commit that fills it — or removed in the same commit that
-          replaces its text — announces nothing at all. Only the SENTENCE
-          changes here, and the alert stays present-but-empty until there is a
-          reason to put something in it.
-        */}
-        <p className="mb-0 text-ui text-muted" role="status" aria-live="polite" data-session-state={sessionState}>
-          {SESSION_STATE_MESSAGE[sessionState]}
-        </p>
-        <p className={error === null ? 'sr-only' : 'mb-0 mt-1 text-ui text-err'} role="alert" data-session-error="">
-          {error === null ? '' : `Could not refresh this session: ${error}`}
-        </p>
-      </section>
-      <div className="kt-panel grid min-h-0 flex-1 overflow-hidden">
-        <Transcript
-          busy={session?.state.status === 'running'}
-          daemonId={daemonId}
+    <div className="h-full min-h-0 w-full" data-daemon={scope.daemonId} data-session={scope.sessionId}>
+      {/* These live regions outlive every loading/error/content swap. */}
+      <p className="sr-only" role="status" aria-live="polite" data-session-state={sessionState}>
+        {SESSION_STATE_MESSAGE[sessionState]}
+      </p>
+      <p className="sr-only" role="alert" data-session-error="">
+        {error === null ? '' : `Could not refresh this session: ${error}`}
+      </p>
+      {session !== undefined && client !== null ? (
+        <SessionChatPage
+          client={client}
+          connection={connection}
           entries={entries}
-          sessionId={sessionId}
+          onBack={() => navigate(daemonSessionsPath(connection.daemonId))}
+          onRefresh={refresh}
+          onSessionChange={publishSession}
+          presentation={layout === 'drawer' ? 'sheet' : 'pane'}
+          refreshError={error}
+          session={session}
         />
-      </div>
-    </main>
+      ) : (
+        <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
+          <button
+            type="button"
+            className="kt-btn self-start"
+            onClick={() => navigate(daemonSessionsPath(scope.daemonId))}
+          >
+            ← Sessions
+          </button>
+          <section className="kt-panel p-panel" aria-labelledby="session-route-heading">
+            <h1 id="session-route-heading" className="m-0 font-display text-display font-bold tracking-display">
+              {scope.sessionId}
+            </h1>
+            <p className="mb-0 text-ui text-muted">
+              {error === null ? 'Opening this daemon-scoped session…' : `Could not open this session: ${error}`}
+            </p>
+          </section>
+        </main>
+      )}
+    </div>
   );
 }
 
