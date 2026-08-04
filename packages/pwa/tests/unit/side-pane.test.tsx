@@ -273,6 +273,7 @@ describe('SidePaneWorkspace', () => {
     );
 
     expect(view.container.querySelector('[data-tab^="browser:"]')).toBeNull();
+    expect(readSidePaneTabsState(scopeA).active).toBeNull();
     const browserTabs = readSidePaneTabsState(scopeA).open.filter(tab => tab.startsWith('browser:')).length;
     await interact(() => (view.container.querySelector('main button:nth-of-type(2)') as HTMLButtonElement).click());
     expect(readSidePaneTabsState(scopeA).open.filter(tab => tab.startsWith('browser:'))).toHaveLength(browserTabs);

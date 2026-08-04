@@ -243,6 +243,13 @@ export function SidePaneWorkspace({
   const lastTabRef = useRef<SidePaneTabDefinition | null>(null);
   const resolvedActiveDef = state.active ? resolveSidePaneTab(scope, state.active) : undefined;
   const activeDef = resolvedActiveDef && shouldIncludeTab(resolvedActiveDef) ? resolvedActiveDef : undefined;
+  useEffect(() => {
+    // A deep link can reopen a retained instance before this host mounts. If
+    // this workspace cannot render that definition, clear only its active
+    // selection so the pane cannot stay wedged invisibly; the tab record stays
+    // available to a host that does support it.
+    if (state.active !== null && activeDef === undefined) deactivateSidePane(scope);
+  }, [activeDef, scope, state.active]);
   if (activeDef) lastTabRef.current = activeDef;
   else if (state.active !== null) lastTabRef.current = null;
   const displayDef = activeDef ?? (compact ? lastTabRef.current : undefined);
