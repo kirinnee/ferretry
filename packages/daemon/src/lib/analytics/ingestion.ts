@@ -129,7 +129,14 @@ interface AdmittedCandidate {
  */
 export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   private pass: AnalyticsIngestSummary | undefined;
-  private refreshing = false;
+  /**
+   * Passes asked for and not yet finished, including any still queued.
+   *
+   * COUNTED rather than flagged, because a pass that completes while another is queued behind it has not
+   * left the index settled. A boolean set by the finisher would report `refreshing: false` with work
+   * still outstanding, which is the reading a caller uses to decide the index is as complete as it gets.
+   */
+  private pending = 0;
   /** The tail of the pass chain. Always settled, never rejected. */
   private chain: Promise<void> = Promise.resolve();
 
@@ -161,14 +168,16 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
    * long a pass takes, which is exactly the case this serializes.
    */
   private async enqueue(work: () => Promise<AnalyticsIngestSummary>): Promise<AnalyticsIngestSummary> {
+    // Counted the moment the pass is ASKED FOR, not when it starts running: between those two instants
+    // there is outstanding work, and a read that called the index settled would be wrong.
+    this.pending += 1;
     const next = this.chain.then(async () => {
-      this.refreshing = true;
       try {
         const summary = await work();
         this.pass = summary;
         return summary;
       } finally {
-        this.refreshing = false;
+        this.pending -= 1;
       }
     });
     this.chain = next.then(
@@ -193,7 +202,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
         // A row whose fold was refused is PENDING, not indexed — the next pass re-attempts it.
         pendingTranscriptSources: status.refusedUsageSessions,
         sourceErrors: this.pass?.sourceErrors ?? 0,
-        refreshing: this.refreshing,
+        refreshing: this.pending > 0,
         ...(status.lastIngestedAt === null ? {} : { lastTokenRefreshAt: status.lastIngestedAt }),
       },
     };

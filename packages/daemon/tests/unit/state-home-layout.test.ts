@@ -82,6 +82,9 @@ describe('foundation paths', () => {
       state: '/tmp/fy-home/state',
       index: '/tmp/fy-home/state/index',
       sessionIndex: '/tmp/fy-home/state/index/sessions.sqlite',
+      // A SEPARATE database beside the session index: the two are dropped for different reasons, and the
+      // session index discards any file carrying tables it does not recognise.
+      analyticsIndex: '/tmp/fy-home/state/index/analytics.sqlite',
       sessions: '/tmp/fy-home/state/sessions',
       temporary: '/tmp/fy-home/state/tmp',
     });

@@ -3495,18 +3495,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     throw error;
   }
   cleanups.push(() => opened.storage.close());
-  /**
-   * The analytics materialization, opened under the lifetime lock this boot is already holding and
-   * through the same confined filesystem port.
-   *
-   * A FAILURE TO OPEN IT FAILS THE BOOT, deliberately. Swallowing it would leave the daemon serving
-   * analytics from a store nothing could write to, and an empty store answers every question with a
-   * fleet that spent nothing — the "absent evidence read as a benign result" bug this repository has
-   * now fixed six times. A disk this daemon cannot materialize an index on is a fault to report at
-   * startup, not one to discover as a suspiciously cheap month.
-   */
-  const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
-  cleanups.push(() => analyticsStore.store.close());
 
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
@@ -3529,6 +3517,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
   const catalogs = new NodeCatalog({ home: homedir(), projectRoots: config.projectRoots });
+  /**
+   * The analytics materialization, opened under the lifetime lock this boot is already holding and
+   * through the same confined filesystem port.
+   *
+   * AFTER THE ADDRESS PROBE, so a boot that is about to hand over to an incumbent daemon does not
+   * create a database file it will never write a row to.
+   *
+   * A FAILURE TO OPEN IT FAILS THE BOOT, deliberately. Swallowing it would leave the daemon serving
+   * analytics from a store nothing could write to, and an empty store answers every question with a
+   * fleet that spent nothing — the "absent evidence read as a benign result" bug this repository has
+   * now fixed six times. A disk this daemon cannot materialize an index on is a fault to report at
+   * startup, not one to discover as a suspiciously cheap month.
+   */
+  const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
+  cleanups.push(() => analyticsStore.store.close());
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
