@@ -88,16 +88,39 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     label: 'Your computer is deploying the relay. This browser is waiting.',
   },
   /*
-   * Nobody is at the machine on this route — an agent is. The figure says so by
-   * lighting the machine end while the browser rests, exactly as install does,
-   * because from this browser's point of view they are the same situation.
+   * THE COLLAPSE, DRAWN. The daemon and this browser are the SAME machine, so
+   * both ends light at once and the link is already solid — there is no journey
+   * across the picture for a code to make. It is the one step whose figure says
+   * "you are already here" before the reader has read a word of it.
    */
-  brief: {
-    machine: 'agent working',
+  local: {
+    machine: 'fyd running',
+    browser: 'same machine',
+    lit: { machine: true, browser: true, link: true },
+    linked: true,
+    label: 'The daemon and this browser are the same machine, so they reach each other over loopback.',
+  },
+  /*
+   * Nothing is happening on either end, and the figure must not pretend
+   * otherwise: this device cannot be the machine, so the machine end is empty.
+   */
+  'need-computer': {
+    machine: 'no terminal here',
     browser: 'waiting',
-    lit: { machine: true, browser: false, link: false },
+    lit: { machine: false, browser: true, link: false },
     linked: false,
-    label: 'An agent is setting Ferretry up on your machine. This browser is not linked to it yet.',
+    label: 'This device has no terminal, so it cannot run the daemon. Nothing is linked yet.',
+  },
+  /*
+   * The link is live and the reader is being offered a SECOND browser. The
+   * existing pair stays lit and joined — the offer costs them nothing they have.
+   */
+  handoff: {
+    machine: 'fyd running',
+    browser: 'adding a phone',
+    lit: { machine: true, browser: true, link: true },
+    linked: true,
+    label: 'This browser is linked to the daemon, and a phone is being offered the same link.',
   },
   pair: {
     machine: 'showing QR',

@@ -1,15 +1,14 @@
 /**
- * FIRST RUN: one question, then one of three different journeys.
+ * FIRST RUN: one question about this device, then the journey that answer implies.
  *
- * A cold visitor has installed nothing, so a "Connect a daemon" screen with a QR
- * button asks them to do something they cannot do yet. But a visitor whose phone
- * just scanned a QR has the opposite problem: an install step asks them to do
- * something they do not need. So this screen asks WHICH OF THOSE THEY ARE first,
- * and each answer walks its own list of steps — not one stepper with steps hidden
- * inside it, which is how you get two readers out of three following
- * instructions that are not theirs.
+ * Ferretry has two roles. A DAEMON runs agents and needs a terminal; a CLIENT is
+ * a browser that watches one. So the question is what THIS DEVICE is about to
+ * become — first-time setup, another client, or another daemon — and each answer
+ * walks its own list of steps, on its own kind of hardware. A phone is never
+ * offered a role it cannot hold, and a computer standing up its own daemon is
+ * never asked to scan its own screen.
  *
- * THREE RULES SHAPE EVERYTHING HERE.
+ * FOUR RULES SHAPE EVERYTHING HERE.
  *
  * 1. THE PAGE CANNOT SEE THE TERMINAL. It is static, public, and has no way to
  *    know whether `fy` installed or the daemon came up. So `Next` is never
@@ -23,6 +22,11 @@
  *    important, and a screen where four controls shout is a screen with no next
  *    action. `Next` is the only filled button; back, copy and the disclosures are
  *    quiet until wanted. This is an accessibility property, not a taste one.
+ * 4. THE DEVICE IS OBSERVED, NEVER ASKED. `progress.device` is the one reading,
+ *    taken once at hydration, and every helper here derives its steps from the
+ *    PATH — route plus device — rather than from the route alone. A page that
+ *    could render a route without knowing the device would eventually render the
+ *    wrong one, silently.
  *
  * WHAT LIVES ELSEWHERE. The question is `onboarding-chooser.tsx`, the stages are
  * `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the picture of
@@ -43,13 +47,17 @@ import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
-import { activeCarrierStatus, type HostedRelayFallback } from './hosted-relay.ts';
+import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
 import {
   type ConnectionMethodId,
   type InstallChannelId,
+  isLastOnboardingStep,
   nextOnboardingStep,
+  type OnboardingPath,
+  type OnboardingRouteId,
   type OnboardingStepId,
+  handoffTarget,
   onboardingRoute,
   onboardingStep,
   onboardingStepCount,
@@ -58,10 +66,12 @@ import {
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
 import {
-  BriefStage,
   DaemonStage,
   DoneStage,
+  HandoffStage,
   InstallStage,
+  LocalStage,
+  NeedComputerStage,
   PairStage,
   RelayAllowStage,
   RelayDeployStage,
@@ -70,6 +80,8 @@ import {
   ScanStage,
 } from './onboarding-stages.tsx';
 import { OnboardingTrack } from './onboarding-track.tsx';
+import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.tsx';
+import { setupHandoffUrl, setupPageUrl } from './setup-handoff.ts';
 import { SetupDiagram } from './setup-diagram.tsx';
 
 const SHELL =
@@ -101,6 +113,17 @@ export interface OnboardingPageProps {
   readonly connectionStatus?: string | null;
   /** What the runtime advertisement said about the default relay. */
   readonly fallback: HostedRelayFallback;
+  /**
+   * This page's own address, from which a hand-off link is built.
+   *
+   * Passed in rather than read from `window`, because the origin is a deployment
+   * fact and there is no hosted address baked into this bundle — and because a
+   * component that reaches for `location` cannot be rendered by a test or by the
+   * screenshot harness without a browser agreeing to it first.
+   */
+  readonly href: string;
+  /** The OS share sheet, when this browser has one. Absent is the ordinary case. */
+  readonly share?: SetupSharePort | undefined;
 }
 
 /**
@@ -130,8 +153,11 @@ export function OnboardingPage({
   fleetReady,
   connectionStatus = null,
   fallback,
+  href,
+  share,
 }: OnboardingPageProps) {
   const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
+  const device = progress.device;
   /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
   const screen = at.stage === 'choose' ? 'choose' : at.current;
 
@@ -188,6 +214,7 @@ export function OnboardingPage({
       data-onboarding="setup"
       data-onboarding-screen={screen}
       data-onboarding-route={at.stage === 'choose' ? 'none' : at.route}
+      data-onboarding-device={device}
     >
       {/*
         `data-kb-hide` is legal here and nowhere else on this screen: the brand
@@ -213,6 +240,7 @@ export function OnboardingPage({
 
       {at.stage === 'choose' ? (
         <OnboardingChooser
+          device={device}
           onChoose={route => {
             progress.choose(route);
           }}
@@ -220,6 +248,7 @@ export function OnboardingPage({
       ) : (
         <RouteFlow
           at={at}
+          path={progress.path(at)}
           heading={heading}
           write={write}
           channel={channel}
@@ -228,11 +257,16 @@ export function OnboardingPage({
           fleetReady={fleetReady}
           connectionStatus={connectionStatus}
           fallback={fallback}
+          href={href}
+          share={share}
           onGoTo={step => {
             progress.goTo(step);
           }}
           onChooseConnection={connection => {
             progress.chooseConnection(connection);
+          }}
+          onChooseRoute={route => {
+            progress.choose(route);
           }}
           onLeaveRoute={() => {
             progress.backToChooser();
@@ -245,6 +279,8 @@ export function OnboardingPage({
 
 interface RouteFlowProps {
   readonly at: OnboardingWalking;
+  /** The route AND the device, which together decide which steps exist. */
+  readonly path: OnboardingPath;
   readonly heading: RefObject<HTMLHeadingElement | null>;
   readonly write: ClipboardWriter;
   readonly channel: InstallChannelId;
@@ -253,8 +289,12 @@ interface RouteFlowProps {
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
   readonly fallback: HostedRelayFallback;
+  readonly href: string;
+  readonly share: SetupSharePort | undefined;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
+  /** Switch to a different answer without going back through the question. */
+  readonly onChooseRoute: (route: OnboardingRouteId) => void;
   /** Back out of the route entirely, to the question. */
   readonly onLeaveRoute: () => void;
 }
@@ -268,6 +308,7 @@ interface RouteFlowProps {
  */
 function RouteFlow({
   at,
+  path,
   heading,
   write,
   channel,
@@ -276,27 +317,57 @@ function RouteFlow({
   fleetReady,
   connectionStatus,
   fallback,
+  href,
+  share,
   onGoTo,
   onChooseConnection,
+  onChooseRoute,
   onLeaveRoute,
 }: RouteFlowProps) {
-  const route = onboardingRoute(at.route);
+  const route = onboardingRoute(at.route, path.device);
   const step = onboardingStep(at.current);
-  const count = onboardingStepCount(at.route, at.connection);
-  const position = onboardingStepIndex(at.route, at.current, at.connection);
+  const count = onboardingStepCount(path);
+  const position = onboardingStepIndex(path, at.current);
   const first = position === 0;
-  const pairing = renderPairing({ onPaired: () => onGoTo('done') });
+  const last = isLastOnboardingStep(path, at.current);
+  /*
+   * PAIRING ADVANCES ALONG THE ROUTE, IT DOES NOT JUMP TO THE END.
+   *
+   * This used to go straight to `done`, which quietly deleted the one step that
+   * makes first-time setup more than the other two answers in sequence: on a
+   * computer, the step AFTER pairing is the offer to add the reader's phone, and
+   * a hardcoded `done` meant nobody ever saw it. `add-daemon` and `add-client`
+   * have nothing between pairing and the end, so they are unaffected — which is
+   * the point of asking the route rather than naming a step.
+   */
+  const pairing = renderPairing({ onPaired: () => onGoTo(nextOnboardingStep(path, at.current)) });
+  /*
+   * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
+   *
+   * Two stages need it — the phone's "you will need a computer" and the
+   * computer's "add your phone" — and both need the same link built from the
+   * same place. A stage that built its own would be a second opinion about what
+   * the other device should resume as, and the two would diverge the first time
+   * either route changed.
+   */
+  const target = handoffTarget(path);
+  const handoff = (
+    <SetupHandoffPanel
+      url={setupHandoffUrl(href, { route: target.route, step: target.step })}
+      plainUrl={setupPageUrl(href)}
+      device={path.device}
+      write={write}
+      share={share}
+      label={
+        path.device === 'mobile'
+          ? 'QR code carrying this setup to a computer'
+          : 'QR code carrying this setup to your phone'
+      }
+    />
+  );
   return (
     <>
-      {count > 2 && (
-        <OnboardingTrack
-          route={at.route}
-          connection={at.connection}
-          current={at.current}
-          furthest={at.furthest}
-          onJump={onGoTo}
-        />
-      )}
+      {count > 2 && <OnboardingTrack path={path} current={at.current} furthest={at.furthest} onJump={onGoTo} />}
 
       <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
@@ -316,15 +387,18 @@ function RouteFlow({
 
         <Stage
           at={at}
+          path={path}
           write={write}
           channel={channel}
           pairing={pairing}
+          handoff={handoff}
           fleetReady={fleetReady}
           connectionStatus={connectionStatus}
           fallback={fallback}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
           onChooseConnection={onChooseConnection}
+          onChooseRoute={onChooseRoute}
         />
       </section>
 
@@ -342,7 +416,7 @@ function RouteFlow({
               type="button"
               className="kt-btn min-h-[44px]"
               data-variant="ghost"
-              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(at.route, at.current, at.connection))}
+              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(path, at.current))}
               data-onboarding-back={first ? 'chooser' : 'step'}
             >
               <ArrowLeft size={16} aria-hidden="true" />
@@ -355,14 +429,15 @@ function RouteFlow({
               Pairing is the opposite: the daemon answers, in this tab, and that
               answer is the only thing that may declare the journey finished. A
               Next button here would manufacture a "you are set up" for a browser
-              that is paired with nothing.
+              that is paired with nothing — and on the LAST step of a route it
+              would advance to itself, which reads as a page that is stuck.
             */}
-            {at.current !== 'scan' && at.current !== 'connect' && (
+            {at.current !== 'scan' && at.current !== 'connect' && at.current !== 'local' && !last && (
               <button
                 type="button"
                 className="kt-btn ml-auto min-h-[44px] flex-1"
                 data-variant="primary"
-                onClick={() => onGoTo(nextOnboardingStep(at.route, at.current, at.connection))}
+                onClick={() => onGoTo(nextOnboardingStep(path, at.current))}
                 data-onboarding-next=""
               >
                 Next
@@ -378,35 +453,41 @@ function RouteFlow({
 
 interface StageProps {
   readonly at: OnboardingWalking;
+  readonly path: OnboardingPath;
   readonly write: ClipboardWriter;
   readonly channel: InstallChannelId;
   readonly pairing: ReactNode;
+  readonly handoff: ReactNode;
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
   readonly fallback: HostedRelayFallback;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
+  readonly onChooseRoute: (route: OnboardingRouteId) => void;
 }
 
 /**
  * The step's body, and the ONE place a route changes what a step means.
  *
- * `scan` is shared by every route that has a fresh pairing code. The command is
- * always its own preceding step, except for "I have a link", where somebody
- * else already ran it on the computer that produced the code.
+ * `scan` is shared by every route that ends with a fresh pairing code from
+ * somewhere else. `local` is the one that does NOT need one, because the daemon
+ * and this browser are the same machine.
  */
 function Stage({
   at,
+  path,
   write,
   channel,
   pairing,
+  handoff,
   fleetReady,
   connectionStatus,
   fallback,
   onOpenFleet,
   onGoTo,
   onChooseConnection,
+  onChooseRoute,
 }: StageProps) {
   switch (at.current) {
     case 'install':
@@ -423,8 +504,12 @@ function Stage({
       return <RelayAllowStage />;
     case 'relay-deploy':
       return <RelayDeployStage write={write} />;
-    case 'brief':
-      return <BriefStage write={write} />;
+    case 'local':
+      return <LocalStage write={write} pairing={pairing} />;
+    case 'need-computer':
+      return <NeedComputerStage write={write} handoff={handoff} onAddAsClient={() => onChooseRoute('add-client')} />;
+    case 'handoff':
+      return <HandoffStage handoff={handoff} />;
     case 'pair':
       return <PairStage write={write} />;
     case 'scan':
@@ -439,9 +524,15 @@ function Stage({
             the app actually dials and, for a reader who chose a relay, says
             plainly that their choice is not yet what carries the connection.
           */
-          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(at.connection)) : null}
+          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(path.connection)) : null}
+          /*
+            AND WHAT THE FALLBACK WOULD SEE. The carrier in use is only half the
+            disclosure; the other half is about a third party the reader chose
+            screens ago and has not been reminded of since.
+          */
+          fallbackDisclosure={fleetReady ? carrierDisclosure(path.connection) : null}
           onOpenFleet={onOpenFleet}
-          onBackToPairing={() => onGoTo('scan')}
+          onBackToPairing={() => onGoTo(path.route === 'add-client' ? 'scan' : 'local')}
         />
       );
   }
@@ -464,7 +555,9 @@ const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   'relay-source': 'This page cannot see your terminal. Continue once the checkout is ready.',
   'relay-allow': 'This page cannot read your configuration. Continue once the fingerprint is listed.',
   'relay-deploy': 'This page cannot see the deployment. Continue once it finishes.',
-  brief: 'This page cannot see your agent. Continue when it shows you a QR or a link.',
+  local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',
+  'need-computer': 'Nothing happens on this device until a daemon exists somewhere.',
+  handoff: 'Optional, and nothing waits on it. Skip it and add a device whenever you like.',
   pair: 'This page cannot see your terminal. Continue once the QR code or link is on your computer.',
   scan: 'This step finishes itself when the daemon answers.',
 };

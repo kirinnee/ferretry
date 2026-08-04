@@ -7,9 +7,12 @@
  * `wrangler.jsonc` for the relay ones, and against a list of things the agent
  * prompt must never contain, because that prompt ships inside a public bundle.
  *
- * The route tests exist for a different reason: three journeys mean three step
- * lists, and a step list that lets one route's step be reached from another is
- * how a reader ends up on a screen their journey never has.
+ * The route tests exist for a different reason: the step list is a function of
+ * the ROUTE AND THE DEVICE, and the two mistakes it can make are both bad in a
+ * way coverage cannot see. Offering a phone a step it cannot act on sends a
+ * reader to a screen full of commands with nowhere to type them; making a
+ * desktop pair by scanning its own screen is the indignity this rewrite exists
+ * to remove. So both devices are asserted for every route.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -26,20 +29,25 @@ import {
   detectInstallChannel,
   firstOnboardingStep,
   furthestOnboardingStep,
+  handoffTarget,
   INSTALL_CHANNELS,
   installChannel,
+  isConnectionMethodId,
+  isLastOnboardingStep,
   isOnboardingRouteId,
   isOnboardingStepId,
   isStepOfRoute,
   nextOnboardingStep,
-  ONBOARDING_ROUTES,
+  type OnboardingPath,
   onboardingRoute,
+  onboardingRoutes,
   onboardingRouteSteps,
   onboardingStep,
   onboardingStepCount,
   onboardingStepIndex,
   onboardingStepStatus,
   PAIR_COMMAND,
+  PAIR_OPEN_COMMAND,
   PAIR_PRINT_COMMAND,
   previousOnboardingStep,
   VERIFY_COMMAND,
@@ -50,10 +58,18 @@ const repoFile = async (path: string): Promise<string> =>
 
 const installationDoc = await repoFile('INSTALLATION.md');
 
-describe('the three entry paths', () => {
-  it('offers exactly the three answers the reader was asked for', () => {
-    expect(ONBOARDING_ROUTES.map(route => route.id)).toEqual(['have-link', 'first-time', 'agent']);
-    for (const route of ONBOARDING_ROUTES) {
+const desktop = (route: OnboardingPath['route'], connection?: OnboardingPath['connection']): OnboardingPath => ({
+  route,
+  device: 'desktop',
+  connection,
+});
+
+const mobile = (route: OnboardingPath['route']): OnboardingPath => ({ route, device: 'mobile' });
+
+describe('the three answers', () => {
+  it('asks what the device is, not what the reader is holding', () => {
+    expect(onboardingRoutes('desktop').map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
+    for (const route of onboardingRoutes('desktop')) {
       expect(onboardingRoute(route.id)).toBe(route);
       // Every answer says what happens, in one line rather than a paragraph.
       expect(route.answer.length).toBeGreaterThan(0);
@@ -61,16 +77,54 @@ describe('the three entry paths', () => {
     }
   });
 
-  it('gives a reader holding a link nothing to install', () => {
-    // The whole point of the shortest route: no install, no daemon, no carrier.
-    expect(onboardingRouteSteps('have-link')).toEqual(['scan', 'done']);
-    expect(onboardingStepCount('have-link')).toBe(2);
+  it('offers a phone the daemon answer, and tells it the truth about it', () => {
+    const [, , daemonAnswer] = onboardingRoutes('mobile');
+    // Still THREE answers: an option that vanishes reads as a broken page.
+    expect(onboardingRoutes('mobile').map(route => route.id)).toEqual(['first-time', 'add-client', 'add-daemon']);
+    expect(daemonAnswer?.answer).toContain('computer');
+    // And it is not the desktop wording pretending this device can host one.
+    expect(daemonAnswer).not.toBe(onboardingRoute('add-daemon', 'desktop'));
+    expect(onboardingRoute('add-daemon', 'desktop').answer).toContain('terminal');
   });
 
-  it('walks the full arc only on the first-time route, carrier choice included', () => {
-    expect(onboardingRouteSteps('first-time')).toEqual(['install', 'daemon', 'connect', 'pair', 'scan', 'done']);
-    expect(onboardingStepCount('first-time')).toBe(6);
-    expect(onboardingRouteSteps('first-time', 'own-relay')).toEqual([
+  it('collapses pairing when the daemon is on the machine reading the page', () => {
+    // No `pair`, no `scan`: this browser IS a client of that daemon already.
+    expect(onboardingRouteSteps(desktop('add-daemon'))).toEqual(['install', 'daemon', 'connect', 'local', 'done']);
+    expect(onboardingRouteSteps(desktop('add-daemon'))).not.toContain('scan');
+    expect(onboardingRouteSteps(desktop('first-time'))).toEqual([
+      'install',
+      'daemon',
+      'connect',
+      'local',
+      'handoff',
+      'done',
+    ]);
+  });
+
+  it('makes first-time setup the only route that spans two devices', () => {
+    // Only first-time offers the phone afterwards; adding one more daemon does not.
+    expect(onboardingRouteSteps(desktop('first-time'))).toContain('handoff');
+    expect(onboardingRouteSteps(desktop('add-daemon'))).not.toContain('handoff');
+    // And on a phone it is the route that hands the daemon half away, then waits.
+    expect(onboardingRouteSteps(mobile('first-time'))).toEqual(['need-computer', 'scan', 'done']);
+  });
+
+  it('refuses to start a daemon on a phone rather than pretending to', () => {
+    // One honest screen. A `Next` that advanced to itself would read as stuck.
+    expect(onboardingRouteSteps(mobile('add-daemon'))).toEqual(['need-computer']);
+    expect(isLastOnboardingStep(mobile('add-daemon'), 'need-computer')).toBe(true);
+    expect(onboardingRouteSteps(mobile('add-daemon'))).not.toContain('install');
+  });
+
+  it('gives a reader who already has a daemon nothing to install', () => {
+    for (const device of ['desktop', 'mobile'] as const) {
+      expect(onboardingRouteSteps({ route: 'add-client', device })).toEqual(['pair', 'scan', 'done']);
+      expect(onboardingStepCount({ route: 'add-client', device })).toBe(3);
+    }
+  });
+
+  it('shows the self-host detour on the track rather than hiding it', () => {
+    expect(onboardingRouteSteps(desktop('first-time', 'own-relay'))).toEqual([
       'install',
       'daemon',
       'connect',
@@ -78,71 +132,102 @@ describe('the three entry paths', () => {
       'relay-source',
       'relay-allow',
       'relay-deploy',
-      'pair',
+      'local',
+      'handoff',
+      'done',
+    ]);
+    expect(onboardingStepCount(desktop('first-time', 'own-relay'))).toBeGreaterThan(
+      onboardingStepCount(desktop('first-time')),
+    );
+    // The relay detour is a desktop-only decision: a phone never reaches `connect`.
+    expect(onboardingRouteSteps({ route: 'first-time', device: 'mobile', connection: 'own-relay' })).toEqual([
+      'need-computer',
       'scan',
       'done',
     ]);
   });
 
-  it('makes the agent path a route rather than an aside', () => {
-    expect(onboardingRouteSteps('agent')).toEqual(['brief', 'pair', 'scan', 'done']);
+  it('opens each route on its own first step, per device', () => {
+    expect(firstOnboardingStep(desktop('first-time'))).toBe('install');
+    expect(firstOnboardingStep(mobile('first-time'))).toBe('need-computer');
+    expect(firstOnboardingStep(desktop('add-client'))).toBe('pair');
+    expect(firstOnboardingStep(desktop('add-daemon'))).toBe('install');
+    expect(firstOnboardingStep(mobile('add-daemon'))).toBe('need-computer');
   });
 
-  it('opens each route on its own first step', () => {
-    expect(firstOnboardingStep('have-link')).toBe('scan');
-    expect(firstOnboardingStep('first-time')).toBe('install');
-    expect(firstOnboardingStep('agent')).toBe('brief');
-  });
-
-  it('knows which steps belong to which route', () => {
-    expect(isStepOfRoute('first-time', 'connect')).toBe(true);
-    // `connect` is a first-time decision; the other two routes never ask it.
-    expect(isStepOfRoute('have-link', 'connect')).toBe(false);
-    expect(isStepOfRoute('agent', 'install')).toBe(false);
-    expect(onboardingStepIndex('first-time', 'pair')).toBe(3);
-    expect(onboardingStepIndex('first-time', 'relay-deploy', 'own-relay')).toBe(6);
-    expect(onboardingStepIndex('have-link', 'install')).toBe(-1);
+  it('knows which steps belong to which route on which device', () => {
+    expect(isStepOfRoute(desktop('first-time'), 'connect')).toBe(true);
+    // `connect` is a daemon-side decision; a client never chooses a carrier.
+    expect(isStepOfRoute(desktop('add-client'), 'connect')).toBe(false);
+    // The same route, the same step, a different answer — because of the device.
+    expect(isStepOfRoute(desktop('first-time'), 'install')).toBe(true);
+    expect(isStepOfRoute(mobile('first-time'), 'install')).toBe(false);
+    expect(onboardingStepIndex(desktop('first-time'), 'local')).toBe(3);
+    expect(onboardingStepIndex(desktop('first-time', 'own-relay'), 'relay-deploy')).toBe(6);
+    expect(onboardingStepIndex(desktop('add-client'), 'install')).toBe(-1);
   });
 
   it('clamps at both ends of a route rather than falling off it', () => {
-    expect(nextOnboardingStep('first-time', 'install')).toBe('daemon');
-    expect(nextOnboardingStep('first-time', 'connect')).toBe('pair');
-    expect(nextOnboardingStep('first-time', 'connect', 'own-relay')).toBe('relay-fingerprint');
-    expect(nextOnboardingStep('agent', 'brief')).toBe('pair');
-    expect(nextOnboardingStep('have-link', 'done')).toBe('done');
-    expect(previousOnboardingStep('first-time', 'pair')).toBe('connect');
-    expect(previousOnboardingStep('first-time', 'pair', 'own-relay')).toBe('relay-deploy');
-    expect(previousOnboardingStep('agent', 'brief')).toBe('brief');
-    expect(furthestOnboardingStep('first-time', 'daemon', 'pair')).toBe('pair');
-    expect(furthestOnboardingStep('first-time', 'done', 'install')).toBe('done');
+    expect(nextOnboardingStep(desktop('first-time'), 'install')).toBe('daemon');
+    expect(nextOnboardingStep(desktop('first-time'), 'local')).toBe('handoff');
+    expect(nextOnboardingStep(desktop('first-time', 'own-relay'), 'connect')).toBe('relay-fingerprint');
+    expect(nextOnboardingStep(desktop('add-client'), 'done')).toBe('done');
+    expect(nextOnboardingStep(mobile('add-daemon'), 'need-computer')).toBe('need-computer');
+    expect(previousOnboardingStep(desktop('first-time'), 'local')).toBe('connect');
+    expect(previousOnboardingStep(desktop('first-time', 'own-relay'), 'local')).toBe('relay-deploy');
+    expect(previousOnboardingStep(desktop('add-client'), 'pair')).toBe('pair');
+    expect(furthestOnboardingStep(desktop('first-time'), 'daemon', 'local')).toBe('local');
+    expect(furthestOnboardingStep(desktop('first-time'), 'done', 'install')).toBe('done');
+  });
+
+  it('knows the last step of every route, so nothing offers a way onward from it', () => {
+    expect(isLastOnboardingStep(desktop('first-time'), 'done')).toBe(true);
+    expect(isLastOnboardingStep(desktop('first-time'), 'handoff')).toBe(false);
+    expect(isLastOnboardingStep(mobile('first-time'), 'done')).toBe(true);
   });
 
   it('keeps a step reachable after the reader steps back from it', () => {
-    // Stepped back to install, having once reached pair.
-    expect(onboardingStepStatus('first-time', 'install', 'install', 'pair')).toBe('current');
-    expect(onboardingStepStatus('first-time', 'daemon', 'install', 'pair')).toBe('completed');
+    const path = desktop('first-time');
+    expect(onboardingStepStatus(path, 'install', 'install', 'local')).toBe('current');
+    expect(onboardingStepStatus(path, 'daemon', 'install', 'local')).toBe('completed');
     // The furthest point is still somewhere they have been, so it stays jumpable.
-    expect(onboardingStepStatus('first-time', 'pair', 'install', 'pair')).toBe('completed');
-    expect(onboardingStepStatus('first-time', 'done', 'install', 'pair')).toBe('upcoming');
+    expect(onboardingStepStatus(path, 'local', 'install', 'local')).toBe('completed');
+    expect(onboardingStepStatus(path, 'done', 'install', 'local')).toBe('upcoming');
+  });
+
+  it('sends a hand-off to the half the other device can actually do', () => {
+    // A phone cannot install anything, so it hands the whole journey to a computer.
+    expect(handoffTarget(mobile('first-time'))).toEqual({ route: 'first-time', step: 'install' });
+    // A computer with a daemon has only membership to offer, and the phone needs a code.
+    expect(handoffTarget(desktop('first-time'))).toEqual({ route: 'add-client', step: 'pair' });
   });
 
   it('names every step it can put on the glass, and nothing else', () => {
     expect(onboardingStep('connect').title).toBe('Choose a connection');
-    expect(onboardingStep('brief').short).toBe('Brief');
-    expect(isOnboardingStepId('connect')).toBe(true);
-    expect(isOnboardingStepId('finished')).toBe(false);
+    expect(onboardingStep('local').summary).toContain('nothing to scan');
+    expect(onboardingStep('need-computer').title).toBe('You will need a computer');
+    expect(onboardingStep('handoff').short).toBe('Phone');
+    expect(isOnboardingStepId('local')).toBe(true);
+    expect(isOnboardingStepId('brief')).toBe(false);
     expect(isOnboardingStepId(2)).toBe(false);
     expect(isOnboardingStepId(null)).toBe(false);
   });
 
   it('accepts only the three route ids back from storage', () => {
-    expect(isOnboardingRouteId('have-link')).toBe(true);
-    expect(isOnboardingRouteId('stepper')).toBe(false);
+    expect(isOnboardingRouteId('add-daemon')).toBe(true);
+    // The routes this replaced. A stored `have-link` describes a journey that is gone.
+    expect(isOnboardingRouteId('have-link')).toBe(false);
+    expect(isOnboardingRouteId('agent')).toBe(false);
     expect(isOnboardingRouteId(1)).toBe(false);
     expect(isOnboardingRouteId(undefined)).toBe(false);
   });
-});
 
+  it('accepts only the three connection ids back from storage', () => {
+    expect(isConnectionMethodId('own-relay')).toBe(true);
+    expect(isConnectionMethodId('tunnel')).toBe(false);
+    expect(isConnectionMethodId(null)).toBe(false);
+  });
+});
 describe('install channels', () => {
   it('shows every documented route, and only documented commands', () => {
     expect(INSTALL_CHANNELS.map(channel => channel.id)).toEqual(['apt', 'dnf', 'brew', 'nix', 'curl']);
@@ -192,6 +277,7 @@ describe('install channels', () => {
     expect(DAEMON_INSTALL_COMMAND).toBe('fy daemon install');
     expect(DAEMON_STATUS_COMMAND).toBe('fy daemon status');
     expect(PAIR_COMMAND).toBe('fy pair');
+    expect(PAIR_OPEN_COMMAND).toBe('fy pair --open');
     expect(PAIR_PRINT_COMMAND).toBe('fy pair --no-wait');
     expect(DAEMON_SERVING_OUTPUT).toBe('fyd is serving');
   });
@@ -231,7 +317,9 @@ describe('the connection chooser', () => {
   it('makes self-hosting a longer route, not a hidden paragraph', () => {
     const own = connectionMethod('own-relay');
     expect(own.title).toContain('own relay');
-    expect(onboardingStepCount('first-time', 'own-relay')).toBeGreaterThan(onboardingStepCount('first-time'));
+    expect(onboardingStepCount({ route: 'first-time', device: 'desktop', connection: 'own-relay' })).toBeGreaterThan(
+      onboardingStepCount({ route: 'first-time', device: 'desktop' }),
+    );
     expect(PAIR_PRINT_COMMAND).toBe('fy pair --no-wait');
   });
 });

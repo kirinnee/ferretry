@@ -52,9 +52,15 @@ const SECTIONS = [
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
   'harness-onboarding-choose',
+  // The phone reading of the same question: still three answers, and the daemon
+  // one saying why it needs a computer rather than pretending this device can.
+  'harness-onboarding-choose-mobile',
   'harness-onboarding-daemon',
   'harness-onboarding-connect',
-  'harness-onboarding-brief',
+  // The same-machine collapse, and the phone that was told the truth about it.
+  'harness-onboarding-local',
+  'harness-onboarding-need-computer',
+  'harness-onboarding-handoff',
   'harness-onboarding-scan',
   'harness-onboarding-pair',
   'harness-onboarding-done',

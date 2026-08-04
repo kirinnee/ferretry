@@ -17,6 +17,7 @@ import {
   MINTED_AT,
   PAIRING_ID,
   pending,
+  RecordingBrowserOpener,
   RecordingProgress,
   redeemed,
   ScriptedPairGateway,
@@ -31,6 +32,7 @@ interface Harness {
   readonly exit: CapturingExit;
   readonly clock: FakeClock;
   readonly qr: StubQrEncoder;
+  readonly browser: RecordingBrowserOpener;
 }
 
 function harness(overrides: Partial<PairDeps> = {}, gateway = new ScriptedPairGateway()): Harness {
@@ -39,6 +41,7 @@ function harness(overrides: Partial<PairDeps> = {}, gateway = new ScriptedPairGa
   const exit = new CapturingExit();
   const clock = new FakeClock();
   const qr = new StubQrEncoder();
+  const browser = new RecordingBrowserOpener();
   const deps: PairDeps = {
     gateway,
     screen,
@@ -47,10 +50,20 @@ function harness(overrides: Partial<PairDeps> = {}, gateway = new ScriptedPairGa
     clock,
     qr,
     terminal: new FixedTerminalSize(100),
+    browser,
     binaryName: 'fy',
     ...overrides,
   };
-  return { subject: new PairController(deps), gateway, screen, progress, exit, clock, qr };
+  return {
+    subject: new PairController(deps),
+    gateway,
+    screen,
+    progress,
+    exit,
+    clock,
+    qr,
+    browser: (deps.browser as RecordingBrowserOpener) ?? browser,
+  };
 }
 
 const pair = async (h: Harness, options: PairOptions = {}): Promise<void> => {
@@ -236,5 +249,36 @@ describe('fy pair', () => {
 
     // Assert
     should(h.screen.text).containEql('it is not drawn');
+  });
+});
+
+describe('fy pair --open', () => {
+  it('says the browser opened, and leaves the code on the screen anyway', async () => {
+    const browser = new RecordingBrowserOpener(true);
+    const h = harness({ browser });
+    await pair(h, { open: true, wait: false });
+
+    h.screen.text.should.match(/Opened the pairing link/);
+    // The QR is NOT withdrawn. A reader who asked for --open on a machine that
+    // also has a phone nearby may still prefer the phone; taking the code away
+    // the moment a window opened would remove a choice for no reason.
+    h.screen.text.should.match(/code/);
+    browser.opened.should.have.length(1);
+  });
+
+  it('reports a host that cannot open one as a fact, not as a failure', async () => {
+    // A headless box, an SSH session, a container, a desktop with no handler:
+    // all ordinary places to run this. The code is untouched and the QR is
+    // still above, so the honest line points at what still works.
+    const browser = new RecordingBrowserOpener(false);
+    const h = harness({ browser });
+    await pair(h, { open: true, wait: false });
+
+    const screen = h.screen.text;
+    screen.should.match(/Could not open a browser/);
+    screen.should.match(/untouched/);
+    screen.should.match(/fy pair/);
+    // Nothing about it is an error: the exit status belongs to the pairing.
+    should.not.exist(h.exit.code);
   });
 });

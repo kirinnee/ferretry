@@ -1,6 +1,7 @@
 import { PAIRING_CODE_TTL_SECONDS, type PairingCodeMintResponse } from '@ferretry/protocol';
 import { checkedPairUrl, pairingDaemonHost } from './link.ts';
 import type {
+  IBrowserOpener,
   IPairClock,
   IPairExit,
   IPairGateway,
@@ -9,7 +10,15 @@ import type {
   IQrEncoder,
   ITerminalSize,
 } from './ports.ts';
-import { renderExpired, renderInvitation, renderPaired, renderUnconfirmed, renderWaiting } from './render.ts';
+import {
+  renderBrowserRefused,
+  renderExpired,
+  renderInvitation,
+  renderOpenedBrowser,
+  renderPaired,
+  renderUnconfirmed,
+  renderWaiting,
+} from './render.ts';
 
 /**
  * How often the daemon is asked what became of the code.
@@ -34,6 +43,14 @@ export interface PairOptions {
   readonly wait?: boolean;
   /** Draw the QR at full size, for a camera that will not focus on the compact one. */
   readonly large?: boolean;
+  /**
+   * Open the pairing link in this host's own browser.
+   *
+   * For the case the old flow served worst: the daemon and the browser are the
+   * SAME machine, so there is nobody to scan anything and the QR was asking the
+   * operator to photograph their own screen.
+   */
+  readonly open?: boolean;
 }
 
 export interface PairDeps {
@@ -44,6 +61,8 @@ export interface PairDeps {
   readonly clock: IPairClock;
   readonly qr: IQrEncoder;
   readonly terminal: ITerminalSize;
+  /** Opens a URL on this host, for the same-machine case. */
+  readonly browser: IBrowserOpener;
   /** What this binary is called, so every retry hint is a command the operator actually has. */
   readonly binaryName: string;
 }
@@ -82,6 +101,22 @@ export class PairController {
         binaryName: this.deps.binaryName,
       }),
     );
+    /*
+     * THE SAME-MACHINE PATH, ATTEMPTED AND THEN REPORTED HONESTLY.
+     *
+     * Asked for, never assumed: opening a browser on a host whose operator did
+     * not request it is a side effect nobody consented to, and on a shared or
+     * headless box it is worse than useless. When it IS asked for and the host
+     * cannot do it — no display, an SSH session, a desktop that refuses — the
+     * screen already holds the QR and the link, so the honest line is that it
+     * did not open and the code is still good. Claiming a browser opened when
+     * none did would leave the operator staring at a window that never appears.
+     */
+    if (options.open === true) {
+      this.deps.screen.write(
+        (await this.deps.browser.open(link)) ? renderOpenedBrowser() : renderBrowserRefused(this.deps.binaryName),
+      );
+    }
     // `--no-wait` is for a script that wants the screen and nothing else; there is no one to tell.
     if (options.wait === false) return;
     await this.#watch(mint);

@@ -61,6 +61,7 @@ import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
+import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -415,6 +416,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         clock: new SystemMillisecondClock(),
         qr: new QrCodeTerminal(),
         terminal: new ProcessTerminalSize(),
+        browser: desktopBrowserOpener(),
         binaryName: BINARY_NAME,
       }),
     ),

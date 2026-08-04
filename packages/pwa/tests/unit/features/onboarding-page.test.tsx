@@ -7,19 +7,22 @@
  * against source text.
  *
  * The question this suite answers first is the one the reader asked for: from the
- * opening screen, can somebody tell which of the three they are? So the chooser
- * is tested as a chooser — three answers, three different journeys behind them —
- * and each journey is then walked to its end.
+ * opening screen, can somebody tell within two seconds which of the three they
+ * are? So the chooser is tested as a chooser, ON BOTH KINDS OF DEVICE, because
+ * the third answer means something different on a phone — and then each journey
+ * is walked to its end.
  */
 
 import { describe, expect, it } from 'bun:test';
 
+import type { DeviceKind } from '../../../src/features/onboarding/device-kind.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from '../../../src/features/onboarding/hosted-relay.ts';
 import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../src/features/onboarding/onboarding-page.tsx';
 import {
   type OnboardingProgressStorage,
   OnboardingProgressStore,
 } from '../../../src/features/onboarding/onboarding-progress.ts';
+import type { SetupSharePort } from '../../../src/features/onboarding/setup-handoff-panel.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 
 class MemoryStorage implements OnboardingProgressStorage {
@@ -31,6 +34,9 @@ class MemoryStorage implements OnboardingProgressStorage {
     this.#value = next;
   }
 }
+
+/** A `.invalid` origin: a QR rendered in a suite must not point at anything real. */
+const HREF = 'https://ferretry.example.invalid/setup';
 
 /** Lets a `requestAnimationFrame` callback run, the way a real frame would. */
 const nextFrame = async (): Promise<void> =>
@@ -52,21 +58,32 @@ const screenOf = (container: HTMLElement): string | null => root(container).getA
 
 const routeOf = (container: HTMLElement): string | null => root(container).getAttribute('data-onboarding-route');
 
+/** The command block on the glass, as distinct from the agent brief folded below it. */
+const visibleCommand = (container: HTMLElement): string =>
+  must(container.querySelector('pre'), 'the command block').textContent ?? '';
+
 interface PageOptions {
   readonly progress?: OnboardingProgressStore;
+  readonly device?: DeviceKind;
   readonly fleetReady?: boolean;
   readonly onOpenFleet?: () => void;
   /** What the runtime advertisement said about the default relay. */
   readonly fallback?: HostedRelayFallback;
+  readonly share?: SetupSharePort;
 }
 
 const pageWith = async (options: PageOptions = {}) => {
   const opened: string[] = [];
   const view = await mount(
     <OnboardingPage
-      progress={options.progress ?? new OnboardingProgressStore({ storage: new MemoryStorage() })}
+      progress={
+        options.progress ??
+        new OnboardingProgressStore({ storage: new MemoryStorage(), device: options.device ?? 'desktop' })
+      }
       write={async () => {}}
       channel="apt"
+      href={HREF}
+      share={options.share}
       fleetReady={options.fleetReady ?? false}
       connectionStatus={null}
       fallback={options.fallback ?? CHECKING_HOSTED_RELAY}
@@ -98,25 +115,28 @@ const chooseConnection = async (container: HTMLElement, connection: string): Pro
 };
 
 describe('the opening question', () => {
-  it('asks which of the three the reader is, and shows nothing else', async () => {
+  it('asks what this device is, and shows nothing else', async () => {
     const { view } = await pageWith();
 
     expect(screenOf(view.container)).toBe('choose');
     expect(routeOf(view.container)).toBe('none');
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
-    expect(must(view.container.querySelector('h2'), 'the question').textContent).toBe('Which of these are you?');
+    expect(must(view.container.querySelector('h2'), 'the question').textContent).toBe('What is this device?');
+    // The two roles are named before the answers are read, because they are what
+    // the answers are ABOUT.
+    expect(view.container.textContent).toContain('A daemon runs your agents and needs a terminal');
 
     // A real list of real buttons, one per answer, each saying what happens.
     const answers = [...view.container.querySelectorAll('li button[data-onboarding-route]')];
     expect(answers.map(node => node.getAttribute('data-onboarding-route'))).toEqual([
-      'have-link',
       'first-time',
-      'agent',
+      'add-client',
+      'add-daemon',
     ]);
-    expect(answers[0]?.textContent).toContain('I have a link or QR');
-    expect(answers[0]?.textContent).toContain('Nothing to install');
-    expect(answers[1]?.textContent).toContain('First time setup');
-    expect(answers[2]?.textContent).toContain('Let an agent set it up');
+    expect(answers[0]?.textContent).toContain('First time setup');
+    expect(answers[1]?.textContent).toContain('Add this as a client');
+    expect(answers[2]?.textContent).toContain('Add this as a daemon');
+    expect(answers[2]?.textContent).toContain('Needs a terminal');
 
     // No stepper, no track and no diagram of a journey nobody has chosen.
     expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
@@ -125,23 +145,35 @@ describe('the opening question', () => {
     await view.unmount();
   });
 
+  it('never offers a phone a role a phone cannot hold', async () => {
+    const { view } = await pageWith({ device: 'mobile' });
+
+    // Still three answers — an option that silently vanishes reads as a broken
+    // page — but the daemon one says what is actually true about this device.
+    const answers = [...view.container.querySelectorAll('li button[data-onboarding-route]')];
+    expect(answers).toHaveLength(3);
+    expect(answers[2]?.textContent).not.toContain('Needs a terminal');
+    expect(answers[2]?.textContent).toContain('needs a computer');
+    await view.unmount();
+  });
+
   it('sends each answer to a different first screen', async () => {
-    const link = await pageWith();
-    await enter(link.view.container, 'have-link');
-    // Straight to pairing: no install, no daemon, no carrier choice.
-    expect(screenOf(link.view.container)).toBe('scan');
-    expect(link.view.container.textContent).not.toContain('sudo apt install fy');
-    await link.view.unmount();
+    const client = await pageWith();
+    await enter(client.view.container, 'add-client');
+    // Nothing to install: a daemon already exists somewhere else.
+    expect(screenOf(client.view.container)).toBe('pair');
+    expect(client.view.container.textContent).not.toContain('sudo apt install fy');
+    await client.view.unmount();
 
     const first = await pageWith();
     await enter(first.view.container, 'first-time');
     expect(screenOf(first.view.container)).toBe('install');
     await first.view.unmount();
 
-    const agent = await pageWith();
-    await enter(agent.view.container, 'agent');
-    expect(screenOf(agent.view.container)).toBe('brief');
-    await agent.view.unmount();
+    const daemon = await pageWith();
+    await enter(daemon.view.container, 'add-daemon');
+    expect(screenOf(daemon.view.container)).toBe('install');
+    await daemon.view.unmount();
   });
 
   it('is what Back reaches from the first step of any route', async () => {
@@ -154,28 +186,28 @@ describe('the opening question', () => {
 
     // Picking the wrong answer has to be survivable, and then re-answerable.
     expect(screenOf(view.container)).toBe('choose');
-    await enter(view.container, 'agent');
-    expect(screenOf(view.container)).toBe('brief');
+    await enter(view.container, 'add-client');
+    expect(screenOf(view.container)).toBe('pair');
     await view.unmount();
   });
 
   it('remembers the answer and the step across a reload of the whole page', async () => {
     const storage = new MemoryStorage();
-    const firstVisit = await pageWith({ progress: new OnboardingProgressStore({ storage }) });
+    const firstVisit = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'desktop' }) });
     await enter(firstVisit.view.container, 'first-time');
     await next(firstVisit.view.container);
     await firstVisit.view.unmount();
 
     // A new tab, with only storage in between.
-    const second = await pageWith({ progress: new OnboardingProgressStore({ storage }) });
+    const second = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'desktop' }) });
     expect(routeOf(second.view.container)).toBe('first-time');
     expect(screenOf(second.view.container)).toBe('daemon');
     await second.view.unmount();
   });
 });
 
-describe('the first-time route', () => {
-  it('walks the default path and puts fy pair before scanning, with the whole track visible', async () => {
+describe('the first-time route on a computer', () => {
+  it('walks the arc and never asks the reader to scan their own screen', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
 
@@ -201,15 +233,52 @@ describe('the first-time route', () => {
     expect(screenOf(view.container)).toBe('connect');
     expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
     await chooseConnection(view.container, 'default-relay');
-    expect(screenOf(view.container)).toBe('pair');
-    expect(view.container.textContent).toContain('Run this on the computer');
-    await next(view.container);
-    expect(screenOf(view.container)).toBe('scan');
 
-    // Scan IS verifiable — the daemon answers in this tab — so there is no
-    // button here that could declare a browser paired with nothing "done".
+    // THE COLLAPSE. The daemon is on this machine, so there is no QR and no code
+    // — just a command that opens this browser already paired.
+    expect(screenOf(view.container)).toBe('local');
+    expect(view.container.textContent).toContain('fy pair --open');
+    expect(view.container.textContent).toContain('no QR, no code to type');
+    // Nothing here declares the journey finished on a click: the daemon answers.
     expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
     expect(buttonWith(view.container, '[data-onboarding-back]').getAttribute('data-onboarding-back')).toBe('step');
+    await view.unmount();
+  });
+
+  it('keeps a way through for a terminal that cannot open a browser', async () => {
+    // A headless host, a remote shell, a locked-down desktop: common enough that
+    // the fallback is one tap away rather than gone.
+    const progress = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    progress.choose('first-time');
+    progress.goTo('local');
+    const { view } = await pageWith({ progress });
+
+    expect(view.container.textContent).toContain('It did not open a browser');
+    expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('offers the phone once the computer is connected, and lets it be skipped', async () => {
+    const progress = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    progress.choose('first-time');
+    progress.goTo('handoff');
+    const { view } = await pageWith({ progress, fleetReady: true });
+
+    expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('Add your phone');
+    // A QR, because a phone has a camera and this screen is what it points at.
+    const qr = must(view.container.querySelector('[data-onboarding-qr]'), 'the hand-off QR');
+    expect(qr.getAttribute('role')).toBe('img');
+    expect(qr.getAttribute('aria-label')).toContain('phone');
+    // The link carries the PLACE, not just the page: the phone resumes at pairing.
+    expect(
+      must(view.container.querySelector('[data-onboarding-handoff-url]'), 'the printed link').textContent,
+    ).toContain('#fy-setup=v1;add-client;pair');
+    // Optional, and it says so — the reader is already finished.
+    // Said ONCE. The advance note under every step already carries it, and the
+    // same sentence twice reads as a page that does not know what it has said.
+    expect(view.container.textContent).toContain('Skip it and add a device whenever you like');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('done');
     await view.unmount();
   });
 
@@ -232,35 +301,84 @@ describe('the first-time route', () => {
     await next(view.container);
     await next(view.container);
     await chooseConnection(view.container, 'direct');
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('local');
 
     await click(buttonWith(view.container, '[data-onboarding-jump="install"]'));
     expect(screenOf(view.container)).toBe('install');
-    // Stepping back does not unreach pairing.
-    await click(buttonWith(view.container, '[data-onboarding-jump="pair"]'));
-    expect(screenOf(view.container)).toBe('pair');
+    // Stepping back does not unreach the pairing step.
+    await click(buttonWith(view.container, '[data-onboarding-jump="local"]'));
+    expect(screenOf(view.container)).toBe('local');
     await view.unmount();
   });
 
-  it('finishes only when the daemon actually answers', async () => {
+  it('advances along the route when the daemon answers, rather than jumping to the end', async () => {
     const { view } = await pageWith({ fleetReady: false });
     await enter(view.container, 'first-time');
     await next(view.container);
     await next(view.container);
     await chooseConnection(view.container, 'default-relay');
-    expect(view.container.textContent).toContain('fy pair');
-    await next(view.container);
 
     await click(buttonWith(view.container, '[data-test-pair]'));
 
+    // NOT 'done'. The step after pairing on this route is the offer to add the
+    // reader's phone — the one thing that makes first-time setup more than the
+    // other two answers in sequence. A hardcoded 'done' here deleted it.
+    expect(screenOf(view.container)).toBe('handoff');
+    await next(view.container);
     expect(screenOf(view.container)).toBe('done');
     expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('You are set up');
     await view.unmount();
   });
 
+  it('goes straight to the end on a route with nothing after pairing', async () => {
+    // Adding one more daemon has no phone to offer: this is not a first machine.
+    const { view } = await pageWith({ fleetReady: true });
+    await enter(view.container, 'add-daemon');
+    await next(view.container);
+    await next(view.container);
+    await chooseConnection(view.container, 'direct');
+    expect(screenOf(view.container)).toBe('local');
+
+    await click(buttonWith(view.container, '[data-test-pair]'));
+    expect(screenOf(view.container)).toBe('done');
+    await view.unmount();
+  });
+
+  it('restates what the chosen fallback would see, where the connection becomes real', async () => {
+    // The carrier choice was made several screens — possibly several days —
+    // before anything was connected, and it is a decision about somebody else's
+    // infrastructure. Saying "Direct" here and stopping would quietly retire it.
+    const progress = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    progress.choose('first-time');
+    progress.goTo('connect');
+    progress.chooseConnection('default-relay');
+    progress.goTo('done');
+    const relayed = await pageWith({ progress, fleetReady: true });
+
+    expect(relayed.view.container.textContent).toContain('Connection in use: Direct');
+    const disclosure = must(
+      relayed.view.container.querySelector('[data-onboarding-fallback-disclosure]'),
+      'the fallback disclosure',
+    );
+    expect(disclosure.textContent).toContain('could not read a byte of it');
+    expect(disclosure.textContent).toContain('metered and capped');
+    await relayed.view.unmount();
+
+    // A direct connection has no third party in it, and an empty list under a
+    // "what they can see" heading reads as a redaction rather than an absence.
+    const direct = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    direct.choose('first-time');
+    direct.goTo('connect');
+    direct.chooseConnection('direct');
+    direct.goTo('done');
+    const plain = await pageWith({ progress: direct, fleetReady: true });
+    expect(plain.view.container.querySelector('[data-onboarding-fallback-disclosure]')).toBeNull();
+    await plain.view.unmount();
+  });
+
   it('offers the fleet when there is one, and refuses to pretend when there is not', async () => {
     const storage = new MemoryStorage();
-    const progress = new OnboardingProgressStore({ storage });
+    const progress = new OnboardingProgressStore({ storage, device: 'desktop' });
     progress.choose('first-time');
     progress.goTo('done');
     const unpaired = await pageWith({ progress, fleetReady: false });
@@ -268,19 +386,95 @@ describe('the first-time route', () => {
     // Damaged or half-finished setup must not offer a fleet that cannot open.
     expect(unpaired.view.container.textContent).toContain('Nothing is paired in this browser yet');
     await click(buttonWith(unpaired.view.container, '[data-onboarding-open-fleet]'));
-    expect(screenOf(unpaired.view.container)).toBe('scan');
+    // Back to the step that pairs THIS route: the same machine, not a scan.
+    expect(screenOf(unpaired.view.container)).toBe('local');
     await unpaired.view.unmount();
 
     // `paired` is what makes a stored "finished" believable: without a pairing
     // the same document reads as the question again.
     const paired = await pageWith({
-      progress: new OnboardingProgressStore({ storage, paired: true }),
+      progress: new OnboardingProgressStore({ storage, device: 'desktop', paired: true }),
       fleetReady: true,
     });
     await click(buttonWith(paired.view.container, '[data-onboarding-jump="done"]'));
     await click(buttonWith(paired.view.container, '[data-onboarding-open-fleet]'));
     expect(paired.opened).toEqual(['fleet']);
     await paired.view.unmount();
+  });
+});
+
+describe('the first-time route on a phone', () => {
+  it('says what is true and hands the daemon half to a computer', async () => {
+    const { view } = await pageWith({ device: 'mobile' });
+    await enter(view.container, 'first-time');
+
+    expect(screenOf(view.container)).toBe('need-computer');
+    expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('You will need a computer');
+    // No install commands anywhere: this device has nowhere to type them.
+    expect(view.container.textContent).not.toContain('sudo apt install fy');
+
+    // A computer has no camera pointed at a phone, so this direction is a LINK.
+    expect(view.container.querySelector('[data-onboarding-qr]')).toBeNull();
+    expect(view.container.textContent).toContain('no camera pointed at this screen');
+    const handoff = must(view.container.querySelector('[data-onboarding-handoff]'), 'the hand-off');
+    expect(handoff.getAttribute('data-onboarding-handoff')).toBe('mobile');
+    // And it carries the place: the computer opens at the beginning of setup.
+    expect(
+      must(view.container.querySelector('[data-onboarding-handoff-url]'), 'the printed link').textContent,
+    ).toContain('#fy-setup=v1;first-time;install');
+    await view.unmount();
+  });
+
+  it('comes back to the phone to finish pairing', async () => {
+    const { view } = await pageWith({ device: 'mobile', fleetReady: true });
+    await enter(view.container, 'first-time');
+    expect(view.container.textContent).toContain('step 1 of 3');
+
+    await next(view.container);
+    // The phone's own half: the computer prints a code and this device uses it.
+    expect(screenOf(view.container)).toBe('scan');
+    expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
+    await click(buttonWith(view.container, '[data-test-pair]'));
+    expect(screenOf(view.container)).toBe('done');
+    await view.unmount();
+  });
+
+  it('shares the link through the OS when this browser has a share sheet', async () => {
+    const shared: string[] = [];
+    const share: SetupSharePort = async payload => {
+      shared.push(payload.url);
+    };
+    const { view } = await pageWith({ device: 'mobile', share });
+    await enter(view.container, 'first-time');
+
+    await click(buttonWith(view.container, '[data-onboarding-share]'));
+    expect(shared).toEqual([`${HREF}#fy-setup=v1;first-time;install`]);
+    await view.unmount();
+  });
+
+  it('draws no share control when the browser has no share sheet', async () => {
+    // A button that throws `NotAllowedError` when pressed is worse than one that
+    // was never drawn, and copy plus the printed link are still there.
+    const { view } = await pageWith({ device: 'mobile' });
+    await enter(view.container, 'first-time');
+
+    expect(view.container.querySelector('[data-onboarding-share]')).toBeNull();
+    expect(view.container.querySelector('[data-onboarding-copy="Copy setup link"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('refuses to start a daemon on a phone, and offers what the reader may have meant', async () => {
+    const { view } = await pageWith({ device: 'mobile' });
+    await enter(view.container, 'add-daemon');
+
+    expect(screenOf(view.container)).toBe('need-computer');
+    // A one-screen route: a `Next` here would advance to itself and read as stuck.
+    expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
+    // Not a dead end: the other thing they may have meant is one tap away.
+    await click(buttonWith(view.container, '[data-onboarding-add-client]'));
+    expect(routeOf(view.container)).toBe('add-client');
+    expect(screenOf(view.container)).toBe('pair');
+    await view.unmount();
   });
 });
 
@@ -295,18 +489,20 @@ describe('the install step', () => {
       ).getAttribute('data-onboarding-channel');
 
     expect(selected()).toBe('apt');
-    expect(view.container.textContent).toContain('sudo apt install fy');
+    expect(visibleCommand(view.container)).toContain('sudo apt install fy');
     expect(view.container.querySelectorAll('[data-onboarding-channel]')).toHaveLength(5);
 
     await click(buttonWith(view.container, '[data-onboarding-channel="dnf"]'));
     expect(selected()).toBe('dnf');
-    expect(view.container.textContent).toContain('sudo dnf install fy');
-    expect(view.container.textContent).not.toContain('sudo apt install fy');
+    // Scoped to the block on the glass: the agent brief in the disclosure below
+    // legitimately lists every documented command, which is what makes it usable.
+    expect(visibleCommand(view.container)).toContain('sudo dnf install fy');
+    expect(visibleCommand(view.container)).not.toContain('sudo apt install fy');
 
     await click(buttonWith(view.container, '[data-onboarding-channel="brew"]'));
-    expect(view.container.textContent).toContain('brew install --cask ferretry');
+    expect(visibleCommand(view.container)).toContain('brew install --cask ferretry');
     await click(buttonWith(view.container, '[data-onboarding-channel="nix"]'));
-    expect(view.container.textContent).toContain('nix profile install github:kirinnee/ferretry');
+    expect(visibleCommand(view.container)).toContain('nix profile install github:kirinnee/ferretry');
     await view.unmount();
   });
 
@@ -318,7 +514,7 @@ describe('the install step', () => {
     expect(view.container.querySelector('[data-onboarding-fallback-note]')).toBeNull();
 
     await click(buttonWith(view.container, '[data-onboarding-channel="curl"]'));
-    expect(view.container.textContent).toContain('install.sh | bash');
+    expect(visibleCommand(view.container)).toContain('install.sh | bash');
     const note = must(view.container.querySelector('[data-onboarding-fallback-note]'), 'the fallback note');
     expect(note.textContent).toContain('generic fallback');
     // The reason a Mac owner should not be here: the cask clears the quarantine.
@@ -326,7 +522,7 @@ describe('the install step', () => {
     await view.unmount();
   });
 
-  it('gives every command a copy control, and no longer hides the agent path in an aside', async () => {
+  it('keeps the agent prompt as an alternative to the command, not a third identity', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
     const labels = [...view.container.querySelectorAll('[data-onboarding-copy]')].map(node =>
@@ -335,8 +531,13 @@ describe('the install step', () => {
 
     expect(labels).toContain('Copy install command');
     expect(labels).toContain('Copy check');
-    // The agent brief is a route of its own now, not an annexe of this step.
-    expect(labels).not.toContain('Copy setup prompt');
+    // Beside the install command it replaces, in a disclosure of its own — and
+    // whole, because it is about to be handed to something with a shell.
+    expect(labels).toContain('Copy setup prompt');
+    expect(view.container.querySelector('[data-onboarding-aside="Rather have an agent do it?"]')).not.toBeNull();
+    expect(must(view.container.querySelector('[data-onboarding-prompt]'), 'the prompt').textContent).toContain(
+      'stop and report',
+    );
     expect(view.container.textContent).toContain('fy --version');
     await view.unmount();
   });
@@ -402,83 +603,73 @@ describe('the reach-it step', () => {
     await view.unmount();
   });
 
-  it('takes the direct and default choices straight to fy pair', async () => {
+  it('takes the direct and default choices straight to the local pairing step', async () => {
     const { view } = await pageWith();
     await toConnect(view.container);
     await chooseConnection(view.container, 'direct');
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('local');
     await click(buttonWith(view.container, '[data-onboarding-back]'));
     expect(screenOf(view.container)).toBe('connect');
     await chooseConnection(view.container, 'default-relay');
-    expect(screenOf(view.container)).toBe('pair');
+    expect(screenOf(view.container)).toBe('local');
     await view.unmount();
   });
 });
 
-describe('the agent route', () => {
-  it('shows the whole prompt and one control to copy it', async () => {
+describe('the add-a-client route', () => {
+  it('runs fy pair somewhere else, then uses the code here', async () => {
     const { view } = await pageWith();
-    await enter(view.container, 'agent');
+    await enter(view.container, 'add-client');
 
-    expect(view.container.textContent).toContain('step 1 of 4');
-    const prompt = must(view.container.querySelector('[data-onboarding-prompt]'), 'the prompt');
-    // On the glass, not behind a disclosure: it is about to be handed to
-    // something with a shell on the reader's machine.
-    expect(prompt.textContent).toContain('Set up Ferretry on this machine');
-    expect(prompt.textContent).toContain('stop and report');
-    const labels = [...view.container.querySelectorAll('[data-onboarding-copy]')].map(node =>
-      node.getAttribute('data-onboarding-copy'),
-    );
-    expect(labels).toEqual(['Copy setup prompt']);
-
-    // Then pairing, because the agent ends by showing a QR.
+    expect(screenOf(view.container)).toBe('pair');
+    expect(view.container.textContent).toContain('Run this on the computer where the daemon is running');
     await next(view.container);
-    expect(screenOf(view.container)).toBe('pair');
-    expect(view.container.textContent).toContain('fy pair');
-    await view.unmount();
-  });
-});
-
-describe('the have-a-link route', () => {
-  it('goes straight to scanning, with no command to run', async () => {
-    const { view } = await pageWith();
-    await enter(view.container, 'have-link');
 
     expect(screenOf(view.container)).toBe('scan');
     expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('Scan QR or paste link');
     // The pairing surface itself, unforked.
     expect(view.container.querySelector('[data-test-pair]')).not.toBeNull();
-    // A two-step route gets no track: "Pair · Done" tells this reader nothing.
-    expect(view.container.querySelector('[aria-label="Setup steps"]')).toBeNull();
-    // And no `fy pair` block, because it has already been run elsewhere.
-    expect(view.container.querySelector('[data-onboarding-copy="Copy pair command"]')).toBeNull();
+    // Scan IS verifiable — the daemon answers in this tab — so no button here
+    // could declare a browser paired with nothing "done".
+    expect(view.container.querySelector('[data-onboarding-next]')).toBeNull();
     expect(view.container.textContent).toContain('single-use');
     await view.unmount();
   });
 
   it('finishes on the same done screen when the daemon answers', async () => {
     const { view } = await pageWith({ fleetReady: true });
-    await enter(view.container, 'have-link');
+    await enter(view.container, 'add-client');
+    await next(view.container);
     await click(buttonWith(view.container, '[data-test-pair]'));
 
     expect(screenOf(view.container)).toBe('done');
-    expect(routeOf(view.container)).toBe('have-link');
+    expect(routeOf(view.container)).toBe('add-client');
+    await view.unmount();
+  });
+
+  it('sends a stranded reader back to the scan rather than to a local daemon', async () => {
+    // The done stage's fallback has to name the step THIS route pairs on: there
+    // is no daemon on this machine to open a browser from.
+    const progress = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    progress.choose('add-client');
+    progress.goTo('done');
+    const { view } = await pageWith({ progress, fleetReady: false });
+
+    await click(buttonWith(view.container, '[data-onboarding-open-fleet]'));
+    expect(screenOf(view.container)).toBe('scan');
     await view.unmount();
   });
 });
 
 describe('with the software keyboard open', () => {
-  const toPair = async (container: HTMLElement): Promise<void> => {
-    await enter(container, 'first-time');
-    await next(container);
-    await next(container);
-    await chooseConnection(container, 'default-relay');
+  const toScan = async (container: HTMLElement): Promise<void> => {
+    await enter(container, 'add-client');
     await next(container);
   };
 
   it('keeps the step, its actions and the track, and hides only standing chrome', async () => {
     const { view } = await pageWith();
-    await toPair(view.container);
+    await toScan(view.container);
 
     // The pairing field's step is still fully operable.
     expect(screenOf(view.container)).toBe('scan');
@@ -498,7 +689,7 @@ describe('with the software keyboard open', () => {
 
   it('brings the focused field back into view when the keyboard arrives', async () => {
     const { view } = await pageWith();
-    await toPair(view.container);
+    await toScan(view.container);
     const field = must(view.container.querySelector<HTMLInputElement>('#fake-pairing-link'), 'the pairing field');
     const scrolled: ScrollIntoViewOptions[] = [];
     field.scrollIntoView = (options?: boolean | ScrollIntoViewOptions) => {

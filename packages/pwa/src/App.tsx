@@ -21,6 +21,10 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
+import { detectDeviceKind } from './features/onboarding/device-kind.ts';
+import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
+import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
+import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from './features/onboarding/hosted-relay.ts';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
@@ -41,7 +45,7 @@ import {
 import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
-import type { DaemonConnection } from './lib/daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from './lib/daemon-connection.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -250,6 +254,19 @@ const takeArrivalFromLocation = (): void => {
 /** The real clipboard, resolved once: the setup screen is the only page that copies. */
 const clipboardWriter = browserClipboardWriter();
 
+/**
+ * The OS share sheet, or nothing.
+ *
+ * Absent on most desktops and on Firefox everywhere, so it is resolved rather
+ * than assumed: a Share button that throws when pressed is worse than one that
+ * was never drawn, and the hand-off panel already offers copy and the printed
+ * link beside it.
+ */
+const browserSetupShare = (): SetupSharePort | undefined => {
+  const share = navigator.share;
+  return typeof share === 'function' ? async payload => await share.call(navigator, payload) : undefined;
+};
+
 const SETUP_ROUTE: PageRoute = { kind: 'setup' };
 
 function ConnectionPicker() {
@@ -328,11 +345,23 @@ function SetupGuide() {
    * holds no daemon. A pairing removed later, with the last stage already on
    * the glass, is that stage's own problem to state honestly.
    */
+  /*
+   * WHAT THIS DEVICE IS, AND WHERE ANOTHER ONE LEFT OFF.
+   *
+   * Both are read once, at mount, from the real browser. The device decides
+   * which answers the chooser may offer — a phone is never offered a role that
+   * needs a terminal — and the hand-off decides where this visit opens when
+   * somebody carried a half-finished setup here from their other device.
+   */
+  const device = useMemo(() => detectDeviceKind(navigator), []);
+  const [handoff] = useState(() => setupHandoffFromHref(window.location.href));
   const [progress] = useState(
     () =>
       new OnboardingProgressStore({
+        device,
         paired: snapshot.connections.length > 0,
-        ...(arrival.kind === 'none' ? {} : { entry: 'have-link' as const }),
+        ...(handoff === undefined ? {} : { handoff }),
+        ...(arrival.kind === 'none' ? {} : { entry: { route: 'add-client' as const, step: 'scan' as const } }),
       }),
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
@@ -367,6 +396,13 @@ function SetupGuide() {
       channel={channel}
       fleetReady={selected !== null}
       fallback={fallback}
+      /*
+       * THE ORIGIN IS A RUNTIME FACT, NEVER A BUILD CONSTANT. A hand-off link
+       * is built from the address this page was actually served from — there is
+       * no hosted address in this bundle, and anyone may deploy it themselves.
+       */
+      href={window.location.href}
+      share={browserSetupShare()}
       onOpenFleet={() => {
         // The selected daemon IS the one just paired: adding a connection
         // selects it. Never a hardcoded prefix — the app's own route helper.
@@ -710,6 +746,36 @@ export function AppShell() {
    * still literally names. Deriving them from one effective route is what keeps
    * the two descriptions from drifting apart.
    */
+  /*
+   * A PAIRED BROWSER IS ASKED NOTHING WHEN IT OPENS.
+   *
+   * `firstRunEntry` decides between the fleet, the picker and the guide from
+   * evidence alone, and the only one of the three that is a NAVIGATION is the
+   * fleet — so it happens in an effect, and the render below shows the picker
+   * for the single frame it takes. A blank screen while deciding would be the
+   * failure mode this shortcut exists to remove.
+   *
+   * IT IS AN ENTRY SHORTCUT, NOT A REDIRECT ON THE ROUTE. Decided once, from
+   * how this session STARTED. `/` is the only address that reaches the daemon
+   * picker, which is where "set up another machine" lives — so a permanent
+   * redirect off it would make a paired reader unable to add their second
+   * daemon at all. Opening the app is the moment nobody should be asked
+   * anything; deliberately navigating back to `/` afterwards is a reader asking
+   * for that screen, and they get it.
+   */
+  const [shortcut] = useState<DaemonId | null>(() => {
+    if (pageRoute.kind !== 'connection-picker') return null;
+    const entry = firstRunEntry({
+      pairedDaemonIds: connectionSnapshot.connections.map(candidate => candidate.daemonId),
+      selectedDaemonId: connectionSnapshot.selectedDaemonId,
+      setupJourney,
+    });
+    return entry.kind === 'fleet' ? entry.daemonId : null;
+  });
+  useEffect(() => {
+    if (shortcut === null) return;
+    navigate(daemonSessionsPath(shortcut));
+  }, [navigate, shortcut]);
   const effectiveRoute: PageRoute = pageRoute.kind === 'connection-picker' && setupJourney ? SETUP_ROUTE : pageRoute;
 
   useEffect(() => {

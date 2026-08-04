@@ -5,6 +5,7 @@ import {
   type PairingId,
 } from '@ferretry/protocol';
 import type {
+  IBrowserOpener,
   IPairClock,
   IPairExit,
   IPairGateway,
@@ -165,3 +166,21 @@ export const expired: PairingCodeStatusResponse = {
   status: 'expired',
   expiresAt: MINT.expiresAt,
 };
+
+/**
+ * A browser that records what it was asked to open and answers a fixed verdict.
+ *
+ * The verdict is the interesting axis: a host that CANNOT open a browser is an
+ * ordinary host, not a failure, and the controller has to say two different
+ * things about the two outcomes without either of them being an error.
+ */
+export class RecordingBrowserOpener implements IBrowserOpener {
+  readonly opened: string[] = [];
+
+  constructor(private readonly succeeds = true) {}
+
+  async open(url: string): Promise<boolean> {
+    this.opened.push(url);
+    return await Promise.resolve(this.succeeds);
+  }
+}

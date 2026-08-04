@@ -248,14 +248,24 @@ const chooseConnection = async (container: HTMLElement, connection: string): Pro
  * these tests on the REAL long route rather than on a shortcut into `scan`.
  */
 const advanceToPairing = async (container: HTMLElement): Promise<void> => {
+  await chooseRoute(container, 'add-client');
+  /* pair → scan */
+  await advanceStep(container);
+};
+
+/**
+ * Walks the LONG route: first-time setup on a computer, all the way to the step
+ * that pairs it. That step is `local` now, not `scan` — the daemon is on the
+ * machine reading the page, so there is no QR and no code, and the browser's own
+ * pairing surface is the fallback for a terminal that cannot open a window.
+ */
+const advanceToLocalPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'first-time');
   /* install → daemon → connect */
   await advanceStep(container);
   await advanceStep(container);
-  /* connect → pair, by answering rather than by advancing */
+  /* connect → local, by answering rather than by advancing */
   await chooseConnection(container, 'default-relay');
-  /* pair → scan */
-  await advanceStep(container);
 };
 
 /** Drives a browser history navigation the way the back button does. */
@@ -265,12 +275,12 @@ const popTo = async (path: string): Promise<void> => {
 };
 
 describe('AppShell', () => {
-  it('asks an unpaired first run which of the three readers it is', async () => {
+  it('asks an unpaired first run what this device is', async () => {
     const { reads, view } = await renderShell('/');
 
-    // A cold visitor might have installed nothing, or might be holding a link
-    // somebody just sent them. The root cannot know, so the first screen asks
-    // rather than assuming one of them and hiding the other's steps.
+    // A cold visitor might be about to stand up a daemon, or might just want
+    // this browser to watch one that exists. The root cannot know which, so the
+    // first screen asks what the DEVICE is rather than assuming an answer.
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
     expect(stepOfSetup(view.container)).toBe('choose');
     expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(3);
@@ -293,8 +303,8 @@ describe('AppShell', () => {
     // that — holds nothing. A cleared registry, another profile, an abandoned
     // attempt: all of them make the stored claim unbelievable.
     localStorage.setItem(
-      'fy-onboarding-v2',
-      JSON.stringify({ v: 2, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+      'fy-onboarding-v3',
+      JSON.stringify({ v: 3, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
     );
 
     const { view } = await renderShell('/');
@@ -306,13 +316,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
-  it('leaves a paired browser on its daemons, with setup one quiet link away', async () => {
+  it('opens a paired browser straight onto its fleet, asking nothing', async () => {
     const { view } = await renderShell('/', [alpha.daemonId]);
 
-    // Ordinary browsing never re-shows the guide to someone already set up.
+    // The daily open. No chooser, no guide, and no picker to dismiss either —
+    // this browser answered every question it can be asked, months ago.
+    expect(window.location.pathname).toBe('/d/alpha');
     expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
-    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
 
+    // The picker is still REACHABLE, because it is the only screen that offers
+    // "set up another machine". A permanent redirect off `/` would leave a
+    // paired reader unable to add their second daemon at all.
+    await popTo('/');
+    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link').click(),
     );
@@ -327,10 +343,13 @@ describe('AppShell', () => {
     // first-time setup for that machine, so "set up another machine" must not
     // resume the last screen of a journey completed for a laptop.
     localStorage.setItem(
-      'fy-onboarding-v2',
-      JSON.stringify({ v: 2, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+      'fy-onboarding-v3',
+      JSON.stringify({ v: 3, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
     );
     const { view } = await renderShell('/', [alpha.daemonId]);
+    // Opening the app took them to their fleet; asking for the picker is what a
+    // reader standing at a second machine does.
+    await popTo('/');
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link').click(),
@@ -436,7 +455,7 @@ describe('AppShell', () => {
 
   it('still opens an existing daemon immediately from the pairing stage of setup', async () => {
     const { view } = await renderShell('/setup', [alpha.daemonId]);
-    await advanceToPairing(view.container);
+    await advanceToLocalPairing(view.container);
 
     // Choosing a daemon that already exists is not part of the setup journey,
     // so it behaves exactly as it does in the picker: it leaves at once.
@@ -453,7 +472,7 @@ describe('AppShell', () => {
 
   it('forgets a daemon from the pairing stage without leaving setup', async () => {
     const { store, view } = await renderShell('/setup', [alpha.daemonId]);
-    await advanceToPairing(view.container);
+    await advanceToLocalPairing(view.container);
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[aria-label^="Forget"]'), 'the forget control').click(),
@@ -1041,6 +1060,9 @@ describe('the connection picker slot', () => {
     // A browser with a pairing already gets the picker, and pairing from the
     // picker still leaves immediately — that behaviour is unchanged by setup.
     const { store, view } = await renderShell('/', [alpha.daemonId]);
+    // Opening the app went straight to the fleet; the picker is what a reader
+    // asks for when they are adding a machine.
+    await popTo('/');
     const field = must(view.container.querySelector<HTMLInputElement>('#pairing-link'), 'the pairing link field');
     const form = must(field.closest('form'), 'the pairing form');
 
@@ -1146,6 +1168,7 @@ describe('the connection picker slot', () => {
 
   it('selects and forgets a pairing without leaving the picker', async () => {
     const { store, view } = await renderShell('/', [alpha.daemonId, beta.daemonId]);
+    await popTo('/');
     await settle();
 
     const open = must(

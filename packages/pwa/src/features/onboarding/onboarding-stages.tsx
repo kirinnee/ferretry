@@ -12,11 +12,12 @@
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
  *
- * THE AGENT PATH IS NOT A STAGE ANNEXE ANY MORE. It used to hide in an install
- * aside labelled "Check it, or let an agent do it", which put an entire
- * alternative journey behind the same disclosure as a version check. It is now a
- * route of its own with its own step, `BriefStage`, and the install aside is back
- * to being what it says: how to check.
+ * THE AGENT PATH IS AN ASIDE ON THE INSTALL STEP, AND ITS OWN ASIDE. It was a
+ * top-level answer for one release, which asked the reader to classify themselves
+ * by who would type the command — a different question from what this device IS,
+ * and not one anything downstream depends on. It is back beside the install
+ * command it replaces, in a disclosure of its own rather than sharing one with
+ * the version check, which is what made it invisible the first time.
  *
  * EVERY STAGE HERE IS REUSED BY EVERY ROUTE THAT NEEDS IT, including "set up
  * another machine" — a second copy of the daemon instructions is a second copy to
@@ -27,6 +28,7 @@ import { ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
+import type { CarrierDisclosure } from './hosted-relay.ts';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
   AGENT_SETUP_PROMPT,
@@ -38,6 +40,7 @@ import {
   type InstallChannelId,
   installChannel,
   PAIR_COMMAND,
+  PAIR_OPEN_COMMAND,
   PAIR_PRINT_COMMAND,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
@@ -130,6 +133,16 @@ export function InstallStage({
       <Aside summary="Check it landed">
         <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
       </Aside>
+
+      {/*
+        The agent path, folded into the step it is an alternative TO. It used to
+        be one of three top-level answers, which asked the reader to classify
+        themselves by who would type the command rather than by what the device
+        is — a different question, and not one the rest of the flow depends on.
+      */}
+      <Aside summary="Rather have an agent do it?">
+        <BriefStage write={write} />
+      </Aside>
     </div>
   );
 }
@@ -212,13 +225,18 @@ export function RelayDeployStage({ write }: { readonly write: ClipboardWriter })
 }
 
 /**
- * THE AGENT ROUTE'S OWN STEP: one prompt, shown in full, one tap to copy.
+ * THE AGENT PROMPT: shown in full, one tap to copy.
  *
- * The prompt is on the glass rather than behind a disclosure because a reader is
- * about to hand it to something that has a shell on their machine, and "copy
- * this text I will not show you" is not a thing to ask of anybody. It is also
- * generic by construction — it names no host, no user and no daemon — and seeing
- * that for themselves is the point.
+ * It is no longer a top-level answer — "let an agent do it" is not a fact about
+ * what this device IS, and putting it beside the two roles made a category error
+ * into a third of the first screen. It is an alternative WAY to do the install
+ * step, which is exactly what a disclosure on that step is for.
+ *
+ * The prompt itself stays on the glass once opened, rather than behind a second
+ * tap: a reader is about to hand it to something that has a shell on their
+ * machine, and "copy this text I will not show you" is not a thing to ask of
+ * anybody. It is also generic by construction — it names no host, no user and no
+ * daemon — and seeing that for themselves is the point.
  */
 export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
   return (
@@ -242,6 +260,111 @@ export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
       <p className="m-0 text-meta leading-base text-muted">
         It says nothing about you, this browser, or any daemon. When your agent shows you the QR or the link, continue.
       </p>
+    </div>
+  );
+}
+
+/**
+ * THE SAME-MACHINE COLLAPSE: the step where there is nothing to scan.
+ *
+ * The reader said this machine will run the daemon. The browser reading this
+ * sentence is therefore ALREADY on the daemon's machine — it is localhost — and
+ * asking them to photograph their own screen with their own phone, so the phone
+ * can hand a code back to the browser eighteen inches away, is the single most
+ * absurd thing the old flow did. It happened because the old arc could not tell
+ * the two machines apart, so it always assumed they were different.
+ *
+ * `fy pair --open` is what makes this real rather than a claim: the daemon mints
+ * the same single-use link it would have drawn as a QR, and the CLI hands it to
+ * the host's own browser. The reader presses Enter and lands here paired.
+ *
+ * THE FALLBACK IS NOT HIDDEN BECAUSE IT IS COMMON. A headless box, a remote
+ * shell, an SSH session, a browser the OS will not launch — plenty of terminals
+ * cannot open a window. So the plain `fy pair` output and the same pairing
+ * surface every other route uses are one tap away, not gone.
+ */
+export function LocalStage({ write, pairing }: { readonly write: ClipboardWriter; readonly pairing: ReactNode }) {
+  return (
+    <div className={STAGE}>
+      <CommandBlock command={PAIR_OPEN_COMMAND} copyLabel="Copy open command" write={write} />
+      <p className="m-0 text-meta leading-base text-muted">
+        Run it in the same terminal. It opens Ferretry in this browser, already paired — no QR, no code to type.
+      </p>
+      <Aside summary="It did not open a browser">
+        <p className="m-0 text-meta leading-base text-muted">
+          A headless host, a remote shell or a locked-down desktop cannot launch one. Run{' '}
+          <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> instead and paste the link it prints below.
+        </p>
+        <div className="min-w-0" data-onboarding-pairing="">
+          {pairing}
+        </div>
+      </Aside>
+    </div>
+  );
+}
+
+export interface NeedComputerStageProps {
+  readonly write: ClipboardWriter;
+  /** The hand-off, already built by the page — this stage does not know the origin. */
+  readonly handoff: ReactNode;
+  /** Switch to adding this browser as a client of a daemon that already exists. */
+  readonly onAddAsClient: () => void;
+}
+
+/**
+ * WHAT A PHONE IS TOLD, INSTEAD OF BEING OFFERED SOMETHING IT CANNOT DO.
+ *
+ * Agents run in a terminal. This device does not have one, and no amount of
+ * willingness changes that — so the honest screen says so in one line and then
+ * spends the rest of itself being USEFUL: it hands the daemon half to a computer
+ * with the reader's place attached, and it points out the other thing they may
+ * actually have meant, which is that a daemon already exists and this phone just
+ * wants to watch it.
+ *
+ * NO DEAD END AND NO APOLOGY. The two ways forward are both real, both one tap,
+ * and neither of them is "go and read the documentation".
+ */
+export function NeedComputerStage({ handoff, onAddAsClient }: NeedComputerStageProps) {
+  return (
+    <div className={STAGE}>
+      <p className="m-0 text-meta leading-base text-muted">
+        Ferretry runs your agents in a terminal on a real machine. Send this setup to a computer and pick it up there —
+        then come back here to pair this device.
+      </p>
+      {handoff}
+      <Aside summary="A daemon already exists?">
+        <p className="m-0 text-meta leading-base text-muted">
+          Then nothing needs installing. Add this device as a client of it instead.
+        </p>
+        <button
+          type="button"
+          className="kt-btn min-h-[44px] w-full"
+          data-variant="ghost"
+          onClick={onAddAsClient}
+          data-onboarding-add-client=""
+        >
+          Add this as a client
+        </button>
+      </Aside>
+    </div>
+  );
+}
+
+/**
+ * THE OTHER DIRECTION: the computer is done, and the phone is offered the same view.
+ *
+ * This is what makes first-time setup more than the other two answers in
+ * sequence. It is OPTIONAL and says so — the reader is already finished, `Next`
+ * skips it, and nothing here is a step they owe anybody.
+ */
+export function HandoffStage({ handoff }: { readonly handoff: ReactNode }) {
+  return (
+    <div className={STAGE}>
+      <p className="m-0 text-meta leading-base text-muted">
+        Your daemon is running and this browser is connected. Your phone can watch the same fleet — it needs the pairing
+        code your computer is about to print.
+      </p>
+      {handoff}
     </div>
   );
 }
@@ -283,11 +406,26 @@ export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
 export interface DoneStageProps {
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
+  /**
+   * What the carrier the reader CHOSE would be able to see.
+   *
+   * Absent for a direct connection, which has no third party in it. Restated
+   * here rather than left behind on the chooser because that choice was made
+   * several screens — and possibly several days — before anything was connected,
+   * and this is the screen where the connection becomes real.
+   */
+  readonly fallbackDisclosure?: CarrierDisclosure | null;
   readonly onOpenFleet: () => void;
   readonly onBackToPairing: () => void;
 }
 
-export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToPairing }: DoneStageProps) {
+export function DoneStage({
+  fleetReady,
+  connectionStatus,
+  fallbackDisclosure = null,
+  onOpenFleet,
+  onBackToPairing,
+}: DoneStageProps) {
   return (
     <div className={STAGE}>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
@@ -298,6 +436,21 @@ export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToP
         <p className="m-0 text-2xs leading-base text-faint" role="status">
           Connection in use: {connectionStatus}
         </p>
+      )}
+      {fallbackDisclosure === null || fallbackDisclosure.fallbackWouldSee.length === 0 ? null : (
+        <Aside summary={`What ${fallbackDisclosure.fallbackName} would see`}>
+          <ul
+            className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted"
+            data-onboarding-fallback-disclosure=""
+          >
+            {fallbackDisclosure.fallbackWouldSee.map(line => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="m-0 text-2xs leading-base text-faint">
+            It is the fallback, not the carrier: it only ever carries the connection when the direct path cannot.
+          </p>
+        </Aside>
       )}
       {/*
         DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired
