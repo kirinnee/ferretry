@@ -6,16 +6,23 @@
  * `aria-current="step"`, and an unreached one is dashed. Each item also spells
  * its state out for a reader who hears the list rather than seeing it.
  *
- * It is a RAIL rather than four boxes now: a 20px marker with its word under it,
- * joined by a hairline. The boxed version spent 44px of a 844px phone on
- * chrome that says nothing the marker does not, and four bordered cards above
- * the actual step competed with it for attention.
+ * It is a RAIL rather than a row of boxes: a 20px marker with its word under it,
+ * joined by a hairline. The boxed version spent 44px of a 844px phone on chrome
+ * that says nothing the marker does not, and bordered cards above the actual
+ * step competed with it for attention.
+ *
+ * It is a track OF A ROUTE, not of the product: the three entry paths walk
+ * different steps, so the list comes from the route rather than from a constant.
+ * That is also why the labels are one word — a five-step route has five of them
+ * on a 390px row.
  */
 
 import { Check } from 'lucide-react';
 
 import {
-  ONBOARDING_STEPS,
+  onboardingRouteSteps,
+  type OnboardingRouteId,
+  onboardingStep,
   type OnboardingStepId,
   type OnboardingStepStatus,
   onboardingStepStatus,
@@ -44,16 +51,19 @@ const LABEL_TONE: Record<OnboardingStepStatus, string> = {
 };
 
 export interface OnboardingTrackProps {
+  /** Which route's steps this is a track OF. Each route has its own list. */
+  readonly route: OnboardingRouteId;
   readonly current: OnboardingStepId;
   readonly furthest: OnboardingStepId;
   readonly onJump: (id: OnboardingStepId) => void;
 }
 
-export function OnboardingTrack({ current, furthest, onJump }: OnboardingTrackProps) {
+export function OnboardingTrack({ route, current, furthest, onJump }: OnboardingTrackProps) {
   return (
     <ol className="m-0 flex list-none items-start gap-1 p-0" aria-label="Setup steps">
-      {ONBOARDING_STEPS.map((step, index) => {
-        const status = onboardingStepStatus(step.id, current, furthest);
+      {onboardingRouteSteps(route).map((id, index) => {
+        const step = onboardingStep(id);
+        const status = onboardingStepStatus(route, step.id, current, furthest);
         const body = (
           <>
             <span className={`${MARKER} ${MARKER_TONE[status]}`} aria-hidden="true">

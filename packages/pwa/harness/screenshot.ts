@@ -48,7 +48,11 @@ const SECTIONS = [
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
+  'harness-onboarding-choose',
   'harness-onboarding-daemon',
+  'harness-onboarding-connect',
+  'harness-onboarding-brief',
+  'harness-onboarding-scan',
   'harness-onboarding-pair',
   'harness-onboarding-done',
 ] as const;

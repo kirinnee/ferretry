@@ -41,6 +41,14 @@ describe('CommandBlock', () => {
     const scroller = must(view.container.querySelector('pre'), 'the command scroller');
     expect(scroller.className).toContain('overflow-x-auto');
     expect(scroller.className).toContain('overflow-y-hidden');
+
+    // THE COMMAND IS THE LARGEST TEXT IN THE BLOCK. It is the string a reader
+    // has to check character by character before running it on their own
+    // machine, and it used to be `text-meta` — the size of a timestamp.
+    expect(scroller.className).toContain('text-title');
+    expect(scroller.className).not.toContain('text-meta');
+    // The copy control stayed small: the button was never the thing to read.
+    expect(must(view.container.querySelector('button'), 'the copy button').className).toContain('h-8');
     await view.unmount();
   });
 

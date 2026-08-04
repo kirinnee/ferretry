@@ -11,9 +11,18 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { ONBOARDING_STEPS } from '../../../src/features/onboarding/onboarding-model.ts';
+import type { OnboardingStepId } from '../../../src/features/onboarding/onboarding-model.ts';
 import { SetupDiagram } from '../../../src/features/onboarding/setup-diagram.tsx';
 import { mount, must } from '../../support/dom.ts';
+
+/**
+ * EVERY step any route can put on the glass — not one route's list.
+ *
+ * The diagram is drawn per step rather than per route, so the fact worth pinning
+ * is that no step anywhere is missing its sentence. A route's own step list is
+ * the model's business and is tested there.
+ */
+const EVERY_STEP: readonly OnboardingStepId[] = ['install', 'daemon', 'connect', 'brief', 'pair', 'done'];
 
 const figureOf = (container: HTMLElement): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-onboarding-diagram]'), 'the diagram');
@@ -21,17 +30,17 @@ const figureOf = (container: HTMLElement): HTMLElement =>
 describe('the setup diagram', () => {
   it('names itself in a sentence at every step, and never the same one twice', async () => {
     const labels: string[] = [];
-    for (const step of ONBOARDING_STEPS) {
-      const view = await mount(<SetupDiagram step={step.id} />);
+    for (const id of EVERY_STEP) {
+      const view = await mount(<SetupDiagram step={id} />);
       const figure = figureOf(view.container);
 
       expect(figure.getAttribute('role')).toBe('img');
-      expect(figure.getAttribute('data-onboarding-diagram')).toBe(step.id);
-      labels.push(must(figure.getAttribute('aria-label'), `a label for ${step.id}`));
+      expect(figure.getAttribute('data-onboarding-diagram')).toBe(id);
+      labels.push(must(figure.getAttribute('aria-label'), `a label for ${id}`));
       await view.unmount();
     }
 
-    expect(new Set(labels).size).toBe(ONBOARDING_STEPS.length);
+    expect(new Set(labels).size).toBe(EVERY_STEP.length);
     expect(labels.at(-1)).toContain('linked to the daemon');
   });
 

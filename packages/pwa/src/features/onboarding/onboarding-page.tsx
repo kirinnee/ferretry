@@ -1,54 +1,69 @@
 /**
- * FIRST RUN, AS A STEPPER: one stage visible, four in the track.
+ * FIRST RUN: one question, then one of three different journeys.
  *
- * A cold visitor has installed nothing, so a "Connect a daemon" screen with a
- * QR button asks them to do something they cannot do yet. This screen instead
- * walks the actual journey — install, start the daemon, pair, done — and puts
- * exactly one of those on the glass at a time.
+ * A cold visitor has installed nothing, so a "Connect a daemon" screen with a QR
+ * button asks them to do something they cannot do yet. But a visitor whose phone
+ * just scanned a QR has the opposite problem: an install step asks them to do
+ * something they do not need. So this screen asks WHICH OF THOSE THEY ARE first,
+ * and each answer walks its own list of steps — not one stepper with steps hidden
+ * inside it, which is how you get two readers out of three following
+ * instructions that are not theirs.
  *
  * THREE RULES SHAPE EVERYTHING HERE.
  *
  * 1. THE PAGE CANNOT SEE THE TERMINAL. It is static, public, and has no way to
  *    know whether `fy` installed or the daemon came up. So `Next` is never
- *    blocked and no control claims a check it did not make; an honest "when
- *    that finishes, continue" beats a spinner that is lying.
+ *    blocked and no control claims a check it did not make; an honest "when that
+ *    finishes, continue" beats a spinner that is lying.
  * 2. LOSING SOMEONE'S PLACE IS THE CHEAPEST WAY TO FEEL BROKEN. Setup happens
  *    across a browser and a terminal, with minutes or hours in between, so the
- *    step is persisted (`OnboardingProgressStore`) and any step already reached
- *    stays one tap away.
+ *    route AND the step are persisted (`OnboardingProgressStore`) and any step
+ *    already reached stays one tap away.
  * 3. ONE LOUD CONTROL PER STEP. Everything a reader can do is not equally
  *    important, and a screen where four controls shout is a screen with no next
- *    action. `Next` is the only filled button; back, copy and the disclosures
- *    are quiet until wanted. This is an accessibility property, not a taste one.
+ *    action. `Next` is the only filled button; back, copy and the disclosures are
+ *    quiet until wanted. This is an accessibility property, not a taste one.
  *
- * WHAT LIVES ELSEWHERE. The stages are in `onboarding-stages.tsx`, the track in
- * `onboarding-track.tsx`, the picture of the arrangement in `setup-diagram.tsx`.
- * This file owns only the frame: which stage is on the glass, where focus goes
- * when that changes, and how the screen behaves under a software keyboard.
+ * WHAT LIVES ELSEWHERE. The question is `onboarding-chooser.tsx`, the stages are
+ * `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the picture of
+ * the arrangement is `setup-diagram.tsx`. This file owns only the frame: which
+ * screen is on the glass, where focus goes when that changes, and how the screen
+ * behaves under a software keyboard.
  *
- * Layout note: nothing here sizes itself against the viewport. The stepper
- * renders inside the shell's existing `kt-shell` scroller, which is already
- * driven by `--app-h` from `useAppViewport`; a `100dvh` in this file would be a
- * second, competing answer to the same question when the keyboard opens.
+ * Layout note: nothing here sizes itself against the viewport. It renders inside
+ * the shell's existing `kt-shell` scroller, which is already driven by `--app-h`
+ * from `useAppViewport`; a `100dvh` in this file would be a second, competing
+ * answer to the same question when the keyboard opens.
  */
 
 import { ArrowLeft, ArrowRight } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
+import { type ReactNode, type RefObject, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
+import { OnboardingChooser } from './onboarding-chooser.tsx';
 import {
+  DEFAULT_CONNECTION_METHOD,
   type InstallChannelId,
   nextOnboardingStep,
-  ONBOARDING_STEP_COUNT,
-  type OnboardingStepId,
+  onboardingRoute,
   onboardingStep,
+  onboardingStepCount,
+  type OnboardingStepId,
   onboardingStepIndex,
   previousOnboardingStep,
 } from './onboarding-model.ts';
-import type { OnboardingProgressStore } from './onboarding-progress.ts';
-import { DaemonStage, DoneStage, InstallStage, PairStage } from './onboarding-stages.tsx';
+import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
+import {
+  BriefStage,
+  ConnectStage,
+  DaemonStage,
+  DoneStage,
+  InstallStage,
+  PairStage,
+  ScanStage,
+} from './onboarding-stages.tsx';
 import { OnboardingTrack } from './onboarding-track.tsx';
 import { SetupDiagram } from './setup-diagram.tsx';
 
@@ -56,7 +71,7 @@ const SHELL =
   'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
 
 export interface OnboardingPairingHost {
-  /** The daemon answered and this browser is paired; the arc is finished. */
+  /** The daemon answered and this browser is paired; the journey is finished. */
   readonly onPaired: () => void;
 }
 
@@ -73,8 +88,8 @@ export interface OnboardingPageProps {
 }
 
 /**
- * Waits for the shell's keyboard-sized layout, then keeps its focused control
- * in view. Exported as the narrow effect seam so its geometry can be exercised
+ * Waits for the shell's keyboard-sized layout, then keeps its focused control in
+ * view. Exported as the narrow effect seam so its geometry can be exercised
  * without making unrelated DOM suites race over the process-wide `<html>`
  * keyboard attribute.
  */
@@ -98,31 +113,28 @@ export function OnboardingPage({
   onOpenFleet,
   fleetReady,
 }: OnboardingPageProps) {
-  const { current, furthest } = useSyncExternalStore(progress.subscribe, progress.snapshot);
-  const step = onboardingStep(current);
-  const position = onboardingStepIndex(current);
-  const goTo = (id: OnboardingStepId): void => {
-    progress.goTo(id);
-  };
+  const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
+  /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
+  const screen = at.stage === 'choose' ? 'choose' : at.current;
 
   /*
-   * FOCUS FOLLOWS A REAL STEP CHANGE, NOT THE FIRST PAINT.
+   * FOCUS FOLLOWS A REAL SCREEN CHANGE, NOT THE FIRST PAINT.
    *
    * Swapping the stage is a navigation with no page load behind it: the control
    * that was pressed unmounts, focus falls back to `<body>`, and a reader
    * restarts from the top of the document. Moving focus to the new heading
-   * restores what a real navigation would have given. The previous step is
+   * restores what a real navigation would have given. The previous screen is
    * seeded during render rather than latched in an effect, because StrictMode
    * replays mount effects and an effect-owned latch mistakes that replay for a
    * navigation — stealing focus from whatever the browser had already placed.
    */
   const heading = useRef<HTMLHeadingElement>(null);
-  const previousStep = useRef(current);
+  const previousScreen = useRef(screen);
   useEffect(() => {
-    if (previousStep.current === current) return;
-    previousStep.current = current;
+    if (previousScreen.current === screen) return;
+    previousScreen.current = screen;
     heading.current?.focus();
-  }, [current]);
+  }, [screen]);
 
   /*
    * A KEYBOARD MUST NOT SWALLOW THE FIELD IT BELONGS TO.
@@ -156,7 +168,8 @@ export function OnboardingPage({
       className={SHELL}
       aria-labelledby="onboarding-title"
       data-onboarding="setup"
-      data-onboarding-step={current}
+      data-onboarding-screen={screen}
+      data-onboarding-route={at.stage === 'choose' ? 'none' : at.route}
     >
       {/*
         `data-kb-hide` is legal here and nowhere else on this screen: the brand
@@ -173,17 +186,85 @@ export function OnboardingPage({
         </div>
         {/*
           The picture replaces the paragraph that used to say the same thing:
-          your machine does the work, this page is a window onto it.
+          your machine does the work, this page is a window onto it. It is absent
+          from the chooser on purpose — that screen's job is three answers, and a
+          diagram of a journey nobody has chosen yet is decoration.
         */}
-        <SetupDiagram step={current} />
+        {at.stage === 'choose' ? null : <SetupDiagram step={at.current} />}
       </header>
 
-      <OnboardingTrack current={current} furthest={furthest} onJump={goTo} />
+      {at.stage === 'choose' ? (
+        <OnboardingChooser
+          onChoose={route => {
+            progress.choose(route);
+          }}
+        />
+      ) : (
+        <RouteFlow
+          at={at}
+          heading={heading}
+          write={write}
+          channel={channel}
+          renderPairing={renderPairing}
+          onOpenFleet={onOpenFleet}
+          fleetReady={fleetReady}
+          onGoTo={step => {
+            progress.goTo(step);
+          }}
+          onLeaveRoute={() => {
+            progress.backToChooser();
+          }}
+        />
+      )}
+    </main>
+  );
+}
+
+interface RouteFlowProps {
+  readonly at: OnboardingWalking;
+  readonly heading: RefObject<HTMLHeadingElement | null>;
+  readonly write: ClipboardWriter;
+  readonly channel: InstallChannelId;
+  readonly renderPairing: (host: OnboardingPairingHost) => ReactNode;
+  readonly onOpenFleet: () => void;
+  readonly fleetReady: boolean;
+  readonly onGoTo: (step: OnboardingStepId) => void;
+  /** Back out of the route entirely, to the question. */
+  readonly onLeaveRoute: () => void;
+}
+
+/**
+ * One route being walked: its track, its current stage, and the way onward.
+ *
+ * The TRACK IS HIDDEN on a two-step route. A rail reading "Pair · Done" tells
+ * somebody who arrived holding a link nothing they did not know, and it costs
+ * them a row of a 390px screen to say it.
+ */
+function RouteFlow({
+  at,
+  heading,
+  write,
+  channel,
+  renderPairing,
+  onOpenFleet,
+  fleetReady,
+  onGoTo,
+  onLeaveRoute,
+}: RouteFlowProps) {
+  const route = onboardingRoute(at.route);
+  const step = onboardingStep(at.current);
+  const count = onboardingStepCount(at.route);
+  const position = onboardingStepIndex(at.route, at.current);
+  const first = position === 0;
+  const pairing = renderPairing({ onPaired: () => onGoTo('done') });
+  return (
+    <>
+      {count > 2 && <OnboardingTrack route={at.route} current={at.current} furthest={at.furthest} onJump={onGoTo} />}
 
       <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
           <p className="m-0 text-2xs font-semibold uppercase tracking-label text-faint">
-            Step {position + 1} of {ONBOARDING_STEP_COUNT}
+            {route.title} · step {position + 1} of {count}
           </p>
           <h2
             id="onboarding-step-title"
@@ -196,45 +277,52 @@ export function OnboardingPage({
           <p className="m-0 text-meta leading-base text-muted">{step.summary}</p>
         </div>
 
-        {current === 'install' && <InstallStage write={write} channel={channel} />}
-        {current === 'daemon' && <DaemonStage write={write} />}
-        {current === 'pair' && <PairStage write={write} pairing={renderPairing({ onPaired: () => goTo('done') })} />}
-        {current === 'done' && (
-          <DoneStage fleetReady={fleetReady} onOpenFleet={onOpenFleet} onBackToPairing={() => goTo('pair')} />
-        )}
+        <Stage
+          at={at}
+          write={write}
+          channel={channel}
+          pairing={pairing}
+          fleetReady={fleetReady}
+          onOpenFleet={onOpenFleet}
+          onGoTo={onGoTo}
+        />
       </section>
 
-      {current !== 'done' && (
+      {at.current === 'done' ? null : (
         <div className="mt-auto flex min-w-0 flex-col gap-1 pt-2">
-          <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[current]}</p>
+          <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[at.current]}</p>
           <div className="flex min-w-0 items-center gap-2">
-            {current !== 'install' && (
-              <button
-                type="button"
-                className="kt-btn min-h-[44px]"
-                data-variant="ghost"
-                onClick={() => goTo(previousOnboardingStep(current))}
-                data-onboarding-back=""
-              >
-                <ArrowLeft size={16} aria-hidden="true" />
-                Back
-              </button>
-            )}
+            {/*
+              BACK ALWAYS GOES SOMEWHERE. On the first step of a route the place
+              behind it is the question itself, which is the one screen a reader
+              needs when they picked the wrong answer — and picking the wrong
+              answer is a thing a three-way choice must survive.
+            */}
+            <button
+              type="button"
+              className="kt-btn min-h-[44px]"
+              data-variant="ghost"
+              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(at.route, at.current))}
+              data-onboarding-back={first ? 'chooser' : 'step'}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              Back
+            </button>
             {/*
               NEXT EXISTS ONLY WHERE THE PAGE CANNOT CHECK.
-              Install and Start-the-daemon happen in a terminal this page will
-              never see, so blocking on them would block forever. Pairing is the
-              opposite: the daemon answers, in this tab, and that answer is the
-              only thing that may declare the arc finished. A Next button here
-              would manufacture a "you are set up" for a browser that is paired
-              with nothing.
+              Install, the daemon and the carrier choice happen in a terminal
+              this page will never see, so blocking on them would block forever.
+              Pairing is the opposite: the daemon answers, in this tab, and that
+              answer is the only thing that may declare the journey finished. A
+              Next button here would manufacture a "you are set up" for a browser
+              that is paired with nothing.
             */}
-            {current !== 'pair' && (
+            {at.current !== 'pair' && (
               <button
                 type="button"
                 className="kt-btn ml-auto min-h-[44px] flex-1"
                 data-variant="primary"
-                onClick={() => goTo(nextOnboardingStep(current))}
+                onClick={() => onGoTo(nextOnboardingStep(at.route, at.current))}
                 data-onboarding-next=""
               >
                 Next
@@ -244,8 +332,45 @@ export function OnboardingPage({
           </div>
         </div>
       )}
-    </main>
+    </>
   );
+}
+
+interface StageProps {
+  readonly at: OnboardingWalking;
+  readonly write: ClipboardWriter;
+  readonly channel: InstallChannelId;
+  readonly pairing: ReactNode;
+  readonly fleetReady: boolean;
+  readonly onOpenFleet: () => void;
+  readonly onGoTo: (step: OnboardingStepId) => void;
+}
+
+/**
+ * The step's body, and the ONE place a route changes what a step means.
+ *
+ * `pair` is the case that earns this function: on the "I have a link" route
+ * there is nothing to run, so printing `fy pair` would describe a thing that has
+ * already happened on a machine the reader may not be near. Same pairing surface,
+ * different framing — and the framing comes from the route, not from a flag
+ * threaded down through three components.
+ */
+function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }: StageProps) {
+  switch (at.current) {
+    case 'install':
+      return <InstallStage write={write} channel={channel} />;
+    case 'daemon':
+      return <DaemonStage write={write} />;
+    case 'connect':
+      /* Direct first, because `docs/relay-protocol.md` §1 prefers it whenever it works. */
+      return <ConnectStage write={write} method={DEFAULT_CONNECTION_METHOD} />;
+    case 'brief':
+      return <BriefStage write={write} />;
+    case 'pair':
+      return at.route === 'have-link' ? <ScanStage pairing={pairing} /> : <PairStage write={write} pairing={pairing} />;
+    case 'done':
+      return <DoneStage fleetReady={fleetReady} onOpenFleet={onOpenFleet} onBackToPairing={() => onGoTo('pair')} />;
+  }
 }
 
 /**
@@ -260,5 +385,7 @@ export function OnboardingPage({
 const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
+  connect: 'Nothing here tests a route. Continue when you have picked one.',
+  brief: 'This page cannot see your agent. Continue when it shows you a QR or a link.',
   pair: 'This step finishes itself when the daemon answers.',
 };
