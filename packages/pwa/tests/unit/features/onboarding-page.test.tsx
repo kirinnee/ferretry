@@ -75,7 +75,10 @@ describe('the first-run stepper', () => {
     const { view } = await pageWith();
 
     expect(stepOf(view.container)).toBe('install');
-    expect(view.container.textContent).toContain('Ferretry runs on your own machine');
+    // The paragraph that used to say this is now the picture that shows it.
+    const diagram = must(view.container.querySelector('[role="img"]'), 'the arrangement diagram');
+    expect(diagram.getAttribute('data-onboarding-diagram')).toBe('install');
+    expect(diagram.getAttribute('aria-label')).toContain('not yet linked');
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
     expect(must(view.container.querySelector('h2'), 'the stage heading').textContent).toBe('Install Ferretry');
     expect(view.container.textContent).toContain('Step 1 of 4');
@@ -217,7 +220,7 @@ describe('the install stage', () => {
       node.getAttribute('data-onboarding-copy'),
     );
 
-    expect(labels).toContain('Copy command');
+    expect(labels).toContain('Copy install command');
     expect(labels).toContain('Copy check');
     expect(labels).toContain('Copy setup prompt');
     expect(view.container.textContent).toContain('fy --version');

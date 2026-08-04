@@ -6,7 +6,7 @@
  * walks the actual journey — install, start the daemon, pair, done — and puts
  * exactly one of those on the glass at a time.
  *
- * TWO RULES SHAPE EVERYTHING HERE.
+ * THREE RULES SHAPE EVERYTHING HERE.
  *
  * 1. THE PAGE CANNOT SEE THE TERMINAL. It is static, public, and has no way to
  *    know whether `fy` installed or the daemon came up. So `Next` is never
@@ -16,6 +16,15 @@
  *    across a browser and a terminal, with minutes or hours in between, so the
  *    step is persisted (`OnboardingProgressStore`) and any step already reached
  *    stays one tap away.
+ * 3. ONE LOUD CONTROL PER STEP. Everything a reader can do is not equally
+ *    important, and a screen where four controls shout is a screen with no next
+ *    action. `Next` is the only filled button; back, copy and the disclosures
+ *    are quiet until wanted. This is an accessibility property, not a taste one.
+ *
+ * WHAT LIVES ELSEWHERE. The stages are in `onboarding-stages.tsx`, the track in
+ * `onboarding-track.tsx`, the picture of the arrangement in `setup-diagram.tsx`.
+ * This file owns only the frame: which stage is on the glass, where focus goes
+ * when that changes, and how the screen behaves under a software keyboard.
  *
  * Layout note: nothing here sizes itself against the viewport. The stepper
  * renders inside the shell's existing `kt-shell` scroller, which is already
@@ -23,36 +32,28 @@
  * second, competing answer to the same question when the keyboard opens.
  */
 
-import { ArrowLeft, ArrowRight, Check, ExternalLink } from 'lucide-react';
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { type ReactNode, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
-import { type ClipboardWriter, CommandBlock, CopyButton } from './copy-button.tsx';
+import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import {
-  AGENT_SETUP_PROMPT,
-  DAEMON_SERVING_OUTPUT,
-  DAEMON_START_COMMAND,
-  DAEMON_STATUS_COMMAND,
-  INSTALL_CHANNELS,
   type InstallChannelId,
-  installChannel,
   nextOnboardingStep,
   ONBOARDING_STEP_COUNT,
-  ONBOARDING_STEPS,
   type OnboardingStepId,
-  type OnboardingStepStatus,
   onboardingStep,
   onboardingStepIndex,
-  onboardingStepStatus,
-  PAIR_COMMAND,
   previousOnboardingStep,
-  VERIFY_COMMAND,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore } from './onboarding-progress.ts';
+import { DaemonStage, DoneStage, InstallStage, PairStage } from './onboarding-stages.tsx';
+import { OnboardingTrack } from './onboarding-track.tsx';
+import { SetupDiagram } from './setup-diagram.tsx';
 
 const SHELL =
-  'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-4 py-6 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-10';
+  'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
 
 export interface OnboardingPairingHost {
   /** The daemon answered and this browser is paired; the arc is finished. */
@@ -159,25 +160,29 @@ export function OnboardingPage({
     >
       {/*
         `data-kb-hide` is legal here and nowhere else on this screen: the brand
-        and the standing explanation are stateless chrome with no focus, no
-        overlay and no state to lose. The track, the active stage and its
-        actions must all survive an open keyboard.
+        and the diagram are stateless chrome with no focus, no overlay and no
+        state to lose. The track, the active stage and its actions must all
+        survive an open keyboard.
       */}
-      <header className="min-w-0" data-kb-hide>
-        <OnboardingBrand />
-        <h1 id="onboarding-title" className="mb-1 mt-2 font-display text-display font-bold tracking-display text-fg">
-          Set up Ferretry
-        </h1>
-        <p className="m-0 text-ui leading-base text-muted">
-          Ferretry runs on your own machine, and this page is only a window onto it.
-        </p>
+      <header className="flex min-w-0 flex-col gap-2" data-kb-hide>
+        <div className="flex min-w-0 items-baseline justify-between gap-2">
+          <h1 id="onboarding-title" className="m-0 font-display text-title font-bold tracking-display text-fg">
+            Set up Ferretry
+          </h1>
+          <OnboardingBrand />
+        </div>
+        {/*
+          The picture replaces the paragraph that used to say the same thing:
+          your machine does the work, this page is a window onto it.
+        */}
+        <SetupDiagram step={current} />
       </header>
 
       <OnboardingTrack current={current} furthest={furthest} onJump={goTo} />
 
-      <section className="flex min-w-0 flex-col gap-3" aria-labelledby="onboarding-step-title">
+      <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
-          <p className="m-0 text-meta font-semibold uppercase tracking-label text-faint">
+          <p className="m-0 text-2xs font-semibold uppercase tracking-label text-faint">
             Step {position + 1} of {ONBOARDING_STEP_COUNT}
           </p>
           <h2
@@ -188,7 +193,7 @@ export function OnboardingPage({
           >
             {step.title}
           </h2>
-          <p className="m-0 mt-1 text-ui leading-base text-muted">{step.summary}</p>
+          <p className="m-0 text-meta leading-base text-muted">{step.summary}</p>
         </div>
 
         {current === 'install' && <InstallStage write={write} channel={channel} />}
@@ -200,13 +205,14 @@ export function OnboardingPage({
       </section>
 
       {current !== 'done' && (
-        <div className="mt-auto flex min-w-0 flex-col gap-2">
-          <p className="m-0 text-meta leading-base text-faint">{ADVANCE_NOTE[current]}</p>
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="mt-auto flex min-w-0 flex-col gap-1 pt-2">
+          <p className="m-0 text-2xs leading-base text-faint">{ADVANCE_NOTE[current]}</p>
+          <div className="flex min-w-0 items-center gap-2">
             {current !== 'install' && (
               <button
                 type="button"
                 className="kt-btn min-h-[44px]"
+                data-variant="ghost"
                 onClick={() => goTo(previousOnboardingStep(current))}
                 data-onboarding-back=""
               >
@@ -226,7 +232,7 @@ export function OnboardingPage({
             {current !== 'pair' && (
               <button
                 type="button"
-                className="kt-btn ml-auto min-h-[44px]"
+                className="kt-btn ml-auto min-h-[44px] flex-1"
                 data-variant="primary"
                 onClick={() => goTo(nextOnboardingStep(current))}
                 data-onboarding-next=""
@@ -245,201 +251,14 @@ export function OnboardingPage({
 /**
  * What the reader is told about moving on, per step.
  *
- * The pair step deliberately promises nothing: it is the one stage this page
- * can actually verify, so it waits for the daemon rather than for a click.
+ * One line each, in the smallest type on the screen, because this is a caveat
+ * rather than an instruction — but still present, because the alternative is a
+ * page that quietly implies it checked something it cannot see. The pair step
+ * deliberately promises nothing: it is the one stage this page can actually
+ * verify, so it waits for the daemon rather than for a click.
  */
 const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
-  install: 'This page cannot see your terminal, so nothing here waits on it. Continue when the install finishes.',
-  daemon: 'Still nothing this page can check. Continue once the daemon reports that it is serving.',
-  pair: 'This step finishes itself: the moment the daemon answers, you are set up.',
+  install: 'This page cannot see your terminal. Continue when the install finishes.',
+  daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
+  pair: 'This step finishes itself when the daemon answers.',
 };
-
-const STATUS_WORD: Record<OnboardingStepStatus, string> = {
-  completed: 'completed, go back to it',
-  current: 'current step',
-  upcoming: 'not reached yet',
-};
-
-const TRACK_ITEM =
-  'flex min-h-[44px] w-full min-w-0 flex-col items-center justify-center gap-1 rounded-control border px-1 py-1 text-center';
-
-const TRACK_TONE: Record<OnboardingStepStatus, string> = {
-  completed: 'border-border-strong bg-surface-2 text-fg hover:border-accent hover:text-accent',
-  current: 'border-accent bg-accent-bg font-semibold text-fg',
-  upcoming: 'border-dashed border-border bg-transparent text-faint',
-};
-
-interface OnboardingTrackProps {
-  readonly current: OnboardingStepId;
-  readonly furthest: OnboardingStepId;
-  readonly onJump: (id: OnboardingStepId) => void;
-}
-
-/**
- * The numbered track: a real ordered list, because that is what it is.
- *
- * State is never carried by colour alone — a completed step swaps its number
- * for a tick, the current one is the only solid border and is marked
- * `aria-current="step"`, and an unreached one is dashed. Each item also spells
- * its state out for a reader who hears the list rather than seeing it.
- */
-function OnboardingTrack({ current, furthest, onJump }: OnboardingTrackProps) {
-  return (
-    <ol className="m-0 flex list-none items-stretch gap-1 p-0" aria-label="Setup steps">
-      {ONBOARDING_STEPS.map((step, index) => {
-        const status = onboardingStepStatus(step.id, current, furthest);
-        const body = (
-          <>
-            <span className="flex h-5 w-5 items-center justify-center text-meta font-semibold" aria-hidden="true">
-              {status === 'completed' ? <Check size={14} strokeWidth={3} /> : index + 1}
-            </span>
-            <span className="w-full truncate text-meta">{step.short}</span>
-            <span className="sr-only">{STATUS_WORD[status]}</span>
-          </>
-        );
-        return (
-          <li key={step.id} className="min-w-0 flex-1">
-            {status === 'completed' ? (
-              <button
-                type="button"
-                className={`${TRACK_ITEM} ${TRACK_TONE.completed} focus-visible:outline-focus focus-visible:outline-offset-focus`}
-                onClick={() => onJump(step.id)}
-                data-onboarding-jump={step.id}
-              >
-                {body}
-              </button>
-            ) : (
-              <span
-                className={`${TRACK_ITEM} ${TRACK_TONE[status]}`}
-                aria-current={status === 'current' ? 'step' : undefined}
-                data-onboarding-track={status}
-              >
-                {body}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-const CHANNEL_BUTTON =
-  'min-h-[44px] rounded-control border px-control-x text-ui focus-visible:outline-focus focus-visible:outline-offset-focus';
-
-function InstallStage({ write, channel }: { readonly write: ClipboardWriter; readonly channel: InstallChannelId }) {
-  const [selected, setSelected] = useState<InstallChannelId>(channel);
-  const active = installChannel(selected);
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      {/*
-        A row of buttons that swaps what is shown below it. `role="toolbar"`
-        rather than a tablist: there is no tab panel per option, and rather than
-        a bare labelled div, which is not a nameable element.
-      */}
-      <div role="toolbar" aria-label="Install method" className="flex flex-wrap gap-1">
-        {INSTALL_CHANNELS.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className={`${CHANNEL_BUTTON} ${option.id === selected ? 'border-accent bg-accent-bg font-semibold text-fg' : 'border-border bg-surface-2 text-muted'}`}
-            aria-pressed={option.id === selected}
-            onClick={() => setSelected(option.id)}
-            data-onboarding-channel={option.id}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
-
-      {active.blocks.map(block => (
-        <CommandBlock key={block} command={block} copyLabel="Copy command" write={write} />
-      ))}
-
-      <p className="m-0 text-ui leading-base text-muted">Then check that it landed:</p>
-      <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
-
-      <div className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-2">
-        <p className="m-0 text-ui font-semibold text-fg">Or have an AI agent do it</p>
-        <p className="m-0 text-meta leading-base text-muted">
-          Paste this into an agent with a terminal on that machine. It is generic setup text — it says nothing about
-          you, this browser, or any daemon.
-        </p>
-        <CopyButton text={AGENT_SETUP_PROMPT} label="Copy setup prompt" write={write} />
-      </div>
-    </div>
-  );
-}
-
-function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <CommandBlock command={DAEMON_START_COMMAND} copyLabel="Copy start command" write={write} />
-      <p className="m-0 text-ui leading-base text-muted">Then ask it whether it is actually up:</p>
-      <CommandBlock command={DAEMON_STATUS_COMMAND} copyLabel="Copy status command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        A healthy daemon prints <code className="font-mono text-fg">{DAEMON_SERVING_OUTPUT}</code>. Leave it running: it
-        is what your agents run inside.
-      </p>
-    </div>
-  );
-}
-
-function PairStage({ write, pairing }: { readonly write: ClipboardWriter; readonly pairing: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <CommandBlock command={PAIR_COMMAND} copyLabel="Copy pair command" write={write} />
-      <p className="m-0 text-meta leading-base text-muted">
-        It prints a QR code and a link. Both work once, and only for about two minutes.
-      </p>
-      <div className="min-w-0" data-onboarding-pairing="">
-        {pairing}
-      </div>
-    </div>
-  );
-}
-
-interface DoneStageProps {
-  readonly fleetReady: boolean;
-  readonly onOpenFleet: () => void;
-  readonly onBackToPairing: () => void;
-}
-
-function DoneStage({ fleetReady, onOpenFleet, onBackToPairing }: DoneStageProps) {
-  return (
-    <div className="flex min-w-0 flex-col gap-3">
-      <ul className="m-0 flex list-none flex-col gap-1 p-0 text-ui leading-base text-muted">
-        <li>Start and watch sessions that run on your own machine.</li>
-        <li>Come back to this tab any time — this browser remembers the pairing.</li>
-        <li>Pair another machine later; each one keeps its own separate data.</li>
-      </ul>
-      {fleetReady ? (
-        <button
-          type="button"
-          className="kt-btn min-h-[56px] w-full text-title"
-          data-variant="primary"
-          onClick={onOpenFleet}
-          data-onboarding-open-fleet=""
-        >
-          Open my fleet
-          <ExternalLink size={16} aria-hidden="true" />
-        </button>
-      ) : (
-        <>
-          <p className="m-0 text-ui leading-base text-warn" role="status">
-            Nothing is paired in this browser yet, so there is no fleet to open.
-          </p>
-          <button
-            type="button"
-            className="kt-btn min-h-[56px] w-full text-title"
-            data-variant="primary"
-            onClick={onBackToPairing}
-            data-onboarding-open-fleet=""
-          >
-            Back to pairing
-          </button>
-        </>
-      )}
-    </div>
-  );
-}

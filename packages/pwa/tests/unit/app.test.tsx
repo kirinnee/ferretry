@@ -216,7 +216,10 @@ describe('AppShell', () => {
     expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
       'install',
     );
-    expect(view.container.textContent).toContain('Ferretry runs on your own machine');
+    // The sentence that used to say this is now the diagram that shows it.
+    expect(view.container.querySelector('[data-onboarding-diagram]')?.getAttribute('aria-label')).toContain(
+      'not yet linked',
+    );
     expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(reads).toEqual([]);

@@ -1,0 +1,91 @@
+/**
+ * The numbered track: a real ordered list, because that is what it is.
+ *
+ * State is never carried by colour alone — a completed step swaps its number for
+ * a tick, the current one is the only filled marker and is marked
+ * `aria-current="step"`, and an unreached one is dashed. Each item also spells
+ * its state out for a reader who hears the list rather than seeing it.
+ *
+ * It is a RAIL rather than four boxes now: a 20px marker with its word under it,
+ * joined by a hairline. The boxed version spent 44px of a 844px phone on
+ * chrome that says nothing the marker does not, and four bordered cards above
+ * the actual step competed with it for attention.
+ */
+
+import { Check } from 'lucide-react';
+
+import {
+  ONBOARDING_STEPS,
+  type OnboardingStepId,
+  type OnboardingStepStatus,
+  onboardingStepStatus,
+} from './onboarding-model.ts';
+
+const STATUS_WORD: Record<OnboardingStepStatus, string> = {
+  completed: 'completed, go back to it',
+  current: 'current step',
+  upcoming: 'not reached yet',
+};
+
+const ITEM = 'flex w-full min-w-0 flex-col items-center gap-1 py-1 text-center';
+
+const MARKER = 'flex h-5 w-5 items-center justify-center rounded-full border text-2xs font-semibold';
+
+const MARKER_TONE: Record<OnboardingStepStatus, string> = {
+  completed: 'border-accent bg-accent-bg text-accent',
+  current: 'border-accent bg-accent text-accent-fg',
+  upcoming: 'border-dashed border-border text-faint',
+};
+
+const LABEL_TONE: Record<OnboardingStepStatus, string> = {
+  completed: 'text-muted',
+  current: 'font-semibold text-fg',
+  upcoming: 'text-faint',
+};
+
+export interface OnboardingTrackProps {
+  readonly current: OnboardingStepId;
+  readonly furthest: OnboardingStepId;
+  readonly onJump: (id: OnboardingStepId) => void;
+}
+
+export function OnboardingTrack({ current, furthest, onJump }: OnboardingTrackProps) {
+  return (
+    <ol className="m-0 flex list-none items-start gap-1 p-0" aria-label="Setup steps">
+      {ONBOARDING_STEPS.map((step, index) => {
+        const status = onboardingStepStatus(step.id, current, furthest);
+        const body = (
+          <>
+            <span className={`${MARKER} ${MARKER_TONE[status]}`} aria-hidden="true">
+              {status === 'completed' ? <Check size={12} strokeWidth={3} /> : index + 1}
+            </span>
+            <span className={`w-full truncate text-2xs ${LABEL_TONE[status]}`}>{step.short}</span>
+            <span className="sr-only">{STATUS_WORD[status]}</span>
+          </>
+        );
+        return (
+          <li key={step.id} className="min-w-0 flex-1">
+            {status === 'completed' ? (
+              <button
+                type="button"
+                className={`${ITEM} rounded-control focus-visible:outline-focus focus-visible:outline-offset-focus`}
+                onClick={() => onJump(step.id)}
+                data-onboarding-jump={step.id}
+              >
+                {body}
+              </button>
+            ) : (
+              <span
+                className={ITEM}
+                aria-current={status === 'current' ? 'step' : undefined}
+                data-onboarding-track={status}
+              >
+                {body}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

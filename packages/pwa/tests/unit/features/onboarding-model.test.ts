@@ -68,21 +68,24 @@ describe('the onboarding arc', () => {
 describe('install channels', () => {
   it('shows every documented route, and only documented commands', () => {
     expect(INSTALL_CHANNELS.map(channel => channel.id)).toEqual(['apt', 'dnf', 'brew', 'curl']);
-    // The switcher must not lose a platform the docs support.
-    expect(installChannel('dnf').label).toBe('Fedora / RHEL / CentOS');
+    // Short enough that four of them fit one phone row, and still naming the
+    // platform a reader recognises their own machine as.
+    expect(INSTALL_CHANNELS.map(channel => channel.label)).toEqual([
+      'Debian / Ubuntu',
+      'Fedora / RHEL',
+      'macOS',
+      'Linux / macOS',
+    ]);
     for (const channel of INSTALL_CHANNELS) {
       expect(installChannel(channel.id)).toBe(channel);
-      for (const block of channel.blocks) {
-        // Character for character: a paraphrased install command is one nobody
-        // has ever run. `cli-contracts.sh` pins the doc, so this pins the page.
-        expect(installationDoc).toContain(block);
-      }
+      // Character for character: a paraphrased install command is one nobody
+      // has ever run. `cli-contracts.sh` pins the doc, so this pins the page.
+      expect(installationDoc).toContain(channel.command);
     }
   });
 
   it('offers no Intel mac, because no release targets one', () => {
-    const macBlocks = installChannel('brew').blocks.join('\n');
-    expect(macBlocks).toContain('brew install --cask ferretry');
+    expect(installChannel('brew').command).toContain('brew install --cask ferretry');
     expect(INSTALL_CHANNELS.map(channel => channel.label).join('|')).not.toContain('Intel');
   });
 
@@ -114,9 +117,7 @@ describe('the agent setup prompt', () => {
   it('carries the same commands the page displays', () => {
     for (const channel of INSTALL_CHANNELS) {
       expect(AGENT_SETUP_PROMPT).toContain(channel.label);
-      for (const block of channel.blocks) {
-        for (const line of block.split('\n')) expect(AGENT_SETUP_PROMPT).toContain(line);
-      }
+      for (const line of channel.command.split('\n')) expect(AGENT_SETUP_PROMPT).toContain(line);
     }
     for (const command of [VERIFY_COMMAND, DAEMON_START_COMMAND, DAEMON_STATUS_COMMAND, PAIR_COMMAND]) {
       expect(AGENT_SETUP_PROMPT).toContain(command);

@@ -21,7 +21,12 @@ export interface OnboardingStep {
   readonly title: string;
   /** The track label. One word, because four of them share a 390px row. */
   readonly short: string;
-  /** One short line under the heading. Never a paragraph. */
+  /**
+   * One short line under the heading.
+   *
+   * Never a paragraph, and now never a sentence either: the diagram beside it
+   * already says where the work happens, so this says only what the reader does.
+   */
   readonly summary: string;
 }
 
@@ -30,25 +35,25 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     id: 'install' as const,
     title: 'Install Ferretry',
     short: 'Install',
-    summary: 'Put the fy command on the machine you want your agents to run on.',
+    summary: 'Run this on the machine your agents will work on.',
   }),
   daemon: Object.freeze({
     id: 'daemon' as const,
     title: 'Start the daemon',
     short: 'Daemon',
-    summary: 'The daemon is the part that keeps running and does the work.',
+    summary: 'Leave it running. It does the work.',
   }),
   pair: Object.freeze({
     id: 'pair' as const,
     title: 'Pair this device',
     short: 'Pair',
-    summary: 'Hand this browser a one-time code so it can reach that daemon.',
+    summary: 'Link this browser to that daemon.',
   }),
   done: Object.freeze({
     id: 'done' as const,
     title: 'You are set up',
     short: 'Done',
-    summary: 'This browser is now a window onto your own machine.',
+    summary: 'This browser is a window onto your machine.',
   }),
 });
 
@@ -113,8 +118,13 @@ export interface InstallChannel {
   readonly id: InstallChannelId;
   /** What the reader recognises their own machine as. */
   readonly label: string;
-  /** Copyable blocks, in the order they are run. */
-  readonly blocks: readonly string[];
+  /**
+   * ONE copyable block, even when it is several lines.
+   *
+   * Two blocks side by side read as two decisions; a route that needs three
+   * commands still only needs one copy, one paste and one press of Enter.
+   */
+  readonly command: string;
 }
 
 /**
@@ -129,44 +139,38 @@ const CHANNELS: Readonly<Record<InstallChannelId, InstallChannel>> = Object.free
   apt: Object.freeze({
     id: 'apt' as const,
     label: 'Debian / Ubuntu',
-    blocks: Object.freeze([
-      [
-        'echo "deb [trusted=yes] https://apt.fury.io/kirinnee97/ /" | sudo tee /etc/apt/sources.list.d/fury.list',
-        'sudo apt update',
-        'sudo apt install fy',
-      ].join('\n'),
-    ]),
+    command: [
+      'echo "deb [trusted=yes] https://apt.fury.io/kirinnee97/ /" | sudo tee /etc/apt/sources.list.d/fury.list',
+      'sudo apt update',
+      'sudo apt install fy',
+    ].join('\n'),
   }),
   dnf: Object.freeze({
     id: 'dnf' as const,
-    label: 'Fedora / RHEL / CentOS',
-    blocks: Object.freeze([
-      [
-        "sudo tee /etc/yum.repos.d/fury.repo <<'EOF'",
-        '[fury]',
-        'name=Gemfury kirinnee97',
-        'baseurl=https://yum.fury.io/kirinnee97/',
-        'enabled=1',
-        'gpgcheck=0',
-        'EOF',
-        'sudo dnf install fy',
-      ].join('\n'),
-    ]),
+    label: 'Fedora / RHEL',
+    command: [
+      "sudo tee /etc/yum.repos.d/fury.repo <<'EOF'",
+      '[fury]',
+      'name=Gemfury kirinnee97',
+      'baseurl=https://yum.fury.io/kirinnee97/',
+      'enabled=1',
+      'gpgcheck=0',
+      'EOF',
+      'sudo dnf install fy',
+    ].join('\n'),
   }),
   brew: Object.freeze({
     id: 'brew' as const,
-    label: 'macOS (Homebrew)',
-    blocks: Object.freeze([
-      'brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry',
-      'brew install --cask ferretry',
-    ]),
+    label: 'macOS',
+    command: ['brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry', 'brew install --cask ferretry'].join(
+      '\n',
+    ),
   }),
   curl: Object.freeze({
     id: 'curl' as const,
-    label: 'Any Linux or macOS',
-    blocks: Object.freeze([
+    label: 'Linux / macOS',
+    command:
       'curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash',
-    ]),
   }),
 });
 
@@ -230,7 +234,7 @@ export const AGENT_SETUP_PROMPT = [
   '   Linux arm64 and macOS arm64. If this machine is not one of those, stop and tell me.',
   '2. Install using exactly ONE of the documented commands below, whichever matches this machine.',
   '',
-  ...INSTALL_CHANNELS.flatMap(channel => [`   ${channel.label}:`, ...channel.blocks.flatMap(toPromptLines), '']),
+  ...INSTALL_CHANNELS.flatMap(channel => [`   ${channel.label}:`, ...toPromptLines(channel.command), '']),
   `3. Verify the install: ${VERIFY_COMMAND}`,
   `4. Start the daemon: ${DAEMON_START_COMMAND}`,
   `5. Confirm it is running: ${DAEMON_STATUS_COMMAND} — it should print "${DAEMON_SERVING_OUTPUT}".`,

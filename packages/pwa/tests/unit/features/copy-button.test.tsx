@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { browserClipboardWriter, CommandBlock, CopyButton } from '../../../src/features/onboarding/copy-button.tsx';
+import { browserClipboardWriter, CopyButton } from '../../../src/features/onboarding/copy-button.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 
 const click = async (target: Element): Promise<void> => {
@@ -60,40 +60,31 @@ describe('CopyButton', () => {
     await view.unmount();
   });
 
-  it('is a real touch target with its own visible name', async () => {
+  it('is small, quiet and icon-led, and still carries its whole name', async () => {
     const view = await mount(<CopyButton text="fy --version" label="Copy check" write={async () => {}} />);
     const button = must(view.container.querySelector('button'), 'the copy button');
 
-    expect(button.className).toContain('min-h-[44px]');
-    expect(button.textContent).toContain('Copy check');
-    expect(button.getAttribute('aria-label')).toBeNull();
+    // Deliberately under the control floor: a repeated shortcut, never the way
+    // to make progress. The one control that gates progress keeps the floor.
+    expect(button.className).toContain('h-8');
+    expect(button.className).not.toContain('44px');
+    expect(button.className).toContain('border-transparent');
+    // Icon-led means the name has to come from somewhere.
+    expect(button.textContent).toBe('');
+    expect(button.getAttribute('aria-label')).toBe('Copy check');
     await view.unmount();
   });
-});
 
-describe('CommandBlock', () => {
-  it('shows the command exactly and copies exactly that', async () => {
-    const copied: string[] = [];
-    const command = 'sudo apt update\nsudo apt install fy';
-    const view = await mount(
-      <CommandBlock
-        command={command}
-        copyLabel="Copy command"
-        write={async text => {
-          copied.push(text);
-        }}
-      />,
-    );
+  it('answers with a shape as well as a colour, so a tick is not the only signal', async () => {
+    const view = await mount(<CopyButton text="fy pair" label="Copy pair command" write={async () => {}} />);
+    const button = must(view.container.querySelector('button'), 'the copy button');
+    const iconName = (): string | null => button.querySelector('svg')?.getAttribute('class') ?? null;
+    const resting = iconName();
 
-    const code = must(view.container.querySelector('code'), 'the command text');
-    expect(code.textContent).toBe(command);
-    await click(must(view.container.querySelector('button'), 'the copy button'));
-    expect(copied).toEqual([command]);
+    await click(button);
 
-    // A horizontal scroller without this grows a phantom vertical scrollbar.
-    const scroller = must(view.container.querySelector('pre'), 'the command scroller');
-    expect(scroller.className).toContain('overflow-x-auto');
-    expect(scroller.className).toContain('overflow-y-hidden');
+    expect(iconName()).not.toBe(resting);
+    expect(button.className).toContain('text-ok');
     await view.unmount();
   });
 });
