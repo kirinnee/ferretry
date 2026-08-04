@@ -231,6 +231,13 @@ try {
           await page.screenshot({ path: target });
           process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
 
+          // The gallery bar carries BOTH transient states (reconnecting and an
+          // available update). It complements the at-rest workspace bar below
+          // and proves that 390px gets a breathing row instead of dropped state.
+          const statusTopBarTarget = join(outDir, `top-bar-status-${viewport.name}.png`);
+          await page.locator('[data-density-region="app-bar"]').first().screenshot({ path: statusTopBarTarget });
+          process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
+
           if (viewport.name === 'desktop') {
             const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
             await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });

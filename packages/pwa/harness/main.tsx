@@ -3457,12 +3457,10 @@ function Shell() {
         onOpenSidebar={() => {}}
         sessionCount={7}
         connectionStatus="reconnecting"
-        // Desktop only, and deliberately: at 390 the chip and the destination
-        // selector together squeeze the centred palette entry out of the bar.
-        // That is the original's own layout, inherited rather than introduced —
-        // showing the chip here would only hide the palette in every phone
-        // screenshot. The chip is exercised at desktop width and in unit tests.
-        updateReady={phone ? null : 'update'}
+        // The rebuilt phone bar gives transient state its own row, so this no
+        // longer has to disappear at 390px to protect navigation or item #6's
+        // centred search seam.
+        updateReady="update"
         active="warden"
         themeToggle={<Button size="sm">Theme</Button>}
       />

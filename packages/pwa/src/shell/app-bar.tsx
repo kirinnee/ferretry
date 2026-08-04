@@ -225,9 +225,15 @@ function DestinationFinderButton({ onOpen, roomy = false }: { onOpen: () => void
     >
       <Search size={roomy ? 16 : 14} aria-hidden="true" />
       <span className={roomy ? 'text-ui font-semibold' : 'text-meta font-medium'}>
-        {roomy ? 'Find destination or session' : 'Find'}
+        {roomy ? 'Search app & sessions' : 'Find'}
       </span>
-      <span className="mono ml-auto text-meta text-muted">{paletteShortcutLabel()}</span>
+      <span
+        className={
+          roomy ? 'mono ml-auto hidden text-meta text-muted min-[440px]:inline' : 'mono ml-auto text-meta text-muted'
+        }
+      >
+        {paletteShortcutLabel()}
+      </span>
     </button>
   );
 }
@@ -343,7 +349,7 @@ export function AppBar({
     // and a new stacking context would trap its fixed overlay under page content.
     <header data-density-region="app-bar" className="shrink-0 border-b border-border bg-[var(--bar-bg)]">
       <div
-        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-sm font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md md:py-md"
+        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-md font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md"
         data-app-bar-primary=""
       >
         {/* Identity stays together at the start. Destinations have their own

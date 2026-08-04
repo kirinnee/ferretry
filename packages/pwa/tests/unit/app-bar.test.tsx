@@ -215,7 +215,7 @@ describe('AppBar command palette entry', () => {
     const finder = sheet.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
 
     expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
-    expect(finder.textContent).toContain('Find destination or session');
+    expect(finder.textContent).toContain('Search app & sessions');
 
     await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
 
@@ -234,8 +234,7 @@ describe('AppBar current-session search seam', () => {
     const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
 
     expect(primary.className).toContain('md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)]');
-    expect(primary.className).toContain('py-sm');
-    expect(primary.className).toContain('md:py-md');
+    expect(primary.className).toContain('py-md');
     expect(slot.className).toContain('justify-center');
     expect(slot.children).toHaveLength(0);
     expect(slot.querySelector('button, input')).toBeNull();
