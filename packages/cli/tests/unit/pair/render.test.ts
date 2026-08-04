@@ -28,19 +28,22 @@ const invitation = (overrides: Partial<PairingInvitation> = {}): string =>
   });
 
 describe('pairing screen', () => {
-  it('should lead with one instruction, then the QR, then the code', () => {
+  it('should give the short human code prominence before the compact QR and full link', () => {
     // Arrange + Act
     const actual = invitation();
     const lines = actual.split('\n');
 
     // Assert
     should(lines[0]).equal("Scan this with your phone's camera — it opens Ferretry ready to pair.");
-    should(lines[2]).equal(`  ${QR.split('\n')[0]}`);
-    should(actual).containEql(`  code     ${CODE}`);
-    should(actual).containEql(`  link     ${LINK}`);
-    should(actual).containEql('  expires  in 2:00, and the code works once');
+    should(lines[2]).equal('PAIRING CODE');
+    should(lines[3]).equal(`  ${CODE}`);
+    should(actual).containEql('Or scan this compact QR:');
+    should(actual).containEql(`  ${QR.split('\n')[0]}`);
+    should(actual).containEql('Or open this link — copy the complete line below:');
+    should(actual).containEql(LINK);
+    should(actual).containEql('Expires in 2:00; the code works once.');
     // The code must appear ready to be dictated as well as read.
-    should(actual).containEql('  aloud    seven foxtrot three kilo · quebec two november delta');
+    should(actual).containEql('  aloud: seven foxtrot three kilo · quebec two november delta');
   });
 
   it('should withhold a QR that would wrap and explain it within the same window', () => {
@@ -56,7 +59,7 @@ describe('pairing screen', () => {
     should(actual).containEql('`fy pair`');
     // A complaint about wrapping must not itself wrap. Only the link is exempt.
     for (const line of actual.split('\n')) {
-      if (line.startsWith('  link     http')) continue;
+      if (line === LINK) continue;
       should(line.length).be.belowOrEqual(20);
     }
   });
@@ -69,8 +72,8 @@ describe('pairing screen', () => {
     // Half a copied link is worse than a long one, and the link has no spaces to break on.
     const linkLine = invitation({ columns: 20 })
       .split('\n')
-      .find(line => line.startsWith('  link     http'));
-    should(linkLine).equal(`  link     ${LINK}`);
+      .find(line => line === LINK);
+    should(linkLine).equal(LINK);
   });
 
   it('should round the countdown up, so a live code never reads as dead', () => {
