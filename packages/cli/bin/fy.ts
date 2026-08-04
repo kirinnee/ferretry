@@ -2,7 +2,7 @@
 import { homedir } from 'node:os';
 import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
 import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
-import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
+import { type AnalyticsResponse, FY_DEFAULT_DAEMON_URL, type IFyApiClient, type SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -136,8 +136,8 @@ export function buildWorld(): CliWorld {
   };
 }
 
-/** Where `fyd` listens when the environment does not say otherwise. */
-const DEFAULT_DAEMON_URL = 'http://127.0.0.1:7337';
+/** Where `fyd` listens when the environment does not say otherwise, single-sourced with the daemon. */
+const DEFAULT_DAEMON_URL = FY_DEFAULT_DAEMON_URL;
 
 /**
  * How the CLI finds the daemon. An explicit `FY_TOKEN` is retained for remote/CI connections; on a

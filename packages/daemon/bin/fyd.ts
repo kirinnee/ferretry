@@ -189,7 +189,9 @@ import {
   type ApiServerPort,
   type AssigneeObservation,
   AttentionService,
+  advertisesForeignAddress,
   authorizeSessionCommand,
+  type BootNoticePort,
   type BrowserLoginLifecycle,
   type BrowserViewerHost,
   BrowserViewerStream,
@@ -221,10 +223,10 @@ import {
   defaultSessionSendSettings,
   defaultStartWaitPolicy,
   doneMarkerCertifiesTurn,
-  EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
   FleetEventStreamService,
   type FoundationPaths,
+  foreignAdvertisementNotice,
   HarnessQuirkService,
   harnessMigrationRefusal,
   InitialAttachmentError,
@@ -259,6 +261,8 @@ import {
   QuotaFailoverService,
   RecommendError,
   type RecommendSubsystem,
+  refuseHeldStateHome,
+  refuseOccupiedAddress,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -403,6 +407,15 @@ export interface DaemonWorld {
     readonly binder: DaemonBinder;
   };
   readonly config: FileDaemonConfig;
+  /**
+   * Where a boot states what stopped it.
+   *
+   * A WORLD FIELD so the refusals below are provable without reading a real log file, and a port
+   * rather than a direct write because `src/lib` owns the decision about what is said and may not
+   * reach a stream. Every non-zero return from `start` writes through this first: an exit code that
+   * explains nothing is the defect this seam exists to prevent recurring.
+   */
+  readonly notices: BootNoticePort;
   readonly secrets: DaemonSecretsLoader;
   /** The destructive-migration safety gate: it inventories in-flight work and refuses to migrate
    *  a session whose work cannot be shown to survive the relaunch. */
@@ -2597,9 +2610,16 @@ function createRecommendSubsystem(
   };
 }
 
-/** The hosted PWA and this daemon's own published origin may both drive browser requests. */
+/**
+ * The hosted PWA and this daemon's own origins may all drive browser requests.
+ *
+ * BOTH addresses, because they are two different ways a browser reaches this daemon and either may
+ * be the one in the address bar: the advertised origin is what a pairing link hands out, and the
+ * bound one is what a person types on the host itself. They are the same string unless an operator
+ * set `publicUrl`, in which case the set collapses back to one.
+ */
 function browserOrigins(config: DaemonConfig): readonly string[] {
-  return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin])];
+  return [...new Set([...config.corsOrigins, new URL(config.publicUrl).origin, new URL(config.bindUrl).origin])];
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
@@ -2945,6 +2965,9 @@ export function buildWorld(): DaemonWorld {
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
     },
     config: new FileDaemonConfig(paths, stateFiles),
+    // The standard error stream, which is what every service definition appends to the daemon's log
+    // file — so a boot refusal lands in exactly the file the launcher tells the operator to inspect.
+    notices: { state: message => void process.stderr.write(`${DAEMON_NAME}: ${message}\n`) },
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -3480,9 +3503,14 @@ export function buildWorld(): DaemonWorld {
  * home as foreign state: a first boot on a fresh home could not get past its own configuration
  * step. Owning the home before writing into it removes the whole class.
  *
- * A held lifetime lock is then the same answer as a responder on the address — another daemon is
- * already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them surfacing as a
- * crash about SQLite.
+ * A held lifetime lock is then the same answer as one of THESE daemons responding on the address —
+ * another one is already serving — so both report `EXIT_ALREADY_RUNNING` rather than one of them
+ * surfacing as a crash about SQLite. A responder that cannot be identified as one of these daemons
+ * is a different thing entirely, and reports the address conflict it actually is.
+ *
+ * EVERY ONE OF THOSE EXITS SAYS SOMETHING FIRST. They used to return their code and write nothing at
+ * all, so the launcher pointed the operator at a log file that was empty and a person who had done
+ * everything right learned nothing.
  *
  * The socket comes last, and every acquisition registers its release as it is made rather than in
  * one block at the end, so a failure part-way through unwinds exactly what succeeded.
@@ -3496,14 +3524,37 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   try {
     opened = await world.storage.open();
   } catch (error) {
-    if (error instanceof StateHomeLockedError) return EXIT_ALREADY_RUNNING;
+    if (error instanceof StateHomeLockedError) {
+      const refusal = refuseHeldStateHome(DAEMON_NAME, CLIENT_NAME, error.lockFile);
+      world.notices.state(refusal.message);
+      return refusal.exitCode;
+    }
     throw error;
   }
   cleanups.push(() => opened.storage.close());
 
   const config = await world.config.load();
   await world.secrets.load(config.secretsFile);
-  if (await world.boot.probe.responds({ url: config.publicUrl })) return EXIT_ALREADY_RUNNING;
+  // Stated rather than refused: advertising an address other than the bound one is a real deployment
+  // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
+  // persisted looks like. Either way the operator is the one who can tell which, so say it.
+  if (advertisesForeignAddress(config))
+    world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
+  // THE BOUND ADDRESS, not the advertised one: a responder only concerns this boot when it holds the
+  // socket the bind wants. And the answer is IDENTIFIED before it is believed — "something answered"
+  // is not "I am already running", and the two need different remedies from the operator.
+  const occupant = await world.boot.probe.identify({ url: config.bindUrl });
+  if (occupant.kind !== 'vacant') {
+    const refusal = refuseOccupiedAddress({
+      daemonName: DAEMON_NAME,
+      clientName: CLIENT_NAME,
+      url: config.bindUrl,
+      configFile: world.config.path,
+      occupant,
+    });
+    world.notices.state(refusal.message);
+    return refusal.exitCode;
+  }
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();

@@ -1,3 +1,4 @@
+import { FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
@@ -122,10 +123,25 @@ export const UsageFeedConfigSchema = z
 
 export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
 
-export const DaemonConfigSchema = z
+/**
+ * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.
+ *
+ * SEPARATE from the parsed configuration below, because the two are written back to disk very
+ * differently. A DEFAULT is a value this deployment picked and an operator may edit — writing it out
+ * makes it visible and editable, which is the point. A DERIVATION is a value computed from other
+ * fields, and persisting one is a defect: once on disk it stops tracking the field it came from, so
+ * the operator edits `port`, the derived `publicUrl` keeps the old number, and the daemon appears to
+ * ignore the edit entirely. That is exactly what happened — `port` was a field an operator could
+ * change with no error, no message and no change in behaviour, which is worse than the collision it
+ * was being changed to escape. So: nothing derived is ever written here, and everything derived is
+ * recomputed on every read, which makes disagreement between the two unrepresentable.
+ */
+export const DaemonConfigDocumentSchema = z
   .object({
     host: HostSchema.default('127.0.0.1'),
-    port: PortSchema.default(7337),
+    port: PortSchema.default(FY_DEFAULT_DAEMON_PORT),
+    /** The address this daemon is REACHED at, when that is not the address it binds. Operator-owned
+     *  and optional: absent means "the same one", and absent is what a written document carries. */
     publicUrl: z.url().optional(),
     /** Exact browser origins allowed to call this daemon, including the public pairing exchange. */
     corsOrigins: z.array(CorsOriginSchema).max(32).readonly().default(['https://ferretry.pages.dev']),
@@ -140,16 +156,56 @@ export const DaemonConfigSchema = z
     analyticsPricing: AnalyticsPricingCatalogSchema.default([]),
     projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
   })
-  .strict()
-  .transform(value => ({ ...value, publicUrl: value.publicUrl ?? `http://${value.host}:${value.port}` }));
+  .strict();
+
+export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
+
+/**
+ * The document plus the two addresses derived from it.
+ *
+ * `bindUrl` is what this daemon LISTENS on and is therefore what an incumbent probe must ask: a
+ * responder is only this boot's problem when it holds the very socket the bind wants. Probing the
+ * advertised URL instead is how a stale advertisement sent the boot to interrogate an unrelated
+ * program on a port it was not even going to bind.
+ *
+ * `publicUrl` is what this daemon is REACHED at, which is the same address unless an operator said
+ * otherwise, and it is what pairing links and browser origins carry.
+ */
+export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
+  const bindUrl = `http://${value.host}:${String(value.port)}`;
+  return { ...value, bindUrl, publicUrl: value.publicUrl ?? bindUrl };
+});
 
 export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
 
-/** Parses a complete configuration document and derives its canonical public URL. */
+/** Parses a complete configuration document and derives its canonical addresses. */
 export function parseDaemonConfig(value: unknown): DaemonConfig {
   return DaemonConfigSchema.parse(value);
 }
 
+/**
+ * The document a first boot writes into a fresh state home.
+ *
+ * The DOCUMENT rather than the parsed configuration, so no derived address is ever persisted. A
+ * first boot that wrote `publicUrl` out would freeze it at the port it happened to default to, and
+ * every later edit of `port` would move the bind while the advertisement stayed behind.
+ */
+export function defaultDaemonConfigDocument(): DaemonConfigDocument {
+  return DaemonConfigDocumentSchema.parse({});
+}
+
 export function defaultDaemonConfig(): DaemonConfig {
   return parseDaemonConfig({});
+}
+
+/**
+ * Whether this daemon is advertised at an address other than the one it binds.
+ *
+ * A LEGITIMATE deployment — a daemon behind a reverse proxy or a tunnel — so it is a fact to state,
+ * never a refusal. It is worth stating because the historical cause was a defect rather than a
+ * choice: homes written before derived values stopped being persisted still carry a `publicUrl`
+ * frozen at whatever the port was on the day the home was created.
+ */
+export function advertisesForeignAddress(config: DaemonConfig): boolean {
+  return new URL(config.publicUrl).origin !== new URL(config.bindUrl).origin;
 }
