@@ -311,7 +311,7 @@ describe('the first-time route on a computer', () => {
     await view.unmount();
   });
 
-  it('finishes only when the daemon actually answers', async () => {
+  it('advances along the route when the daemon answers, rather than jumping to the end', async () => {
     const { view } = await pageWith({ fleetReady: false });
     await enter(view.container, 'first-time');
     await next(view.container);
@@ -320,8 +320,27 @@ describe('the first-time route on a computer', () => {
 
     await click(buttonWith(view.container, '[data-test-pair]'));
 
+    // NOT 'done'. The step after pairing on this route is the offer to add the
+    // reader's phone — the one thing that makes first-time setup more than the
+    // other two answers in sequence. A hardcoded 'done' here deleted it.
+    expect(screenOf(view.container)).toBe('handoff');
+    await next(view.container);
     expect(screenOf(view.container)).toBe('done');
     expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe('You are set up');
+    await view.unmount();
+  });
+
+  it('goes straight to the end on a route with nothing after pairing', async () => {
+    // Adding one more daemon has no phone to offer: this is not a first machine.
+    const { view } = await pageWith({ fleetReady: true });
+    await enter(view.container, 'add-daemon');
+    await next(view.container);
+    await next(view.container);
+    await chooseConnection(view.container, 'direct');
+    expect(screenOf(view.container)).toBe('local');
+
+    await click(buttonWith(view.container, '[data-test-pair]'));
+    expect(screenOf(view.container)).toBe('done');
     await view.unmount();
   });
 

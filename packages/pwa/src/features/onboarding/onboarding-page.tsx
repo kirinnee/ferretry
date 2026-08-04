@@ -330,7 +330,17 @@ function RouteFlow({
   const position = onboardingStepIndex(path, at.current);
   const first = position === 0;
   const last = isLastOnboardingStep(path, at.current);
-  const pairing = renderPairing({ onPaired: () => onGoTo('done') });
+  /*
+   * PAIRING ADVANCES ALONG THE ROUTE, IT DOES NOT JUMP TO THE END.
+   *
+   * This used to go straight to `done`, which quietly deleted the one step that
+   * makes first-time setup more than the other two answers in sequence: on a
+   * computer, the step AFTER pairing is the offer to add the reader's phone, and
+   * a hardcoded `done` meant nobody ever saw it. `add-daemon` and `add-client`
+   * have nothing between pairing and the end, so they are unaffected — which is
+   * the point of asking the route rather than naming a step.
+   */
+  const pairing = renderPairing({ onPaired: () => onGoTo(nextOnboardingStep(path, at.current)) });
   /*
    * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
    *
