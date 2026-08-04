@@ -7,6 +7,7 @@ import {
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   type MigrateSessionRequest,
+  type RegisterProjectRequest,
   SessionConfigSchema,
   SessionStateSchema,
   type SessionView,
@@ -3730,8 +3731,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
   const catalogs = {
     projects: () => projects.projects(),
-    registerProject: request => projects.register(request),
-    skills: session => skills.skills(session),
+    registerProject: (request: RegisterProjectRequest) => projects.register(request),
+    skills: (session: SessionView) => skills.skills(session),
   };
   /**
    * The analytics materialization, opened under the lifetime lock this boot is already holding and
