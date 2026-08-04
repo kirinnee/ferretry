@@ -280,6 +280,33 @@ describe('rendezvous durable object', () => {
 });
 
 describe('hosted rendezvous enforcement', () => {
+  /** Which reservations were actually handed back, in the order the rendezvous gave them up. */
+  function releasedBy(calls: readonly { path: string; input: unknown }[]): readonly string[] {
+    return calls
+      .filter(call => call.path === '/internal/release')
+      .map(call => (call.input as { reservationId?: string }).reservationId ?? '');
+  }
+
+  /** Stand up a rendezvous holding one live session for `socketId`, and return a frame it may send. */
+  function liveSessionFrame(harness: ReturnType<typeof makeObject>, socketId: string): ArrayBuffer {
+    const sessionId = sessionIdFromBytes(new Uint8Array(16).fill(1));
+    if (sessionId === null) throw new Error('session fixture is invalid');
+    harness.objectState.storage.values.set('rendezvous', {
+      ...initialRendezvousState(`fy_daemon_${'a'.repeat(43)}`),
+      daemon: { socketId: 'daemon', since: 1 },
+      sessions: [
+        {
+          sessionId,
+          clientSocketId: socketId,
+          since: 1,
+          fromClient: { allowed: 1, sent: 0 },
+          fromDaemon: { allowed: 1, sent: 0 },
+        },
+      ],
+    });
+    return bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence: 1, payload: new Uint8Array([1]) });
+  }
+
   function hostedEnvironment(answer: (path: string, input: unknown) => unknown = () => ({ ok: true })): {
     readonly environment: RelayEnvironment;
     readonly calls: { path: string; input: unknown }[];
@@ -366,7 +393,103 @@ describe('hosted rendezvous enforcement', () => {
       );
       should(controlOf(client.frames()[0])).match({ t: 'error' });
       should(client.closed?.code).be.oneOf(RELAY_CLOSE_CODES.hostedBandwidth, RELAY_CLOSE_CODES.relayInternal);
+      // A refusal that closes the socket and keeps the slot spends it for the deployment's lifetime.
+      should(releasedBy(hosted.calls)).containEql('client_reservation');
     }
+  });
+
+  it('should release the reservation when the state machine refuses an arriving socket', async () => {
+    const hosted = hostedEnvironment();
+    const harness = makeObject({}, hosted.environment);
+    await harness.object.fetch(socketRequest(`fy_daemon_${'a'.repeat(43)}`, 'client', 'lonely_reservation'));
+    const refused = harness.objectState.sockets.at(-1);
+    should(controlOf(refused?.frames()[0])).match({ t: 'error', code: RELAY_CLOSE_CODES.daemonAbsent });
+    should(refused?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
+    should(releasedBy(hosted.calls)).deepEqual(['lonely_reservation']);
+  });
+
+  it('should release the reservation when the heartbeat sweep evicts a socket', async () => {
+    const hosted = hostedEnvironment();
+    const harness = makeObject({}, hosted.environment);
+    const { identity, daemonSocket } = await claimRendezvous(harness, 'daemon_reservation');
+    const { clientSocket } = await joinClient(harness, identity.daemonId, 'client_reservation');
+    daemonSocket.drain();
+
+    harness.runtime.clock += HEARTBEAT_GRACE_SECONDS * 1_000 + 1;
+    harness.objectState.lastSeen.set(daemonSocket, new Date(harness.runtime.clock));
+    await harness.object.alarm();
+
+    should(clientSocket.closed?.code).equal(RELAY_CLOSE_CODES.heartbeatTimeout);
+    should(daemonSocket.closed).be.null();
+    // Only the evicted socket's slot goes back; the daemon that is still answering keeps its own.
+    should(releasedBy(hosted.calls)).deepEqual(['client_reservation']);
+  });
+
+  it('should release the reservation on a protocol refusal but never invent one for a stray socket', async () => {
+    const hosted = hostedEnvironment();
+    const harness = makeObject({}, hosted.environment);
+    const attached = new FakeSocket();
+    attached.serializeAttachment({ socketId: 'talker', reservationId: 'talker_reservation' });
+    await harness.object.webSocketMessage(attached, 'fy-ping is the only text this carries');
+    should(attached.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+
+    const garbled = new FakeSocket();
+    garbled.serializeAttachment({ socketId: 'garbled', reservationId: 'garbled_reservation' });
+    await harness.object.webSocketMessage(garbled, new Uint8Array([0, 1, 2]).buffer as ArrayBuffer);
+    should(garbled.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+    should(releasedBy(hosted.calls)).deepEqual(['talker_reservation', 'garbled_reservation']);
+
+    const stray = new FakeSocket();
+    await harness.object.webSocketMessage(stray, 'anything');
+    should(stray.closed?.code).equal(RELAY_CLOSE_CODES.relayInternal);
+    should(releasedBy(hosted.calls)).deepEqual(['talker_reservation', 'garbled_reservation']);
+  });
+
+  it('should hand the reservation back even when the socket cannot be explained to or closed', async () => {
+    /** A socket the runtime has already torn down: it throws instead of accepting either call. */
+    class BrokenSocket extends FakeSocket {
+      constructor(private readonly failing: 'send' | 'close') {
+        super();
+      }
+
+      override send(data: ArrayBuffer | string): void {
+        if (this.failing === 'send') throw new Error('socket is already gone');
+        super.send(data);
+      }
+
+      override close(code?: number, reason?: string): void {
+        if (this.failing === 'close') throw new Error('socket is already gone');
+        super.close(code, reason);
+      }
+    }
+
+    const denied = () => ({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth, reason: 'daily cap reached' });
+
+    const mute = hostedEnvironment(denied);
+    const muteHarness = makeObject({}, mute.environment);
+    const unsendable = new BrokenSocket('send');
+    unsendable.serializeAttachment({ socketId: 'mute', reservationId: 'mute_reservation' });
+    await muteHarness.object.webSocketMessage(unsendable, liveSessionFrame(muteHarness, 'mute'));
+    // The explanation was undeliverable, so the close and the release carried on without it.
+    should(unsendable.closed?.code).equal(RELAY_CLOSE_CODES.hostedBandwidth);
+    should(releasedBy(mute.calls)).deepEqual(['mute_reservation']);
+
+    const stuck = hostedEnvironment(denied);
+    const stuckHarness = makeObject({}, stuck.environment);
+    const unclosable = new BrokenSocket('close');
+    unclosable.serializeAttachment({ socketId: 'stuck', reservationId: 'stuck_reservation' });
+    await should(
+      stuckHarness.object.webSocketMessage(unclosable, liveSessionFrame(stuckHarness, 'stuck')),
+    ).be.rejectedWith(/already gone/u);
+    // A close that fails is loud, but the slot is already back before anyone hears about it.
+    should(releasedBy(stuck.calls)).deepEqual(['stuck_reservation']);
+  });
+
+  it('should leave self-hosted refusals free of any control-plane traffic', async () => {
+    const harness = makeObject();
+    await harness.object.fetch(socketRequest(`fy_daemon_${'a'.repeat(43)}`, 'client'));
+    const refused = harness.objectState.sockets.at(-1);
+    should(refused?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
   });
 
   it('should apply the runtime kill switch to live sockets on the next sweep and release their reservations', async () => {

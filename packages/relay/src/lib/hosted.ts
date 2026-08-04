@@ -119,12 +119,22 @@ export const HostedRelayUsageWindowSchema = z.strictObject({
 });
 export type HostedRelayUsageWindow = z.infer<typeof HostedRelayUsageWindowSchema>;
 
+/**
+ * The three refusal counters answer three different questions and deliberately overlap.
+ *
+ * `connectionRefusals` counts admission attempts turned away for any reason at all.
+ * `bandwidthRefusals` counts frame events turned away by a byte ceiling, and nothing else — a
+ * kill-switch refusal recorded there would read as an over-budget account when no budget was spent.
+ * `disabledRefusals` counts everything the runtime switch turned away, whether it arrived as a new
+ * socket or as a frame on a live one, so an operator can tell an intentional stop from a real cap.
+ */
 const HostedRelayUsageShape = {
   requestCount: SafeCountSchema,
   acceptedConnections: SafeCountSchema,
   connectionRefusals: SafeCountSchema,
   bytesRelayed: SafeCountSchema,
   bandwidthRefusals: SafeCountSchema,
+  disabledRefusals: SafeCountSchema,
   concurrentConnections: SafeCountSchema,
   peakConcurrentConnections: SafeCountSchema,
   firstActivityAt: TimestampSchema.nullable(),
@@ -200,7 +210,7 @@ export function admitHostedRelayConnection(
   if (touchedGlobal === null) return internalFailure(global, daemon, 'relay meter clock moved backwards');
 
   if (configuration.relayUrl === null) {
-    return refuseConnection(touchedGlobal, daemon, RELAY_CLOSE_CODES.hostedDisabled, 'hosted relay is disabled');
+    return refuseDisabledConnection(touchedGlobal, daemon, 'hosted relay is disabled');
   }
   if (daemon !== null && daemon.daemonId !== parsedDaemonId) {
     return internalFailure(touchedGlobal, daemon, 'daemon metrics belong to another rendezvous');
@@ -216,11 +226,19 @@ export function admitHostedRelayConnection(
 
   const baseDaemon = daemon ?? initialHostedRelayDaemonMetrics(parsedDaemonId, at);
   const touchedDaemon = touchRequest(baseDaemon, at);
-  if (touchedDaemon === null) return internalFailure(touchedGlobal, baseDaemon, 'relay meter clock moved backwards');
+  if (touchedDaemon === null) return internalFailure(touchedGlobal, daemon, 'relay meter clock moved backwards');
+  /**
+   * A refusal never invents a durable row.
+   *
+   * `trackedDaemons` is the census of stored per-daemon rows, and it only grows when a connection is
+   * admitted. Handing a freshly minted row back on a refusal would persist a row nothing counted,
+   * which desynchronises that census permanently and makes the operator snapshot unreadable.
+   */
+  const refusedDaemon = daemon === null ? null : touchedDaemon;
   if (touchedDaemon.concurrentConnections >= configuration.limits.maxConcurrentConnectionsPerDaemon) {
     return refuseConnection(
       touchedGlobal,
-      touchedDaemon,
+      refusedDaemon,
       RELAY_CLOSE_CODES.hostedCapacity,
       'hosted relay per-daemon connection ceiling is reached',
     );
@@ -228,7 +246,7 @@ export function admitHostedRelayConnection(
   if (touchedGlobal.concurrentConnections >= configuration.limits.maxConcurrentConnectionsGlobal) {
     return refuseConnection(
       touchedGlobal,
-      touchedDaemon,
+      refusedDaemon,
       RELAY_CLOSE_CODES.hostedCapacity,
       'hosted relay global connection ceiling is reached',
     );
@@ -259,7 +277,7 @@ export function meterHostedRelayRequest(
     return internalFailure(global, daemon, 'relay meter clock moved backwards');
   }
   if (configuration.relayUrl === null) {
-    return refuseBandwidth(touchedGlobal, touchedDaemon, RELAY_CLOSE_CODES.hostedDisabled, 'hosted relay is disabled');
+    return refuseDisabledFrame(touchedGlobal, touchedDaemon, 'hosted relay is disabled');
   }
   if (touchedGlobal.concurrentConnections === 0 || touchedDaemon.concurrentConnections === 0) {
     return internalFailure(touchedGlobal, touchedDaemon, 'relay meter has no connection reservation');
@@ -330,6 +348,46 @@ export function releaseHostedRelayConnection(
     daemon: { ...daemon, concurrentConnections: daemon.concurrentConnections - 1, lastActivityAt: at },
     decision: { ok: true },
   };
+}
+
+/**
+ * May this stored daemon row be forgotten to make room for a daemon that has never been seen?
+ *
+ * `maxTrackedDaemons` bounds durable rows, and a bound that only ever fills is a bound that
+ * eventually refuses every new daemon forever. Reclaiming is what keeps it a ceiling rather than a
+ * one-way lock, so the test has to be strict in the other direction: a row may only go when nothing
+ * is using it and its accounting day is over. Both the day window and the last activity stamp must
+ * predate the current UTC day, because a refusal can stamp activity on a row without rolling its
+ * window, and either one alone would let today's traffic be forgotten out from under its own caps.
+ *
+ * A missing activity stamp is kept rather than reclaimed. Every row that reaches durable storage has
+ * been through {@link admitHostedRelayConnection} or {@link meterHostedRelayRequest}, both of which
+ * stamp it, so a stored row with no stamp is evidence nobody can account for — and the fail-closed
+ * reading of evidence nobody can account for is that it is still in use.
+ */
+export function reclaimableHostedRelayDaemon(daemon: HostedRelayDaemonMetrics, at: number): boolean {
+  const today = windowStart(TimestampSchema.parse(at), HOSTED_RELAY_DAY_MILLISECONDS);
+  return (
+    daemon.concurrentConnections === 0 &&
+    daemon.day.startedAt < today &&
+    daemon.lastActivityAt !== null &&
+    daemon.lastActivityAt < today
+  );
+}
+
+/**
+ * Shrink the row census by rows that were actually deleted, and change nothing else.
+ *
+ * Cumulative totals are deliberately untouched: the bill an account already ran up does not become
+ * smaller because a quiet daemon's row was tidied away. A count that exceeds the census is damaged
+ * evidence rather than an empty account, so it returns null and the caller fails closed.
+ */
+export function forgetHostedRelayDaemons(
+  global: HostedRelayGlobalMetrics,
+  forgotten: number,
+): HostedRelayGlobalMetrics | null {
+  if (!Number.isSafeInteger(forgotten) || forgotten < 0 || forgotten > global.trackedDaemons) return null;
+  return { ...global, trackedDaemons: global.trackedDaemons - forgotten };
 }
 
 /** Re-check a live rendezvous after an operator changes the kill switch or ceilings. */
@@ -404,6 +462,7 @@ function emptyUsage(at: number) {
     connectionRefusals: 0,
     bytesRelayed: 0,
     bandwidthRefusals: 0,
+    disabledRefusals: 0,
     concurrentConnections: 0,
     peakConcurrentConnections: 0,
     firstActivityAt: null,
@@ -469,6 +528,36 @@ function refuseBandwidth(
     global: { ...global, bandwidthRefusals: safeAdd(global.bandwidthRefusals, 1) },
     daemon: { ...daemon, bandwidthRefusals: safeAdd(daemon.bandwidthRefusals, 1) },
     decision: { ok: false, code, reason, ...(retryAt === undefined ? {} : { retryAt }) },
+  };
+}
+
+/** A socket turned away by the switch is still a refused connection, and also an intentional stop. */
+function refuseDisabledConnection(
+  global: HostedRelayGlobalMetrics,
+  daemon: HostedRelayDaemonMetrics | null,
+  reason: string,
+): HostedRelayMetricsTransition {
+  const refused = refuseConnection(global, daemon, RELAY_CLOSE_CODES.hostedDisabled, reason);
+  return {
+    global: { ...refused.global, disabledRefusals: safeAdd(refused.global.disabledRefusals, 1) },
+    daemon:
+      refused.daemon === null
+        ? null
+        : { ...refused.daemon, disabledRefusals: safeAdd(refused.daemon.disabledRefusals, 1) },
+    decision: refused.decision,
+  };
+}
+
+/** A frame turned away by the switch spent no bandwidth, so only the switch counter moves. */
+function refuseDisabledFrame(
+  global: HostedRelayGlobalMetrics,
+  daemon: HostedRelayDaemonMetrics,
+  reason: string,
+): HostedRelayMetricsTransition {
+  return {
+    global: { ...global, disabledRefusals: safeAdd(global.disabledRefusals, 1) },
+    daemon: { ...daemon, disabledRefusals: safeAdd(daemon.disabledRefusals, 1) },
+    decision: { ok: false, code: RELAY_CLOSE_CODES.hostedDisabled, reason },
   };
 }
 

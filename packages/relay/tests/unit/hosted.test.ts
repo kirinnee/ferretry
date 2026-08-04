@@ -4,6 +4,7 @@ import {
   advertiseHostedRelay,
   configureHostedRelay,
   DEFAULT_HOSTED_RELAY_LIMITS,
+  forgetHostedRelayDaemons,
   HOSTED_RELAY_CONFIG_VERSION,
   HOSTED_RELAY_DAY_MILLISECONDS,
   HOSTED_RELAY_MINUTE_MILLISECONDS,
@@ -26,6 +27,7 @@ import {
   MAX_FRAME_BYTES,
   meterHostedRelayRequest,
   RELAY_CLOSE_CODES,
+  reclaimableHostedRelayDaemon,
   releaseHostedRelayConnection,
 } from '@ferretry/relay';
 import should from 'should';
@@ -137,7 +139,39 @@ describe('hosted relay connection admission', () => {
     );
     should(result.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedDisabled });
     should(result.daemon).be.null();
-    should(result.global).match({ requestCount: 1, connectionRefusals: 1, trackedDaemons: 0 });
+    should(result.global).match({
+      requestCount: 1,
+      connectionRefusals: 1,
+      disabledRefusals: 1,
+      bandwidthRefusals: 0,
+      trackedDaemons: 0,
+    });
+  });
+
+  it('should keep the tracked-daemon census equal to the rows it would store', () => {
+    const base = admitted();
+    const atCapacity = admitHostedRelayConnection(
+      configuration({ maxConcurrentConnectionsPerDaemon: 2, maxConcurrentConnectionsGlobal: 2 }),
+      { ...base.global, concurrentConnections: 2, peakConcurrentConnections: 2 },
+      null,
+      otherDaemonId,
+      at + 2,
+    );
+    should(atCapacity.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    // A row nobody counted is a row the operator snapshot can never reconcile again.
+    should(atCapacity.daemon).be.null();
+    should(atCapacity.global).match({ trackedDaemons: base.global.trackedDaemons, connectionRefusals: 1 });
+
+    // A daemon that already has a row still gets its own refusal counted on that row.
+    const known = admitHostedRelayConnection(
+      configuration({ maxConcurrentConnectionsPerDaemon: 1 }),
+      base.global,
+      base.daemon,
+      daemonId,
+      at + 2,
+    );
+    should(known.daemon).match({ daemonId, connectionRefusals: 1 });
+    should(known.global).match({ trackedDaemons: 1 });
   });
 
   it('should key accepted counts and concurrent reservations by daemon', () => {
@@ -305,6 +339,82 @@ describe('hosted relay byte and request metering', () => {
     const rolled = meterHostedRelayRequest(configuration(), filled.global, filled.daemon, 50, nextMinute);
     should(rolled.decision).deepEqual({ ok: true });
     should(rolled.global).match({ bytesRelayed: 150, minute: { startedAt: nextMinute, bytes: 50 } });
+  });
+});
+
+describe('hosted relay refusal counter semantics', () => {
+  it('should count a switched-off frame as an intentional stop rather than an exhausted budget', () => {
+    const base = admitted();
+    const stopped = meterHostedRelayRequest(
+      initialHostedRelayConfiguration(at),
+      base.global,
+      base.daemon,
+      4_096,
+      at + 2,
+    );
+    should(stopped.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedDisabled });
+    should(stopped.global).match({
+      disabledRefusals: 1,
+      bandwidthRefusals: 0,
+      // The frame event is still accounted for; only its label changed.
+      requestCount: base.global.requestCount + 1,
+      bytesRelayed: base.global.bytesRelayed,
+    });
+    should(stopped.daemon).match({ disabledRefusals: 1, bandwidthRefusals: 0 });
+  });
+
+  it('should keep a real byte ceiling on the bandwidth counter alone', () => {
+    const base = admitted();
+    const capped = meterHostedRelayRequest(
+      configuration({ maxBytesPerMinutePerDaemon: 1, maxBytesPerMinuteGlobal: 1, maxBytesPerDayPerDaemon: 1 }),
+      base.global,
+      base.daemon,
+      4_096,
+      at + 2,
+    );
+    should(capped.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth });
+    should(capped.global).match({ bandwidthRefusals: 1, disabledRefusals: 0 });
+    should(capped.daemon).match({ bandwidthRefusals: 1, disabledRefusals: 0 });
+  });
+});
+
+describe('hosted relay daemon row reclamation', () => {
+  const today = HOSTED_RELAY_DAY_MILLISECONDS * 2;
+  const yesterday = HOSTED_RELAY_DAY_MILLISECONDS;
+
+  function row(overrides: Partial<HostedRelayDaemonMetrics> = {}): HostedRelayDaemonMetrics {
+    return { ...initialHostedRelayDaemonMetrics(daemonId, yesterday), lastActivityAt: yesterday, ...overrides };
+  }
+
+  it('should forget only a validated row that is idle and finished with its accounting day', () => {
+    should(reclaimableHostedRelayDaemon(row(), at)).be.true();
+  });
+
+  it('should never forget a row that is live or still inside the current day', () => {
+    should(reclaimableHostedRelayDaemon(row({ concurrentConnections: 1 }), at)).be.false();
+    should(reclaimableHostedRelayDaemon(row({ day: { startedAt: today, bytes: 0 } }), at)).be.false();
+    // A refusal stamps activity without rolling the window, so the stamp is checked on its own.
+    should(reclaimableHostedRelayDaemon(row({ lastActivityAt: at }), at)).be.false();
+  });
+
+  it('should keep a row whose activity stamp is missing rather than guess it is idle', () => {
+    // Admission and metering both stamp a row before it is ever stored, so an unstamped stored row
+    // is evidence nobody can explain. Fail-closed means keeping it, not tidying it away.
+    should(reclaimableHostedRelayDaemon(row({ lastActivityAt: null }), at)).be.false();
+  });
+
+  it('should shrink the census by exactly what was deleted and leave cumulative totals alone', () => {
+    const global = { ...initialHostedRelayGlobalMetrics(at), trackedDaemons: 3, requestCount: 99, bytesRelayed: 4_096 };
+    const forgotten = forgetHostedRelayDaemons(global, 2);
+    should(forgotten).match({ trackedDaemons: 1, requestCount: 99, bytesRelayed: 4_096 });
+    should(forgetHostedRelayDaemons(global, 0)).deepEqual(global);
+  });
+
+  it('should refuse to shrink the census below the rows it claims to have', () => {
+    const global = { ...initialHostedRelayGlobalMetrics(at), trackedDaemons: 1 };
+    should(forgetHostedRelayDaemons(global, 2)).be.null();
+    should(forgetHostedRelayDaemons(global, -1)).be.null();
+    should(forgetHostedRelayDaemons(global, 1.5)).be.null();
   });
 });
 

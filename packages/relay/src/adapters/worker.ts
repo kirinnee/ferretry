@@ -356,14 +356,12 @@ export class RendezvousDurableObject {
     this.enqueue(async () => {
       const loaded = await this.load();
       if (loaded === null && hadSocketsBefore) {
-        this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
-        await this.releaseReservation(reservationId);
+        await this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
         return;
       }
       const state = loaded ?? initialRendezvousState(route.daemonId);
       if (state.daemonId !== route.daemonId) {
-        this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous belongs to another daemon');
-        await this.releaseReservation(reservationId);
+        await this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous belongs to another daemon');
         return;
       }
       await this.applyStep(reduceRendezvous(state, event));
@@ -378,13 +376,13 @@ export class RendezvousDurableObject {
     if (typeof message === 'string') {
       // The auto-responder handles the heartbeat without ever reaching here; anything else in text
       // is a peer speaking a protocol this one does not have.
-      return this.refuseSocket(socket, RELAY_CLOSE_CODES.protocolError, 'this rendezvous carries binary frames');
+      return this.closeSocket(socket, RELAY_CLOSE_CODES.protocolError, 'this rendezvous carries binary frames');
     }
     const decoded = decodeFrame(new Uint8Array(message));
-    if (!decoded.ok) return this.refuseSocket(socket, decoded.code, decoded.reason);
+    if (!decoded.ok) return this.closeSocket(socket, decoded.code, decoded.reason);
     this.enqueue(async () => {
       const state = await this.load();
-      if (state === null) return this.refuseSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
+      if (state === null) return this.closeSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
       const step = reduceRendezvous(state, {
         kind: 'frame',
         socketId: attachment.socketId,
@@ -416,8 +414,7 @@ export class RendezvousDurableObject {
       const decision = await this.hostedDecision('inspect', { daemonId: state.daemonId });
       if (!decision.ok) {
         for (const socket of this.objectState.getWebSockets()) {
-          this.refuseSocketClearly(socket, decision.code, decision.reason);
-          await this.releaseReservation(attachmentOf(socket)?.reservationId);
+          await this.refuseSocketClearly(socket, decision.code, decision.reason);
         }
         return;
       }
@@ -464,27 +461,54 @@ export class RendezvousDurableObject {
   }
 
   /** A socket with no attachment is not one this rendezvous ever accepted. It does not get to stay. */
-  private orphan(socket: RelaySocket): void {
-    socket.close(RELAY_CLOSE_CODES.relayInternal, 'socket is not attached to this rendezvous');
+  private async orphan(socket: RelaySocket): Promise<void> {
+    await this.closeSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'socket is not attached to this rendezvous');
   }
 
-  private refuseSocket(socket: RelaySocket, code: number, reason: string): void {
-    socket.close(code, reason);
+  /**
+   * Close one socket and hand back whatever hosted capacity it was holding.
+   *
+   * Every close this side initiates goes through here. A hosted reservation is only ever given up by
+   * telling the control object, so a refusal that closes a socket and says nothing spends a slot for
+   * the lifetime of the deployment — sixteen of those and the daemon they belonged to can never
+   * reach the hosted relay again. The attachment is read before the close because the reservation is
+   * the only evidence of what to release, and release is idempotent, so a later `webSocketClose` or
+   * `webSocketError` callback describing the same socket costs nothing.
+   *
+   * The release is in a `finally` because a socket the runtime has already torn down can throw on
+   * close, and a slot that leaks because the socket was *extra* dead is the same permanent leak.
+   */
+  private async closeSocket(socket: RelaySocket, code: number, reason: string): Promise<void> {
+    const reservationId = attachmentOf(socket)?.reservationId;
+    try {
+      socket.close(code, reason);
+    } finally {
+      await this.releaseReservation(reservationId);
+    }
   }
 
-  /** Capacity and control-plane refusals are data before they are a close, so a phone can explain them. */
-  private refuseSocketClearly(socket: RelaySocket, code: number, reason: string): void {
-    socket.send(
-      toArrayBuffer(
-        encodeFrame({
-          kind: FRAME_KINDS.control,
-          sessionId: RENDEZVOUS_SESSION_ID,
-          sequence: 0,
-          payload: encodeControlMessage({ t: 'error', code, reason }),
-        }),
-      ),
-    );
-    socket.close(code, reason);
+  /**
+   * Capacity and control-plane refusals are data before they are a close, so a phone can explain them.
+   *
+   * The explanation is best effort and the close is not. A socket too far gone to hear why it is
+   * being closed still has to be closed, and still has to give its reservation back.
+   */
+  private async refuseSocketClearly(socket: RelaySocket, code: number, reason: string): Promise<void> {
+    try {
+      socket.send(
+        toArrayBuffer(
+          encodeFrame({
+            kind: FRAME_KINDS.control,
+            sessionId: RENDEZVOUS_SESSION_ID,
+            sequence: 0,
+            payload: encodeControlMessage({ t: 'error', code, reason }),
+          }),
+        ),
+      );
+    } catch {
+      // Undeliverable is not the same as unaccounted. The close and the release happen either way.
+    }
+    await this.closeSocket(socket, code, reason);
   }
 
   private isHosted(): boolean {
@@ -524,9 +548,12 @@ export class RendezvousDurableObject {
         case 'send':
           sockets.get(effect.socketId)?.send(toArrayBuffer(encodeFrame(effect.frame)));
           break;
-        case 'close':
-          sockets.get(effect.socketId)?.close(effect.code, effect.reason);
+        case 'close': {
+          // A state-machine refusal is still a socket this side closed, so it releases like any other.
+          const closing = sockets.get(effect.socketId);
+          if (closing !== undefined) await this.closeSocket(closing, effect.code, effect.reason);
           break;
+        }
         case 'schedule-alarm':
           await this.objectState.storage.setAlarm(effect.at);
           break;

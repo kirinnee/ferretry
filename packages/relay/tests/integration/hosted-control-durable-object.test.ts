@@ -8,7 +8,9 @@ import {
 import { HostedRelayControlDurableObject } from '../../src/adapters/worker.ts';
 import {
   DEFAULT_HOSTED_RELAY_LIMITS,
+  HOSTED_RELAY_DAY_MILLISECONDS,
   type HostedRelayConfigurationInput,
+  type HostedRelayDaemonMetrics,
   initialHostedRelayDaemonMetrics,
   initialHostedRelayGlobalMetrics,
   RELAY_CLOSE_CODES,
@@ -270,6 +272,291 @@ describe('hosted relay control Durable Object', () => {
     const response = await harness.object.fetch(request('/operator/metrics'));
     should(response.status).equal(200);
     should(((await response.json()) as { daemons: unknown[] }).daemons.length).equal(1_000);
+  });
+
+  it('should keep the operator snapshot readable after a first-time daemon is refused at the global cap', async () => {
+    const harness = makeObject();
+    await configure(
+      harness,
+      enabledConfiguration({ maxConcurrentConnectionsPerDaemon: 1, maxConcurrentConnectionsGlobal: 1 }),
+    );
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+
+    harness.runtime.clock += 1;
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId: otherDaemonId, reservationId: 'reservation_0002' }),
+        )
+      ).json(),
+    ).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+
+    // The refusal must not have left an uncounted row behind, or this snapshot 503s forever.
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.false();
+    const snapshot = await harness.object.fetch(request('/operator/metrics'));
+    should(snapshot.status).equal(200);
+    const body = (await snapshot.json()) as {
+      global: { trackedDaemons: number; connectionRefusals: number };
+      daemons: { daemonId: string }[];
+    };
+    should(body.global.trackedDaemons).equal(body.daemons.length);
+    should(body.daemons.map(daemon => daemon.daemonId)).deepEqual([daemonId]);
+    should(body.global.connectionRefusals).equal(1);
+  });
+});
+
+describe('hosted relay daemon row cap recovery', () => {
+  const staleClock = 1_000;
+  const laterDay = HOSTED_RELAY_DAY_MILLISECONDS * 3 + 5_000;
+
+  /** One census of `rows` stored rows with matching global counters, so the snapshot is consistent. */
+  async function atRowCap(
+    rows: readonly HostedRelayDaemonMetrics[],
+    reservations: readonly HostedRelayReservationRow[],
+    census = rows.length,
+  ) {
+    const harness = makeObject();
+    await configure(harness, enabledConfiguration({ maxTrackedDaemons: Math.max(census, 1) }));
+    for (const row of rows) harness.storage.values.set(`metrics:daemon:${row.daemonId}`, row);
+    for (const reservation of reservations) {
+      harness.storage.values.set(`reservation:${reservation.reservationId}`, reservation);
+    }
+    harness.storage.values.set('metrics:global', {
+      ...initialHostedRelayGlobalMetrics(staleClock),
+      requestCount: 41,
+      bytesRelayed: 4_096,
+      trackedDaemons: census,
+      concurrentConnections: reservations.length,
+      peakConcurrentConnections: reservations.length,
+      ...(reservations.length === 0 ? {} : { lastActivityAt: staleClock, firstActivityAt: staleClock }),
+    });
+    harness.runtime.clock = laterDay;
+    return harness;
+  }
+
+  interface HostedRelayReservationRow {
+    readonly reservationId: string;
+    readonly daemonId: string;
+    readonly openedAt: number;
+  }
+
+  function staleRow(id: string): HostedRelayDaemonMetrics {
+    return { ...initialHostedRelayDaemonMetrics(id, staleClock), requestCount: 7, lastActivityAt: staleClock };
+  }
+
+  it('should reclaim an idle row from a completed day and admit the new daemon', async () => {
+    const harness = await atRowCap([staleRow(otherDaemonId)], []);
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.false();
+    should(harness.storage.values.has(`metrics:daemon:${daemonId}`)).be.true();
+    const snapshot = await harness.object.fetch(request('/operator/metrics'));
+    should(snapshot.status).equal(200);
+    const body = (await snapshot.json()) as {
+      global: { trackedDaemons: number; requestCount: number; bytesRelayed: number };
+      daemons: { daemonId: string }[];
+    };
+    should(body.global.trackedDaemons).equal(1);
+    should(body.daemons.map(daemon => daemon.daemonId)).deepEqual([daemonId]);
+    // Forgetting a row tidies the census, never the bill the account already ran up.
+    should(body.global.requestCount).be.above(41);
+    should(body.global.bytesRelayed).equal(4_096);
+  });
+
+  it('should refuse rather than reclaim a row that is live or still inside the current day', async () => {
+    const live = await atRowCap(
+      [{ ...staleRow(otherDaemonId), concurrentConnections: 1 }],
+      [{ reservationId: 'reservation_live001', daemonId: otherDaemonId, openedAt: staleClock }],
+    );
+    should(
+      await (
+        await live.object.fetch(request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }))
+      ).json(),
+    ).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should(live.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+    should((await live.object.fetch(request('/operator/metrics'))).status).equal(200);
+
+    const today = await atRowCap(
+      [
+        {
+          ...staleRow(otherDaemonId),
+          lastActivityAt: laterDay,
+          day: { startedAt: HOSTED_RELAY_DAY_MILLISECONDS * 3, bytes: 128 },
+        },
+      ],
+      [],
+    );
+    should(
+      await (
+        await today.object.fetch(request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0002' }))
+      ).json(),
+    ).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should(today.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+  });
+
+  it('should keep an unstamped row instead of reclaiming evidence it cannot account for', async () => {
+    const harness = await atRowCap([{ ...staleRow(otherDaemonId), lastActivityAt: null }], []);
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+  });
+
+  it('should fail closed on a damaged row rather than delete what it cannot read', async () => {
+    const harness = await atRowCap([staleRow(otherDaemonId)], []);
+    harness.storage.values.set(`metrics:daemon:${otherDaemonId}`, { daemonId: otherDaemonId, broken: true });
+    const refused = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(refused.status).equal(503);
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+    should(harness.storage.values.has(`metrics:daemon:${daemonId}`)).be.false();
+  });
+
+  it('should carry the sweep forward so a row the last pass never reached is still recovered', async () => {
+    const harness = await atRowCap([staleRow(otherDaemonId)], []);
+    // The last pass stopped past every stored row, so this pass starts beyond the only stale row.
+    harness.storage.values.set('control:reclaim-cursor', {
+      scannedThrough: `${'metrics:daemon:fy_daemon_'}${'z'.repeat(43)}`,
+    });
+
+    const beyondHorizon = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(await beyondHorizon.json()).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+    // A pass that recovered nothing still has to leave the next one somewhere new: wrapped to the start.
+    should(harness.storage.values.get('control:reclaim-cursor')).deepEqual({ scannedThrough: null });
+
+    // Recovery is therefore a matter of attempts, not of where a fingerprint happens to sort.
+    harness.runtime.clock += 1;
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0002' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.false();
+    should((await harness.object.fetch(request('/operator/metrics'))).status).equal(200);
+  });
+
+  it('should treat a batch that stops mid-page as an unfinished census, not a complete one', async () => {
+    // More stale rows than one batch may forget, all inside a single short page. The sweep must stop
+    // on its batch limit without concluding it has seen the whole census.
+    const crowded = Array.from({ length: 70 }, (_unused, index) =>
+      staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
+    );
+    const harness = await atRowCap(crowded, []);
+
+    const admitted = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(await admitted.json()).deepEqual({ ok: true });
+
+    // 64 forgotten, 6 left, plus the daemon just admitted.
+    const cursor = harness.storage.values.get('control:reclaim-cursor') as { scannedThrough: string | null };
+    should(cursor.scannedThrough).be.a.String();
+    const snapshot = await harness.object.fetch(request('/operator/metrics'));
+    should(snapshot.status).equal(200);
+    const body = (await snapshot.json()) as { global: { trackedDaemons: number }; daemons: unknown[] };
+    should(body.daemons.length).equal(7);
+    should(body.global.trackedDaemons).equal(7);
+  });
+
+  it('should fail closed on a damaged sweep cursor instead of restarting from the top', async () => {
+    const harness = await atRowCap([staleRow(otherDaemonId)], []);
+    for (const damaged of [
+      { scannedThrough: 'reservation:not-a-daemon-key' },
+      // Right prefix, but not a key this object could ever have written.
+      { scannedThrough: `${'metrics:daemon:'}not-a-fingerprint` },
+      { broken: true },
+      'not-an-object',
+    ]) {
+      harness.storage.values.set('control:reclaim-cursor', damaged);
+      should(
+        (
+          await harness.object.fetch(
+            request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+          )
+        ).status,
+      ).equal(503);
+    }
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+  });
+
+  it('should refuse to tidy rows while the census already disagrees with what storage holds', async () => {
+    // The census claims two rows; storage holds one. Deleting the stale row would bury that, not fix it.
+    const harness = await atRowCap([staleRow(otherDaemonId)], [], 2);
+    const refused = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(refused.status).equal(503);
+    should(await refused.json()).deepEqual({ error: 'relay metrics and daemon rows disagree' });
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
+    should(harness.storage.values.has('control:reclaim-cursor')).be.false();
+  });
+
+  it('should fail closed when a row key disagrees with the fingerprint inside it', async () => {
+    const harness = await atRowCap([staleRow(otherDaemonId)], []);
+    harness.storage.values.delete(`metrics:daemon:${otherDaemonId}`);
+    harness.storage.values.set(`metrics:daemon:${otherDaemonId}`, staleRow(`fy_daemon_${'c'.repeat(43)}`));
+    should(
+      (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).status,
+    ).equal(503);
+  });
+});
+
+describe('hosted relay operator configuration contract', () => {
+  it('should refuse a stored document echoed back and accept the same edit without the server-owned stamp', async () => {
+    const harness = makeObject();
+    await configure(harness);
+    const stored = (await (await harness.object.fetch(request('/operator/configuration'))).json()) as {
+      configuration: Record<string, unknown>;
+    };
+    should(stored.configuration).have.property('updatedAt');
+
+    // Echoing the GET document straight back is what silently disabled the kill switch.
+    const echoed = await harness.object.fetch(
+      request('/operator/configuration', 'PUT', { ...stored.configuration, relayUrl: null }),
+    );
+    should(echoed.status).equal(400);
+    should(await echoed.json()).deepEqual({ error: 'invalid hosted relay configuration' });
+    should(await (await harness.object.fetch(request('/public/configuration'))).json()).match({
+      relayUrl: 'https://relay.example',
+    });
+
+    harness.runtime.clock = 5_000;
+    const { updatedAt: _ignored, ...operatorOwned } = stored.configuration;
+    const projected = await harness.object.fetch(
+      request('/operator/configuration', 'PUT', { ...operatorOwned, relayUrl: null }),
+    );
+    should(projected.status).equal(200);
+    should(await projected.json()).match({ configured: true, configuration: { relayUrl: null, updatedAt: 5_000 } });
+    should(await (await harness.object.fetch(request('/public/configuration'))).json()).deepEqual({
+      version: 1,
+      relayUrl: null,
+    });
   });
 });
 

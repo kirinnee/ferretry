@@ -25,11 +25,13 @@ import {
   HostedRelayGlobalMetricsSchema,
   type HostedRelayReservation,
   HostedRelayReservationSchema,
+  forgetHostedRelayDaemons,
   initialHostedRelayConfiguration,
   initialHostedRelayGlobalMetrics,
   inspectHostedRelayCapacity,
   meterHostedRelayRequest,
   RELAY_CLOSE_CODES,
+  reclaimableHostedRelayDaemon,
   releaseHostedRelayConnection,
 } from '../lib/index.ts';
 
@@ -47,6 +49,58 @@ const GLOBAL_METRICS_KEY = 'metrics:global';
 const DAEMON_METRICS_PREFIX = 'metrics:daemon:';
 const RESERVATION_PREFIX = 'reservation:';
 const LIST_PAGE_SIZE = 1_000;
+
+/**
+ * How hard one admission is allowed to look for rows it may forget.
+ *
+ * Reclaiming runs only while the row census is full, and it runs inside the admission transaction,
+ * so it has to be bounded rather than thorough. The budget covers more rows than the default census
+ * holds, so an ordinary deployment proves its whole census in a single pass; a deployment whose
+ * operator raised the ceiling past the budget relies on the cursor below instead. Forgetting a batch
+ * rather than a single row means the next few first-time daemons are admitted without sweeping again.
+ */
+const RECLAIM_SCAN_PAGES = 12;
+const RECLAIM_BATCH = 64;
+
+/**
+ * Where the next sweep resumes.
+ *
+ * A sweep that always restarted at the first key would only ever recover rows that sort early: if
+ * the rows it can reach are all busy, every later admission re-reads the same prefix and a full
+ * census stays full forever. Remembering how far the last pass got — and wrapping to the start once
+ * the prefix runs out — turns a bounded pass into a cycle that eventually reaches every row, so the
+ * ceiling is recoverable over the deployment's life rather than only near the front of the keyspace.
+ */
+const RECLAIM_CURSOR_KEY = 'control:reclaim-cursor';
+
+const ReclaimCursorSchema = z.strictObject({
+  /**
+   * Checked as a key this object could actually have written, not merely as one with the right
+   * prefix. A cursor is a position that decides which rows a sweep will never look at, so a value
+   * nobody here could have produced is damaged control state rather than a harmless offset.
+   */
+  scannedThrough: z
+    .string()
+    .max(256)
+    .refine(
+      value =>
+        value.startsWith(DAEMON_METRICS_PREFIX) &&
+        DaemonIdSchema.safeParse(value.slice(DAEMON_METRICS_PREFIX.length)).success,
+      'cursor is not a daemon metric key',
+    )
+    .nullable(),
+});
+type ReclaimCursor = z.infer<typeof ReclaimCursorSchema>;
+
+interface ReclaimSweep {
+  /** Rows this pass may delete, already validated, capped at {@link RECLAIM_BATCH}. */
+  readonly keys: readonly string[];
+  /** How many rows this pass actually read. */
+  readonly observed: number;
+  /** True when this pass read the entire prefix, so `observed` is the exact durable row count. */
+  readonly proven: boolean;
+  readonly cursor: ReclaimCursor;
+}
 
 const ReserveRequestSchema = z.strictObject({
   daemonId: DaemonIdSchema,
@@ -223,9 +277,42 @@ export class HostedRelayControlDurableObject {
       }
       const daemonResult = await this.daemonMetrics(transaction, input.daemonId);
       if (!daemonResult.ok) return daemonResult;
+
+      // A first-time daemon meeting a full row census gets one bounded attempt to reclaim rows that
+      // finished their accounting day, so the ceiling stays a ceiling instead of becoming permanent.
+      let global = loaded.value.global;
+      if (daemonResult.value === null && global.trackedDaemons >= loaded.value.configuration.limits.maxTrackedDaemons) {
+        const cursor = await readReclaimCursor(transaction);
+        if (!cursor.ok) return cursor;
+        const sweep = await sweepDaemonRows(transaction, cursor.value, now);
+        if (!sweep.ok) return sweep;
+        /**
+         * A census that already disagrees with storage is damaged, and deleting rows would bury the
+         * disagreement rather than settle it. A pass that read the whole prefix knows the exact row
+         * count and demands it match; a partial pass can still prove damage by reading more rows
+         * than the census claims exist in total.
+         */
+        if (
+          sweep.value.proven
+            ? sweep.value.observed !== global.trackedDaemons
+            : sweep.value.observed > global.trackedDaemons
+        ) {
+          return { ok: false as const, reason: 'relay metrics and daemon rows disagree' };
+        }
+        // Recorded whether or not anything was reclaimed: a pass that found only busy rows still has
+        // to hand the next one somewhere new to look.
+        await transaction.put(RECLAIM_CURSOR_KEY, sweep.value.cursor);
+        if (sweep.value.keys.length !== 0) {
+          const forgotten = forgetHostedRelayDaemons(global, sweep.value.keys.length);
+          if (forgotten === null) return { ok: false as const, reason: 'relay daemon census is damaged' };
+          for (const key of sweep.value.keys) await transaction.delete(key);
+          global = forgotten;
+        }
+      }
+
       const transition = admitHostedRelayConnection(
         loaded.value.configuration,
-        loaded.value.global,
+        global,
         daemonResult.value,
         input.daemonId,
         now,
@@ -417,6 +504,74 @@ export class HostedRelayControlDurableObject {
 
 function daemonKey(daemonId: string): string {
   return `${DAEMON_METRICS_PREFIX}${DaemonIdSchema.parse(daemonId)}`;
+}
+
+/** Where the last sweep stopped. An unreadable cursor is damaged state, not a fresh start. */
+async function readReclaimCursor(
+  storage: HostedRelayControlStorageRead,
+): Promise<{ readonly ok: true; readonly value: ReclaimCursor } | { readonly ok: false; readonly reason: string }> {
+  const raw = await storage.get(RECLAIM_CURSOR_KEY);
+  if (raw === undefined) return { ok: true, value: { scannedThrough: null } };
+  const parsed = ReclaimCursorSchema.safeParse(raw);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, reason: 'relay reclaim cursor is damaged' };
+}
+
+/**
+ * Read one bounded window of daemon rows and report which of them may be forgotten.
+ *
+ * Every row it reads is validated first. A row that will not parse, or whose key disagrees with the
+ * fingerprint inside it, stops the sweep with an error: deleting evidence nobody can read is how a
+ * live daemon loses the reservation that was holding its slot, so ambiguity fails closed here.
+ *
+ * The window always advances. Whether it fills its batch, runs out of budget or runs off the end of
+ * the prefix, the returned cursor is somewhere the next pass has not already been.
+ */
+async function sweepDaemonRows(
+  storage: HostedRelayControlStorageRead,
+  cursor: ReclaimCursor,
+  at: number,
+): Promise<{ readonly ok: true; readonly value: ReclaimSweep } | { readonly ok: false; readonly reason: string }> {
+  const keys: string[] = [];
+  const fromStart = cursor.scannedThrough === null;
+  let scannedThrough = cursor.scannedThrough;
+  let observed = 0;
+  let exhausted = false;
+  let batched = false;
+
+  for (let page = 0; page < RECLAIM_SCAN_PAGES && !exhausted && !batched; page += 1) {
+    const rows = await storage.list<unknown>({
+      prefix: DAEMON_METRICS_PREFIX,
+      limit: LIST_PAGE_SIZE,
+      ...(scannedThrough === null ? {} : { startAfter: scannedThrough }),
+    });
+    for (const [key, raw] of rows) {
+      const parsed = HostedRelayDaemonMetricsSchema.safeParse(raw);
+      if (!parsed.success || key !== daemonKey(parsed.data.daemonId)) {
+        return { ok: false, reason: 'daemon metrics are damaged' };
+      }
+      observed += 1;
+      scannedThrough = key;
+      if (reclaimableHostedRelayDaemon(parsed.data, at)) keys.push(key);
+      if (keys.length === RECLAIM_BATCH) {
+        batched = true;
+        break;
+      }
+    }
+    // A short page means the end of the prefix only when the pass actually read all of it. Stopping
+    // mid-page on a full batch leaves rows behind, and calling that a complete census would both
+    // lose the cursor's place and let a partial count masquerade as the durable row total.
+    if (!batched && rows.size < LIST_PAGE_SIZE) exhausted = true;
+  }
+
+  return {
+    ok: true,
+    value: {
+      keys,
+      observed,
+      proven: fromStart && exhausted,
+      cursor: { scannedThrough: exhausted ? null : scannedThrough },
+    },
+  };
 }
 
 async function listAll(storage: HostedRelayControlStorageRead, prefix: string): Promise<readonly [string, unknown][]> {
