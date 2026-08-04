@@ -8,7 +8,7 @@
  * on two paired daemons are unrelated identities.
  */
 
-import type { AttentionItem, Pin, SessionView, TaskSummary } from '@ferretry/protocol';
+import type { AttentionItem, Pin, SessionView, TaskSummary, TerminalListView } from '@ferretry/protocol';
 import { taskReference } from '../features/tasks/task-board-model.ts';
 import { TASK_STATUS_META } from '../features/tasks/task-presentation.ts';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
@@ -19,6 +19,8 @@ import { pinReferenceMarkdown } from '../lib/pin-links.ts';
 import { resolvedPinReference } from '../lib/pin-reference-context.ts';
 import { formatReference } from '../lib/references.ts';
 import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import { type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
+import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import {
@@ -100,9 +102,51 @@ export interface ComposerReferenceProviderOptions extends ComposerProviderScopeO
   readonly waitForPins?: ComposerProviderWarmup;
 }
 
+/** Injected so a test can drive the surfaces family without a live daemon; the
+ *  default is the one authenticated terminal listing call. */
+export type ComposerTerminalLister = (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  fetcher: DaemonFetch,
+) => Promise<TerminalListView>;
+
+export interface ComposerSurfacesProviderOptions extends ComposerProviderScopeOptions {
+  readonly listTerminals?: ComposerTerminalLister;
+}
+
 export interface ComposerAutocompleteProvidersOptions extends ComposerReferenceProviderOptions {
   readonly harness?: ComposerHarness;
+  readonly listTerminals?: ComposerTerminalLister;
 }
+
+/**
+ * The one thing a row must not leave unsaid.
+ *
+ * The daemon does not record who opened a terminal, so a reader choosing between
+ * two shells cannot be told whether an agent or their own phone opened either.
+ * Saying so is the honest reading; printing "you opened this" would be a guess
+ * that happens to be right most of the time, which is worse.
+ */
+const SURFACE_PROVENANCE_NOTICE =
+  'This daemon does not record who opened a terminal, so ownership is shown as unrecorded.';
+
+const surfaceCandidate =
+  (scope: DaemonSessionScope) =>
+  (surface: SessionSurface): ComposerAutocompleteCandidate => ({
+    id: scopedId('surface', scope, `${surface.surface}:${surface.key}`),
+    kind: 'surface',
+    label: surface.title,
+    detail: [surface.token, surface.viewers === 1 ? '1 viewer' : `${surface.viewers} viewers`, 'owner unrecorded'].join(
+      ' · ',
+    ),
+    keywords: `${surface.key} ${surface.title} ${surface.surface}`,
+    group: 'Surfaces',
+    // Small, named, session-owned sets stay above anything fuzzier.
+    rankPriority: 1,
+    badge: surface.surface,
+    replacement: surface.token,
+    append: 'space',
+  });
 
 const EMPTY_SESSIONS: readonly SessionView[] = [];
 const EMPTY_TASKS: readonly ComposerTaskSummary[] = [];
@@ -638,7 +682,10 @@ export function createReferencesProvider({
       candidates: [],
       filterQuery: query,
       contextLabel: `${'@'.repeat(Math.min(tier, 8))} has no reference family`,
-      notice: 'Use one to five @ signs. The legend above shows every available tier.',
+      // The one place a reader who over-types `@` is already looking, so it is
+      // also the cheapest place to teach that live surfaces have their own sigil.
+      notice:
+        'Use one to five @ signs. The legend above shows every available tier. For this session’s terminals, use %.',
     };
   };
 
@@ -685,9 +732,65 @@ export function createReferencesProvider({
   };
 }
 
+/**
+ * `%` — the surfaces this session owns, addressable by their daemon-issued ids.
+ *
+ * IT ASKS THE DAEMON ITSELF rather than taking a host getter, which is a
+ * deliberate difference from the agent, task, attention and pin families. Those
+ * read stores the host must wire up, and nothing wires them today, so they offer
+ * an empty list in the shipped composer. A terminal listing is one authenticated
+ * request away, so this family is honest the moment it is mounted.
+ *
+ * WHAT A ROW PROMISES. It offers exactly what the daemon listed: a real terminal,
+ * with its title, how many viewers are attached right now (the co-control signal —
+ * a reader can see they are about to share a shell) and how provenance stands.
+ * The listing is cached per token like the files tree is, and `reset` clears it
+ * after a send; a row that has since closed is a stale OFFER, never a false claim,
+ * because the inserted reference is proved again by whoever renders it.
+ */
+export function createSurfacesProvider({
+  daemon,
+  scope,
+  fetcher = fetch,
+  listTerminals = listSessionTerminals,
+}: ComposerSurfacesProviderOptions): ComposerAutocompleteProvider {
+  assertProviderScope(daemon, scope);
+  const cache = new Map<string, TerminalListView>();
+  const cacheKey = daemonSessionKey(scope);
+  return {
+    id: scopedId('surfaces', scope),
+    trigger: '%',
+    label: 'Session surfaces',
+    reset: () => cache.clear(),
+    async candidates({ query, signal }): Promise<ComposerProviderResult> {
+      if (signal.aborted) throw abortReason(signal);
+      let listing = cache.get(cacheKey);
+      if (!listing) {
+        listing = await listTerminals(daemon, scope, fetcher);
+        if (signal.aborted) throw abortReason(signal);
+        cache.set(cacheKey, listing);
+      }
+      const surfaces = sessionSurfaces(scope, listing);
+      return {
+        candidates: surfaces.map(surfaceCandidate(scope)),
+        filterQuery: query,
+        contextLabel: '% session surfaces',
+        notice:
+          surfaces.length === 0
+            ? 'This session has no open terminal to address yet. Open one from the Terminal pane.'
+            : SURFACE_PROVENANCE_NOTICE,
+      };
+    },
+  };
+}
+
 export function createComposerAutocompleteProviders(
   options: ComposerAutocompleteProvidersOptions,
 ): ComposerAutocompleteProvider[] {
-  const { daemon, scope, harness, fetcher } = options;
-  return [createSkillsProvider({ daemon, scope, harness, fetcher }), createReferencesProvider(options)];
+  const { daemon, scope, harness, fetcher, listTerminals } = options;
+  return [
+    createSkillsProvider({ daemon, scope, harness, fetcher }),
+    createReferencesProvider(options),
+    createSurfacesProvider({ daemon, scope, fetcher, ...(listTerminals === undefined ? {} : { listTerminals }) }),
+  ];
 }
