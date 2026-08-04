@@ -1176,12 +1176,13 @@ const PALETTE_SETTINGS = [
   { id: 'setting-theme', label: 'Theme', description: 'Pick a colour family and mode', settingId: 'theme' },
 ];
 
-/** Attention fixture exercises a type-specific action and a deliberately long
- * background, so both the rail treatment and the phone disclosure are visible. */
+/** Attention fixture puts all four response shapes beside their distinct action
+ * controls. The permission background stays deliberately long so the phone
+ * disclosure is exercised without hiding the required action. */
 const ATTENTION: AttentionSnapshot = {
   v: 1,
   sessionId: 'harness-session',
-  count: 1,
+  count: 4,
   parseErrors: 0,
   updatedAt: '2026-07-31T12:00:00.000Z',
   items: [
@@ -1197,6 +1198,55 @@ const ATTENTION: AttentionSnapshot = {
       waitingSince: '2026-07-31T11:30:00.000Z',
       howToResolve: 'Approve to grant this browser access to the paired daemon.',
       ask: { kind: 'permission' },
+      raisedBy: 'agent',
+      raisedBySession: 'harness-session',
+      raisedByName: 'Zoe',
+    },
+    {
+      id: 'A4',
+      source: 'agent-raised',
+      sourceRef: null,
+      sourceSeq: 2,
+      subject: 'Choose the next migration step',
+      why: 'The agent needs one bounded direction before it can continue.',
+      context: 'Each option has a different trade-off; choose exactly one.',
+      waitingSince: '2026-07-31T11:35:00.000Z',
+      howToResolve: 'Choose one of the offered options.',
+      ask: {
+        kind: 'multiple-choice',
+        options: [
+          { label: 'Port the data model', description: 'Make the durable response contract first.' },
+          { label: 'Polish the UI', description: 'Defer the model work.' },
+        ],
+      },
+      raisedBy: 'agent',
+      raisedBySession: 'harness-session',
+      raisedByName: 'Zoe',
+    },
+    {
+      id: 'A5',
+      source: 'agent-raised',
+      sourceRef: null,
+      sourceSeq: 3,
+      subject: 'Review the generated migration note',
+      why: 'The agent has produced a proposed answer that needs human review.',
+      waitingSince: '2026-07-31T11:40:00.000Z',
+      howToResolve: 'Accept the answer or explain what needs clarifying.',
+      ask: { kind: 'answer-review' },
+      raisedBy: 'agent',
+      raisedBySession: 'harness-session',
+      raisedByName: 'Zoe',
+    },
+    {
+      id: 'A6',
+      source: 'agent-raised',
+      sourceRef: null,
+      sourceSeq: 4,
+      subject: 'Describe the preferred release timing',
+      why: 'No fixed option can capture the needed scheduling context.',
+      waitingSince: '2026-07-31T11:45:00.000Z',
+      howToResolve: 'Write the response in your own words.',
+      ask: { kind: 'open-question' },
       raisedBy: 'agent',
       raisedBySession: 'harness-session',
       raisedByName: 'Zoe',

@@ -7,9 +7,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  CircleHelp,
   Clock3,
+  ListChecks,
   LoaderCircle,
   MessageCircleQuestion,
+  ShieldQuestion,
   UserRoundCheck,
   X,
 } from 'lucide-react';
@@ -27,23 +30,35 @@ import { cn } from '../../lib/class-names.ts';
 import { Button, Textarea } from '../../shell/primitives.tsx';
 import { actOnAttention, fetchAttention } from './attention-api.ts';
 
-type AttentionTone = AttentionAsk['kind'] | 'none';
+type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
 type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean) => void;
 
 const kindMeta = (
   item: Pick<AttentionItem, 'source' | 'ask'>,
-): { tone: AttentionTone; label: string; action: string } => {
+): { tone: AttentionTone; label: string; icon: typeof CircleAlert; action: string } => {
   if (!item.ask)
-    return { tone: 'none', label: sourceLabel(item.source), action: 'No answer shape recorded — clear it by acting' };
+    return {
+      tone: 'none',
+      label: sourceLabel(item.source),
+      icon: CircleHelp,
+      action: 'No answer shape recorded — clear it by acting',
+    };
   switch (item.ask.kind) {
     case 'permission':
-      return { tone: 'permission', label: 'Permission', action: 'Approve or reject' };
+      return { tone: 'permission', label: 'Permission', icon: ShieldQuestion, action: 'Approve or reject' };
     case 'multiple-choice':
-      return { tone: 'multiple-choice', label: 'Pick one', action: 'Choose an answer' };
+      return { tone: 'multiple-choice', label: 'Pick one', icon: ListChecks, action: 'Choose an answer' };
     case 'answer-review':
-      return { tone: 'answer-review', label: 'Review answer', action: 'Accept it, or ask for more' };
+      return { tone: 'answer-review', label: 'Review answer', icon: BadgeCheck, action: 'Accept it, or ask for more' };
     case 'open-question':
-      return { tone: 'open-question', label: 'Open question', action: 'Write an answer' };
+      return { tone: 'open-question', label: 'Open question', icon: MessageCircleQuestion, action: 'Write an answer' };
+    default:
+      return {
+        tone: 'unknown',
+        label: 'Damaged attention',
+        icon: CircleHelp,
+        action: 'The requested action is malformed. Repair it before treating this as resolved',
+      };
   }
 };
 
@@ -118,7 +133,7 @@ export function AttentionBoard({
       </header>
       {error && (
         <p role="alert" className="m-0 border-b border-err/30 bg-err/5 px-panel py-row-y text-meta text-err">
-          {error}
+          Could not verify attention: {error}
         </p>
       )}
       {snapshot?.parseErrors !== undefined && snapshot.parseErrors > 0 && !error && (
@@ -133,6 +148,10 @@ export function AttentionBoard({
               <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" />
               Loading attention ledger…
             </p>
+          ) : error && !snapshot ? (
+            <AttentionUnavailable />
+          ) : items.length === 0 && (snapshot?.parseErrors ?? 0) > 0 ? (
+            <AttentionUnavailable damaged />
           ) : items.length === 0 ? (
             <div className="py-10 text-center">
               <Check size={18} className="mx-auto mb-sm text-muted" aria-hidden="true" />
@@ -167,6 +186,20 @@ export function AttentionBoard({
   );
 }
 
+function AttentionUnavailable({ damaged = false }: { readonly damaged?: boolean }) {
+  return (
+    <div className="py-10 text-center" role="alert">
+      <CircleAlert size={18} className="mx-auto mb-sm text-err" aria-hidden="true" />
+      <p className="m-0 text-cell font-medium text-fg">Attention needs human verification.</p>
+      <p className="m-0 mt-xs text-meta text-faint">
+        {damaged
+          ? 'The daemon reported damaged attention data. Repair it before assuming no action is needed.'
+          : 'The attention ledger could not be read. Reconnect or repair the paired daemon before assuming no action is needed.'}
+      </p>
+    </div>
+  );
+}
+
 function AttentionRow({
   item,
   oldest,
@@ -185,6 +218,7 @@ function AttentionRow({
   readonly onAction: Action;
 }) {
   const kind = kindMeta(item);
+  const KindIcon = kind.icon;
   return (
     <li
       data-kind={kind.tone}
@@ -193,6 +227,7 @@ function AttentionRow({
     >
       <div className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs">
         <span className="kt-attn-chip kt-label inline-flex shrink-0 items-center gap-1 px-badge-x py-0.5">
+          <KindIcon size={11} aria-hidden="true" />
           {kind.label}
         </span>
         <span className="mono text-meta text-faint">{attentionReference(item.id)}</span>
@@ -226,11 +261,17 @@ function AttentionRow({
         {prose(item.howToResolve, 'mt-0.5 text-cell leading-base text-muted')}
       </Part>
       <div className="mt-sm flex flex-col gap-xs">
-        {item.ask ? (
+        <p className="m-0 text-meta text-faint" data-attention-action>
+          {kind.action}.
+        </p>
+        {kind.tone === 'unknown' ? (
+          <p role="alert" className="m-0 text-meta text-err">
+            Cannot offer a response for this damaged attention item. Repair it before treating it as resolved.
+          </p>
+        ) : item.ask ? (
           <AnswerControls ask={item.ask} busy={busy} onRespond={response => onAction(item.id, response)} />
         ) : (
           <>
-            <p className="m-0 text-meta text-faint">{kind.action}.</p>
             <div className="flex justify-end">
               <Button size="sm" className="min-h-[44px]" disabled={busy} onClick={() => onAction(item.id, null)}>
                 {busy ? (
