@@ -145,11 +145,16 @@ function WorkspaceSurface({
       />
     );
   } else if (tab.id === 'terminals' || tab.instance?.kind === 'terminal') {
+    // The deck is still ONE surface (DESIGN-side-pane-tabs.md assigns its
+    // per-terminal split to the deck's own owner). A `terminal:<id>` tab is
+    // therefore addressable rather than separate: it selects ITS shell in the
+    // deck, and says nothing if that shell is not in the listing.
     body = (
       <SessionTerminalSurface
         connection={connection}
         scope={scope}
         {...(readSnapshot === undefined ? {} : { readSnapshot })}
+        {...(tab.instance?.kind === 'terminal' ? { focusTerminalId: tab.instance.key } : {})}
       />
     );
   } else if (tab.render !== undefined) {

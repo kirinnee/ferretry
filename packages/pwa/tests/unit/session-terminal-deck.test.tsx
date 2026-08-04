@@ -558,3 +558,51 @@ describe('SessionTerminalDeck theming', () => {
     document.documentElement.removeAttribute('data-theme');
   });
 });
+
+/**
+ * Handover #35 — a `terminal:<id>` side-pane tab is ADDRESSABLE: it selects its
+ * own shell rather than dropping the reader on whichever one happens to be
+ * first. Damaged evidence (an id this session does not have) changes nothing.
+ */
+describe('SessionTerminalDeck focused by a side-pane tab', () => {
+  const selectedId = (page: Rendered): string | null => {
+    const tab = page.root
+      .findAll(node => node.type === 'button')
+      .find(node => (node.props as Record<string, unknown>)['aria-selected'] === true);
+    const controls = tab === undefined ? null : ((tab.props as Record<string, unknown>)['aria-controls'] as string);
+    return controls === null ? null : controls.replace('web-terminal-panel-', '');
+  };
+
+  test('selects the terminal its tab was opened for, not the first in the listing', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND)]));
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        focusTerminalId={SECOND}
+        scope={scopeAlpha}
+      />,
+    );
+    await settle();
+
+    expect(selectedId(page)).toBe(SECOND);
+    run(() => page.unmount());
+  });
+
+  test('leaves the selection alone when the requested terminal is not in the listing', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND)]));
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        focusTerminalId="ffffffffffff"
+        scope={scopeAlpha}
+      />,
+    );
+    await settle();
+
+    // The deck's own default stands; nothing invents a shell to focus.
+    expect(selectedId(page)).toBe(FIRST);
+    run(() => page.unmount());
+  });
+});
