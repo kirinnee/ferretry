@@ -5,8 +5,8 @@ import { QR_INDENT, qrColumns, qrFitsTerminal } from './qr.ts';
  * The pairing screen.
  *
  * Someone running `fy pair` for the first time should not have to read anything else, so the screen
- * is ordered by where the eye goes: one instruction, then the QR as the visual centre, then the code
- * for anyone whose camera will not cooperate, then when it dies.
+ * is ordered by what an operator can use most reliably: one instruction, the short code and its
+ * spoken form, then the compact QR and full link, then when it dies.
  *
  * THE CODE IS PRINTED THREE WAYS ON PURPOSE. Scanned, it is inside the QR. Typed, it is the grouped
  * `code` line. Dictated down a phone line, it is the `aloud` line — because `7F3K` read out is where
@@ -17,7 +17,6 @@ import { QR_INDENT, qrColumns, qrFitsTerminal } from './qr.ts';
  */
 
 const INDENT = ' '.repeat(QR_INDENT);
-const LABEL_WIDTH = 9;
 
 /** How each symbol is said out loud. The pairing alphabet excludes every symbol without a distinct name. */
 const SPOKEN: Record<string, string> = {
@@ -101,7 +100,7 @@ const indented = (block: string): string =>
 /**
  * Greedy word wrap for the screen's prose.
  *
- * Only the prose. The code, the spelling and the link are laid out to be read or copied whole, and the
+ * Only the prose. The code, its spelling and the link are laid out to be read or copied whole, and the
  * link is a single unbreakable token anyway — wrapping it would invite someone to copy half of it.
  */
 export function wrapText(text: string, width: number): string[] {
@@ -145,23 +144,25 @@ function qrBlock(invitation: PairingInvitation): string {
 
 /** The whole screen, from the instruction down to the deadline. */
 export function renderInvitation(invitation: PairingInvitation): string {
-  // A labelled row, wrapped under a hanging indent so the label column stays a column. The link has
-  // no spaces to break on and so is never wrapped — half a copied link is worse than a long one.
-  const gutter = INDENT + ' '.repeat(LABEL_WIDTH);
-  const row = (label: string, value: string): string =>
-    wrapText(value, Math.max(1, (invitation.columns ?? Number.POSITIVE_INFINITY) - gutter.length))
-      .map((line, index) => (index === 0 ? `${INDENT}${label.padEnd(LABEL_WIDTH)}${line}` : `${gutter}${line}`))
-      .join('\n');
   const headline = "Scan this with your phone's camera — it opens Ferretry ready to pair.";
+  const text = (value: string): string => wrapText(value, invitation.columns ?? value.length).join('\n');
+  const detail = (value: string): string =>
+    wrapText(value, Math.max(1, (invitation.columns ?? Number.POSITIVE_INFINITY) - INDENT.length))
+      .map(line => `${INDENT}${line}`)
+      .join('\n');
   return [
-    wrapText(headline, invitation.columns ?? headline.length).join('\n'),
+    text(headline),
     '',
+    'PAIRING CODE',
+    `${INDENT}${invitation.mint.code}`,
+    detail(`aloud: ${spellCode(invitation.mint.code)}`),
+    '',
+    text('Or scan this compact QR:'),
     qrBlock(invitation),
     '',
-    row('code', invitation.mint.code),
-    row('aloud', spellCode(invitation.mint.code)),
-    row('link', invitation.link),
-    row('expires', `in ${renderRemaining(invitation.remainingMs)}, and the code works once`),
+    text('Or open this link — copy the complete line below:'),
+    invitation.link,
+    text(`Expires in ${renderRemaining(invitation.remainingMs)}; the code works once.`),
   ].join('\n');
 }
 
