@@ -3284,7 +3284,9 @@ describe('daemon boot lifecycle', () => {
     });
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
-    const world = { ...(await worldAt(home, boundPort(stranger), async () => {})), notices: said.port };
+    // Read BEFORE the stop below: a stopped server reports port 0, and the assertions name the port.
+    const strangerPort = boundPort(stranger);
+    const world = { ...(await worldAt(home, strangerPort, async () => {})), notices: said.port };
 
     // Act
     const code = await start(world, cleanups);
@@ -3298,7 +3300,7 @@ describe('daemon boot lifecycle', () => {
     // NON-EMPTY OUTPUT is the point of this whole test: the defect was an exit code with no message.
     should(said.stated).have.length(1);
     should(said.stated[0]).match(/HTTP 401/u);
-    should(said.stated[0]).match(new RegExp(`127\\.0\\.0\\.1:${String(boundPort(stranger))}`, 'u'));
+    should(said.stated[0]).match(new RegExp(`127\\.0\\.0\\.1:${String(strangerPort)}`, 'u'));
     // It names the edit that fixes it, in the file that holds it.
     should(said.stated[0]).match(/"port" in .*config\/daemon\.json/u);
   });

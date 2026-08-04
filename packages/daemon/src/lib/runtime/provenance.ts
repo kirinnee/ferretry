@@ -123,7 +123,7 @@ export function renderConfiguration(rows: readonly ResolvedValue[], config: Daem
   const nameWidth = Math.max(...rows.map(row => row.name.length));
   // Capped, because one long state-home path would otherwise push every origin off the right of the
   // terminal — and the origin column is the entire reason this report exists.
-  const valueWidth = Math.min(44, Math.max(...rows.map(row => row.value.length)));
+  const valueWidth = Math.min(40, Math.max(...rows.map(row => row.value.length)));
   const lines = rows.map(row => {
     const detail = row.note === undefined ? `(${row.origin})` : `(${row.origin} — ${row.note})`;
     return `${row.name.padEnd(nameWidth)}  ${row.value.padEnd(valueWidth)}  ${detail}`;
