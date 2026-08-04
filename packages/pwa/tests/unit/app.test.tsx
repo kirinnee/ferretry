@@ -407,6 +407,37 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('lands a hand-off link on the install step, which is what makes the recursion real', async () => {
+    // THE CENTRAL CLAIM OF THE DEVICE-AWARE FLOW, wired end to end. A phone that
+    // cannot host a daemon sends this link to a computer; that computer walks the
+    // SAME subflow answering "this one", which is why installation is taught in
+    // exactly one place. The place travels in the fragment, and the root has to
+    // read it before the store hydrates — a slot pointed at the wrong option here
+    // would silently drop the reader back on the entry question with no sign that
+    // anything was carried.
+    const { view } = await renderShell('/setup#fy-setup=v2;route=first-time;target=this;doer=self;step=install');
+
+    expect(stepOfSetup(view.container)).toBe('install');
+    expect(view.container.textContent).toContain('fy --version');
+    // Neither question is asked again: the link answered both, and this machine
+    // can hold the answer it proposed.
+    expect(view.container.querySelector('button[data-onboarding-target]')).toBeNull();
+    expect(view.container.querySelector('button[data-onboarding-doer]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('refuses a hand-off payload rather than repairing one, through the root that reads it', async () => {
+    // A step that is not a step is not a hand-off with a typo in it; it is
+    // something else, and guessing which journey its author meant would land a
+    // reader somewhere nobody chose. The entry question is always a correct answer.
+    // Asserted here, at the root, because this is the one place the fragment is
+    // read at all — the refusal that matters is the one the reader experiences.
+    const { view } = await renderShell('/setup#fy-setup=v2;route=first-time;target=this;doer=self;step=nowhere');
+
+    expect(stepOfSetup(view.container)).toBe('entry');
+    await view.unmount();
+  });
+
   it('keeps /setup reachable, and reload-durable, for a browser that is already paired', async () => {
     const { view } = await renderShell('/setup', [alpha.daemonId]);
 
