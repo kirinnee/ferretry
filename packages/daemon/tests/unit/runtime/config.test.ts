@@ -122,3 +122,25 @@ describe('daemon configuration', () => {
     ).throw();
   });
 });
+
+describe('the relay carrier block', () => {
+  it('should default to no carrier and refuse an address it could not sign for', () => {
+    // Assert — an absent block is no carrier, never the address everybody else uses.
+    should(defaultDaemonConfig().relay).be.undefined();
+    should(parseDaemonConfig({ relay: { url: 'https://relay.example' } }).relay).deepEqual({
+      url: 'https://relay.example',
+      enabled: true,
+      reconnectSeconds: 5,
+    });
+    should(
+      parseDaemonConfig({ relay: { url: 'wss://relay.example/', enabled: false, reconnectSeconds: 45 } }).relay,
+    ).deepEqual({ url: 'wss://relay.example', enabled: false, reconnectSeconds: 45 });
+    // A loopback rendezvous is the one insecure address allowed, because that is the line the
+    // published site's content-security-policy already draws.
+    should(parseDaemonConfig({ relay: { url: 'http://127.0.0.1:8787' } }).relay?.url).equal('http://127.0.0.1:8787');
+    should(() => parseDaemonConfig({ relay: { url: 'http://relay.example' } })).throw();
+    should(() => parseDaemonConfig({ relay: { url: 'https://relay.example?tenant=a' } })).throw();
+    should(() => parseDaemonConfig({ relay: { url: 'https://relay.example', reconnectSeconds: 0 } })).throw();
+    should(() => parseDaemonConfig({ relay: { url: 'https://relay.example', unknown: true } })).throw();
+  });
+});

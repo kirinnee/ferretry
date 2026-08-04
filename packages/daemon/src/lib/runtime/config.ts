@@ -1,3 +1,4 @@
+import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
@@ -122,6 +123,40 @@ export const UsageFeedConfigSchema = z
 
 export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
 
+/**
+ * The rendezvous this daemon dials out to, so a browser can reach it without an inbound route.
+ *
+ * THE DAEMON DIALS. Nothing ever connects inward to a daemon on `127.0.0.1`, which is the whole
+ * reason a relay makes one reachable at all: the socket is opened from behind the NAT, and the
+ * rendezvous only ever answers on a connection the daemon already made.
+ *
+ * THERE IS NO DEFAULT ADDRESS, and the block itself is optional. An absent block means this daemon
+ * has no relay carrier — never "use the one everybody uses". The relay protocol keeps no compiled
+ * carrier constant on either end (§1 of `docs/relay-protocol.md`), and inventing one here would put
+ * the daemon half of that contract in a release rather than in configuration.
+ *
+ * `url` IS PART OF THE SIGNATURE. The claim transcript covers the host the daemon believes it is
+ * talking to, so this string has to be the one the rendezvous serves itself as; a daemon refuses to
+ * sign a host it did not configure. Both ends being pointed at the same spelling is the requirement
+ * `describeConnectionMethod` already discloses to the person configuring it.
+ */
+export const DaemonRelayConfigSchema = z
+  .object({
+    /** The rendezvous origin, as `SocketEndpointSchema` spells one: secure everywhere, insecure
+     *  only against loopback, and no query or fragment. */
+    url: SocketEndpointSchema,
+    /** Whether to dial at all. A configured address the operator has switched off stays readable
+     *  rather than having to be deleted and retyped. */
+    enabled: z.boolean().default(true),
+    /** How long to wait before dialling again after a socket ends. A rendezvous holds the incumbent
+     *  daemon's slot until its dead socket is swept — at most 45 seconds — so a redial that is faster
+     *  than the sweep is refused with `4409` rather than being granted early. */
+    reconnectSeconds: z.number().int().positive().max(3_600).default(5),
+  })
+  .strict();
+
+export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
+
 export const DaemonConfigSchema = z
   .object({
     host: HostSchema.default('127.0.0.1'),
@@ -133,6 +168,8 @@ export const DaemonConfigSchema = z
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),
     usage: UsageFeedConfigSchema.prefault({}),
+    /** The rendezvous carrier, if this host has one. Absent means direct-only. */
+    relay: DaemonRelayConfigSchema.optional(),
     /**
      * Prices the operator has personally supplied for this daemon's usage.
      * These are API-equivalent rates, not a statement of subscription spend.

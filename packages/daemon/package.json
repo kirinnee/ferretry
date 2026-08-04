@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ferretry/protocol": "workspace:*",
+    "@ferretry/relay": "workspace:*",
     "zod": "4.4.3"
   }
 }
