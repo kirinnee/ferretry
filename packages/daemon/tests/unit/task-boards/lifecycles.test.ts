@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import { compareProtocolVersions } from '@ferretry/protocol';
+import should from 'should';
 import { TaskBoardAuthorizationService } from '../../../src/lib/task-boards/authorization-service.ts';
 import { TaskBoardChildGrantService } from '../../../src/lib/task-boards/child-grant-service.ts';
 import { TaskBoardCreationService } from '../../../src/lib/task-boards/creation-service.ts';
@@ -9,9 +9,9 @@ import { TaskBoardInvitationService } from '../../../src/lib/task-boards/invitat
 import { TaskBoardMembershipService } from '../../../src/lib/task-boards/membership-service.ts';
 import {
   actionsForTaskBoardRole,
+  hasExplicitInvitationAuthority,
   isExplicitBoardMember,
   isGrantWithinActiveMembershipTree,
-  hasExplicitInvitationAuthority,
 } from '../../../src/lib/task-boards/policy.ts';
 import {
   EMPTY_TASK_BOARD_REPOSITORY_STATE,
@@ -395,7 +395,7 @@ describe('TaskBoardInvitationService', () => {
 });
 
 describe('TaskBoardMembershipService', () => {
-  it('should revoke a relinquishing root and its children only after an accepted external root exists', () => {
+  it('should preserve the old root until the accepted replacement proves it can act', () => {
     // Arrange
     const subject = services();
     const requested = subject.invitations.request(createState(), sessions, {
@@ -428,8 +428,25 @@ describe('TaskBoardMembershipService', () => {
       { grantId: 'external-grant', capability: { value: 'external-secret', hash: hash('external-secret') } },
     );
 
+    // Acceptance writes a grant but does not prove the replacement received its capability. This is
+    // the failure mode a cross-harness handover must survive: the old root remains intact.
+    should(() =>
+      subject.membership.relinquish(accepted.state, sessions, {
+        member: rootCredential,
+        requestId: 'relinquish-before-verify',
+        at,
+      }),
+    ).throw(TaskBoardError);
+    should(accepted.state.boards[0]?.grants.find(grant => grant.id === 'root-grant')?.active).be.true();
+
+    const verified = subject.invitations.verify(accepted.state, sessions, {
+      member: { sessionId: 'external', runtimeGeneration: 1, capabilityHash: hash('external-secret') },
+      requestId: 'relinquish-verify',
+      at,
+    });
+
     // Act
-    const actual = subject.membership.relinquish(accepted.state, sessions, {
+    const actual = subject.membership.relinquish(verified.state, sessions, {
       member: rootCredential,
       requestId: 'relinquish',
       at,
@@ -440,6 +457,14 @@ describe('TaskBoardMembershipService', () => {
     should(actual.state.boards[0]?.grants.find(grant => grant.id === 'root-grant')?.active).be.false();
     should(actual.state.bindings.some(binding => binding.sessionId === 'root')).be.false();
     should(() => subject.authorization.authorize(actual.state, sessions, rootCredential, 'read')).throw(TaskBoardError);
+    should(
+      subject.authorization.authorize(
+        actual.state,
+        sessions,
+        { sessionId: 'external', runtimeGeneration: 1, capabilityHash: hash('external-secret') },
+        'read',
+      ),
+    ).have.property('sessionId', 'external');
   });
 
   it('should require explicit administrator authority to replace a coordinator and fence the old key', () => {

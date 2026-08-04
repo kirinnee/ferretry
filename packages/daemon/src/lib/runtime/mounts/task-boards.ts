@@ -1,13 +1,13 @@
 import {
+  type TaskBoardChildAccess,
   TaskBoardChildGrantApprovalSchema,
   TaskBoardChildGrantRequestSchema,
   TaskBoardCreateRequestSchema,
-  TaskBoardInvitationApprovalSchema,
-  TaskBoardInvitationRequestSchema,
-  type TaskBoardChildAccess,
   type TaskBoardCreateResponse,
   type TaskBoardErrorCode,
   type TaskBoardGrantRequestView,
+  TaskBoardInvitationApprovalSchema,
+  TaskBoardInvitationRequestSchema,
   type TaskBoardInvitationView,
   type TaskBoardMembership,
   type TaskBoardRelinquishResponse,
@@ -15,7 +15,7 @@ import {
 import { secretsMatch } from '../../api/authentication.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
+import { type ApiRequest, type ApiResponse, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 // The board domain is imported MODULE BY MODULE rather than through its barrel, and deliberately.
@@ -615,6 +615,36 @@ async function acceptInvitation(subsystem: MountedTaskBoards, context: RouteCont
   return jsonResponse(outcome.membership satisfies TaskBoardMembership, 201);
 }
 
+/**
+ * The invited top-level agent proves that its accepted capability is usable before its predecessor
+ * can relinquish. This is a real `read` authorization, not a claim made by the coordinator or an
+ * inference from a binding on disk.
+ */
+async function verifyInvitation(subsystem: MountedTaskBoards, context: RouteContext): Promise<ApiResponse> {
+  const capability = presented(
+    context.request,
+    BOARD_CAPABILITY_HEADER,
+    'verifying replacement authority needs the replacement session’s own board capability',
+  );
+  const at = subsystem.now();
+  const membership = await subsystem.repository
+    .transaction(async state => {
+      const sessions = await subsystem.sessions.snapshot();
+      const member = peerCredential(state, sessions, capability, subsystem.issuer);
+      return subsystem.services.invitations.verify(state, sessions, {
+        member,
+        requestId: derivedRequestId(subsystem.issuer, [
+          'invitation.verify',
+          member.sessionId,
+          String(member.runtimeGeneration),
+        ]),
+        at,
+      });
+    })
+    .catch(reraise);
+  return jsonResponse(membership.membership satisfies TaskBoardMembership);
+}
+
 /** A member gives up its own membership, which revokes every grant beneath it. */
 async function relinquish(subsystem: MountedTaskBoards, context: RouteContext): Promise<ApiResponse> {
   const capability = presented(
@@ -708,6 +738,13 @@ export function taskBoardRoutes(world: TaskBoardSubsystem): readonly ApiRoute[] 
       scope: 'admin',
       noStore: true,
       handle: async context => await acceptInvitation(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/task-boards/invitations/verify',
+      scope: 'admin',
+      noStore: true,
+      handle: async context => await verifyInvitation(subsystem, context),
     },
     {
       method: 'POST',

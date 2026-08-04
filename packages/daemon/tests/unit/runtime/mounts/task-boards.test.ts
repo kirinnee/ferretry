@@ -602,11 +602,11 @@ describe('the task board membership mount', () => {
     should(response.status).equal(403);
     should(jsonBody(response)).have.property(
       'error',
-      'only a membership root with an accepted replacement root may relinquish access',
+      'only a membership root with a verified accepted replacement root may relinquish access',
     );
   });
 
-  it('should let a membership root relinquish once another root has accepted', async () => {
+  it('should let a membership root relinquish only after the replacement proves its capability works', async () => {
     // Arrange — the invitation flow is what produces a second membership root.
     const world = await withBoard();
     const invited = TaskBoardInvitationViewSchema.parse(
@@ -635,6 +635,15 @@ describe('the task board membership mount', () => {
       },
     );
     const capability = world.capabilityFor('root') ?? '';
+
+    // A grant on disk is not proof that the replacement harness received it. The old root must stay
+    // live until the replacement itself uses the delivered capability.
+    const beforeVerification = await post(world, '/membership/relinquish', {}, peer(capability));
+    should(beforeVerification.status).equal(403);
+    should(world.capabilityFor('root')).equal(capability);
+    const replacementCapability = world.capabilityFor('outsider') ?? '';
+    const verified = await post(world, '/invitations/verify', {}, peer(replacementCapability));
+    should(verified.status).equal(200);
 
     // Act
     const response = await post(world, '/membership/relinquish', {}, peer(capability));

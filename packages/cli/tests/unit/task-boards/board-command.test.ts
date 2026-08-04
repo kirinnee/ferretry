@@ -8,6 +8,7 @@ import {
   inviteAcceptCommand,
   inviteApproveCommand,
   inviteCommand,
+  inviteVerifyCommand,
   markDoneCommand,
   membershipCommand,
   relinquishCommand,
@@ -15,10 +16,11 @@ import {
 } from '../../../src/lib/task-boards/board-command';
 
 describe('board commands', () => {
-  it('should describe the membership read, the accept and the relinquish with no payload at all', () => {
+  it('should describe membership, acceptance, verification and relinquish with no payload at all', () => {
     // Act + Assert — no board id anywhere: the caller authenticates as itself.
     should(membershipCommand()).eql({ command: 'membership' });
     should(inviteAcceptCommand()).eql({ command: 'invite-accept' });
+    should(inviteVerifyCommand()).eql({ command: 'invite-verify' });
     should(relinquishCommand()).eql({ command: 'relinquish' });
   });
 

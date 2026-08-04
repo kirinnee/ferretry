@@ -112,6 +112,12 @@ export interface TaskBoardInvitation {
   readonly acceptanceCapabilityHash?: string;
   readonly acceptedAt?: string;
   readonly grantId?: string;
+  /**
+   * An authenticated board action made by the invited root after acceptance. Acceptance only proves
+   * that a grant was written; this receipt proves the replacement actually received and can use it.
+   */
+  readonly verifiedAt?: string;
+  readonly verifiedBySessionId?: string;
   readonly refusalReason?: string;
 }
 
@@ -137,6 +143,7 @@ export type TaskBoardAuditEvent =
   | 'invitation.requested'
   | 'invitation.approved'
   | 'invitation.accepted'
+  | 'invitation.verified'
   | 'invitation.refused'
   | 'invitation.expired'
   | 'membership.relinquished'
@@ -158,6 +165,7 @@ export type TaskBoardOperationKind =
   | 'child-grant.approve'
   | 'invitation.approve'
   | 'invitation.accept'
+  | 'invitation.verify'
   | 'membership.relinquish'
   | 'coordinator.replace'
   | 'grant.revoke'

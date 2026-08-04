@@ -8,8 +8,8 @@ import {
   TaskBoardRevokeResponseSchema,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
-import type { ITaskBoardGateway } from '../../lib/task-boards/board-controller';
 import type { TaskBoardCommand } from '../../lib/task-boards/board-command';
+import type { ITaskBoardGateway } from '../../lib/task-boards/board-controller';
 
 export const TASK_BOARD_ROUTE_PREFIX = '/v1/task-boards';
 
@@ -39,6 +39,8 @@ function route(command: TaskBoardCommand): Route {
       return { path: '/invitations/approve', schema: TaskBoardInvitationViewSchema, body: command.body };
     case 'invite-accept':
       return { path: '/invitations/accept', schema: TaskBoardMembershipSchema, body: {} };
+    case 'invite-verify':
+      return { path: '/invitations/verify', schema: TaskBoardMembershipSchema, body: {} };
     case 'relinquish':
       return { path: '/membership/relinquish', schema: TaskBoardRelinquishResponseSchema, body: {} };
     case 'mark-done':

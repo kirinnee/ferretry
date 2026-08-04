@@ -8,6 +8,7 @@ import {
   inviteAcceptCommand,
   inviteApproveCommand,
   inviteCommand,
+  inviteVerifyCommand,
   markDoneCommand,
   membershipCommand,
   relinquishCommand,
@@ -87,6 +88,13 @@ export function registerTaskBoardCommands(program: Command, dependencies: TaskBo
     .description('accept an approved invitation; the daemon delivers the proof out of band')
     .action(async () => {
       await controller.run(inviteAcceptCommand());
+    });
+
+  group
+    .command('invite-verify')
+    .description('prove an accepted external invitation can act before its predecessor leaves')
+    .action(async () => {
+      await controller.run(inviteVerifyCommand());
     });
 
   group

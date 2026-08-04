@@ -34,6 +34,7 @@ export type TaskBoardCommand =
   | { readonly command: 'invite'; readonly body: TaskBoardInvitationRequest }
   | { readonly command: 'invite-approve'; readonly body: TaskBoardInvitationApproval }
   | { readonly command: 'invite-accept' }
+  | { readonly command: 'invite-verify' }
   | { readonly command: 'relinquish' }
   | { readonly command: 'mark-done'; readonly body: TaskBoardMarkDoneRequest }
   | { readonly command: 'coordinator-replace'; readonly body: TaskBoardCoordinatorReplacement }
@@ -99,6 +100,11 @@ export function inviteApproveCommand(invitationRequestId: string): TaskBoardComm
 
 export function inviteAcceptCommand(): TaskBoardCommand {
   return { command: 'invite-accept' };
+}
+
+/** Records that an invited replacement can actually use the board capability it accepted. */
+export function inviteVerifyCommand(): TaskBoardCommand {
+  return { command: 'invite-verify' };
 }
 
 export function relinquishCommand(): TaskBoardCommand {
