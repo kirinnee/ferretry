@@ -169,6 +169,7 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import {
   type AccountInventoryPort,
+  type AnalyticsPricingRate,
   type AnalyticsSubsystem,
   type ApiServerHandle,
   type ApiServerPort,
@@ -568,6 +569,8 @@ export interface DaemonWorld {
     stt: SttSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
+    /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
+    pricingCatalog: readonly AnalyticsPricingRate[],
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
     socketTickets: SocketTicketBroker,
@@ -2025,12 +2028,15 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
  * than contributed with holes: an analytics row assembled from a config the schema rejected is a row
  * whose provenance nobody can state.
  *
- * The pricing catalog is EMPTY, and deliberately so. Rates are operator doctrine, the daemon mounts
- * no source for them, and an empty catalog makes every cost `unpriced` with a reason — which is the
+ * The pricing catalog comes from this daemon's validated operator configuration. It is never shared
+ * between daemon state homes, and an empty catalog makes every cost `unpriced` with a reason — the
  * honest answer. A hardcoded table would price historical runs off numbers nobody in this deployment
  * agreed to; a zero would read as free.
  */
-function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
+function createAnalyticsSubsystem(
+  storage: DaemonStorage,
+  pricingCatalog: readonly AnalyticsPricingRate[],
+): AnalyticsSubsystem {
   const finishedRecord = async (id: SessionId): Promise<FinishedAnalyticsSession | undefined> => {
     const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
     const config = SessionConfigSchema.safeParse(rawConfig);
@@ -2070,7 +2076,7 @@ function createAnalyticsSubsystem(storage: DaemonStorage): AnalyticsSubsystem {
       const sessions = await Promise.all(storage.listSessions().map(session => finishedRecord(session.id)));
       return sessions.filter((session): session is FinishedAnalyticsSession => session !== undefined);
     },
-    pricing: () => [],
+    pricing: () => pricingCatalog,
   };
 }
 
@@ -2887,6 +2893,7 @@ export function buildWorld(): DaemonWorld {
       browserLogin,
       stt,
       catalogs,
+      pricingCatalog,
       pairing,
       socketTickets,
     ) => {
@@ -3088,7 +3095,7 @@ export function buildWorld(): DaemonWorld {
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         taskBoards: boards,
-        analytics: createAnalyticsSubsystem(storage),
+        analytics: createAnalyticsSubsystem(storage, pricingCatalog),
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
         names: createNameSubsystem(storage),
@@ -3296,6 +3303,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLogin.window,
     world.stt,
     catalogs,
+    config.analyticsPricing,
     pairing.subsystem,
     world.createSocketTickets(),
   );
