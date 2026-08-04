@@ -47,6 +47,10 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
+      # Cheap, credential-free, and the last chance to catch a config that would deploy a relay
+      # nobody can enable. It reads only files already in the checkout.
+      - name: Validate hosted relay configuration
+        run: nix develop .#ci -c ./scripts/validate/relay-config.sh
       # This mirrors pwa-pages.yaml: Wrangler runs through the pinned nix shell rather than through
       # a third-party action, and reads both Cloudflare credentials from the environment.
       - name: Publish hosted relay

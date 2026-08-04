@@ -92,6 +92,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # The hosted relay is the one subsystem whose configuration meets its code only in production:
+    # no test reads a wrangler config or a workflow's shell. Includes the adapter sources because
+    # the gate cross-checks the routes and Durable Object classes they declare against the two.
+    a-relay-config = {
+      enable = true;
+      name = "Hosted relay configuration";
+      entry = validator "scripts/validate/relay-config.sh";
+      files = "^(packages/relay/wrangler\\.(hosted\\.json|jsonc)|packages/relay/src/adapters/(worker|hosted-control)\\.ts|\\.github/workflows/relay-hosted\\.yaml|scripts/validate/relay-config\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-legacy-state = {
       enable = true;
       name = "No legacy package state";

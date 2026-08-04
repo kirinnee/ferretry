@@ -9,6 +9,10 @@ cd "${root_dir}"
 
 ./scripts/ci/setup.sh
 ./scripts/validate/pages-config.sh
+# The hosted relay's Worker config, deploy workflow and control-plane projections have no test that
+# can fail for them — `bun test` never reads a wrangler config or a workflow's shell. This is the
+# only place CI looks at them.
+./scripts/validate/relay-config.sh
 
 if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
