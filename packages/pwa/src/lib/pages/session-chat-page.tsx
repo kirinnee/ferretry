@@ -22,10 +22,7 @@ import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 
-export type SessionChatClient = Pick<
-  IFyApiClient,
-  'answer' | 'attachTarget' | 'interrupt' | 'resume' | 'send' | 'stop'
->;
+export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'>;
 
 export interface SessionChatPageProps {
   readonly connection: DaemonConnection;
@@ -71,14 +68,12 @@ function PaneLaunchers() {
 }
 
 interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
-  readonly client: SessionChatClient;
   readonly connection: DaemonConnection;
   readonly session: SessionView;
   readonly readSnapshot?: PaneSnapshotReader;
 }
 
 function WorkspaceSurface({
-  client,
   connection,
   session,
   readSnapshot,
@@ -95,18 +90,10 @@ function WorkspaceSurface({
   } else if (tab.id === 'terminals' || tab.instance?.kind === 'terminal') {
     body = (
       <SessionTerminalSurface
-        client={client}
         connection={connection}
         scope={scope}
         {...(readSnapshot === undefined ? {} : { readSnapshot })}
       />
-    );
-  } else if (tab.id === 'browser' || tab.instance?.kind === 'browser') {
-    body = (
-      <p className="m-3 text-ui text-muted" role="status">
-        Browser automation is not available in this build. The paired daemon deliberately returns 501 because no browser
-        worker program is installed.
-      </p>
     );
   } else if (tab.render !== undefined) {
     body = tab.render({
@@ -263,7 +250,6 @@ export function SessionChatPage({
       renderSurface={props => (
         <WorkspaceSurface
           {...props}
-          client={client}
           connection={connection}
           session={session}
           {...(readSnapshot === undefined ? {} : { readSnapshot })}

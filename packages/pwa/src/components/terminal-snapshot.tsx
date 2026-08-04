@@ -17,7 +17,7 @@
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import {
   describeSnapshotError,
   formatSnapshotAge,
@@ -34,7 +34,10 @@ export type PaneSnapshotReader = (daemon: DaemonConnection, scope: DaemonSession
 export interface TerminalSnapshotViewProps {
   daemon: DaemonConnection;
   scope: DaemonSessionScope;
-  tmuxSession: string;
+  /** Optional host-runtime identity. Remote readers deliberately cannot call
+   * the loopback-only attach route, so absence is rendered as absence rather
+   * than replacing it with the public session id. */
+  tmuxSession?: string;
   /** Overridable so a test can drive the clock instead of waiting on it. */
   now?: () => number;
   readSnapshot?: PaneSnapshotReader;
@@ -145,9 +148,13 @@ export const TerminalSnapshotView = ({
           <Terminal size={13} className="text-muted" aria-hidden="true" />
           <span className="font-semibold text-fg">Terminal</span>
         </span>
-        <span className="mono min-w-0 max-w-[18rem] truncate text-muted" title={tmuxSession}>
-          tmux: {tmuxSession}
-        </span>
+        {tmuxSession === undefined ? (
+          <span className="mono min-w-0 max-w-[18rem] truncate text-muted">managed session pane</span>
+        ) : (
+          <span className="mono min-w-0 max-w-[18rem] truncate text-muted" title={tmuxSession}>
+            tmux: {tmuxSession}
+          </span>
+        )}
         <span className="mono ml-auto inline-flex shrink-0 items-center gap-1.5 text-[11px]" role="status">
           {stale ? (
             <span className="text-warn" title={errorMessage ?? 'stale'}>

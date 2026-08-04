@@ -3296,25 +3296,14 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
  *
  * Nothing here touches the network: the screenshot driver aborts every
  * off-origin request anyway, so a client that tried would paint error states
- * over the layout under review. `attachTarget` returns a real
- * `SessionAttachTarget` so the terminal pane resolves its tmux identity and
- * renders the cached snapshot instead of its "could not verify" branch.
+ * over the layout under review. The terminal snapshot reader below supplies
+ * paired-device evidence without calling the loopback-only attach route.
  *
  * Typed against `SessionChatClient` rather than cast into it, deliberately. A
- * stub that casts stops being evidence the moment the contract moves — and this
- * one is bound to a contract that IS moving: if `attachTarget` leaves the Pick,
- * deleting it here is the one-line follow-up, and the typecheck gate is what
- * says so out loud.
+ * stub that casts stops being evidence the moment the contract moves.
  */
 const WORKSPACE_CLIENT: SessionChatClient = {
   answer: async () => WORKSPACE_SESSION,
-  attachTarget: async () => ({
-    socketPath: '/run/user/1000/ferretry/tmux.sock',
-    tmuxSession: 'ms9u6kfu-16918932',
-    paneId: '%1',
-    pid: 4_242,
-    processStartTicks: 987_654,
-  }),
   interrupt: async () => WORKSPACE_SESSION,
   resume: async () => WORKSPACE_SESSION,
   send: async () => ({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never,
