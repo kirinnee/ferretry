@@ -89,6 +89,8 @@ export interface OnboardingPageProps {
   readonly onOpenFleet: () => void;
   /** Whether there is a paired daemon for the final action to open. */
   readonly fleetReady: boolean;
+  /** The carrier selected by the paired connection, never a preference control. */
+  readonly connectionStatus?: string | null;
 }
 
 /**
@@ -116,6 +118,7 @@ export function OnboardingPage({
   renderPairing,
   onOpenFleet,
   fleetReady,
+  connectionStatus = null,
 }: OnboardingPageProps) {
   const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
   /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
@@ -212,6 +215,7 @@ export function OnboardingPage({
           renderPairing={renderPairing}
           onOpenFleet={onOpenFleet}
           fleetReady={fleetReady}
+          connectionStatus={connectionStatus}
           onGoTo={step => {
             progress.goTo(step);
           }}
@@ -235,6 +239,7 @@ interface RouteFlowProps {
   readonly renderPairing: (host: OnboardingPairingHost) => ReactNode;
   readonly onOpenFleet: () => void;
   readonly fleetReady: boolean;
+  readonly connectionStatus: string | null;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   /** Back out of the route entirely, to the question. */
@@ -256,6 +261,7 @@ function RouteFlow({
   renderPairing,
   onOpenFleet,
   fleetReady,
+  connectionStatus,
   onGoTo,
   onChooseConnection,
   onLeaveRoute,
@@ -300,6 +306,7 @@ function RouteFlow({
           channel={channel}
           pairing={pairing}
           fleetReady={fleetReady}
+          connectionStatus={connectionStatus}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
           onChooseConnection={onChooseConnection}
@@ -360,6 +367,7 @@ interface StageProps {
   readonly channel: InstallChannelId;
   readonly pairing: ReactNode;
   readonly fleetReady: boolean;
+  readonly connectionStatus: string | null;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
@@ -372,7 +380,17 @@ interface StageProps {
  * always its own preceding step, except for "I have a link", where somebody
  * else already ran it on the computer that produced the code.
  */
-function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo, onChooseConnection }: StageProps) {
+function Stage({
+  at,
+  write,
+  channel,
+  pairing,
+  fleetReady,
+  connectionStatus,
+  onOpenFleet,
+  onGoTo,
+  onChooseConnection,
+}: StageProps) {
   switch (at.current) {
     case 'install':
       return <InstallStage write={write} channel={channel} />;
@@ -395,7 +413,14 @@ function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo, o
     case 'scan':
       return <ScanStage pairing={pairing} />;
     case 'done':
-      return <DoneStage fleetReady={fleetReady} onOpenFleet={onOpenFleet} onBackToPairing={() => onGoTo('scan')} />;
+      return (
+        <DoneStage
+          fleetReady={fleetReady}
+          connectionStatus={connectionStatus}
+          onOpenFleet={onOpenFleet}
+          onBackToPairing={() => onGoTo('scan')}
+        />
+      );
   }
 }
 

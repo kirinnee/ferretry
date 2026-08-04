@@ -282,17 +282,23 @@ export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
 
 export interface DoneStageProps {
   readonly fleetReady: boolean;
+  readonly connectionStatus: string | null;
   readonly onOpenFleet: () => void;
   readonly onBackToPairing: () => void;
 }
 
-export function DoneStage({ fleetReady, onOpenFleet, onBackToPairing }: DoneStageProps) {
+export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToPairing }: DoneStageProps) {
   return (
     <div className={STAGE}>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
         <li>This browser remembers the pairing.</li>
         <li>Pair another machine later — each keeps its own data.</li>
       </ul>
+      {connectionStatus === null ? null : (
+        <p className="m-0 text-2xs leading-base text-faint" role="status">
+          Connection in use: {connectionStatus}
+        </p>
+      )}
       {/*
         DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired
         in this browser is not a fleet to open; it is a step that has to be done

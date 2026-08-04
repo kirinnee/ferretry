@@ -158,10 +158,17 @@ describe('the done stage', () => {
   it('offers the fleet when there is one', async () => {
     const opened: string[] = [];
     const view = await mount(
-      <DoneStage fleetReady onOpenFleet={() => opened.push('fleet')} onBackToPairing={() => opened.push('pair')} />,
+      <DoneStage
+        fleetReady
+        connectionStatus="Direct"
+        onOpenFleet={() => opened.push('fleet')}
+        onBackToPairing={() => opened.push('pair')}
+      />,
     );
 
-    expect(view.container.querySelector('[role="status"]')).toBeNull();
+    expect(must(view.container.querySelector('[role="status"]'), 'the carrier indicator').textContent).toContain(
+      'Connection in use: Direct',
+    );
     await click(must(view.container.querySelector('[data-onboarding-open-fleet]'), 'the final action'));
     expect(opened).toEqual(['fleet']);
     await view.unmount();
@@ -172,6 +179,7 @@ describe('the done stage', () => {
     const view = await mount(
       <DoneStage
         fleetReady={false}
+        connectionStatus={null}
         onOpenFleet={() => opened.push('fleet')}
         onBackToPairing={() => opened.push('pair')}
       />,

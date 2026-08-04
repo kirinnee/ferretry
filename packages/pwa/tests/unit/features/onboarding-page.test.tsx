@@ -65,6 +65,7 @@ const pageWith = async (options: PageOptions = {}) => {
       write={async () => {}}
       channel="apt"
       fleetReady={options.fleetReady ?? false}
+      connectionStatus={null}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
       renderPairing={({ onPaired }) => (
         <>
