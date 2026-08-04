@@ -14,6 +14,15 @@ ship the capability in this increment; it is not an empty-state claim. The publi
 PWA must continue to obtain every daemon URL and credential through runtime
 pairing, and any resulting store/cache/subscription must remain daemon scoped.
 
+**This table has no row for first-run setup, and that is a fact about the source
+rather than a gap in the survey.** `${KTEAM_SRC}/ui/src/pages` is Sessions,
+NewSession, Chat, Settings, Warden, Learning and Analytics: there is no
+onboarding, first-run or pairing surface to port, because that UI is served by the
+local daemon to the same machine and has nothing to pair. Everything under
+`packages/pwa/src/features/onboarding/` is therefore Ferretry-native, required by
+the pairing split rather than carried across — so a unit looking for the source
+symbol behind a setup screen should stop looking rather than keep searching.
+
 | Source path                                      |   LOC | Disposition   | Ferretry path / evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------ | ----: | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/App.tsx`                                    |   465 | PARTLY-PORTED | `src/App.tsx` now mounts the router/store providers, pairing, daemon-qualified page host, app bar, palette, viewport/orientation lifecycle, notifications and update recovery. `tests/unit/app.test.tsx` proves first-run and cross-daemon routing. The full retained session workspace/sidebar remains absent; the mounted session route is an explicit scoped fallback.                                                                                                                                                                                         |
