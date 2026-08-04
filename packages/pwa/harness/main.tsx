@@ -19,6 +19,7 @@ import type {
   TaskLive,
   TaskStatus,
   TaskSummary,
+  TerminalListView,
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
@@ -47,6 +48,7 @@ import { SessionDashboard } from '../src/components/session-dashboard.tsx';
 import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
+import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
 import { SessionTaskKanban } from '../src/components/session-tasks.tsx';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
@@ -748,6 +750,38 @@ const HARNESS_PANE_SNAPSHOT: PaneSnapshotReader = async () =>
     '✅ Coverage artifact matches the complete unit production ledger',
     '$ ',
   ].join('\n');
+
+/** Two terminals the harness owns outright, so the addressing card renders its
+ *  rows — reference, viewer count, ownership — with no daemon in reach. */
+const HARNESS_TERMINAL_LISTING: TerminalListView = {
+  sessionId: 'harness-session',
+  terminals: [
+    {
+      id: 'a1b2c3d4e5f6',
+      sessionId: 'harness-session',
+      title: 'build',
+      state: 'running',
+      cols: 100,
+      rows: 30,
+      viewers: 1,
+      createdAt: '2026-08-04T09:00:00.000Z',
+      lastActivityAt: '2026-08-04T09:41:00.000Z',
+    },
+    {
+      id: '0f0e0d0c0b0a',
+      sessionId: 'harness-session',
+      title: 'watch tests',
+      state: 'running',
+      cols: 100,
+      rows: 30,
+      viewers: 0,
+      createdAt: '2026-08-04T09:05:00.000Z',
+      lastActivityAt: '2026-08-04T09:39:00.000Z',
+      idleDeadline: '2026-08-04T10:39:00.000Z',
+    },
+  ],
+  limits: { perSession: 6, global: 24, runningGlobal: 2, idleTimeoutSeconds: 3600, scrollbackLines: 5_000 },
+};
 
 const dashboardSession = (
   id: string,
@@ -2737,6 +2771,24 @@ function Shell() {
               readSnapshot={HARNESS_PANE_SNAPSHOT}
             />
           </div>
+        </Card>
+      ),
+    },
+    {
+      label: 'Addressable terminals',
+      render: () => (
+        <Card aria-label="Addressable terminals" className="min-w-0" id="harness-surface-references">
+          <PanelBody className="flex flex-col gap-sm">
+            {/* The listing is the harness's own: this card is about how a
+                reference, its viewer count and its ownership READ, so it must
+                never depend on a daemon being reachable. */}
+            <SessionSurfaceReferences
+              connection={daemon}
+              listTerminals={async () => HARNESS_TERMINAL_LISTING}
+              scope={scope}
+              write={async () => undefined}
+            />
+          </PanelBody>
         </Card>
       ),
     },
