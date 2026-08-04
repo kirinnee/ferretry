@@ -72,9 +72,9 @@ tasks:
       # The rehearsal for relay:deploy. `--dry-run` compiles and resolves bindings and migrations
       # against your wrangler.jsonc and needs no Cloudflare credentials: it publishes nothing and
       # changes nothing in your account, so a broken config is found here rather than halfway
-      # through a real deploy. (`bunx` may still fetch Wrangler from the npm registry if it is not
-      # already cached — the "no network" part of a dry run is Cloudflare, not the package manager.)
-      - bunx wrangler deploy --dry-run
+      # through a real deploy. Wrangler comes from the flake-locked Nix shell, so the rehearsal and
+      # production workflow execute the same integrity-pinned tool rather than npm's latest release.
+      - wrangler deploy --dry-run
 
   relay:deploy:
     desc: 'Expert: deploy the rendezvous relay to your own Cloudflare account'
@@ -86,9 +86,8 @@ tasks:
       # token, verification, teardown and what it costs. Fill in RELAY_DAEMON_IDS in wrangler.jsonc
       # first: an empty list serves nobody. Run relay:check first.
       #
-      # Wrangler is fetched on demand rather than vendored, because nobody who never deploys a relay
-      # should pay for its toolchain.
-      - bunx wrangler deploy
+      # Wrangler comes from the flake-locked Nix shell rather than an ambient global installation.
+      - wrangler deploy
 
   deadcode:
     desc: Review strict and LLM-assisted dead-code findings

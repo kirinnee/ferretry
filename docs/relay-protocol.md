@@ -25,11 +25,12 @@ There are two carriers and one security model across both.
 | **Direct** | The browser opens a WebSocket straight at the daemon.                         | Attempted first, automatically, whenever the daemon is reachable. |
 | **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read. | The automatic fallback when direct is not. Ferretry operates one. |
 
-**Neither is a question the product asks.** The required behaviour is: try direct first because it
-has fewer hops and fewer observers; fall back to the hosted relay when direct does not work; and
-always say which carrier is live and why the other was passed over. No carrier chooser, nothing to
-opt into, and no silent degradation — a surface that shows a connection without naming its carrier is
-not conforming.
+**Neither is a question a conforming product asks.** The required behaviour is: try direct first
+because it has fewer hops and fewer observers; fall back to the hosted relay when direct does not
+work; and always say which carrier is live and why the other was passed over. No carrier chooser,
+nothing to opt into, and no silent degradation — a surface that shows a connection without naming
+its carrier is not conforming. The current PWA still contains an interim three-way chooser and
+self-hosting setup route; §13 lists their removal as unbuilt work rather than pretending otherwise.
 
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
 `packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
@@ -56,8 +57,9 @@ operating contract.
 Anyone who would rather run the carrier themselves still can — the Worker in this repository deploys
 to any Cloudflare account, and this document is the contract, so it can also be reimplemented from
 scratch. That is an **expert opt-in path with its own runbook**
-([`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md)), deliberately kept out of
-onboarding and ordinary setup rather than offered as a third thing to decide about.
+([`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md)). The required product keeps
+it out of onboarding and ordinary setup rather than offering a third thing to decide about; the
+current interim chooser has not caught up with that contract yet.
 
 ---
 
@@ -448,10 +450,11 @@ That is the main reason to prefer it.
 
 ## 11. Running your own relay
 
-This is an **expert opt-in path**. Nothing in onboarding or ordinary setup asks anyone to do it,
-because the hosted relay in §13 is what carries anyone who does not want to operate their own. It exists
-because someone should always be able to own their own carrier — not because the product needs them
-to. The step-by-step procedure, including plan requirements, the narrowest API token that works,
+This is an **expert opt-in path**. The required onboarding and ordinary setup do not ask anyone to do
+it, because the hosted relay in §13 carries anyone who does not want to operate their own; the
+current interim chooser is the explicit exception listed in §13. It exists because someone should
+always be able to own their own carrier — not because the product needs them to. The step-by-step
+procedure, including plan requirements, the narrowest API token that works,
 verification, teardown and what it costs, is
 [`cloudflare-relay-self-hosting.md`](cloudflare-relay-self-hosting.md). This section stays
 architectural: what a relay of your own _is_, and what you take on by running one.
@@ -577,6 +580,15 @@ that opaque frame. It excludes rejected frames, HTTP headers and control frames 
 relay. The meter receives a daemon fingerprint and a number of bytes — never a payload, decoded
 handshake, device credential, command or result.
 
+Reservation identifiers make both admission and release idempotent, and each operation retries once
+when its answer is missing or unusable. There is deliberately no clock-only reservation reaper: the
+control object cannot prove that an old reservation no longer belongs to a hibernating live socket,
+so expiring one would make the cap undercount real traffic. That leaves a narrow distributed-systems
+residual. If the stateless Worker terminates after admission commits but before the rendezvous owns
+the socket, or if both reserve replies and both compensating release attempts fail to arrive, one
+slot can remain stranded. It relays no bytes but reduces available connection capacity. This design
+discloses that residual rather than claiming exact recovery or inventing an unsafe expiry rule.
+
 Initial limits are deliberately configuration, not protocol constants:
 
 | Ceiling                   | Per daemon | Global |
@@ -641,6 +653,12 @@ implementation is worth — a reservation that leaked instead of being released 
 squeeze into a permanent lockout, which is why release-on-every-close and recovery of stale rows are
 treated as correctness, not tidiness.
 
+The normal socket lifecycle does release every close, error, refusal and sweep even when a peer
+effect throws, and a partial kill-switch sweep attempts every socket before reporting failure. The
+commit-to-handoff residual described above remains the exception: it can strand capacity without a
+live attacker socket, which is why this section does not promise that every possible distributed
+failure is transient.
+
 What cannot be done about it is the point: **the relay cannot tell abuse from use.** Distinguishing
 them means reading what is being carried, and it structurally cannot. Enrolment, quotas per identity
 and abuse review are the service apparatus this design refuses. So the trade is stated rather than
@@ -695,11 +713,15 @@ Four named pieces. PR #202 provides the first two; the prerequisite is the other
    `event-transport.ts`, which both derive every request and socket from that one direct `baseUrl`.
 4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for whichever carrier a live session won on.
+5. **Removal of the interim carrier chooser and self-hosting setup route.** The current PWA still
+   renders `onboarding-connection-chooser.tsx`, offers `own-relay`, and routes it through
+   `SELF_HOSTED_RELAY_STEPS`. The conforming flow uses the automatic order above and leaves
+   self-hosting to the expert runbook.
 
 PR #202 also surfaces the live advertisement state in onboarding. That work is **discovery-only**
 and says so on its own screen, which is the honest description: a browser can read the address and
 the kill switch, and can do nothing with either. Combine it with this branch and the remaining gap
-is the transport, pieces 3 and 4.
+is the transport and onboarding cleanup, pieces 3 through 5.
 
 Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and

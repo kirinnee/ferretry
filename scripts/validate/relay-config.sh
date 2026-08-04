@@ -21,6 +21,7 @@ cd "${root_dir}"
 hosted_config="packages/relay/wrangler.hosted.json"
 byo_config="packages/relay/wrangler.jsonc"
 workflow=".github/workflows/relay-hosted.yaml"
+ci_workflow=".github/workflows/ci.yaml"
 worker="packages/relay/src/adapters/worker.ts"
 control="packages/relay/src/adapters/hosted-control.ts"
 
@@ -88,6 +89,21 @@ rg -q '"RELAY_DAEMON_IDS"' "${byo_config}" ||
 
 rg -qF -- '--config wrangler.hosted.json' "${workflow}" ||
   fail "${workflow} must deploy and set secrets against ${hosted_config}"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.jsonc' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the self-hosted relay configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the hosted relay configuration"
+# A clean Actions checkout has no node_modules. Both the credential-free rehearsal and the real
+# deployment must install from inside the relay package before Wrangler bundles workspace imports;
+# otherwise @ferretry/protocol and zod disappear only in CI/production while a prepared developer
+# checkout keeps passing. Keep this package-local, matching the repository's other build scripts.
+for worker_workflow in "${workflow}" "${ci_workflow}"; do
+  rg -U -q 'cd packages/relay[[:space:]]*\n[[:space:]]*bun install --frozen-lockfile' "${worker_workflow}" ||
+    fail "${worker_workflow} must install locked relay workspace dependencies before Wrangler runs"
+done
+if rg -qF -- 'bunx wrangler' "${workflow}"; then
+  fail "${workflow} must use the flake-locked Wrangler, not resolve npm latest with bunx"
+fi
 
 # The derived operator bearer is a digest of a registered secret, not the secret, so GitHub masks
 # nothing about it on its own. Both jobs must register it before use.

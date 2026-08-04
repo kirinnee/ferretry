@@ -61,8 +61,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          nix develop .#ci -c bash -c \
-            'cd packages/relay && bunx wrangler deploy --config wrangler.hosted.json'
+          nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/relay
+            bun install --frozen-lockfile
+            wrangler deploy --config wrangler.hosted.json
+          '
 
           # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
           # Cloudflare token is never installed in the Worker; only this domain-separated digest is
@@ -77,7 +81,7 @@ jobs:
           # that anybody can read.
           echo "::add-mask::$operator_token"
           printf '%s' "$operator_token" | nix develop .#ci -c bash -c \
-            'cd packages/relay && bunx wrangler secret put RELAY_OPERATOR_TOKEN --config wrangler.hosted.json'
+            'cd packages/relay && wrangler secret put RELAY_OPERATOR_TOKEN --config wrangler.hosted.json'
 
           if [[ -z "$HOSTED_RELAY_ORIGIN" ]]; then
             worker_subdomain="$(

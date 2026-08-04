@@ -769,6 +769,22 @@ describe('hosted relay control clients', () => {
     should(names.every(name => name === 'ferretry-relay-control/v1')).be.true();
   });
 
+  it('should retry one ambiguous release answer with the same reservation', async () => {
+    let attempts = 0;
+    const namespace: HostedRelayControlNamespace = {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async () => {
+          attempts += 1;
+          return attempts === 1 ? new Response(null, { status: 503 }) : Response.json({ ok: true });
+        },
+      }),
+    };
+
+    should(await releaseHostedRelayReservation(namespace, 'reservation_0001')).be.true();
+    should(attempts).equal(2);
+  });
+
   it('should treat transport, status and body ambiguity as unavailable', async () => {
     const namespace = (response: () => Promise<Response>): HostedRelayControlNamespace => ({
       idFromName: name => name,

@@ -67,16 +67,16 @@ Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cl
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
-There are two carriers and no carrier chooser: direct is attempted first, and Ferretry's hosted relay
-is the automatic fallback. No **carrier** address is compiled in: the client build carries only the
+The carrier contract has no chooser: direct is attempted first, and Ferretry's hosted relay is the
+automatic fallback. No **carrier** address is compiled in: the client build carries only the
 **discovery origin** it reads the advertisement from — a service address, never a user's — while the
 relay endpoint and the daemon URL are runtime values. The hosted default therefore comes from a
 no-store runtime advertisement whose operator can change or disable it without a release.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
-[docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md); it is not an
-onboarding option, and its fingerprint allowlist remains independent of the hosted deployment. The
-PWA discovery of the advertisement is separate in-flight work; the **transport** that would carry a
-session over it is not built on either end — protocol §13 names the gap.
+[docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
+allowlist remains independent of the hosted deployment. The current PWA still has an interim
+three-way carrier chooser and self-hosting route; removing those is an explicit GAP, as is the
+**transport** that would carry a relay session on either end. Protocol §13 names both.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
