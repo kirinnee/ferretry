@@ -537,6 +537,89 @@ try {
           await page.screenshot({ path: migrateTarget });
           process.stdout.write(`📸 ${viewport.name} migrate sheet -> ${migrateTarget}\n`);
 
+          // THE ASSEMBLED SESSION WORKSPACE, on a page of its own.
+          //
+          // It is `h-full` with a single scroller of its own, so an element shot
+          // inside the stacked gallery would be clipped by the gallery's
+          // scroller and would prove nothing about where the composer sits. The
+          // alternate root mounts the production shell and the production
+          // viewport producer, and derives pane-vs-sheet from the layout regime
+          // exactly as `src/App.tsx` does — so this loop's two viewports are the
+          // two presentations, with nothing to switch by hand.
+          //
+          // Captured at rest FIRST: the pane starts closed in production, so the
+          // full-width chat column is the state a reader actually opens on, and
+          // it is the only frame that shows the transcript and the composer with
+          // nothing over them.
+          const workspaceTarget = join(outDir, `${viewport.name}-session-workspace.png`);
+          await page.goto(`${server.url}#session-workspace`);
+          await page.reload();
+          await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+          // The transcript follows its tail on mount; wait for the LAST row
+          // rather than for load, or the shot catches a scroller mid-pin.
+          await page.locator('[data-transcript-kind]').last().waitFor({ state: 'visible' });
+          await page.screenshot({ path: workspaceTarget });
+          process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
+
+          // Geometry, printed rather than eyeballed. A screenshot cannot tell a
+          // pinned tail apart from a transcript that happens to be short, and it
+          // cannot show that the page itself never scrolls — which is the one
+          // invariant the whole shell exists to hold (`html, body { overflow:
+          // hidden }` plus one scroller per page).
+          const workspaceGeometry = await page.evaluate(() => {
+            const root = document.documentElement;
+            const scrollers = [...document.querySelectorAll<HTMLElement>('*')].filter(element => {
+              const style = getComputedStyle(element);
+              const scrolls = /auto|scroll/u.test(`${style.overflowY}${style.overflowX}`);
+              return scrolls && element.scrollHeight - element.clientHeight > 1;
+            });
+            const composer = document.querySelector<HTMLElement>('[data-session-input] form');
+            const transcript = document.querySelector<HTMLElement>('.fy-transcript');
+            const box = composer?.getBoundingClientRect();
+            return {
+              appHeight: root.style.getPropertyValue('--app-h'),
+              pageScrollsX: root.scrollWidth > root.clientWidth,
+              pageScrollsY: root.scrollHeight > root.clientHeight,
+              scrollers: scrollers.map(element => element.className.split(/\s+/u)[0] || element.tagName),
+              transcriptPinned:
+                transcript === null
+                  ? null
+                  : transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 2,
+              composerBottom: box === undefined ? null : Math.round(box.bottom),
+              composerVisible: box === undefined ? null : Math.round(box.bottom) <= window.innerHeight,
+              pane: document.querySelector('aside') !== null,
+            };
+          });
+          process.stdout.write(
+            `   workspace geometry: --app-h=${workspaceGeometry.appHeight || '(unset)'} ` +
+              `page scroll x/y=${workspaceGeometry.pageScrollsX}/${workspaceGeometry.pageScrollsY} ` +
+              `scrollers=[${workspaceGeometry.scrollers.join(', ')}] ` +
+              `transcript pinned=${String(workspaceGeometry.transcriptPinned)} ` +
+              `composer bottom=${String(workspaceGeometry.composerBottom)}px ` +
+              `visible=${String(workspaceGeometry.composerVisible)} pane mounted=${workspaceGeometry.pane}\n`,
+          );
+          if (workspaceGeometry.pageScrollsX) {
+            fail('the session workspace made the page scroll horizontally');
+          }
+          if (workspaceGeometry.composerVisible === false) {
+            fail(`the composer sits below the viewport at ${viewport.name}`);
+          }
+
+          // THEN the companion pane, opened through the page's own launcher —
+          // the same `pane.open('terminals', …)` a reader clicks. Driving the
+          // real control is what makes this a capture of the desktop/sheet split
+          // rather than of a prop someone set. The terminal surface is chosen
+          // because it resolves entirely from the harness client and snapshot
+          // reader: the files tree would paint a network error over the layout.
+          const workspacePaneTarget = join(outDir, `${viewport.name}-session-workspace-pane.png`);
+          await page.getByRole('button', { name: 'Terminal', exact: true }).click();
+          await page.getByText('Session pane snapshot').waitFor({ state: 'visible' });
+          await page.screenshot({ path: workspacePaneTarget });
+          process.stdout.write(
+            `📸 ${viewport.name} session workspace, ${viewport.name === 'mobile' ? 'sheet' : 'pane'} open -> ` +
+              `${workspacePaneTarget}\n`,
+          );
+
           // The install stage on a page of its own, so the capture starts at
           // the real top of the screen rather than wherever the gallery's
           // scroller happened to clip it.
