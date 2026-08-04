@@ -122,14 +122,26 @@ export function identifyAddressOccupant(outcome: AddressProbeOutcome): AddressOc
 }
 
 /**
- * Where a boot states something a human must read.
+ * The daemon's account of its own startup.
  *
- * A PORT, because the refusals below are the one thing this daemon says outside its own API, and the
- * decision about what to say must be provable without a running daemon writing to a real file. The
- * composition root sends it to the standard error stream, which every service definition appends to
- * the daemon's log — so a refusal now reaches exactly the file the launcher tells the operator to read.
+ * A PORT, because what a boot says is the only thing this daemon communicates outside its own API,
+ * and it must be provable without a running daemon writing to a real file. The composition root
+ * sends it to the standard error stream, which every service definition appends to the daemon's log
+ * — so what a boot says reaches exactly the file the launcher tells the operator to inspect.
+ *
+ * IT EXISTS BECAUSE THE LOG WAS EMPTY. Not sparse — empty. A daemon that failed wrote nothing, and a
+ * daemon that spent ninety seconds initializing successfully also wrote nothing, so the two were the
+ * same zero bytes and the launcher's "inspect the log" was advice that could not be followed. Every
+ * operator instruction this product gives ends at that file, which makes silence there a defect in
+ * its own right rather than a missing nicety.
+ *
+ * TWO VERBS, because a stall and a refusal are read differently. `step` is the trail: a boot that
+ * hangs is diagnosed by which milestone is the last one present. `state` is what a human must act on.
  */
 export interface BootNoticePort {
+  /** A milestone this boot has just passed, named so a stall says which step it stalled on. */
+  step(name: string, detail?: string): void;
+  /** Something a human must read and probably act on. */
   state(message: string): void;
 }
 

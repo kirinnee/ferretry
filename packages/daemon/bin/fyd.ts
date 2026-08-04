@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { createHash } from 'node:crypto';
+import { writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -344,6 +345,7 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
+import { daemonVersion } from '../src/lib/version.ts';
 import { startSttWorker } from './stt-worker.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
@@ -2611,6 +2613,41 @@ function createRecommendSubsystem(
 }
 
 /**
+ * The daemon's startup account, on the standard error stream.
+ *
+ * `writeSync` ON THE DESCRIPTOR, not the stream object, and that is the point rather than a detail.
+ * A launcher hands the daemon a file for both its streams, and the operator is then told to inspect
+ * that file when something goes wrong — so anything that could leave a written line sitting in a
+ * userspace buffer at the moment the daemon wedges or exits would reproduce the very symptom being
+ * fixed. A descriptor write is handed to the kernel before it returns; there is nothing left to
+ * flush. (Measured on this runtime, a stream write to a redirected descriptor reaches the file
+ * immediately too — this simply removes the question rather than depending on the answer.)
+ *
+ * EVERY LINE CARRIES ELAPSED MILLISECONDS, because the failure that prompted this was a ninety-second
+ * initialization that produced no output at all. A trail whose last entry is a step name and a
+ * timestamp turns "it hung" into "it hung opening the state home", which is the whole difference
+ * between a report someone can act on and a report that ends at an empty file.
+ *
+ * A FAILED WRITE IS SWALLOWED. Losing the log is bad; refusing to boot because the log could not be
+ * written is worse, and a daemon that died writing about its own startup would be the least
+ * debuggable outcome of all.
+ */
+function bootJournal(): BootNoticePort {
+  const startedAtMs = Date.now();
+  const line = (text: string): void => {
+    try {
+      writeSync(2, `${DAEMON_NAME} ${new Date().toISOString()} +${String(Date.now() - startedAtMs)}ms ${text}\n`);
+    } catch {
+      // Intentionally ignored: a stream this daemon cannot write to must not stop it starting.
+    }
+  };
+  return {
+    step: (name, detail) => line(detail === undefined ? name : `${name} — ${detail}`),
+    state: message => line(`! ${message}`),
+  };
+}
+
+/**
  * The hosted PWA and this daemon's own origins may all drive browser requests.
  *
  * BOTH addresses, because they are two different ways a browser reaches this daemon and either may
@@ -2965,9 +3002,7 @@ export function buildWorld(): DaemonWorld {
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
     },
     config: new FileDaemonConfig(paths, stateFiles),
-    // The standard error stream, which is what every service definition appends to the daemon's log
-    // file — so a boot refusal lands in exactly the file the launcher tells the operator to inspect.
-    notices: { state: message => void process.stderr.write(`${DAEMON_NAME}: ${message}\n`) },
+    notices: bootJournal(),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
         source: file => {
@@ -3516,7 +3551,11 @@ export function buildWorld(): DaemonWorld {
  * one block at the end, so a failure part-way through unwinds exactly what succeeded.
  */
 export async function start(world: DaemonWorld, cleanups: Array<() => void | Promise<void>> = []): Promise<number> {
-  if (world.role !== 'daemon') return 1;
+  if (world.role !== 'daemon') {
+    world.notices.state(`this build is packaged as ${world.role} rather than a daemon and cannot serve`);
+    return 1;
+  }
+  world.notices.step('starting', `${DAEMON_NAME} ${daemonVersion}, pid ${String(process.pid)}`);
 
   // Registered for release immediately: an exception from anything below must not leave the lock
   // behind, because a stale lock fails the NEXT start for a reason unrelated to what broke.
@@ -3532,9 +3571,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     throw error;
   }
   cleanups.push(() => opened.storage.close());
+  world.notices.step('state home opened', opened.paths.home);
 
   const config = await world.config.load();
+  world.notices.step('configuration loaded', world.config.path);
   await world.secrets.load(config.secretsFile);
+  if (config.secretsFile !== undefined) world.notices.step('secrets loaded', config.secretsFile);
   // Stated rather than refused: advertising an address other than the bound one is a real deployment
   // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
@@ -3555,10 +3597,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(refusal.message);
     return refusal.exitCode;
   }
+  world.notices.step('address is free', config.bindUrl);
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock);
+  world.notices.step('pairing identity opened');
   const base = {
     credentials: { ...(await world.credentials.load()), devices: pairing.credentials },
     usage,
@@ -3588,6 +3632,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    */
   const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
   cleanups.push(() => analyticsStore.store.close());
+  world.notices.step('analytics index opened', analyticsStore.rebuildRequired ? 'a rebuild is required' : undefined);
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -3624,7 +3669,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // directories. A failure is swallowed for the same reason the ticks below swallow theirs — a
   // self-check that could not run is reported by the next one's freshness, and refusing to serve
   // because the daemon could not measure itself is strictly worse than serving and saying so.
+  world.notices.step('subsystems mounted');
   await health.selfCheck().catch(() => undefined);
+  world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
@@ -3650,6 +3697,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // stream is over while the socket it writes to still exists.
   cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
+  world.notices.step('listening', config.bindUrl);
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period
@@ -3753,16 +3801,27 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     .arm()
     .then(disarm => cleanups.push(disarm))
     .catch(() => undefined);
+  // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
+  // here and stops is a daemon that is serving, which is a completely different report from one that
+  // stops at "state home opened" — and before any of this existed the two were the same empty file.
+  world.notices.step('ready', `serving ${config.bindUrl}`);
   await world.untilShutdown();
+  world.notices.step('stopping', 'releasing everything this boot acquired');
   return 0;
 }
 
 async function execute(): Promise<number> {
   const cleanups: Array<() => void | Promise<void>> = [];
+  // ONE journal for the whole invocation, built before the world so a world that throws while it is
+  // being assembled is still reported. `buildWorld` resolves the state home and opens a filesystem;
+  // when that failed, the only thing this daemon had ever written was nothing at all.
+  const notices = bootJournal();
   try {
-    return await start(buildWorld(), cleanups);
+    return await start({ ...buildWorld(), notices }, cleanups);
   } catch (error) {
-    process.stderr.write(`${DAEMON_NAME}: ${error instanceof Error ? error.message : String(error)}\n`);
+    // The stack too, not just the message: this is the branch a crash during startup lands in, and a
+    // one-line message with no frames is the difference between a bug report and a shrug.
+    notices.state(error instanceof Error ? (error.stack ?? error.message) : String(error));
     return 1;
   } finally {
     // Each cleanup runs in its own try/catch so a failing one never masks the exit code.
