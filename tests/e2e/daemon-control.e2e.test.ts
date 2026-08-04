@@ -209,21 +209,29 @@ describe('daemon control journeys', () => {
     });
   });
 
-  it('should refuse a daemon executable it cannot find instead of writing a broken unit', async () => {
+  it('should require a live executable only when a snapshot build actually needs one', async () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = startStubDaemon(false);
 
       try {
         // Act — no `FY_DAEMON_BIN`, and the temp PATH has no `fyd`.
-        const actual = await environment.runFy(['daemon', 'status'], {
+        const variables = {
           FY_URL: stub.baseUrl,
           FY_TOKEN: 'e2e-token',
-        });
+        };
+        const status = await environment.runFy(['daemon', 'status'], variables);
+        const snapshots = await environment.runFy(['daemon', 'snapshot', 'list', '--json'], variables);
+        const build = await environment.runFy(['daemon', 'snapshot', 'build'], variables);
 
-        // Assert — systemd would have loaded a unit and failed 203/EXEC; this says why up front.
-        should(actual.code).equal(1);
-        should(actual.err).containEql('cannot find fyd on PATH');
+        // Assert — read-only control and rollback paths survive removal of the live installation.
+        should(status.code).equal(1);
+        should(status.out).containEql('fyd is stopped');
+        should(status.err).not.containEql('cannot find fyd on PATH');
+        should(snapshots.code).equal(0);
+        should(JSON.parse(snapshots.out)).deepEqual({ daemon: 'fyd', snapshots: [] });
+        should(build.code).equal(1);
+        should(build.err).containEql('cannot find fyd on PATH');
       } finally {
         await stub.stop();
       }

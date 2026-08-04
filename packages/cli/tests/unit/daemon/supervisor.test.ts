@@ -12,6 +12,7 @@ import { type CommandScript, daemonSnapshot, FakeFiles, FakeProcesses, layout } 
 const linux = layout();
 const mac = layout({ platform: 'darwin', userId: 501 });
 const artifact = daemonSnapshot();
+const promotedPointer = `${linux.snapshotRoot}/current`;
 
 function systemd(script: CommandScript = []): {
   supervisor: SystemdSupervisor;
@@ -43,7 +44,7 @@ describe('systemd supervisor install', () => {
 
     // Assert
     should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${artifact.binaryPath}"`);
-    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${linux.daemonBinary}"`);
+    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${promotedPointer}"`);
     should(processes.ran).deepEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable fyd.service',
@@ -370,7 +371,7 @@ describe('direct supervisor', () => {
     should(files.directories).deepEqual([linux.logDirectory]);
     should(processes.launched).have.length(1);
     should(processes.launched[0]?.argv).deepEqual([artifact.binaryPath]);
-    should(processes.launched[0]?.argv).not.deepEqual([linux.daemonBinary]);
+    should(processes.launched[0]?.argv).not.deepEqual([promotedPointer]);
     should(processes.launched[0]?.environment).deepEqual({ FY_HOME: linux.stateHome, PATH: linux.searchPath });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);

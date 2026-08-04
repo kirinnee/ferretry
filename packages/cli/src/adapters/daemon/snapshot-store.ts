@@ -65,7 +65,8 @@ export class DaemonSnapshotStoreError extends Error {
 export interface FileDaemonSnapshotStoreOptions {
   readonly root: string;
   readonly daemon: DaemonSnapshotIdentity;
-  readonly sourceBinary: string;
+  /** Resolved only by `build`; inspection, promotion and rollback never require the live install. */
+  readonly sourceBinary: string | (() => string);
   readonly now?: (() => Date) | undefined;
   readonly uniqueId?: (() => string) | undefined;
   /** Observation seam used by deterministic race tests; production leaves it absent. */
@@ -397,12 +398,31 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
   }
 
   async #source(): Promise<string> {
+    let configured: string;
     try {
-      return await realpath(this.options.sourceBinary);
+      configured =
+        typeof this.options.sourceBinary === 'function' ? this.options.sourceBinary() : this.options.sourceBinary;
     } catch (error) {
       throw new DaemonSnapshotStoreError(
         'invalid_source',
-        `cannot resolve daemon snapshot source ${this.options.sourceBinary}: ${errorMessage(error)}`,
+        `cannot resolve daemon snapshot source: ${errorMessage(error)}`,
+      );
+    }
+    if (configured.trim().length === 0) {
+      throw new DaemonSnapshotStoreError('invalid_source', 'daemon snapshot source must not be empty');
+    }
+    if (!isAbsolute(configured)) {
+      throw new DaemonSnapshotStoreError(
+        'invalid_source',
+        `daemon snapshot source must be an absolute path: ${configured}`,
+      );
+    }
+    try {
+      return await realpath(configured);
+    } catch (error) {
+      throw new DaemonSnapshotStoreError(
+        'invalid_source',
+        `cannot resolve daemon snapshot source ${configured}: ${errorMessage(error)}`,
       );
     }
   }

@@ -312,9 +312,10 @@ function resolveDaemonBinary(environment: Record<string, string | undefined>, da
 /**
  * Builds the daemon-control controller.
  *
- * Constructed lazily, per invocation: resolving the layout can fail (no `fyd` on `PATH`, a nonsensical
+ * Constructed lazily, per invocation: resolving the layout can fail (for example, on a nonsensical
  * `FY_HOME`) and that must surface as an error from `fy daemon …`, never as a CLI that cannot even
- * print `--help`.
+ * print `--help`. The live daemon executable is resolved later still, only if a snapshot build needs
+ * it; retained snapshots remain operable after the source installation disappears.
  */
 function buildDaemonController(environment: Record<string, string | undefined>, out: ICliIo): DaemonController {
   const daemonName = `${BINARY_NAME}d`;
@@ -325,7 +326,6 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
     userId: typeof process.getuid === 'function' ? process.getuid() : 0,
-    daemonBinary: resolveDaemonBinary(environment, daemonName),
     daemonName,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',
@@ -348,7 +348,7 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     snapshots: new FileDaemonSnapshotStore({
       root: layout.snapshotRoot,
       daemon: { product: layout.product, name: layout.daemonName },
-      sourceBinary: layout.sourceDaemonBinary,
+      sourceBinary: () => resolveDaemonBinary(environment, daemonName),
     }),
     clock: new SystemMillisecondClock(),
     out,

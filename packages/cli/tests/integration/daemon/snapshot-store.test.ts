@@ -161,6 +161,28 @@ describe('file daemon snapshot store', () => {
     should(actual.map(snapshot => snapshot.id)).deepEqual([second.id, first.id]);
   });
 
+  it('should resolve live source only for builds, never inspection or rollback', async () => {
+    // Arrange
+    const available = store();
+    const built = await available.build();
+    await available.promote(built.id);
+    let resolutions = 0;
+    const unavailable = store({
+      sourceBinary: () => {
+        resolutions += 1;
+        throw new Error('live fyd disappeared');
+      },
+    });
+
+    // Act + Assert
+    should((await unavailable.current())?.id).equal(built.id);
+    should((await unavailable.list()).map(snapshot => snapshot.id)).deepEqual([built.id]);
+    should((await unavailable.promote(built.id)).id).equal(built.id);
+    should(resolutions).equal(0);
+    await should(unavailable.build()).be.rejectedWith(/live fyd disappeared/u);
+    should(resolutions).equal(1);
+  });
+
   it('should keep daemon namespaces disjoint even when their executable bytes match', async () => {
     // Arrange
     const first = store();
@@ -348,6 +370,9 @@ describe('file daemon snapshot store', () => {
     await writeFile(source, '#!/bin/sh\n', { mode: 0o644 });
     await chmod(source, 0o644);
     await should(store().build()).be.rejectedWith(/snapshot source is not executable/u);
+
+    await should(store({ sourceBinary: 'relative/fyd' }).build()).be.rejectedWith(/must be an absolute path/u);
+    await should(store({ sourceBinary: '  ' }).build()).be.rejectedWith(/must not be empty/u);
   });
 
   it('should discard a build when its source changes during the copy', async () => {

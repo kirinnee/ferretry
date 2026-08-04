@@ -80,16 +80,14 @@ describe('daemon layout', () => {
     should(actual.launchAgentFile).equal(`${HOME}/Library/LaunchAgents/com.ferretry.fyd.plist`);
   });
 
-  it('should separate the source executable from the promoted runtime pointer', () => {
+  it('should derive the daemon-keyed snapshot store without resolving a live executable', () => {
     // Act
-    const actual = layout({ daemonBinary: '/opt/other/fyd', searchPath: '/only/here' });
+    const actual = layout({ searchPath: '/only/here' });
 
     // Assert
     should(actual.daemonName).equal('fyd');
     should(actual.product).equal('ferretry');
-    should(actual.sourceDaemonBinary).equal('/opt/other/fyd');
     should(actual.snapshotRoot).equal(`${HOME}/.local/state/ferretry/daemon-snapshots/fyd`);
-    should(actual.daemonBinary).equal(`${actual.snapshotRoot}/current`);
     should(actual.searchPath).equal('/only/here');
   });
 
@@ -123,7 +121,7 @@ describe('daemon layout', () => {
     // Assert
     should(first.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/one');
     should(second.snapshotRoot).equal('/tmp/state/alpha/daemon-snapshots/two');
-    should(first.daemonBinary).not.equal(second.daemonBinary);
+    should(first.snapshotRoot).not.equal(second.snapshotRoot);
   });
 
   it('should treat a blank XDG_STATE_HOME as unset', () => {
@@ -190,13 +188,6 @@ describe('daemon layout refusals', () => {
   it('should refuse a product name that would retarget the launchd label', () => {
     // Act + Assert
     should(() => resolveDaemonLayout(environment({ product: 'a/b' }))).throw(/product name must be a plain name/u);
-  });
-
-  it('should refuse a relative daemon binary, because systemd needs an absolute ExecStart', () => {
-    // Act + Assert
-    should(() => resolveDaemonLayout(environment({ daemonBinary: 'fyd' }))).throw(
-      /daemon binary must be an absolute path/u,
-    );
   });
 
   it('should refuse a user id that is not a whole non-negative number', () => {

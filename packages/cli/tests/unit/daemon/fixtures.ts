@@ -28,7 +28,6 @@ export function environment(overrides: Partial<DaemonEnvironmentInput> = {}): Da
     platform: 'linux',
     homeDirectory: HOME,
     userId: 1000,
-    daemonBinary: '/opt/fy/bin/fyd',
     daemonName: 'fyd',
     product: 'ferretry',
     searchPath: '/usr/bin:/bin',

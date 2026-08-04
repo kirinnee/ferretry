@@ -26,8 +26,6 @@ export interface DaemonEnvironmentInput {
   readonly stateDirectory?: string | undefined;
   /** The invoking user's numeric id, which names the launchd domain. */
   readonly userId: number;
-  /** The complete daemon executable this CLI imports into the snapshot store. */
-  readonly daemonBinary: string;
   /** Base name of that executable: it names the systemd unit and the launchd label. */
   readonly daemonName: string;
   /** The product name, which prefixes the reverse-DNS launchd label. */
@@ -47,10 +45,6 @@ export interface DaemonLayout {
   readonly stateHome: string;
   readonly logDirectory: string;
   readonly logFile: string;
-  /** The installed executable from which an operator deliberately builds snapshots. */
-  readonly sourceDaemonBinary: string;
-  /** Stable atomic selection pointer; supervisors execute the captured snapshot path, never this. */
-  readonly daemonBinary: string;
   /** Daemon-keyed root of the CLI-owned immutable snapshot store. */
   readonly snapshotRoot: string;
   readonly searchPath: string;
@@ -155,7 +149,6 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
       : requireDirectory(input.stateDirectory, 'XDG_STATE_HOME');
   const daemonName = requireName(input.daemonName, 'daemon name');
   const product = requireName(input.product, 'product name');
-  const daemonBinary = requireDirectory(input.daemonBinary, 'daemon binary');
   const userId = requireUserId(input.userId, 'user id');
 
   const logDirectory = join(stateHome, 'logs');
@@ -170,8 +163,6 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     stateHome,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
-    sourceDaemonBinary: daemonBinary,
-    daemonBinary: join(snapshotRoot, 'current'),
     snapshotRoot,
     searchPath: input.searchPath,
     systemdUnitName: `${daemonName}.service`,

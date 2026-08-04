@@ -68,7 +68,6 @@ function layoutFor(root: string): ReturnType<typeof resolveDaemonLayout> {
     configHome: join(root, 'config-home'),
     stateDirectory: join(root, 'cli-state'),
     userId: 1000,
-    daemonBinary: NOTHING,
     daemonName: 'fyd',
     product: 'ferretry',
     searchPath: '/usr/bin:/bin',
@@ -81,7 +80,7 @@ async function startThroughTheCli(root: string): Promise<string> {
   const snapshots = new FileDaemonSnapshotStore({
     root: layout.snapshotRoot,
     daemon: { product: layout.product, name: layout.daemonName },
-    sourceBinary: layout.sourceDaemonBinary,
+    sourceBinary: NOTHING,
   });
   const built = await snapshots.build();
   await snapshots.promote(built.id);
