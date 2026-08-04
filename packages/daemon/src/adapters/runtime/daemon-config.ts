@@ -1,5 +1,6 @@
 import {
   type DaemonConfig,
+  DaemonConfigDocumentSchema,
   defaultDaemonConfigDocument,
   parseDaemonConfig,
   type FileSystemPort,
@@ -36,5 +37,24 @@ export class FileDaemonConfig {
       return parseDaemonConfig(document);
     }
     return parseDaemonConfig(JSON.parse(text));
+  }
+
+  /**
+   * Writes down the address this daemon took, so it is the same one next time.
+   *
+   * RECORDING IS WHAT MAKES CHOOSING SAFE. A daemon that picked a free port on every boot would move
+   * whenever the machine's port usage changed, and every client that had learned where it lived
+   * would be wrong for reasons nobody could see. Written once, the port stops being a choice and
+   * becomes a claim: the next boot binds exactly this or refuses.
+   *
+   * THE DOCUMENT IS RE-READ rather than rewritten from the parsed configuration, because the parsed
+   * form carries derived addresses and persisting one of those is the defect this whole file was
+   * corrected for. Re-reading also means an operator's own fields survive untouched — this writes
+   * exactly one key.
+   */
+  async record(port: number): Promise<void> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, port }, null, 2)}\n`);
   }
 }

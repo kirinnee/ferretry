@@ -2,7 +2,7 @@
 import { homedir } from 'node:os';
 import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
 import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
-import { type AnalyticsResponse, FY_DEFAULT_DAEMON_URL, type IFyApiClient, type SessionView } from '@ferretry/protocol';
+import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -12,6 +12,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
+import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
@@ -41,6 +42,7 @@ import { registerAttentionCommands } from '../src/lib/attention/commands';
 import { AttentionController } from '../src/lib/attention/controller';
 import { ProtocolAttentionGateway } from '../src/lib/attention/gateway';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
+import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
@@ -136,12 +138,34 @@ export function buildWorld(): CliWorld {
   };
 }
 
-/** Where `fyd` listens when the environment does not say otherwise, single-sourced with the daemon. */
-const DEFAULT_DAEMON_URL = FY_DEFAULT_DAEMON_URL;
+/**
+ * Where this invocation should look for the daemon.
+ *
+ * READ EACH TIME rather than resolved once per invocation, because the answer can change while a
+ * single command is running: `daemon start` spawns a daemon that decides its own port and records it,
+ * and the poll that follows must see the record it wrote. The document read is one small local file.
+ */
+async function daemonBaseUrl(environment: Record<string, string | undefined>, stateHome: string): Promise<string> {
+  const explicitUrl = environment.FY_URL?.trim() ?? '';
+  // An operator who pinned an address has said where to look; nothing local may override that, and
+  // this installation may not even have a state home to consult.
+  if (explicitUrl !== '') return explicitUrl;
+  return resolveDaemonUrl('', await readDaemonConfigDocument(`${stateHome}/config/daemon.json`));
+}
 
 /**
- * How the CLI finds the daemon. An explicit `FY_TOKEN` is retained for remote/CI connections; on a
- * local installation its absent value falls back to the owner-only credential file that `fyd` mints.
+ * How the CLI finds the daemon, and which credential it may use to talk to it.
+ *
+ * WHERE: an explicit `FY_URL` first, then the address the local daemon recorded for itself, then the
+ * well-known default. The middle step is what stops this client reporting a healthy daemon
+ * unreachable — a daemon whose preferred port was taken binds another and writes the choice down,
+ * and a client that assumed the default would never look at it.
+ *
+ * WHICH CREDENTIAL: decided from the URL, never from whether one was given. Testing "is `FY_URL`
+ * set" classified a daemon on this very machine as remote and demanded `FY_TOKEN` for it, while the
+ * owner-only token file that is exactly the right credential sat unread. A loopback daemon uses the
+ * minted file; a genuinely remote one still must carry its own token, because a local admin
+ * credential must never leave this machine.
  */
 export async function daemonConnection(
   environment: Record<string, string | undefined>,
@@ -151,18 +175,16 @@ export async function daemonConnection(
   token: string;
   version: string;
 }> {
-  const explicit = environment.FY_TOKEN?.trim() ?? '';
-  const url = environment.FY_URL?.trim() ?? '';
-  if (explicit === '' && url !== '') {
+  const explicitToken = environment.FY_TOKEN?.trim() ?? '';
+  const stateHome = resolveDaemonStateHome(homeDirectory, environment.FY_HOME);
+  const baseUrl = await daemonBaseUrl(environment, stateHome);
+  if (explicitToken === '' && !isLocalDaemonUrl(baseUrl)) {
     throw new Error(
-      'FY_TOKEN is required when FY_URL targets a remote daemon; local daemon credentials are never sent remotely',
+      `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely`,
     );
   }
-  const token =
-    explicit === ''
-      ? await readDaemonToken(`${resolveDaemonStateHome(homeDirectory, environment.FY_HOME)}/api-token`)
-      : explicit;
-  return { baseUrl: url === '' ? DEFAULT_DAEMON_URL : url, token, version: assertSemver(pkg.version) };
+  const token = explicitToken === '' ? await readDaemonToken(`${stateHome}/api-token`) : explicitToken;
+  return { baseUrl, token, version: assertSemver(pkg.version) };
 }
 
 /**
@@ -236,17 +258,33 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
  */
 const UNAUTHENTICATED_PROBE_TOKEN = 'unauthenticated';
 
-/** A client for the public health route, which works with or without `FY_TOKEN`. */
-function lazyHealthClient(environment: Record<string, string | undefined>): HealthApiClient {
-  let connected: Promise<FyApiClient> | undefined;
+/**
+ * A client for the public health route, which works with or without `FY_TOKEN`.
+ *
+ * THE ADDRESS IS RE-RESOLVED ON EVERY PROBE, and that is not a micro-optimisation in reverse — it is
+ * required for a first start to work at all. `daemon start` probes, spawns the daemon, then polls
+ * until it answers; the daemon decides its port DURING that window and writes the choice down. A
+ * client that resolved once, before the spawn, would poll the address the daemon did not take and
+ * report "did not become ready" against a daemon that came up perfectly. The connection is rebuilt
+ * only when the answer actually changes, and building one costs nothing but an object.
+ */
+function lazyHealthClient(environment: Record<string, string | undefined>, stateHome: string): HealthApiClient {
+  let connected: { readonly url: string; readonly client: Promise<FyApiClient> } | undefined;
   const token = environment.FY_TOKEN?.trim() ?? '';
-  const url = environment.FY_URL?.trim() ?? '';
-  const options = {
-    baseUrl: url === '' ? DEFAULT_DAEMON_URL : url,
-    token: token === '' ? UNAUTHENTICATED_PROBE_TOKEN : token,
-    version: assertSemver(pkg.version),
+  const client = async (): Promise<FyApiClient> => {
+    const url = await daemonBaseUrl(environment, stateHome);
+    if (connected === undefined || connected.url !== url) {
+      connected = {
+        url,
+        client: FyApiClient.connect({
+          baseUrl: url,
+          token: token === '' ? UNAUTHENTICATED_PROBE_TOKEN : token,
+          version: assertSemver(pkg.version),
+        }),
+      };
+    }
+    return await connected.client;
   };
-  const client = (): Promise<FyApiClient> => (connected ??= FyApiClient.connect(options));
   return {
     request: async <T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T> => {
       const ready = await client();
@@ -301,7 +339,7 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     layout,
     service,
     direct: new DirectSupervisor(layout, processes, files),
-    health: new ProtocolDaemonHealth(lazyHealthClient(environment)),
+    health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
     clock: new SystemMillisecondClock(),
     out,

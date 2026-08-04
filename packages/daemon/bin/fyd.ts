@@ -192,6 +192,7 @@ import {
   AttentionService,
   advertisesForeignAddress,
   authorizeSessionCommand,
+  type BootRefusal,
   type BootNoticePort,
   type BrowserLoginLifecycle,
   type BrowserViewerHost,
@@ -205,6 +206,7 @@ import {
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
+  configuredAt,
   contextWindowForSession,
   createFoundationPaths,
   createMountedDispatcher,
@@ -258,12 +260,15 @@ import {
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
+  portCandidates,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RecommendError,
   type RecommendSubsystem,
+  refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
+  refuseUnbindableAddress,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -2613,6 +2618,60 @@ function createRecommendSubsystem(
 }
 
 /**
+ * Which address this boot will serve, or the refusal that stops it.
+ *
+ * TWO PATHS, and which one applies is decided by whether the configuration document RECORDS a port.
+ *
+ *   * A RECORDED PORT IS A CLAIM. An operator typed it, or an earlier boot wrote down what it took,
+ *     and either way something out there has been told this daemon lives at that address. So it is
+ *     bound or the boot refuses — never silently moved. The occupant is identified first so the
+ *     refusal can say whether it is another of these daemons (nothing to do) or a stranger (a human
+ *     must act), because those are different remedies.
+ *   * NO RECORDED PORT IS A PREFERENCE. This is a state home that has never started a daemon, and a
+ *     first run must succeed on a machine that happens to have something on the preferred port. It
+ *     walks a short consecutive sequence, takes the first free address, and the caller records it —
+ *     after which every later boot is in the first case.
+ *
+ * FAIL CLOSED on the claimed path: `identify` treats anything it cannot positively recognise as this
+ * product — including a probe that could not complete — as an occupant, so an inconclusive answer
+ * refuses rather than booting a second daemon over a live one.
+ */
+async function decideAddress(
+  world: DaemonWorld,
+  loaded: DaemonConfig,
+): Promise<{ readonly config: DaemonConfig } | BootRefusal> {
+  if (loaded.portIsRecorded) {
+    const occupant = await world.boot.probe.identify({ url: loaded.bindUrl });
+    if (occupant.kind !== 'vacant')
+      return refuseOccupiedAddress({
+        daemonName: DAEMON_NAME,
+        clientName: CLIENT_NAME,
+        url: loaded.bindUrl,
+        configFile: world.config.path,
+        occupant,
+      });
+    world.notices.step('address is free', loaded.bindUrl);
+    return { config: configuredAt(loaded, loaded.port) };
+  }
+  const candidates = portCandidates(loaded.port);
+  for (const port of candidates) {
+    const config = configuredAt(loaded, port);
+    const occupant = await world.boot.probe.identify({ url: config.bindUrl });
+    if (occupant.kind === 'vacant') {
+      world.notices.step('address chosen', `${config.bindUrl} (no port was recorded yet)`);
+      return { config };
+    }
+    // Said out loud rather than passed over silently: an operator who expected the preferred port
+    // and finds the daemon one along deserves to read why in the same log they are already reading.
+    world.notices.step(
+      'address in use',
+      `${config.bindUrl} — ${occupant.kind === 'daemon' ? `another ${DAEMON_NAME} is serving it` : occupant.evidence}`,
+    );
+  }
+  return refuseExhaustedCandidates(DAEMON_NAME, candidates, world.config.path);
+}
+
+/**
  * The daemon's startup account, on the standard error stream.
  *
  * `writeSync` ON THE DESCRIPTOR, not the stream object, and that is the point rather than a detail.
@@ -3573,31 +3632,30 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => opened.storage.close());
   world.notices.step('state home opened', opened.paths.home);
 
-  const config = await world.config.load();
+  const loaded = await world.config.load();
   world.notices.step('configuration loaded', world.config.path);
-  await world.secrets.load(config.secretsFile);
-  if (config.secretsFile !== undefined) world.notices.step('secrets loaded', config.secretsFile);
+  await world.secrets.load(loaded.secretsFile);
+  if (loaded.secretsFile !== undefined) world.notices.step('secrets loaded', loaded.secretsFile);
+  // BEFORE the subsystems, because everything below assembles addresses from this document — the
+  // pairing link, the browser origins, the advertised URL. A boot that only learned its real port at
+  // bind time would have handed every one of them the port it did not take.
+  const decided = await decideAddress(world, loaded);
+  if ('exitCode' in decided) {
+    world.notices.state(decided.message);
+    return decided.exitCode;
+  }
+  const config = decided.config;
+  // Recorded only when it CHANGED, so a boot that took its preferred address does not rewrite the
+  // operator's document on every start just to say what it already says.
+  if (config.port !== loaded.port) {
+    await world.config.record(config.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  }
   // Stated rather than refused: advertising an address other than the bound one is a real deployment
   // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
   if (advertisesForeignAddress(config))
     world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
-  // THE BOUND ADDRESS, not the advertised one: a responder only concerns this boot when it holds the
-  // socket the bind wants. And the answer is IDENTIFIED before it is believed — "something answered"
-  // is not "I am already running", and the two need different remedies from the operator.
-  const occupant = await world.boot.probe.identify({ url: config.bindUrl });
-  if (occupant.kind !== 'vacant') {
-    const refusal = refuseOccupiedAddress({
-      daemonName: DAEMON_NAME,
-      clientName: CLIENT_NAME,
-      url: config.bindUrl,
-      configFile: world.config.path,
-      occupant,
-    });
-    world.notices.state(refusal.message);
-    return refusal.exitCode;
-  }
-  world.notices.step('address is free', config.bindUrl);
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
@@ -3680,18 +3738,33 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // ALL THREE parts of the surface are served by the one host, from the one credential set: the
   // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
   // routes that carry dictation audio.
-  const server: ApiServerHandle = await world.boot.binder.bind(
-    async () =>
-      await world.api.listen(
-        {
-          http: createMountedDispatcher(base, subsystems),
-          sockets: createMountedSocketDispatcher(base, subsystems),
-          raw: createMountedRawDispatcher(base, subsystems),
-          corsOrigins: browserOrigins(config),
-        },
-        { host: config.host, port: config.port },
-      ),
-  );
+  let server: ApiServerHandle;
+  try {
+    server = await world.boot.binder.bind(
+      async () =>
+        await world.api.listen(
+          {
+            http: createMountedDispatcher(base, subsystems),
+            sockets: createMountedSocketDispatcher(base, subsystems),
+            raw: createMountedRawDispatcher(base, subsystems),
+            corsOrigins: browserOrigins(config),
+          },
+          { host: config.host, port: config.port },
+        ),
+    );
+  } catch (error) {
+    // A REFUSAL, not a crash. The address was probed and looked free, so arriving here means the
+    // host will not let this daemon listen there — a privileged port, a host name that resolves to
+    // no local interface, or something that took the address in the interval. All three are the
+    // operator's to resolve, and a stack trace about a socket says none of it.
+    const refusal = refuseUnbindableAddress(
+      config.bindUrl,
+      error instanceof Error ? error.message : String(error),
+      world.config.path,
+    );
+    world.notices.state(refusal.message);
+    return refusal.exitCode;
+  }
   // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
   // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
   // stream is over while the socket it writes to still exists.

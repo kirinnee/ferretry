@@ -1,4 +1,4 @@
-import { FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import { daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
@@ -139,7 +139,16 @@ export type UsageFeedConfig = z.output<typeof UsageFeedConfigSchema>;
 export const DaemonConfigDocumentSchema = z
   .object({
     host: HostSchema.default('127.0.0.1'),
-    port: PortSchema.default(FY_DEFAULT_DAEMON_PORT),
+    /**
+     * The address this daemon owns. OPTIONAL, and the absence means something specific.
+     *
+     * A recorded port — whether an operator typed it or a first boot wrote down what it took — is a
+     * claim on that exact address: it is bound or the boot refuses, because a daemon whose address
+     * moves on its own is worse than one that fails, and every client that pinned it would be left
+     * looking at nothing. An ABSENT port is the only case where this daemon may choose, and it
+     * chooses once and records the answer, so the next boot is back in the first case.
+     */
+    port: PortSchema.optional(),
     /** The address this daemon is REACHED at, when that is not the address it binds. Operator-owned
      *  and optional: absent means "the same one", and absent is what a written document carries. */
     publicUrl: z.url().optional(),
@@ -161,22 +170,61 @@ export const DaemonConfigDocumentSchema = z
 export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
 
 /**
- * The document plus the two addresses derived from it.
+ * The document plus everything derived from it: the port to try, the two addresses, and which of
+ * them the document actually recorded.
  *
  * `bindUrl` is what this daemon LISTENS on and is therefore what an incumbent probe must ask: a
  * responder is only this boot's problem when it holds the very socket the bind wants. Probing the
- * advertised URL instead is how a stale advertisement sent the boot to interrogate an unrelated
+ * advertised URL instead is how a stale advertisement sent a boot to interrogate an unrelated
  * program on a port it was not even going to bind.
  *
  * `publicUrl` is what this daemon is REACHED at, which is the same address unless an operator said
  * otherwise, and it is what pairing links and browser origins carry.
+ *
+ * The two `…IsRecorded` flags exist because a value's ORIGIN changes what may be done with it, and
+ * once derivation happens on every read there is otherwise no way to tell a default from a choice.
+ * A recorded port is claimed; an unrecorded one is a preference this boot may move off. A recorded
+ * public URL survives a moved port; an unrecorded one follows it.
  */
 export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
-  const bindUrl = `http://${value.host}:${String(value.port)}`;
-  return { ...value, bindUrl, publicUrl: value.publicUrl ?? bindUrl };
+  const port = value.port ?? FY_DEFAULT_DAEMON_PORT;
+  const bindUrl = daemonAddress(value.host, port);
+  return {
+    ...value,
+    port,
+    portIsRecorded: value.port !== undefined,
+    bindUrl,
+    publicUrl: value.publicUrl ?? bindUrl,
+    publicUrlIsRecorded: value.publicUrl !== undefined,
+  };
 });
 
 export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
+
+/**
+ * The same configuration once a port has actually been decided.
+ *
+ * It exists so the decision happens BEFORE anything reads an address. Pairing links, browser origins
+ * and the advertised URL are all assembled from this document while the subsystems are built, and a
+ * boot that only learned its real port at bind time would have handed every one of them the port it
+ * did not take. So the port is settled first and threaded through as configuration, which is what it
+ * is.
+ *
+ * An operator's own `publicUrl` SURVIVES the move — they were describing a proxy or a tunnel, not
+ * this daemon's socket — while a derived one follows the port, because a derived advertisement that
+ * stayed behind is precisely the defect this file exists to have removed.
+ */
+export function configuredAt(config: DaemonConfig, port: number): DaemonConfig {
+  if (port === config.port) return { ...config, portIsRecorded: true };
+  const bindUrl = daemonAddress(config.host, port);
+  return {
+    ...config,
+    port,
+    portIsRecorded: true,
+    bindUrl,
+    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+  };
+}
 
 /** Parses a complete configuration document and derives its canonical addresses. */
 export function parseDaemonConfig(value: unknown): DaemonConfig {

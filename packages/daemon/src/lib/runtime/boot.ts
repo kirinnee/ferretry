@@ -199,6 +199,65 @@ export function refuseHeldStateHome(daemonName: string, clientName: string, lock
 }
 
 /**
+ * How many addresses a boot with no recorded port will try before giving up.
+ *
+ * BOUNDED, and small. The point is to survive a machine that happens to have something on the
+ * preferred port, not to hunt the whole port space: a host with sixteen consecutive ports occupied is
+ * telling the operator something that scanning further would only hide.
+ */
+export const PORT_CANDIDATE_LIMIT = 16;
+
+/**
+ * The addresses a boot may take when no port has been recorded, in the order it tries them.
+ *
+ * CONSECUTIVE FROM THE PREFERRED ONE, deliberately, rather than asking the kernel for any free port.
+ * An operator has to be able to find this daemon, a colleague has to be able to read a support
+ * thread and guess right, and 7432 is guessable in a way that 51877 is not. The first free one wins
+ * and is then written down, so this sequence is walked once in a state home's life.
+ *
+ * It stops at the top of the port space rather than wrapping: a boot that wrapped would start
+ * offering privileged ports it cannot bind and addresses nobody would look for.
+ */
+export function portCandidates(preferred: number, limit: number = PORT_CANDIDATE_LIMIT): readonly number[] {
+  const candidates: number[] = [];
+  for (let port = preferred; port <= 65_535 && candidates.length < limit; port += 1) candidates.push(port);
+  return candidates;
+}
+
+/**
+ * How a boot answers a host where every address it may choose from is taken.
+ *
+ * A REFUSAL rather than a wider search: sixteen consecutive occupied ports is a fact about the host
+ * that an operator needs told, and quietly landing on the seventeenth would hide it.
+ */
+export function refuseExhaustedCandidates(
+  daemonName: string,
+  tried: readonly number[],
+  configFile: string,
+): BootRefusal {
+  const first = tried[0];
+  const last = tried[tried.length - 1];
+  return {
+    exitCode: EXIT_ADDRESS_CONFLICT,
+    message: `${daemonName} found no free address: every port from ${String(first)} to ${String(last)} is already taken on this host. Free one of them, or name the port this daemon should use by setting "port" in ${configFile}.`,
+  };
+}
+
+/**
+ * How a boot answers a bind that failed for a reason retrying will not fix.
+ *
+ * The address was probed and looked free, so reaching here means either something took it in the
+ * interval or the kernel refused for a reason of its own — a privileged port, a host name that does
+ * not resolve to a local interface. Both are the operator's to resolve and neither is a crash.
+ */
+export function refuseUnbindableAddress(url: string, reason: string, configFile: string): BootRefusal {
+  return {
+    exitCode: EXIT_ADDRESS_CONFLICT,
+    message: `${url} could not be bound: ${reason}. Check that the address is free and that this host can listen on it, or choose another by setting "host" and "port" in ${configFile}.`,
+  };
+}
+
+/**
  * What a boot says when the address it advertises is not the address it binds.
  *
  * A DEPLOYMENT MAY MEAN THIS — a daemon behind a reverse proxy advertises the proxy's name and binds
