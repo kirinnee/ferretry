@@ -80,15 +80,14 @@ endpoint instead.
 The protocol, both relay operating modes, the runtime control plane and operator metrics are
 implemented and tested.
 
-**The transport is not wired yet, and that is the honest limit of this package.** Discovery is done:
-the PWA reads and parses `/v1/default-relay` from its build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a
-browser can already learn the relay's address and whether the operator has switched it off. It can do
-nothing with either — `packages/pwa/src/lib/daemon-transport.ts` still builds every request from one
-direct `baseUrl`, and `ConnectionMethod` has no consumer outside this package.
+**The transport is not wired, and that is the honest limit of this package.**
+[PR #198](https://github.com/kirinnee/ferretry/pull/198) supplies the discovery half — the PWA reads
+and parses `/v1/default-relay` from a build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
+the relay's address and whether the operator has switched it off — and drops the carrier chooser from
+onboarding. It stops there deliberately, and says so on the glass: nothing dials a relay.
 
-That discovery half arrived with [PR #198](https://github.com/kirinnee/ferretry/pull/198), which also
-dropped the carrier chooser from onboarding. It stops there deliberately, and says so on the glass:
-nothing dials a relay yet.
+Nothing here does either. `packages/pwa/src/lib/daemon-transport.ts` builds every request from one
+direct `baseUrl`, and `ConnectionMethod` has no consumer outside this package.
 
 What remains is the transport. `packages/daemon/src` has no relay client and no relay configuration
 at all, and needs one plus its persisted claim key and a `fy` surface to configure it;

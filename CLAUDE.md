@@ -75,8 +75,8 @@ no-store runtime advertisement whose operator can change or disable it without a
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md); it is not an
 onboarding option, and its fingerprint allowlist remains independent of the hosted deployment. The
-PWA already discovers the advertisement; the **transport** that would carry a session over it is not
-built on either end — protocol §13 names the gap.
+PWA discovery of the advertisement is separate in-flight work; the **transport** that would carry a
+session over it is not built on either end — protocol §13 names the gap.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one

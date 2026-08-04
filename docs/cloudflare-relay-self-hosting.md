@@ -29,7 +29,7 @@ because the transport that would dial it is not written.
   `packages/relay`.
 - `fyd` has no dial-out relay client at all.
 
-The browser _can_ already discover Ferretry's hosted relay and read its kill switch, from a
+Separate work does let a browser discover Ferretry's hosted relay and read its kill switch, from a
 build-time origin. That is discovery, not transport, and it does nothing for a relay of your own —
 see [The client gap, exactly](#the-client-gap-exactly).
 
@@ -353,16 +353,18 @@ request metadata.
 
 **There is no shipped interface for this step.** Nothing is missing from your relay; what is missing
 is the transport on the two ends that would dial one. Naming it precisely so you can tell when it
-lands — the first two are done, and neither helps you:
+lands — [PR #198](https://github.com/kirinnee/ferretry/pull/198) provides the first two, and neither
+helps you:
 
-1. ✅ **A build-time discovery-origin constant in the PWA.** The relay lives on its own hostname, so
-   the browser cannot find a relay advertisement at its own origin. A relative `/v1/default-relay`
-   is wrong, and the PWA is served as a static Cloudflare Pages bundle — no Function, no proxy — so
-   the discovery origin is compiled into the build as `FY_RELAY_DIRECTORY_ORIGIN`. That origin
-   identifies a _service_; it is not a daemon URL and identifies no user.
-2. ✅ **A fetch-and-parse step** that reads the advertisement through
+1. **A build-time discovery-origin constant in the PWA** — provided by #198. The relay lives on its
+   own hostname, so the browser cannot find a relay advertisement at its own origin. A relative
+   `/v1/default-relay` is wrong, and the PWA is served as a static Cloudflare Pages bundle — no
+   Function, no proxy — so the discovery origin is compiled into the build as
+   `FY_RELAY_DIRECTORY_ORIGIN`. That origin identifies a _service_; it is not a daemon URL and
+   identifies no user.
+2. **A fetch-and-parse step** — also #198 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier via `hostedRelayConnection`.
-3. ⬜ **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
+3. **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
    - **The daemon.** `packages/daemon/src` has **no relay client and no relay configuration at
      all** — not a partial one, zero references to `packages/relay`. It needs a relay client that
      dials out and holds the socket open, the persisted key material it signs its rendezvous claim
@@ -373,7 +375,7 @@ lands — the first two are done, and neither helps you:
      `daemon-connection.ts` (the carrier on the record), `connections.ts` (persisting it),
      `daemon-transport.ts` and `event-transport.ts` (both build every request and socket from that
      single direct `baseUrl` today).
-4. ⬜ **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
+4. **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for a _live session_, so a session on a relay never looks
    like a direct one.
 
@@ -381,15 +383,14 @@ The decision layer those four would call is already written and tested in
 `packages/relay/src/lib/connection.ts`: `connectionPreferenceOrder` puts direct first,
 `chooseConnection` returns the plain sentence saying which carrier won and what it passed over.
 
-Pieces 1 and 2 arrived with [PR #198](https://github.com/kirinnee/ferretry/pull/198), which also
-removed the carrier chooser from onboarding. It is **discovery-only**, and says on its own screen
-that nothing dials a relay yet, because nothing does.
+#198 also removes the carrier chooser from onboarding. It is **discovery-only**, and says on its own
+screen that nothing dials a relay, because nothing does.
 
-**None of that helps a relay of your own**, and it is worth being blunt about why: what the browser
+**None of that helps a relay of your own**, and it is worth being blunt about why: what a browser
 discovers is the **hosted** deployment's advertisement, and `/v1/default-relay` is a hosted-mode
 route your `wrangler.jsonc` deployment does not serve at all. Pieces **3 and 4** are the ones that
 would let any browser dial any relay, and they are unwritten. Your relay is verified at the Worker,
-by [step 5](#step-5--verify-at-the-worker), and by nothing in a browser yet.
+by [step 5](#step-5--verify-at-the-worker), and by nothing in a browser.
 
 **An expert override — a way to name a relay address for a specific daemon by hand — does not exist,
 and this document will not invent a command for it.** When one lands, the intended shape is unchanged

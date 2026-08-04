@@ -33,11 +33,11 @@ not conforming.
 
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
 `packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
-which-carrier-and-why sentence a surface can show verbatim. The browser can also already discover the
-hosted relay's address and read its kill switch. **What does not exist yet is the transport** —
-neither `fyd` nor the PWA dials or carries a relay session, so read this section as the contract both
-ends are being built against rather than as a description of what a phone does today. "What is not
-built yet" in §13 names the exact gap.
+which-carrier-and-why sentence a surface can show verbatim. Discovery — learning the hosted relay's
+address and reading its kill switch — is provided by [PR #198](https://github.com/kirinnee/ferretry/pull/198).
+**What no branch has is the transport** — nothing dials or carries a relay session, so read this
+section as the contract both ends are being built against rather than as a description of what a
+phone does today. "What is not built yet" in §13 names the exact gap.
 
 Three addresses are involved and they are deliberately not the same thing:
 
@@ -661,29 +661,31 @@ The relay is incapable of decrypting content, including when a cap is hit.
 The relay, the control plane, the caps and the disclosure text are implemented and tested. **The gap
 is the transport, and only the transport.**
 
-Discovery is answered: the PWA reads and parses this advertisement from its own build-time
-`FY_RELAY_DIRECTORY_ORIGIN`, so the browser can already learn the relay address and whether the
-operator has switched it off. What it cannot do is use it. **Neither `fyd` nor the PWA transport
-dials or carries a relay session.** The browser still builds every request from a single direct
-`baseUrl` in `packages/pwa/src/lib/daemon-transport.ts`; `ConnectionMethod` — the carrier type that
-would replace it — has no consumer outside this package; and `packages/daemon/src` has no relay
-client at all. The decision layer is here too (`connectionPreferenceOrder` orders direct first,
-`chooseConnection` returns the which-carrier-and-why sentence); what is missing is the plumbing that
-would carry bytes over the address discovery already hands it.
+Discovery is answered by [PR #198](https://github.com/kirinnee/ferretry/pull/198): the PWA reads and
+parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
+the relay address and whether the operator has switched it off. What that does not do is use it.
+**Nothing dials or carries a relay session — not `fyd`, not the PWA transport, on any branch.** The
+browser builds every request from a single direct `baseUrl` in
+`packages/pwa/src/lib/daemon-transport.ts`; `ConnectionMethod` — the carrier type that would replace
+it — has no consumer outside this package; and `packages/daemon/src` has no relay client at all. The
+decision layer is here too (`connectionPreferenceOrder` orders direct first, `chooseConnection`
+returns the which-carrier-and-why sentence); what is missing is the plumbing that would carry bytes
+over an address discovery hands it.
 
-Four named pieces. The first two are done; the prerequisite is the other two:
+Four named pieces. PR #198 provides the first two; the prerequisite is the other two:
 
-1. ✅ **A build-time discovery origin in the PWA.** The relay lives on its own hostname, so the
+1. **A build-time discovery origin in the PWA** — provided by #198. The relay lives on its own
+   hostname, so the
    browser cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is
    wrong**, and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is
    compiled into the PWA build as `FY_RELAY_DIRECTORY_ORIGIN`, supplied by the Pages workflow from
    the same repository variable the relay's own deploy uses, and shipping no directory rather than
    guessing when unset. It is a _service_ address, not a user address: it identifies the relay,
    never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over.
-2. ✅ **A fetch-and-parse step** that reads the advertisement through
+2. **A fetch-and-parse step** — also provided by #198 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
    treating `relayUrl: null` and any failure as "no hosted carrier".
-3. ⬜ **A relay-capable transport on both ends** — the large piece, and entirely unstarted.
+3. **A relay-capable transport on both ends** — the large piece, and entirely unstarted.
    `packages/daemon/src` holds no relay client and no relay configuration whatsoever: it needs one
    that dials out, the persisted key material it signs its rendezvous claim with, and the `fy`
    command surface and config layout to point it at an address. On the browser side,
@@ -691,14 +693,14 @@ Four named pieces. The first two are done; the prerequisite is the other two:
    `{ daemonId, baseUrl, deviceToken }` with no carrier field, so four files move together:
    `daemon-connection.ts`, `connections.ts` for persistence, and `daemon-transport.ts` and
    `event-transport.ts`, which both derive every request and socket from that one direct `baseUrl`.
-4. ⬜ **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
+4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for whichever carrier a live session won on.
 
-Pieces 1 and 2 arrived with [PR #198](https://github.com/kirinnee/ferretry/pull/198), which also
-dropped the carrier chooser from onboarding. That work is **discovery-only** and says so on its own
-screen, which is the honest description: the browser can read the address and the kill switch, and
-can do nothing with either.
+PR #198 also drops the carrier chooser from onboarding. That work is **discovery-only** and says so
+on its own screen, which is the honest description: a browser can read the address and the kill
+switch, and can do nothing with either. Combine it with this branch and the remaining gap is the
+transport, pieces 3 and 4.
 
-Until 3 and 4 land, deploying a relay of any kind gets you a working relay, not a remote connection.
+Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
 on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.
