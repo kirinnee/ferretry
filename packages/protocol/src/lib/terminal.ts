@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
+import { SurfaceOpenerSchema } from './surface.ts';
 
 export const TERMINAL_MAX_PER_SESSION = 6;
 export const TERMINAL_MAX_GLOBAL = 24;
@@ -35,6 +36,13 @@ export const TerminalViewSchema = z
     cols: z.number().int().min(TERMINAL_MIN_COLUMNS).max(TERMINAL_MAX_COLUMNS),
     rows: z.number().int().min(TERMINAL_MIN_ROWS).max(TERMINAL_MAX_ROWS),
     viewers: NonNegativeIntegerSchema,
+    /**
+     * Who opened this shell, as the daemon can attest it. ABSENT MEANS
+     * UNRECORDED — a terminal that predates provenance, or one served by a
+     * daemon that never recorded it — and a reader is told that rather than
+     * shown a guess. See `SurfaceOpenerSchema`.
+     */
+    openedBy: SurfaceOpenerSchema.optional(),
     createdAt: InstantSchema,
     lastActivityAt: InstantSchema,
     idleDeadline: InstantSchema.optional(),
@@ -89,6 +97,14 @@ export const CreateTerminalRequestSchema = z.strictObject({
   title: TerminalTitleSchema.optional(),
   cols: z.number().int().min(TERMINAL_MIN_COLUMNS).max(TERMINAL_MAX_COLUMNS).optional(),
   rows: z.number().int().min(TERMINAL_MIN_ROWS).max(TERMINAL_MAX_ROWS).optional(),
+  /**
+   * The agent session this terminal is being opened FOR. It is the only part of
+   * the opener a caller may state, and the daemon honours it only from a local
+   * admin credential: a paired device is a human by construction, so letting one
+   * name itself an agent would make `by: 'agent'` unreadable. The daemon derives
+   * the rest of the opener from the credential — see `SurfaceOpenerSchema`.
+   */
+  agentSessionId: z.string().trim().min(1).max(128).optional(),
 });
 export type CreateTerminalRequest = z.infer<typeof CreateTerminalRequestSchema>;
 
