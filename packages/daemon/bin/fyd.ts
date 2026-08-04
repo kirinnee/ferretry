@@ -16,6 +16,7 @@ import {
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
+import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.ts';
 import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
@@ -176,8 +177,11 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import {
   type AccountInventoryPort,
+  type AnalyticsIndexStoreFactory,
+  type AnalyticsIngestCandidate,
+  type AnalyticsIngestCandidateSource,
+  AnalyticsIngestionService,
   type AnalyticsPricingRate,
-  type AnalyticsSessionUsage,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
   type ApiServerHandle,
@@ -218,10 +222,9 @@ import {
   doneMarkerCertifiesTurn,
   EXIT_ALREADY_RUNNING,
   exactWorkerAssignee,
-  type FinishedAnalyticsSession,
   FleetEventStreamService,
   type FoundationPaths,
-  foldAnalyticsSessionUsage,
+  type OpenedAnalyticsIndexStore,
   HarnessQuirkService,
   harnessMigrationRefusal,
   InitialAttachmentError,
@@ -321,7 +324,6 @@ import {
   TmuxController,
   type TranscriptEvent,
   type TranscriptFileResolver,
-  type TranscriptHarness,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
@@ -385,6 +387,15 @@ const FALLBACK_TMUX = '/usr/bin/tmux';
 export interface DaemonWorld {
   readonly role: typeof packageRole;
   readonly storage: DaemonStorageFactory;
+  /**
+   * The analytics materialization this daemon ingests into.
+   *
+   * A SEPARATE acquisition from the session index rather than another table inside it: the two are
+   * dropped for different reasons — a session index when a journal moves, this one when the analytics
+   * derivation changes — and the session index refuses to open a file carrying tables it does not
+   * recognise, so an extra table in it would drop every daemon's event index on upgrade.
+   */
+  readonly analyticsIndexes: AnalyticsIndexStoreFactory;
   readonly worktrees: ManagedWorktreeAdapter;
   readonly boot: {
     readonly probe: DaemonHealthProbe;
@@ -597,6 +608,13 @@ export interface DaemonWorld {
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
     pricingCatalog: readonly AnalyticsPricingRate[],
+    /**
+     * The analytics materialization, passed IN because opening it touches the disk: it walks its own
+     * paths through the confined filesystem port, may discard an index it cannot reuse, and must be
+     * closed with the rest of this boot's acquisitions. A factory that opened it here would open a
+     * second database every time a test built subsystems.
+     */
+    analyticsStore: OpenedAnalyticsIndexStore,
     /** Pairing is opened before the dispatcher so its live device registry is the auth boundary. */
     pairing: PairingService,
     socketTickets: SocketTicketBroker,
@@ -2118,48 +2136,35 @@ function createQuotaFailoverSubsystem(wiring: QuotaFailoverWiring): QuotaFailove
 const ANALYTICS_FOLD_CONCURRENCY = 4;
 
 /**
- * The analytics read, over the same authoritative session documents the rest of the daemon serves.
+ * How often the ingestion sweep looks for sessions that have ended.
  *
- * A session counts as FINISHED when its state document carries a finish instant. Deciding it from
- * the status enum instead would make a `stopped` session with no recorded finish look like a run of
- * zero length, and a duration of zero is a measurement rather than a gap.
- *
- * Both documents are PARSED, and a session whose pair does not parse is left out entirely rather
- * than contributed with holes: an analytics row assembled from a config the schema rejected is a row
- * whose provenance nobody can state.
- *
- * The pricing catalog comes from this daemon's validated operator configuration. It is never shared
- * between daemon state homes, and an empty catalog makes every cost `unpriced` with a reason — the
- * honest answer. A hardcoded table would price historical runs off numbers nobody in this deployment
- * agreed to; a zero would read as free.
- *
- * TOKEN TOTALS COME FROM THE SESSION'S OWN TRANSCRIPT, folded once per session and then remembered.
- * A session only reaches here after recording a finish instant, so its transcript is final and a
- * second read could only produce the same answer more expensively. A fold this daemon REFUSED
- * leaves `usage` null, which reports the session's tokens as unknown and its cost as unpriced — the
- * two things a session with unreadable evidence actually is. It never reports them as zero.
+ * A minute, because nothing waits on it: analytics is a read over history, and a session that ended
+ * thirty seconds ago is not a question anyone is asking. A pass with nothing new to do reads no
+ * transcripts at all — every already-ingested session with a proven total is skipped on its signature —
+ * so the cost of a quiet tick is one listing of the state home.
  */
-function createAnalyticsSubsystem(
-  storage: DaemonStorage,
-  pricingCatalog: readonly AnalyticsPricingRate[],
-  evidence: AnalyticsTranscriptEvidenceSource,
-): AnalyticsSubsystem {
-  const usageBySession = new Map<string, AnalyticsSessionUsage | null>();
-  const sessionUsage = async (id: SessionId, harness: TranscriptHarness): Promise<AnalyticsSessionUsage | null> => {
-    const remembered = usageBySession.get(id);
-    if (remembered !== undefined) return remembered;
-    const fold = foldAnalyticsSessionUsage(await evidence.evidenceFor(id, harness));
-    const usage = fold.kind === 'usage' ? fold.usage : null;
-    usageBySession.set(id, usage);
-    return usage;
-  };
-  const finishedRecord = async (id: SessionId): Promise<FinishedAnalyticsSession | undefined> => {
+const ANALYTICS_INGEST_INTERVAL_MS = 60_000;
+
+/**
+ * Every session the daemon holds durable documents for, as ingestion candidates.
+ *
+ * IT DOES NOT DECIDE ANYTHING. No gate, no fold, no pricing: it parses the two documents and hands
+ * over what they say, including whether they say a session ended. Pre-filtering here would put a
+ * second, unstated copy of the terminal-state rule in the composition root, where nothing tests it.
+ *
+ * Both documents are PARSED, and a session whose pair does not parse is left out entirely rather than
+ * contributed with holes: an analytics row assembled from a config the schema rejected is a row whose
+ * provenance nobody can state.
+ */
+function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngestCandidateSource {
+  const candidate = async (id: SessionId): Promise<AnalyticsIngestCandidate | undefined> => {
     const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
     const config = SessionConfigSchema.safeParse(rawConfig);
     const state = SessionStateSchema.safeParse(rawState);
-    if (!config.success || !state.success || state.data.finishedAt === undefined) return undefined;
+    if (!config.success || !state.success) return undefined;
     return {
       id,
+      transcriptHarness: config.data.harness === 'codex' ? 'codex' : 'claude',
       agent: config.data.agent,
       // The SELECTED model only. `observedModel` is transcript evidence, and the record's own
       // contract forbids substituting it for what the operator asked for.
@@ -2167,44 +2172,75 @@ function createAnalyticsSubsystem(
       contextWindow: state.data.contextWindow ?? null,
       harness: config.data.harness,
       mode: config.data.mode,
-      status: state.data.status,
       label: config.data.label ?? null,
       cwd: config.data.cwd,
       parent: config.data.parent ?? null,
       createdAt: config.data.createdAt,
       startedAt: state.data.startedAt ?? null,
-      finishedAt: state.data.finishedAt,
+      finishedAt: state.data.finishedAt ?? null,
+      status: state.data.status,
       // Time-to-first-output is transcript evidence the daemon does not index; a launch instant is
       // not an output, so reporting one here would mismeasure every session.
       firstOutputAt: null,
       turns: state.data.turn,
       contextEndPercent: state.data.contextPercent ?? null,
-      stalled: state.data.status === 'stalled',
-      failed: state.data.status === 'failed',
       migrated: config.data.migration !== undefined,
-      completed: state.data.status === 'completed',
-      // Transcript evidence, folded across every request the session made. Null means this daemon
-      // could not prove a total, never that the session was free.
-      usage: await sessionUsage(id, config.data.harness === 'codex' ? 'codex' : 'claude'),
     };
   };
   return {
-    finished: async () => {
-      // Read in bounded batches rather than all at once. Each transcript read is capped on its own,
-      // but a fleet with hundreds of finished sessions would still hold every one of those caps in
-      // memory simultaneously under an unbounded `Promise.all`.
+    listCandidates: async () => {
+      // Read in bounded batches rather than all at once. Each document read is small, but a fleet with
+      // hundreds of sessions would hold every one of them resident under an unbounded `Promise.all`.
       const ids = storage.listSessions().map(session => session.id);
-      const sessions: FinishedAnalyticsSession[] = [];
+      const candidates: AnalyticsIngestCandidate[] = [];
       for (let start = 0; start < ids.length; start += ANALYTICS_FOLD_CONCURRENCY) {
-        const batch = await Promise.all(
-          ids.slice(start, start + ANALYTICS_FOLD_CONCURRENCY).map(id => finishedRecord(id)),
-        );
-        sessions.push(...batch.filter((session): session is FinishedAnalyticsSession => session !== undefined));
+        const batch = await Promise.all(ids.slice(start, start + ANALYTICS_FOLD_CONCURRENCY).map(id => candidate(id)));
+        candidates.push(...batch.filter((entry): entry is AnalyticsIngestCandidate => entry !== undefined));
       }
-      return sessions;
+      return candidates;
     },
-    pricing: () => pricingCatalog,
   };
+}
+
+/**
+ * Analytics ingestion, over this daemon's own state home.
+ *
+ * WHY INGESTION EXISTS AT ALL. The read used to derive everything per request — every session's
+ * documents parsed and its whole transcript folded, on every question — so the cost of one query grew
+ * with the entire history of the fleet, and nothing richer could be built on top of it. A session is
+ * now folded and priced ONCE, when it reaches a durable terminal state, and the query reads the result.
+ *
+ * THE STORE IS THIS DAEMON'S ALONE. It lives under this state home, and the file records the home it
+ * was built for; a copied or restored index naming another home is discarded on open rather than
+ * served, because one daemon's spend reported as another's is a wrong answer, not a stale one.
+ *
+ * THE PRICING CATALOG comes from this daemon's validated operator configuration and is read per pass,
+ * so an operator's edit takes effect on the next ingestion. It is never shared between state homes, and
+ * an empty catalog makes every cost `unpriced` with a reason — the honest answer. A hardcoded table
+ * would price historical runs off numbers nobody in this deployment agreed to; a zero would read as
+ * free.
+ */
+function createAnalyticsIngestion(
+  storage: DaemonStorage,
+  opened: OpenedAnalyticsIndexStore,
+  pricingCatalog: readonly AnalyticsPricingRate[],
+  evidence: AnalyticsTranscriptEvidenceSource,
+  clock: ClockPort,
+): AnalyticsIngestionService {
+  return new AnalyticsIngestionService({
+    candidates: createAnalyticsCandidateSource(storage),
+    evidence,
+    store: opened.store,
+    pricing: () => pricingCatalog,
+    clock,
+    concurrency: ANALYTICS_FOLD_CONCURRENCY,
+    rebuildRequired: opened.rebuildRequired,
+  });
+}
+
+/** The analytics read, over the rows ingestion materialised. */
+function createAnalyticsSubsystem(ingestion: AnalyticsIngestionService): AnalyticsSubsystem {
+  return { index: () => ingestion.read() };
 }
 
 /**
@@ -2897,6 +2933,7 @@ export function buildWorld(): DaemonWorld {
       clock,
       () => new KeyedSerialExecutor(),
     ),
+    analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
     worktrees: new ManagedWorktreeAdapter(gateway, files, worktreeClock, new WorktreeOperationQueue()),
     boot: {
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
@@ -3065,6 +3102,7 @@ export function buildWorld(): DaemonWorld {
       stt,
       catalogs,
       pricingCatalog,
+      analyticsStore,
       pairing,
       socketTickets,
     ) => {
@@ -3218,6 +3256,16 @@ export function buildWorld(): DaemonWorld {
         clock,
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
+      // that reads them. Two would each hold their own account of whether a pass is in flight, and the
+      // read would report `refreshing: false` while the loop was mid-pass.
+      const analyticsIngestion = createAnalyticsIngestion(
+        storage,
+        analyticsStore,
+        pricingCatalog,
+        createAnalyticsTranscriptEvidence(storage),
+        clock,
+      );
       // Hoisted, because the quota-failover loop below moves sessions THROUGH this exact subsystem
       // rather than through a second, ungated path of its own.
       const sessionMigrate = createSessionMigrateSubsystem({
@@ -3277,7 +3325,8 @@ export function buildWorld(): DaemonWorld {
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         taskBoards: boards,
-        analytics: createAnalyticsSubsystem(storage, pricingCatalog, createAnalyticsTranscriptEvidence(storage)),
+        analytics: createAnalyticsSubsystem(analyticsIngestion),
+        analyticsIngest: analyticsIngestion,
         terminals: createTerminalSubsystem(storage, terminals, { now: () => Date.now() }),
         browserLogin,
         names: createNameSubsystem(storage),
@@ -3468,6 +3517,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
   const catalogs = new NodeCatalog({ home: homedir(), projectRoots: config.projectRoots });
+  /**
+   * The analytics materialization, opened under the lifetime lock this boot is already holding and
+   * through the same confined filesystem port.
+   *
+   * AFTER THE ADDRESS PROBE, so a boot that is about to hand over to an incumbent daemon does not
+   * create a database file it will never write a row to.
+   *
+   * A FAILURE TO OPEN IT FAILS THE BOOT, deliberately. Swallowing it would leave the daemon serving
+   * analytics from a store nothing could write to, and an empty store answers every question with a
+   * fleet that spent nothing — the "absent evidence read as a benign result" bug this repository has
+   * now fixed six times. A disk this daemon cannot materialize an index on is a fault to report at
+   * startup, not one to discover as a suspiciously cheap month.
+   */
+  const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
+  cleanups.push(() => analyticsStore.store.close());
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -3483,6 +3547,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.stt,
     catalogs,
     config.analyticsPricing,
+    analyticsStore,
     pairing.subsystem,
     world.createSocketTickets(),
   );
@@ -3589,6 +3654,30 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     }, failoverIntervalMs);
     cleanups.push(() => clearInterval(failoverTicks));
   }
+  /**
+   * The analytics ingestion sweep.
+   *
+   * THE FIRST PASS RUNS AT BOOT, and it is a REBUILD when the store reported that nothing survived
+   * being opened — a schema this daemon does not recognise, or a file naming another state home. A
+   * daemon that has just restarted is also exactly when the store is most likely to be behind: every
+   * session that ended while the process was down went uningested, and the sweep is what catches up.
+   *
+   * THE PASS IS A SWEEP, NOT A TRIGGER, and correctness does not depend on its cadence. What decides
+   * whether a session is ingested is the durable terminal-state gate, so a session that ends between
+   * two ticks is ingested by the next one with exactly the same result. A cheap pass is the common
+   * case: a session already ingested with a proven total has its transcript read once, ever.
+   *
+   * Errors are swallowed for the reason every other background timer swallows its own: an unhandled
+   * rejection from a timer takes down a daemon whose fleet is fine. A pass that could not run leaves
+   * the index reporting what it does hold, which is the honest reading.
+   */
+  await (analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest())
+    .then(() => undefined)
+    .catch(() => undefined);
+  const analyticsTicks = setInterval(() => {
+    void subsystems.analyticsIngest.ingest().catch(() => undefined);
+  }, ANALYTICS_INGEST_INTERVAL_MS);
+  cleanups.push(() => clearInterval(analyticsTicks));
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
   const terminalReaper = world.createTerminalReaper(opened.storage);

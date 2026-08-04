@@ -8,6 +8,7 @@ import {
   decideLayout,
   decideSessionMarker,
   InvalidStateHomeError,
+  analyticsIndexFiles,
   indexFiles,
   isPathInside,
   parseSessionId,
@@ -82,6 +83,9 @@ describe('foundation paths', () => {
       state: '/tmp/fy-home/state',
       index: '/tmp/fy-home/state/index',
       sessionIndex: '/tmp/fy-home/state/index/sessions.sqlite',
+      // A SEPARATE database beside the session index: the two are dropped for different reasons, and the
+      // session index discards any file carrying tables it does not recognise.
+      analyticsIndex: '/tmp/fy-home/state/index/analytics.sqlite',
       sessions: '/tmp/fy-home/state/sessions',
       temporary: '/tmp/fy-home/state/tmp',
     });
@@ -98,6 +102,14 @@ describe('foundation paths', () => {
       '/tmp/fy-home/state/index/sessions.sqlite',
       '/tmp/fy-home/state/index/sessions.sqlite-wal',
       '/tmp/fy-home/state/index/sessions.sqlite-shm',
+    ]);
+    // Both sidecars are named for the analytics store too: SQLite opens them itself, outside the
+    // confined filesystem port, so a store that enumerated only its main file would leave two paths
+    // nothing had checked for a symlink out of the state home.
+    should(analyticsIndexFiles(actual)).deepEqual([
+      '/tmp/fy-home/state/index/analytics.sqlite',
+      '/tmp/fy-home/state/index/analytics.sqlite-wal',
+      '/tmp/fy-home/state/index/analytics.sqlite-shm',
     ]);
   });
 

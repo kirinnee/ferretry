@@ -98,6 +98,18 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),
+  // The ingestion loop serves no route, so the surface inventory never calls it. It is present because
+  // `MountedSubsystems` is the list of what production constructs, and a loop absent from that list is
+  // a store nothing writes to.
+  analyticsIngest: {
+    rebuildRequired: false,
+    ingest: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    rebuild: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   terminals: new FakeTerminals(),
   browserLogin: new FakeBrowserLogin(),
   names: nameSubsystem(),

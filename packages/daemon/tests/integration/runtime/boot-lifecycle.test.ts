@@ -2106,12 +2106,17 @@ describe('daemon boot lifecycle', () => {
   /**
    * The analytics read, driven through the production composition root over a real socket.
    *
-   * It proves the mount DOES ITS JOB rather than merely existing: the index is derived from the real
-   * session documents in the state home, a session that has not finished is left out of it, the real
-   * query parser answers the CLI's own `?q=`, and the durations reported are the ones the seeded
-   * instants imply.
+   * It proves the mount DOES ITS JOB rather than merely existing: the boot ingestion pass reads the real
+   * session documents in the state home and materialises rows in the daemon's own SQLite store, a
+   * session that has not finished is left out of it, the real query parser answers the CLI's own `?q=`,
+   * and the durations reported are the ones the seeded instants imply.
+   *
+   * The pass is armed after the bind — a fleet's worth of transcript folds must not stand between a
+   * restart and the socket — so this case WAITS FOR THE INDEX TO SETTLE rather than assuming it has.
+   * That wait is itself the assertion that `refreshing` means something: an index still being built and
+   * one with nothing to say are the same empty answer to a caller that cannot tell them apart.
    */
-  it('should derive and query analytics from the real session documents', async () => {
+  it('should ingest and query analytics from the real session documents', async () => {
     // Arrange
     const home = await tempDirectory('fyd-analytics');
     const port = await freeLoopbackPort();
@@ -2140,6 +2145,15 @@ describe('daemon boot lifecycle', () => {
     const analytics = `http://127.0.0.1:${port}/v1/analytics`;
 
     // Act
+    let settled = false;
+    for (let attempt = 0; attempt < 200 && !settled; attempt += 1) {
+      const settling = AnalyticsResponseSchema.parse(
+        await fetch(analytics, { headers }).then(async response => await response.json()),
+      );
+      settled = settling.index.sessions === 1 && !settling.index.refreshing;
+      if (!settled) await Bun.sleep(50);
+    }
+    should(settled).be.true();
     const grouped = await fetch(`${analytics}?q=${encodeURIComponent('sum by (id)')}`, { headers });
     const raw = await fetch(`${analytics}?q=${encodeURIComponent('{status=completed}')}`, { headers });
     const refused = await fetch(`${analytics}?q=${encodeURIComponent('sum by (nonsense)')}`, { headers });
@@ -2172,10 +2186,16 @@ describe('daemon boot lifecycle', () => {
     should(rawBody.kind === 'raw' ? rawBody.results.map(row => [row.id, row.cwd]) : []).deepEqual([
       ['wire-done', home],
     ]);
+    // The rows came out of a real materialisation in this daemon's own state home, not a per-request
+    // derivation: the file the boot pass wrote is on disk under the index directory.
+    should(await Bun.file(join(home, 'state', 'index', 'analytics.sqlite')).exists()).be.true();
+    should(groupedBody.index.schemaVersion).equal(2);
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');
-  });
+    // Longer than the suite default because this case waits for a background pass rather than for a
+    // request: it boots a real daemon, lets the ingestion sweep catch up, and only then asks.
+  }, 30_000);
 
   /**
    * The terminal lifecycle, driven through the production composition root over a real socket.
