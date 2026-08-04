@@ -72,6 +72,7 @@ describe('the board gateway', () => {
       [{ command: 'invite', body: { targetSessionId: 's-9' } }, invitation, '/invitations/request'],
       [{ command: 'invite-approve', body: { invitationRequestId: 'i-1' } }, invitation, '/invitations/approve'],
       [{ command: 'invite-accept' }, membership, '/invitations/accept'],
+      [{ command: 'invite-verify' }, membership, '/invitations/verify'],
       [
         { command: 'relinquish' },
         { relinquished: true, sessionId: 's-1', sessionStopped: false },
@@ -198,6 +199,7 @@ describe('fy task-board', () => {
     const invite = harness(everyProof);
     const inviteApprove = harness(everyProof);
     const accept = harness(everyProof);
+    const verify = harness(everyProof);
     const relinquish = harness(everyProof);
 
     // Act
@@ -206,6 +208,7 @@ describe('fy task-board', () => {
     await invite.run('invite', 's-9');
     await inviteApprove.run('invite-approve', 'i-1');
     await accept.run('invite-accept');
+    await verify.run('invite-verify');
     await relinquish.run('relinquish');
 
     // Assert
@@ -217,6 +220,7 @@ describe('fy task-board', () => {
     should(invite.gateway.sent).eql({ command: 'invite', body: { targetSessionId: 's-9' } });
     should(inviteApprove.gateway.sent).eql({ command: 'invite-approve', body: { invitationRequestId: 'i-1' } });
     should(accept.gateway.sent).eql({ command: 'invite-accept' });
+    should(verify.gateway.sent).eql({ command: 'invite-verify' });
     should(relinquish.gateway.sent).eql({ command: 'relinquish' });
   });
 

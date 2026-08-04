@@ -1,5 +1,5 @@
 import type { TaskBoardMembership, TaskBoardRelinquishResponse } from '@ferretry/protocol';
-import { TaskBoardAuthorizationService } from './authorization-service.ts';
+import type { TaskBoardAuthorizationService } from './authorization-service.ts';
 import {
   appendTaskBoardAudit,
   bindingForGrant,
@@ -88,19 +88,31 @@ export class TaskBoardMembershipService {
         throw new TaskBoardError('conflict', 'the membership relinquish request id was reused');
       return { state, result: { relinquished: true, sessionId: authorization.sessionId, sessionStopped: false } };
     }
-    const roots = board.grants.filter(
-      candidate =>
-        candidate.active && candidate.role === 'top_agent' && candidate.membershipRootSessionId === candidate.sessionId,
+    const verifiedReplacement = board.invitations.find(
+      invitation =>
+        invitation.status === 'accepted' &&
+        invitation.sourceSessionId === authorization.sessionId &&
+        invitation.verifiedAt !== undefined &&
+        invitation.verifiedBySessionId === invitation.targetSessionId &&
+        invitation.grantId !== undefined &&
+        board.grants.some(
+          candidate =>
+            candidate.id === invitation.grantId &&
+            candidate.active &&
+            candidate.role === 'top_agent' &&
+            candidate.sessionId === invitation.targetSessionId &&
+            candidate.membershipRootSessionId === candidate.sessionId,
+        ),
     );
     if (
       grant === undefined ||
       grant.role !== 'top_agent' ||
       grant.membershipRootSessionId !== grant.sessionId ||
-      roots.length < 2
+      verifiedReplacement === undefined
     ) {
       throw new TaskBoardError(
         'forbidden',
-        'only a membership root with an accepted replacement root may relinquish access',
+        'only a membership root with a verified accepted replacement root may relinquish access',
       );
     }
     const boardEpoch = board.boardEpoch + 1;

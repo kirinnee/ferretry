@@ -1,5 +1,5 @@
 import type { TaskBoardInvitationView, TaskBoardMembership } from '@ferretry/protocol';
-import { TaskBoardAuthorizationService } from './authorization-service.ts';
+import type { TaskBoardAuthorizationService } from './authorization-service.ts';
 import {
   appendTaskBoardAudit,
   bindingForGrant,
@@ -60,6 +60,13 @@ export interface AcceptExternalInvitationMaterial {
   readonly capability: TaskBoardSecret;
 }
 
+/** A replacement root records this only after it has used its delivered board capability. */
+export interface VerifyExternalInvitationCommand {
+  readonly member: TaskBoardCredential;
+  readonly requestId: string;
+  readonly at: string;
+}
+
 export type ApprovalResult =
   | { readonly approved: true; readonly invitation: TaskBoardInvitationView; readonly acceptanceCapability: string }
   | { readonly approved: false; readonly invitation: TaskBoardInvitationView };
@@ -67,6 +74,8 @@ export type ApprovalResult =
 export type AcceptanceResult =
   | { readonly accepted: true; readonly membership: TaskBoardMembership }
   | { readonly accepted: false; readonly invitation: TaskBoardInvitationView };
+
+export type VerificationResult = { readonly verified: true; readonly membership: TaskBoardMembership };
 
 /** The wire projection of an invitation. Exported so the mount reports the same shape the service
  *  does rather than a second, drifting copy of it. */
@@ -466,6 +475,93 @@ export class TaskBoardInvitationService {
         ),
       }),
       result: { accepted: true, membership: membershipForGrant(grant) },
+    };
+  }
+
+  /**
+   * Receipts an actual replacement-side board action.
+   *
+   * A binding written by `accept` is deliberately not enough to retire the old root: delivery is
+   * asynchronous and a replacement may have crashed before it ever received the capability. The
+   * replacement presents that capability here and is authorized for `read`, making this an exact
+   * proof of both membership and usable authority. The receipt is durable so a daemon restart cannot
+   * turn an earlier proof into an inference from a currently-shaped board.
+   */
+  verify(
+    state: TaskBoardRepositoryState,
+    sessions: readonly TaskBoardSession[],
+    command: VerifyExternalInvitationCommand,
+  ): TaskBoardMutation<VerificationResult> {
+    const requestId = requireTaskBoardRequestId(command.requestId);
+    const authorization = this.authorization.authorize(state, sessions, command.member, 'read');
+    const board = requireBoard(state, authorization.boardId);
+    const invitation = board.invitations.find(
+      candidate =>
+        candidate.status === 'accepted' &&
+        candidate.targetSessionId === authorization.sessionId &&
+        candidate.grantId === authorization.grantId,
+    );
+    if (invitation === undefined)
+      throw new TaskBoardError('forbidden', 'only an accepted external invitation may verify replacement authority');
+    const membershipGrant = board.grants.find(grant => grant.id === authorization.grantId);
+    if (membershipGrant === undefined)
+      throw new TaskBoardError('unavailable', 'the accepted invitation has no exact membership grant');
+    const fingerprint = taskBoardFingerprint([
+      'invitation.verify',
+      invitation.requestId,
+      authorization.grantId,
+      authorization.runtimeGeneration,
+    ]);
+    const replay = board.appliedOperations.find(operation => operation.requestId === requestId);
+    if (replay !== undefined) {
+      if (replay.fingerprint !== fingerprint || replay.resultGrantId !== authorization.grantId)
+        throw new TaskBoardError('conflict', 'the invitation verification request id was reused');
+      return {
+        state,
+        result: { verified: true, membership: membershipForGrant(membershipGrant) },
+      };
+    }
+    if (invitation.verifiedAt !== undefined) {
+      return {
+        state,
+        result: { verified: true, membership: membershipForGrant(membershipGrant) },
+      };
+    }
+    const verified = { ...invitation, verifiedAt: command.at, verifiedBySessionId: authorization.sessionId };
+    const updated = appendTaskBoardAudit(
+      {
+        ...board,
+        mutationGeneration: board.mutationGeneration + 1,
+        invitations: board.invitations.map(candidate =>
+          candidate.requestId === verified.requestId ? verified : candidate,
+        ),
+        appliedOperations: [
+          ...board.appliedOperations,
+          {
+            requestId,
+            kind: 'invitation.verify',
+            fingerprint,
+            actorSessionId: authorization.sessionId,
+            actorGrantId: authorization.grantId,
+            actorRuntimeGeneration: authorization.runtimeGeneration,
+            resultGrantId: authorization.grantId,
+            resultSessionId: authorization.sessionId,
+            appliedAt: command.at,
+          },
+        ],
+      },
+      {
+        at: command.at,
+        event: 'invitation.verified',
+        requestId,
+        actorSessionId: authorization.sessionId,
+        outcome: 'applied',
+        detail: { invitationRequestId: invitation.requestId, grantId: authorization.grantId },
+      },
+    );
+    return {
+      state: replaceTaskBoard(state, updated),
+      result: { verified: true, membership: membershipForGrant(membershipGrant) },
     };
   }
 }

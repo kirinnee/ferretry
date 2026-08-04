@@ -134,6 +134,8 @@ const InvitationSchema = z.strictObject({
   acceptanceCapabilityHash: HASH.optional(),
   acceptedAt: InstantSchema.optional(),
   grantId: z.string().min(1).optional(),
+  verifiedAt: InstantSchema.optional(),
+  verifiedBySessionId: z.string().min(1).optional(),
   refusalReason: z.string().min(1).optional(),
 });
 
@@ -161,6 +163,7 @@ const AuditEntrySchema = z.strictObject({
     'invitation.requested',
     'invitation.approved',
     'invitation.accepted',
+    'invitation.verified',
     'invitation.refused',
     'invitation.expired',
     'membership.relinquished',
@@ -180,6 +183,7 @@ const AppliedOperationSchema = z.strictObject({
     'child-grant.approve',
     'invitation.approve',
     'invitation.accept',
+    'invitation.verify',
     'membership.relinquish',
     'coordinator.replace',
     'grant.revoke',
