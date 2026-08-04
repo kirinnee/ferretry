@@ -3,6 +3,7 @@ import {
   createFoundationPaths,
   type EnvironmentPort,
   type FileSystemFactory,
+  type FileSystemPort,
   type FoundationPaths,
   type HomeLockFactory,
   resolveStateHome,
@@ -15,6 +16,15 @@ import type { LayoutInitialization, StateHomeLayout } from './state-home-layout.
 
 export interface OpenedDaemonStorage {
   readonly paths: FoundationPaths;
+  /**
+   * The confined filesystem this home was opened through.
+   *
+   * Published so a later acquisition — the analytics materialization is the first — is confined by the
+   * SAME port, under the lifetime lock this open is holding. A second port built from the same paths
+   * would be a second set of rules over one home, and the rule that matters here is the one that
+   * refuses a symlinked database file.
+   */
+  readonly fileSystem: FileSystemPort;
   readonly layout: LayoutInitialization;
   readonly storage: DaemonStorage;
 }
@@ -56,7 +66,7 @@ export class DaemonStorageFactory {
       // session and keep every healthy sibling indexed.
       await storage.upgradeLegacySessions();
       await storage.repairSessionPermissions();
-      return { paths, layout, storage };
+      return { paths, fileSystem, layout, storage };
     } catch (error) {
       await storage.close();
       throw error;

@@ -28,7 +28,11 @@ import {
   type BrowserLoginLifecycle,
   type BrowserLoginStatus,
 } from '../../../../src/lib/browser/control/index.ts';
-import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
+import {
+  rebuildAnalyticsSessionIndex,
+  type FinishedAnalyticsSession,
+} from '../../../../src/lib/analytics/session-record.ts';
+import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import {
   AttentionService,
   type AttentionLedger,
@@ -338,13 +342,37 @@ export function finishedSession(
   };
 }
 
-/** An analytics subsystem over a fixed finished-session set and rate catalog. The derivation, the
- *  query parser and the aggregator are all the REAL ones — only the session source is the test's. */
+/**
+ * An analytics subsystem over a fixed set of ingested sessions and the catalog they were priced with.
+ *
+ * The derivation, the query parser and the aggregator are all the REAL ones — only the store is the
+ * test's. The account it reports is the one an ingesting store gives: one transcript source per row,
+ * indexed when the row carries a proven total and pending when it does not, because the next pass
+ * re-attempts a refused fold.
+ */
 export function analyticsSubsystem(
   sessions: readonly FinishedAnalyticsSession[] = [],
   pricing: readonly AnalyticsPricingRate[] = [],
 ): AnalyticsSubsystem {
-  return { finished: async () => sessions, pricing: () => pricing };
+  const rows = rebuildAnalyticsSessionIndex({ listFinishedAnalyticsSessions: () => sessions }, pricing).map(
+    record => record.raw,
+  );
+  const tokenSessions = rows.filter(row => row.tokens !== null).length;
+  return {
+    index: () => ({
+      rows,
+      status: {
+        schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
+        sessions: rows.length,
+        tokenSessions,
+        transcriptSources: rows.length,
+        indexedTranscriptSources: tokenSessions,
+        pendingTranscriptSources: rows.length - tokenSessions,
+        sourceErrors: 0,
+        refreshing: false,
+      },
+    }),
+  };
 }
 
 /**

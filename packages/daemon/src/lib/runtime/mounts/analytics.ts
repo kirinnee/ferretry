@@ -1,27 +1,27 @@
-import type { AnalyticsIndexStatus, AnalyticsResponse } from '@ferretry/protocol';
+import type { AnalyticsResponse } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { AnalyticsPricingRate } from '../../analytics/pricing.ts';
 import { AnalyticsQueryError, parseAnalyticsQuery, scopeAnalyticsQuery } from '../../analytics/query.ts';
 import { queryAnalyticsRecords } from '../../analytics/results.ts';
-import { rebuildAnalyticsSessionIndex, type FinishedAnalyticsSession } from '../../analytics/session-record.ts';
+import type { AnalyticsIndexRead } from '../../analytics/ingestion.ts';
 
 /**
- * The analytics read: one bounded PromQL-like query over every finished session the daemon holds a
- * durable record for.
+ * The analytics read: one bounded PromQL-like query over every finished session the daemon has
+ * INGESTED into its analytics store.
  *
  * This is the route the CLI's `fy analytics` already speaks — `GET /v1/analytics?q=…` — so mounting
  * it is what turns the shipped command from a 404 into an answer. The query parser, the pricing
  * snapshot, the model-identity normaliser and the aggregator behind it were built and fully tested
  * and nothing constructed them.
  *
- * THE INDEX IS REBUILT PER REQUEST, from the authoritative session documents, rather than being
- * materialised into a durable table. `rebuildAnalyticsSessionIndex` exists precisely because the
- * index is disposable — "an analytics index is never a source of truth" — and a daemon that holds
- * tens of sessions has nothing to gain from caching a derivation this cheap. `refreshing` is
- * therefore always `false`: there is no background pass that could be mid-flight.
+ * THE ROWS ARE MATERIALISED, NOT DERIVED PER REQUEST. Ingestion happens when a session reaches a
+ * durable terminal state, and this route reads the result. It used to be the other way round: every
+ * question re-parsed every session's documents and re-folded every transcript, so the cost of one
+ * query grew with the whole history of the fleet and no richer analytics surface could be built on it.
+ * The store is still DISPOSABLE — it can be dropped and rebuilt from the durable session records at
+ * any time, because those records, not this table, are what the daemon actually knows.
  *
  * WHAT IS AND IS NOT CLAIMED HERE.
  *
@@ -44,18 +44,16 @@ import { rebuildAnalyticsSessionIndex, type FinishedAnalyticsSession } from '../
  * cost at the operator's per-token rates. Fleet accounts are commonly subscriptions, where marginal
  * token cost is not what the human pays, so this number must never be presented as a bill.
  *
- * `transcriptSources` and its companions are `0` because this index holds no durable transcript
- * cursor — each fold is derived on demand from the session's own file, so there is no ingestion
- * backlog that could be behind.
- */
-
-/**
- * The stored index schema this daemon materialises.
+ * COSTS ARE PRICED WHEN THE ROW IS WRITTEN, and the rate that priced it is stored beside it. An
+ * operator who corrects the catalog therefore changes what future ingestions cost, and can see from
+ * the row which rates a past one was charged at, instead of every historical figure silently moving.
  *
- * It is `1` because the shape has never changed; it is DECLARED rather than omitted so a client can
- * tell a daemon that rebuilt the index under a new derivation from one that did not.
+ * `transcriptSources` and its companions are the ingestion account: one source per ingested session,
+ * indexed when its fold produced a total and PENDING when the fold was refused, because a refusal is
+ * re-attempted on the next pass. `sourceErrors` counts the transcripts the last pass could not read at
+ * all, and `refreshing` says a pass is in flight — the distinction between an index that is behind and
+ * one that has nothing to say.
  */
-const ANALYTICS_INDEX_SCHEMA_VERSION = 1;
 
 /** The parameters this route takes. `session` is the server-enforced side-pane scope. */
 const ANALYTICS_PARAMETERS = ['q', 'session'] as const;
@@ -63,19 +61,14 @@ const ANALYTICS_PARAMETERS = ['q', 'session'] as const;
 /**
  * The analytics subsystem as the route needs it.
  *
- * Both members are pulled per request rather than held: the finished-session set changes as sessions
- * end, and a route that closed over a snapshot taken at boot would answer with the fleet as it was
- * when the daemon started.
+ * READ PER REQUEST, never held: sessions keep ending and the ingestion pass keeps writing, so a route
+ * that closed over a snapshot taken at boot would answer with the fleet as it was when the daemon
+ * started. The operator's rate catalog is deliberately NOT part of this interface any more — a row is
+ * priced when it is ingested, so the read has no pricing decision left to take.
  */
 export interface AnalyticsSubsystem {
-  /**
-   * Every session the daemon holds a durable FINISHED record for. A session still running has no
-   * finish instant, so it has no duration and no end-of-run context — including it would report a
-   * half-measured run as a completed one.
-   */
-  finished(): Promise<readonly FinishedAnalyticsSession[]>;
-  /** The operator's rate catalog. Empty means costs are honestly unpriced, never zero. */
-  pricing(): readonly AnalyticsPricingRate[];
+  /** The materialised rows, and an account of what they consist of. */
+  index(): AnalyticsIndexRead;
 }
 
 /**
@@ -112,35 +105,15 @@ function reraise(error: unknown): never {
   throw error;
 }
 
-/** What the freshly derived index consists of, reported alongside every answer so a caller can tell
- *  "nothing matched" from "nothing is indexed". */
-function indexStatus(sessions: number, tokenSessions: number): AnalyticsIndexStatus {
-  return {
-    schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
-    sessions,
-    tokenSessions,
-    transcriptSources: 0,
-    indexedTranscriptSources: 0,
-    pendingTranscriptSources: 0,
-    sourceErrors: 0,
-    refreshing: false,
-  };
-}
-
 /** One analytics answer over the whole fleet. */
-async function query(subsystem: AnalyticsSubsystem, context: RouteContext): Promise<ApiResponse> {
+function query(subsystem: AnalyticsSubsystem, context: RouteContext): ApiResponse {
   const source = analyticsQuery(context.request);
   try {
-    // Parsed BEFORE the session set is read: a malformed query is the caller's mistake and must not
-    // cost a full read of every session document in the state home first.
+    // Parsed BEFORE the index is read: a malformed query is the caller's mistake and must not cost a
+    // full read of the store first.
     parseAnalyticsQuery(source);
-    const catalog = subsystem.pricing();
-    const finished = await subsystem.finished();
-    const records = rebuildAnalyticsSessionIndex({ listFinishedAnalyticsSessions: () => finished }, catalog);
-    const rows = records.map(record => record.raw);
-    const response: AnalyticsResponse = queryAnalyticsRecords(rows, source, {
-      index: indexStatus(rows.length, rows.filter(row => row.tokens !== null).length),
-    });
+    const read = subsystem.index();
+    const response: AnalyticsResponse = queryAnalyticsRecords(read.rows, source, { index: read.status });
     return jsonResponse(response);
   } catch (error) {
     reraise(error);
@@ -161,7 +134,7 @@ export function analyticsRoutes(subsystem: AnalyticsSubsystem): readonly ApiRout
       path: '/v1/analytics',
       scope: 'admin',
       noStore: true,
-      handle: async context => await query(subsystem, context),
+      handle: context => Promise.resolve(query(subsystem, context)),
     },
   ];
 }

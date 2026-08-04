@@ -5,6 +5,7 @@ import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
+import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
@@ -104,8 +105,14 @@ export interface MountedSubsystems {
    *  distinct from `tasks`, which is the records themselves. Three of the CLI's eleven board routes
    *  are not served; the mount's own header names each one and why. */
   readonly taskBoards: TaskBoardSubsystem;
-  /** The fleet-wide analytics read over every finished session's durable record. */
+  /** The fleet-wide analytics read over every finished session the daemon has ingested. */
   readonly analytics: AnalyticsSubsystem;
+  /** The other half of analytics: the pass that PUTS a finished session in the store, folding its
+   *  transcript once and pricing it at the rates in force when the row was written. It serves no route
+   *  — nobody asks for an ingestion — and it is a mounted subsystem for the reason `monitor` and
+   *  `quotaFailover` are: a background loop nothing constructs is the same absent capability as an
+   *  unserved route, and an analytics store nothing writes to answers every query with an empty fleet. */
+  readonly analyticsIngest: AnalyticsIngestionLoop;
   /** Independent shell terminals attached to a session's working directory. */
   readonly terminals: TerminalSubsystem;
   /** The daemon-global human browser-login window: a private X display, served over loopback VNC, that

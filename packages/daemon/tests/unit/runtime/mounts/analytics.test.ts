@@ -92,20 +92,20 @@ describe('the analytics mount', () => {
   });
 
   describe('what the index reports about itself', () => {
-    it('should report no transcript sources and no background refresh', async () => {
-      // The index is rebuilt from durable session documents on every request, so nothing can be
-      // mid-refresh and there are no transcript sources to be behind on.
+    it('should pass the ingesting store account through rather than inventing one', async () => {
+      // The route reports what the store says it holds. A session whose transcript fold was refused is
+      // a PENDING source, not an indexed one, because the next ingestion pass re-attempts it.
       // Arrange / Act
       const response = await answer([finishedSession({ id: 's1' })]);
 
       // Assert
       should(response.index).deepEqual({
-        schemaVersion: 1,
+        schemaVersion: 2,
         sessions: 1,
         tokenSessions: 0,
-        transcriptSources: 0,
+        transcriptSources: 1,
         indexedTranscriptSources: 0,
-        pendingTranscriptSources: 0,
+        pendingTranscriptSources: 1,
         sourceErrors: 0,
         refreshing: false,
       });
@@ -339,17 +339,16 @@ describe('the analytics mount', () => {
       should(jsonBody(response)).have.property('code', 'unknown_parameter');
     });
 
-    it('should report a state home it could not read as its own fault, not the caller‘s', async () => {
+    it('should report a store it could not read as its own fault, not the caller‘s', async () => {
       // A caller told its query was malformed will rewrite a query that was right all along, so a
       // failed read must never borrow the 400 the query parser owns.
       // Arrange
       const broken = new ApiDispatcher(
         new ApiRouter(
           analyticsRoutes({
-            finished: async () => {
-              throw new Error('the session index is unreadable');
+            index: () => {
+              throw new Error('the analytics index is unreadable');
             },
-            pricing: () => [],
           }),
         ),
         CREDENTIALS,
