@@ -58,15 +58,13 @@ describe('useKeyboardOpen', () => {
     const view = await mount(<Probe />);
 
     // Act
-    document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'open');
-    await settle(() => openOf(view.container) === 'true');
+    await interact(() => document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'open'));
 
     // Assert
     expect(openOf(view.container)).toBe('true');
 
     // Act
-    document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'closed');
-    await settle(() => openOf(view.container) === 'false');
+    await interact(() => document.documentElement.setAttribute(KEYBOARD_ATTRIBUTE, 'closed'));
 
     // Assert
     expect(openOf(view.container)).toBe('false');
