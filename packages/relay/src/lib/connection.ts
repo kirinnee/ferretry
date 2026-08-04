@@ -7,8 +7,9 @@
  *    opt out of a relay to get it.
  * 2. **Relay** — the Workers rendezvous in this package. Ferretry's metered hosted service is the
  *    automatic fallback only after direct fails; running the same carrier in your own Cloudflare
- *    account remains an expert override, not an onboarding choice. Who operates and pays for the
- *    relay changes, but the wire protocol and security model do not.
+ *    account remains an expert override in the required product contract. The current PWA's
+ *    interim carrier chooser has not caught up with that contract yet. Who operates and pays for
+ *    the relay changes, but the wire protocol and security model do not.
  *
  * A hosted relay anyone can reach is abusable precisely because its operator cannot read what it
  * carries. Ferretry accepts that risk for its hosted deployment and bounds the bill with runtime

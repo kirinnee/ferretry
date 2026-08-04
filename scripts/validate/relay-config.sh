@@ -21,6 +21,7 @@ cd "${root_dir}"
 hosted_config="packages/relay/wrangler.hosted.json"
 byo_config="packages/relay/wrangler.jsonc"
 workflow=".github/workflows/relay-hosted.yaml"
+ci_workflow=".github/workflows/ci.yaml"
 worker="packages/relay/src/adapters/worker.ts"
 control="packages/relay/src/adapters/hosted-control.ts"
 
@@ -88,6 +89,13 @@ rg -q '"RELAY_DAEMON_IDS"' "${byo_config}" ||
 
 rg -qF -- '--config wrangler.hosted.json' "${workflow}" ||
   fail "${workflow} must deploy and set secrets against ${hosted_config}"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.jsonc' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the self-hosted relay configuration"
+rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_workflow}" ||
+  fail "${ci_workflow} must compile the hosted relay configuration"
+if rg -qF -- 'bunx wrangler' "${workflow}"; then
+  fail "${workflow} must use the flake-locked Wrangler, not resolve npm latest with bunx"
+fi
 
 # The derived operator bearer is a digest of a registered secret, not the secret, so GitHub masks
 # nothing about it on its own. Both jobs must register it before use.

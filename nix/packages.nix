@@ -13,6 +13,7 @@
     ripgrep
     shellcheck
     treefmt
+    wrangler
     yq-go
     ;
 }

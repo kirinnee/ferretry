@@ -47,14 +47,16 @@ task preview -- --help
 
 ## Connecting to a daemon
 
-The browser tries a **direct** connection first and falls back to Ferretry's **hosted relay** when
-the daemon has no inbound route. Neither is a question anyone is asked during setup, and the live
-carrier is always named on screen. That is the required behaviour, not yet the shipped one: **the
-client transport is not wired** — neither `fyd` nor the PWA can route through a relay today, and
-[docs/relay-protocol.md](docs/relay-protocol.md) §13 names the remaining pieces. That document is
-also the wire contract and the disclosure of what a relay operator can and cannot observe.
+The required behaviour is to try a **direct** connection first, fall back to Ferretry's **hosted
+relay** when the daemon has no inbound route, ask no carrier question, and always name the live
+carrier on screen. That is not yet the shipped behaviour: the PWA still contains an interim
+three-way carrier chooser and self-hosting setup route, and **the client transport is not wired** —
+neither `fyd` nor the PWA can route through a relay today. [docs/relay-protocol.md](docs/relay-protocol.md)
+§13 names both remaining pieces. That document is also the wire contract and the disclosure of what
+a relay operator can and cannot observe.
 
-Running a relay of your own is supported but is an **expert opt-in path**, not part of setup:
+Running a relay of your own remains supported as an **expert opt-in path**; the interim setup option
+is a known GAP that the conforming product removes:
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md) is the runbook.
 
 ## Releasing
