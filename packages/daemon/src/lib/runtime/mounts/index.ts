@@ -8,6 +8,7 @@ import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
+import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
@@ -90,6 +91,13 @@ export interface MountedSubsystems {
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;
+  /** The other half of that operation: NOTICING that an account has measurably run out of tokens and
+   *  moving its sessions onto a pooled same-kind account with confirmed headroom — through the same
+   *  migration above, preflight included. It serves no route, and it is a mounted subsystem for the
+   *  reason `monitor` is: a background loop nothing constructs is the same absent capability as an
+   *  unserved route, and before this field `fy migrate` was a manual operation with nothing watching
+   *  the quota that makes it necessary. */
+  readonly quotaFailover: QuotaFailoverLoop;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
   /** The shared task-board MEMBERSHIP lifecycle — who is on a board and what they may do — as
