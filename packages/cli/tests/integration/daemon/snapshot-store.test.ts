@@ -294,6 +294,15 @@ describe('file daemon snapshot store', () => {
     await should(store().build()).be.rejectedWith(/snapshot source is not executable/u);
   });
 
+  it('should discard a build when its source changes during the copy', async () => {
+    // Arrange
+    const subject = store({ afterCopy: async () => await writeExecutable('#!/bin/sh\necho changed midway\n') });
+
+    // Act + Assert
+    await should(subject.build()).be.rejectedWith(/source changed while it was being copied/u);
+    should(await subject.list()).deepEqual([]);
+  });
+
   it('should reject a relative or filesystem-root store before touching disk', () => {
     // Act + Assert
     should(() => store({ root: 'relative' })).throw(/snapshot root must be a non-root absolute path/u);

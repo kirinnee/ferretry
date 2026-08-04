@@ -65,6 +65,8 @@ export interface FileDaemonSnapshotStoreOptions {
   readonly sourceBinary: string;
   readonly now?: (() => Date) | undefined;
   readonly uniqueId?: (() => string) | undefined;
+  /** Observation seam used by deterministic race tests; production leaves it absent. */
+  readonly afterCopy?: (() => Promise<void>) | undefined;
 }
 
 interface FileDigest {
@@ -160,6 +162,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     try {
       const stagedBinary = join(stage, this.options.daemon.name);
       await copyFile(source, stagedBinary);
+      await this.options.afterCopy?.();
       const afterCopy = await stableStat(source);
       if (!sameFile(before, afterCopy)) this.#sourceChanged(source);
 
