@@ -429,37 +429,32 @@ describe('hosted relay daemon row cap recovery', () => {
     should(harness.storage.values.has(`metrics:daemon:${daemonId}`)).be.false();
   });
 
-  it('should carry the sweep forward so a row the last pass never reached is still recovered', async () => {
-    const harness = await atRowCap([staleRow(otherDaemonId)], []);
-    // The last pass stopped past every stored row, so this pass starts beyond the only stale row.
-    harness.storage.values.set('control:reclaim-cursor', {
-      scannedThrough: `${'metrics:daemon:fy_daemon_'}${'z'.repeat(43)}`,
-    });
+  it('should recover a stale row wherever its fingerprint happens to sort', async () => {
+    // Every row busy except the very last one in key order. A sweep that only read a leading window
+    // would never reach it, and the ceiling would stay full for the life of the deployment.
+    const busy = Array.from({ length: 200 }, (_unused, index) => ({
+      ...staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
+      lastActivityAt: laterDay,
+      day: { startedAt: HOSTED_RELAY_DAY_MILLISECONDS * 3, bytes: 1 },
+    }));
+    const lastInOrder = staleRow(`fy_daemon_${'z'.repeat(43)}`);
+    const harness = await atRowCap([...busy, lastInOrder], []);
 
-    const beyondHorizon = await harness.object.fetch(
-      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
-    );
-    should(await beyondHorizon.json()).match({ ok: false, code: RELAY_CLOSE_CODES.hostedCapacity });
-    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
-    // A pass that recovered nothing still has to leave the next one somewhere new: wrapped to the start.
-    should(harness.storage.values.get('control:reclaim-cursor')).deepEqual({ scannedThrough: null });
-
-    // Recovery is therefore a matter of attempts, not of where a fingerprint happens to sort.
-    harness.runtime.clock += 1;
     should(
       await (
         await harness.object.fetch(
-          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0002' }),
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
         )
       ).json(),
     ).deepEqual({ ok: true });
-    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.false();
+    should(harness.storage.values.has(`metrics:daemon:${lastInOrder.daemonId}`)).be.false();
+    should(harness.storage.values.has(`metrics:daemon:fy_daemon_${'0'.padStart(43, 'a')}`)).be.true();
     should((await harness.object.fetch(request('/operator/metrics'))).status).equal(200);
   });
 
   it('should count the whole census even when it may only forget one batch of it', async () => {
-    // More stale rows than one batch may forget. Filling the batch must not make the sweep abandon
-    // the rest of the page and report 64 as if it were the durable row total.
+    // More stale rows than one batch may forget. Filling the batch must not stop the counting, since
+    // the count is the only thing that proves the census before anything is deleted.
     const crowded = Array.from({ length: 70 }, (_unused, index) =>
       staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
     );
@@ -469,8 +464,6 @@ describe('hosted relay daemon row cap recovery', () => {
       request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
     );
     should(await admitted.json()).deepEqual({ ok: true });
-    // The pass read the whole prefix, so it wrapped rather than stopping where the batch filled.
-    should(harness.storage.values.get('control:reclaim-cursor')).deepEqual({ scannedThrough: null });
 
     // 64 forgotten, 6 left, plus the daemon just admitted — and the census still agrees with storage.
     const snapshot = await harness.object.fetch(request('/operator/metrics'));
@@ -478,47 +471,6 @@ describe('hosted relay daemon row cap recovery', () => {
     const body = (await snapshot.json()) as { global: { trackedDaemons: number }; daemons: unknown[] };
     should(body.daemons.length).equal(7);
     should(body.global.trackedDaemons).equal(7);
-  });
-
-  it('should leave the next pass a new place to look when the census outruns one sweep budget', async () => {
-    // A census larger than a single sweep can read: the pass must stop somewhere concrete rather than
-    // wrap, or every later attempt would re-read the same rows and the ceiling would never recover.
-    const beyondBudget = Array.from({ length: 12_001 }, (_unused, index) =>
-      staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
-    );
-    const harness = await atRowCap(beyondBudget, []);
-
-    should(
-      await (
-        await harness.object.fetch(
-          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
-        )
-      ).json(),
-    ).deepEqual({ ok: true });
-    const cursor = harness.storage.values.get('control:reclaim-cursor') as { scannedThrough: string | null };
-    should(cursor.scannedThrough).be.a.String();
-    should(cursor.scannedThrough).startWith('metrics:daemon:');
-  });
-
-  it('should fail closed on a damaged sweep cursor instead of restarting from the top', async () => {
-    const harness = await atRowCap([staleRow(otherDaemonId)], []);
-    for (const damaged of [
-      { scannedThrough: 'reservation:not-a-daemon-key' },
-      // Right prefix, but not a key this object could ever have written.
-      { scannedThrough: `${'metrics:daemon:'}not-a-fingerprint` },
-      { broken: true },
-      'not-an-object',
-    ]) {
-      harness.storage.values.set('control:reclaim-cursor', damaged);
-      should(
-        (
-          await harness.object.fetch(
-            request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
-          )
-        ).status,
-      ).equal(503);
-    }
-    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
   });
 
   it('should refuse to tidy rows while the census already disagrees with what storage holds', async () => {
@@ -530,7 +482,35 @@ describe('hosted relay daemon row cap recovery', () => {
     should(refused.status).equal(503);
     should(await refused.json()).deepEqual({ error: 'relay metrics and daemon rows disagree' });
     should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
-    should(harness.storage.values.has('control:reclaim-cursor')).be.false();
+  });
+
+  it('should refuse a deficit no bounded window could ever have proved', async () => {
+    // An operator-raised census far past any single-window budget, one row short of what it claims.
+    // A sweep reading only a window would see fewer rows than the census and delete anyway, shedding
+    // rows on every admission while the deficit itself survived untouched.
+    const short = Array.from({ length: 12_001 }, (_unused, index) =>
+      staleRow(`fy_daemon_${String(index).padStart(43, 'a')}`),
+    );
+    const harness = await atRowCap(short, [], 12_002);
+
+    const refused = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(refused.status).equal(503);
+    should(await refused.json()).deepEqual({ error: 'relay metrics and daemon rows disagree' });
+    should([...harness.storage.values.keys()].filter(key => key.startsWith('metrics:daemon:')).length).equal(12_001);
+  });
+
+  it('should refuse a surplus of rows the census never accounted for', async () => {
+    // The mirror image: more stored rows than the census claims. Counting stops as soon as the
+    // surplus is proved, which is also what bounds the sweep.
+    const harness = await atRowCap([staleRow(otherDaemonId), staleRow(`fy_daemon_${'c'.repeat(43)}`)], [], 1);
+    const refused = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(refused.status).equal(503);
+    should(await refused.json()).deepEqual({ error: 'relay metrics and daemon rows disagree' });
+    should(harness.storage.values.has(`metrics:daemon:${otherDaemonId}`)).be.true();
   });
 
   it('should fail closed when a row key disagrees with the fingerprint inside it', async () => {

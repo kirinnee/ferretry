@@ -485,6 +485,29 @@ describe('hosted rendezvous enforcement', () => {
     should(releasedBy(stuck.calls)).deepEqual(['stuck_reservation']);
   });
 
+  it('should still close and release when a state-machine refusal cannot be explained', async () => {
+    // The reducer refuses with two effects, "say why" then "close", and the close is the one that
+    // gives the slot back. An undeliverable explanation must not abandon the rest of the transition.
+    class MuteSocket extends FakeSocket {
+      override send(): void {
+        throw new Error('socket is already gone');
+      }
+    }
+
+    const hosted = hostedEnvironment();
+    const harness = makeObject(
+      { createSocketPair: () => ({ client: new FakeSocket(), server: new MuteSocket() }) },
+      hosted.environment,
+    );
+
+    // A client arriving at a rendezvous no daemon holds: refused by the state machine, not the meter.
+    await should(
+      harness.object.fetch(socketRequest(`fy_daemon_${'a'.repeat(43)}`, 'client', 'mute_reservation')),
+    ).be.rejectedWith(/already gone/u);
+    should(harness.objectState.sockets.at(-1)?.closed?.code).equal(RELAY_CLOSE_CODES.daemonAbsent);
+    should(releasedBy(hosted.calls)).deepEqual(['mute_reservation']);
+  });
+
   it('should leave self-hosted refusals free of any control-plane traffic', async () => {
     const harness = makeObject();
     await harness.object.fetch(socketRequest(`fy_daemon_${'a'.repeat(43)}`, 'client'));

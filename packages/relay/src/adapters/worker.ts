@@ -540,28 +540,44 @@ export class RendezvousDurableObject {
     return sockets;
   }
 
+  /**
+   * Carry out one transition, attempting every effect before reporting any failure.
+   *
+   * A refusal is two effects — say why, then close — and the close is the one that gives a hosted
+   * reservation back. Letting a throwing effect abandon the rest of the list meant a socket too far
+   * gone to be told why it was being refused kept its slot forever. So each effect is attempted on
+   * its own and the first failure is raised once the others have had their turn: nothing is
+   * swallowed, and a genuine forwarding failure is still an error, just not one that also costs the
+   * caller its accounting.
+   */
   private async applyStep(step: RendezvousStep): Promise<void> {
     await this.objectState.storage.put(STATE_KEY, step.state);
     const sockets = this.socketsById();
+    const failures: unknown[] = [];
     for (const effect of step.effects) {
-      switch (effect.kind) {
-        case 'send':
-          sockets.get(effect.socketId)?.send(toArrayBuffer(encodeFrame(effect.frame)));
-          break;
-        case 'close': {
-          // A state-machine refusal is still a socket this side closed, so it releases like any other.
-          const closing = sockets.get(effect.socketId);
-          if (closing !== undefined) await this.closeSocket(closing, effect.code, effect.reason);
-          break;
+      try {
+        switch (effect.kind) {
+          case 'send':
+            sockets.get(effect.socketId)?.send(toArrayBuffer(encodeFrame(effect.frame)));
+            break;
+          case 'close': {
+            // A state-machine refusal is still a socket this side closed, so it releases like any other.
+            const closing = sockets.get(effect.socketId);
+            if (closing !== undefined) await this.closeSocket(closing, effect.code, effect.reason);
+            break;
+          }
+          case 'schedule-alarm':
+            await this.objectState.storage.setAlarm(effect.at);
+            break;
+          case 'verify-claim':
+            await this.applyStep(reduceRendezvous(step.state, await this.judgeClaim(step.state, effect)));
+            break;
         }
-        case 'schedule-alarm':
-          await this.objectState.storage.setAlarm(effect.at);
-          break;
-        case 'verify-claim':
-          await this.applyStep(reduceRendezvous(step.state, await this.judgeClaim(step.state, effect)));
-          break;
+      } catch (error) {
+        failures.push(error);
       }
     }
+    if (failures.length !== 0) throw failures[0];
   }
 
   private async judgeClaim(
