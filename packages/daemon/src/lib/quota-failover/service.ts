@@ -134,10 +134,14 @@ export class QuotaFailoverService implements QuotaFailoverLoop {
 
   private async tick(): Promise<QuotaFailoverTickReport> {
     const at = new Date(this.parts.clock.nowMs()).toISOString();
-    const stored = await this.parts.config.read().catch(reason => {
-      throw new Error(`the quota-failover configuration could not be read: ${describe(reason)}`);
-    });
-    const { config, warnings } = parseStoredQuotaFailoverConfig(stored);
+    // Settled rather than awaited bare: a configuration document this daemon cannot read at all is a
+    // halt with a stated reason, not a rejection out of a background timer.
+    const read = await this.parts.config.read().then(
+      (value: unknown) => ({ ok: true as const, value }),
+      (reason: unknown) => ({ ok: false as const, reason }),
+    );
+    if (!read.ok) return halted(at, `the quota-failover configuration could not be read: ${describe(read.reason)}`, []);
+    const { config, warnings } = parseStoredQuotaFailoverConfig(read.value);
     // The disabled tick stops HERE, before the feed is touched. Reading the usage feed refreshes it,
     // and a switched-off subsystem must not be the reason a collector is probed every five minutes.
     if (!config.enabled) return halted(at, 'automatic quota failover is disabled (enabled=false)', warnings);
