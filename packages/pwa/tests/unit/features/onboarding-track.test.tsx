@@ -20,24 +20,26 @@ const click = async (target: Element): Promise<void> => {
 
 describe('the step track', () => {
   it('is a real ordered list with one current step', async () => {
-    const view = await mount(<OnboardingTrack current="daemon" furthest="daemon" onJump={() => {}} />);
+    const view = await mount(
+      <OnboardingTrack route="first-time" current="daemon" furthest="daemon" onJump={() => {}} />,
+    );
     const list = must(view.container.querySelector('ol'), 'the track');
 
     expect(list.getAttribute('aria-label')).toBe('Setup steps');
-    expect(list.querySelectorAll('li')).toHaveLength(4);
+    expect(list.querySelectorAll('li')).toHaveLength(5);
     expect(must(list.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Daemon');
     await view.unmount();
   });
 
   it('spells every state out for a reader who hears the list', async () => {
-    const view = await mount(<OnboardingTrack current="daemon" furthest="pair" onJump={() => {}} />);
+    const view = await mount(<OnboardingTrack route="first-time" current="daemon" furthest="pair" onJump={() => {}} />);
     const text = must(view.container.querySelector('ol'), 'the track').textContent ?? '';
 
     expect(text).toContain('current step');
     expect(text).toContain('completed, go back to it');
     expect(text).toContain('not reached yet');
     // A finished step swaps its number for a tick: state by shape, not by tone.
-    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(2);
+    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(3);
     // An unreached one is dashed for the same reason.
     expect(view.container.innerHTML).toContain('border-dashed');
     await view.unmount();
@@ -47,6 +49,7 @@ describe('the step track', () => {
     const jumped: string[] = [];
     const view = await mount(
       <OnboardingTrack
+        route="first-time"
         current="pair"
         furthest="pair"
         onJump={id => {
@@ -56,7 +59,7 @@ describe('the step track', () => {
     );
 
     // `done` is ahead of them, so it is not a control at all.
-    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(2);
+    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(3);
     expect(view.container.querySelector('[data-onboarding-jump="done"]')).toBeNull();
 
     await click(must(view.container.querySelector('[data-onboarding-jump="install"]'), 'the install step'));

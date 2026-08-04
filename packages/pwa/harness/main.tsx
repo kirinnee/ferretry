@@ -77,9 +77,12 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
-import type { OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
+import type { OnboardingRouteId, OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
-import { OnboardingProgressStore } from '../src/features/onboarding/onboarding-progress.ts';
+import {
+  ONBOARDING_PROGRESS_VERSION,
+  OnboardingProgressStore,
+} from '../src/features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
@@ -590,19 +593,45 @@ const HARNESS_NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await new Promise<string>(() => {}) };
 
 /**
- * One store per setup stage, so each card is a different point in the arc.
+ * One store per setup screen, so each card is a different point in a journey.
  *
- * Storage is deliberately absent: a review page must not write, or read, the
- * real reader's `fy-onboarding-v1` progress.
+ * Seeded through a READ-ONLY fake storage rather than through the store's
+ * `entry` option: `entry` names a route and lands on its first step, which is
+ * the right behaviour for an arrival and useless for a gallery that has to show
+ * the middle of one. The fake answers with a fixed document and swallows every
+ * write, so a review page can neither read nor overwrite the real reader's
+ * `fy-onboarding-v2` progress.
  */
-const harnessOnboarding = (entry: OnboardingStepId): OnboardingProgressStore =>
-  new OnboardingProgressStore({ storage: undefined, entry });
+const harnessOnboarding = (route: OnboardingRouteId, current: OnboardingStepId): OnboardingProgressStore =>
+  new OnboardingProgressStore({
+    storage: {
+      getItem: () =>
+        JSON.stringify({
+          v: ONBOARDING_PROGRESS_VERSION,
+          stage: 'walk',
+          route,
+          current,
+          furthest: current,
+        }),
+      setItem: () => {},
+    },
+    paired: true,
+  });
 
-const HARNESS_ONBOARDING: Readonly<Record<OnboardingStepId, OnboardingProgressStore>> = {
-  install: harnessOnboarding('install'),
-  daemon: harnessOnboarding('daemon'),
-  pair: harnessOnboarding('pair'),
-  done: harnessOnboarding('done'),
+/** The screens the gallery shows, named by what a reviewer is looking at. */
+type HarnessOnboardingScreen = 'choose' | 'install' | 'daemon' | 'connect' | 'brief' | 'pair' | 'scan' | 'done';
+
+const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
+  /* No document at all: the chooser is what a store with nothing stored resolves to. */
+  choose: new OnboardingProgressStore({ storage: undefined }),
+  install: harnessOnboarding('first-time', 'install'),
+  daemon: harnessOnboarding('first-time', 'daemon'),
+  connect: harnessOnboarding('first-time', 'connect'),
+  brief: harnessOnboarding('agent', 'brief'),
+  pair: harnessOnboarding('first-time', 'pair'),
+  /* The same step on the route that arrives holding a link: no `fy pair` to run. */
+  scan: harnessOnboarding('have-link', 'pair'),
+  done: harnessOnboarding('first-time', 'done'),
 };
 
 /** A clipboard the review page never actually needs to reach. */
@@ -1568,6 +1597,21 @@ function Shell() {
       ),
     },
     {
+      label: 'Setup — which of these are you',
+      render: () => (
+        <section aria-label="Setup entry chooser" id="harness-onboarding-choose">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.choose}
+            write={HARNESS_CLIPBOARD}
+            channel="apt"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
       label: 'Setup — install',
       render: () => (
         <section aria-label="Setup install step" id="harness-onboarding-install">
@@ -1593,6 +1637,61 @@ function Shell() {
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — choose how to reach it',
+      render: () => (
+        <section aria-label="Setup connect step" id="harness-onboarding-connect">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.connect}
+            write={HARNESS_CLIPBOARD}
+            channel="brew"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — brief your agent',
+      render: () => (
+        <section aria-label="Setup brief step" id="harness-onboarding-brief">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.brief}
+            write={HARNESS_CLIPBOARD}
+            channel="apt"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — arrived with a link',
+      render: () => (
+        <section aria-label="Setup scan step" id="harness-onboarding-scan">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.scan}
+            write={HARNESS_CLIPBOARD}
+            channel="curl"
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => (
+              <PairingScreen
+                embedded
+                connections={[]}
+                selectedDaemonId={null}
+                scanHost={HARNESS_SCAN_HOST}
+                onPair={async () => {}}
+                onRemove={() => {}}
+                onSelect={() => {}}
+              />
+            )}
           />
         </section>
       ),
@@ -3093,15 +3192,15 @@ function Shell() {
  * stacked gallery: Chrome clips the element shot to the fixed scroller, which
  * silently drops the top of the Install stage — brand, heading and all.
  */
-function OnboardingStageHarness({ step }: { readonly step: OnboardingStepId }) {
+function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboardingScreen }) {
   useAppViewport();
   return (
-    <div className="kt-shell overflow-y-auto" id={`harness-onboarding-${step}-page`}>
+    <div className="kt-shell overflow-y-auto" id={`harness-onboarding-${screen}-page`}>
       <OnboardingPage
-        progress={HARNESS_ONBOARDING[step]}
+        progress={HARNESS_ONBOARDING[screen]}
         write={HARNESS_CLIPBOARD}
         channel="curl"
-        fleetReady={step === 'done'}
+        fleetReady={screen === 'done'}
         onOpenFleet={() => {}}
         renderPairing={() => (
           <PairingScreen
@@ -3356,22 +3455,22 @@ function SessionWorkspaceHarness() {
   );
 }
 
-/** Hash fragments that replace the whole gallery with one setup stage. */
-const ONBOARDING_FRAGMENTS: Readonly<Record<string, OnboardingStepId>> = {
+/** Hash fragments that replace the whole gallery with one setup screen. */
+const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
   '#onboarding-keyboard': 'pair',
 };
 
 const host = document.getElementById('root');
 if (host) {
-  const stage = ONBOARDING_FRAGMENTS[window.location.hash];
+  const screen = ONBOARDING_FRAGMENTS[window.location.hash];
   createRoot(host).render(
     window.location.hash === '#session-workspace' ? (
       <SessionWorkspaceHarness />
-    ) : stage === undefined ? (
+    ) : screen === undefined ? (
       <Shell />
     ) : (
-      <OnboardingStageHarness step={stage} />
+      <OnboardingStageHarness screen={screen} />
     ),
   );
 }

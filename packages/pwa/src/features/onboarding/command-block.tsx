@@ -15,6 +15,14 @@
  * COLOUR IS NEVER THE ONLY SIGNAL. It speeds up a reader who can use it and
  * costs nothing to one who cannot: the text is unchanged, the copy control has
  * its own name, and no meaning is carried by hue alone.
+ *
+ * THE COMMAND IS THE LARGEST TEXT IN THE BLOCK, and larger than the prose around
+ * it. It was `text-meta` — 11px — which is the size this interface uses for
+ * badges and timestamps, and it is the wrong size for the one string a reader has
+ * to check character by character before pressing Enter on their own machine. It
+ * is now `text-title`, the same 15px the interface gives a session heading,
+ * because within this block the command IS the heading. The copy control stayed
+ * small in the same pass: the button was never the thing to read.
  */
 
 import { type CommandToken, type CommandTokenKind, tokenizeCommand } from './command-syntax.ts';
@@ -57,8 +65,8 @@ export interface CommandBlockProps {
  */
 export function CommandBlock({ command, copyLabel, write }: CommandBlockProps) {
   return (
-    <div className="flex min-w-0 items-start gap-1 rounded-control border border-code-border bg-code-bg py-1 pl-2 pr-1">
-      <pre className="m-0 min-w-0 flex-1 self-center overflow-x-auto overflow-y-hidden font-mono text-meta leading-base text-code-fg">
+    <div className="flex min-w-0 items-start gap-1 rounded-control border border-code-border bg-code-bg py-2 pl-2 pr-1">
+      <pre className="m-0 min-w-0 flex-1 self-center overflow-x-auto overflow-y-hidden font-mono text-title leading-base text-code-fg">
         <code>
           {tokenizeCommand(command).map((token: CommandToken) => (
             <span key={token.start} className={TONE[token.kind]}>

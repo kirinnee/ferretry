@@ -205,13 +205,29 @@ const settle = async (): Promise<void> => {
   });
 };
 
-/** Which stage of the setup guide is on the glass, if it is on the glass at all. */
+/** Which screen of the setup guide is on the glass, if it is on the glass at all. */
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
-  container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step');
+  container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
 
-/** Walks the setup stepper from install to the pairing stage. */
+/** Answers the opening question the way a reader does. */
+const chooseRoute = async (container: HTMLElement, route: string): Promise<void> => {
+  await interact(() =>
+    must(
+      container.querySelector<HTMLButtonElement>(`button[data-onboarding-route="${route}"]`),
+      `the ${route} answer`,
+    ).click(),
+  );
+};
+
+/**
+ * Walks the LONG route to pairing: the question, then install, daemon and the
+ * carrier choice. Deliberately not the two-tap "I have a link" answer — these
+ * tests are about the pairing surface behaving the same at the end of the full
+ * journey as it does in the picker.
+ */
 const advanceToPairing = async (container: HTMLElement): Promise<void> => {
-  for (let step = 0; step < 2; step += 1) {
+  await chooseRoute(container, 'first-time');
+  for (let step = 0; step < 3; step += 1) {
     await interact(() =>
       must(container.querySelector<HTMLButtonElement>('[data-onboarding-next]'), 'the next control').click(),
     );
@@ -225,22 +241,26 @@ const popTo = async (path: string): Promise<void> => {
 };
 
 describe('AppShell', () => {
-  it('renders the unpaired first run as the setup stepper', async () => {
+  it('asks an unpaired first run which of the three readers it is', async () => {
     const { reads, view } = await renderShell('/');
 
-    // A cold visitor has installed nothing, so the first screen teaches setup
-    // rather than demanding a pairing link they cannot produce yet.
+    // A cold visitor might have installed nothing, or might be holding a link
+    // somebody just sent them. The root cannot know, so the first screen asks
+    // rather than assuming one of them and hiding the other's steps.
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
-      'install',
-    );
-    // The sentence that used to say this is now the diagram that shows it.
-    expect(view.container.querySelector('[data-onboarding-diagram]')?.getAttribute('aria-label')).toContain(
-      'not yet linked',
-    );
+    expect(stepOfSetup(view.container)).toBe('choose');
+    expect(view.container.querySelectorAll('button[data-onboarding-route]')).toHaveLength(3);
     expect(view.container.querySelector('ul[aria-label="Paired daemons"]')).toBeNull();
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
     expect(reads).toEqual([]);
+
+    // Answering "first time" is what puts the install step, and the diagram
+    // that used to carry this sentence, on the glass.
+    await chooseRoute(view.container, 'first-time');
+    expect(stepOfSetup(view.container)).toBe('install');
+    expect(view.container.querySelector('[data-onboarding-diagram]')?.getAttribute('aria-label')).toContain(
+      'not yet linked',
+    );
     await view.unmount();
   });
 
@@ -248,11 +268,16 @@ describe('AppShell', () => {
     // Progress says the arc finished; the pairing registry — the authority on
     // that — holds nothing. A cleared registry, another profile, an abandoned
     // attempt: all of them make the stored claim unbelievable.
-    localStorage.setItem('fy-onboarding-v1', JSON.stringify({ v: 1, current: 'done', furthest: 'done' }));
+    localStorage.setItem(
+      'fy-onboarding-v2',
+      JSON.stringify({ v: 2, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+    );
 
     const { view } = await renderShell('/');
 
-    expect(stepOfSetup(view.container)).toBe('install');
+    // Back to the question, which is the honest reading of a claim no other
+    // store supports.
+    expect(stepOfSetup(view.container)).toBe('choose');
     expect(view.container.textContent).not.toContain('You are set up');
     await view.unmount();
   });
@@ -273,6 +298,30 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('replays the whole thing when a paired browser adds another machine', async () => {
+    // This browser finished setup — for a DIFFERENT host. Every new machine is a
+    // first-time setup for that machine, so "set up another machine" must not
+    // resume the last screen of a journey completed for a laptop.
+    localStorage.setItem(
+      'fy-onboarding-v2',
+      JSON.stringify({ v: 2, stage: 'walk', route: 'first-time', current: 'done', furthest: 'done' }),
+    );
+    const { view } = await renderShell('/', [alpha.daemonId]);
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-pairing-setup]'), 'the setup link').click(),
+    );
+
+    expect(stepOfSetup(view.container)).toBe('choose');
+
+    // And the instructions are the same ones, replayed rather than a second copy
+    // of them: install, the daemon, the carrier choice, then pairing.
+    await chooseRoute(view.container, 'first-time');
+    expect(stepOfSetup(view.container)).toBe('install');
+    expect(view.container.textContent).toContain('fy --version');
+    await view.unmount();
+  });
+
   it('keeps /setup reachable, and reload-durable, for a browser that is already paired', async () => {
     const { view } = await renderShell('/setup', [alpha.daemonId]);
 
@@ -288,7 +337,7 @@ describe('AppShell', () => {
 
     // A camera app opening this link IS the setup journey arriving at its third
     // stage — not a picker with a banner on it.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
       'pair',
     );
     expect(window.location.hash).toBe('');
@@ -303,7 +352,7 @@ describe('AppShell', () => {
 
     // Finishes in the guide, keeps the daemon this browser already had, and
     // leaves only when the reader says so.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
       'done',
     );
     const snapshot = store.connections.getSnapshot();
@@ -1003,7 +1052,7 @@ describe('the connection picker slot', () => {
     // An unpaired browser opened from a QR is in the setup guide — but the
     // arrival puts it straight on the pairing stage, with the confirmation and
     // the fragment hygiene of the standalone screen unchanged.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
       'pair',
     );
     expect(view.container.textContent).toContain('Pair this device?');
@@ -1024,7 +1073,7 @@ describe('the connection picker slot', () => {
     expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual(['gamma']);
     // Setup finishes on its own last stage rather than teleporting the reader
     // out of the guide the moment the exchange lands.
-    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-step')).toBe(
+    expect(view.container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen')).toBe(
       'done',
     );
     expect(window.location.pathname).toBe('/pair');

@@ -1,8 +1,8 @@
 /**
  * Build the REAL bundle, serve `dist/` on an ephemeral loopback port, and
  * screenshot the running app — the brand surfaces at both viewports in both
- * colour schemes, and the first-run setup stepper in the five states that
- * actually differ.
+ * colour schemes, and first-run in every state that actually differs: the
+ * chooser, and each step of each of the three routes it leads to.
  *
  * This is the other half of `harness/screenshot.ts`, not a replacement for it.
  * That one bundles `harness/main.tsx`: a stacked gallery of every ported surface,
@@ -22,9 +22,9 @@
  *   - COLOUR SCHEME. `pre-paint.js` resolves the theme from `prefers-color-scheme`
  *     before first paint, so light mode is a different first frame rather than a
  *     class toggle. It has to be emulated at the context, not the DOM.
- *   - A ROUTE'S REAL STATE. The setup stepper's steps are reached by clicking,
- *     and its pairing step reacts to the software keyboard. Neither is a prop you
- *     can set from outside; both have to be driven.
+ *   - A ROUTE'S REAL STATE. First-run's steps are reached by answering a question
+ *     and then clicking, and its pairing step reacts to the software keyboard.
+ *     Neither is a prop you can set from outside; both have to be driven.
  *
  * Dev-only, never runs in CI, and nothing it writes is committed —
  * `harness/out/` is gitignored. Every request that leaves the loopback origin is
@@ -79,9 +79,11 @@ const KEYBOARD_VISUAL_HEIGHT = 430;
 /** The favicon magnification factor, matching the `-at-12x` proofs in `docs/brand`. */
 const MAGNIFY = 12;
 
-/** The setup stepper's root, and the attribute that names the step it is on. */
+/** The setup screen's root, and the attribute that names what is on the glass. */
 const SETUP_ROOT = '[data-onboarding="setup"]';
-const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-step="${step}"]`;
+const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-screen="${step}"]`;
+/** The chooser: the one screen that belongs to no route yet. */
+const SETUP_CHOOSER = `${SETUP_ROOT}[data-onboarding-route="none"]`;
 
 /**
  * The pairing arrival used for the Done capture. A fabricated single-use code
@@ -432,7 +434,7 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<install|daemon|pair|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
+          '    setup-<chooser|install|daemon|connect|pair|brief|scan|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
     } else {
@@ -445,14 +447,39 @@ try {
        * frame — the stepper opens on `install` rather than wherever a previous
        * visit left it.
        */
-      const ADVANCES = { install: 0, daemon: 1, pair: 2 } as const;
-      const toStep = async (page: Page, step: keyof typeof ADVANCES): Promise<void> => {
+      /*
+       * EVERY CAPTURE STARTS AT THE QUESTION, because every reader does. The
+       * route is entered by clicking its own answer on the chooser, so a shot
+       * named `brief` proves that the agent answer really leads there — a seeded
+       * store would prove only that the component renders.
+       */
+      const JOURNEYS = [
+        { name: 'install', route: 'first-time', advances: 0, screen: 'install' },
+        { name: 'daemon', route: 'first-time', advances: 1, screen: 'daemon' },
+        { name: 'connect', route: 'first-time', advances: 2, screen: 'connect' },
+        { name: 'pair', route: 'first-time', advances: 3, screen: 'pair' },
+        { name: 'brief', route: 'agent', advances: 0, screen: 'brief' },
+        /* The same step, the other framing: arrived holding a link, nothing to run. */
+        { name: 'scan', route: 'have-link', advances: 0, screen: 'pair' },
+      ] as const;
+
+      const toChooser = async (page: Page): Promise<void> => {
         await open(page, '/setup');
-        await page.locator(setupStep('install')).waitFor({ state: 'visible' });
-        for (let advance = 0; advance < ADVANCES[step]; advance += 1) {
+        await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
+      };
+
+      const toStep = async (page: Page, journey: (typeof JOURNEYS)[number]): Promise<void> => {
+        await toChooser(page);
+        await page.locator(`button[data-onboarding-route="${journey.route}"]`).click();
+        for (let advance = 0; advance < journey.advances; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
         }
-        await page.locator(setupStep(step)).waitFor({ state: 'visible' });
+        await page.locator(setupStep(journey.screen)).waitFor({ state: 'visible' });
+      };
+      const journey = (name: (typeof JOURNEYS)[number]['name']): (typeof JOURNEYS)[number] => {
+        const found = JOURNEYS.find(candidate => candidate.name === name);
+        if (found === undefined) fail(`no such setup journey: ${name}`);
+        return found;
       };
 
       /**
@@ -465,22 +492,45 @@ try {
       const contextFor = (viewport: (typeof VIEWPORTS)[number]): BrowserContextOptions =>
         viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
 
-      // 1. EVERY STEP THE READER CLICKS TO, AT BOTH VIEWPORTS. `done` is not one
-      // of them: it is reached by a daemon answering, and is captured below.
-      for (const step of ['install', 'daemon', 'pair'] as const) {
+      // 1. THE QUESTION ITSELF, AT BOTH VIEWPORTS. It is the screen everything
+      // else is reached through, and the one the reader is asked to recognise
+      // themselves in.
+      for (const viewport of VIEWPORTS) {
+        await capture(contextFor(viewport), async page => {
+          await toChooser(page);
+          await shot(page, `setup-chooser-${viewport.name}`);
+        });
+      }
+
+      // 2. EVERY STEP OF EVERY ROUTE THE READER CLICKS TO, AT BOTH VIEWPORTS.
+      // `done` is not one of them: it is reached by a daemon answering, and is
+      // captured below.
+      for (const step of JOURNEYS) {
         for (const viewport of VIEWPORTS) {
           await capture(contextFor(viewport), async page => {
             await toStep(page, step);
-            await shot(page, `setup-${step}-${viewport.name}`);
+            await shot(page, `setup-${step.name}-${viewport.name}`);
           });
         }
       }
 
+      // 2b. THE CARRIER THAT CHANGES THE MOST. Direct is the default and is
+      // captured above; the deploy-your-own-relay branch is the one whose steps
+      // and commands actually differ, so it gets its own frame at both widths.
+      for (const viewport of VIEWPORTS) {
+        await capture(contextFor(viewport), async page => {
+          await toStep(page, journey('connect'));
+          await page.locator('[data-onboarding-method="own-relay"]').click();
+          await page.locator('[data-onboarding-method-caveat]').waitFor({ state: 'visible' });
+          await shot(page, `setup-relay-${viewport.name}`);
+        });
+      }
+
       const toPairStep = async (page: Page): Promise<void> => {
-        await toStep(page, 'pair');
+        await toStep(page, journey('pair'));
       };
 
-      // 2. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
+      // 3. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
       // this is a synthetic visual viewport and not a smaller window.
       await capture(PHONE_CONTEXT, async page => {
         await page.addInitScript(VISUAL_VIEWPORT_SCRIPT);
@@ -598,7 +648,7 @@ try {
         if (fit.gate) defects.push('the portrait gate mounted over an upright phone with its keyboard open');
       });
 
-      // 3. A SUCCESSFUL PAIRING, ending on `done`, at both viewports. The arrival
+      // 4. A SUCCESSFUL PAIRING, ending on `done`, at both viewports. The arrival
       // seeds the stepper at `pair`, so this is the path a phone's ordinary
       // camera app produces — and the only honest way to reach `done`, which no
       // button on this page may declare.

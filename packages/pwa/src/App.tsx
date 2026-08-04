@@ -23,7 +23,7 @@ import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
-import { OnboardingProgressStore } from './features/onboarding/onboarding-progress.ts';
+import { OnboardingProgressStore, resetOnboardingProgress } from './features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -278,7 +278,20 @@ function ConnectionPicker() {
       onRemove={daemonId => {
         store.connections.remove(daemonId);
       }}
-      onOpenSetup={() => navigate(setupPath())}
+      /*
+       * ADDING A MACHINE REPLAYS THE WHOLE THING.
+       *
+       * Somebody here has a working pairing, so their stored progress says
+       * "finished" — for a DIFFERENT host. Every new machine is a first-time
+       * setup for that machine: it needs the install, the daemon, the carrier
+       * choice and the pairing again, and resuming the last screen of a journey
+       * they completed for a laptop is the one thing that cannot help them. So
+       * the place is forgotten first, and the setup route opens on its question.
+       */
+      onOpenSetup={() => {
+        resetOnboardingProgress();
+        navigate(setupPath());
+      }}
     />
   );
 }
@@ -304,8 +317,10 @@ function SetupGuide() {
   const scanHost = useMemo(browserQrScan, []);
   const takeArrival = useCallback(takeArrivalFromLocation, []);
   /*
-   * A tab opened FROM a pairing link is past install and daemon whatever
-   * storage remembers, so the arrival decides where it lands.
+   * A tab opened FROM a pairing link IS the "I have a link" reader, whatever
+   * storage remembers — it demonstrably has one. So the arrival answers the
+   * chooser's question on their behalf rather than asking somebody holding a
+   * live, two-minute code which of three people they are.
    *
    * `paired` is read here, at hydration, and deliberately not tracked: it
    * decides only whether a stored "finished" is believable for a browser that
@@ -316,7 +331,7 @@ function SetupGuide() {
     () =>
       new OnboardingProgressStore({
         paired: snapshot.connections.length > 0,
-        ...(arrival.kind === 'none' ? {} : { entry: 'pair' as const }),
+        ...(arrival.kind === 'none' ? {} : { entry: 'have-link' as const }),
       }),
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);

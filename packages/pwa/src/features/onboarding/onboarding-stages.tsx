@@ -1,5 +1,5 @@
 /**
- * THE FOUR STAGES: heading, one command, one action.
+ * THE STAGES: heading, one command, one action.
  *
  * Each stage used to carry its command plus two or three paragraphs explaining
  * the command, and the paragraphs are what made the screen unreadable — they sat
@@ -11,6 +11,16 @@
  * NOTHING HONEST WAS DROPPED to get there. The verification command, the healthy
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
+ *
+ * THE AGENT PATH IS NOT A STAGE ANNEXE ANY MORE. It used to hide in an install
+ * aside labelled "Check it, or let an agent do it", which put an entire
+ * alternative journey behind the same disclosure as a version check. It is now a
+ * route of its own with its own step, `BriefStage`, and the install aside is back
+ * to being what it says: how to check.
+ *
+ * EVERY STAGE HERE IS REUSED BY EVERY ROUTE THAT NEEDS IT, including "set up
+ * another machine" — a second copy of the daemon instructions is a second copy to
+ * keep true, and one of the two would be wrong within a release.
  */
 
 import { ExternalLink } from 'lucide-react';
@@ -20,22 +30,27 @@ import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
   AGENT_SETUP_PROMPT,
+  CONNECTION_METHODS,
+  type ConnectionMethodId,
+  connectionMethod,
+  DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
   DAEMON_STATUS_COMMAND,
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
+  NO_DEFAULT_RELAY_NOTE,
   PAIR_COMMAND,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
 
 const STAGE = 'flex min-w-0 flex-col gap-2';
 
-const CHANNEL =
-  'h-8 rounded-control border px-2 text-meta focus-visible:outline-focus focus-visible:outline-offset-focus';
+const CHOICE =
+  'min-h-[36px] rounded-control border px-2 text-meta focus-visible:outline-focus focus-visible:outline-offset-focus';
 
-const CHANNEL_TONE = {
+const CHOICE_TONE = {
   on: 'border-accent bg-accent-bg font-semibold text-fg',
   off: 'border-border bg-surface-2 text-muted',
 } as const;
@@ -61,26 +76,6 @@ function Aside({ summary, children }: { readonly summary: string; readonly child
   );
 }
 
-interface CopyRowProps {
-  /** What the reader sees. */
-  readonly label: string;
-  /** What the control is called. Spelled out rather than derived from the label,
-   * which would produce names like "Copy setup prompt for an ai agent". */
-  readonly copyLabel: string;
-  readonly text: string;
-  readonly write: ClipboardWriter;
-}
-
-/** A labelled copy for text that is not a command and would be absurd to print. */
-function CopyRow({ label, copyLabel, text, write }: CopyRowProps) {
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-control border border-border bg-surface py-1 pl-2 pr-1">
-      <span className="min-w-0 flex-1 truncate text-meta text-fg">{label}</span>
-      <CopyButton text={text} label={copyLabel} write={write} />
-    </div>
-  );
-}
-
 export function InstallStage({
   write,
   channel,
@@ -89,25 +84,28 @@ export function InstallStage({
   readonly channel: InstallChannelId;
 }) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
+  const chosen = installChannel(selected);
   return (
     <div className={STAGE}>
       {/*
         A row of buttons that swaps what is shown below it. `role="toolbar"`
         rather than a tablist: there is no tab panel per option, and rather than
         a bare labelled div, which is not a nameable element.
-      */}
-      {/*
-        A GRID, NOT A WRAPPING ROW. Four labels of different widths wrap into a
-        ragged 3 + 1 on a phone, which reads as a mistake rather than a choice.
-        Two even columns are the same information with no ambiguity, and the row
-        the widths do fit on gets all four.
+
+        A GRID, NOT A WRAPPING ROW. Labels of different widths wrap into a ragged
+        last row, which reads as a mistake rather than a choice. The four NAMED
+        routes take two even columns on a phone and one row on anything wider;
+        the fallback spans the full width beneath them, which is both tidy and
+        true — it is the route for machines the named ones do not cover.
       */}
       <div role="toolbar" aria-label="Install method" className="grid grid-cols-2 gap-1 sm:grid-cols-4">
         {INSTALL_CHANNELS.map(option => (
           <button
             key={option.id}
             type="button"
-            className={`${CHANNEL} ${option.id === selected ? CHANNEL_TONE.on : CHANNEL_TONE.off}`}
+            className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off} ${
+              option.fallback === undefined ? '' : 'col-span-2 sm:col-span-4'
+            }`}
             aria-pressed={option.id === selected}
             onClick={() => setSelected(option.id)}
             data-onboarding-channel={option.id}
@@ -117,19 +115,23 @@ export function InstallStage({
         ))}
       </div>
 
-      <CommandBlock command={installChannel(selected).command} copyLabel="Copy install command" write={write} />
+      <CommandBlock command={chosen.command} copyLabel="Copy install command" write={write} />
 
-      <Aside summary="Check it, or let an agent do it">
-        <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
-        <CopyRow
-          label="Setup prompt for an AI agent"
-          copyLabel="Copy setup prompt"
-          text={AGENT_SETUP_PROMPT}
-          write={write}
-        />
-        <p className="m-0 text-meta leading-base text-muted">
-          Generic setup text — it says nothing about you, this browser, or any daemon.
+      {/*
+        Said only for the fallback, and only when it is showing: a reader who
+        picked `brew` does not need to be told what the script would have done,
+        and a reader who landed on the script does need to know that a first-class
+        route may exist for their machine.
+      */}
+      {chosen.fallback === undefined ? null : (
+        <p className="m-0 text-meta leading-base text-muted" data-onboarding-fallback-note="">
+          The generic fallback. It works on every supported target — but if your machine is named above, that route is
+          packaged and, on macOS, clears the Gatekeeper quarantine for you.
         </p>
+      )}
+
+      <Aside summary="Check it landed">
+        <CommandBlock command={VERIFY_COMMAND} copyLabel="Copy check" write={write} />
       </Aside>
     </div>
   );
@@ -145,6 +147,125 @@ export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
           A healthy daemon prints <code className="font-mono text-syn-string">{DAEMON_SERVING_OUTPUT}</code>.
         </p>
       </Aside>
+      <Aside summary="Keep it running after a reboot">
+        <CommandBlock command={DAEMON_INSTALL_COMMAND} copyLabel="Copy service command" write={write} />
+        <p className="m-0 text-meta leading-base text-muted">
+          Installs the user service and starts the daemon under it.
+        </p>
+      </Aside>
+    </div>
+  );
+}
+
+export interface ConnectStageProps {
+  readonly write: ClipboardWriter;
+  /** Which carrier is shown first. Direct, because direct is better whenever it works. */
+  readonly method: ConnectionMethodId;
+}
+
+/**
+ * HOW A BROWSER REACHES A DAEMON — and the one choice that rewrites the rest.
+ *
+ * There are three carriers and they do not need the same work: direct needs
+ * nothing deployed, your own relay needs four commands and a Cloudflare account,
+ * your own implementation needs the protocol document. So this stage does not
+ * merely record a preference — the instructions BELOW the choice are the
+ * choice's, and they change with it. That is why this is its own step rather
+ * than a switch inside the daemon step: a set of instructions that changes is a
+ * page, not a toggle.
+ *
+ * There is deliberately no fourth option reading "use the Ferretry relay",
+ * because there is no such thing. `NO_DEFAULT_RELAY_NOTE` says why, in the
+ * disclosure, rather than leaving a reader to wonder what the default is.
+ */
+export function ConnectStage({ write, method }: ConnectStageProps) {
+  const [selected, setSelected] = useState<ConnectionMethodId>(method);
+  const chosen = connectionMethod(selected);
+  return (
+    <div className={STAGE}>
+      <div role="toolbar" aria-label="Connection method" className="grid grid-cols-1 gap-1 sm:grid-cols-3">
+        {CONNECTION_METHODS.map(option => (
+          <button
+            key={option.id}
+            type="button"
+            className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off}`}
+            aria-pressed={option.id === selected}
+            onClick={() => setSelected(option.id)}
+            data-onboarding-method={option.id}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      <p className="m-0 text-meta leading-base text-muted" data-onboarding-method-answer={chosen.id}>
+        {chosen.answer}
+      </p>
+
+      {/*
+        A REAL ORDERED LIST. These are numbered steps in a sequence, so they are
+        an `<ol>`; the numbers are the marker rather than something drawn, and a
+        reader who hears the page hears "3 of 4" without us saying it.
+      */}
+      <ol className="m-0 flex list-decimal flex-col gap-2 pl-5 text-meta leading-base text-muted">
+        {chosen.instructions.map(instruction => (
+          <li key={instruction.text} className="min-w-0">
+            <p className="m-0 mb-1 text-meta leading-base text-fg">{instruction.text}</p>
+            {instruction.command === undefined ? null : (
+              <CommandBlock
+                command={instruction.command}
+                copyLabel={instruction.copyLabel ?? 'Copy command'}
+                write={write}
+              />
+            )}
+          </li>
+        ))}
+      </ol>
+
+      {chosen.caveat === undefined ? null : (
+        <p className="m-0 text-meta leading-base text-warn" data-onboarding-method-caveat="">
+          {chosen.caveat}
+        </p>
+      )}
+
+      <Aside summary="Why is there no default relay?">
+        <p className="m-0 text-meta leading-base text-muted">{NO_DEFAULT_RELAY_NOTE}</p>
+      </Aside>
+    </div>
+  );
+}
+
+/**
+ * THE AGENT ROUTE'S OWN STEP: one prompt, shown in full, one tap to copy.
+ *
+ * The prompt is on the glass rather than behind a disclosure because a reader is
+ * about to hand it to something that has a shell on their machine, and "copy
+ * this text I will not show you" is not a thing to ask of anybody. It is also
+ * generic by construction — it names no host, no user and no daemon — and seeing
+ * that for themselves is the point.
+ */
+export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
+  return (
+    <div className={STAGE}>
+      <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
+        <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">
+          <span className="min-w-0 flex-1 truncate text-meta font-semibold text-fg">Setup prompt for an AI agent</span>
+          <CopyButton text={AGENT_SETUP_PROMPT} label="Copy setup prompt" write={write} />
+        </div>
+        {/*
+          Scrolls inside its own box: it is thirty lines, and a stage that grows
+          to thirty lines pushes its own next action off a phone.
+        */}
+        <pre
+          className="m-0 max-h-56 overflow-auto px-2 py-2 font-mono text-meta leading-base text-code-fg"
+          data-onboarding-prompt=""
+        >
+          <code>{AGENT_SETUP_PROMPT}</code>
+        </pre>
+      </div>
+      <p className="m-0 text-meta leading-base text-muted">
+        It says nothing about you, this browser, or any daemon. When your agent shows you the QR or the link, continue.
+      </p>
     </div>
   );
 }
@@ -163,6 +284,30 @@ export function PairStage({ write, pairing }: { readonly write: ClipboardWriter;
       <div className="min-w-0" data-onboarding-pairing="">
         {pairing}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The pair step WITHOUT the command, for the reader who already has a link.
+ *
+ * Somebody whose camera just opened this page has nothing to run: printing
+ * `fy pair` at them describes a thing that has already happened, on a machine
+ * they may not be standing at. The pairing surface itself is the same one, and
+ * is not forked.
+ */
+export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
+  return (
+    <div className={STAGE}>
+      <div className="min-w-0" data-onboarding-pairing="">
+        {pairing}
+      </div>
+      <Aside summary="No link yet?">
+        <p className="m-0 text-meta leading-base text-muted">
+          Run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> on the machine that runs the daemon. It
+          prints a QR code and a link — one use, about two minutes.
+        </p>
+      </Aside>
     </div>
   );
 }

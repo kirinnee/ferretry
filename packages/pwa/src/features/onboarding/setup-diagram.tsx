@@ -47,6 +47,30 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'The daemon is starting on your machine. This browser is not linked to it yet.',
   },
+  /*
+   * The one step that is about the LINE, not the ends. Choosing a carrier decides
+   * how the two will reach each other, so the link is what lights up while both
+   * ends rest — and it is still dashed, because deciding is not connecting.
+   */
+  connect: {
+    machine: 'fyd running',
+    browser: 'waiting',
+    lit: { machine: false, browser: false, link: true },
+    linked: false,
+    label: 'Choosing how this browser will reach the daemon on your machine. They are not linked yet.',
+  },
+  /*
+   * Nobody is at the machine on this route — an agent is. The figure says so by
+   * lighting the machine end while the browser rests, exactly as install does,
+   * because from this browser's point of view they are the same situation.
+   */
+  brief: {
+    machine: 'agent working',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'An agent is setting Ferretry up on your machine. This browser is not linked to it yet.',
+  },
   pair: {
     machine: 'fyd running',
     browser: 'pairing',
