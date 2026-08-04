@@ -643,7 +643,7 @@ describe('the agent setup prompt', () => {
     // either installs a second one nobody asked for or skips the step as obviously
     // fine, and neither answer tells the human anything.
     for (const prompt of both) {
-      expect(prompt).toContain('CHECK rather than assume');
+      expect(prompt).toContain('check and not an install');
       for (const harness of AGENT_HARNESSES) {
         expect(prompt).toContain(harness.check);
         expect(prompt).toContain(harness.command);
@@ -654,7 +654,36 @@ describe('the agent setup prompt', () => {
       expect(prompt).toContain('install exactly one of these');
       // And it happens before the daemon boots, so the daemon's own report at boot
       // is about a machine that can already run something.
-      expect(prompt.indexOf('CHECK rather than assume')).toBeLessThan(prompt.indexOf(DAEMON_START_COMMAND));
+      expect(prompt.indexOf('check and not an install')).toBeLessThan(prompt.indexOf(DAEMON_START_COMMAND));
+    }
+  });
+
+  it('tells the agent it IS one of them, so it never reinstalls itself', () => {
+    // The reader of this text is by definition one of the two things it is about.
+    // An agent that reads "install a harness" and dutifully installs the harness it
+    // already IS produces a screenshot nobody wants to see — so the instruction is
+    // guarded twice: named a check, and gated on NEITHER command answering.
+    for (const prompt of both) {
+      expect(prompt).toContain('YOU ARE ONE OF THEM, so this is a check and not an install');
+      expect(prompt).toContain('do not reinstall yourself');
+      expect(prompt).toContain('ONLY if neither answers');
+      // The check comes before any install command in the text, so an agent reading
+      // top to bottom meets the guard first.
+      for (const harness of AGENT_HARNESSES) {
+        expect(prompt.indexOf('do not reinstall yourself')).toBeLessThan(prompt.indexOf(harness.command));
+      }
+    }
+  });
+
+  it('says why the check is worth running even though the reader is a harness', () => {
+    // Ferretry launches an EXECUTABLE, so what matters is one on PATH rather than
+    // the route by which an agent reaches the human — and in that case installing
+    // one is exactly right rather than redundant.
+    for (const prompt of both) {
+      expect(prompt).toContain('Ferretry launches an');
+      expect(prompt).toContain('EXECUTABLE');
+      expect(prompt).toContain('not the way you happen');
+      expect(prompt).toContain('An IDE extension, a wrapper or a remote session');
     }
   });
 

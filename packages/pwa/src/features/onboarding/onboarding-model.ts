@@ -928,36 +928,48 @@ const reportBack = (target: SetupTargetId, step: number): readonly string[] =>
       ];
 
 /**
- * THE STEP THAT ASKS THE AGENT TO CHECK ITSELF.
+ * THE STEP THAT ASKS THE AGENT TO CHECK ITSELF, AND NOT TO REINSTALL ITSELF.
  *
- * The prompt is being pasted INTO Claude or Codex, so one harness is there by
- * definition — which is exactly why this says CONFIRM rather than install. An
- * agent told "install a harness" would either install a second one nobody asked
- * for or skip the step on the reasoning that it is obviously fine, and neither
- * answer tells the human anything.
+ * The prompt is being pasted INTO Claude or Codex, so the reader of this text is by
+ * definition one of the two things it is about — which is why it says CONFIRM. The
+ * failure to design against is not subtle: an agent that reads "install a harness"
+ * and dutifully installs the harness it already IS produces a screenshot nobody
+ * wants to see, and tells the human nothing they did not know.
  *
- * IT IS NOT OBVIOUSLY FINE, either: an agent can reach a machine without its own
- * executable being on that machine's `PATH` — an IDE extension, a wrapper, a
- * remote session over SSH. The check is cheap, and it is the only thing that turns
- * an assumption into a report.
+ * SO THE FIRST THING IT SAYS IS "YOU ARE ONE OF THEM", and the instruction to
+ * install is guarded twice — by naming it a check rather than an install, and by
+ * gating it on NEITHER command answering.
+ *
+ * IT IS STILL NOT OBVIOUSLY FINE, which is the reason to check rather than assume:
+ * Ferretry launches an EXECUTABLE, so what matters is `claude` or `codex` on this
+ * machine's `PATH` — not the route by which an agent happens to be reaching the
+ * human. An IDE extension, a wrapper or a remote session all arrive without either
+ * executable being there, and in that case installing one is exactly right.
  *
  * AND IT REFUSES TO SIGN ANYBODY IN. A version string proves an executable exists;
  * it says nothing about an account. An agent that tried to authenticate on the
- * human's behalf would be doing the one thing on this page nobody delegated.
+ * human's behalf would be doing the one thing on this page nobody delegated — and
+ * somebody who is on `PATH` but not authenticated otherwise meets a baffling
+ * failure at the moment they first try to run an agent, which is the worst possible
+ * moment to learn it.
  */
 const confirmHarness = (step: number): readonly string[] => [
   `${step}. Confirm this machine can actually run agents. Ferretry RUNS Claude Code and Codex — it is`,
   '   neither of them — and a daemon with both missing starts perfectly and can run nothing.',
-  '   - You are one of them, so CHECK rather than assume: an IDE extension, a wrapper or a remote',
-  "     session can all reach me without either executable being on this machine's PATH.",
-  `   - Run ${AGENT_HARNESSES.map(harness => harness.check).join(' and ')}. If at least one answers, that`,
-  '     is enough — tell me which, and go on.',
-  '   - If neither answers, install exactly one of these and tell me which you chose:',
+  '   - YOU ARE ONE OF THEM, so this is a check and not an install. If your own command answers, you',
+  '     are the harness: do not reinstall yourself.',
+  '   - It can still be missing, which is why you check rather than assume. Ferretry launches an',
+  "     EXECUTABLE, so what matters is one of these on this machine's PATH — not the way you happen",
+  '     to be reaching me. An IDE extension, a wrapper or a remote session all arrive without it.',
+  `   - Run ${AGENT_HARNESSES.map(harness => harness.check).join(' and ')}. If at least one answers, that is`,
+  '     enough — tell me which one, and go on.',
+  '   - ONLY if neither answers, install exactly one of these and tell me which you chose:',
   '',
   /* Nested one level deeper than the `fy` channels above, because it is inside a sub-bullet. */
   ...AGENT_HARNESSES.flatMap(harness => [`     ${harness.label}:`, `       ${harness.command}`, '']),
   '   - Being on PATH is not being signed in, and signing in is mine to do. If the one you found or',
-  '     installed still needs an account, say so plainly instead of attempting it.',
+  '     installed still needs an account, say so plainly instead of attempting it — I would rather',
+  '     hear it now than meet it the first time I try to run something.',
 ];
 
 /**

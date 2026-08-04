@@ -220,10 +220,16 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
 export function AgentsStage({ write }: { readonly write: ClipboardWriter }) {
   return (
     <div className={STAGE}>
+      {/*
+        AND IT SAYS SO TO SOMEBODY WHO ALREADY HAS ONE. A developer who uses Claude
+        Code daily is the likeliest reader of this page, and a step that only knows
+        how to say "install this" invites them to reinstall something they have. The
+        check below is the whole task for them, and this line points at it.
+      */}
       <p className="m-0 text-meta leading-base text-muted">
         Ferretry runs your agents; it is not one. Install{' '}
         <strong className="font-semibold text-fg">at least one</strong> of these on this machine — both is fine, one is
-        enough.
+        enough. Already have one? Check it below and move on.
       </p>
       {AGENT_HARNESSES.map(harness => (
         <div key={harness.id} className="flex min-w-0 flex-col gap-1" data-onboarding-harness={harness.id}>
