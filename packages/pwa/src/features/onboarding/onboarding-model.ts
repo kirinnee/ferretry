@@ -310,7 +310,8 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     id: 'agents' as const,
     title: 'Install Claude Code or Codex',
     short: 'Agents',
-    summary: 'Ferretry runs these. One of them is enough.',
+    /* Not "Ferretry runs these", which the line under it says better and once. */
+    summary: 'One of them is enough. Both is fine.',
   }),
   daemon: Object.freeze({
     id: 'daemon' as const,
