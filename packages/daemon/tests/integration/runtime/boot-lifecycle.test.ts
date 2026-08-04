@@ -2145,11 +2145,15 @@ describe('daemon boot lifecycle', () => {
     const analytics = `http://127.0.0.1:${port}/v1/analytics`;
 
     // Act
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const settling = await fetch(analytics, { headers }).then(async response => await response.json());
-      if ((settling as { index: { refreshing: boolean } }).index.refreshing === false) break;
-      await Bun.sleep(50);
+    let settled = false;
+    for (let attempt = 0; attempt < 200 && !settled; attempt += 1) {
+      const settling = AnalyticsResponseSchema.parse(
+        await fetch(analytics, { headers }).then(async response => await response.json()),
+      );
+      settled = settling.index.sessions === 1 && !settling.index.refreshing;
+      if (!settled) await Bun.sleep(50);
     }
+    should(settled).be.true();
     const grouped = await fetch(`${analytics}?q=${encodeURIComponent('sum by (id)')}`, { headers });
     const raw = await fetch(`${analytics}?q=${encodeURIComponent('{status=completed}')}`, { headers });
     const refused = await fetch(`${analytics}?q=${encodeURIComponent('sum by (nonsense)')}`, { headers });
@@ -2189,7 +2193,9 @@ describe('daemon boot lifecycle', () => {
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');
-  });
+    // Longer than the suite default because this case waits for a background pass rather than for a
+    // request: it boots a real daemon, lets the ingestion sweep catch up, and only then asks.
+  }, 30_000);
 
   /**
    * The terminal lifecycle, driven through the production composition root over a real socket.
