@@ -23,29 +23,46 @@
  */
 
 import {
+  bytesEqual,
+  decodeClaim,
   decodeFrame,
+  encodeControlMessage,
   encodeFrame,
+  FRAME_KINDS,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
+  type HostedRelayDecision,
   initialRendezvousState,
-  parseRendezvousPath,
+  NONCE_BYTES,
   parseRelayTenancy,
-  reduceRendezvous,
+  parseRendezvousPath,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
+  RENDEZVOUS_SESSION_ID,
   type RelayCrypto,
   type RendezvousEvent,
   type RendezvousState,
   type RendezvousStep,
-  NONCE_BYTES,
+  reduceRendezvous,
   SESSION_ID_BYTES,
-  sessionIdFromBytes,
   servesDaemon,
+  sessionIdFromBytes,
   toBase64Url,
+  utf8Bytes,
   verifyRendezvousClaim,
-  decodeClaim,
 } from '../lib/index.ts';
+import {
+  HOSTED_RELAY_OPERATOR_CONFIG_PATH,
+  HOSTED_RELAY_OPERATOR_METRICS_PATH,
+  HOSTED_RELAY_PUBLIC_PATH,
+  type HostedRelayControlNamespace,
+  hostedRelayControlStub,
+  releaseHostedRelayReservation,
+  requestHostedRelayDecision,
+} from './hosted-control.ts';
 import { WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
+
+export { HostedRelayControlDurableObject } from './hosted-control.ts';
 
 // ─── the slice of the Workers runtime this adapter uses ───────────────────────────────────────
 
@@ -84,6 +101,12 @@ export interface RelayEnvironment {
    * means this relay serves nobody, which is the only safe reading of a relay nobody configured.
    */
   readonly RELAY_DAEMON_IDS?: string;
+  /** Present only in the centrally operated deployment. Missing keeps the BYO path byte-for-byte. */
+  readonly RELAY_MODE?: string;
+  /** The singleton runtime configuration, global meter and admission controller. */
+  readonly RELAY_CONTROL?: HostedRelayControlNamespace;
+  /** Secret binding provisioned by the hosted deployment workflow; never committed or bundled. */
+  readonly RELAY_OPERATOR_TOKEN?: string;
 }
 
 /** The platform pieces that cannot be reached without the Workers runtime, so they are injected. */
@@ -91,6 +114,8 @@ export interface RelayRuntime {
   readonly crypto: RelayCrypto;
   now(): number;
   createSocketPair(): { readonly client: RelaySocket; readonly server: RelaySocket };
+  /** Accept the server half in a stateless Worker so a refusal can be explained before close. */
+  acceptWebSocket(socket: RelaySocket): void;
   upgradeResponse(client: RelaySocket): Response;
   heartbeatPair(): unknown;
 }
@@ -105,6 +130,7 @@ export const workersRuntime: RelayRuntime = {
     const pair = new WebSocketPair();
     return { client: pair[0], server: pair[1] };
   },
+  acceptWebSocket: socket => (socket as RelaySocket & { accept(): void }).accept(),
   upgradeResponse: (client: RelaySocket) => new Response(null, { status: 101, webSocket: client } as ResponseInit),
   heartbeatPair: () => new WebSocketRequestResponsePair(HEARTBEAT_REQUEST, HEARTBEAT_RESPONSE),
 };
@@ -113,6 +139,7 @@ export const workersRuntime: RelayRuntime = {
 
 const STATE_KEY = 'rendezvous';
 const NOT_FOUND = 'not found';
+const RESERVATION_HEADER = 'x-ferretry-relay-reservation';
 
 /**
  * Route a socket to its rendezvous, or refuse it cheaply.
@@ -121,11 +148,51 @@ const NOT_FOUND = 'not found';
  * scanner which fingerprints this deployment carries, and the honest answer to "is this daemon
  * here" is one only the daemon's own operator is owed.
  */
-export async function relayFetch(request: Request, environment: RelayEnvironment): Promise<Response> {
-  const route = parseRendezvousPath(new URL(request.url).pathname);
+export async function relayFetch(
+  request: Request,
+  environment: RelayEnvironment,
+  runtime: RelayRuntime = workersRuntime,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const mode = relayMode(environment);
+  if (mode === 'invalid') return jsonError('relay deployment mode is invalid', 503);
+  if (mode === 'hosted' && url.pathname === HOSTED_RELAY_PUBLIC_PATH) {
+    return hostedPublicConfiguration(request, environment);
+  }
+  if (
+    mode === 'hosted' &&
+    (url.pathname === HOSTED_RELAY_OPERATOR_CONFIG_PATH || url.pathname === HOSTED_RELAY_OPERATOR_METRICS_PATH)
+  ) {
+    return hostedOperatorRequest(request, environment);
+  }
+
+  const route = parseRendezvousPath(url.pathname);
   if (route === null) return new Response(NOT_FOUND, { status: 404 });
   if ((request.headers.get('Upgrade') ?? '').toLowerCase() !== 'websocket') {
     return new Response('expected a websocket upgrade', { status: 426 });
+  }
+  if (mode === 'hosted') {
+    const control = environment.RELAY_CONTROL;
+    if (control === undefined) {
+      return refusalUpgrade(runtime, internalDecision('hosted relay accounting is unavailable'));
+    }
+    const reservationId = toBase64Url(runtime.crypto.randomBytes(16));
+    const decision = await requestHostedRelayDecision(control, 'reserve', { daemonId: route.daemonId, reservationId });
+    if (decision === null) return refusalUpgrade(runtime, internalDecision('hosted relay accounting is unavailable'));
+    if (!decision.ok) return refusalUpgrade(runtime, decision);
+
+    const headers = new Headers(request.headers);
+    headers.set(RESERVATION_HEADER, reservationId);
+    try {
+      const response = await environment.RENDEZVOUS.get(
+        environment.RENDEZVOUS.idFromName(`${RELAY_PROTOCOL_ID}:${route.daemonId}`),
+      ).fetch(new Request(request, { headers }));
+      if (response.status === 101) return response;
+    } catch {
+      // The reservation is released below. The caller still gets an application close frame.
+    }
+    await releaseHostedRelayReservation(control, reservationId);
+    return refusalUpgrade(runtime, internalDecision('hosted relay rendezvous is unavailable'));
   }
   if (!servesDaemon(parseRelayTenancy(environment.RELAY_DAEMON_IDS), route.daemonId)) {
     return new Response(NOT_FOUND, { status: 404 });
@@ -136,10 +203,112 @@ export async function relayFetch(request: Request, environment: RelayEnvironment
 
 export default { fetch: relayFetch };
 
+type RelayMode = 'self-hosted' | 'hosted' | 'invalid';
+
+function relayMode(environment: RelayEnvironment): RelayMode {
+  if (environment.RELAY_MODE === undefined || environment.RELAY_MODE === 'self-hosted') return 'self-hosted';
+  return environment.RELAY_MODE === 'hosted' ? 'hosted' : 'invalid';
+}
+
+async function hostedPublicConfiguration(request: Request, environment: RelayEnvironment): Promise<Response> {
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
+  }
+  if (request.method !== 'GET') return jsonError('method not allowed', 405, true);
+  const control = environment.RELAY_CONTROL;
+  if (control === undefined) return jsonError('hosted relay configuration is unavailable', 503, true);
+  try {
+    return await hostedRelayControlStub(control).fetch(
+      new Request('https://relay-control.invalid/public/configuration'),
+    );
+  } catch {
+    return jsonError('hosted relay configuration is unavailable', 503, true);
+  }
+}
+
+async function hostedOperatorRequest(request: Request, environment: RelayEnvironment): Promise<Response> {
+  const token = environment.RELAY_OPERATOR_TOKEN;
+  if (token === undefined || token === '') return jsonError('relay operator authentication is not configured', 503);
+  const authorization = request.headers.get('Authorization') ?? '';
+  const supplied = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
+  if (!bytesEqual(utf8Bytes(supplied), utf8Bytes(token))) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), {
+      status: 401,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store, max-age=0',
+        'WWW-Authenticate': 'Bearer',
+      },
+    });
+  }
+  const control = environment.RELAY_CONTROL;
+  if (control === undefined) return jsonError('hosted relay control is unavailable', 503);
+  const sourcePath = new URL(request.url).pathname;
+  const targetPath = sourcePath === HOSTED_RELAY_OPERATOR_CONFIG_PATH ? '/operator/configuration' : '/operator/metrics';
+  if (
+    (targetPath === '/operator/configuration' && request.method !== 'GET' && request.method !== 'PUT') ||
+    (targetPath === '/operator/metrics' && request.method !== 'GET')
+  ) {
+    return jsonError('method not allowed', 405);
+  }
+  try {
+    return await hostedRelayControlStub(control).fetch(
+      new Request(`https://relay-control.invalid${targetPath}`, {
+        method: request.method,
+        headers: { 'Content-Type': request.headers.get('Content-Type') ?? 'application/json' },
+        ...(request.method === 'GET' ? {} : { body: await request.text() }),
+      }),
+    );
+  } catch {
+    return jsonError('hosted relay control is unavailable', 503);
+  }
+}
+
+/** A browser cannot read an HTTP WebSocket rejection, so accept, explain, then close. */
+function refusalUpgrade(runtime: RelayRuntime, decision: Exclude<HostedRelayDecision, { ok: true }>): Response {
+  const pair = runtime.createSocketPair();
+  runtime.acceptWebSocket(pair.server);
+  pair.server.send(
+    toArrayBuffer(
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: RENDEZVOUS_SESSION_ID,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'error', code: decision.code, reason: decision.reason }),
+      }),
+    ),
+  );
+  pair.server.close(decision.code, decision.reason);
+  return runtime.upgradeResponse(pair.client);
+}
+
+function internalDecision(reason: string): Exclude<HostedRelayDecision, { ok: true }> {
+  return { ok: false, code: RELAY_CLOSE_CODES.relayInternal, reason };
+}
+
+function jsonError(error: string, status: number, publicResponse = false): Response {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, max-age=0',
+      ...(publicResponse ? { 'Access-Control-Allow-Origin': '*' } : {}),
+    },
+  });
+}
+
 // ─── the durable half ─────────────────────────────────────────────────────────────────────────
 
 interface SocketAttachment {
   readonly socketId: string;
+  readonly reservationId?: string;
 }
 
 export class RendezvousDurableObject {
@@ -147,7 +316,7 @@ export class RendezvousDurableObject {
 
   constructor(
     private readonly objectState: RelayObjectState,
-    _environment: RelayEnvironment,
+    private readonly environment: RelayEnvironment,
     private readonly runtime: RelayRuntime = workersRuntime,
   ) {
     // Heartbeats are answered by the runtime itself, so a live-but-idle rendezvous is never woken
@@ -158,10 +327,18 @@ export class RendezvousDurableObject {
   async fetch(request: Request): Promise<Response> {
     const route = parseRendezvousPath(new URL(request.url).pathname);
     if (route === null) return new Response(NOT_FOUND, { status: 404 });
+    const reservationId = request.headers.get(RESERVATION_HEADER) ?? undefined;
+    if (this.isHosted() && reservationId === undefined) {
+      return new Response('hosted relay reservation is required', { status: 403 });
+    }
 
+    const hadSocketsBefore = this.objectState.getWebSockets().length !== 0;
     const { client, server } = this.runtime.createSocketPair();
     const socketId = toBase64Url(this.runtime.crypto.randomBytes(8));
-    server.serializeAttachment({ socketId } satisfies SocketAttachment);
+    server.serializeAttachment({
+      socketId,
+      ...(reservationId === undefined ? {} : { reservationId }),
+    } satisfies SocketAttachment);
     this.objectState.acceptWebSocket(server);
 
     const at = this.runtime.now();
@@ -177,7 +354,18 @@ export class RendezvousDurableObject {
         : { kind: 'client-arrived', socketId, sessionId: this.newSessionId(), at };
 
     this.enqueue(async () => {
-      const state = (await this.load()) ?? initialRendezvousState(route.daemonId);
+      const loaded = await this.load();
+      if (loaded === null && hadSocketsBefore) {
+        this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
+        await this.releaseReservation(reservationId);
+        return;
+      }
+      const state = loaded ?? initialRendezvousState(route.daemonId);
+      if (state.daemonId !== route.daemonId) {
+        this.refuseSocketClearly(server, RELAY_CLOSE_CODES.relayInternal, 'rendezvous belongs to another daemon');
+        await this.releaseReservation(reservationId);
+        return;
+      }
       await this.applyStep(reduceRendezvous(state, event));
     });
     await this.queue;
@@ -185,8 +373,8 @@ export class RendezvousDurableObject {
   }
 
   async webSocketMessage(socket: RelaySocket, message: ArrayBuffer | string): Promise<void> {
-    const socketId = attachmentOf(socket);
-    if (socketId === null) return this.orphan(socket);
+    const attachment = attachmentOf(socket);
+    if (attachment === null) return this.orphan(socket);
     if (typeof message === 'string') {
       // The auto-responder handles the heartbeat without ever reaching here; anything else in text
       // is a peer speaking a protocol this one does not have.
@@ -197,9 +385,18 @@ export class RendezvousDurableObject {
     this.enqueue(async () => {
       const state = await this.load();
       if (state === null) return this.refuseSocket(socket, RELAY_CLOSE_CODES.relayInternal, 'rendezvous state is lost');
-      await this.applyStep(
-        reduceRendezvous(state, { kind: 'frame', socketId, frame: decoded.frame, at: this.runtime.now() }),
-      );
+      const step = reduceRendezvous(state, {
+        kind: 'frame',
+        socketId: attachment.socketId,
+        frame: decoded.frame,
+        at: this.runtime.now(),
+      });
+      const relayedBytes = step.effects.some(effect => effect.kind === 'send' && effect.frame === decoded.frame)
+        ? message.byteLength
+        : 0;
+      const decision = await this.hostedDecision('meter', { daemonId: state.daemonId, bytes: relayedBytes });
+      if (!decision.ok) return this.refuseSocketClearly(socket, decision.code, decision.reason);
+      await this.applyStep(step);
     });
     await this.queue;
   }
@@ -216,12 +413,20 @@ export class RendezvousDurableObject {
     this.enqueue(async () => {
       const state = await this.load();
       if (state === null) return;
+      const decision = await this.hostedDecision('inspect', { daemonId: state.daemonId });
+      if (!decision.ok) {
+        for (const socket of this.objectState.getWebSockets()) {
+          this.refuseSocketClearly(socket, decision.code, decision.reason);
+          await this.releaseReservation(attachmentOf(socket)?.reservationId);
+        }
+        return;
+      }
       const lastSeen: Record<string, number> = {};
       for (const socket of this.objectState.getWebSockets()) {
-        const socketId = attachmentOf(socket);
-        if (socketId === null) continue;
+        const attachment = attachmentOf(socket);
+        if (attachment === null) continue;
         const stamp = this.objectState.getWebSocketAutoResponseTimestamp(socket);
-        if (stamp !== null) lastSeen[socketId] = stamp.getTime();
+        if (stamp !== null) lastSeen[attachment.socketId] = stamp.getTime();
       }
       await this.applyStep(reduceRendezvous(state, { kind: 'alarm', at: this.runtime.now(), lastSeen }));
     });
@@ -245,14 +450,17 @@ export class RendezvousDurableObject {
   }
 
   private async departed(socket: RelaySocket): Promise<void> {
-    const socketId = attachmentOf(socket);
-    if (socketId === null) return;
+    const attachment = attachmentOf(socket);
+    if (attachment === null) return;
     this.enqueue(async () => {
       const state = await this.load();
       if (state === null) return;
-      await this.applyStep(reduceRendezvous(state, { kind: 'socket-closed', socketId, at: this.runtime.now() }));
+      await this.applyStep(
+        reduceRendezvous(state, { kind: 'socket-closed', socketId: attachment.socketId, at: this.runtime.now() }),
+      );
     });
     await this.queue;
+    await this.releaseReservation(attachment.reservationId);
   }
 
   /** A socket with no attachment is not one this rendezvous ever accepted. It does not get to stay. */
@@ -264,11 +472,46 @@ export class RendezvousDurableObject {
     socket.close(code, reason);
   }
 
+  /** Capacity and control-plane refusals are data before they are a close, so a phone can explain them. */
+  private refuseSocketClearly(socket: RelaySocket, code: number, reason: string): void {
+    socket.send(
+      toArrayBuffer(
+        encodeFrame({
+          kind: FRAME_KINDS.control,
+          sessionId: RENDEZVOUS_SESSION_ID,
+          sequence: 0,
+          payload: encodeControlMessage({ t: 'error', code, reason }),
+        }),
+      ),
+    );
+    socket.close(code, reason);
+  }
+
+  private isHosted(): boolean {
+    return this.environment.RELAY_MODE === 'hosted';
+  }
+
+  private async hostedDecision(path: 'meter' | 'inspect', input: unknown): Promise<HostedRelayDecision> {
+    if (!this.isHosted()) return { ok: true };
+    const control = this.environment.RELAY_CONTROL;
+    if (control === undefined) return internalDecision('hosted relay accounting is unavailable');
+    return (
+      (await requestHostedRelayDecision(control, path, input)) ??
+      internalDecision('hosted relay accounting is unavailable')
+    );
+  }
+
+  private async releaseReservation(reservationId: string | undefined): Promise<void> {
+    if (!this.isHosted() || reservationId === undefined) return;
+    const control = this.environment.RELAY_CONTROL;
+    if (control !== undefined) await releaseHostedRelayReservation(control, reservationId);
+  }
+
   private socketsById(): Map<string, RelaySocket> {
     const sockets = new Map<string, RelaySocket>();
     for (const socket of this.objectState.getWebSockets()) {
-      const socketId = attachmentOf(socket);
-      if (socketId !== null) sockets.set(socketId, socket);
+      const attachment = attachmentOf(socket);
+      if (attachment !== null) sockets.set(attachment.socketId, socket);
     }
     return sockets;
   }
@@ -317,9 +560,14 @@ export class RendezvousDurableObject {
   }
 }
 
-function attachmentOf(socket: RelaySocket): string | null {
+function attachmentOf(socket: RelaySocket): SocketAttachment | null {
   const attachment = socket.deserializeAttachment() as Partial<SocketAttachment> | null;
-  return typeof attachment?.socketId === 'string' ? attachment.socketId : null;
+  if (typeof attachment?.socketId !== 'string') return null;
+  if (attachment.reservationId !== undefined && typeof attachment.reservationId !== 'string') return null;
+  return {
+    socketId: attachment.socketId,
+    ...(attachment.reservationId === undefined ? {} : { reservationId: attachment.reservationId }),
+  };
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {

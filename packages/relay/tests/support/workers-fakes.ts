@@ -14,7 +14,12 @@ import { relayCrypto } from './identities.ts';
 export class FakeSocket implements RelaySocket {
   readonly sent: (ArrayBuffer | string)[] = [];
   closed: { code?: number; reason?: string } | null = null;
+  accepted = false;
   private attachment: unknown = null;
+
+  accept(): void {
+    this.accepted = true;
+  }
 
   send(data: ArrayBuffer | string): void {
     this.sent.push(data);
@@ -106,6 +111,7 @@ export function testRuntime(overrides: Partial<RelayRuntime> = {}): TestRuntime 
       pairs.push(pair);
       return pair;
     },
+    acceptWebSocket: socket => (socket as FakeSocket).accept(),
     upgradeResponse: () => new Response(null, { status: 200 }),
     heartbeatPair: () => 'heartbeat',
     ...overrides,
