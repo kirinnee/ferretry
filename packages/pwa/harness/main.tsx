@@ -81,6 +81,7 @@ import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
 import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
+import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
 import type { OnboardingRouteId, OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
 import {
@@ -622,8 +623,13 @@ const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await
  * write, so a review page can neither read nor overwrite the real reader's
  * `fy-onboarding-v2` progress.
  */
-const harnessOnboarding = (route: OnboardingRouteId, current: OnboardingStepId): OnboardingProgressStore =>
+const harnessOnboarding = (
+  route: OnboardingRouteId,
+  current: OnboardingStepId,
+  device: DeviceKind = 'desktop',
+): OnboardingProgressStore =>
   new OnboardingProgressStore({
+    device,
     storage: {
       getItem: () =>
         JSON.stringify({
@@ -638,21 +644,52 @@ const harnessOnboarding = (route: OnboardingRouteId, current: OnboardingStepId):
     paired: true,
   });
 
-/** The screens the gallery shows, named by what a reviewer is looking at. */
-type HarnessOnboardingScreen = 'choose' | 'install' | 'daemon' | 'connect' | 'brief' | 'pair' | 'scan' | 'done';
+/**
+ * The screens the gallery shows, named by what a reviewer is looking at.
+ *
+ * The device-specific pair — `choose-mobile` and `need-computer` — are here
+ * because they are the two screens whose whole point is that they render
+ * DIFFERENTLY on a phone, and a gallery that only ever showed the desktop
+ * reading of them would prove nothing about the rule they exist to keep.
+ */
+type HarnessOnboardingScreen =
+  | 'choose'
+  | 'choose-mobile'
+  | 'install'
+  | 'daemon'
+  | 'connect'
+  | 'local'
+  | 'need-computer'
+  | 'handoff'
+  | 'pair'
+  | 'scan'
+  | 'done';
 
 const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
   /* No document at all: the chooser is what a store with nothing stored resolves to. */
-  choose: new OnboardingProgressStore({ storage: undefined }),
+  choose: new OnboardingProgressStore({ storage: undefined, device: 'desktop' }),
+  'choose-mobile': new OnboardingProgressStore({ storage: undefined, device: 'mobile' }),
   install: harnessOnboarding('first-time', 'install'),
   daemon: harnessOnboarding('first-time', 'daemon'),
   connect: harnessOnboarding('first-time', 'connect'),
-  brief: harnessOnboarding('agent', 'brief'),
-  pair: harnessOnboarding('first-time', 'pair'),
-  /* The same scan step on the route that arrives holding a link: no `fy pair` to run. */
-  scan: harnessOnboarding('have-link', 'scan'),
+  /* The same-machine collapse: a daemon on this box, and nothing to scan. */
+  local: harnessOnboarding('first-time', 'local'),
+  /* A phone that asked to run agents, told the truth and handed the job onward. */
+  'need-computer': harnessOnboarding('first-time', 'need-computer', 'mobile'),
+  handoff: harnessOnboarding('first-time', 'handoff'),
+  pair: harnessOnboarding('add-client', 'pair'),
+  /* The scan step on the route that arrives holding a link: no `fy pair` to run here. */
+  scan: harnessOnboarding('add-client', 'scan'),
   done: harnessOnboarding('first-time', 'done'),
 };
+
+/**
+ * The origin a hand-off link is built from.
+ *
+ * A `.invalid` host, because the reserved TLD cannot resolve: a QR in a review
+ * screenshot must not be a scannable link to anything real.
+ */
+const HARNESS_SETUP_HREF = 'https://ferretry.example.invalid/setup';
 
 /** A clipboard the review page never actually needs to reach. */
 const HARNESS_CLIPBOARD: ClipboardWriter = async () => {};
@@ -1670,6 +1707,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.choose}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="apt"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1686,6 +1724,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.install}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="apt"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1702,6 +1741,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.daemon}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="brew"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1718,6 +1758,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.connect}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="brew"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1728,15 +1769,77 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — brief your agent',
+      label: 'Setup — what is this device (phone)',
       render: () => (
-        <section aria-label="Setup brief step" id="harness-onboarding-brief">
+        <section aria-label="Setup entry chooser on a phone" id="harness-onboarding-choose-mobile">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING.brief}
+            progress={HARNESS_ONBOARDING['choose-mobile']}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="brew"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — same machine, nothing to scan',
+      render: () => (
+        <section aria-label="Setup local pairing step" id="harness-onboarding-local">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.local}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="apt"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => (
+              <PairingScreen
+                embedded
+                connections={[]}
+                selectedDaemonId={null}
+                scanHost={HARNESS_SCAN_HOST}
+                onPair={async () => {}}
+                onRemove={() => {}}
+                onSelect={() => {}}
+              />
+            )}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — you will need a computer (phone)',
+      render: () => (
+        <section aria-label="Setup need a computer step" id="harness-onboarding-need-computer">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING['need-computer']}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="brew"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — add your phone',
+      render: () => (
+        <section aria-label="Setup hand-off step" id="harness-onboarding-handoff">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.handoff}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady
             onOpenFleet={() => {}}
             renderPairing={() => null}
           />
@@ -1750,6 +1853,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.scan}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="curl"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1776,6 +1880,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.pair}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="curl"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
@@ -1802,6 +1907,7 @@ function Shell() {
           <OnboardingPage
             progress={HARNESS_ONBOARDING.done}
             write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
             channel="apt"
             fallback={HARNESS_FALLBACK.available}
             fleetReady
@@ -3337,6 +3443,7 @@ function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboarding
       <OnboardingPage
         progress={HARNESS_ONBOARDING[screen]}
         write={HARNESS_CLIPBOARD}
+        href={HARNESS_SETUP_HREF}
         channel="curl"
         fallback={HARNESS_FALLBACK.available}
         fleetReady={screen === 'done'}

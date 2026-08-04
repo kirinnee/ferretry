@@ -22,7 +22,16 @@ import { mount, must } from '../../support/dom.ts';
  * is that no step anywhere is missing its sentence. A route's own step list is
  * the model's business and is tested there.
  */
-const EVERY_STEP: readonly OnboardingStepId[] = ['install', 'daemon', 'connect', 'brief', 'pair', 'done'];
+const EVERY_STEP: readonly OnboardingStepId[] = [
+  'install',
+  'daemon',
+  'connect',
+  'local',
+  'need-computer',
+  'handoff',
+  'pair',
+  'done',
+];
 
 const figureOf = (container: HTMLElement): HTMLElement =>
   must(container.querySelector<HTMLElement>('[data-onboarding-diagram]'), 'the diagram');
@@ -71,9 +80,13 @@ describe('the setup diagram', () => {
   });
 
   it('makes the computer-to-browser hand-off visible', async () => {
-    const lit = async (step: 'install' | 'pair' | 'scan'): Promise<readonly boolean[]> => {
+    const lit = async (step: OnboardingStepId): Promise<readonly boolean[]> => {
       const view = await mount(<SetupDiagram step={step} />);
-      const nodes = [...figureOf(view.container).children].filter(child => child.querySelector('svg') !== null);
+      // The two ENDS, by their own glyphs: a joined link draws a tick of its own,
+      // so "has an svg" would count the line between them as a third node.
+      const nodes = [...figureOf(view.container).children].filter(
+        child => child.querySelector('svg.lucide-laptop, svg.lucide-smartphone') !== null,
+      );
       const result = nodes.map(node => node.className.includes('border-accent'));
       await view.unmount();
       return result;
@@ -81,6 +94,10 @@ describe('the setup diagram', () => {
 
     // Install is work on the machine alone; the browser is not doing anything.
     expect(await lit('install')).toEqual([true, false]);
+    // The same-machine collapse lights BOTH ends: they are one machine.
+    expect(await lit('local')).toEqual([true, true]);
+    // A phone cannot be the machine, so that end is not lit at all.
+    expect(await lit('need-computer')).toEqual([false, true]);
     // `fy pair` is on the computer; scanning is the first time both devices act.
     expect(await lit('pair')).toEqual([true, false]);
     expect(await lit('scan')).toEqual([true, true]);

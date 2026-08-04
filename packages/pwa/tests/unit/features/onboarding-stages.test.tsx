@@ -41,18 +41,31 @@ const click = async (target: Element): Promise<void> => {
 const asideOf = (container: HTMLElement): HTMLDetailsElement =>
   must(container.querySelector<HTMLDetailsElement>('details'), 'the disclosure');
 
+/**
+ * The command a reader is actually looking at.
+ *
+ * Scoped rather than read off the whole container, because the agent prompt in
+ * the second disclosure legitimately contains EVERY documented install command —
+ * that is what makes it a brief an agent can follow on a machine nobody here can
+ * see. Asserting against the page text would prove the opposite of what it says.
+ */
+const visibleCommand = (container: HTMLElement): string =>
+  must(container.querySelector('pre'), 'the command block').textContent ?? '';
+
 describe('the install stage', () => {
   it('puts one command on the glass and folds the check away, still there', async () => {
     const view = await mount(<InstallStage write={async () => {}} channel="apt" />);
 
-    // One command block visible, one behind the disclosure.
-    expect(view.container.querySelectorAll('pre')).toHaveLength(2);
+    // One command block visible; the check and the agent brief are each folded away.
+    expect(view.container.querySelectorAll('pre')).toHaveLength(3);
     const aside = asideOf(view.container);
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(VERIFY_COMMAND);
-    // The agent path is a ROUTE now. It was hiding behind this same disclosure,
-    // which put an entire alternative journey beside a version check.
-    expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).toBeNull();
+    // The agent path is an alternative to THIS command, and it gets a disclosure
+    // of its own rather than sharing one with a version check.
+    expect(view.container.querySelectorAll('details')).toHaveLength(2);
+    expect(view.container.querySelector('[data-onboarding-aside="Rather have an agent do it?"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).not.toBeNull();
     await view.unmount();
   });
 
@@ -74,8 +87,8 @@ describe('the install stage', () => {
     // The guess leads, and swapping it swaps the command rather than adding one.
     expect(must(toolbar.querySelector('[aria-pressed="true"]'), 'the guess').textContent).toBe('macOS');
     await click(must(toolbar.querySelector('[data-onboarding-channel="dnf"]'), 'the dnf route'));
-    expect(view.container.textContent).toContain('sudo dnf install fy');
-    expect(view.container.textContent).not.toContain('brew install');
+    expect(visibleCommand(view.container)).toContain('sudo dnf install fy');
+    expect(visibleCommand(view.container)).not.toContain('brew install');
     await view.unmount();
   });
 });

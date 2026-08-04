@@ -12,14 +12,27 @@
  * that must not drift: the same block is displayed, copied, and pasted into the
  * agent prompt, so there is exactly one copy of each.
  *
- * THERE IS NO ONE ARC. Three different people open this page — somebody holding
- * a pairing link, somebody who has installed nothing, and somebody who would
- * rather an agent did it — and a single stepper with hidden steps serves none of
- * them. So a ROUTE is chosen first, and the route owns its own list of steps.
+ * THERE IS NO ONE ARC, AND THE AXIS IS THE DEVICE. Ferretry has two roles — a
+ * daemon that runs agents and needs a terminal, and a client that only watches —
+ * so the first question is which of those this device is about to become, and the
+ * answer decides both the steps AND whether some of them are possible here at all.
+ * A route therefore owns its own list of steps, and that list is a function of the
+ * device as much as of the answer.
  */
 
-/** Which of the three people opened the page. */
-export type OnboardingRouteId = 'have-link' | 'first-time' | 'agent';
+import { type DeviceKind, otherDeviceKind } from './device-kind.ts';
+
+/**
+ * WHAT IS THIS DEVICE, AND WHAT IS IT FOR? — the question the chooser asks.
+ *
+ * The first version of this screen asked what the reader was HOLDING: a link, no
+ * link, or an agent. That is not a fact about the system. Ferretry has exactly
+ * two roles — a DAEMON, a machine that runs agents and needs a terminal, and a
+ * CLIENT, a browser that watches one — and every real question is about which of
+ * those this device is about to become. One machine can be both, and the ordinary
+ * desktop first run is exactly that.
+ */
+export type OnboardingRouteId = 'first-time' | 'add-client' | 'add-daemon';
 
 /** Every stage that any route can put on the glass, in no particular order. */
 export type OnboardingStepId =
@@ -30,7 +43,9 @@ export type OnboardingStepId =
   | 'relay-source'
   | 'relay-allow'
   | 'relay-deploy'
-  | 'brief'
+  | 'local'
+  | 'need-computer'
+  | 'handoff'
   | 'pair'
   | 'scan'
   | 'done';
@@ -55,7 +70,7 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     id: 'install' as const,
     title: 'Install Ferretry',
     short: 'Install',
-    summary: 'Run this on the machine your agents will work on.',
+    summary: 'Run this in a terminal on this machine.',
   }),
   daemon: Object.freeze({
     id: 'daemon' as const,
@@ -67,19 +82,19 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     id: 'connect' as const,
     title: 'Choose a connection',
     short: 'Connect',
-    summary: 'Choose how this browser will reach your machine.',
+    summary: 'Choose how other devices will reach this machine.',
   }),
   'relay-fingerprint': Object.freeze({
     id: 'relay-fingerprint' as const,
     title: 'Get its fingerprint',
     short: 'Fingerprint',
-    summary: 'On your computer, print the daemon identity your relay will allow.',
+    summary: 'Print the daemon identity your relay will allow.',
   }),
   'relay-source': Object.freeze({
     id: 'relay-source' as const,
     title: 'Get relay source',
     short: 'Source',
-    summary: 'On your computer, get the deployment source.',
+    summary: 'Get the deployment source.',
   }),
   'relay-allow': Object.freeze({
     id: 'relay-allow' as const,
@@ -93,23 +108,35 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     short: 'Deploy',
     summary: 'Deploy the Cloudflare Worker from your account.',
   }),
-  brief: Object.freeze({
-    id: 'brief' as const,
-    title: 'Brief your agent',
-    short: 'Brief',
-    summary: 'Paste this into an agent that has a terminal there.',
+  local: Object.freeze({
+    id: 'local' as const,
+    title: 'Open it from your terminal',
+    short: 'Open',
+    summary: 'The daemon is on this machine, so there is nothing to scan.',
+  }),
+  'need-computer': Object.freeze({
+    id: 'need-computer' as const,
+    title: 'You will need a computer',
+    short: 'Computer',
+    summary: 'Agents run in a terminal, and this device does not have one.',
+  }),
+  handoff: Object.freeze({
+    id: 'handoff' as const,
+    title: 'Add your phone',
+    short: 'Phone',
+    summary: 'Optional. Your phone can watch this machine too.',
   }),
   pair: Object.freeze({
     id: 'pair' as const,
     title: 'Run fy pair',
     short: 'Pair',
-    summary: 'On your computer, print a fresh QR code and pairing link.',
+    summary: 'On the computer running the daemon, print a fresh code.',
   }),
   scan: Object.freeze({
     id: 'scan' as const,
     title: 'Scan QR or paste link',
     short: 'Scan',
-    summary: 'On this phone or browser, use the fresh code from your computer.',
+    summary: 'On this device, use the fresh code from that computer.',
   }),
   done: Object.freeze({
     id: 'done' as const,
@@ -128,52 +155,60 @@ export interface OnboardingRoute {
   readonly title: string;
   /** What happens if they pick it. One line, because three of them are compared at once. */
   readonly answer: string;
-  /** The steps this route actually walks, in order. No hidden steps, no skipped ones. */
-  readonly steps: readonly OnboardingStepId[];
 }
 
 /**
- * The three entry paths.
+ * The three answers, in the order they are read.
  *
- * Order is deliberate and is NOT "simplest first": somebody who already holds a
- * link is one tap from finished and should not read past their own answer, and
- * everybody arriving from a QR is in exactly that position.
+ * NOT "simplest first" and not "most common first": first-time setup leads
+ * because it is the only answer somebody who knows nothing yet can recognise as
+ * theirs, and the other two are for readers who already have a fleet and know
+ * exactly which half they are adding.
  */
 const ROUTES: Readonly<Record<OnboardingRouteId, OnboardingRoute>> = Object.freeze({
-  'have-link': Object.freeze({
-    id: 'have-link' as const,
-    title: 'I have a link or QR',
-    answer: 'Scan or paste it. Nothing to install, nothing to start.',
-    steps: Object.freeze(['scan', 'done'] as const),
-  }),
   'first-time': Object.freeze({
     id: 'first-time' as const,
     title: 'First time setup',
-    answer: 'Install, start the daemon, choose a connection, then pair this browser. Every new machine starts here.',
-    steps: Object.freeze(['install', 'daemon', 'connect', 'pair', 'scan', 'done'] as const),
+    answer: 'Nothing installed yet. Set up a machine to run agents, and this browser to watch it.',
   }),
-  agent: Object.freeze({
-    id: 'agent' as const,
-    title: 'Let an agent set it up',
-    answer: 'Copy a prompt for an agent that already has a terminal on that machine.',
-    steps: Object.freeze(['brief', 'pair', 'scan', 'done'] as const),
+  'add-client': Object.freeze({
+    id: 'add-client' as const,
+    title: 'Add this as a client',
+    answer: 'A daemon already exists somewhere. This browser will watch it.',
+  }),
+  'add-daemon': Object.freeze({
+    id: 'add-daemon' as const,
+    title: 'Add this as a daemon',
+    answer: 'This machine will run agents. Needs a terminal.',
   }),
 });
 
-export const ONBOARDING_ROUTES: readonly OnboardingRoute[] = Object.freeze([
-  ROUTES['have-link'],
-  ROUTES['first-time'],
-  ROUTES.agent,
-]);
+/**
+ * What the third answer says on a device that cannot host a daemon.
+ *
+ * NOT hidden: a reader who came here to add a machine must still find out what
+ * became of that answer, and an option that silently vanishes reads as a bug in
+ * the page rather than as a fact about the phone. It is offered, it says plainly
+ * why it cannot happen here, and choosing it hands the job to a computer.
+ */
+const DAEMON_ON_MOBILE: OnboardingRoute = Object.freeze({
+  id: 'add-daemon' as const,
+  title: 'Add a daemon',
+  answer: 'Agents run in a terminal, so this needs a computer. Send the setup there.',
+});
 
 /** Total, because the id is a closed union. */
-export const onboardingRoute = (id: OnboardingRouteId): OnboardingRoute => ROUTES[id];
+export const onboardingRoute = (id: OnboardingRouteId, device: DeviceKind = 'desktop'): OnboardingRoute =>
+  id === 'add-daemon' && device === 'mobile' ? DAEMON_ON_MOBILE : ROUTES[id];
 
-/** Whether a value read back from storage is still one of the routes we ship. */
+/** The three answers as this device should read them. */
+export const onboardingRoutes = (device: DeviceKind): readonly OnboardingRoute[] =>
+  Object.freeze([ROUTES['first-time'], ROUTES['add-client'], onboardingRoute('add-daemon', device)]);
+
+/** Whether a value read back from storage or a link is still one of the routes we ship. */
 export const isOnboardingRouteId = (value: unknown): value is OnboardingRouteId =>
-  typeof value === 'string' && ONBOARDING_ROUTES.some(route => route.id === value);
+  typeof value === 'string' && Object.hasOwn(ROUTES, value);
 
-/** The steps of one route. */
 export type ConnectionMethodId = 'default-relay' | 'own-relay' | 'direct';
 
 export interface ConnectionMethod {
@@ -213,50 +248,91 @@ export const DEFAULT_CONNECTION_METHOD: ConnectionMethodId = 'default-relay';
 export const connectionMethod = (id: ConnectionMethodId): ConnectionMethod => CONNECTIONS[id];
 
 export const isConnectionMethodId = (value: unknown): value is ConnectionMethodId =>
-  typeof value === 'string' && CONNECTION_METHODS.some(method => method.id === value);
+  typeof value === 'string' && Object.hasOwn(CONNECTIONS, value);
 
-const SELF_HOSTED_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
-  'install',
-  'daemon',
-  'connect',
+/**
+ * A route being walked BY A PARTICULAR DEVICE.
+ *
+ * The device is part of the path rather than a separate argument threaded through
+ * nine helpers, because it is not an optional refinement: "first time setup" is a
+ * genuinely different list of steps on a phone than on a computer, and a helper
+ * that can be called without it would silently answer for the wrong one.
+ */
+export interface OnboardingPath {
+  readonly route: OnboardingRouteId;
+  readonly device: DeviceKind;
+  /** The connection chooser's answer. Only the daemon-bearing routes have one. */
+  readonly connection?: ConnectionMethodId | undefined;
+}
+
+/** The four extra stages a self-hosted relay costs, inserted where the choice was made. */
+const OWN_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
   'relay-fingerprint',
   'relay-source',
   'relay-allow',
   'relay-deploy',
-  'pair',
-  'scan',
-  'done',
 ]);
 
-/** The self-host path alone grows: its extra work is visible on the track. */
-export const onboardingRouteSteps = (
-  id: OnboardingRouteId,
-  connection?: ConnectionMethodId,
-): readonly OnboardingStepId[] =>
-  id === 'first-time' && connection === 'own-relay' ? SELF_HOSTED_RELAY_STEPS : ROUTES[id].steps;
+/**
+ * Standing up a daemon ON THIS MACHINE, and the collapse that makes it short.
+ *
+ * The browser reading this page is running on the machine that is about to host
+ * the daemon — that is what the answer MEANT. So it is already a client of it,
+ * over loopback, and there is no QR to scan and no code to type: `fy pair --open`
+ * on the same machine opens this app already paired. Making somebody photograph
+ * their own screen is the single most common first-run indignity, and it exists
+ * only because the old arc could not tell the two machines apart.
+ */
+const daemonSteps = (connection: ConnectionMethodId | undefined): readonly OnboardingStepId[] =>
+  Object.freeze([
+    'install',
+    'daemon',
+    'connect',
+    ...(connection === 'own-relay' ? OWN_RELAY_STEPS : []),
+    'local',
+  ] as OnboardingStepId[]);
+
+/**
+ * The steps this route walks on this device.
+ *
+ * FIRST TIME SETUP IS THE ONLY ROUTE THAT SPANS TWO DEVICES, and that is what
+ * makes it more than the other two in sequence. On a computer it stands the
+ * daemon up, pairs over loopback, and then OFFERS the phone. On a phone it cannot
+ * begin — there is no terminal — so it hands the daemon half to a computer and
+ * stays behind to finish pairing when that computer prints a code.
+ *
+ * `add-daemon` on a phone is one honest screen. It is not a route that pretends
+ * to start; it says what is needed and sends the job somewhere it can happen.
+ */
+export const onboardingRouteSteps = ({ route, device, connection }: OnboardingPath): readonly OnboardingStepId[] => {
+  if (route === 'add-client') return Object.freeze(['pair', 'scan', 'done'] as OnboardingStepId[]);
+  if (device === 'mobile') {
+    return route === 'first-time'
+      ? Object.freeze(['need-computer', 'scan', 'done'] as OnboardingStepId[])
+      : Object.freeze(['need-computer'] as OnboardingStepId[]);
+  }
+  return Object.freeze([
+    ...daemonSteps(connection),
+    ...(route === 'first-time' ? (['handoff'] as OnboardingStepId[]) : []),
+    'done',
+  ] as OnboardingStepId[]);
+};
 
 /** Position within a route, or `-1` for a step that route never walks. */
-export const onboardingStepIndex = (
-  route: OnboardingRouteId,
-  step: OnboardingStepId,
-  connection?: ConnectionMethodId,
-): number => onboardingRouteSteps(route, connection).indexOf(step);
+export const onboardingStepIndex = (path: OnboardingPath, step: OnboardingStepId): number =>
+  onboardingRouteSteps(path).indexOf(step);
 
-/** Whether this step belongs to this route at all — the guard every stored pair must pass. */
-export const isStepOfRoute = (
-  route: OnboardingRouteId,
-  step: OnboardingStepId,
-  connection?: ConnectionMethodId,
-): boolean => onboardingStepIndex(route, step, connection) >= 0;
+/** Whether this step belongs to this route on this device — the guard every stored pair must pass. */
+export const isStepOfRoute = (path: OnboardingPath, step: OnboardingStepId): boolean =>
+  onboardingStepIndex(path, step) >= 0;
 
 /** How many steps this route walks, for a track that has to say "step 2 of 5". */
-export const onboardingStepCount = (route: OnboardingRouteId, connection?: ConnectionMethodId): number =>
-  onboardingRouteSteps(route, connection).length;
+export const onboardingStepCount = (path: OnboardingPath): number => onboardingRouteSteps(path).length;
 
 /** The step a route opens on. */
-export const firstOnboardingStep = (route: OnboardingRouteId): OnboardingStepId => {
-  const [first] = onboardingRouteSteps(route);
-  /* Unreachable: every route above ships at least two steps, and the list is frozen. */
+export const firstOnboardingStep = (path: OnboardingPath): OnboardingStepId => {
+  const [first] = onboardingRouteSteps(path);
+  /* Unreachable: every branch above ships at least one step, and each list is frozen. */
   return first ?? 'done';
 };
 
@@ -271,51 +347,64 @@ export type OnboardingStepStatus = 'completed' | 'current' | 'upcoming';
  * has been, so the track must still take them there.
  */
 export const onboardingStepStatus = (
-  route: OnboardingRouteId,
+  path: OnboardingPath,
   step: OnboardingStepId,
   current: OnboardingStepId,
   furthest: OnboardingStepId,
-  connection?: ConnectionMethodId,
 ): OnboardingStepStatus => {
   if (step === current) return 'current';
-  return onboardingStepIndex(route, step, connection) <= onboardingStepIndex(route, furthest, connection)
-    ? 'completed'
-    : 'upcoming';
+  return onboardingStepIndex(path, step) <= onboardingStepIndex(path, furthest) ? 'completed' : 'upcoming';
 };
 
 /** The next step of this route, or the same one at the end of it. */
-export const nextOnboardingStep = (
-  route: OnboardingRouteId,
-  id: OnboardingStepId,
-  connection?: ConnectionMethodId,
-): OnboardingStepId => {
-  const steps = onboardingRouteSteps(route, connection);
-  return steps[Math.min(onboardingStepIndex(route, id, connection) + 1, steps.length - 1)] ?? id;
+export const nextOnboardingStep = (path: OnboardingPath, id: OnboardingStepId): OnboardingStepId => {
+  const steps = onboardingRouteSteps(path);
+  return steps[Math.min(onboardingStepIndex(path, id) + 1, steps.length - 1)] ?? id;
 };
 
 /** The previous step of this route, or the same one at the start of it. */
-export const previousOnboardingStep = (
-  route: OnboardingRouteId,
-  id: OnboardingStepId,
-  connection?: ConnectionMethodId,
-): OnboardingStepId => {
-  const steps = onboardingRouteSteps(route, connection);
-  return steps[Math.max(onboardingStepIndex(route, id, connection) - 1, 0)] ?? id;
+export const previousOnboardingStep = (path: OnboardingPath, id: OnboardingStepId): OnboardingStepId => {
+  const steps = onboardingRouteSteps(path);
+  return steps[Math.max(onboardingStepIndex(path, id) - 1, 0)] ?? id;
 };
 
 /** The later of two steps of one route, so progress can only ever move forward. */
 export const furthestOnboardingStep = (
-  route: OnboardingRouteId,
+  path: OnboardingPath,
   left: OnboardingStepId,
   right: OnboardingStepId,
-  connection?: ConnectionMethodId,
-): OnboardingStepId =>
-  onboardingStepIndex(route, left, connection) >= onboardingStepIndex(route, right, connection) ? left : right;
+): OnboardingStepId => (onboardingStepIndex(path, left) >= onboardingStepIndex(path, right) ? left : right);
 
 /** Whether a value read back from storage is still one of the steps we ship. */
 export const isOnboardingStepId = (value: unknown): value is OnboardingStepId =>
   typeof value === 'string' && Object.hasOwn(STEPS, value);
 
+/**
+ * Whether this step is the last one on its route, so nothing offers a way onward.
+ *
+ * `add-daemon` on a phone is a ONE-step route whose only screen is a refusal, and
+ * a `Next` there would advance to itself — a control that does nothing is worse
+ * than no control, because the reader presses it and concludes the page is stuck.
+ */
+export const isLastOnboardingStep = (path: OnboardingPath, step: OnboardingStepId): boolean =>
+  onboardingStepIndex(path, step) === onboardingStepCount(path) - 1;
+
+/**
+ * Where a hand-off from THIS device should drop the other one.
+ *
+ * The asymmetry is the whole point. A phone cannot host a daemon, so it hands the
+ * daemon half to a computer and asks it to start at the beginning of first-time
+ * setup. A computer that already has a daemon has nothing to hand over except
+ * membership, so it hands the phone the CLIENT route, at the step where somebody
+ * must run `fy pair` — which, at that moment, is the computer doing the handing.
+ */
+export const handoffTarget = (
+  path: OnboardingPath,
+): { readonly route: OnboardingRouteId; readonly step: OnboardingStepId } =>
+  path.device === 'mobile' ? { route: 'first-time', step: 'install' } : { route: 'add-client', step: 'pair' };
+
+/** The device a hand-off from here is aimed at, so the copy can name it. */
+export const handoffDevice = (device: DeviceKind): DeviceKind => otherDeviceKind(device);
 /* ---------- install channels, verbatim from INSTALLATION.md ---------------- */
 
 export type InstallChannelId = 'apt' | 'dnf' | 'brew' | 'nix' | 'curl';
@@ -421,6 +510,16 @@ export const DAEMON_STATUS_COMMAND = 'fy daemon status';
 export const PAIR_COMMAND = 'fy pair';
 /** Prints the code and this daemon's fingerprint without staying to watch for the scan. */
 export const PAIR_PRINT_COMMAND = 'fy pair --no-wait';
+/**
+ * Pairs the browser ON THIS MACHINE, with nothing to scan.
+ *
+ * The daemon mints the same single-use link it puts in the QR and this opens it
+ * in the host's own browser, so a reader whose daemon and browser are the same
+ * machine never photographs their own screen. It is the CLI half of the
+ * same-machine collapse; without it that collapse is a claim rather than a
+ * behaviour.
+ */
+export const PAIR_OPEN_COMMAND = 'fy pair --open';
 /** What a serving daemon prints, so the reader knows what they are looking for. */
 export const DAEMON_SERVING_OUTPUT = 'fyd is serving';
 

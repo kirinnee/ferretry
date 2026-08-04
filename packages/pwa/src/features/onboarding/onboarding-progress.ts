@@ -1,5 +1,5 @@
 /**
- * SOLE OWNER of the `fy-onboarding-v2` browser-storage key.
+ * SOLE OWNER of the `fy-onboarding-v3` browser-storage key.
  *
  * Setup happens across two devices and a terminal: the reader leaves to run a
  * command and comes back minutes — or hours, after the tab was evicted — later.
@@ -8,11 +8,19 @@
  * following the versioned `fy-<thing>-v<n>` document convention
  * `lib/theme-preferences.ts` records.
  *
- * The key moved from `v1` to `v2` when the single fixed arc became three routes.
- * A `v1` document describes a step list that no longer exists, and there is no
- * honest mapping from "step 3 of the old four" onto a route nobody chose — so it
- * is ignored, and its owner is asked the question once. That is a lost place, not
- * lost work: nothing on this page is state the daemon does not already hold.
+ * The key moved from `v1` to `v2` when the single fixed arc became three routes,
+ * and from `v2` to `v3` when those three routes stopped being about what the
+ * reader was HOLDING and became about what the DEVICE IS. `have-link` and `agent`
+ * no longer name anything, and a stored place inside one of them describes a
+ * journey that is gone — so an older document is ignored, and its owner is asked
+ * the question once. That is a lost place, not lost work: nothing on this page is
+ * state the daemon does not already hold.
+ *
+ * THE DEVICE IS NEVER STORED. It is detected on every load, because the same
+ * document can legitimately be read by two different devices — that is exactly
+ * what a hand-off does — and a phone that inherited a laptop's "this is a
+ * desktop" would be offered an install command it cannot run. The route is a
+ * decision; the device is an observation, and observations are re-made.
  *
  * Deliberately NOT daemon-scoped: this state exists before any daemon does, and
  * it is not evidence of anything. The AUTHORITATIVE "setup is over" signal is a
@@ -25,6 +33,7 @@
  * with nothing to pair.
  */
 
+import type { DeviceKind } from './device-kind.ts';
 import {
   type ConnectionMethodId,
   firstOnboardingStep,
@@ -33,13 +42,15 @@ import {
   isOnboardingRouteId,
   isOnboardingStepId,
   isStepOfRoute,
+  type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
   onboardingStepIndex,
 } from './onboarding-model.ts';
+import { landSetupHandoff, type SetupHandoff } from './setup-handoff.ts';
 
-export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v2';
-export const ONBOARDING_PROGRESS_VERSION = 2;
+export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v3';
+export const ONBOARDING_PROGRESS_VERSION = 3;
 
 /** The chooser is on the glass: no route, and therefore no step. */
 export interface OnboardingChoosing {
@@ -52,7 +63,7 @@ export interface OnboardingWalking {
   readonly v: typeof ONBOARDING_PROGRESS_VERSION;
   readonly stage: 'walk';
   readonly route: OnboardingRouteId;
-  /** The second chooser's answer. Only first-time setup has one. */
+  /** The connection chooser's answer. Only the daemon-bearing routes ask it. */
   readonly connection?: ConnectionMethodId;
   /** Where the reader is now. */
   readonly current: OnboardingStepId;
@@ -77,21 +88,37 @@ export const FRESH_ONBOARDING_PROGRESS: OnboardingChoosing = Object.freeze({
 const fresh = (): OnboardingProgress => ({ ...FRESH_ONBOARDING_PROGRESS });
 
 /** Opening a route: its first step, and nothing remembered from any other route. */
-export const enterOnboardingRoute = (route: OnboardingRouteId): OnboardingWalking => ({
-  v: ONBOARDING_PROGRESS_VERSION,
-  stage: 'walk',
-  route,
-  current: firstOnboardingStep(route),
-  furthest: firstOnboardingStep(route),
-});
+export const enterOnboardingRoute = (route: OnboardingRouteId, device: DeviceKind): OnboardingWalking => {
+  const first = firstOnboardingStep({ route, device });
+  return { v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', route, current: first, furthest: first };
+};
+
+/** Opening a route AT A KNOWN PLACE, which is what a hand-off link asks for. */
+export const resumeOnboardingRoute = (handoff: SetupHandoff, device: DeviceKind): OnboardingWalking => {
+  const landed = landSetupHandoff(handoff, device);
+  return {
+    v: ONBOARDING_PROGRESS_VERSION,
+    stage: 'walk',
+    route: handoff.route,
+    ...(landed.path.connection === undefined ? {} : { connection: landed.path.connection }),
+    current: landed.step,
+    furthest: landed.step,
+  };
+};
 
 /**
- * Parse, do not validate: anything that is not exactly a version-2 document
- * whose two steps both belong to its own route, with `current` no further than
- * `furthest`, is the chooser. There is no partial recovery, because a
- * half-trusted step is indistinguishable from a made-up one.
+ * Parse, do not validate: anything that is not exactly a version-3 document
+ * whose two steps both belong to its own route ON THIS DEVICE, with `current` no
+ * further than `furthest`, is the chooser. There is no partial recovery, because
+ * a half-trusted step is indistinguishable from a made-up one.
+ *
+ * The device is an argument because it changes the answer: a laptop's stored
+ * `install` is a real place, and the same document read on a phone names a step
+ * that phone's route does not have. Refusing there is not pedantry — it is the
+ * difference between resuming and dropping somebody onto a screen full of
+ * commands they have nowhere to type.
  */
-export const parseOnboardingProgress = (raw: string | null | undefined): OnboardingProgress => {
+export const parseOnboardingProgress = (raw: string | null | undefined, device: DeviceKind): OnboardingProgress => {
   if (!raw) return fresh();
   let parsed: unknown;
   try {
@@ -107,11 +134,12 @@ export const parseOnboardingProgress = (raw: string | null | undefined): Onboard
   const { route, current, furthest, connection } = fields;
   if (!isOnboardingRouteId(route)) return fresh();
   if (!isOnboardingStepId(current) || !isOnboardingStepId(furthest)) return fresh();
-  if (connection !== undefined && (!isConnectionMethodId(connection) || route !== 'first-time')) return fresh();
+  /* `add-client` never asks the connection question, so a stored answer for it is not this document. */
+  if (connection !== undefined && (!isConnectionMethodId(connection) || route === 'add-client')) return fresh();
+  const path: OnboardingPath = { route, device, connection };
   /* A step from another route's list is not this reader's place; it is a mismatch. */
-  if (!isStepOfRoute(route, current, connection) || !isStepOfRoute(route, furthest, connection)) return fresh();
-  if (onboardingStepIndex(route, current, connection) > onboardingStepIndex(route, furthest, connection))
-    return fresh();
+  if (!isStepOfRoute(path, current) || !isStepOfRoute(path, furthest)) return fresh();
+  if (onboardingStepIndex(path, current) > onboardingStepIndex(path, furthest)) return fresh();
   return {
     v: ONBOARDING_PROGRESS_VERSION,
     stage: 'walk',
@@ -179,12 +207,35 @@ export const resetOnboardingProgress = (
 export interface OnboardingProgressStoreOptions {
   readonly storage?: OnboardingProgressStorage | undefined;
   /**
-   * A route the ARRIVAL itself proves: a tab opened from a pairing link is on
-   * the "I have a link" route whatever storage remembers, because it demonstrably
-   * has one. Applied on read rather than written, so merely opening a link never
-   * rewrites progress.
+   * What this device is, decided by observation and never by storage.
+   *
+   * Defaults to `desktop` for the same reason `detectDeviceKind` does: the
+   * caller that cannot say should not be the one that hides the daemon route
+   * from the only kind of machine that can host one.
    */
-  readonly entry?: OnboardingRouteId | undefined;
+  readonly device?: DeviceKind;
+  /**
+   * The place an ARRIVAL itself proves.
+   *
+   * A tab opened from a live pairing code is demonstrably a client being added,
+   * whatever storage remembers — and it is past the step that says to go and run
+   * `fy pair`, because somebody already did. So the arrival names a STEP as well
+   * as a route; landing a reader holding a two-minute code on an instruction to
+   * produce one is the same mistake as asking them which of three they are.
+   *
+   * Applied on read rather than written, so merely opening a link never rewrites
+   * progress.
+   */
+  readonly entry?: SetupHandoff | undefined;
+  /**
+   * A place another device handed to this one.
+   *
+   * Beats `entry` and beats storage, because it is the most recent deliberate
+   * act by a human: somebody stood at one device, pressed hand-off, and walked
+   * to this one. It is applied on read for the same reason as `entry` — landing
+   * here must not overwrite a place this device might still want.
+   */
+  readonly handoff?: SetupHandoff | undefined;
   /**
    * Whether this browser holds a pairing at the moment the store hydrates.
    *
@@ -203,15 +254,29 @@ export interface OnboardingProgressStoreOptions {
  */
 export class OnboardingProgressStore {
   readonly #storage: OnboardingProgressStorage | undefined;
-  readonly #entry: OnboardingRouteId | undefined;
+  readonly #entry: SetupHandoff | undefined;
+  readonly #handoff: SetupHandoff | undefined;
   readonly #paired: boolean;
+  readonly #device: DeviceKind;
   readonly #listeners = new Set<() => void>();
   #snapshot: OnboardingProgress | null = null;
 
   constructor(options: OnboardingProgressStoreOptions = {}) {
     this.#storage = 'storage' in options ? options.storage : browserOnboardingStorage();
     this.#entry = options.entry;
+    this.#handoff = options.handoff;
     this.#paired = options.paired ?? false;
+    this.#device = options.device ?? 'desktop';
+  }
+
+  /** What this device is, so every screen derives its path from one observation. */
+  get device(): DeviceKind {
+    return this.#device;
+  }
+
+  /** The route being walked, with the device folded in — the argument every model helper wants. */
+  path(at: OnboardingWalking): OnboardingPath {
+    return { route: at.route, device: this.#device, connection: at.connection };
   }
 
   snapshot = (): OnboardingProgress => {
@@ -228,14 +293,14 @@ export class OnboardingProgressStore {
 
   /** Answers the chooser. A route always opens on its own first step. */
   choose(route: OnboardingRouteId): OnboardingProgress {
-    return this.#commit(enterOnboardingRoute(route));
+    return this.#commit(enterOnboardingRoute(route, this.#device));
   }
 
   /** Answers the second chooser and immediately starts that answer's real work. */
   chooseConnection(connection: ConnectionMethodId): OnboardingProgress {
     const at = this.snapshot();
-    if (at.stage !== 'walk' || at.route !== 'first-time' || at.current !== 'connect') return at;
-    const current = connection === 'own-relay' ? 'relay-fingerprint' : 'pair';
+    if (at.stage !== 'walk' || at.current !== 'connect') return at;
+    const current = connection === 'own-relay' ? 'relay-fingerprint' : 'local';
     return this.#commit({
       v: ONBOARDING_PROGRESS_VERSION,
       stage: 'walk',
@@ -260,14 +325,16 @@ export class OnboardingProgressStore {
    */
   goTo(step: OnboardingStepId): OnboardingProgress {
     const at = this.snapshot();
-    if (at.stage !== 'walk' || !isStepOfRoute(at.route, step, at.connection)) return at;
+    if (at.stage !== 'walk') return at;
+    const path = this.path(at);
+    if (!isStepOfRoute(path, step)) return at;
     return this.#commit({
       v: ONBOARDING_PROGRESS_VERSION,
       stage: 'walk',
       route: at.route,
       ...(at.connection === undefined ? {} : { connection: at.connection }),
       current: step,
-      furthest: furthestOnboardingStep(at.route, at.furthest, step, at.connection),
+      furthest: furthestOnboardingStep(path, at.furthest, step),
     });
   }
 
@@ -278,19 +345,30 @@ export class OnboardingProgressStore {
     return next;
   }
 
+  /**
+   * Where this visit opens, in order of how much a human meant it.
+   *
+   * A HAND-OFF WINS. Somebody stood at another device, pressed a button that
+   * says "continue on this one", and carried it here; nothing in storage is more
+   * recent than that. An ARRIVAL comes next: a tab opened from a live pairing
+   * code is a client being added, whatever it remembers. Storage is last, and is
+   * only ever a memory of where somebody was.
+   */
   #load(): OnboardingProgress {
     const stored = reconcileOnboardingProgress(this.#read(), this.#paired);
+    const handoff = this.#handoff;
+    if (handoff !== undefined) return resumeOnboardingRoute(handoff, this.#device);
     const entry = this.#entry;
     if (entry === undefined) return stored;
     /* Already walking the route the arrival proves? Keep the place; do not restart it. */
-    if (stored.stage === 'walk' && stored.route === entry) return stored;
-    return enterOnboardingRoute(entry);
+    if (stored.stage === 'walk' && stored.route === entry.route) return stored;
+    return resumeOnboardingRoute(entry, this.#device);
   }
 
   #read(): OnboardingProgress {
     if (!this.#storage) return fresh();
     try {
-      return parseOnboardingProgress(this.#storage.getItem(ONBOARDING_PROGRESS_KEY));
+      return parseOnboardingProgress(this.#storage.getItem(ONBOARDING_PROGRESS_KEY), this.#device);
     } catch {
       return fresh();
     }

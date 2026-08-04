@@ -20,8 +20,7 @@
 import { Check } from 'lucide-react';
 
 import {
-  type ConnectionMethodId,
-  type OnboardingRouteId,
+  type OnboardingPath,
   type OnboardingStepId,
   type OnboardingStepStatus,
   onboardingRouteSteps,
@@ -52,20 +51,25 @@ const LABEL_TONE: Record<OnboardingStepStatus, string> = {
 };
 
 export interface OnboardingTrackProps {
-  /** Which route's steps this is a track OF. Each route has its own list. */
-  readonly route: OnboardingRouteId;
-  readonly connection?: ConnectionMethodId;
+  /**
+   * Which route's steps this is a track OF, ON WHICH DEVICE.
+   *
+   * The device belongs in the path rather than beside it: first-time setup is a
+   * genuinely different list on a phone than on a computer, and a track that
+   * could be rendered without knowing which would draw the wrong journey.
+   */
+  readonly path: OnboardingPath;
   readonly current: OnboardingStepId;
   readonly furthest: OnboardingStepId;
   readonly onJump: (id: OnboardingStepId) => void;
 }
 
-export function OnboardingTrack({ route, connection, current, furthest, onJump }: OnboardingTrackProps) {
+export function OnboardingTrack({ path, current, furthest, onJump }: OnboardingTrackProps) {
   return (
     <ol className="m-0 flex list-none items-start gap-1 p-0" aria-label="Setup steps">
-      {onboardingRouteSteps(route, connection).map((id, index) => {
+      {onboardingRouteSteps(path).map((id, index) => {
         const step = onboardingStep(id);
-        const status = onboardingStepStatus(route, step.id, current, furthest, connection);
+        const status = onboardingStepStatus(path, step.id, current, furthest);
         const body = (
           <>
             <span className={`${MARKER} ${MARKER_TONE[status]}`} aria-hidden="true">
