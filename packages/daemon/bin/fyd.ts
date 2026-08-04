@@ -14,6 +14,10 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
+// One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
+// verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
+// is the class of bug this removes.
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.ts';
@@ -27,6 +31,7 @@ import {
   BunApiServer,
   BunCommandRunner,
   BunProcessProbe,
+  BunRelayCarrier,
   BunSecretShell,
   BunSqliteIndexFactory,
   BunSttCommandRunner,
@@ -72,6 +77,7 @@ import {
   SystemFrameClock,
   TmuxPaneSnapshot,
   type ViewerSocket,
+  WebCryptoRelayIdentityKeys,
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
@@ -259,11 +265,14 @@ import {
   QuotaFailoverService,
   RecommendError,
   type RecommendSubsystem,
+  type RelayApiDispatch,
+  type RelayDeviceDirectory,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
   type RoutingCatalogPort,
+  readDaemonRelayIdentity,
   relaunchCommand,
   renderInitialAttachmentSection,
   resolveStateHome,
@@ -544,6 +553,23 @@ export interface DaemonWorld {
    * production socket path can be exercised at an elapsed deadline without making an integration
    * test sleep for the public thirty-second ticket lifetime. */
   readonly createSocketTickets: () => SocketTicketBroker;
+  /**
+   * The OTHER carrier this daemon can be reached over: an outbound socket to a rendezvous.
+   *
+   * THE DAEMON DIALS. This is not a second listener — a daemon on `127.0.0.1` has no inbound route,
+   * and the only reason a relay makes it reachable is that the connection is opened outbound from
+   * behind the NAT. It carries the SAME dispatcher the bound address serves, so a relayed request
+   * reaches exactly the routes a direct one reaches and there is no second surface to keep in step.
+   *
+   * It answers a refusal rather than throwing, and the refusal is printed. A daemon with no relay and
+   * a daemon whose relay is broken look identical from the outside, and this migration has shipped
+   * that confusion three times: the sentence is the difference.
+   */
+  readonly createRelayCarrier: (
+    config: DaemonConfig,
+    dispatch: RelayApiDispatch,
+    devices: RelayDeviceDirectory,
+  ) => Promise<{ readonly carrier: BunRelayCarrier } | { readonly refusal: string }>;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -3094,6 +3120,26 @@ export function buildWorld(): DaemonWorld {
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
+    createRelayCarrier: async (config, dispatch, devices) => {
+      // The key is the one PAIRING minted, read through the path both subsystems now share. A relay
+      // identity of its own would carry a different fingerprint from the one in the pairing QR, and
+      // every paired browser pins that one — so it would refuse the handshake, correctly, forever.
+      const identity = await readDaemonRelayIdentity(
+        stateFiles,
+        paths.daemonIdentity,
+        new WebCryptoRelayIdentityKeys(),
+      );
+      if (!identity.ok) return { refusal: identity.reason };
+      return {
+        carrier: new BunRelayCarrier({
+          config: config.relay,
+          crypto: new WebCryptoRelayCrypto(),
+          identity: identity.identity,
+          dispatch,
+          devices,
+        }),
+      };
+    },
     browserLogin: createBrowserLoginWorld(paths),
     createSubsystems: (
       storage,
@@ -3582,11 +3628,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // ALL THREE parts of the surface are served by the one host, from the one credential set: the
   // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
   // routes that carry dictation audio.
+  const dispatcher = createMountedDispatcher(base, subsystems);
   const server: ApiServerHandle = await world.boot.binder.bind(
     async () =>
       await world.api.listen(
         {
-          http: createMountedDispatcher(base, subsystems),
+          http: dispatcher,
           sockets: createMountedSocketDispatcher(base, subsystems),
           raw: createMountedRawDispatcher(base, subsystems),
           corsOrigins: browserOrigins(config),
@@ -3594,6 +3641,36 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
         { host: config.host, port: config.port },
       ),
   );
+  /**
+   * The relay carrier, dialled AFTER the bind and serving the very same dispatcher.
+   *
+   * AFTER, deliberately: a boot that is about to hand over to an incumbent daemon on this address
+   * must not first claim the rendezvous that incumbent is holding — the claim is exclusive, and the
+   * loser of a bind race would knock the winner off the relay for a heartbeat sweep.
+   *
+   * THE SAME DISPATCHER, not a second surface. Every route a browser can reach directly it can reach
+   * relayed, on the same authorization boundary, and there is no route that is reachable one way and
+   * not the other.
+   *
+   * A REFUSAL IS PRINTED AND THE DAEMON KEEPS SERVING. Direct clients are unaffected by a relay this
+   * daemon could not dial, and the sentence is what stops "no relay configured" from looking exactly
+   * like "the relay is broken".
+   */
+  const relay = await world.createRelayCarrier(config, request => dispatcher.dispatch(request), {
+    identifyDevice: token => pairing.credentials.identify(token),
+  });
+  if ('carrier' in relay) {
+    relay.carrier.start();
+    cleanups.push(() => relay.carrier.stop());
+    const status = relay.carrier.status();
+    process.stderr.write(
+      status.phase === 'none'
+        ? `${DAEMON_NAME}: no relay carrier — ${status.detail ?? 'no reason reported'}\n`
+        : `${DAEMON_NAME}: dialling the relay at ${status.relayUrl}\n`,
+    );
+  } else {
+    process.stderr.write(`${DAEMON_NAME}: no relay carrier — ${relay.refusal}\n`);
+  }
   // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
   // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
   // stream is over while the socket it writes to still exists.

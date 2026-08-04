@@ -43,6 +43,7 @@ export * from './ports.ts';
 export * from './quota-failover/index.ts';
 export * from './rebuild.ts';
 export * from './reconciliation.ts';
+export * from './relay/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';
 export * from './session/attach/index.ts';
