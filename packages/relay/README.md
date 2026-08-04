@@ -15,11 +15,12 @@ carriers and one security model across both:
   automatic fallback. Ferretry operates one, with daemon-keyed metering, a runtime kill switch, and
   per-daemon plus account-wide caps.
 
-**Neither is a question a user is asked.** The carrier is behaviour: direct first, hosted relay when
-direct does not work, and the live carrier always named on screen so nothing degrades silently.
-Running a relay of your own is still possible and still supported, but it is an **expert opt-in
-path** with its own runbook — [`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md) —
-not an onboarding option.
+**Neither should be a question a user is asked.** The required carrier behaviour is direct first,
+hosted relay when direct does not work, and the live carrier always named on screen so nothing
+degrades silently. The current PWA still carries an interim three-way chooser and self-hosting setup
+route; removing those is an explicit GAP. Running a relay of your own remains supported as an
+**expert opt-in path** with its own runbook —
+[`docs/cloudflare-relay-self-hosting.md`](../../docs/cloudflare-relay-self-hosting.md).
 
 No **carrier** address is compiled into this package. The client build does carry one address — the
 **discovery origin** it reads the advertisement from, because the relay has its own hostname and the

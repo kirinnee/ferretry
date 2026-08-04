@@ -2,14 +2,15 @@
 
 **This is an expert opt-in path. Almost nobody needs it.**
 
-Ferretry connects a browser to a daemon directly whenever it can, and falls back to a relay Ferretry
-operates when it cannot. Neither is a question setup asks. This document is for the person who would
-rather that fallback ran in their own Cloudflare account — because they do not want a third party on
-the path at all, because they want the metadata to stay with them, or because they simply prefer to
-own the infrastructure they depend on.
+Ferretry's required behaviour connects a browser to a daemon directly whenever it can and falls back
+to a relay Ferretry operates when it cannot, without asking for a carrier choice. This document is
+for the person who would rather that fallback ran in their own Cloudflare account — because they do
+not want a third party on the path at all, because they want the metadata to stay with them, or
+because they simply prefer to own the infrastructure they depend on.
 
-Nothing in onboarding links here on purpose. If you are setting Ferretry up for the first time, close
-this and use the app.
+The current interim onboarding still links here; that chooser is a declared GAP and will be removed
+when the automatic transport lands. This remains the expert runbook, not an ordinary setup step. If
+you are setting Ferretry up for the first time, close this and use the app.
 
 - **What a relay is, and what its operator can observe** — [relay-protocol.md](relay-protocol.md)
   §§9–11. Architecture lives there; procedure lives here.
@@ -52,8 +53,9 @@ If that is not useful to you yet, stop here and come back when the prerequisite 
 | The repo's devshell          | `direnv allow`, or `nix develop`. Every command below runs inside it.      |
 | `fyd` installed and running  | You need a daemon fingerprint, and the daemon must be running to print it. |
 
-Wrangler is not vendored. It is fetched from npm on first use by `bunx`, so the first `task
-relay:check` may take a minute and needs network access to the npm registry.
+Wrangler comes from the repository's flake-locked Nix devshell. The first `direnv allow` or `nix
+develop` may need network access to fetch that pinned toolchain; relay commands never resolve npm's
+latest Wrangler while they hold your Cloudflare credential.
 
 ### Getting the code
 
@@ -237,12 +239,13 @@ task relay:check
 ```
 
 `--dry-run` compiles the Worker and resolves bindings and migrations without publishing anything to
-Cloudflare. Expected output (verified against Wrangler 4.118.0 in this repository's devshell):
+Cloudflare. Expected output at this revision (the version and bundle sizes change when the flake or
+Worker changes):
 
 ```
- ⛅️ wrangler 4.118.0
-────────────────────
-Total Upload: 757.13 KiB / gzip: 118.99 KiB
+ ⛅️ wrangler 4.93.0 (update available 4.118.0)
+──────────────────────────────────────────────
+Total Upload: 759.98 KiB / gzip: 119.82 KiB
 Your Worker has access to the following bindings:
 Binding                                             Resource
 env.RENDEZVOUS (RendezvousDurableObject)            Durable Object
@@ -260,7 +263,7 @@ Then:
 task relay:deploy
 ```
 
-That is `bunx wrangler deploy` in `packages/relay`. On success Wrangler prints the deployed Worker's
+That is `wrangler deploy` in `packages/relay`. On success Wrangler prints the deployed Worker's
 URL, of the form:
 
 ```
@@ -338,7 +341,7 @@ the same, `RELAY_DAEMON_IDS` did not deploy the way you think it did.
 **4. Watch it live**, if you want to see requests arrive:
 
 ```bash
-cd packages/relay && bunx wrangler tail
+cd packages/relay && wrangler tail
 ```
 
 Cloudflare describes `wrangler tail` as _"start a log tailing session for a Worker"_. Your relay
@@ -416,7 +419,7 @@ Written out so the procedure is on record, not because you can run it today.
 3. The session opens. **Confirm the screen names the carrier** and says why direct was passed over.
    A session that connects without naming its carrier is the failure mode this whole design is
    guarding against — report it rather than accepting it.
-4. On the host, `cd packages/relay && bunx wrangler tail` should show the two socket arrivals
+4. On the host, `cd packages/relay && wrangler tail` should show the two socket arrivals
    (`/daemon` and `/client`) and then traffic. Two arrivals and no traffic means the sockets
    connected but the handshake did not complete.
 5. Confirm your own relay is the one carrying it — the address on screen should be your
@@ -467,7 +470,7 @@ you it could not reach it rather than quietly using something else.
 
 - Cloudflare's **Workers & Pages → your Worker → Metrics** for requests, errors and duration;
 - your **plan usage**, if you are on Free — the daily Durable Object caps are the first wall;
-- `bunx wrangler tail` when something is wrong and you want to watch it happen.
+- `wrangler tail` when something is wrong and you want to watch it happen.
 
 **Upgrades are yours.** This relay is deployed from a checkout of this repository. Protocol changes
 ship in this repository; a relay running old code against new clients is your problem to notice.
@@ -500,14 +503,14 @@ Rehearse first:
 
 ```bash
 cd packages/relay
-bunx wrangler delete --config wrangler.jsonc --dry-run
+wrangler delete --config wrangler.jsonc --dry-run
 ```
 
 `--dry-run` is documented as _"do not actually delete the Worker"_. Read what it says it will remove.
 Then, if you are sure:
 
 ```bash
-bunx wrangler delete --config wrangler.jsonc
+wrangler delete --config wrangler.jsonc
 ```
 
 Do not attempt to hand-edit the `migrations` block into a delete migration to clean up classes
@@ -527,12 +530,12 @@ there is nothing configured to remove.
 
 ```bash
 cd packages/relay
-bunx wrangler secret list          # expect an empty list
+wrangler secret list          # expect an empty list
 ```
 
 This deployment stores **no Worker secrets**. `RELAY_DAEMON_IDS` is a plaintext `var`, deliberately:
 a fingerprint is public. If `secret list` shows anything, you put it there, and
-`bunx wrangler secret delete <NAME>` removes it.
+`wrangler secret delete <NAME>` removes it.
 
 Then **revoke the API token** in **Manage Account → API Tokens**. A deploy token that outlives the
 deployment is a credential nobody is watching. Finally, clear it from your shell:

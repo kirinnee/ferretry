@@ -171,25 +171,28 @@ export async function requestHostedRelayDecision(
   }
 }
 
-/** Release is idempotent because both close and error callbacks may describe the same socket. */
+/** Release is idempotent, so retry one missing/failed answer without risking a second decrement. */
 export async function releaseHostedRelayReservation(
   namespace: HostedRelayControlNamespace,
   reservationId: string,
 ): Promise<boolean> {
-  try {
-    const response = await hostedRelayControlStub(namespace).fetch(
-      new Request(`https://relay-control.invalid${INTERNAL_RELEASE_PATH}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reservationId }),
-      }),
-    );
-    if (!response.ok) return false;
-    const parsed = HostedRelayDecisionSchema.safeParse(await response.json());
-    return parsed.success && parsed.data.ok;
-  } catch {
-    return false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await hostedRelayControlStub(namespace).fetch(
+        new Request(`https://relay-control.invalid${INTERNAL_RELEASE_PATH}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reservationId }),
+        }),
+      );
+      if (!response.ok) continue;
+      const parsed = HostedRelayDecisionSchema.safeParse(await response.json());
+      if (parsed.success && parsed.data.ok) return true;
+    } catch {
+      // A missing answer is ambiguous: the idempotent endpoint may already have committed.
+    }
   }
+  return false;
 }
 
 export class HostedRelayControlDurableObject {

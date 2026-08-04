@@ -29,6 +29,7 @@ import {
   encodeControlMessage,
   encodeFrame,
   FRAME_KINDS,
+  HEARTBEAT_SECONDS,
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   type HostedRelayDecision,
@@ -429,9 +430,22 @@ export class RendezvousDurableObject {
       if (state === null) return;
       const decision = await this.hostedDecision('inspect', { daemonId: state.daemonId });
       if (!decision.ok) {
+        const failures: unknown[] = [];
         for (const socket of this.objectState.getWebSockets()) {
-          await this.refuseSocketClearly(socket, decision.code, decision.reason);
+          try {
+            await this.refuseSocketClearly(socket, decision.code, decision.reason);
+          } catch (error) {
+            failures.push(error);
+          }
         }
+        try {
+          // A socket the runtime already tore down may reject close. Keep the sweep alive so one
+          // such socket cannot shield every idle socket after it from the kill switch forever.
+          await this.objectState.storage.setAlarm(this.runtime.now() + HEARTBEAT_SECONDS * 1_000);
+        } catch (error) {
+          failures.push(error);
+        }
+        if (failures.length !== 0) throw failures[0];
         return;
       }
       const lastSeen: Record<string, number> = {};
@@ -472,8 +486,13 @@ export class RendezvousDurableObject {
         reduceRendezvous(state, { kind: 'socket-closed', socketId: attachment.socketId, at: this.runtime.now() }),
       );
     });
-    await this.queue;
-    await this.releaseReservation(attachment.reservationId);
+    try {
+      await this.queue;
+    } finally {
+      // The transition tells the peer and that effect can throw when both ends died together. The
+      // departing socket's own reservation is independent evidence and must go back either way.
+      await this.releaseReservation(attachment.reservationId);
+    }
   }
 
   /** A socket with no attachment is not one this rendezvous ever accepted. It does not get to stay. */

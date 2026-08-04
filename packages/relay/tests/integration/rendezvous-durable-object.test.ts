@@ -463,7 +463,10 @@ describe('hosted rendezvous enforcement', () => {
       }
     }
 
-    const denied = () => ({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth, reason: 'daily cap reached' });
+    const denied = (path: string) =>
+      path === '/internal/meter'
+        ? { ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth, reason: 'daily cap reached' }
+        : { ok: true };
 
     const mute = hostedEnvironment(denied);
     const muteHarness = makeObject({}, mute.environment);
@@ -483,6 +486,83 @@ describe('hosted rendezvous enforcement', () => {
     ).be.rejectedWith(/already gone/u);
     // A close that fails is loud, but the slot is already back before anyone hears about it.
     should(releasedBy(stuck.calls)).deepEqual(['stuck_reservation']);
+  });
+
+  it('should release a departing socket even when telling its dead peer fails', async () => {
+    class DeadPeer extends FakeSocket {
+      override send(): void {
+        throw new Error('socket is already gone');
+      }
+    }
+
+    const sessionId = sessionIdFromBytes(new Uint8Array(16).fill(1));
+    if (sessionId === null) throw new Error('session fixture is invalid');
+    for (const departing of ['client', 'daemon'] as const) {
+      const hosted = hostedEnvironment();
+      const harness = makeObject({}, hosted.environment);
+      const daemon = departing === 'client' ? new DeadPeer() : new FakeSocket();
+      const client = departing === 'daemon' ? new DeadPeer() : new FakeSocket();
+      daemon.serializeAttachment({ socketId: 'daemon', reservationId: 'daemon_reservation' });
+      client.serializeAttachment({ socketId: 'client', reservationId: 'client_reservation' });
+      harness.objectState.sockets.push(daemon, client);
+      harness.objectState.storage.values.set('rendezvous', {
+        ...initialRendezvousState(`fy_daemon_${'a'.repeat(43)}`),
+        daemon: { socketId: 'daemon', since: 1 },
+        sessions: [
+          {
+            sessionId,
+            clientSocketId: 'client',
+            since: 1,
+            fromClient: { allowed: 1, sent: 0 },
+            fromDaemon: { allowed: 1, sent: 0 },
+          },
+        ],
+      });
+
+      await should(
+        departing === 'client' ? harness.object.webSocketClose(client) : harness.object.webSocketError(daemon),
+      ).be.rejectedWith(/already gone/u);
+      should(releasedBy(hosted.calls)).containEql(`${departing}_reservation`);
+    }
+  });
+
+  it('should apply a failed sweep to every socket and keep the next sweep armed', async () => {
+    class UnclosableSocket extends FakeSocket {
+      override close(): void {
+        throw new Error('socket is already gone');
+      }
+    }
+
+    const hosted = hostedEnvironment(path =>
+      path === '/internal/inspect'
+        ? { ok: false, code: RELAY_CLOSE_CODES.hostedDisabled, reason: 'hosted relay is disabled' }
+        : { ok: true },
+    );
+    let created = 0;
+    const harness = makeObject(
+      {
+        createSocketPair: () => ({
+          client: new FakeSocket(),
+          server: created++ === 0 ? new UnclosableSocket() : new FakeSocket(),
+        }),
+      },
+      hosted.environment,
+    );
+    const { identity } = await claimRendezvous(harness, 'daemon_reservation');
+    const one = await joinClient(harness, identity.daemonId, 'client_one_reservation');
+    const two = await joinClient(harness, identity.daemonId, 'client_two_reservation');
+    const alarmsBefore = harness.objectState.storage.alarms.length;
+
+    await should(harness.object.alarm()).be.rejectedWith(/already gone/u);
+
+    should(releasedBy(hosted.calls)).deepEqual([
+      'daemon_reservation',
+      'client_one_reservation',
+      'client_two_reservation',
+    ]);
+    should(one.clientSocket.closed?.code).equal(RELAY_CLOSE_CODES.hostedDisabled);
+    should(two.clientSocket.closed?.code).equal(RELAY_CLOSE_CODES.hostedDisabled);
+    should(harness.objectState.storage.alarms.length).be.above(alarmsBefore);
   });
 
   it('should still close and release when a state-machine refusal cannot be explained', async () => {

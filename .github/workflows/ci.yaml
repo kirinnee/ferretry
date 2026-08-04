@@ -19,6 +19,27 @@ jobs:
       - name: Run pre-commit
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
 
+  relay-configurations:
+    name: Relay Configurations
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # Compile both deployment shapes with the same flake-locked Wrangler production uses. This
+      # catches schema, migration, binding and module-resolution drift before a deploy sees secrets.
+      - name: Compile relay Workers without publishing
+        run: |
+          nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/relay
+            wrangler deploy --dry-run --config wrangler.jsonc
+            wrangler deploy --dry-run --config wrangler.hosted.json
+          '
+
   test:
     name: ${{ matrix.mode == 'int' && 'Integration Tests' || 'Unit Tests' }}
     permissions:

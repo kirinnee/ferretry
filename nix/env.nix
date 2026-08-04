@@ -23,6 +23,7 @@ with packages;
     go-task
     jq
     ripgrep
+    wrangler
     yq-go
   ];
 
