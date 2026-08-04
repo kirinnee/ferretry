@@ -206,14 +206,13 @@ function TierLegend({
  */
 export function ComposerAutocompletePopover({ surface }: { readonly surface: ComposerAutocompleteSurface }) {
   const { activeIndex, candidates, contextLabel, error, listboxId, match, notice, open, provider, status } = surface;
-  const activeOptionId = activeIndex >= 0 ? optionId(listboxId, activeIndex) : undefined;
+  const activeOptionId = open && activeIndex >= 0 ? optionId(listboxId, activeIndex) : undefined;
   // Arrow keys must not walk the selection out of the scroller. The row is
   // looked up by id rather than held in a ref because the active row moves.
   useEffect(() => {
     if (activeOptionId === undefined || typeof document === 'undefined') return;
     document.getElementById(activeOptionId)?.scrollIntoView({ block: 'nearest' });
   }, [activeOptionId]);
-  if (!open) return null;
   const rows = (section: CandidateSection) =>
     section.items.map(item => (
       <CandidateRow
@@ -226,72 +225,83 @@ export function ComposerAutocompletePopover({ surface }: { readonly surface: Com
       />
     ));
   return (
-    <div
-      className="absolute inset-x-0 bottom-[calc(100%+var(--gap-xs))] z-40 overflow-hidden rounded-panel border-panel border-border-strong bg-surface shadow-popover"
-      data-composer-autocomplete={provider?.label ?? 'Suggestions'}
-      onPointerDown={event => {
-        event.preventDefault();
-      }}
-    >
-      <div className="flex min-h-[34px] items-center gap-sm border-b border-border-soft bg-surface-2 px-control-x py-1">
-        <span className="min-w-0 flex-1 truncate text-meta font-semibold uppercase tracking-label text-fg-soft">
-          {contextLabel ?? provider?.label}
-        </span>
-        {candidates.length === 0 ? null : (
-          <span className="mono shrink-0 text-2xs text-faint">{candidates.length}</span>
-        )}
-      </div>
-      <TierLegend activeTier={match?.referenceTier} legend={provider?.legend} />
-      <div className="relative max-h-[min(280px,max(88px,calc(var(--app-h,100dvh)*0.34)))] overflow-y-auto overscroll-contain scroll-thin [touch-action:pan-y]">
-        {status === 'loading' ? (
-          <div
-            className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
-            role="status"
-          >
-            <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={15} />
-            Searching…
-          </div>
-        ) : status === 'error' ? (
-          <div className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-err" role="alert">
-            <ShieldAlert aria-hidden="true" size={15} />
-            {error ?? 'Suggestions unavailable'}
-          </div>
-        ) : candidates.length === 0 ? (
-          <div
-            className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
-            role="status"
-          >
-            <SearchX aria-hidden="true" size={15} />
-            {notice ?? 'Nothing matches yet'}
-          </div>
-        ) : (
-          <div aria-label={provider?.label ?? 'Suggestions'} id={listboxId} role="listbox">
-            {candidateSections(candidates).map(section =>
-              section.group === undefined ? (
-                rows(section)
-              ) : (
-                <fieldset aria-label={section.group} className="m-0 min-w-0 border-0 p-0" key={section.group}>
-                  <div aria-hidden="true" className="kt-label px-control-x pb-xs pt-xs">
-                    {section.group}
-                  </div>
-                  {rows(section)}
-                </fieldset>
-              ),
+    <>
+      <span aria-atomic="true" aria-live="polite" className="sr-only">
+        {open ? announcement(status, candidates.length) : ''}
+      </span>
+      {open ? (
+        <div
+          className="absolute inset-x-0 bottom-[calc(100%+var(--gap-xs))] z-40 overflow-hidden rounded-panel border-panel border-border-strong bg-surface shadow-popover"
+          data-composer-autocomplete={provider?.label ?? 'Suggestions'}
+          onPointerDown={event => {
+            event.preventDefault();
+          }}
+        >
+          <div className="flex min-h-[34px] items-center gap-sm border-b border-border-soft bg-surface-2 px-control-x py-1">
+            <span className="min-w-0 flex-1 truncate text-meta font-semibold uppercase tracking-label text-fg-soft">
+              {contextLabel ?? provider?.label}
+            </span>
+            {candidates.length === 0 ? null : (
+              <span className="mono shrink-0 text-2xs text-faint">{candidates.length}</span>
             )}
           </div>
-        )}
-      </div>
-      {notice === undefined || candidates.length === 0 ? null : (
-        <div
-          className="border-t border-border-soft bg-warn-bg px-control-x py-1 text-2xs leading-base text-warn"
-          role="status"
-        >
-          {notice}
+          <TierLegend activeTier={match?.referenceTier} legend={provider?.legend} />
+          <div
+            {...(status === 'ready' && candidates.length > 0
+              ? { 'aria-label': provider?.label ?? 'Suggestions', role: 'listbox' }
+              : {})}
+            className="relative max-h-[min(280px,max(88px,calc(var(--app-h,100dvh)*0.34)))] overflow-y-auto overscroll-contain scroll-thin [touch-action:pan-y]"
+            id={listboxId}
+          >
+            {status === 'loading' ? (
+              <div
+                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
+                role="status"
+              >
+                <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={15} />
+                Searching…
+              </div>
+            ) : status === 'error' ? (
+              <div
+                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-err"
+                role="alert"
+              >
+                <ShieldAlert aria-hidden="true" size={15} />
+                {error ?? 'Suggestions unavailable'}
+              </div>
+            ) : candidates.length === 0 ? (
+              <div
+                className="flex min-h-[44px] items-center gap-sm px-control-x py-row-y text-meta text-muted"
+                role="status"
+              >
+                <SearchX aria-hidden="true" size={15} />
+                {notice ?? 'Nothing matches yet'}
+              </div>
+            ) : (
+              candidateSections(candidates).map(section =>
+                section.group === undefined ? (
+                  rows(section)
+                ) : (
+                  <fieldset aria-label={section.group} className="m-0 min-w-0 border-0 p-0" key={section.group}>
+                    <div aria-hidden="true" className="kt-label px-control-x pb-xs pt-xs">
+                      {section.group}
+                    </div>
+                    {rows(section)}
+                  </fieldset>
+                ),
+              )
+            )}
+          </div>
+          {notice === undefined || candidates.length === 0 ? null : (
+            <div
+              className="border-t border-border-soft bg-warn-bg px-control-x py-1 text-2xs leading-base text-warn"
+              role="status"
+            >
+              {notice}
+            </div>
+          )}
         </div>
-      )}
-      <span aria-atomic="true" aria-live="polite" className="sr-only">
-        {announcement(status, candidates.length)}
-      </span>
-    </div>
+      ) : null}
+    </>
   );
 }

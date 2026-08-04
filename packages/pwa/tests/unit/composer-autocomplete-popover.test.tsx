@@ -107,9 +107,18 @@ const texts = (view: ReactTestRenderer): string[] => {
 };
 
 describe('composer autocomplete popover', () => {
-  test('renders nothing at all while the controller is closed', () => {
+  test('keeps an empty live region mounted while closed so the first open state is announced', () => {
     const view = mounted(render(<ComposerAutocompletePopover surface={surfaceOf({ open: false })} />));
-    expect(view.toJSON()).toBeNull();
+    const announcer = view.root.findByProps({ 'aria-live': 'polite' });
+    expect(announcer.children.join('')).toBe('');
+    expect(view.root.findAllByProps({ 'data-composer-autocomplete': 'Suggestions' })).toHaveLength(0);
+
+    run(() =>
+      view.update(<ComposerAutocompletePopover surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0 })} />),
+    );
+
+    expect(view.root.findByProps({ 'aria-live': 'polite' })).toBe(announcer);
+    expect(announcer.children.join('')).toBe('3 suggestions');
   });
 
   test('renders ranked candidates in provider sections with the selected row marked', () => {
@@ -203,6 +212,7 @@ describe('composer autocomplete popover', () => {
 
   test('reports loading, failure and emptiness instead of an empty box', () => {
     const loading = mounted(render(<ComposerAutocompletePopover surface={surfaceOf({ status: 'loading' })} />));
+    expect(loading.root.findByProps({ id: 'composer-autocomplete-test' })).toBeDefined();
     expect(loading.root.findAllByProps({ role: 'status' }).length).toBeGreaterThan(0);
     expect(texts(loading)).toContain('Searching…');
     expect(texts(loading)).toContain('Loading suggestions');
@@ -210,6 +220,7 @@ describe('composer autocomplete popover', () => {
     const failed = mounted(
       render(<ComposerAutocompletePopover surface={surfaceOf({ status: 'error', error: 'the daemon said no' })} />),
     );
+    expect(failed.root.findByProps({ id: 'composer-autocomplete-test' })).toBeDefined();
     expect(failed.root.findAllByProps({ role: 'alert' }).length).toBeGreaterThan(0);
     expect(texts(failed)).toContain('the daemon said no');
     expect(texts(failed)).toContain('Suggestions unavailable');
@@ -218,6 +229,7 @@ describe('composer autocomplete popover', () => {
     expect(texts(nameless).filter(text => text === 'Suggestions unavailable')).toHaveLength(2);
 
     const empty = mounted(render(<ComposerAutocompletePopover surface={surfaceOf({ provider: referenceProvider })} />));
+    expect(empty.root.findByProps({ id: 'composer-autocomplete-test' })).toBeDefined();
     expect(texts(empty)).toContain('Nothing matches yet');
     // With no context label the provider names itself, and an empty list prints
     // no count chip and no notice footer.
