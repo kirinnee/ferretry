@@ -340,3 +340,221 @@ describe('SessionTerminalDeck co-control', () => {
     run(() => page.unmount());
   });
 });
+
+describe('SessionTerminalDeck pane wiring', () => {
+  test('lets the browser keep copy and paste while every other key reaches the shell', async () => {
+    // A terminal that swallowed Ctrl/Cmd+C would make its own output
+    // uncopyable, and one that swallowed Ctrl/Cmd+V would make a paste
+    // impossible on a laptop. Everything else is shell input, including the
+    // same letters without the modifier.
+    const spy = xtermSpy({ selection: 'built ok' });
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const pane = spy.instances[0];
+    if (pane === undefined) throw new Error('the deck did not attach a pane');
+
+    expect(pane.key({ ctrlKey: true, code: 'KeyC' })).toBe(false);
+    expect(pane.key({ metaKey: true, code: 'KeyV' })).toBe(false);
+    expect(pane.key({ code: 'KeyC' })).toBe(true);
+    expect(pane.key({ ctrlKey: true, altKey: true, code: 'KeyC' })).toBe(true);
+    expect(pane.key({ ctrlKey: true, code: 'KeyD' })).toBe(true);
+    run(() => page.unmount());
+  });
+
+  test('sends a binary-mode paste as the bytes it was, not as re-encoded text', async () => {
+    // xterm hands binary input back as one character per byte. Re-encoding that
+    // through TextEncoder would turn every byte above 0x7f into two.
+    const spy = xtermSpy();
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const socket = deck.sockets[0];
+    const pane = spy.instances[0];
+    if (socket === undefined || pane === undefined) throw new Error('the deck did not attach a pane');
+    await runAsync(async () => {
+      socket.emit('open');
+      await Promise.resolve();
+    });
+
+    run(() => pane.binary(String.fromCharCode(0xff, 0x01)));
+
+    const sent = socket.sent.filter((frame): frame is Uint8Array => frame instanceof Uint8Array);
+    expect([...(sent[0] ?? [])]).toEqual([0xff, 0x01]);
+    run(() => page.unmount());
+  });
+
+  test('copies the pane selection the reader made', async () => {
+    const spy = xtermSpy({ selection: 'built ok' });
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const pane = spy.instances[0];
+    if (pane === undefined) throw new Error('the deck did not attach a pane');
+
+    run(() => pane.select('built ok'));
+    clickNamed(page, 'Copy selection');
+    await settle();
+
+    expect(deck.copied).toEqual(['built ok']);
+    run(() => page.unmount());
+  });
+
+  test('says so when the browser refuses clipboard access instead of failing silently', async () => {
+    const spy = xtermSpy({ selection: 'built ok' });
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      loadXterm: async () => spy.modules,
+      writeClipboard: async () => {
+        throw new Error('denied');
+      },
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const pane = spy.instances[0];
+    if (pane === undefined) throw new Error('the deck did not attach a pane');
+
+    run(() => pane.select('built ok'));
+    clickNamed(page, 'Copy selection');
+    await settle();
+
+    expect(json(page)).toContain('Clipboard access was denied');
+    run(() => page.unmount());
+  });
+
+  test('copies nothing when there is no selection to copy', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    clickNamed(page, 'Copy selection');
+    await settle();
+
+    expect(deck.copied).toEqual([]);
+    run(() => page.unmount());
+  });
+
+  test('survives a pane that cannot be measured yet, because a retained tab is exactly that', async () => {
+    const spy = xtermSpy({ fitThrows: true });
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const socket = deck.sockets[0];
+    if (socket === undefined) throw new Error('the deck opened no socket');
+
+    await runAsync(async () => {
+      socket.emit('open');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+
+    // No resize frame could be measured, and the deck is still attached.
+    expect(socket.sent).toHaveLength(0);
+    expect(json(page)).toContain('live');
+    run(() => page.unmount());
+  });
+
+  test('switches tabs to the shell the reader picked', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST), terminalView(SECOND, { title: 'logs' })]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    const tab = page.root
+      .findAll(node => node.type === 'button')
+      .find(node => (node.props as { id?: string }).id === `web-terminal-tab-${SECOND}`);
+    if (tab === undefined) throw new Error('the second tab is missing');
+    run(() => (tab.props as { onClick: () => void }).onClick());
+    await settle();
+
+    expect(deck.urls.at(-1)).toContain(SECOND);
+    run(() => page.unmount());
+  });
+
+  test('reconnects after a transport failure and says so while it waits', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const socket = deck.sockets[0];
+    if (socket === undefined) throw new Error('the deck opened no socket');
+
+    await runAsync(async () => {
+      socket.emit('open');
+      socket.emit('error');
+      socket.emit('close', { code: 1006 });
+      await Promise.resolve();
+    });
+
+    expect(json(page)).toContain('reconnecting');
+    run(() => page.unmount());
+  });
+
+  test('reports a create, rename or close the daemon refused', async () => {
+    const refuse = async (): Promise<never> => {
+      throw new Error('terminal capacity reached');
+    };
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), {
+      create: refuse,
+      rename: refuse,
+      close: refuse,
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    clickNamed(page, 'Create terminal');
+    await settle();
+    expect(json(page)).toContain('terminal capacity reached');
+
+    clickNamed(page, 'Close terminal process');
+    await settle();
+    expect(json(page)).toContain('terminal capacity reached');
+
+    clickNamed(page, 'Rename terminal');
+    const input = page.root.findAll(node => node.type === 'input')[0];
+    const form = page.root.findAll(node => node.type === 'form')[0];
+    if (input === undefined || form === undefined) throw new Error('the rename form did not open');
+    run(() => (input.props as { onChange: (event: unknown) => void }).onChange({ target: { value: 'watch' } }));
+    await runAsync(async () => {
+      (form.props as { onSubmit: (event: unknown) => void }).onSubmit({ preventDefault: () => {} });
+      await Promise.resolve();
+    });
+    expect(json(page)).toContain('terminal capacity reached');
+    run(() => page.unmount());
+  });
+
+  test('leaves the expanded view when the reader presses Escape', async () => {
+    // A fixed overlay with no keyboard exit traps whoever opened it by accident.
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    clickNamed(page, 'Expand the terminal to fill the screen');
+    expect(json(page)).toContain('"data-expanded"');
+    run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(json(page)).not.toContain('"data-expanded"');
+
+    // A key that is not Escape leaves it alone.
+    clickNamed(page, 'Expand the terminal to fill the screen');
+    run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' })));
+    expect(json(page)).toContain('"data-expanded"');
+    run(() => page.unmount());
+  });
+});
+
+describe('SessionTerminalDeck theming', () => {
+  test('repaints the pane when the reader changes theme', async () => {
+    // The pane is not a DOM node with classes — xterm holds its own colour
+    // table, so a theme switch that only changed CSS variables would leave a
+    // dark shell sitting in a light page.
+    const spy = xtermSpy();
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    document.documentElement.setAttribute('data-theme', 'studio-light');
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+
+    expect(spy.themes.length).toBeGreaterThan(0);
+    run(() => page.unmount());
+    document.documentElement.removeAttribute('data-theme');
+  });
+});

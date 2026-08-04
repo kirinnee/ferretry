@@ -152,6 +152,12 @@ export interface XtermInstance {
   readonly written: Uint8Array[];
   /** Simulates the reader typing. */
   type(value: string): void;
+  /** Simulates a paste or another binary-mode input. */
+  binary(value: string): void;
+  /** Simulates the reader selecting pane text. */
+  select(value: string): void;
+  /** Asks the deck's own key handler whether it keeps a shortcut. */
+  key(event: { ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; code: string }): boolean;
 }
 
 /**
@@ -161,25 +167,43 @@ export interface XtermInstance {
  * reader's keystroke, and what a test asserts is that it reached the socket
  * whoever else owns the shell.
  */
-export function xtermSpy(): {
+export function xtermSpy(options: { readonly fitThrows?: boolean; readonly selection?: string } = {}): {
   readonly modules: {
     Terminal: typeof import('@xterm/xterm').Terminal;
     FitAddon: typeof import('@xterm/addon-fit').FitAddon;
   };
   readonly instances: XtermInstance[];
+  /** Every theme the deck pushed after the first, i.e. every repaint. */
+  readonly themes: unknown[];
 } {
   const instances: XtermInstance[] = [];
+  const themes: unknown[] = [];
   class Terminal {
     cols = 80;
     rows = 24;
-    options: Record<string, unknown> = {};
+    /** `theme` is an accessor so a repaint is observable: the deck assigns
+     *  `xterm.options.theme`, which is a write THROUGH this object. */
+    readonly options: { theme?: unknown } = {
+      get theme(): unknown {
+        return themes.at(-1);
+      },
+      set theme(value: unknown) {
+        themes.push(value);
+      },
+    };
     readonly written: Uint8Array[] = [];
     #data: (value: string) => void = () => {};
+    #binary: (value: string) => void = () => {};
+    #selection: () => void = () => {};
+    #key: (event: never) => boolean = () => true;
 
     constructor() {
       instances.push({
         written: this.written,
         type: value => this.#data(value),
+        binary: value => this.#binary(value),
+        select: () => this.#selection(),
+        key: event => this.#key(event as never),
       });
     }
 
@@ -190,25 +214,33 @@ export function xtermSpy(): {
     }
     dispose(): void {}
     hasSelection(): boolean {
-      return false;
+      return (options.selection ?? '') !== '';
     }
     getSelection(): string {
-      return '';
+      return options.selection ?? '';
     }
-    attachCustomKeyEventHandler(): void {}
+    attachCustomKeyEventHandler(handler: (event: never) => boolean): void {
+      this.#key = handler;
+    }
     onData(listener: (value: string) => void): { dispose(): void } {
       this.#data = listener;
       return { dispose: () => {} };
     }
-    onBinary(): { dispose(): void } {
+    onBinary(listener: (value: string) => void): { dispose(): void } {
+      this.#binary = listener;
       return { dispose: () => {} };
     }
-    onSelectionChange(): { dispose(): void } {
+    onSelectionChange(listener: () => void): { dispose(): void } {
+      this.#selection = listener;
       return { dispose: () => {} };
     }
   }
   class FitAddon {
-    fit(): void {}
+    fit(): void {
+      // A pane with no measurable box throws in the real addon; the deck has to
+      // survive it, because a retained tab is exactly that until it is shown.
+      if (options.fitThrows === true) throw new Error('cannot fit an unmeasured pane');
+    }
   }
   return {
     modules: {
@@ -216,5 +248,6 @@ export function xtermSpy(): {
       FitAddon: FitAddon as unknown as typeof import('@xterm/addon-fit').FitAddon,
     },
     instances,
+    themes,
   };
 }
