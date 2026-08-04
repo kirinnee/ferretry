@@ -237,6 +237,14 @@ describe('extractToolSummary — claude object inputs', () => {
     should(actual.bodyLines).deepEqual(['a.json', '', '[object Object]']);
   });
 
+  it('should keep a write path readable when the agent omitted its content', () => {
+    // Act
+    const actual = extractToolSummary('write', { file_path: 'a.ts' });
+
+    // Assert
+    should(actual.bodyLines).deepEqual(['a.ts']);
+  });
+
   it('should name a write call with no path', () => {
     // Act
     const actual = extractToolSummary('write', {});

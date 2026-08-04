@@ -19,6 +19,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -56,6 +57,7 @@ import { SidePaneTabs, sidePanePanelId, sidePaneTabId } from './side-pane-tabs.t
 
 const defaultPreferences = new SidePanePreferenceStore();
 const IGNORE_RESIZE = (_width: number) => undefined;
+const INCLUDE_EVERY_TAB = (_tab: SidePaneTabDefinition): boolean => true;
 
 /** Desktop's non-modal half of the workspace. The resize target is a sibling
  * of the semantic aside so its 16px hit target can safely straddle the edge. */
@@ -149,6 +151,10 @@ export interface SidePaneWorkspaceProps {
   readonly children: ReactNode;
   /** Feature owners render their registered tab here; this shell owns no feature screens. */
   readonly renderSurface: (props: SidePaneSurfaceProps) => ReactNode;
+  /** Host capability filter. This is separate from `unavailableReason`: an
+   * unavailable-but-real surface can remain discoverable, while a host that
+   * cannot render a surface at all must omit it and refuse stale opens. */
+  readonly shouldIncludeTab?: (tab: SidePaneTabDefinition) => boolean;
   /** Injectable for an isolated app root or tests; defaults to the browser-wide layout preference. */
   readonly preferences?: SidePanePreferenceStore;
 }
@@ -166,13 +172,15 @@ export function SidePaneWorkspace({
   active = true,
   children,
   renderSurface,
+  shouldIncludeTab = INCLUDE_EVERY_TAB,
   preferences = defaultPreferences,
 }: SidePaneWorkspaceProps) {
   const generatedId = useId();
   const paneId = `session-side-pane-${generatedId}`;
   const titleId = `${paneId}-title`;
   const openerRef = useRef<HTMLElement | null>(null);
-  const allTabs = useSyncExternalStore(subscribeSidePaneTabRegistry, getSidePaneTabDefinitions);
+  const registeredTabs = useSyncExternalStore(subscribeSidePaneTabRegistry, getSidePaneTabDefinitions);
+  const allTabs = useMemo(() => registeredTabs.filter(shouldIncludeTab), [registeredTabs, shouldIncludeTab]);
   const state = useSyncExternalStore(subscribeSidePaneTabsState, () => readSidePaneTabsState(scope));
   const storedPreferences = useSyncExternalStore(preferences.subscribe, () => preferences.snapshot());
   const [previewWidth, setPreviewWidth] = useState<number | null>(null);
@@ -183,7 +191,9 @@ export function SidePaneWorkspace({
   // registry subscription must re-resolve an already-open registered tab.
   const openTabDefs = sortSidePaneTabs(state.open, state.instances)
     .map(id => resolveSidePaneTab(scope, id))
-    .filter((definition): definition is SidePaneTabDefinition => definition !== undefined);
+    .filter(
+      (definition): definition is SidePaneTabDefinition => definition !== undefined && shouldIncludeTab(definition),
+    );
 
   const close = useCallback(() => {
     deactivateSidePane(scope);
@@ -195,18 +205,23 @@ export function SidePaneWorkspace({
   }, [scope]);
   const open = useCallback(
     (tab: SidePaneTabId, opener?: HTMLElement | null) => {
+      const definition = resolveSidePaneTab(scope, tab);
+      if (definition === undefined || !shouldIncludeTab(definition)) return;
       if (opener) openerRef.current = opener;
       openSidePaneTab(scope, tab);
     },
-    [scope],
+    [scope, shouldIncludeTab],
   );
   const openNewInstance = useCallback(
     (kind: SidePaneInstanceKind) => {
+      const catalogueId: SidePaneTabId = kind === 'browser' ? 'browser' : kind === 'file' ? 'files' : 'terminals';
+      const definition = resolveSidePaneTab(scope, catalogueId);
+      if (definition === undefined || !shouldIncludeTab(definition)) return;
       if (kind === 'browser') openSidePaneBrowserTab(scope, null, { forceNew: true });
       else if (kind === 'file') openSidePaneTab(scope, 'files');
       else openSidePaneTab(scope, 'terminals');
     },
-    [scope],
+    [scope, shouldIncludeTab],
   );
   const commitWidth = useCallback(
     (width: number) => {
@@ -226,11 +241,23 @@ export function SidePaneWorkspace({
   }, [active, compact, scope]);
 
   const lastTabRef = useRef<SidePaneTabDefinition | null>(null);
-  const activeDef = state.active ? resolveSidePaneTab(scope, state.active) : undefined;
+  const resolvedActiveDef = state.active ? resolveSidePaneTab(scope, state.active) : undefined;
+  const activeDef = resolvedActiveDef && shouldIncludeTab(resolvedActiveDef) ? resolvedActiveDef : undefined;
+  useEffect(() => {
+    // A deep link can reopen a retained instance before this host mounts. If
+    // this workspace cannot render that definition, clear only its active
+    // selection so the pane cannot stay wedged invisibly; the tab record stays
+    // available to a host that does support it.
+    if (state.active !== null && activeDef === undefined) deactivateSidePane(scope);
+  }, [activeDef, scope, state.active]);
   if (activeDef) lastTabRef.current = activeDef;
+  else if (state.active !== null) lastTabRef.current = null;
   const displayDef = activeDef ?? (compact ? lastTabRef.current : undefined);
-  const surfaceOpen = state.active !== null;
-  const liveRetained = [...everRetained].filter(id => resolveSidePaneTab(scope, id)?.retain === true);
+  const surfaceOpen = state.active !== null && activeDef !== undefined;
+  const liveRetained = [...everRetained].filter(id => {
+    const definition = resolveSidePaneTab(scope, id);
+    return definition?.retain === true && shouldIncludeTab(definition);
+  });
   const retainedIds =
     !compact && activeDef?.retain === true && !liveRetained.includes(activeDef.id)
       ? [...liveRetained, activeDef.id]

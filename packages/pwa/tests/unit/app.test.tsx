@@ -120,6 +120,8 @@ interface ShellOptions {
   readonly sessions?: readonly string[];
   /** Makes `get` reject, which is the session route's failure path. */
   readonly sessionFailure?: string;
+  /** Makes creating the daemon-bound client reject before any read starts. */
+  readonly clientFailure?: string;
   /**
    * Holds `get` open. Without it the read resolves inside the mount's own act
    * flush and the loading state never exists to be observed — which is exactly
@@ -132,13 +134,20 @@ interface ShellOptions {
    * silent on first sight, so a transition is the only thing that delivers.
    */
   readonly sessionStatus?: () => SessionStatus;
+  /** Daemon-owned normalized transcript tail returned by `logs`. */
+  readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
 }
 
-const appStore = async (reads: string[], options: ShellOptions = {}): Promise<AppStore> =>
+const appStore = async (
+  reads: string[],
+  options: ShellOptions = {},
+  transcriptReads: string[] = [],
+): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
-    connectClient: async connection =>
-      ({
+    connectClient: async connection => {
+      if (options.clientFailure !== undefined) throw new Error(options.clientFailure);
+      return {
         get: async (sessionId: string) => {
           reads.push(`${connection.daemonId}:${sessionId}`);
           await options.sessionGate;
@@ -154,9 +163,17 @@ const appStore = async (reads: string[], options: ShellOptions = {}): Promise<Ap
           (options.sessions ?? []).map(id =>
             sessionView(id, { state: { status: options.sessionStatus?.() ?? 'running' } }),
           ),
+        logs: async (sessionId: string) => {
+          transcriptReads.push(`${connection.daemonId}:${sessionId}`);
+          return typeof options.transcript === 'function'
+            ? options.transcript(connection.daemonId, sessionId)
+            : (options.transcript ?? '');
+        },
+        interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
-      }) as unknown as FyApiClient,
+      } as unknown as FyApiClient;
+    },
     // Only the pairing exchange has a shape the root itself depends on; every
     // other page reads through a store port that answers an empty document.
     fetcher: async input =>
@@ -167,7 +184,8 @@ const appStore = async (reads: string[], options: ShellOptions = {}): Promise<Ap
 
 const renderShell = async (path: string, paired: readonly DaemonId[] = [], options: ShellOptions = {}) => {
   const reads: string[] = [];
-  const store = await appStore(reads, options);
+  const transcriptReads: string[] = [];
+  const store = await appStore(reads, options, transcriptReads);
   for (const daemon of paired) store.connections.add(daemon === alpha.daemonId ? alpha : beta);
   setPath(path);
   const view = await mount(
@@ -177,7 +195,7 @@ const renderShell = async (path: string, paired: readonly DaemonId[] = [], optio
       </StoreProvider>
     </RouterProvider>,
   );
-  return { reads, store, view };
+  return { reads, store, transcriptReads, view };
 };
 
 const settle = async (): Promise<void> => {
@@ -396,10 +414,28 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('applies the persisted chat measure to the real session surface', async () => {
+    const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const surface = must(view.container.querySelector('[data-chat-width]'), 'the chat-width surface');
+    expect(surface.getAttribute('data-chat-width')).toBe('full');
+
+    await interact(() => store.controls.setDeviceControls({ chatWidth: 'readable' }));
+
+    expect(view.container.querySelector('[data-chat-width]')).toBe(surface);
+    expect(surface.getAttribute('data-chat-width')).toBe('readable');
+    await view.unmount();
+  });
+
   it('never crosses two daemons that own the same session id', async () => {
-    const { reads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId, beta.daemonId]);
+    const { reads, transcriptReads, view } = await renderShell(
+      '/d/alpha/session/shared',
+      [alpha.daemonId, beta.daemonId],
+      { transcript: daemon => `assistant/message: ${daemon} transcript` },
+    );
     await settle();
     expect(view.container.querySelector('[data-session="shared"]')?.textContent).toContain('Alpha Agent');
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('alpha transcript');
 
     await popTo('/d/beta/session/shared');
     await settle();
@@ -408,8 +444,43 @@ describe('AppShell', () => {
     expect(session?.getAttribute('data-daemon')).toBe('beta');
     expect(session?.textContent).toContain('Beta Agent');
     expect(session?.textContent).not.toContain('Alpha Agent');
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('beta transcript');
+    expect(view.container.querySelector('[role="log"]')?.textContent).not.toContain('alpha transcript');
     expect(reads).toEqual(['alpha:shared', 'beta:shared']);
+    expect(transcriptReads).toEqual(['alpha:shared', 'beta:shared']);
     await view.unmount();
+  });
+
+  it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {
+    const { reads, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    try {
+      await settle();
+      const findInterrupt = () =>
+        Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(button =>
+          button.textContent?.includes('Interrupt turn'),
+        );
+      let interrupt = findInterrupt();
+
+      // This transport test must not depend on the process-global viewport.
+      // Compact truthfully keeps lifecycle actions in Session Details, so reach
+      // the same production control through that presentation when necessary.
+      if (interrupt === undefined) {
+        const details = must(
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="Open session details"]'),
+          'the session details control',
+        );
+        await interact(() => details.click());
+        interrupt = findInterrupt();
+      }
+
+      await interact(() => must(interrupt, 'the interrupt control').click());
+      await settle();
+
+      expect(reads).toEqual(['alpha:shared', 'alpha:shared']);
+      expect(transcriptReads).toEqual(['alpha:shared', 'alpha:shared']);
+    } finally {
+      await view.unmount();
+    }
   });
 
   it('mounts every daemon-qualified destination through its own slot', async () => {
@@ -574,7 +645,21 @@ describe('the session route live regions', () => {
     expect(status.getAttribute('data-session-state')).toBe('failed');
     expect(status.textContent).toBe('This session could not be opened.');
     expect(view.container.querySelector('[data-session-error]')).toBe(alert);
-    expect(alert.textContent).toBe('Could not open this session: daemon refused the read');
+    expect(alert.textContent).toBe('Session workspace issue: Session: daemon refused the read');
+
+    await view.unmount();
+  });
+
+  it('announces a client connection refusal through the same persistent alert', async () => {
+    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      clientFailure: 'pairing expired',
+    });
+    const alert = must(view.container.querySelector('[data-session-error]'), 'the session alert region');
+
+    await settle();
+
+    expect(alert.textContent).toBe('Session workspace issue: pairing expired');
+    expect(view.container.textContent).toContain('Session workspace issue: pairing expired');
 
     await view.unmount();
   });

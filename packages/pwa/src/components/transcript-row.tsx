@@ -1,6 +1,7 @@
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { LedgerMessage } from './ledger-message.tsx';
+import { Markdown } from './markdown.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -17,10 +18,11 @@ export interface TranscriptRowProps {
 }
 
 /**
- * A deliberately asymmetric transcript reading: messages stay legible prose,
- * while tool calls and daemon notices recede into compact chrome. A `tool` row
- * that carries calls renders as the collapsed tool group; richer Markdown and
- * attachments remain owned by later ports.
+ * A deliberately asymmetric transcript reading: assistant messages use the
+ * shared rich renderer while human prose stays literal, and tool calls and
+ * daemon notices recede into compact chrome. A `tool` row that carries calls
+ * renders as the collapsed tool group; attachments remain owned by a later
+ * port.
  */
 export function TranscriptRow({ entry, live = false, isLast = false, asOf, onResend }: TranscriptRowProps) {
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
@@ -55,7 +57,7 @@ function TranscriptTextRow({ entry }: { readonly entry: TranscriptEntry }) {
         <span>{label}</span>
         {validTimestamp ? <time dateTime={timestamp.toISOString()}>{timestamp.toLocaleTimeString()}</time> : null}
       </header>
-      <p>{entry.text}</p>
+      {entry.kind === 'assistant' ? <Markdown text={entry.text} /> : <p>{entry.text}</p>}
     </article>
   );
 }

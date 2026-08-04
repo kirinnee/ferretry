@@ -32,6 +32,7 @@ export * from '../components/session-dashboard-groups.tsx';
 export * as sessionDashboardModel from '../components/session-dashboard-model.ts';
 export * from '../components/session-dashboard-rows.tsx';
 export * from '../components/session-header.tsx';
+export * from '../components/session-workspace-model.ts';
 export * from '../components/sessions-page.tsx';
 export * from '../components/session-tasks.tsx';
 export * from '../components/terminal-snapshot.tsx';

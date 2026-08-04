@@ -22,6 +22,8 @@ export const sessionView = (id: string, overrides: SessionFixtureOverrides = {})
       id,
       name: `Session ${id}`,
       agent: 'claude',
+      harness: 'claude',
+      modelHint: 'claude-opus-5',
       mode: 'auto',
       cwd: `/work/${id}`,
       createdAt: '1970-01-01T00:00:00.000Z',

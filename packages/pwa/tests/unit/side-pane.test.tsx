@@ -259,6 +259,36 @@ describe('SidePaneWorkspace', () => {
     await view.unmount();
   });
 
+  it('lets a host omit an unsupported catalogue surface and refuses stale or programmatic opens', async () => {
+    const shouldIncludeTab = (tab: SidePaneSurfaceProps['tab']) =>
+      tab.id !== 'browser' && tab.instance?.kind !== 'browser';
+    openSidePaneBrowserTab(scopeA, null, { forceNew: true });
+    const view = await mount(
+      <SidePaneWorkspace scope={scopeA} presentation="pane" renderSurface={surface} shouldIncludeTab={shouldIncludeTab}>
+        <main>
+          Conversation remains available
+          <PaneActions />
+        </main>
+      </SidePaneWorkspace>,
+    );
+
+    expect(view.container.querySelector('[data-tab^="browser:"]')).toBeNull();
+    expect(readSidePaneTabsState(scopeA).active).toBeNull();
+    const browserTabs = readSidePaneTabsState(scopeA).open.filter(tab => tab.startsWith('browser:')).length;
+    await interact(() => (view.container.querySelector('main button:nth-of-type(2)') as HTMLButtonElement).click());
+    expect(readSidePaneTabsState(scopeA).open.filter(tab => tab.startsWith('browser:'))).toHaveLength(browserTabs);
+
+    await interact(() => (view.container.querySelector('main button') as HTMLButtonElement).click());
+    await interact(() =>
+      (view.container.querySelector('[aria-label="Add or remove tabs"]') as HTMLButtonElement).click(),
+    );
+    expect(view.container.querySelector('[aria-label="New Browser tab"]')).toBeNull();
+    expect(
+      view.container.querySelector('[aria-label="Add Analytics tab"], [aria-label="Remove Analytics tab"]'),
+    ).not.toBeNull();
+    await view.unmount();
+  });
+
   it('retains a browser instance on desktop while a different tab is active', async () => {
     openSidePaneBrowserTab(scopeA, null, { forceNew: true });
     const view = await mount(workspace());

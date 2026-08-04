@@ -1,5 +1,6 @@
 import type { IFyApiClient } from '@ferretry/protocol';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../lib/drafts.ts';
@@ -7,6 +8,7 @@ import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
+import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { useComposerAutocomplete } from './composer-autocomplete.ts';
 import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
@@ -22,9 +24,33 @@ export interface ComposerProps {
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
+  /** Phone chrome. The host already knows its presentation; the composer does
+   * not re-derive it, it only picks the growth ceiling from it. */
+  readonly compact?: boolean;
 }
 
 const defaultDraftStore = new DaemonDraftStore();
+
+/**
+ * AUTO-GROW CEILINGS, ported from kteam `ui/src/components/Composer.tsx`.
+ *
+ * A composer that does not grow is a composer that hides what you typed: the
+ * shipped box was one 44px row with `overflow` on the textarea, so line two of
+ * a draft was sliced by the actions row at both viewports (measured 2026-08-04).
+ * Growth is capped for the opposite reason — a pasted essay must not swallow
+ * the conversation it is about.
+ *
+ * The phone gets a slightly taller rest ceiling than the desktop because its
+ * lines are shorter, and a LOWER one while the keyboard is up: with ~430px of
+ * visible viewport, 160px of composer is more than a third of everything the
+ * reader can see.
+ */
+const MAX_TEXTAREA_PX = 148;
+const COMPACT_MAX_TEXTAREA_PX = 160;
+const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 140;
+/** The floor is the touch target, and it is the same 44px `.fy-composer
+ *  textarea` already declares — stated here so the two cannot drift. */
+const MIN_TEXTAREA_PX = 44;
 
 /**
  * A single composer surface. Draft persistence is scoped by the supplied paired
@@ -41,6 +67,7 @@ export function Composer({
   quota,
   draftStore = defaultDraftStore,
   onSent,
+  compact = false,
 }: ComposerProps) {
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
   const [draft, setDraft] = useState(() => draftStore.load(scope));
@@ -64,6 +91,38 @@ export function Composer({
   const syncHighlight = useCallback((input: HTMLTextAreaElement) => {
     syncComposerHighlightViewport(input, overlayRef.current);
   }, []);
+  const keyboardOpen = useKeyboardOpen();
+  const maxTextareaPx = !compact
+    ? MAX_TEXTAREA_PX
+    : keyboardOpen
+      ? COMPACT_KEYBOARD_MAX_TEXTAREA_PX
+      : COMPACT_MAX_TEXTAREA_PX;
+
+  // Measured BEFORE paint, so the box never flashes at the wrong height, and
+  // reset to `auto` first because `scrollHeight` of an already-tall textarea
+  // reports the height it was given rather than the height it needs — without
+  // the reset the box can only ever grow.
+  //
+  // The ceiling is a dependency, not a constant read once: opening the keyboard
+  // has to re-run this, or a draft that grew to four lines at rest keeps its
+  // 160px through a 430px viewport. `overflowY` is only turned on AT the cap, so
+  // a draft that fits never shows a scrollbar it does not need — which is the
+  // whole difference between growing and clipping.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `highlighted` is a re-sync trigger
+  useLayoutEffect(() => {
+    // `highlighted` is in the dependency list although the body never reads it:
+    // toggling it mounts or unmounts the paint overlay, and the overlay has to
+    // be re-aligned to the textarea's viewport the moment it appears. Dropping
+    // it leaves a freshly enabled overlay painting at the wrong offset until the
+    // next keystroke.
+    const input = inputRef.current;
+    if (input === null) return;
+    input.style.height = 'auto';
+    const next = Math.min(maxTextareaPx, Math.max(MIN_TEXTAREA_PX, input.scrollHeight));
+    input.style.height = `${next}px`;
+    input.style.overflowY = input.scrollHeight > maxTextareaPx ? 'auto' : 'hidden';
+    syncHighlight(input);
+  }, [draft, highlighted, maxTextareaPx, syncHighlight]);
 
   // The draft is read through a ref so registration survives every keystroke:
   // re-registering on each character would churn the quote registry for nothing.
@@ -150,7 +209,13 @@ export function Composer({
             syncHighlight(input);
           }}
           onKeyDown={event => {
-            if (autocomplete.handleKeyDown(event)) return;
+            // The popover is what makes a completion real. Enter and Tab reach
+            // the controller only while a row is BOTH rendered and selected, so
+            // a list that is loading, empty or entirely refused can never eat a
+            // send — every other key still belongs to the open list.
+            const completionKey = event.key === 'Enter' || event.key === 'Tab';
+            const acceptable = autocomplete.open && autocomplete.activeIndex >= 0;
+            if ((!completionKey || acceptable) && autocomplete.handleKeyDown(event)) return;
             if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
               return;
             const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
@@ -171,6 +236,10 @@ export function Composer({
           value={draft}
           {...autocomplete.textareaAria}
         />
+        {/* Anchored to the input layer, opening UPWARD: the composer sits at the
+            bottom of the session, so a downward list would land off-screen and
+            under the on-screen keyboard. */}
+        <ComposerAutocompletePopover surface={autocomplete} />
       </div>
       <div className="fy-composer-actions">
         <p id={hintId}>{busy ? 'Queue for the next turn' : 'Enter to send · Shift+Enter for a new line'}</p>

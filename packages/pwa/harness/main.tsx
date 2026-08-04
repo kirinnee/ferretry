@@ -70,8 +70,8 @@ import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser
 import { rememberBrowserEngine } from '../src/features/browser/unified-browser-model.ts';
 import {
   DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
-  UnifiedBrowserSurface,
   type UnifiedBrowserDependencies,
+  UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
@@ -81,9 +81,6 @@ import type { OnboardingStepId } from '../src/features/onboarding/onboarding-mod
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
 import { OnboardingProgressStore } from '../src/features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
-import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
-import type { QrScanHost } from '../src/lib/pair-scan.ts';
-import type { PairingArrival } from '../src/lib/pairing.ts';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
@@ -104,7 +101,9 @@ import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
+import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
+import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
 import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
 import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
@@ -118,7 +117,11 @@ import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.t
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
+import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
+import type { QrScanHost } from '../src/lib/pair-scan.ts';
+import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../src/lib/projects-store.ts';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
 import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
 import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
@@ -3116,6 +3119,243 @@ function OnboardingStageHarness({ step }: { readonly step: OnboardingStepId }) {
   );
 }
 
+// ---- the assembled session workspace ---------------------------------------
+//
+// A scope of its own, deliberately NOT the gallery's `scope`. The gallery opens
+// pins and two file tabs on that scope at module load (see the `openSidePaneTab`
+// calls above), and inheriting them would make this page open with a pane
+// already up — on a phone that means a focus-trapped sheet over the very
+// transcript and composer this fixture exists to show. Starting empty is also
+// what production does: nothing auto-opens the pane, the reader does.
+const WORKSPACE_SCOPE = daemonSessionScope(daemon, 'harness-workspace');
+
+/**
+ * A draft in the composer, seeded through the same browser storage the shipped
+ * composer reads.
+ *
+ * `Composer` inside `SessionChatPage` uses its own module-level
+ * `DaemonDraftStore`, which is not injectable from the page's props — but every
+ * instance reads `localStorage` on each `load()`, so writing the key here is the
+ * honest way to paint a real draft rather than an empty box. An empty composer
+ * would hide the markdown paint layer, the send button's enabled state and the
+ * textarea's grown height, which are three of the things this capture is for.
+ */
+const WORKSPACE_DRAFT = [
+  'Two things before you push:',
+  '',
+  '- the `--app-h` fallback ladder has to stay `100vh -> 100dvh -> var(--app-h)`',
+  '- `packages/pwa/src/shell/side-pane.tsx` still announces `Opened <tab>` without',
+  '  the "beside the conversation" half',
+].join('\n');
+new DaemonDraftStore().save(WORKSPACE_SCOPE, WORKSPACE_DRAFT, HARNESS_NOW);
+
+const WORKSPACE_SESSION = {
+  config: {
+    id: 'harness-workspace',
+    name: 'Assemble the session workspace',
+    teammate: 'mylie',
+    label: 'Assemble the session workspace',
+    model: 'claude-opus-5',
+    modelHint: 'opus-5',
+    agent: 'claude',
+    harness: 'claude',
+    mode: 'auto',
+    cwd: '/work/ferretry',
+    updatedAt: '2026-07-31T10:00:00.000Z',
+  },
+  state: {
+    id: 'harness-workspace',
+    status: 'running',
+    turn: 12,
+    lastActivityAt: '2026-07-31T10:00:00.000Z',
+    contextPercent: 61,
+    quota: { fiveHourPercent: 23, weeklyPercent: 41 },
+    activity: 'Editing session-chat-page.tsx',
+  },
+  directory: '/work/ferretry',
+} as unknown as SessionView;
+
+/**
+ * Enough conversation to overflow both viewports.
+ *
+ * The transcript follows its tail on mount, so a fixture that fits on screen
+ * would capture a scroller that has never scrolled — and the one thing a
+ * transcript capture has to prove is that the tail is pinned above the composer
+ * rather than behind it. Every row kind the port renders appears once: prose,
+ * a collapsed tool group with a failure in it, a notice, a durable ledger row,
+ * and a tool still running.
+ */
+const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
+  {
+    id: 'workspace-user-1',
+    kind: 'user',
+    text: 'Assemble the session workspace: header, transcript, composer and the side pane, on one page.',
+    label: 'You',
+  },
+  {
+    id: 'workspace-assistant-1',
+    kind: 'assistant',
+    text: 'Composing it in `src/lib/pages/session-chat-page.tsx`. The page owns no store — it takes one daemon connection, one session view and one client bound to that same pairing, so a retained pane can never send to a daemon it no longer belongs to.',
+    label: 'mylie',
+  },
+  {
+    id: 'workspace-tools-1',
+    kind: 'tool',
+    text: 'ran 4 tools',
+    tools: [
+      {
+        key: 'workspace-tool-read',
+        use: { name: 'Read', input: { file_path: '/work/ferretry/packages/pwa/src/shell/side-pane.tsx' } },
+        result: { text: 'export function SidePaneWorkspace(…)' },
+      },
+      {
+        key: 'workspace-tool-edit-1',
+        use: { name: 'Edit', input: { file_path: 'side-pane.tsx', new_string: 'shouldIncludeTab' } },
+        result: { text: 'applied' },
+      },
+      {
+        key: 'workspace-tool-write',
+        // Keep a representative content body in the visual fixture. The parser
+        // now also tolerates an incomplete Write record without blanking the
+        // workspace; that damaged-input branch is covered by its unit test.
+        use: {
+          name: 'Write',
+          input: {
+            file_path: 'src/lib/pages/session-chat-page.tsx',
+            content:
+              'export function SessionChatPage({ connection, session, entries, client }: SessionChatPageProps) {',
+          },
+        },
+        result: { text: 'wrote 375 lines' },
+      },
+      {
+        key: 'workspace-tool-bash',
+        use: { name: 'Bash', input: { command: 'bun test --config=bunfig.unit.toml side-pane' } },
+        result: { text: 'error: expected the browser tab to be filtered out', isError: true },
+      },
+    ],
+  },
+  {
+    id: 'workspace-assistant-2',
+    kind: 'assistant',
+    text: 'That failure was mine: the host filter has to reject a *stale open* as well as hide the catalogue entry, or a session that opened the browser tab before this build comes back to a pane the host cannot render. Fixed and re-run.',
+    label: 'mylie',
+  },
+  {
+    id: 'workspace-notice',
+    kind: 'notice',
+    text: 'Browser automation stays unavailable: this daemon has no browser worker installed.',
+  },
+  {
+    id: 'workspace-ledger',
+    kind: 'ledger',
+    text: 'a durable send attempt',
+    placement: 'after-loaded',
+    ledger: {
+      sendId: 'workspace-send-unconfirmed',
+      acceptedAt: '2026-07-31T09:59:10.000Z',
+      message: 'Keep the composer inside the chat column so both measures narrow together.',
+      attachmentIds: [],
+      fate: 'unaccounted',
+      unaccountedReason: 'timeout',
+    },
+  },
+  {
+    id: 'workspace-user-2',
+    kind: 'user',
+    text: 'Capture it at 390x844 and 1440x900 before you call it done.',
+    label: 'You',
+  },
+  {
+    id: 'workspace-tools-live',
+    kind: 'tool',
+    text: 'running a tool',
+    tools: [
+      {
+        key: 'workspace-tool-live',
+        use: { name: 'Bash', input: { command: 'bun harness/screenshot.ts' } },
+        // `Date.now()`, NOT the frozen `HARNESS_NOW`. A running tool's elapsed
+        // label is computed against the wall clock inside ToolGroup, with no
+        // injectable now at this level, so a fixed 2026-07-31 stamp renders as
+        // however long ago that happens to be — the first capture said
+        // "5111m 36s". Every other row here is deliberately frozen; this one
+        // has to move with the clock to read as a tool that is running.
+        ts: new Date(Date.now() - 41_000).toISOString(),
+      },
+    ],
+  },
+];
+
+/**
+ * The whole daemon surface this page can reach, answered locally.
+ *
+ * Nothing here touches the network: the screenshot driver aborts every
+ * off-origin request anyway, so a client that tried would paint error states
+ * over the layout under review. The terminal snapshot reader below supplies
+ * paired-device evidence without calling the loopback-only attach route.
+ *
+ * Typed against `SessionChatClient` rather than cast into it, deliberately. A
+ * stub that casts stops being evidence the moment the contract moves.
+ */
+const WORKSPACE_CLIENT: SessionChatClient = {
+  interrupt: async () => WORKSPACE_SESSION,
+  resume: async () => WORKSPACE_SESSION,
+  send: async () => ({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never,
+  stop: async () => WORKSPACE_SESSION,
+};
+
+/**
+ * The assembled workspace, alone on the page, in the production shell.
+ *
+ * A root of its own for the same two reasons the setup stages get one. It
+ * mounts the PRODUCTION viewport producer, so `--app-h` and the safe-area
+ * padding on `.kt-shell` are the shipped ones rather than the gallery's
+ * document flow. And the workspace is a `h-full` layout with its own single
+ * scroller: inside the stacked gallery it would be clipped by the gallery's
+ * scroller and every claim about where the composer sits would be a claim about
+ * the harness instead of about the app.
+ *
+ * The shell markup mirrors `src/App.tsx` exactly — `.kt-shell` column, the app
+ * bar, then the `px-1 sm:px-3` route gutter — so the capture shows the real
+ * chrome budget at 390 and at 1440, including the app bar that the PWA (unlike
+ * kteam) still renders on a phone's session route.
+ *
+ * `presentation` is derived the way production derives it, from the layout
+ * regime, so 390 gets the sheet and 1440 gets the non-modal pane without the
+ * driver having to say which.
+ */
+function SessionWorkspaceHarness() {
+  useAppViewport();
+  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
+  const [session, setSession] = useState(WORKSPACE_SESSION);
+  return (
+    <div className="kt-shell flex flex-col overflow-hidden" id="harness-session-workspace-page">
+      <AppBar
+        crumbs={[{ href: daemonSessionsPath(daemon.daemonId), label: 'Sessions' }, { label: 'harness-workspace' }]}
+        daemon={daemon.daemonId}
+        onOpenPalette={() => {}}
+        onOpenSidebar={() => {}}
+        sessionCount={7}
+        connectionStatus="open"
+        themeToggle={<Button size="sm">Theme</Button>}
+      />
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+        <SessionChatPage
+          chatWidth="readable"
+          client={WORKSPACE_CLIENT}
+          connection={daemon}
+          entries={WORKSPACE_ENTRIES}
+          onBack={() => {}}
+          onSessionChange={setSession}
+          presentation={presentation}
+          readSnapshot={HARNESS_PANE_SNAPSHOT}
+          session={session}
+        />
+      </div>
+    </div>
+  );
+}
+
 /** Hash fragments that replace the whole gallery with one setup stage. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, OnboardingStepId>> = {
   '#onboarding-install': 'install',
@@ -3125,5 +3365,13 @@ const ONBOARDING_FRAGMENTS: Readonly<Record<string, OnboardingStepId>> = {
 const host = document.getElementById('root');
 if (host) {
   const stage = ONBOARDING_FRAGMENTS[window.location.hash];
-  createRoot(host).render(stage === undefined ? <Shell /> : <OnboardingStageHarness step={stage} />);
+  createRoot(host).render(
+    window.location.hash === '#session-workspace' ? (
+      <SessionWorkspaceHarness />
+    ) : stage === undefined ? (
+      <Shell />
+    ) : (
+      <OnboardingStageHarness step={stage} />
+    ),
+  );
 }

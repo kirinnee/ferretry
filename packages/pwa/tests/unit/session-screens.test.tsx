@@ -1,5 +1,5 @@
-import type { SessionView } from '@ferretry/protocol';
 import { describe, expect, test } from 'bun:test';
+import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import { ComposerQuota, composerQuotaPercent, composerQuotaSpoken } from '../../src/components/composer-quota.tsx';
@@ -330,7 +330,9 @@ describe('session screen components', () => {
     const rows = render(
       <>
         <TranscriptRow entry={{ id: 'user', kind: 'user', text: 'A human message' }} />
-        <TranscriptRow entry={{ at: Number.NaN, id: 'assistant', kind: 'assistant', text: 'A response' }} />
+        <TranscriptRow
+          entry={{ at: Number.NaN, id: 'assistant', kind: 'assistant', text: 'A **rendered** response' }}
+        />
         <TranscriptRow entry={{ id: 'tool', kind: 'tool', text: 'working tree clean' }} />
         <TranscriptRow entry={{ id: 'notice', kind: 'notice', text: 'Daemon reconnected' }} />
       </>,
@@ -347,6 +349,7 @@ describe('session screen components', () => {
     expect(findText(rows.root, 'Assistant')).toHaveLength(1);
     expect(findText(rows.root, 'Tool')).toHaveLength(1);
     expect(findText(rows.root, 'Daemon')).toHaveLength(1);
+    expect(rows.root.findAllByType('strong').map(node => node.children.join(''))).toEqual(['rendered']);
     expect(rows.root.findAllByType('time')).toHaveLength(0);
   });
 
