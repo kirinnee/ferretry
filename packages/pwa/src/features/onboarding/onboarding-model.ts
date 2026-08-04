@@ -20,7 +20,7 @@
  * device as much as of the answer.
  */
 
-import { type DeviceKind, otherDeviceKind } from './device-kind.ts';
+import type { DeviceKind } from './device-kind.ts';
 
 /**
  * WHAT IS THIS DEVICE, AND WHAT IS IT FOR? — the question the chooser asks.
@@ -402,9 +402,6 @@ export const handoffTarget = (
   path: OnboardingPath,
 ): { readonly route: OnboardingRouteId; readonly step: OnboardingStepId } =>
   path.device === 'mobile' ? { route: 'first-time', step: 'install' } : { route: 'add-client', step: 'pair' };
-
-/** The device a hand-off from here is aimed at, so the copy can name it. */
-export const handoffDevice = (device: DeviceKind): DeviceKind => otherDeviceKind(device);
 /* ---------- install channels, verbatim from INSTALLATION.md ---------------- */
 
 export type InstallChannelId = 'apt' | 'dnf' | 'brew' | 'nix' | 'curl';

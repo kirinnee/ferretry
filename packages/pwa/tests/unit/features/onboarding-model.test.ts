@@ -29,7 +29,6 @@ import {
   detectInstallChannel,
   firstOnboardingStep,
   furthestOnboardingStep,
-  handoffDevice,
   handoffTarget,
   INSTALL_CHANNELS,
   installChannel,
@@ -201,8 +200,6 @@ describe('the three answers', () => {
     expect(handoffTarget(mobile('first-time'))).toEqual({ route: 'first-time', step: 'install' });
     // A computer with a daemon has only membership to offer, and the phone needs a code.
     expect(handoffTarget(desktop('first-time'))).toEqual({ route: 'add-client', step: 'pair' });
-    expect(handoffDevice('mobile')).toBe('desktop');
-    expect(handoffDevice('desktop')).toBe('mobile');
   });
 
   it('names every step it can put on the glass, and nothing else', () => {

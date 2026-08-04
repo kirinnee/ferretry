@@ -90,9 +90,3 @@ export const detectDeviceKind = (evidence: DeviceEvidence = {}): DeviceKind => {
   if (isDesktopClassIpad(agent, platform, touch)) return 'mobile';
   return 'desktop';
 };
-
-/** Whether a value read back from a link or storage is still a device kind we ship. */
-export const isDeviceKind = (value: unknown): value is DeviceKind => value === 'mobile' || value === 'desktop';
-
-/** What the OTHER device is called, for a hand-off that has to name where it is going. */
-export const otherDeviceKind = (device: DeviceKind): DeviceKind => (device === 'mobile' ? 'desktop' : 'mobile');

@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { detectDeviceKind, isDeviceKind, otherDeviceKind } from '../../../src/features/onboarding/device-kind.ts';
+import { detectDeviceKind } from '../../../src/features/onboarding/device-kind.ts';
 
 describe('detectDeviceKind', () => {
   it('recognises the devices that announce themselves', () => {
@@ -60,19 +60,5 @@ describe('detectDeviceKind', () => {
     expect(detectDeviceKind({})).toBe('desktop');
     expect(detectDeviceKind({ userAgent: undefined, platform: undefined, maxTouchPoints: undefined })).toBe('desktop');
     expect(detectDeviceKind({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('desktop');
-  });
-});
-
-describe('the device kind as a value', () => {
-  it('accepts only the two kinds back from a link or storage', () => {
-    expect(isDeviceKind('mobile')).toBe(true);
-    expect(isDeviceKind('desktop')).toBe(true);
-    expect(isDeviceKind('tablet')).toBe(false);
-    expect(isDeviceKind(undefined)).toBe(false);
-  });
-
-  it('names the other device, for a hand-off that has to say where it is going', () => {
-    expect(otherDeviceKind('mobile')).toBe('desktop');
-    expect(otherDeviceKind('desktop')).toBe('mobile');
   });
 });
