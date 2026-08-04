@@ -27,7 +27,7 @@ import { cn } from '../../lib/class-names.ts';
 import { Button, Textarea } from '../../shell/primitives.tsx';
 import { actOnAttention, fetchAttention } from './attention-api.ts';
 
-type AttentionTone = AttentionAsk['kind'] | 'none';
+type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
 type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean) => void;
 
 const kindMeta = (
@@ -37,13 +37,19 @@ const kindMeta = (
     return { tone: 'none', label: sourceLabel(item.source), action: 'No answer shape recorded — clear it by acting' };
   switch (item.ask.kind) {
     case 'permission':
-      return { tone: 'permission', label: 'Permission', action: 'Approve or reject' };
+      return { tone: 'permission', label: 'Permission', action: 'Approve or deny this request' };
     case 'multiple-choice':
-      return { tone: 'multiple-choice', label: 'Pick one', action: 'Choose an answer' };
+      return { tone: 'multiple-choice', label: 'Choice', action: 'Choose one offered option' };
     case 'answer-review':
-      return { tone: 'answer-review', label: 'Review answer', action: 'Accept it, or ask for more' };
+      return { tone: 'answer-review', label: 'Answer review', action: 'Accept the answer, or send it back' };
     case 'open-question':
-      return { tone: 'open-question', label: 'Open question', action: 'Write an answer' };
+      return { tone: 'open-question', label: 'Open response', action: 'Write a free-text response' };
+    default:
+      return {
+        tone: 'unknown',
+        label: 'Damaged attention',
+        action: 'The requested action is malformed. Repair it before treating this as resolved',
+      };
   }
 };
 
@@ -118,7 +124,7 @@ export function AttentionBoard({
       </header>
       {error && (
         <p role="alert" className="m-0 border-b border-err/30 bg-err/5 px-panel py-row-y text-meta text-err">
-          {error}
+          Could not verify attention: {error}
         </p>
       )}
       {snapshot?.parseErrors !== undefined && snapshot.parseErrors > 0 && !error && (
@@ -133,6 +139,10 @@ export function AttentionBoard({
               <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" />
               Loading attention ledger…
             </p>
+          ) : error && !snapshot ? (
+            <AttentionUnavailable />
+          ) : items.length === 0 && (snapshot?.parseErrors ?? 0) > 0 ? (
+            <AttentionUnavailable damaged />
           ) : items.length === 0 ? (
             <div className="py-10 text-center">
               <Check size={18} className="mx-auto mb-sm text-muted" aria-hidden="true" />
@@ -164,6 +174,20 @@ export function AttentionBoard({
         </div>
       </div>
     </section>
+  );
+}
+
+function AttentionUnavailable({ damaged = false }: { readonly damaged?: boolean }) {
+  return (
+    <div className="py-10 text-center" role="alert">
+      <CircleAlert size={18} className="mx-auto mb-sm text-err" aria-hidden="true" />
+      <p className="m-0 text-cell font-medium text-fg">Attention needs human verification.</p>
+      <p className="m-0 mt-xs text-meta text-faint">
+        {damaged
+          ? 'The daemon reported damaged attention data. Repair it before assuming no action is needed.'
+          : 'The attention ledger could not be read. Reconnect or repair the paired daemon before assuming no action is needed.'}
+      </p>
+    </div>
   );
 }
 

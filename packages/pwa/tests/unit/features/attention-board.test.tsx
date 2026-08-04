@@ -169,7 +169,65 @@ describe('AttentionBoard', () => {
       />,
     );
     expect(audit.container.textContent).toContain('offline');
+    expect(audit.container.textContent).toContain('Could not verify attention');
     expect(audit.container.textContent).toContain('Resolution audit');
+  });
+
+  it('fails closed when the daemon cannot provide a complete attention ledger', async () => {
+    const unavailable = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={null}
+        loading={false}
+        error="malformed response"
+        onAction={() => undefined}
+      />,
+    );
+    expect(unavailable.container.textContent).toContain('Attention needs human verification.');
+    expect(unavailable.container.textContent).not.toContain('Nothing needs attention.');
+
+    const damaged = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={snapshot({ items: [], count: 0, parseErrors: 1 })}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(damaged.container.textContent).toContain('Attention needs human verification.');
+    expect(damaged.container.textContent).toContain('damaged attention data');
+    expect(damaged.container.textContent).not.toContain('Nothing needs attention.');
+  });
+
+  it('labels every requested action before a person opens an item', async () => {
+    const asks = [
+      { kind: 'permission' as const },
+      { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] },
+      { kind: 'answer-review' as const },
+      { kind: 'open-question' as const },
+    ];
+    const { container } = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={snapshot({
+          items: asks.map((ask, index) => ({
+            ...item,
+            id: `A${index + 3}`,
+            ask,
+            waitingSince: `2026-07-31T11:3${index}:00.000Z`,
+          })),
+          count: asks.length,
+        })}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(container.textContent).toContain('Permission');
+    expect(container.textContent).toContain('Choice');
+    expect(container.textContent).toContain('Answer review');
+    expect(container.textContent).toContain('Open response');
   });
 
   it('keeps a legacy no-ask item actionable and makes pending work visibly busy', async () => {
