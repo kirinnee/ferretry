@@ -14,6 +14,8 @@
 ## 🧭 How to use this handover
 
 - Import every row as **Todo**.
+- `☐` is outstanding and `☑` is landed on `main`. A row is only ticked when its whole definition of
+  done is shipped and gated; partial work stays `☐` and says what is left in the section prose.
 - Keep the stable item number for discussion and speech-to-text.
 - Preserve the requirement, **hard dependencies**, and **soft coordination edges**.
 - A prior branch, commit, or worktree is an implementation lead—not proof of completion.
@@ -109,9 +111,20 @@ Human intervention should be obvious, brief, and genuinely necessary.
 
 Collect trustworthy session data first; build readable views on top.
 
+**#13 landed.** A finished session is ingested once it reaches a durable terminal state — a recorded
+finish instant AND a terminal status, never a guess that it looks done — and its transcript is folded
+and priced at that moment into `state/index/analytics.sqlite`. The store is SQLite rather than DuckDB:
+the daemon already ships a Bun-native SQLite engine for its session index, and the analytics table is
+one bounded row per session, so a second embedded engine would be a dependency and a build target with
+nothing to show for it. The queryable, columnar-per-measure shape the row asks for is unchanged.
+
+The store is DISPOSABLE: it can be dropped and re-ingested from the durable session records, and a
+boot that could not reuse the index does exactly that. A session whose transcript could not be read is
+stored as unknown with the reason, never as a zero.
+
 |  ID | Todo | Feature                                | Definition of done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 🔒 Hard | ↔ Soft        |
 | --: | :--: | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ------------- |
-|  13 |  ☐   | **Analytics ingestion**                | Finished Claude and Codex sessions should ingest analytics into a queryable DuckDB-style store before richer analytics UI is built.                                                                                                                                                                                                                                                                                                                                                                              | —       | #28, #42      |
+|  13 |  ☑   | **Analytics ingestion**                | Finished Claude and Codex sessions should ingest analytics into a queryable DuckDB-style store before richer analytics UI is built.                                                                                                                                                                                                                                                                                                                                                                              | —       | #28, #42      |
 |  42 |  ☐   | **Default analytics query list**       | Global and per-session analytics pages should ship with a readable curated list rather than requiring users to invent queries.                                                                                                                                                                                                                                                                                                                                                                                   | #13     | #28           |
 |  66 |  ☐   | **Configure and sync API model costs** | Add a Settings/API surface to key in per-model API pricing and pull refreshed pricing from configured providers when available. Track input, output, cached-input, reasoning, image, and tool rates with currency, unit, source, effective date, and last-sync time. Preview provider changes before applying them; allow explicit manual overrides. Snapshot the effective rate with usage so historical session costs do not silently change, and show unknown/unpriced usage separately rather than guessing. | #13     | #28, #42, #49 |
 
