@@ -704,6 +704,7 @@ type HarnessOnboardingScreen =
   | 'agent-pair'
   | 'agent-pair-elsewhere'
   | 'install'
+  | 'agents'
   | 'daemon'
   | 'connect'
   | 'local'
@@ -730,6 +731,8 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
     'mobile',
   ),
   install: harnessOnboarding(hereByHand(), 'install'),
+  /* Ferretry runs Claude Code and Codex and is neither: the step that makes the daemon worth starting. */
+  agents: harnessOnboarding(hereByHand(), 'agents'),
   daemon: harnessOnboarding(hereByHand(), 'daemon'),
   connect: harnessOnboarding(hereByHand(), 'connect'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
@@ -2031,6 +2034,28 @@ function Shell() {
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      /*
+       * The step that makes the daemon worth starting: Ferretry RUNS Claude Code
+       * and Codex and is neither of them, so a reader who skips this finishes with
+       * a paired app that cannot open one session.
+       */
+      label: 'Setup — install an agent harness',
+      render: () => (
+        <section aria-label="Setup agents step" id="harness-onboarding-agents">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.agents}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="brew"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}

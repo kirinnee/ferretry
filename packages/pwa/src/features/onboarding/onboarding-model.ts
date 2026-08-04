@@ -249,6 +249,7 @@ export type OnboardingStepId =
   | 'brief'
   | 'agent-pair'
   | 'install'
+  | 'agents'
   | 'daemon'
   | 'connect'
   | 'relay-fingerprint'
@@ -295,6 +296,21 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
     title: 'Install Ferretry',
     short: 'Install',
     summary: 'Run this in a terminal on this machine.',
+  }),
+  /**
+   * THE STEP WITHOUT WHICH EVERYTHING ELSE IS THEATRE.
+   *
+   * Ferretry runs Claude and Codex; it is not either of them. A reader who
+   * installed `fy`, started the daemon and paired this browser has a working
+   * Ferretry that cannot run one session, and the old arc let them finish
+   * believing they were done. It is a step inside standing the daemon up rather
+   * than a question, because there is nothing here to decide.
+   */
+  agents: Object.freeze({
+    id: 'agents' as const,
+    title: 'Install Claude Code or Codex',
+    short: 'Agents',
+    summary: 'Ferretry runs these. One of them is enough.',
   }),
   daemon: Object.freeze({
     id: 'daemon' as const,
@@ -513,6 +529,13 @@ const OWN_RELAY_STEPS: readonly OnboardingStepId[] = Object.freeze([
 const daemonSteps = (connection: ConnectionMethodId | undefined): readonly OnboardingStepId[] =>
   Object.freeze([
     'install',
+    /*
+     * BEFORE the daemon starts, so its own boot preflight reports the harness the
+     * reader just installed rather than a gap they have to come back for. A daemon
+     * that came up first would have told them something was missing at the one
+     * moment they were being congratulated for starting it.
+     */
+    'agents',
     'daemon',
     'connect',
     ...(connection === 'own-relay' ? OWN_RELAY_STEPS : []),
@@ -782,6 +805,69 @@ export const INSTALL_CHANNELS: readonly InstallChannel[] = Object.freeze([
 /** Total, because the id is a closed union — an unknown channel cannot be constructed. */
 export const installChannel = (id: InstallChannelId): InstallChannel => CHANNELS[id];
 
+/* ---------- the agents Ferretry runs, which are not Ferretry ---------------- */
+
+/**
+ * FERRETRY RUNS CODING AGENTS; IT IS NOT ONE. With neither installed, the daemon
+ * starts perfectly and can do nothing at all — so onboarding that ends at a paired
+ * app has walked somebody to a fleet that cannot run a single session.
+ *
+ * THESE COMMANDS ARE NOT PINNED THE WAY `INSTALL_CHANNELS` IS, and that asymmetry
+ * is worth stating rather than hiding. Ferretry's own commands are asserted
+ * character-for-character against `INSTALLATION.md`, which
+ * `scripts/validate/cli-contracts.sh` holds to the release; these two belong to
+ * other people's products, and nothing in this repository can prove they still
+ * work. So the page names the vendor as the authority, and the check command
+ * beside each one is what actually tells the reader anything.
+ *
+ * The ids are the two families `HarnessSchema` ships in `@ferretry/protocol`
+ * (`claude`, `codex`), and the executable names are what a fresh fleet manifest
+ * points at. It is deliberately not imported: this is a public page describing two
+ * third-party tools, and it must not acquire a build dependency on the wire
+ * protocol to say their names.
+ */
+export interface AgentHarness {
+  readonly id: 'claude' | 'codex';
+  /** What the reader calls it. */
+  readonly label: string;
+  /** How its own documentation installs it. */
+  readonly command: string;
+  /**
+   * What proves it landed — AND NOTHING MORE THAN THAT.
+   *
+   * A version on stdout means the executable is on `PATH`. It does not mean the
+   * reader is signed in, that a subscription is live, or that a single prompt
+   * would be answered. Every string near this one has to respect that gap.
+   */
+  readonly check: string;
+}
+
+const HARNESSES: Readonly<Record<AgentHarness['id'], AgentHarness>> = Object.freeze({
+  claude: Object.freeze({
+    id: 'claude' as const,
+    label: 'Claude Code',
+    command: 'npm install -g @anthropic-ai/claude-code',
+    check: 'claude --version',
+  }),
+  codex: Object.freeze({
+    id: 'codex' as const,
+    label: 'Codex',
+    command: 'npm install -g @openai/codex',
+    check: 'codex --version',
+  }),
+});
+
+/**
+ * Both, in the order they are read — and AT LEAST ONE is the bar.
+ *
+ * Not "both are required", which is what a page listing two commands with no
+ * qualifier says by implication. A fleet with one Claude account runs perfectly.
+ */
+export const AGENT_HARNESSES: readonly AgentHarness[] = Object.freeze([HARNESSES.claude, HARNESSES.codex]);
+
+/** Total, because the id is a closed union. */
+export const agentHarness = (id: AgentHarness['id']): AgentHarness => HARNESSES[id];
+
 /** Proves the install landed. */
 export const VERIFY_COMMAND = 'fy --version';
 /** Starts the daemon and waits until it serves. */
@@ -826,19 +912,52 @@ function toPromptLines(block: string): readonly string[] {
  * agent that hits that with no instructions stops on the one step the human
  * cannot do for it.
  */
-const reportBack = (target: SetupTargetId): readonly string[] =>
+const reportBack = (target: SetupTargetId, step: number): readonly string[] =>
   target === 'this'
     ? [
-        `6. Pair the browser on this machine: ${PAIR_OPEN_COMMAND}. It opens Ferretry in this machine's own`,
-        '   browser, already paired, and there is nothing for me to type.',
+        `${step}. Pair the browser on this machine: ${PAIR_OPEN_COMMAND}. It opens Ferretry in this machine's`,
+        '   own browser, already paired, and there is nothing for me to type.',
         `   - If it reports that it cannot open a browser, run ${PAIR_COMMAND} instead and show me the QR`,
         '     code and the pairing link it prints, exactly as printed.',
       ]
     : [
-        `6. I am reading the Ferretry setup page on a different device, so run ${PAIR_COMMAND} and show me`,
-        '   the QR code and the pairing link it prints, exactly as printed, so I can scan or paste it there.',
-        '   The code is single-use and expires in about two minutes, so show it as soon as it appears.',
+        `${step}. I am reading the Ferretry setup page on a different device, so run ${PAIR_COMMAND} and show`,
+        '   me the QR code and the pairing link it prints, exactly as printed, so I can scan or paste it',
+        '   there. The code is single-use and expires in about two minutes, so show it as soon as it appears.',
       ];
+
+/**
+ * THE STEP THAT ASKS THE AGENT TO CHECK ITSELF.
+ *
+ * The prompt is being pasted INTO Claude or Codex, so one harness is there by
+ * definition — which is exactly why this says CONFIRM rather than install. An
+ * agent told "install a harness" would either install a second one nobody asked
+ * for or skip the step on the reasoning that it is obviously fine, and neither
+ * answer tells the human anything.
+ *
+ * IT IS NOT OBVIOUSLY FINE, either: an agent can reach a machine without its own
+ * executable being on that machine's `PATH` — an IDE extension, a wrapper, a
+ * remote session over SSH. The check is cheap, and it is the only thing that turns
+ * an assumption into a report.
+ *
+ * AND IT REFUSES TO SIGN ANYBODY IN. A version string proves an executable exists;
+ * it says nothing about an account. An agent that tried to authenticate on the
+ * human's behalf would be doing the one thing on this page nobody delegated.
+ */
+const confirmHarness = (step: number): readonly string[] => [
+  `${step}. Confirm this machine can actually run agents. Ferretry RUNS Claude Code and Codex — it is`,
+  '   neither of them — and a daemon with both missing starts perfectly and can run nothing.',
+  '   - You are one of them, so CHECK rather than assume: an IDE extension, a wrapper or a remote',
+  "     session can all reach me without either executable being on this machine's PATH.",
+  `   - Run ${AGENT_HARNESSES.map(harness => harness.check).join(' and ')}. If at least one of them`,
+  '     answers, that is enough — tell me which, and go on.',
+  '   - If neither answers, install exactly one of these and tell me which you chose:',
+  '',
+  /* Nested one level deeper than the `fy` channels above, because it is inside a sub-bullet. */
+  ...AGENT_HARNESSES.flatMap(harness => [`     ${harness.label}:`, `       ${harness.command}`, '']),
+  '   - Being on PATH is not being signed in, and signing in is mine to do. If the one you found or',
+  '     installed still needs an account, say so plainly instead of attempting it.',
+];
 
 /**
  * A public, self-contained brief for an AI coding agent — THE PRODUCT of the
@@ -854,6 +973,10 @@ const reportBack = (target: SetupTargetId): readonly string[] =>
  * IT MUST SAY HOW TO REPORT BACK, or the person who pasted it is left wondering
  * whether anything worked. Which report to use is a function of the answer to the
  * first question, so it is a function argument here.
+ *
+ * THE HARNESS CHECK COMES BEFORE THE DAEMON, for the same reason the reader's own
+ * list puts it there: the daemon reports what it can see at boot, so it should be
+ * booting into a machine that is already able to run something.
  */
 export const agentSetupPrompt = (target: SetupTargetId): string =>
   [
@@ -867,9 +990,10 @@ export const agentSetupPrompt = (target: SetupTargetId): string =>
     '',
     ...INSTALL_CHANNELS.flatMap(channel => [`   ${channel.label}:`, ...toPromptLines(channel.command), '']),
     `3. Verify the install: ${VERIFY_COMMAND}`,
-    `4. Start the daemon: ${DAEMON_START_COMMAND}`,
-    `5. Confirm it is running: ${DAEMON_STATUS_COMMAND} — it should print "${DAEMON_SERVING_OUTPUT}".`,
-    ...reportBack(target),
+    ...confirmHarness(4),
+    `5. Start the daemon: ${DAEMON_START_COMMAND}`,
+    `6. Confirm it is running: ${DAEMON_STATUS_COMMAND} — it should print "${DAEMON_SERVING_OUTPUT}".`,
+    ...reportBack(target, 7),
     '',
     'If any command fails, stop and report the exact command and the exact error. Do not improvise a',
     'workaround, do not install from an undocumented source, and do not edit configuration to route',

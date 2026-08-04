@@ -24,6 +24,7 @@ import { mount, must } from '../../support/dom.ts';
  */
 const EVERY_STEP: readonly OnboardingStepId[] = [
   'install',
+  'agents',
   'daemon',
   'connect',
   'local',
@@ -93,6 +94,7 @@ describe('the setup diagram', () => {
     };
 
     // Install is work on the machine alone; the browser is not doing anything.
+    expect(await lit('agents')).toEqual([true, false]);
     expect(await lit('install')).toEqual([true, false]);
     // The same-machine collapse lights BOTH ends: they are one machine.
     expect(await lit('local')).toEqual([true, true]);

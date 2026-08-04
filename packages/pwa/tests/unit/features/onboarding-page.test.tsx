@@ -373,6 +373,8 @@ describe('who installs it', () => {
     const storage = new MemoryStorage();
     const firstVisit = await pageWith({ progress: new OnboardingProgressStore({ storage, device: 'desktop' }) });
     await enter(firstVisit.view.container, 'first-time');
+    /* install → agents → daemon, so the resumed place is two steps in */
+    await next(firstVisit.view.container);
     await next(firstVisit.view.container);
     await firstVisit.view.unmount();
 
@@ -504,7 +506,7 @@ describe('this computer, by hand', () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
 
-    expect(view.container.textContent).toContain('step 1 of 6');
+    expect(view.container.textContent).toContain('step 1 of 7');
     const diagram = must(view.container.querySelector('[role="img"]'), 'the arrangement diagram');
     expect(diagram.getAttribute('data-onboarding-diagram')).toBe('install');
     expect(diagram.getAttribute('aria-label')).toContain('not yet linked');
@@ -512,7 +514,7 @@ describe('this computer, by hand', () => {
 
     // A real ordered list, not a row of divs pretending to be one.
     const track = must(view.container.querySelector('[aria-label="Setup steps"]'), 'the step track');
-    expect(track.querySelectorAll('li')).toHaveLength(6);
+    expect(track.querySelectorAll('li')).toHaveLength(7);
     expect(must(track.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Install');
     // Only the steps already reached are jumpable, and none have been yet.
     expect(track.querySelectorAll('[data-onboarding-jump]')).toHaveLength(0);
@@ -520,6 +522,10 @@ describe('this computer, by hand', () => {
     expect(track.textContent).toContain('current step');
     expect(track.textContent).toContain('not reached yet');
 
+    await next(view.container);
+    // Ferretry runs Claude Code and Codex and is neither of them, so this is where
+    // the machine gets something to run before the daemon comes up to report it.
+    expect(screenOf(view.container)).toBe('agents');
     await next(view.container);
     expect(screenOf(view.container)).toBe('daemon');
     await next(view.container);
@@ -591,6 +597,7 @@ describe('this computer, by hand', () => {
     await enter(view.container, 'first-time');
     await next(view.container);
     await next(view.container);
+    await next(view.container);
     await chooseConnection(view.container, 'direct');
     expect(screenOf(view.container)).toBe('local');
 
@@ -605,6 +612,7 @@ describe('this computer, by hand', () => {
   it('advances along the journey when the daemon answers, rather than jumping to the end', async () => {
     const { view } = await pageWith({ fleetReady: false });
     await enter(view.container, 'first-time');
+    await next(view.container);
     await next(view.container);
     await next(view.container);
     await chooseConnection(view.container, 'default-relay');
@@ -625,6 +633,7 @@ describe('this computer, by hand', () => {
     // Adding one more daemon has no phone to offer: this is not a first machine.
     const { view } = await pageWith({ fleetReady: true });
     await enter(view.container, 'add-daemon');
+    await next(view.container);
     await next(view.container);
     await next(view.container);
     await chooseConnection(view.container, 'direct');
@@ -860,10 +869,49 @@ describe('the install step', () => {
   });
 });
 
+describe('the agents step', () => {
+  it('is where the machine gets something for the daemon to run', async () => {
+    // Ferretry RUNS Claude Code and Codex; it is not either of them. A reader who
+    // finished without this had a paired app that could not open one session.
+    const { view } = await pageWith();
+    await enter(view.container, 'first-time');
+    await next(view.container);
+
+    expect(screenOf(view.container)).toBe('agents');
+    expect(must(view.container.querySelector('h2'), 'the step heading').textContent).toBe(
+      'Install Claude Code or Codex',
+    );
+    // Both commands, and the words that say one is enough — two blocks with no
+    // qualifier read as two requirements.
+    expect(view.container.textContent).toContain('npm install -g @anthropic-ai/claude-code');
+    expect(view.container.textContent).toContain('npm install -g @openai/codex');
+    expect(view.container.textContent).toContain('at least one');
+    expect(view.container.querySelectorAll('[data-onboarding-harness]')).toHaveLength(2);
+
+    // And nothing here claims to have checked anything: the page cannot see a
+    // terminal, and a version on PATH is not an account.
+    expect(view.container.textContent).toContain('It does not mean you are signed in');
+    expect(view.container.textContent).toContain('cannot see which of them you have');
+    await view.unmount();
+  });
+
+  it('comes before the daemon, so the daemon boots into a machine that can run something', async () => {
+    const { view } = await pageWith();
+    await enter(view.container, 'first-time');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('agents');
+    await next(view.container);
+    expect(screenOf(view.container)).toBe('daemon');
+    await view.unmount();
+  });
+});
+
 describe('the daemon step', () => {
   it('prints the real commands and what a healthy answer looks like', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
+    /* install → agents → daemon */
+    await next(view.container);
     await next(view.container);
 
     expect(view.container.textContent).toContain('fy daemon start');
@@ -881,6 +929,8 @@ describe('the daemon step', () => {
 describe('the reach-it step', () => {
   const toConnect = async (container: HTMLElement): Promise<void> => {
     await enter(container, 'first-time');
+    /* install → agents → daemon → connect */
+    await next(container);
     await next(container);
     await next(container);
   };
@@ -906,8 +956,8 @@ describe('the reach-it step', () => {
     await chooseConnection(view.container, 'own-relay');
 
     expect(screenOf(view.container)).toBe('relay-fingerprint');
-    expect(view.container.textContent).toContain('step 4 of 10');
-    expect(view.container.querySelectorAll('[aria-label="Setup steps"] li')).toHaveLength(10);
+    expect(view.container.textContent).toContain('step 5 of 11');
+    expect(view.container.querySelectorAll('[aria-label="Setup steps"] li')).toHaveLength(11);
     expect(view.container.textContent).toContain('fy pair --no-wait');
     await next(view.container);
     expect(screenOf(view.container)).toBe('relay-source');

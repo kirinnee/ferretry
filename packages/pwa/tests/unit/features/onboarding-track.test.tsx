@@ -28,7 +28,7 @@ describe('the step track', () => {
     const list = must(view.container.querySelector('ol'), 'the track');
 
     expect(list.getAttribute('aria-label')).toBe('Setup steps');
-    expect(list.querySelectorAll('li')).toHaveLength(6);
+    expect(list.querySelectorAll('li')).toHaveLength(7);
     expect(must(list.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Daemon');
     await view.unmount();
   });
@@ -41,7 +41,7 @@ describe('the step track', () => {
     expect(text).toContain('completed, go back to it');
     expect(text).toContain('not reached yet');
     // A finished step swaps its number for a tick: state by shape, not by tone.
-    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(3);
+    expect(view.container.querySelectorAll('svg.lucide-check')).toHaveLength(4);
     // An unreached one is dashed for the same reason.
     expect(view.container.innerHTML).toContain('border-dashed');
     await view.unmount();
@@ -61,7 +61,7 @@ describe('the step track', () => {
     );
 
     // `done` is ahead of them, so it is not a control at all.
-    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(3);
+    expect(view.container.querySelectorAll('[data-onboarding-jump]')).toHaveLength(4);
     expect(view.container.querySelector('[data-onboarding-jump="done"]')).toBeNull();
 
     await click(must(view.container.querySelector('[data-onboarding-jump="install"]'), 'the install step'));

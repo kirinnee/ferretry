@@ -486,7 +486,8 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<entry|target|doer|install|daemon|connect|reach-*|pair|brief*|agent-pair*|elsewhere|scan|done>-\n' +
+          '    setup-<entry|target|doer|install|agents|daemon|connect|reach-*|pair|brief*|agent-pair*|elsewhere|\n' +
+          '    scan|done>-\n' +
           '    <mobile|desktop>\n' +
           '    and setup-scan-keyboard-mobile\n' +
           '    were NOT produced.\n',
@@ -537,8 +538,14 @@ try {
        */
       const JOURNEYS = [
         { name: 'install', on: 'desktop', route: 'first-time', doer: 'self', advances: 0, screen: 'install' },
-        { name: 'daemon', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'daemon' },
-        { name: 'connect', on: 'desktop', route: 'first-time', doer: 'self', advances: 2, screen: 'connect' },
+        /*
+         * The step without which everything after it is theatre: Ferretry runs
+         * Claude Code and Codex and is neither, so a daemon with both missing
+         * starts perfectly and can run nothing.
+         */
+        { name: 'agents', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'agents' },
+        { name: 'daemon', on: 'desktop', route: 'first-time', doer: 'self', advances: 2, screen: 'daemon' },
+        { name: 'connect', on: 'desktop', route: 'first-time', doer: 'self', advances: 3, screen: 'connect' },
         /*
          * `pair` — run `fy pair` somewhere else — belongs to the pairing entry. It
          * was pointed at first-time with a carrier answer, which since the
@@ -551,7 +558,7 @@ try {
           on: 'desktop',
           route: 'first-time',
           doer: 'self',
-          advances: 2,
+          advances: 3,
           screen: 'local',
           connection: 'direct',
         },

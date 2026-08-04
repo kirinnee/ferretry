@@ -284,7 +284,12 @@ const advanceToPairing = async (container: HTMLElement): Promise<void> => {
  */
 const advanceToLocalPairing = async (container: HTMLElement): Promise<void> => {
   await chooseRoute(container, 'first-time');
-  /* install → daemon → connect */
+  /*
+   * install → agents → daemon → connect. The agents step is not decoration on the
+   * way past: Ferretry runs Claude Code and Codex and is neither of them, so a
+   * daemon standing up with both missing serves perfectly and runs nothing.
+   */
+  await advanceStep(container);
   await advanceStep(container);
   await advanceStep(container);
   /* connect → local, by answering rather than by advancing */

@@ -67,6 +67,9 @@ const SECTIONS = [
   // And that step without the "already open in another tab" line, which is true
   // only when the daemon is on the machine reading the page.
   'harness-onboarding-agent-pair-elsewhere',
+  // The step that makes the daemon worth starting: Ferretry runs Claude Code and
+  // Codex and is neither, so a daemon with both missing starts and can do nothing.
+  'harness-onboarding-agents',
   'harness-onboarding-daemon',
   'harness-onboarding-connect',
   // The same-machine collapse, and the one screen that stands in for the whole

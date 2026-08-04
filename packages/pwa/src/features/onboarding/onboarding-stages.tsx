@@ -33,6 +33,8 @@ import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import type { CarrierDisclosure } from './hosted-relay.ts';
 import {
+  AGENT_HARNESSES,
+  agentHarness,
   agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
@@ -193,6 +195,65 @@ export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }:
           </button>
         </Aside>
       )}
+    </div>
+  );
+}
+
+/**
+ * THE STEP THAT MAKES THE DAEMON WORTH STARTING.
+ *
+ * Ferretry runs Claude Code and Codex; it is not either of them. Everything before
+ * and after this step is about a daemon, and a daemon with neither harness
+ * installed starts perfectly and can run nothing at all — so a reader who finished
+ * without this had a paired app, a green shield, and no way to open a session.
+ *
+ * AT LEAST ONE IS THE BAR, said in words rather than left to be inferred from two
+ * commands sitting side by side. Two blocks with no qualifier read as two
+ * requirements.
+ *
+ * AND BEING ON `PATH` IS NOT BEING SIGNED IN. This page cannot see a terminal, let
+ * alone somebody's account, so the check command is described as what it actually
+ * proves and the sign-in is named as a separate thing that happens on first run.
+ * The alternative — "you are ready" — is the benign reading of no evidence, which
+ * is the failure this whole flow is built to avoid.
+ */
+export function AgentsStage({ write }: { readonly write: ClipboardWriter }) {
+  return (
+    <div className={STAGE}>
+      <p className="m-0 text-meta leading-base text-muted">
+        Ferretry runs your agents; it is not one. Install{' '}
+        <strong className="font-semibold text-fg">at least one</strong> of these on this machine — both is fine, one is
+        enough.
+      </p>
+      {AGENT_HARNESSES.map(harness => (
+        <div key={harness.id} className="flex min-w-0 flex-col gap-1" data-onboarding-harness={harness.id}>
+          <p className="m-0 text-meta font-semibold text-fg">{harness.label}</p>
+          <CommandBlock command={harness.command} copyLabel={`Copy ${harness.label} install command`} write={write} />
+        </div>
+      ))}
+      <Aside summary="Check one of them is there">
+        {AGENT_HARNESSES.map(harness => (
+          <CommandBlock
+            key={harness.id}
+            command={harness.check}
+            copyLabel={`Copy ${harness.label} check`}
+            write={write}
+          />
+        ))}
+        <p className="m-0 text-meta leading-base text-muted">
+          A version means the command is installed. It does not mean you are signed in — the first time you run{' '}
+          <code className="font-mono text-syn-string">{agentHarness('claude').id}</code> or{' '}
+          <code className="font-mono text-syn-string">{agentHarness('codex').id}</code> it will ask you to log in, and
+          Ferretry cannot do that for you.
+        </p>
+      </Aside>
+      <Aside summary="These are not ours">
+        <p className="m-0 text-meta leading-base text-muted">
+          Claude Code and Codex are other people&apos;s products, so their own documentation is the authority on
+          installing them. These are the commands each one documents; if either has moved on, believe them over this
+          page.
+        </p>
+      </Aside>
     </div>
   );
 }

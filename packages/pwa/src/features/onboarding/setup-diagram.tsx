@@ -61,6 +61,19 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'Your machine, where Ferretry is being installed, is not yet linked to this browser.',
   },
+  /*
+   * STILL THE MACHINE END, and deliberately not drawn as progress toward the link:
+   * installing an agent harness is what makes the daemon able to do anything, and
+   * it happens entirely on the far side of a line that does not exist yet.
+   */
+  agents: {
+    machine: 'adding an agent',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label:
+      'Your machine is getting an agent harness — Claude Code or Codex — for Ferretry to run. This browser is not linked yet.',
+  },
   daemon: {
     machine: 'fyd running',
     browser: 'waiting',

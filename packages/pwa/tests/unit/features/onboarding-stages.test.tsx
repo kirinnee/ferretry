@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  AGENT_HARNESSES,
   agentSetupPrompt,
   DAEMON_SERVING_OUTPUT,
   DAEMON_STATUS_COMMAND,
@@ -23,6 +24,7 @@ import {
 } from '../../../src/features/onboarding/onboarding-model.ts';
 import {
   AgentPairStage,
+  AgentsStage,
   BriefStage,
   DaemonStage,
   DoneStage,
@@ -131,6 +133,61 @@ describe('the install stage', () => {
     await click(must(toolbar.querySelector('[data-onboarding-channel="dnf"]'), 'the dnf route'));
     expect(visibleCommand(view.container)).toContain('sudo dnf install fy');
     expect(visibleCommand(view.container)).not.toContain('brew install');
+    await view.unmount();
+  });
+});
+
+describe('the agents stage', () => {
+  it('offers both harnesses and says one is enough', async () => {
+    // Ferretry RUNS Claude Code and Codex; it is not either of them. Two commands
+    // with no qualifier read as two requirements, so the bar is in words.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+
+    const blocks = [...view.container.querySelectorAll('[data-onboarding-harness]')];
+    expect(blocks.map(node => node.getAttribute('data-onboarding-harness'))).toEqual(['claude', 'codex']);
+    for (const harness of AGENT_HARNESSES) {
+      expect(
+        must(
+          blocks.find(node => node.textContent?.includes(harness.label)),
+          harness.label,
+        ).textContent,
+      ).toContain(harness.command);
+    }
+    expect(view.container.textContent).toContain('at least one');
+    expect(view.container.textContent).toContain('one is enough');
+    await view.unmount();
+  });
+
+  it('describes the check as what it proves, and no more', async () => {
+    // A version on stdout means the executable exists. It does not mean the reader
+    // is signed in, and a page that implied otherwise would be doing the
+    // damaged-state-as-empty-state thing with somebody's account.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+    const asides = [...view.container.querySelectorAll<HTMLDetailsElement>('details')];
+
+    expect(asides).toHaveLength(2);
+    for (const aside of asides) expect(aside.open).toBe(false);
+    const check = must(
+      view.container.querySelector('[data-onboarding-aside="Check one of them is there"]'),
+      'the check disclosure',
+    );
+    for (const harness of AGENT_HARNESSES) expect(check.textContent).toContain(harness.check);
+    expect(check.textContent).toContain('It does not mean you are signed in');
+    expect(check.textContent).toContain('Ferretry cannot do that for you');
+    await view.unmount();
+  });
+
+  it('names the vendors as the authority, because this repo cannot pin their commands', async () => {
+    // Unlike `INSTALL_CHANNELS`, which is asserted character-for-character against
+    // `INSTALLATION.md`, nothing here can prove a third-party command still works.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+    const disclosure = must(
+      view.container.querySelector('[data-onboarding-aside="These are not ours"]'),
+      'the provenance disclosure',
+    );
+
+    expect(disclosure.textContent).toContain('their own documentation is the authority');
+    expect(disclosure.textContent).toContain('believe them over this page');
     await view.unmount();
   });
 });

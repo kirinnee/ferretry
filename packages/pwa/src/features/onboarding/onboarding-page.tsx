@@ -87,6 +87,7 @@ import {
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
 import {
   AgentPairStage,
+  AgentsStage,
   BriefStage,
   DaemonStage,
   DoneStage,
@@ -607,6 +608,8 @@ function Stage({
           {...(assumed ? { onOtherMachine: () => onChooseTarget('other') } : {})}
         />
       );
+    case 'agents':
+      return <AgentsStage write={write} />;
     case 'daemon':
       return <DaemonStage write={write} />;
     case 'connect':
@@ -672,6 +675,7 @@ const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   brief: 'Nothing here watches your agent. Continue when it says it has finished.',
   'agent-pair': 'This step finishes itself when the daemon answers. Nothing here is waiting on you.',
   install: 'This page cannot see your terminal. Continue when the install finishes.',
+  agents: 'This page cannot see which of them you have, or whether you are signed in. Continue once one runs.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
   connect: 'Choose the route that matches this machine. Direct is still preferred whenever it is reachable.',
   'relay-fingerprint': 'This page cannot see your terminal. Continue once you have copied the fingerprint.',
