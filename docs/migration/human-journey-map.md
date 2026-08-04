@@ -84,10 +84,29 @@ message any session that the daemon serves. A supplied `FY_SESSION_ID` changes
 the journal actor; it is not an authorization boundary, and the daemon resolves
 that header only after the bearer is already authorized.
 
-This may be a defensible single-user-tool default, and this map does not propose
-changing it. It is recorded because a future scoped-agent design must be a
-deliberate capability boundary, not an accidental consequence of supplying the
-convenient local token fallback.
+**This is the intended design, decided 2026-08-04, not an accident of the token
+fallback.** Agents spawning agents and stopping their children is the product;
+restricting it would be theatre. Every agent already runs as the operator, on
+the operator's machine, with the operator's filesystem — an agent denied an API
+call can read `api-token` directly or bypass the daemon entirely. A boundary
+between processes sharing a UID enforces nothing against an adversary and
+obstructs the legitimate case.
+
+Meaningful per-agent permissions would need a real capability system: who may
+spawn what, who may stop whom, how authority delegates down a spawn chain, how
+it is revoked when a parent dies, what becomes of orphans. That is a large
+subsystem, subtly wrong for years at a time, defending a threat a single-user
+tool does not have.
+
+The one exception is already in place and is the right level:
+`FY_SESSION_BOARD_CAPABILITY`, where a start receives only the `--board-access`
+it asked for (PR #120). A shared task board is collaborative state, so two
+agents' interests can genuinely diverge there — unlike a process one of them
+owns.
+
+So: full admin over sessions and processes; narrow capabilities only where state
+is genuinely shared. Anyone revisiting this should change it deliberately rather
+than because the full-admin scope looked like an oversight.
 
 The principal correction to the previous reachability measure is therefore:
 the PWA session workspace is the biggest shared presentation gap. Agent identity
