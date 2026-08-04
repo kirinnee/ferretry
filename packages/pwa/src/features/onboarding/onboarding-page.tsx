@@ -47,7 +47,7 @@ import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
-import { activeCarrierStatus, type HostedRelayFallback } from './hosted-relay.ts';
+import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
 import {
   type ConnectionMethodId,
@@ -515,6 +515,12 @@ function Stage({
             plainly that their choice is not yet what carries the connection.
           */
           connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(path.connection)) : null}
+          /*
+            AND WHAT THE FALLBACK WOULD SEE. The carrier in use is only half the
+            disclosure; the other half is about a third party the reader chose
+            screens ago and has not been reminded of since.
+          */
+          fallbackDisclosure={fleetReady ? carrierDisclosure(path.connection) : null}
           onOpenFleet={onOpenFleet}
           onBackToPairing={() => onGoTo(path.route === 'add-client' ? 'scan' : 'local')}
         />

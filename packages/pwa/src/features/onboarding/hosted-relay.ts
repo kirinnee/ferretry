@@ -226,6 +226,57 @@ export const activeCarrierStatus = (chosen: 'default-relay' | 'own-relay' | 'dir
 };
 
 /**
+ * THE WHOLE DISCLOSURE: what carries this connection, and what the FALLBACK
+ * would see if it ever carried one.
+ *
+ * Naming the carrier in use is half of it. The other half is the half a reader
+ * cannot check for themselves: the carrier they picked as a fallback is a third
+ * party, and they chose it during setup — several screens and possibly several
+ * days before anything was actually connected. Saying "Direct" at the end and
+ * stopping there quietly retires a decision they made about somebody else's
+ * infrastructure, so the fallback's terms are restated exactly where the
+ * connection becomes real.
+ *
+ * It is stated ONLY for a relay choice. `direct` has no third party in it, and
+ * an empty disclosure under a "what they can see" heading reads as a redaction
+ * rather than as an absence.
+ */
+export interface CarrierDisclosure {
+  /** The carrier this build actually dials, said plainly. */
+  readonly inUse: string;
+  /** What the chosen fallback would learn, if it were carrying the connection. */
+  readonly fallbackWouldSee: readonly string[];
+  /** How to name the fallback in a heading. Empty when the choice has no third party in it. */
+  readonly fallbackName: string;
+}
+
+export const carrierDisclosure = (chosen: 'default-relay' | 'own-relay' | 'direct' | undefined): CarrierDisclosure => {
+  const inUse = activeCarrierStatus(chosen);
+  if (chosen === 'default-relay') {
+    return { inUse, fallbackName: 'the default relay', fallbackWouldSee: HOSTED_RELAY_DISCLOSURE };
+  }
+  if (chosen === 'own-relay') {
+    return { inUse, fallbackName: 'your own relay', fallbackWouldSee: OWN_RELAY_DISCLOSURE };
+  }
+  return { inUse, fallbackName: '', fallbackWouldSee: [] };
+};
+
+/**
+ * The same three facts for a relay the READER runs.
+ *
+ * Not a copy of the hosted list with a name swapped: what changes is who is on
+ * the other side of each fact, and that is the whole reason somebody self-hosts.
+ * Cloudflare is still in the path — the Worker runs on their network — and
+ * pretending otherwise would make self-hosting look like a stronger guarantee
+ * than it is.
+ */
+export const OWN_RELAY_DISCLOSURE = [
+  'You and Cloudflare would see your daemon’s fingerprint, both IP addresses, and when and how much you connect.',
+  'Neither could read a byte of it: frames, device tokens, commands, output and names are encrypted end to end.',
+  'Its limits, its bill and its uptime are yours, and no one else can switch it off.',
+] as const;
+
+/**
  * The gap, said on the screen rather than only in a review.
  *
  * `packages/relay` is complete and tested and NOTHING mounts it: neither the

@@ -28,6 +28,7 @@ import { ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
+import type { CarrierDisclosure } from './hosted-relay.ts';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
   AGENT_SETUP_PROMPT,
@@ -408,11 +409,26 @@ export function ScanStage({ pairing }: { readonly pairing: ReactNode }) {
 export interface DoneStageProps {
   readonly fleetReady: boolean;
   readonly connectionStatus: string | null;
+  /**
+   * What the carrier the reader CHOSE would be able to see.
+   *
+   * Absent for a direct connection, which has no third party in it. Restated
+   * here rather than left behind on the chooser because that choice was made
+   * several screens — and possibly several days — before anything was connected,
+   * and this is the screen where the connection becomes real.
+   */
+  readonly fallbackDisclosure?: CarrierDisclosure | null;
   readonly onOpenFleet: () => void;
   readonly onBackToPairing: () => void;
 }
 
-export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToPairing }: DoneStageProps) {
+export function DoneStage({
+  fleetReady,
+  connectionStatus,
+  fallbackDisclosure = null,
+  onOpenFleet,
+  onBackToPairing,
+}: DoneStageProps) {
   return (
     <div className={STAGE}>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted">
@@ -423,6 +439,21 @@ export function DoneStage({ fleetReady, connectionStatus, onOpenFleet, onBackToP
         <p className="m-0 text-2xs leading-base text-faint" role="status">
           Connection in use: {connectionStatus}
         </p>
+      )}
+      {fallbackDisclosure === null || fallbackDisclosure.fallbackWouldSee.length === 0 ? null : (
+        <Aside summary={`What ${fallbackDisclosure.fallbackName} would see`}>
+          <ul
+            className="m-0 flex list-none flex-col gap-1 p-0 text-meta leading-base text-muted"
+            data-onboarding-fallback-disclosure=""
+          >
+            {fallbackDisclosure.fallbackWouldSee.map(line => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="m-0 text-2xs leading-base text-faint">
+            It is the fallback, not the carrier: it only ever carries the connection when the direct path cannot.
+          </p>
+        </Aside>
       )}
       {/*
         DAMAGED STATE IS NOT EMPTY STATE. A stored "finished" with nothing paired

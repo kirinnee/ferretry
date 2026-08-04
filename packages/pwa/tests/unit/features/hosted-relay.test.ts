@@ -16,6 +16,7 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   bundledRelayDirectory,
+  carrierDisclosure,
   HOSTED_RELAY_ROW_NOTE,
   CHECKING_HOSTED_RELAY,
   HOSTED_RELAY_ADVERTISEMENT_VERSION,
@@ -25,6 +26,7 @@ import {
   HOSTED_RELAY_UNDETERMINED_NOTE,
   type HostedRelayFetch,
   NO_RELAY_DIRECTORY,
+  OWN_RELAY_DISCLOSURE,
   activeCarrierStatus,
   parseHostedRelayAdvertisement,
   readHostedRelayFallback,
@@ -251,5 +253,41 @@ describe('what the step says', () => {
     expect(text).not.toMatch(/wss?:\/\//);
     expect(text).not.toMatch(/https?:\/\//);
     expect(text).not.toContain('workers.dev');
+  });
+});
+
+describe('the carrier disclosure', () => {
+  it('names the carrier in use and what the chosen fallback would see', () => {
+    // The carrier in use is only half of it. The other half is about a third
+    // party the reader chose several screens ago and has not seen since.
+    const hosted = carrierDisclosure('default-relay');
+    expect(hosted.inUse).toBe(activeCarrierStatus('default-relay'));
+    expect(hosted.fallbackName).toBe('the default relay');
+    expect(hosted.fallbackWouldSee).toEqual(HOSTED_RELAY_DISCLOSURE);
+
+    const own = carrierDisclosure('own-relay');
+    expect(own.fallbackName).toBe('your own relay');
+    expect(own.fallbackWouldSee).toEqual(OWN_RELAY_DISCLOSURE);
+  });
+
+  it('does not pretend self-hosting removes Cloudflare from the path', () => {
+    // The Worker runs on their network either way. What changes is who holds
+    // the account, the bill and the off switch — which is the actual reason to
+    // self-host, and it is worth less if the page oversells it.
+    expect(OWN_RELAY_DISCLOSURE.join(' ')).toContain('Cloudflare');
+    expect(OWN_RELAY_DISCLOSURE.join(' ')).toContain('no one else can switch it off');
+    // Still end-to-end encrypted, said in both lists rather than only the hosted one.
+    for (const lines of [HOSTED_RELAY_DISCLOSURE, OWN_RELAY_DISCLOSURE]) {
+      expect(lines.join(' ')).toContain('encrypted end to end');
+    }
+  });
+
+  it('says nothing at all for a direct connection', () => {
+    // No third party is in it. An empty list under a "what they can see" heading
+    // reads as a redaction rather than as an absence.
+    const direct = carrierDisclosure('direct');
+    expect(direct.fallbackWouldSee).toEqual([]);
+    expect(direct.fallbackName).toBe('');
+    expect(carrierDisclosure(undefined).fallbackWouldSee).toEqual([]);
   });
 });

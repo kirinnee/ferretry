@@ -323,6 +323,38 @@ describe('the first-time route on a computer', () => {
     await view.unmount();
   });
 
+  it('restates what the chosen fallback would see, where the connection becomes real', async () => {
+    // The carrier choice was made several screens — possibly several days —
+    // before anything was connected, and it is a decision about somebody else's
+    // infrastructure. Saying "Direct" here and stopping would quietly retire it.
+    const progress = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    progress.choose('first-time');
+    progress.goTo('connect');
+    progress.chooseConnection('default-relay');
+    progress.goTo('done');
+    const relayed = await pageWith({ progress, fleetReady: true });
+
+    expect(relayed.view.container.textContent).toContain('Connection in use: Direct');
+    const disclosure = must(
+      relayed.view.container.querySelector('[data-onboarding-fallback-disclosure]'),
+      'the fallback disclosure',
+    );
+    expect(disclosure.textContent).toContain('could not read a byte of it');
+    expect(disclosure.textContent).toContain('metered and capped');
+    await relayed.view.unmount();
+
+    // A direct connection has no third party in it, and an empty list under a
+    // "what they can see" heading reads as a redaction rather than an absence.
+    const direct = new OnboardingProgressStore({ storage: new MemoryStorage(), device: 'desktop' });
+    direct.choose('first-time');
+    direct.goTo('connect');
+    direct.chooseConnection('direct');
+    direct.goTo('done');
+    const plain = await pageWith({ progress: direct, fleetReady: true });
+    expect(plain.view.container.querySelector('[data-onboarding-fallback-disclosure]')).toBeNull();
+    await plain.view.unmount();
+  });
+
   it('offers the fleet when there is one, and refuses to pretend when there is not', async () => {
     const storage = new MemoryStorage();
     const progress = new OnboardingProgressStore({ storage, device: 'desktop' });
