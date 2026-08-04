@@ -647,14 +647,38 @@ const harnessOnboarding = (
   });
 
 /**
+ * A store parked on one of the two QUESTIONS.
+ *
+ * Seeded rather than left empty, because an empty store resolves to the FIRST
+ * question and the device question is now one answer in — a gallery that could
+ * only reach it by pressing a button could not show it as a still frame at all.
+ */
+const harnessQuestion = (stage: 'who' | 'choose', device: DeviceKind = 'desktop'): OnboardingProgressStore =>
+  new OnboardingProgressStore({
+    device,
+    storage: {
+      getItem: () => JSON.stringify({ v: ONBOARDING_PROGRESS_VERSION, stage }),
+      setItem: () => {},
+    },
+    paired: true,
+  });
+
+/**
  * The screens the gallery shows, named by what a reviewer is looking at.
  *
  * The device-specific pair — `choose-mobile` and `need-computer` — are here
  * because they are the two screens whose whole point is that they render
  * DIFFERENTLY on a phone, and a gallery that only ever showed the desktop
  * reading of them would prove nothing about the rule they exist to keep.
+ *
+ * `who` leads because it is what a reader sees first, and the two agent frames
+ * are here because that route is the one nothing else in the gallery covers: it
+ * shares no step with any other answer.
  */
 type HarnessOnboardingScreen =
+  | 'who'
+  | 'brief'
+  | 'agent-pair'
   | 'choose'
   | 'choose-mobile'
   | 'install'
@@ -668,9 +692,13 @@ type HarnessOnboardingScreen =
   | 'done';
 
 const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
-  /* No document at all: the chooser is what a store with nothing stored resolves to. */
-  choose: new OnboardingProgressStore({ storage: undefined, device: 'desktop' }),
-  'choose-mobile': new OnboardingProgressStore({ storage: undefined, device: 'mobile' }),
+  /* No document at all: the FIRST question is what an empty store resolves to. */
+  who: new OnboardingProgressStore({ storage: undefined, device: 'desktop' }),
+  /* The agent route, whose two steps are shared with nothing else in the gallery. */
+  brief: harnessOnboarding('agent', 'brief'),
+  'agent-pair': harnessOnboarding('agent', 'agent-pair'),
+  choose: harnessQuestion('choose'),
+  'choose-mobile': harnessQuestion('choose', 'mobile'),
   install: harnessOnboarding('first-time', 'install'),
   daemon: harnessOnboarding('first-time', 'daemon'),
   connect: harnessOnboarding('first-time', 'connect'),
@@ -1752,6 +1780,67 @@ function Shell() {
             usage={DASHBOARD_USAGE}
             wardenStatus={null}
             wardenVerdicts={[]}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — who is doing this',
+      render: () => (
+        <section aria-label="Setup first question" id="harness-onboarding-who">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.who}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — the prompt for an agent',
+      render: () => (
+        <section aria-label="Setup agent brief step" id="harness-onboarding-brief">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.brief}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — pair with what the agent printed',
+      render: () => (
+        <section aria-label="Setup agent pairing step" id="harness-onboarding-agent-pair">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING['agent-pair']}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => (
+              <PairingScreen
+                embedded
+                connections={[]}
+                selectedDaemonId={null}
+                scanHost={HARNESS_SCAN_HOST}
+                onPair={async () => {}}
+                onRemove={() => {}}
+                onSelect={() => {}}
+              />
+            )}
           />
         </section>
       ),

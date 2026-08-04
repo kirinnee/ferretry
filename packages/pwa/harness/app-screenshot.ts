@@ -82,8 +82,10 @@ const MAGNIFY = 12;
 /** The setup screen's root, and the attribute that names what is on the glass. */
 const SETUP_ROOT = '[data-onboarding="setup"]';
 const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-screen="${step}"]`;
-/** The chooser: the one screen that belongs to no route yet. */
-const SETUP_CHOOSER = `${SETUP_ROOT}[data-onboarding-route="none"]`;
+/** The first question — who does the work — which belongs to no route yet. */
+const SETUP_WHO = `${SETUP_ROOT}[data-onboarding-screen="who"]`;
+/** The device question, one answer in: also no route yet, and a different screen. */
+const SETUP_CHOOSER = `${SETUP_ROOT}[data-onboarding-screen="choose"]`;
 
 /**
  * The pairing arrival used for the Done capture. A fabricated single-use code
@@ -453,7 +455,8 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<chooser|install|daemon|connect|reach-*|pair|brief|scan|done>-<mobile|desktop> and setup-scan-keyboard-mobile\n' +
+          '    setup-<who|chooser|install|daemon|connect|reach-*|pair|brief|agent-pair|scan|done>-<mobile|desktop>\n' +
+          '    and setup-scan-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
     } else {
@@ -467,10 +470,12 @@ try {
        * visit left it.
        */
       /*
-       * EVERY CAPTURE STARTS AT THE QUESTION, because every reader does. The
-       * route is entered by clicking its own answer on the chooser, so a shot
-       * named `brief` proves that the agent answer really leads there — a seeded
-       * store would prove only that the component renders.
+       * EVERY CAPTURE STARTS AT THE FIRST QUESTION, because every reader does.
+       * A journey names the DOER it answers first and, when that answer opens a
+       * second question, the device route it picks there — so a shot named
+       * `brief` proves that "an agent does it" really leads there, and one named
+       * `install` proves that "I do it myself" plus "first time setup" does. A
+       * seeded store would prove only that the components render.
        */
       /*
        * A CONNECTION IS ANSWERED, NOT ADVANCED PAST. The carrier step is a chooser
@@ -480,23 +485,30 @@ try {
        * driver reported the split when it landed.
        */
       const JOURNEYS = [
-        { name: 'install', route: 'first-time', advances: 0, screen: 'install' },
-        { name: 'daemon', route: 'first-time', advances: 1, screen: 'daemon' },
-        { name: 'connect', route: 'first-time', advances: 2, screen: 'connect' },
-        { name: 'pair', route: 'first-time', advances: 2, screen: 'pair', connection: 'direct' },
-        { name: 'brief', route: 'agent', advances: 0, screen: 'brief' },
-        /* The scan half: arrived holding a link, so there is nothing to run first. */
-        { name: 'scan', route: 'have-link', advances: 0, screen: 'scan' },
+        { name: 'install', doer: 'self', route: 'first-time', advances: 0, screen: 'install' },
+        { name: 'daemon', doer: 'self', route: 'first-time', advances: 1, screen: 'daemon' },
+        { name: 'connect', doer: 'self', route: 'first-time', advances: 2, screen: 'connect' },
+        { name: 'pair', doer: 'self', route: 'first-time', advances: 2, screen: 'pair', connection: 'direct' },
+        /* The agent route: one answer to the FIRST question, and no device question at all. */
+        { name: 'brief', doer: 'agent', advances: 0, screen: 'brief' },
+        { name: 'agent-pair', doer: 'agent', advances: 1, screen: 'agent-pair' },
+        /* The scan half: a daemon already exists, so there is nothing to install. */
+        { name: 'scan', doer: 'self', route: 'add-client', advances: 1, screen: 'scan' },
       ] as const;
 
-      const toChooser = async (page: Page): Promise<void> => {
+      const toWho = async (page: Page): Promise<void> => {
         await open(page, '/setup');
-        await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
+        await page.locator(SETUP_WHO).waitFor({ state: 'visible' });
       };
 
       const toStep = async (page: Page, journey: (typeof JOURNEYS)[number]): Promise<void> => {
-        await toChooser(page);
-        await page.locator(`button[data-onboarding-route="${journey.route}"]`).click();
+        await toWho(page);
+        await page.locator(`button[data-onboarding-doer="${journey.doer}"]`).click();
+        const route = 'route' in journey ? journey.route : undefined;
+        if (route !== undefined) {
+          await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
+          await page.locator(`button[data-onboarding-route="${route}"]`).click();
+        }
         for (let advance = 0; advance < journey.advances; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
         }
@@ -522,12 +534,16 @@ try {
       const contextFor = (viewport: (typeof VIEWPORTS)[number]): BrowserContextOptions =>
         viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
 
-      // 1. THE QUESTION ITSELF, AT BOTH VIEWPORTS. It is the screen everything
-      // else is reached through, and the one the reader is asked to recognise
-      // themselves in.
+      // 1. BOTH QUESTIONS, AT BOTH VIEWPORTS. The first one is the screen
+      // everything else is reached through and the one the reader has to
+      // recognise themselves in within two seconds; the second is the one that
+      // only exists for a reader who is typing the commands themselves.
       for (const viewport of VIEWPORTS) {
         await capture(contextFor(viewport), async page => {
-          await toChooser(page);
+          await toWho(page);
+          await shot(page, `setup-who-${viewport.name}`);
+          await page.locator('button[data-onboarding-doer="self"]').click();
+          await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
           await shot(page, `setup-chooser-${viewport.name}`);
         });
       }
