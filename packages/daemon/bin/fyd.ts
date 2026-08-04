@@ -222,6 +222,7 @@ import {
   FleetEventStreamService,
   type FoundationPaths,
   foldAnalyticsSessionUsage,
+  gateAnalyticsIngest,
   HarnessQuirkService,
   harnessMigrationRefusal,
   InitialAttachmentError,
@@ -2157,7 +2158,16 @@ function createAnalyticsSubsystem(
     const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
     const config = SessionConfigSchema.safeParse(rawConfig);
     const state = SessionStateSchema.safeParse(rawState);
-    if (!config.success || !state.success || state.data.finishedAt === undefined) return undefined;
+    if (!config.success || !state.success) return undefined;
+    // The DURABLE TERMINAL STATE gate, not a finish stamp alone. A finish instant beside a live
+    // status is a session the daemon stamped and kept running, and freezing its totals here would
+    // report a run still in progress as a completed one.
+    const gate = gateAnalyticsIngest({
+      createdAt: config.data.createdAt,
+      finishedAt: state.data.finishedAt,
+      status: state.data.status,
+    });
+    if (gate.kind === 'refused') return undefined;
     return {
       id,
       agent: config.data.agent,
@@ -2167,22 +2177,24 @@ function createAnalyticsSubsystem(
       contextWindow: state.data.contextWindow ?? null,
       harness: config.data.harness,
       mode: config.data.mode,
-      status: state.data.status,
+      status: gate.status,
       label: config.data.label ?? null,
       cwd: config.data.cwd,
       parent: config.data.parent ?? null,
-      createdAt: config.data.createdAt,
+      // The instants the gate ACCEPTED, so the record cannot disagree with the decision that let it
+      // through — and so no assertion is needed to narrow a value already proved readable.
+      createdAt: gate.createdAt,
       startedAt: state.data.startedAt ?? null,
-      finishedAt: state.data.finishedAt,
+      finishedAt: gate.finishedAt,
       // Time-to-first-output is transcript evidence the daemon does not index; a launch instant is
       // not an output, so reporting one here would mismeasure every session.
       firstOutputAt: null,
       turns: state.data.turn,
       contextEndPercent: state.data.contextPercent ?? null,
-      stalled: state.data.status === 'stalled',
-      failed: state.data.status === 'failed',
+      stalled: gate.status === 'stalled',
+      failed: gate.status === 'failed',
       migrated: config.data.migration !== undefined,
-      completed: state.data.status === 'completed',
+      completed: gate.status === 'completed',
       // Transcript evidence, folded across every request the session made. Null means this daemon
       // could not prove a total, never that the session was free.
       usage: await sessionUsage(id, config.data.harness === 'codex' ? 'codex' : 'claude'),

@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package. */
 export const packageRole = 'daemon' as const;
 
+export * from './analytics/ingest.ts';
 export * from './analytics/model-identity.ts';
 export * from './analytics/pricing.ts';
 export * from './analytics/query.ts';
