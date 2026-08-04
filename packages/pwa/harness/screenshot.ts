@@ -606,11 +606,48 @@ try {
           const topBarTarget = join(outDir, `top-bar-${viewport.name}.png`);
           await topBar.screenshot({ path: topBarTarget });
           process.stdout.write(`📸 top bar ${viewport.name} -> ${topBarTarget}\n`);
+          const topBarGeometry = await page.evaluate(() => {
+            const header = document.querySelector<HTMLElement>('[data-density-region="app-bar"]');
+            const slot = document.querySelector<HTMLElement>('[data-app-bar-session-search-slot]');
+            const headerBox = header?.getBoundingClientRect();
+            const slotBox = slot?.getBoundingClientRect();
+            return {
+              height: headerBox === undefined ? null : Math.round(headerBox.height),
+              slotCentre: slotBox === undefined ? null : Math.round(slotBox.left + slotBox.width / 2),
+              viewportCentre: Math.round(window.innerWidth / 2),
+            };
+          });
+          process.stdout.write(
+            `   top bar geometry: height=${String(topBarGeometry.height)}px ` +
+              `slot centre=${String(topBarGeometry.slotCentre)}px viewport centre=${topBarGeometry.viewportCentre}px\n`,
+          );
+          if (
+            topBarGeometry.slotCentre === null ||
+            Math.abs(topBarGeometry.slotCentre - topBarGeometry.viewportCentre) > 1
+          ) {
+            fail(`the current-session search slot is not centred at ${viewport.name}`);
+          }
           if (viewport.name === 'mobile') {
             const destinationTrigger = page.getByRole('button', { name: 'Choose destination' });
             await destinationTrigger.click();
             const destinationDialog = page.getByRole('dialog', { name: 'Choose destination' });
             await destinationDialog.waitFor({ state: 'visible' });
+            const pickerGeometry = await destinationDialog.evaluate(dialog => {
+              const box = dialog.getBoundingClientRect();
+              return {
+                left: Math.round(box.left),
+                right: Math.round(box.right),
+                viewport: window.innerWidth,
+                pageScrollsX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+              };
+            });
+            if (
+              pickerGeometry.pageScrollsX ||
+              pickerGeometry.left < 0 ||
+              pickerGeometry.right > pickerGeometry.viewport + 1
+            ) {
+              fail(`the mobile destination picker overflows its ${pickerGeometry.viewport}px viewport`);
+            }
             const pickerTarget = join(outDir, 'top-bar-picker-open-mobile.png');
             await page.screenshot({ path: pickerTarget });
             process.stdout.write(`📸 top bar picker open mobile -> ${pickerTarget}\n`);
