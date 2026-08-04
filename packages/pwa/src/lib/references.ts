@@ -2,12 +2,13 @@
  * One canonical reference grammar and proof gate for every Markdown surface.
  *
  * References are authored as plain sigil tokens:
- *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `/skill` or `$skill`
- *   `:term/<id>` (terminal instance)  `:page/<id>` (browser page)
+ *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `%surface:key`
+ *   `/skill` or `$skill`
  *
  * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
  * written by hand is not a reference and never becomes one: the renderer only
- * trusts links this module's own transform produced.
+ * trusts links this module's own transform produced. The whole grammar, with
+ * authoring examples and the click contract, is `docs/reference-standard.md`.
  *
  * SKILLS ACCEPT TWO SIGILS AND MEAN ONE THING. Claude invokes a skill as
  * `/name` and Codex as `$name` (`features/skills/skills-catalog.ts` owns that
@@ -15,14 +16,6 @@
  * authored bytes are what the reader keeps seeing. `formatReference` answers
  * with the `/name` form because it is the one a reader can type on either
  * harness.
- *
- * TERMINALS AND BROWSER PAGES SHARE THE AGENT SIGIL, namespaced. `:` already
- * means "a live thing in this session you can open", and an agent callsign can
- * never contain `/` (`AGENT_NAME`), so `:term/<id>` and `:page/<id>` cannot
- * collide with `:zelda` — an agent literally named `term` still resolves as
- * `:term`. Handover #64 supplies the live proof and the click destinations for
- * both kinds; until it does, an instance token has no resolver and stays prose,
- * which is the same rule every other kind obeys.
  *
  * **Syntax is never existence proof.** `findReferences` reports lexical
  * candidates; `resolveReference` requires the appropriate live resolver; and
@@ -40,6 +33,21 @@
  * `DaemonId` it was proved against and links to `/d/:daemon/session/:id`, so a
  * reference in one daemon's transcript can never open a same-named session on
  * another daemon.
+ *
+ * SURFACES ARE SESSION-SCOPED, WHICH IS A CORRECTNESS PROPERTY, NOT A STYLE ONE.
+ * A `%terminal:…` token names one live surface inside ONE session, and a proved
+ * surface therefore carries the daemon AND the session it was proved against.
+ * Agent, task and attention identities are fleet-wide; a terminal id is not — the
+ * same twelve hex characters mean nothing outside the session that owns them, and
+ * an agent told to type into "that terminal" must never reach a different one.
+ *
+ * A SURFACE THAT IS GONE SAYS SO. Every other family resolves to a link or to
+ * plain prose, because "we cannot prove it" and "it is not there" are the same
+ * answer for a file path. For a surface they are not: a terminal that CLOSED is
+ * positive evidence, and silently reprinting the token would leave the reader and
+ * the agent believing they still share a target. A proved-closed surface renders
+ * as an inert tombstone (`delete`, i.e. `<del>`), never as a link and never as
+ * indistinguishable prose.
  *
  * Ported from kteam's `src/lib/references.ts`.
  */
@@ -75,22 +83,37 @@ export interface AttentionReference {
   readonly id: AttentionId;
 }
 
+/**
+ * The addressable live surfaces of a session.
+ *
+ * `terminal` is real today. `browser` is declared here on purpose: the browser
+ * worker is unbuilt and `/v1/sessions/:id/browser` answers 501, so nothing can
+ * prove a page yet — but the grammar, the envelope, the identity and the
+ * tombstone are all key-agnostic, so a page slots in by teaching one resolver
+ * about it. Declaring the kind now is what stops a second surface grammar being
+ * invented next to this one.
+ */
+export const SURFACE_KINDS = ['terminal', 'browser'] as const;
+export type SurfaceKind = (typeof SURFACE_KINDS)[number];
+
+/**
+ * One surface inside the session being read.
+ *
+ * `key` is the OWNER's identity for the surface — the daemon's terminal id, the
+ * page id — and is opaque here. A reference is never an index into a list: a
+ * strip position shifts when a neighbour closes, and a shifted reference is how
+ * an agent ends up typing into the wrong shell.
+ */
+export interface SurfaceReference {
+  readonly kind: 'surface';
+  readonly surface: SurfaceKind;
+  readonly key: string;
+}
+
 export interface SkillReference {
   readonly kind: 'skill';
   /** Canonical lowercase skill name, without either sigil. */
   readonly name: string;
-}
-
-/** One registered terminal instance inside the surface's own session. */
-export interface TerminalReference {
-  readonly kind: 'terminal';
-  readonly id: string;
-}
-
-/** One registered browser page inside the surface's own session. */
-export interface BrowserPageReference {
-  readonly kind: 'browser';
-  readonly id: string;
 }
 
 export type Reference =
@@ -98,12 +121,25 @@ export type Reference =
   | FileReference
   | TaskReference
   | AttentionReference
-  | SkillReference
-  | TerminalReference
-  | BrowserPageReference;
+  | SurfaceReference
+  | SkillReference;
 
 /** An agent reference that a live fleet has proved, daemon and session both. */
 export interface ResolvedAgentReference extends AgentReference {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+}
+
+/**
+ * A surface a live owner has proved, daemon and session both.
+ *
+ * The TITLE is deliberately absent. A terminal can be retitled at any moment, and
+ * a mutable field inside the envelope would change `referenceIdentity`, so every
+ * already-painted link to that terminal would fail its origin check and go inert
+ * the moment someone renamed it. Titles belong to the picker and the pane, which
+ * read them live; identity belongs here.
+ */
+export interface ResolvedSurfaceReference extends SurfaceReference {
   readonly daemonId: DaemonId;
   readonly sessionId: string;
 }
@@ -113,9 +149,8 @@ export type ResolvedReference =
   | FileReference
   | TaskReference
   | AttentionReference
-  | SkillReference
-  | TerminalReference
-  | BrowserPageReference;
+  | ResolvedSurfaceReference
+  | SkillReference;
 
 export interface ReferenceMatch {
   readonly reference: Reference;
@@ -134,48 +169,44 @@ const TASK_ID = /^[BFIC][0-9]{1,9}$/iu;
 const TASK_TOKEN = /^&([BFIC][0-9]{1,9})$/iu;
 const ATTENTION_ID = /^A[1-9][0-9]*$/u;
 const ATTENTION_TOKEN = /^!(A[1-9][0-9]*)$/u;
-// A skill name is a directory name on the host, so the grammar is deliberately
-// narrower than the filesystem: lowercase words and hyphens only. Namespaced
-// forms a harness may accept elsewhere (`plugin:skill`, `apps/web:deploy`) are
-// NOT references, because their separators are this grammar's own boundaries.
+/**
+ * A surface key is deliberately dot-free. Daemon terminal ids are twelve hex
+ * characters and page keys are `page-<n>`, so a dot buys nothing — and it would
+ * cost the one thing that matters here: `%terminal:abc.` at the end of a sentence
+ * would swallow the full stop into the identity and address nothing.
+ */
+const SURFACE_KEY = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
+const SURFACE_TOKEN = /^%(terminal|browser):([A-Za-z0-9][A-Za-z0-9_-]{0,63})$/iu;
 // LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,
 // not a daemon-normalised identity, and `$HOME`/`$PATH` are far more common in
 // prose and in code than a capitalised skill invocation is. Reading `$HOME` as
 // `$home` would make the reference layer volunteer a candidate for every shell
-// variable a message contains.
+// variable a message contains. Namespaced invocation forms a harness may accept
+// elsewhere (`plugin:skill`, `apps/web:deploy`) are NOT references, because
+// their separators are this grammar's own boundaries.
 const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
 const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
-// Mirrors `TerminalIdSchema` — twelve lowercase hex digits, minted by the daemon.
-const TERMINAL_ID = /^[a-f0-9]{12}$/u;
-const TERMINAL_TOKEN = /^:term\/([a-f0-9]{12})$/u;
-// A browser page id is the worker's own opaque target id, so the grammar bounds
-// its shape and length rather than describing it. It must START and END
-// alphanumeric: `.` and `-` are legal inside an id and are also ordinary
-// sentence punctuation, so a trailing one would swallow the period that ends
-// `open :page/PAGE-1.`
-const BROWSER_PAGE_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$/u;
-const BROWSER_PAGE_TOKEN = /^:page\/([A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?)$/u;
 
 // Each alternative owns its right boundary. A colon may naturally follow
 // agent/task/attention prose, but it cannot terminate a file candidate because
-// it could be the start of a malformed location suffix.
+// it could be the start of a malformed location suffix. A surface token contains
+// exactly one interior colon and is bounded like the others — `%` is otherwise a
+// percentage, and `50%` never opens a candidate because a digit is not a left
+// boundary.
 //
-// Composed rather than written as one 500-character literal: seven alternatives
-// sharing two boundary sets is exactly the shape a single literal hides. The
-// alternatives are ordered longest-prefix-first so a namespaced instance token
-// is never read as an agent callsign that happens to be followed by a slash.
-// Ordinary quoted strings, not `String.raw`: a backtick is one of the boundary
-// characters, and `String.raw` would keep the backslash that escaping it needs —
-// which a `u`-mode character class rejects as an invalid escape.
+// Composed rather than written as one 600-character literal: six alternatives
+// sharing two boundary sets is exactly the shape a single literal hides. Ordinary
+// quoted strings, not `String.raw`, because a backtick is one of the boundary
+// characters and `String.raw` would keep the backslash escaping it needs — which
+// a `u`-mode character class rejects as an invalid escape.
 const BOUNDARY_BEFORE = '(^|[\\s([{"\'`<>=—–])';
 const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
 const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
-  `:term/[a-f0-9]{12}${BOUNDARY_AFTER}`,
-  `:page/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?${BOUNDARY_AFTER}`,
   `:[a-z][a-z0-9-]{0,31}${BOUNDARY_AFTER}`,
   `&[BFIC][0-9]{1,9}${BOUNDARY_AFTER}`,
   `!A[1-9][0-9]*${BOUNDARY_AFTER}`,
+  `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
   `[/$][a-z][a-z0-9-]{0,63}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
 ];
@@ -199,6 +230,12 @@ function safeSessionId(value: string): boolean {
   return SESSION_ID.test(value) && value !== '.' && value !== '..';
 }
 
+const surfaceKind = (value: string): value is SurfaceKind => (SURFACE_KINDS as readonly string[]).includes(value);
+
+function validSurfaceReference(reference: SurfaceReference): boolean {
+  return surfaceKind(reference.surface) && SURFACE_KEY.test(reference.key);
+}
+
 function validCodeReference(reference: CodeReference): boolean {
   if (!validPath(reference.path)) return false;
   if (reference.line === undefined) return reference.endLine === undefined;
@@ -210,23 +247,25 @@ function validCodeReference(reference: CodeReference): boolean {
 
 /** Parse one complete canonical token. No legacy sigils or implicit paths. */
 export function parseReferenceToken(raw: string): Reference | null {
-  const terminal = raw.match(TERMINAL_TOKEN);
-  if (terminal?.[1]) return { kind: 'terminal', id: terminal[1] };
-
-  const page = raw.match(BROWSER_PAGE_TOKEN);
-  if (page?.[1]) return { kind: 'browser', id: page[1] };
-
   const agent = raw.match(AGENT_TOKEN);
   if (agent?.[1]) return { kind: 'agent', name: agent[1].toLowerCase() };
-
-  const skill = raw.match(SKILL_TOKEN);
-  if (skill?.[1]) return { kind: 'skill', name: skill[1].toLowerCase() };
 
   const task = raw.match(TASK_TOKEN);
   if (task?.[1]) return { kind: 'task', id: task[1].toUpperCase() };
 
   const attention = raw.match(ATTENTION_TOKEN);
   if (attention?.[1]) return { kind: 'attention', id: attention[1] as AttentionId };
+
+  const surface = raw.match(SURFACE_TOKEN);
+  // The KIND is case-folded, exactly as an agent callsign is. The KEY is not: it
+  // is an owner-issued identity, and case-folding one would let `%terminal:AB…`
+  // and `%terminal:ab…` claim to be the same surface when the owner says they are
+  // two.
+  if (surface?.[1] && surface[2])
+    return { kind: 'surface', surface: surface[1].toLowerCase() as SurfaceKind, key: surface[2] };
+
+  const skill = raw.match(SKILL_TOKEN);
+  if (skill?.[1]) return { kind: 'skill', name: skill[1] };
 
   const file = raw.match(FILE_TOKEN);
   if (!file?.[1]) return null;
@@ -246,7 +285,7 @@ export function findReferences(value: string): ReferenceMatch[] {
   const matches: ReferenceMatch[] = [];
   for (const match of value.matchAll(REFERENCE_CANDIDATE)) {
     const prefix = match[1] ?? '';
-    const raw = match[2] ?? match[3] ?? match[4] ?? match[5];
+    const raw = match[2];
     if (!raw || match.index === undefined) continue;
     const reference = parseReferenceToken(raw);
     if (!reference) continue;
@@ -277,10 +316,29 @@ export type TaskReferenceResolver = (id: string) => boolean;
 export type AttentionReferenceResolver = (id: AttentionId) => boolean;
 /** Answers whether this session's own skills catalog carries that name. */
 export type SkillReferenceResolver = (name: string) => boolean;
-/** Answers whether that terminal instance is registered in this session. */
-export type TerminalReferenceResolver = (id: string) => boolean;
-/** Answers whether that browser page is registered in this session. */
-export type BrowserPageReferenceResolver = (id: string) => boolean;
+
+/** What a live surface owner answers with: the daemon AND the session it proved. */
+export interface ResolvedSurface {
+  readonly daemonId: DaemonId;
+  readonly sessionId: string;
+  readonly surface: SurfaceKind;
+  readonly key: string;
+}
+
+/**
+ * THREE ANSWERS, NOT TWO — this is the whole reason surfaces have their own
+ * resolver shape.
+ *
+ *   `open`    the owner holds this surface right now.
+ *   `closed`  the owner holds an AUTHORITATIVE list that does not contain it, so
+ *             it demonstrably no longer exists.
+ *   nothing   no evidence either way: no list yet, a failed request, a token for
+ *             another session. Fail closed — never a link, and never a tombstone
+ *             either, because "I could not ask" is not "it is gone".
+ */
+export type SurfaceProof = ({ readonly state: 'open' } & ResolvedSurface) | { readonly state: 'closed' };
+
+export type SurfaceReferenceResolver = (lookup: SurfaceReference) => SurfaceProof | null | undefined;
 
 /**
  * The live proofs a Markdown surface can offer. Every one is optional: a surface
@@ -292,9 +350,8 @@ export interface ReferenceResolvers {
   readonly file?: FileReferenceResolver;
   readonly task?: TaskReferenceResolver;
   readonly attention?: AttentionReferenceResolver;
+  readonly surface?: SurfaceReferenceResolver;
   readonly skill?: SkillReferenceResolver;
-  readonly terminal?: TerminalReferenceResolver;
-  readonly browser?: BrowserPageReferenceResolver;
 }
 
 export interface RemarkReferencesOptions {
@@ -333,20 +390,16 @@ export function formatReference(reference: Reference | ResolvedReference): strin
     case 'attention':
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid attention reference');
       return `!${reference.id}`;
-    case 'skill': {
+    case 'surface':
+      if (!validSurfaceReference(reference)) throw new TypeError('invalid surface reference');
+      return `%${reference.surface}:${reference.key}`;
+    case 'skill':
       // `/name` over `$name`: it is the form the shipped harness invokes and the
-      // one the composer's `/` trigger inserts. `$name` remains a valid
-      // AUTHORED alias — this is the canonical rendering, not a rewrite of what
-      // a reader typed.
+      // one the composer's `/` trigger inserts. `$name` remains a valid AUTHORED
+      // alias — this is the canonical rendering, not a rewrite of what a reader
+      // typed.
       if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid skill reference');
-      return `/${reference.name.toLowerCase()}`;
-    }
-    case 'terminal':
-      if (!TERMINAL_ID.test(reference.id)) throw new TypeError('invalid terminal reference');
-      return `:term/${reference.id}`;
-    case 'browser':
-      if (!BROWSER_PAGE_ID.test(reference.id)) throw new TypeError('invalid browser page reference');
-      return `:page/${reference.id}`;
+      return `/${reference.name}`;
   }
 }
 
@@ -359,6 +412,49 @@ function resolvedAgent(value: ResolvedAgent | null | undefined): ResolvedAgentRe
   if (!value || !safeSessionId(value.sessionId) || !AGENT_NAME.test(value.name)) return null;
   if (typeof value.daemonId !== 'string' || value.daemonId.trim() === '') return null;
   return { kind: 'agent', daemonId: value.daemonId, sessionId: value.sessionId, name: value.name.toLowerCase() };
+}
+
+/**
+ * Re-checks an owner's answer against the grammar before it becomes a link.
+ *
+ * A resolver is an injected port, and one that answers with a blank session or a
+ * key it never minted has told us nothing usable. The answer's own key must also
+ * be the key that was asked for: a resolver that quietly substitutes a
+ * neighbouring surface is the exact bug this family exists to prevent, and it
+ * would otherwise be invisible — the link would open a real terminal.
+ */
+function resolvedSurface(
+  asked: SurfaceReference,
+  value: SurfaceProof | null | undefined,
+): ResolvedSurfaceReference | null {
+  if (value?.state !== 'open') return null;
+  if (typeof value.daemonId !== 'string' || value.daemonId.trim() === '') return null;
+  if (!safeSessionId(value.sessionId)) return null;
+  if (value.surface !== asked.surface || value.key !== asked.key) return null;
+  const resolved: ResolvedSurfaceReference = {
+    kind: 'surface',
+    daemonId: value.daemonId,
+    sessionId: value.sessionId,
+    surface: value.surface,
+    key: value.key,
+  };
+  return validSurfaceReference(resolved) ? resolved : null;
+}
+
+/**
+ * Whether a surface token is PROVED GONE, as opposed to merely unproved.
+ *
+ * The transform paints a tombstone only for this, so an offline daemon or an
+ * absent resolver leaves the token as plain prose rather than announcing the
+ * death of a terminal that may be perfectly alive.
+ */
+export function surfaceReferenceClosed(reference: SurfaceReference, resolvers: ReferenceResolvers): boolean {
+  if (!validSurfaceReference(reference)) return false;
+  try {
+    return resolvers.surface?.(reference)?.state === 'closed';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -380,12 +476,12 @@ export function resolveReference(reference: Reference, resolvers: ReferenceResol
         return resolvers.task?.(reference.id) ? reference : null;
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
+      case 'surface':
+        return validSurfaceReference(reference) && resolvers.surface
+          ? resolvedSurface(reference, resolvers.surface(reference))
+          : null;
       case 'skill':
         return resolvers.skill?.(reference.name) ? reference : null;
-      case 'terminal':
-        return resolvers.terminal?.(reference.id) ? reference : null;
-      case 'browser':
-        return resolvers.browser?.(reference.id) ? reference : null;
     }
   } catch {
     return null;
@@ -430,17 +526,20 @@ export function referenceHref(reference: ResolvedReference): string {
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid resolved attention reference');
       query.set('id', reference.id);
       break;
+    case 'surface':
+      if (resolvedSurface(reference, { state: 'open', ...reference }) === null)
+        throw new TypeError('invalid resolved surface reference');
+      // BOTH the daemon and the session travel with the link. A terminal id is
+      // only meaningful inside its own session, and a bare id would let a
+      // reference open whichever session happens to be in front of the reader.
+      query.set('daemon', reference.daemonId);
+      query.set('session', reference.sessionId);
+      query.set('surface', reference.surface);
+      query.set('key', reference.key);
+      break;
     case 'skill':
       if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid resolved skill reference');
-      query.set('name', reference.name.toLowerCase());
-      break;
-    case 'terminal':
-      if (!TERMINAL_ID.test(reference.id)) throw new TypeError('invalid resolved terminal reference');
-      query.set('id', reference.id);
-      break;
-    case 'browser':
-      if (!BROWSER_PAGE_ID.test(reference.id)) throw new TypeError('invalid resolved browser page reference');
-      query.set('id', reference.id);
+      query.set('name', reference.name);
       break;
   }
   return `${REFERENCE_HREF_PREFIX}${query}`;
@@ -486,20 +585,20 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
     const id = one(query, 'id');
     return id && ATTENTION_ID.test(id) ? { kind: 'attention', id: id as AttentionId } : null;
   }
+  if (kind === 'surface') {
+    if (!exactKeys(query, ['kind', 'daemon', 'session', 'surface', 'key'])) return null;
+    const daemon = one(query, 'daemon');
+    const sessionId = one(query, 'session');
+    const surface = one(query, 'surface');
+    const key = one(query, 'key');
+    if (!daemon || !sessionId || !surface || !key || !surfaceKind(surface)) return null;
+    const asked: SurfaceReference = { kind: 'surface', surface, key };
+    return resolvedSurface(asked, { state: 'open', daemonId: daemon as DaemonId, sessionId, surface, key });
+  }
   if (kind === 'skill') {
     if (!exactKeys(query, ['kind', 'name'])) return null;
     const name = one(query, 'name');
-    return name && SKILL_NAME.test(name) ? { kind: 'skill', name: name.toLowerCase() } : null;
-  }
-  if (kind === 'terminal') {
-    if (!exactKeys(query, ['kind', 'id'])) return null;
-    const id = one(query, 'id');
-    return id && TERMINAL_ID.test(id) ? { kind: 'terminal', id } : null;
-  }
-  if (kind === 'browser') {
-    if (!exactKeys(query, ['kind', 'id'])) return null;
-    const id = one(query, 'id');
-    return id && BROWSER_PAGE_ID.test(id) ? { kind: 'browser', id } : null;
+    return name && SKILL_NAME.test(name) ? { kind: 'skill', name } : null;
   }
   return null;
 }
@@ -515,12 +614,12 @@ export function referenceIdentity(reference: ResolvedReference): string {
       return `task:${reference.id}`;
     case 'attention':
       return `attention:${reference.id}`;
+    case 'surface':
+      // Identity is (daemon, session, kind, key) — the same four facts the
+      // envelope carries, and nothing that a rename can move.
+      return `surface:${reference.daemonId}:${reference.sessionId}:${reference.surface}:${reference.key}`;
     case 'skill':
       return `skill:${reference.name}`;
-    case 'terminal':
-      return `terminal:${reference.id}`;
-    case 'browser':
-      return `browser:${reference.id}`;
   }
 }
 
@@ -549,12 +648,16 @@ export function revalidateReference(
         return resolvers.task?.(reference.id) ? reference : null;
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
+      case 'surface': {
+        const current = resolvers.surface ? resolvedSurface(reference, resolvers.surface(reference)) : null;
+        // Identity is (daemon, session, kind, key). A reader whose foreground
+        // daemon or session moved holds a resolver for the NEW scope, and it must
+        // not re-prove a link painted for the old one merely because both have a
+        // terminal with that id.
+        return current?.daemonId === reference.daemonId && current.sessionId === reference.sessionId ? current : null;
+      }
       case 'skill':
         return resolvers.skill?.(reference.name) ? reference : null;
-      case 'terminal':
-        return resolvers.terminal?.(reference.id) ? reference : null;
-      case 'browser':
-        return resolvers.browser?.(reference.id) ? reference : null;
     }
   } catch {
     return null;
@@ -575,14 +678,22 @@ export function referenceTitle(reference: ResolvedReference): string {
       return `Open task &${reference.id}`;
     case 'attention':
       return `Open attention !${reference.id}`;
+    case 'surface':
+      return `Open this session's ${reference.surface} ${reference.key}`;
     case 'skill':
       return `Open the /${reference.name} skill`;
-    case 'terminal':
-      return `Open terminal ${formatReference(reference)}`;
-    case 'browser':
-      return `Open browser page ${formatReference(reference)}`;
   }
 }
+
+/** The tombstone's own hover text. It names the SESSION, because that is the
+ *  scope in which the surface no longer exists. */
+function closedSurfaceTitle(reference: SurfaceReference): string {
+  return `This ${reference.surface} (${reference.key}) is no longer open in this session`;
+}
+
+/** The attribute a tombstone carries, so a test — and a reader's inspector — can
+ *  tell a proved-closed surface from prose that merely looks struck through. */
+export const REFERENCE_CLOSED_ATTRIBUTE = 'data-fy-reference-closed';
 
 /** The mdast subset this transform reads. The full typings are transitive. */
 interface MdNode {
@@ -601,10 +712,10 @@ interface MdFile {
 }
 
 // Already-linked text and raw HTML are left exactly as authored: a reference
-// inside them is content, not a destination. CODE IS NOT IN THIS SET by
-// accident — a fence's content is not mdast children at all, so it is decorated
-// by the renderer through `code-span-references.ts` instead, which can slice
-// code text without an mdast round trip that would re-escape it.
+// inside them is content, not a destination. CODE IS IN THIS SET FOR A DIFFERENT
+// REASON — a fence's content is not mdast children at all, so it is decorated by
+// the renderer through `code-span-references.ts` instead, which can slice code
+// text without an mdast round trip that would re-escape it.
 const SKIP_CHILDREN = new Set(['link', 'linkReference', 'code', 'inlineCode', 'html']);
 
 /** One proved reference and the exact bytes of the token that proved it. */
@@ -616,9 +727,12 @@ export interface ProvenReference {
 }
 
 /**
- * The one scan-then-prove pass every surface shares: prose linkification and
- * code-span decoration must agree about which tokens are live, so neither owns
- * its own loop over `findReferences`.
+ * Scan and prove in one pass, for a surface that can only ever paint a LINK.
+ *
+ * The code-span renderer uses this rather than the prose walk below, because a
+ * code span has no room for the tombstone: striking a token through inside a
+ * snippet would misrepresent the code as containing a `<del>`. A closed surface
+ * therefore stays literal inside code, exactly like an unproved one.
  */
 export function provenReferences(value: string, resolvers: ReferenceResolvers): ProvenReference[] {
   return findReferences(value).flatMap(match => {
@@ -686,9 +800,31 @@ function linkifyText(value: string, resolvers: ReferenceResolvers, alignment: So
   const output: MdNode[] = [];
   let cursor = 0;
   let changed = false;
-  for (const match of provenReferences(value, resolvers)) {
+  for (const match of findReferences(value)) {
+    // An escaped token is prose the author asked for, so it is not a link and not
+    // a tombstone either: the reader wrote the bytes on purpose.
     if (match.start >= alignment.limit || alignment.escaped.has(match.start)) continue;
-    const resolved = match.reference;
+    const resolved = resolveReference(match.reference, resolvers);
+    // A surface the owner proved GONE is the one case where absence is itself
+    // evidence worth painting. It is a `delete` node, so it is inert by
+    // construction: there is no href to forge and nothing to click.
+    if (!resolved && match.reference.kind === 'surface' && surfaceReferenceClosed(match.reference, resolvers)) {
+      if (match.start > cursor) output.push({ type: 'text', value: value.slice(cursor, match.start) });
+      output.push({
+        type: 'delete',
+        data: {
+          hProperties: {
+            [REFERENCE_CLOSED_ATTRIBUTE]: `${match.reference.surface}:${match.reference.key}`,
+            title: closedSurfaceTitle(match.reference),
+          },
+        },
+        children: [{ type: 'text', value: match.raw }],
+      });
+      cursor = match.end;
+      changed = true;
+      continue;
+    }
+    if (!resolved) continue;
     if (match.start > cursor) output.push({ type: 'text', value: value.slice(cursor, match.start) });
     output.push({
       type: 'link',

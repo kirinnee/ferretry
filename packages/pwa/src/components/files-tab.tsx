@@ -45,6 +45,7 @@ import {
   Loading,
   Note,
   OpenFileTabs,
+  Unavailable,
   type FilesMarkdownContext,
 } from './files-views.tsx';
 
@@ -181,18 +182,23 @@ export const FilesTab = ({
     paneRef.current?.focus({ preventScroll: true });
   }, [focusRequest]);
 
+  // A daemon that cannot serve this surface at all is answered ONCE, above. Nothing below is fetched
+  // in that state — a listing request would only earn a second panel contradicting the first.
+  const unavailable = probe.state === 'unsupported';
+
   const listing = useFsResource<FsListing>(
-    stateMatchesScope && !active ? `list:${key}:${dir}` : null,
+    stateMatchesScope && !active && !unavailable ? `list:${key}:${dir}` : null,
     useCallback(signal => fsApi.list(daemon, scope, dir, signal), [daemon, scope, dir]),
   );
 
-  const diffPath = active?.view === 'diff' && active.selection === undefined ? active.path : null;
+  const diffPath = !unavailable && active?.view === 'diff' && active.selection === undefined ? active.path : null;
   const diff = useFsResource<string>(
     diffPath ? `diff:${key}:${diffPath}` : null,
     useCallback(signal => fsApi.diff(daemon, scope, diffPath ?? '', signal), [daemon, scope, diffPath]),
   );
 
-  const filePath = active && (active.view !== 'diff' || active.selection !== undefined) ? active.path : null;
+  const filePath =
+    !unavailable && active && (active.view !== 'diff' || active.selection !== undefined) ? active.path : null;
   const file = useFsResource<FsFile>(
     filePath ? `file:${key}:${filePath}` : null,
     useCallback(signal => fsApi.file(daemon, scope, filePath ?? '', undefined, signal), [daemon, scope, filePath]),
@@ -215,6 +221,15 @@ export const FilesTab = ({
     return (
       <div className="kt-fs rounded-md border border-border bg-surface">
         <Loading what="session files" />
+      </div>
+    );
+
+  // No bar either: a breadcrumb to a tree that cannot be read, a tree toggle with nothing to toggle
+  // and a Refresh that re-asks a settled question are three more controls that cannot work.
+  if (unavailable)
+    return (
+      <div className="kt-fs rounded-md border border-border bg-surface">
+        <Unavailable detail={probe.error} />
       </div>
     );
 
@@ -397,7 +412,14 @@ export const FilesTab = ({
             ) : (
               <Note role="status">Nothing to show.</Note>
             )
-          ) : (
+          ) : // "Files still browse normally" is a CLAIM, so it is made only where the listing beside it
+          // proves it. Stated unconditionally it contradicted the failure panel underneath it, and a
+          // reader had no way to tell which of the two to believe.
+          listing.loading ? (
+            <Loading what={dir || 'the session root'} />
+          ) : listing.error ? (
+            <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
+          ) : listing.data ? (
             <>
               {probe.state === 'error' && (
                 <Note tone="warn" role="status">
@@ -409,22 +431,10 @@ export const FilesTab = ({
                   Some change dots may be missing because the daemon capped this repository’s status response.
                 </Note>
               )}
-              {listing.loading ? (
-                <Loading what={dir || 'the session root'} />
-              ) : listing.error ? (
-                <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
-              ) : listing.data ? (
-                <BrowseList
-                  listing={listing.data}
-                  dir={dir}
-                  changes={changeMap}
-                  onEnter={setDir}
-                  onOpenFile={openFile}
-                />
-              ) : (
-                <Note role="status">Nothing to show.</Note>
-              )}
+              <BrowseList listing={listing.data} dir={dir} changes={changeMap} onEnter={setDir} onOpenFile={openFile} />
             </>
+          ) : (
+            <Note role="status">Nothing to show.</Note>
           )}
         </div>
       </div>

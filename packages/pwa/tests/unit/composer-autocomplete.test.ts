@@ -169,6 +169,51 @@ describe('detectComposerTrigger for @', () => {
   });
 });
 
+describe('detectComposerTrigger for %', () => {
+  test('should open one surface token at a boundary, with no tier', () => {
+    // Act & Assert
+    should(detect('%')).match({ trigger: '%', triggerText: '%', query: '', start: 0, end: 1 });
+    should(detect('drive %terminal:ab12')).match({ trigger: '%', query: 'terminal:ab12', start: 6, end: 20 });
+    should(detect('(%term')).match({ trigger: '%', query: 'term', start: 1 });
+    should(detect('%terminal:ab12')?.referenceTier).be.undefined();
+  });
+
+  test('should close as soon as whitespace ends the token', () => {
+    // Act & Assert
+    should(detect('%terminal:ab12 next')).be.null();
+  });
+
+  test('should read a percentage as prose, never as a surface offer', () => {
+    // Act & Assert — a digit or a letter before the sigil is a word, not a boundary.
+    should(detect('cpu hit 50%')).be.null();
+    should(detect('a%b')).be.null();
+  });
+
+  test('should refuse a repeated sigil, because repetition selects nothing here', () => {
+    // Act & Assert
+    should(detect('%%term')).be.null();
+  });
+
+  test('should leave a path containing a percent sign as one file query', () => {
+    // Act & Assert
+    should(detect('@src/a%b')).match({ trigger: '@', query: 'src/a%b', start: 0 });
+  });
+});
+
+describe('detectComposerTrigger backward scan', () => {
+  // A rejected candidate at index 0 used to restart the scan on itself, because
+  // `lastIndexOf(sigil, -1)` answers 0 rather than -1. The composer — and the tab
+  // with it — froze on a draft as ordinary as `@a b`. These cases must RETURN.
+  const settled = ['@a b', '%a b', '@@ x', '@ ', '% ', '@src/a b', '%terminal:ab12 next'];
+
+  for (const value of settled) {
+    test(`should terminate rather than rescan the leading sigil in ${JSON.stringify(value)}`, () => {
+      // Act & Assert — reaching the assertion at all is the regression.
+      should(detect(value)).be.null();
+    });
+  }
+});
+
 describe('detectComposerTrigger refusals', () => {
   const prose = [
     'Is this right?',

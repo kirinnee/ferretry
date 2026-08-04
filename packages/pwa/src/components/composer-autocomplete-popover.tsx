@@ -40,6 +40,7 @@ import {
   SearchX,
   ShieldAlert,
   Sparkles,
+  SquareTerminal,
   Terminal,
 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
@@ -80,6 +81,9 @@ const KIND_ICON: Record<ComposerAutocompleteKind, LucideIcon> = {
   task: ListChecks,
   attention: Bell,
   pin: Pin,
+  // A surface is a live thing in this session; the square glyph reads as the pane
+  // it lives in, which is what the reader is about to point an agent at.
+  surface: SquareTerminal,
 };
 
 /** The id the textarea's `aria-activedescendant` already points at. */

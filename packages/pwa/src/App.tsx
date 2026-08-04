@@ -342,6 +342,7 @@ function SetupGuide() {
       write={clipboardWriter}
       channel={channel}
       fleetReady={selected !== null}
+      connectionStatus={selected === null ? null : 'Direct'}
       onOpenFleet={() => {
         // The selected daemon IS the one just paired: adding a connection
         // selects it. Never a hardcoded prefix — the app's own route helper.

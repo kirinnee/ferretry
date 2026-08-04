@@ -26,7 +26,7 @@ describe('the step track', () => {
     const list = must(view.container.querySelector('ol'), 'the track');
 
     expect(list.getAttribute('aria-label')).toBe('Setup steps');
-    expect(list.querySelectorAll('li')).toHaveLength(5);
+    expect(list.querySelectorAll('li')).toHaveLength(6);
     expect(must(list.querySelector('[aria-current="step"]'), 'the current step').textContent).toContain('Daemon');
     await view.unmount();
   });

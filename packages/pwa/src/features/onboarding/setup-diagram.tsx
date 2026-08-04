@@ -59,6 +59,34 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     linked: false,
     label: 'Choosing how this browser will reach the daemon on your machine. They are not linked yet.',
   },
+  'relay-fingerprint': {
+    machine: 'showing identity',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'Your computer is showing the daemon fingerprint for a relay configuration. This browser is waiting.',
+  },
+  'relay-source': {
+    machine: 'getting relay',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'Your computer is getting the relay deployment source. This browser is waiting.',
+  },
+  'relay-allow': {
+    machine: 'configuring relay',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'Your computer is allowing its daemon at your relay. This browser is waiting.',
+  },
+  'relay-deploy': {
+    machine: 'deploying relay',
+    browser: 'waiting',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'Your computer is deploying the relay. This browser is waiting.',
+  },
   /*
    * Nobody is at the machine on this route — an agent is. The figure says so by
    * lighting the machine end while the browser rests, exactly as install does,
@@ -72,12 +100,18 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
     label: 'An agent is setting Ferretry up on your machine. This browser is not linked to it yet.',
   },
   pair: {
-    machine: 'fyd running',
-    browser: 'pairing',
-    // Both ends, because pairing is the one step that is about the pair of them.
+    machine: 'showing QR',
+    browser: 'get your phone',
+    lit: { machine: true, browser: false, link: false },
+    linked: false,
+    label: 'On your computer, fy pair is showing a QR code and link. Take that fresh code to this browser next.',
+  },
+  scan: {
+    machine: 'showing QR',
+    browser: 'scanning or pasting',
     lit: { machine: true, browser: true, link: true },
     linked: false,
-    label: 'Your machine is running the daemon and this browser is being linked to it.',
+    label: 'Your computer is showing the fresh QR code while this browser scans it or pastes its link.',
   },
   done: {
     machine: 'fyd running',

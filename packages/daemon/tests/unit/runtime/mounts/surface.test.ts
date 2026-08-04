@@ -80,6 +80,21 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // capability as an unserved route — see the field's own comment.
   monitor: { intervalMs: 15_000, arm: () => {}, run: async () => undefined, close: async () => {} },
   sessionMigrate: new FakeSessionMigrate(),
+  // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
+  // does not: a background tick is ended by a timer, not by a request.
+  quotaFailover: {
+    intervalMs: async () => 300_000,
+    run: async () => ({
+      at: '2026-01-01T00:00:00.000Z',
+      halted: 'automatic quota failover is disabled (enabled=false)',
+      warnings: [],
+      considered: 0,
+      moved: [],
+      failed: [],
+      stranded: [],
+      skipped: [],
+    }),
+  },
   tasks: taskSubsystem(),
   taskBoards: new FakeTaskBoards(),
   analytics: analyticsSubsystem(),

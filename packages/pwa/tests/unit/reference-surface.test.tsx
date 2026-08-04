@@ -80,7 +80,7 @@ describe('sessionReferenceSurface', () => {
     should(bare.attentionReferenceResolver).be.undefined();
     should(bare.skillReferenceResolver).be.undefined();
     should(bare.onNavigate).be.undefined();
-    should(bare.onBrowserPageOpen).be.undefined();
+    should(bare.surfaceReferenceResolver).be.a.Function();
   });
 
   test('should prove a callsign against this daemon only, and stamp its daemon on', () => {
@@ -187,12 +187,18 @@ describe('sessionReferenceSurface', () => {
     ]);
   });
 
-  test('should open a terminal reference as that exact terminal instance', () => {
+  test('should open a proved terminal surface as that exact terminal instance', () => {
     // Arrange
     const surface = sessionReferenceSurface({ connection, scope });
 
     // Act
-    surface.onTerminalOpen?.('0a1b2c3d4e5f');
+    surface.onSurfaceOpen?.({
+      kind: 'surface',
+      surface: 'terminal',
+      key: '0a1b2c3d4e5f',
+      daemonId,
+      sessionId: scope.sessionId,
+    });
 
     // Assert
     should(readSidePaneTabsState(scope).active).equal(sidePaneInstanceTabId('terminal', '0a1b2c3d4e5f'));

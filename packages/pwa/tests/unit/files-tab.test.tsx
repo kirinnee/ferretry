@@ -398,6 +398,39 @@ describe('the Files tab', () => {
     }
   });
 
+  it('says a daemon that cannot serve files ONCE, with nothing to retry', async () => {
+    // Arrange: the shape a macOS daemon answers with. Before this, one condition produced three
+    // messages — an amber "files still browse normally" over two red panels saying they did not.
+    const reason =
+      'file browsing is not available on macOS yet — this daemon confines every read to the session folder';
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      asked.push(String(input));
+      return new Response(JSON.stringify({ error: reason, code: 'unsupported' }), {
+        status: 501,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+    // A remembered open file must not resurrect a second failing panel either.
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      const text = view.container.textContent ?? '';
+      expect(text).toContain('not available on the computer running this daemon');
+      // The precise mechanism stays reachable for whoever needs it, folded away from everyone else.
+      expect(must(view.container.querySelector('details'), 'the reason disclosure').textContent).toContain(reason);
+      // One statement, no contradiction, and no control that cannot work.
+      expect(text).not.toContain('still browse normally');
+      expect(text).not.toContain('Could not load');
+      expect(view.container.querySelectorAll('button').length).toBe(0);
+      // And it stops asking. The first render's reads race the probe, but once the daemon has said
+      // what it is, nothing re-asks it — a refused surface is not a flaky one.
+      const settled = asked.length;
+      await settle();
+      expect(asked.length).toBe(settled);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('states a listing failure instead of presenting an empty directory', async () => {
     const failing = new TypeError('listing offline');
     globalThis.fetch = (async (input: string | URL | Request) => {

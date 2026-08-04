@@ -37,6 +37,7 @@ export * from './pairing/index.ts';
 export * from './paths.ts';
 export * from './pins/index.ts';
 export * from './ports.ts';
+export * from './quota-failover/index.ts';
 export * from './rebuild.ts';
 export * from './reconciliation.ts';
 export * from './runtime/index.ts';

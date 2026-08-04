@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Pin } from '@ferretry/protocol';
+import type { Pin, TerminalListView } from '@ferretry/protocol';
 import type {
   ComposerProviderContext,
   ComposerTrigger,
@@ -12,6 +12,7 @@ import {
   createFilesProvider,
   createReferencesProvider,
   createSkillsProvider,
+  createSurfacesProvider,
   loadSkillsCatalog,
   splitFileQuery,
   splitFileReferenceQuery,
@@ -440,12 +441,141 @@ describe('composer reference families', () => {
     expect(provider.legend).toHaveLength(5);
   });
 
-  it('builds one action provider and one reference provider, refusing crossed scopes at the boundary', () => {
+  it('builds one action, one reference and one surface provider, refusing crossed scopes at the boundary', () => {
     expect(
       createComposerAutocompleteProviders({ daemon: daemonA, scope: scopeA }).map(provider => provider.trigger),
-    ).toEqual(['/', '@']);
+    ).toEqual(['/', '@', '%']);
     expect(() => createSkillsProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createFilesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createReferencesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
+    expect(() => createSurfacesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
+  });
+});
+
+describe('composer session surfaces', () => {
+  const TERMINAL = 'a1b2c3d4e5f6';
+
+  const listing = (ids: readonly string[], sessionId = 'same/session'): TerminalListView =>
+    ({
+      sessionId,
+      terminals: ids.map((id, index) => ({
+        id,
+        sessionId,
+        title: `Terminal ${index + 1}`,
+        state: 'running',
+        cols: 80,
+        rows: 24,
+        viewers: index,
+        createdAt: '2026-08-01T10:00:00.000Z',
+        lastActivityAt: '2026-08-01T10:05:00.000Z',
+        ...(index === 0 ? {} : { idleDeadline: '2026-08-01T11:05:00.000Z' }),
+      })),
+      limits: {
+        perSession: 6,
+        global: 24,
+        runningGlobal: ids.length,
+        idleTimeoutSeconds: 900,
+        scrollbackLines: 5_000,
+      },
+    }) satisfies TerminalListView;
+
+  it('offers each live terminal as its canonical token, with viewers and honest provenance', async () => {
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => listing([TERMINAL]),
+    });
+
+    const result = await provider.candidates(context('%', ''));
+
+    expect(provider.trigger).toBe('%');
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.replacement).toBe(`%terminal:${TERMINAL}`);
+    expect(result.candidates[0]?.kind).toBe('surface');
+    expect(result.candidates[0]?.label).toBe('Terminal 1');
+    expect(result.candidates[0]?.detail).toContain('0 viewers');
+    expect(result.candidates[0]?.detail).toContain('owner unrecorded');
+    expect(result.contextLabel).toBe('% session surfaces');
+    expect(result.notice).toContain('does not record who opened a terminal');
+  });
+
+  it('says the session has no addressable terminal rather than offering an empty list silently', async () => {
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => listing([]),
+    });
+
+    const result = await provider.candidates(context('%', ''));
+
+    expect(result.candidates).toEqual([]);
+    expect(result.notice).toContain('no open terminal to address');
+  });
+
+  it('never offers another session terminals as this session surfaces', async () => {
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => listing([TERMINAL], 'another/session'),
+    });
+
+    const result = await provider.candidates(context('%', ''));
+
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('lists once per token and forgets the listing after a send', async () => {
+    let calls = 0;
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => {
+        calls += 1;
+        return listing([TERMINAL]);
+      },
+    });
+
+    await provider.candidates(context('%', ''));
+    await provider.candidates(context('%', 'term'));
+    expect(calls).toBe(1);
+
+    provider.reset?.();
+    await provider.candidates(context('%', ''));
+    expect(calls).toBe(2);
+  });
+
+  it('surfaces a listing failure to the caller instead of answering with an empty session', async () => {
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => {
+        throw new Error('daemon unreachable');
+      },
+    });
+
+    await expect(provider.candidates(context('%', ''))).rejects.toThrow('daemon unreachable');
+  });
+
+  it('refuses an already-aborted request and one aborted while listing', async () => {
+    const aborted = new AbortController();
+    aborted.abort();
+    const provider = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => listing([TERMINAL]),
+    });
+
+    await expect(provider.candidates(context('%', '', aborted.signal))).rejects.toThrow();
+
+    const midflight = new AbortController();
+    const during = createSurfacesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      listTerminals: async () => {
+        midflight.abort();
+        return listing([TERMINAL]);
+      },
+    });
+    await expect(during.candidates(context('%', '', midflight.signal))).rejects.toThrow();
   });
 });

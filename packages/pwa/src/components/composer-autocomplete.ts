@@ -33,7 +33,17 @@ import {
 } from 'react';
 import { fieldScore } from '../shell/palette-ranking.ts';
 
-export type ComposerTrigger = '/' | '@';
+/**
+ * `%` IS ITS OWN TRIGGER RATHER THAN A SIXTH `@` TIER.
+ *
+ * The `@` run is repetition-as-selection, and the families behind it are all
+ * FLEET-WIDE records: files in the session tree, agents, tasks, attention, pins.
+ * A surface is not one of those — it is a live thing inside THIS session, and a
+ * sixth tier would have been `@@@@@@`, six keystrokes for the family a reader
+ * reaches for while watching an agent work. It also keeps the tiers stable:
+ * renumbering them would have moved every existing family under the reader.
+ */
+export type ComposerTrigger = '/' | '@' | '%';
 
 export type ComposerAutocompleteKind =
   | 'command'
@@ -43,7 +53,8 @@ export type ComposerAutocompleteKind =
   | 'directory'
   | 'task'
   | 'attention'
-  | 'pin';
+  | 'pin'
+  | 'surface';
 
 export interface ComposerReferenceTierLegendItem {
   readonly tier: 1 | 2 | 3 | 4 | 5;
@@ -227,6 +238,26 @@ function slashTrigger(value: string, caret: number): ComposerTriggerMatch | null
  *  real boundary, so `see:@src` and `(@src` still open the list. */
 const WORD_BEFORE_MENTION = /[\p{L}\p{N}_\-.\\/@]/u;
 
+/** The mention rule plus the surface sigil itself. `%%` must not open the list:
+ *  the reference grammar refuses a `%` immediately before a token, so a candidate
+ *  accepted there would insert a dead token the renderer could never prove. */
+const WORD_BEFORE_SURFACE = /[\p{L}\p{N}_\-.\\/@%]/u;
+
+/**
+ * The next sigil STRICTLY before `upTo`, or -1 once there is none.
+ *
+ * `String.prototype.lastIndexOf` clamps a negative `fromIndex` to 0 rather than
+ * answering -1, so `'@a b'.lastIndexOf('@', -1)` is 0 — the very candidate the
+ * caller just rejected. Both backward scans below were written with a bare
+ * `lastIndexOf(sigil, start - 1)` and therefore SPUN FOREVER whenever the
+ * rejected candidate sat at index 0: a draft of `@a b` with the caret at the end
+ * froze the composer, and with it the tab, because the query contained a space
+ * and the scan restarted on the same sigil. Refusing a negative bound is the fix,
+ * and it belongs here so neither scan can reintroduce it.
+ */
+const previousSigil = (haystack: string, sigil: string, upTo: number): number =>
+  upTo < 0 ? -1 : haystack.lastIndexOf(sigil, upTo);
+
 function atTrigger(value: string, caret: number): ComposerTriggerMatch | null {
   const before = value.slice(0, caret);
   let candidate = before.lastIndexOf('@');
@@ -255,7 +286,30 @@ function atTrigger(value: string, caret: number): ComposerTriggerMatch | null {
       }
     }
 
-    candidate = before.lastIndexOf('@', start - 1);
+    candidate = previousSigil(before, '@', start - 1);
+  }
+  return null;
+}
+
+/**
+ * The surface trigger: exactly one `%`, at a token boundary.
+ *
+ * The boundary rule is the mention rule, so `50%` and `a%b` are a percentage and
+ * a word — not an offer to address a terminal. There is no run: repeating the
+ * sigil selects nothing, so `%%` is prose.
+ */
+function percentTrigger(value: string, caret: number): ComposerTriggerMatch | null {
+  const before = value.slice(0, caret);
+  let start = before.lastIndexOf('%');
+  while (start >= 0) {
+    const query = value.slice(start + 1, caret);
+    if (
+      !TOKEN_SPACE.test(query) &&
+      !query.includes('%') &&
+      (start === 0 || !WORD_BEFORE_SURFACE.test(value[start - 1] ?? ''))
+    )
+      return { trigger: '%', triggerText: '%', query, start, end: tokenEnd(value, caret), caret };
+    start = previousSigil(before, '%', start - 1);
   }
   return null;
 }
@@ -263,16 +317,20 @@ function atTrigger(value: string, caret: number): ComposerTriggerMatch | null {
 /**
  * Detect the trigger at a collapsed textarea caret.
  *
- * `/` is limited to the first non-whitespace byte and `@` is valid at a token
- * boundary. `&`, `?` and `#` are ordinary Markdown/prose: tasks and attention
- * are browsed through `@`, while their canonical inserted forms stay `&F12` and
- * `!A3`. A non-collapsed textarea selection never opens a list.
+ * `/` is limited to the first non-whitespace byte, and `@` and `%` are valid at a
+ * token boundary. `&`, `?` and `#` are ordinary Markdown/prose: tasks and
+ * attention are browsed through `@`, while their canonical inserted forms stay
+ * `&F12` and `!A3`. A non-collapsed textarea selection never opens a list.
+ *
+ * `@` is tried before `%` so a path containing a percent sign stays one file
+ * query: `@src/a%b` is a filename, and hijacking its tail as a surface token
+ * would replace half of what the reader typed.
  */
 export function detectComposerTrigger(value: string, selection: ComposerSelection): ComposerTriggerMatch | null {
   const safe = clampSelection(value, selection);
   if (safe.start !== safe.end) return null;
   const caret = safe.end;
-  return atTrigger(value, caret) ?? slashTrigger(value, caret);
+  return atTrigger(value, caret) ?? percentTrigger(value, caret) ?? slashTrigger(value, caret);
 }
 
 /**

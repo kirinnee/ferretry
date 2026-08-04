@@ -21,7 +21,7 @@ import {
   type SessionRepoInfo,
   withLineStats,
 } from '../../../lib/session/filesystem/index.ts';
-import type { GitExecution, GitRunner } from '../../../lib/worktrees/ports.ts';
+import type { GitExecution, GitRunner, GitWorkingDirectory } from '../../../lib/worktrees/ports.ts';
 import { decodeGitOutput, GitCommandError, requireGitExit } from '../../git/index.ts';
 
 /**
@@ -63,7 +63,7 @@ interface TextExecution {
 export class RunnerSessionGit implements SessionGit {
   constructor(private readonly runner: GitRunner) {}
 
-  async repoInfo(cwd: string): Promise<SessionRepoInfo> {
+  async repoInfo(cwd: GitWorkingDirectory): Promise<SessionRepoInfo> {
     // Never throws for "not a repo": that is a valid state the viewer reports so a client hides its diff
     // affordances.
     const inside = await this.text(
@@ -92,7 +92,7 @@ export class RunnerSessionGit implements SessionGit {
    * 1 means "none of them"; anything other than 0 or 1 means we could not tell, and THROWS — a viewer that
    * cannot prove a file is unignored must not claim it is safe to serve.
    */
-  async ignoredPaths(cwd: string, rels: readonly string[]): Promise<ReadonlySet<string>> {
+  async ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>> {
     const candidates = [...new Set(rels.filter(rel => rel.length > 0))];
     if (candidates.length === 0) return new Set();
     // The gate is vacuous outside a Git tree, and `check-ignore` would exit 128 there.
@@ -117,14 +117,14 @@ export class RunnerSessionGit implements SessionGit {
    * so a DELETED directory `sub/` exits 0 — and a caller would then admit `sub` as if it were one deleted
    * file and diff everything under it. So compare the records: exactly one, equal to the requested path.
    */
-  async isTracked(cwd: string, rel: string): Promise<boolean> {
+  async isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean> {
     const listed = await this.text('git ls-files', ['ls-files', '--error-unmatch', '-z', '--', rel], cwd, [0, 1, 128]);
     if (listed.execution.exitCode !== 0) return false;
     const records = listed.stdout.split(NUL).filter(record => record.length > 0);
     return records.length === 1 && records[0] === rel;
   }
 
-  async changes(cwd: string): Promise<SessionChangesView> {
+  async changes(cwd: GitWorkingDirectory): Promise<SessionChangesView> {
     const info = await this.repoInfo(cwd);
     if (!info.repo) return { repo: false, changes: [] };
 
@@ -148,7 +148,7 @@ export class RunnerSessionGit implements SessionGit {
    * The mode is what a diff formatter needs so a mode change, or a symlink-to-file type change, still
    * renders.
    */
-  async headEntry(cwd: string, rel: string, maxBytes: number): Promise<HeadEntry | undefined> {
+  async headEntry(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadEntry | undefined> {
     const info = await this.repoInfo(cwd);
     if (!info.repo || !info.hasHead) return undefined;
 
@@ -170,7 +170,7 @@ export class RunnerSessionGit implements SessionGit {
    * read never touches the working copy, so the syntactic gate is the ONLY containment this has, and
    * `HEAD:./../x` really does resolve outside a subdirectory cwd.
    */
-  async readHeadBlob(cwd: string, rel: string, maxBytes: number): Promise<HeadBlob | undefined> {
+  async readHeadBlob(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadBlob | undefined> {
     const info = await this.repoInfo(cwd);
     if (!info.repo || !info.hasHead) return undefined;
 
@@ -226,7 +226,7 @@ export class RunnerSessionGit implements SessionGit {
    * same cwd-relative namespace as status. This is optional enrichment: a status list is still useful
    * without counts, so a failure here degrades to no counts rather than taking the whole browser down.
    */
-  private async lineStats(cwd: string, info: SessionRepoInfo): Promise<ReadonlyMap<string, GitLineStats>> {
+  private async lineStats(cwd: GitWorkingDirectory, info: SessionRepoInfo): Promise<ReadonlyMap<string, GitLineStats>> {
     try {
       const revision = info.hasHead ? 'HEAD' : EMPTY_TREE_OID;
       const args = [...DIFF_SAFETY, '--numstat', '-z', `--relative=${info.prefix}`, revision, '--'];
@@ -242,7 +242,7 @@ export class RunnerSessionGit implements SessionGit {
   private async text(
     action: string,
     args: readonly string[],
-    cwd: string,
+    cwd: GitWorkingDirectory,
     acceptedExitCodes: readonly number[],
   ): Promise<TextExecution> {
     const execution = requireGitExit(action, await this.runner.run({ args, cwd }), acceptedExitCodes);

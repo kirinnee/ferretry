@@ -1,10 +1,15 @@
-import type { AttentionId } from '@ferretry/protocol';
 import { describe, test } from 'bun:test';
-import should from 'should';
+import type { AttentionId } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
+import should from 'should';
 import { Markdown, referenceHasTrustedOrigin } from '../../src/components/markdown.tsx';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { referenceHref, referenceIdentity, type ResolvedReference } from '../../src/lib/references.ts';
+import {
+  type ResolvedReference,
+  type ResolvedSurfaceReference,
+  referenceHref,
+  referenceIdentity,
+} from '../../src/lib/references.ts';
 import { render, runAsync } from '../support/react.ts';
 
 /**
@@ -199,6 +204,78 @@ describe('Markdown references', () => {
     should(opened).deepEqual(['A3']);
   });
 
+  test('should hand a proved surface reference to its opener, carrying daemon and session', () => {
+    // Arrange
+    const opened: ResolvedSurfaceReference[] = [];
+    const tree = render(
+      <Markdown
+        onSurfaceOpen={reference => opened.push(reference)}
+        surfaceReferenceResolver={lookup => ({
+          state: 'open',
+          daemonId: 'daemon-a' as DaemonId,
+          sessionId: 's1',
+          surface: lookup.surface,
+          key: lookup.key,
+        })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Act
+    const anchor = anchorsOf(tree.root)[0];
+    anchor?.props.onClick(primaryClick());
+
+    // Assert
+    should(anchor?.props.href).equal(
+      '#fy-reference?kind=surface&daemon=daemon-a&session=s1&surface=terminal&key=a1b2c3d4e5f6',
+    );
+    should(opened).deepEqual([
+      { kind: 'surface', daemonId: 'daemon-a' as DaemonId, sessionId: 's1', surface: 'terminal', key: 'a1b2c3d4e5f6' },
+    ]);
+  });
+
+  test('should leave a proved surface inert when the host cannot open one', () => {
+    // Act — no `onSurfaceOpen`: the pane that would show it is not mounted.
+    const tree = render(
+      <Markdown
+        surfaceReferenceResolver={lookup => ({
+          state: 'open',
+          daemonId: 'daemon-a' as DaemonId,
+          sessionId: 's1',
+          surface: lookup.surface,
+          key: lookup.key,
+        })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
+  test('should strike through a surface the daemon proved closed instead of linking it', () => {
+    // Act
+    const tree = render(
+      <Markdown
+        onSurfaceOpen={() => undefined}
+        surfaceReferenceResolver={() => ({ state: 'closed' })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(JSON.stringify(tree.toJSON())).containEql('no longer open in this session');
+  });
+
+  test('should leave a proved reference inert when the host offers no opener for its kind', () => {
+    // Act
+    const tree = render(<Markdown taskReferenceResolver={() => true} text="see &F12" />);
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
   test('should hand a proved skill reference to its opener under either sigil', () => {
     // Arrange
     const opened: string[] = [];
@@ -218,46 +295,6 @@ describe('Markdown references', () => {
     should(anchors.map(anchor => textOf(anchor))).deepEqual(['/summary', '$summary']);
     should(anchors[0]?.props.href).equal('#fy-reference?kind=skill&name=summary');
     should(opened).deepEqual(['summary', 'summary']);
-  });
-
-  test('should hand a proved terminal or browser page instance to its opener', () => {
-    // Arrange
-    const terminals: string[] = [];
-    const pages: string[] = [];
-    const tree = render(
-      <Markdown
-        browserPageReferenceResolver={() => true}
-        onBrowserPageOpen={id => pages.push(id)}
-        onTerminalOpen={id => terminals.push(id)}
-        terminalReferenceResolver={() => true}
-        text="watch :term/0a1b2c3d4e5f and :page/PAGE-1"
-      />,
-    );
-
-    // Act
-    for (const anchor of anchorsOf(tree.root)) anchor.props.onClick(primaryClick());
-
-    // Assert
-    should(terminals).deepEqual(['0a1b2c3d4e5f']);
-    should(pages).deepEqual(['PAGE-1']);
-  });
-
-  test('should leave an instance token as prose while nothing can prove it', () => {
-    // Act — handover #64 supplies the live proof; until then it is text.
-    const tree = render(
-      <Markdown onBrowserPageOpen={() => {}} onTerminalOpen={() => {}} text="watch :term/0a1b2c3d4e5f" />,
-    );
-
-    // Assert
-    should(anchorsOf(tree.root)).be.empty();
-  });
-
-  test('should leave a proved reference inert when the host offers no opener for its kind', () => {
-    // Act
-    const tree = render(<Markdown taskReferenceResolver={() => true} text="see &F12" />);
-
-    // Assert
-    should(anchorsOf(tree.root)).be.empty();
   });
 
   test('should keep a proved agent reference as prose when it has nowhere to navigate', () => {
@@ -444,7 +481,6 @@ describe('Markdown references inside code', () => {
     should(textOf(tree.root.findAllByType('code')[0] as ReactTestInstance)).equal('see &F12');
   });
 });
-
 describe('Markdown file references', () => {
   const text = 'open @src/api.ts:12 please';
 

@@ -70,8 +70,8 @@ describe('the setup diagram', () => {
     await paired.unmount();
   });
 
-  it('lights the end the step is about, and both ends once pairing starts', async () => {
-    const lit = async (step: 'install' | 'pair'): Promise<readonly boolean[]> => {
+  it('makes the computer-to-browser hand-off visible', async () => {
+    const lit = async (step: 'install' | 'pair' | 'scan'): Promise<readonly boolean[]> => {
       const view = await mount(<SetupDiagram step={step} />);
       const nodes = [...figureOf(view.container).children].filter(child => child.querySelector('svg') !== null);
       const result = nodes.map(node => node.className.includes('border-accent'));
@@ -81,7 +81,8 @@ describe('the setup diagram', () => {
 
     // Install is work on the machine alone; the browser is not doing anything.
     expect(await lit('install')).toEqual([true, false]);
-    // Pairing is the one step that is about the pair of them.
-    expect(await lit('pair')).toEqual([true, true]);
+    // `fy pair` is on the computer; scanning is the first time both devices act.
+    expect(await lit('pair')).toEqual([true, false]);
+    expect(await lit('scan')).toEqual([true, true]);
   });
 });

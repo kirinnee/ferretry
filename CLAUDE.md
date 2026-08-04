@@ -70,8 +70,8 @@ Cloudflare rendezvous that can carry it. The wire contract is
 There is no hosted relay and no default relay address; a relay is deployed by its own operator.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
-`$skill`, `:term/<id>`, `:page/<id>` — through one grammar, one proof-before-link gate, one renderer
-and one click behaviour. The authoring and implementation contract is
+`$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
+renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and
 extend the grammar there rather than adding a second one.
 

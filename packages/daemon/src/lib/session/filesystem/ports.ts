@@ -1,3 +1,4 @@
+import type { GitWorkingDirectory } from '../../worktrees/ports.ts';
 import type { FsEntryType } from './types.ts';
 
 /**
@@ -110,12 +111,16 @@ export interface PinnedRoot {
   /** Realpath of the root AS PINNED — for reporting and for the root gate, never for re-opening. */
   readonly rootReal: string;
   /**
-   * A path that resolves to the pinned DESCRIPTOR rather than to the configured pathname.
+   * The pinned DESCRIPTOR, in whatever shape this platform can hand to a capability that only speaks
+   * paths — Git's working directory. A caller reached from HTTP must pass this and never the configured
+   * cwd.
    *
-   * This is how the pin is handed to a capability that only speaks paths — Git's working directory. A
-   * caller reached from HTTP must pass this and never the configured cwd.
+   * A string here is a path that resolves to the descriptor itself rather than to a name that can be
+   * re-pointed (Linux spells that `/proc/<pid>/fd/<n>`); a {@link PinnedWorkingDirectory} is the same
+   * guarantee on a platform with no such alias, installed for the instant of the spawn. What both
+   * spellings promise is identical, and neither is the configured pathname.
    */
-  readonly policyCwd: string;
+  readonly policyCwd: GitWorkingDirectory;
   /** Walk `rel` component by component from the pin, refusing a symlink at ANY component. */
   open(rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget>;
   close(): Promise<void>;
@@ -129,6 +134,7 @@ export interface PinnedRoot {
  * The whole surface failing closed on such a platform is the correct outcome.
  */
 export interface SessionRootPinner {
+  /** `cwd` is the CONFIGURED pathname from the session document — the last name this subsystem trusts. */
   pin(cwd: string): Promise<PinnedRoot>;
 }
 
@@ -198,12 +204,12 @@ export interface RenderedDiff {
  * into a refusal.
  */
 export interface SessionGit {
-  repoInfo(cwd: string): Promise<SessionRepoInfo>;
-  ignoredPaths(cwd: string, rels: readonly string[]): Promise<ReadonlySet<string>>;
-  isTracked(cwd: string, rel: string): Promise<boolean>;
-  changes(cwd: string): Promise<SessionChangesView>;
-  headEntry(cwd: string, rel: string, maxBytes: number): Promise<HeadEntry | undefined>;
-  readHeadBlob(cwd: string, rel: string, maxBytes: number): Promise<HeadBlob | undefined>;
+  repoInfo(cwd: GitWorkingDirectory): Promise<SessionRepoInfo>;
+  ignoredPaths(cwd: GitWorkingDirectory, rels: readonly string[]): Promise<ReadonlySet<string>>;
+  isTracked(cwd: GitWorkingDirectory, rel: string): Promise<boolean>;
+  changes(cwd: GitWorkingDirectory): Promise<SessionChangesView>;
+  headEntry(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadEntry | undefined>;
+  readHeadBlob(cwd: GitWorkingDirectory, rel: string, maxBytes: number): Promise<HeadBlob | undefined>;
   /** Render a unified diff between two byte snapshots the CALLER obtained, using Git as a formatter. */
   diffSnapshots(rel: string, oldSide: DiffSide | undefined, newSide: DiffSide | undefined): Promise<RenderedDiff>;
 }

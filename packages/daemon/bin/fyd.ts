@@ -39,6 +39,8 @@ import {
   daemonSecretSourceProgram,
   FetchEnhancementTransport,
   FileDaemonConfig,
+  FileQuotaFailoverConfigStore,
+  FileQuotaFailoverStateStore,
   FileRoutingCatalog,
   FileScratchCollector,
   HttpUsageSource,
@@ -52,6 +54,7 @@ import {
   PaneProcessInventory,
   PerformanceStopwatch,
   ProcessSecretReader,
+  quotaFailoverRoot,
   RuntimeEnvironment,
   SocketViewerDownstream,
   SqliteHomeLockFactory,
@@ -75,7 +78,11 @@ import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
-import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
+import {
+  PosixSessionRootPinner,
+  ProcfsSessionRootPinner,
+  RunnerSessionGit,
+} from '../src/adapters/session/filesystem/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
   DurableTerminalPaneRegistrar,
@@ -244,6 +251,8 @@ import {
   parseSessionId,
   parseWardenConfigPatch,
   planInitialAttachments,
+  type QuotaFailoverLoop,
+  QuotaFailoverService,
   RecommendError,
   type RecommendSubsystem,
   ResumeCancelled,
@@ -265,6 +274,7 @@ import {
   type SessionDirectorySubsystem,
   SessionFilesystem,
   SessionHealthService,
+  type SessionRootPinner,
   type SessionHealthSettings,
   type SessionId,
   type SessionIdFactory,
@@ -339,6 +349,18 @@ void startSttWorker;
 /** The CLI a human drives. Named here rather than derived, because the daemon
  *  package cannot read the CLI package's `bin` without depending on it. */
 const CLIENT_NAME = 'fy';
+
+/**
+ * Which containment the working-tree viewer gets, decided by what this kernel can express.
+ *
+ * Linux keeps the procfs implementation, whose descriptor alias is a plain path and needs no borrowing
+ * of the working directory. Everywhere else the POSIX one gives the same guarantee by installing the
+ * held directory for the instant of each open — and refuses the whole surface if it cannot. Neither
+ * ever falls back to the configured pathname, which is the one answer that would be a lie.
+ */
+function sessionRootPinner(): SessionRootPinner {
+  return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
+}
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
@@ -2021,6 +2043,72 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   };
 }
 
+/** The collaborators automatic quota failover needs from the rest of the root. */
+interface QuotaFailoverWiring {
+  readonly root: string;
+  readonly storage: DaemonStorage;
+  readonly sessions: SessionDirectorySubsystem;
+  readonly accounts: AccountInventoryPort;
+  readonly usage: UsageFeedPort;
+  /** The SAME migration the route serves — see below for why it is this one and not a private copy. */
+  readonly migrate: SessionMigrateSubsystem;
+}
+
+/**
+ * The loop that makes `fy migrate` answer the journey the product advertises.
+ *
+ * THE MIGRATOR IS THE MOUNTED SUBSYSTEM ITSELF, not a second path built beside it. Everything that
+ * makes a migration safe lives inside `createSessionMigrateSubsystem` — the in-flight preflight, the
+ * same-kind refusal, the forensic report written before the pane dies, the per-session queue — and a
+ * failover that reached around it to "just get the session moving" would be the exact bug the
+ * preflight exists to prevent, committed by the one caller with no human watching.
+ *
+ * `allowContextDowngrade` IS FALSE AND NOT CONFIGURABLE. A downgrade silently truncates the
+ * conversation a migration exists to preserve; a human may accept that for a session they are
+ * looking at, and an unattended loop may not accept it on their behalf. A target with a smaller
+ * window is therefore refused here and recorded as a refusal, which is a fact a human can act on.
+ *
+ * NO MODEL IS NAMED, so the planner serves the target account's own default. Carrying the source
+ * account's model across would ask the new account for a model it may not publish, and the refusal
+ * would arrive as an unavailability that looks like the failover failing.
+ *
+ * THE FEED IS THE DAEMON-WIDE CACHED ONE every other consumer reads, so a move can never be made on
+ * a quota reading that disagrees with what `/v1/usage` is serving the human at the same moment.
+ */
+function createQuotaFailoverSubsystem(wiring: QuotaFailoverWiring): QuotaFailoverLoop {
+  return new QuotaFailoverService({
+    config: new FileQuotaFailoverConfigStore(wiring.root),
+    state: new FileQuotaFailoverStateStore(wiring.root),
+    roster: {
+      sessions: async () =>
+        (await wiring.sessions.list()).map(view => ({
+          id: view.config.id,
+          agent: view.config.agent,
+          harness: view.config.harness,
+          status: view.state.status,
+        })),
+    },
+    accounts: wiring.accounts,
+    usage: wiring.usage,
+    migrator: {
+      migrate: async (sessionId, agent) => {
+        await wiring.migrate.migrate(sessionId, { agent, allowContextDowngrade: false });
+      },
+    },
+    journal: {
+      record: async (sessionId, event, data) => {
+        // PARSED, not asserted: an id the layout would not accept must never become a journal path.
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return;
+        await wiring.storage.append(id, event, data);
+      },
+    },
+    // Epoch milliseconds rather than the daemon's ISO clock: every rule this loop applies is a
+    // subtraction — snapshot age, retry cooldown, revisit cooldown — and the domain says so.
+    clock: { nowMs: () => Date.now() },
+  });
+}
+
 /**
  * How many finished sessions may have their transcripts folded at once.
  *
@@ -3119,6 +3207,25 @@ export function buildWorld(): DaemonWorld {
         clock,
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // Hoisted, because the quota-failover loop below moves sessions THROUGH this exact subsystem
+      // rather than through a second, ungated path of its own.
+      const sessionMigrate = createSessionMigrateSubsystem({
+        storage,
+        sessions,
+        resume,
+        preflight,
+        reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
+        planner,
+        accounts,
+        executables,
+        clock,
+        transcripts: createTranscriptReader(storage),
+        transcriptProvenance,
+        sessionDirectory: id => createSessionPaths(paths, id).directory,
+        // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
+        // make every unrelated document write in the process wait behind it.
+        serial: new KeyedSerialExecutor(),
+      });
       return {
         health: createHealthSubsystem(health, scratch),
         pairing,
@@ -3148,22 +3255,14 @@ export function buildWorld(): DaemonWorld {
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
-        sessionMigrate: createSessionMigrateSubsystem({
+        sessionMigrate,
+        quotaFailover: createQuotaFailoverSubsystem({
+          root: quotaFailoverRoot(paths.home),
           storage,
           sessions,
-          resume,
-          preflight,
-          reports: new FileMigrationReportStore(id => createSessionPaths(paths, id).directory),
-          planner,
           accounts,
-          executables,
-          clock,
-          transcripts: createTranscriptReader(storage),
-          transcriptProvenance,
-          sessionDirectory: id => createSessionPaths(paths, id).directory,
-          // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
-          // make every unrelated document write in the process wait behind it.
-          serial: new KeyedSerialExecutor(),
+          usage,
+          migrate: sessionMigrate,
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         taskBoards: boards,
@@ -3185,10 +3284,7 @@ export function buildWorld(): DaemonWorld {
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
-        sessionFilesystem: new SessionFilesystem(
-          new ProcfsSessionRootPinner(),
-          new RunnerSessionGit(new BunGitRunner()),
-        ),
+        sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
         scratchGc,
         warden: createWardenSubsystem({
           sessions,
@@ -3458,6 +3554,30 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(waitTicks);
     await subsystems.monitor.close();
   });
+  /**
+   * The quota-failover tick, armed beside the other background loops and after the bind, because a
+   * tick can migrate a session and a migration relaunches an agent.
+   *
+   * THE CADENCE IS READ ONCE, here, and the timer keeps firing on it until the daemon restarts — the
+   * same rule the warden sweep follows, and for the same reason: re-arming would mean a tick could
+   * cancel the timer currently running it.
+   *
+   * NO BOOT TICK. Unlike the declared-wait watcher, there is nothing here that went unserviced while
+   * the daemon was down: a session whose account ran out is still exactly as stranded one interval
+   * later, and the first tick after a restart would run against a usage feed that has not collected
+   * yet — which the freshness gate would halt on anyway. Waiting one interval buys a real reading.
+   *
+   * Errors are swallowed for the reason every other background timer swallows its own: an unhandled
+   * rejection from a timer takes down a daemon whose fleet is fine, and a tick that could not run is
+   * visible in the ledger it did not stamp.
+   */
+  const failoverIntervalMs = await subsystems.quotaFailover.intervalMs().catch(() => undefined);
+  if (failoverIntervalMs !== undefined) {
+    const failoverTicks = setInterval(() => {
+      void subsystems.quotaFailover.run().catch(() => undefined);
+    }, failoverIntervalMs);
+    cleanups.push(() => clearInterval(failoverTicks));
+  }
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
   const terminalReaper = world.createTerminalReaper(opened.storage);
