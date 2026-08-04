@@ -190,6 +190,36 @@ describe('startSessionWorkspaceRefresh', () => {
     control.stop();
   });
 
+  test('queues one fresh read after an older poll when a write asks for current evidence', async () => {
+    const browser = environment();
+    const first = deferred<string>();
+    const transcripts: string[] = [];
+    let reads = 0;
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          reads++;
+          return reads === 1 ? await first.promise : 'assistant/message: after write';
+        },
+        get: async () => sessionView('s-1'),
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: entries => transcripts.push(entries.at(-1)?.text ?? ''),
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+
+    const afterWrite = control.refresh(true);
+    expect(reads).toBe(1);
+    first.resolve('assistant/message: before write');
+    await afterWrite;
+
+    expect(reads).toBe(2);
+    expect(transcripts).toEqual(['before write', 'after write']);
+    control.stop();
+  });
+
   test('reports transcript and session failures independently', async () => {
     const browser = environment();
     const transcripts: unknown[] = [];

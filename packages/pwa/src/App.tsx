@@ -447,9 +447,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
           onTranscript: setEntries,
-          onSession: view => {
-            store.fleet.upsertSession(daemonId, view);
-          },
+          // fetchSession publishes the same proved view into the daemon-scoped
+          // fleet cache; publishing it again here would force two shell renders.
+          onSession: () => undefined,
           onError: setError,
         });
         refreshControl.current = control;
@@ -471,8 +471,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   }, [daemonId, sessionId]);
 
   const sessionState: SessionState = session !== undefined ? 'connected' : error !== null ? 'failed' : 'opening';
+  const sessionIssue = error === null ? null : `Session workspace issue: ${error}`;
   const refresh = useCallback(() => {
-    void refreshControl.current?.refresh();
+    void refreshControl.current?.refresh(true);
   }, []);
   const publishSession = useCallback(
     (view: NonNullable<typeof session>) => {
@@ -488,7 +489,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         {SESSION_STATE_MESSAGE[sessionState]}
       </p>
       <p className="sr-only" role="alert" data-session-error="">
-        {error === null ? '' : `Could not refresh this session: ${error}`}
+        {sessionIssue ?? ''}
       </p>
       {session !== undefined && client !== null ? (
         <SessionChatPage
@@ -499,7 +500,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onRefresh={refresh}
           onSessionChange={publishSession}
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
-          refreshError={error}
+          refreshError={sessionIssue}
           session={session}
         />
       ) : (
@@ -515,9 +516,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
             <h1 id="session-route-heading" className="m-0 font-display text-display font-bold tracking-display">
               {scope.sessionId}
             </h1>
-            <p className="mb-0 text-ui text-muted">
-              {error === null ? 'Opening this daemon-scoped session…' : `Could not open this session: ${error}`}
-            </p>
+            <p className="mb-0 text-ui text-muted">{sessionIssue ?? 'Opening this daemon-scoped session…'}</p>
           </section>
         </main>
       )}

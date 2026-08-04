@@ -120,6 +120,8 @@ interface ShellOptions {
   readonly sessions?: readonly string[];
   /** Makes `get` reject, which is the session route's failure path. */
   readonly sessionFailure?: string;
+  /** Makes creating the daemon-bound client reject before any read starts. */
+  readonly clientFailure?: string;
   /**
    * Holds `get` open. Without it the read resolves inside the mount's own act
    * flush and the loading state never exists to be observed — which is exactly
@@ -143,8 +145,9 @@ const appStore = async (
 ): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
-    connectClient: async connection =>
-      ({
+    connectClient: async connection => {
+      if (options.clientFailure !== undefined) throw new Error(options.clientFailure);
+      return {
         get: async (sessionId: string) => {
           reads.push(`${connection.daemonId}:${sessionId}`);
           await options.sessionGate;
@@ -166,9 +169,11 @@ const appStore = async (
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
+        interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
-      }) as unknown as FyApiClient,
+      } as unknown as FyApiClient;
+    },
     // Only the pairing exchange has a shape the root itself depends on; every
     // other page reads through a store port that answers an empty document.
     fetcher: async input =>
@@ -433,6 +438,21 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {
+    const { reads, transcriptReads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const interrupt = Array.from(view.container.querySelectorAll<HTMLButtonElement>('button')).find(button =>
+      button.textContent?.includes('Interrupt turn'),
+    );
+
+    await interact(() => must(interrupt, 'the interrupt control').click());
+    await settle();
+
+    expect(reads).toEqual(['alpha:shared', 'alpha:shared']);
+    expect(transcriptReads).toEqual(['alpha:shared', 'alpha:shared']);
+    await view.unmount();
+  });
+
   it('mounts every daemon-qualified destination through its own slot', async () => {
     const { view } = await renderShell('/d/alpha', [alpha.daemonId], { sessions: ['one'] });
     await settle();
@@ -595,7 +615,21 @@ describe('the session route live regions', () => {
     expect(status.getAttribute('data-session-state')).toBe('failed');
     expect(status.textContent).toBe('This session could not be opened.');
     expect(view.container.querySelector('[data-session-error]')).toBe(alert);
-    expect(alert.textContent).toBe('Could not refresh this session: Session: daemon refused the read');
+    expect(alert.textContent).toBe('Session workspace issue: Session: daemon refused the read');
+
+    await view.unmount();
+  });
+
+  it('announces a client connection refusal through the same persistent alert', async () => {
+    const { view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId], {
+      clientFailure: 'pairing expired',
+    });
+    const alert = must(view.container.querySelector('[data-session-error]'), 'the session alert region');
+
+    await settle();
+
+    expect(alert.textContent).toBe('Session workspace issue: pairing expired');
+    expect(view.container.textContent).toContain('Session workspace issue: pairing expired');
 
     await view.unmount();
   });

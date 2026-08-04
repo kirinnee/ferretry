@@ -53,8 +53,9 @@ const entryFor = (record: LogRecord, index: number): TranscriptEntry => {
  * Projects the daemon's proved, normalized `logs` tail into the already-ported
  * transcript component. The wire format is deliberately parsed rather than
  * guessed from harness JSON: `OperatorReadService.renderTranscript` is the
- * daemon-owned compatibility contract available today while the structured
- * chat-history route remains unported.
+ * compatibility contract this first workspace slice consumes. The daemon's
+ * paged event route is mounted, but structured history/live-event projection
+ * remains an explicit integration gap.
  */
 export const transcriptEntriesFromLog = (text: string): readonly TranscriptEntry[] => {
   if (text.trim() === '') return [];
@@ -121,7 +122,10 @@ export interface SessionWorkspaceRefreshInput {
 
 export interface SessionWorkspaceRefreshControl {
   readonly initial: Promise<void>;
-  readonly refresh: () => Promise<void>;
+  /** `afterCurrent` is for a write that needs evidence newer than any poll
+   * already in flight. Timer/visibility reads leave it false and still
+   * coalesce onto the current request. */
+  readonly refresh: (afterCurrent?: boolean) => Promise<void>;
   readonly stop: () => void;
 }
 
@@ -137,9 +141,9 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
   let stopped = false;
   let inflight: Promise<void> | null = null;
 
-  const refresh = (): Promise<void> => {
+  const refresh = (afterCurrent = false): Promise<void> => {
     if (stopped || !input.environment.visible()) return Promise.resolve();
-    if (inflight !== null) return inflight;
+    if (inflight !== null) return afterCurrent ? inflight.then(() => refresh()) : inflight;
 
     inflight = Promise.allSettled([input.api.logs(input.sessionId), input.api.get(input.sessionId)])
       .then(([logs, session]) => {
