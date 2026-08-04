@@ -36,9 +36,10 @@ The decision layer for that behaviour is in this package today: `connectionPrefe
 `packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
 which-carrier-and-why sentence a surface can show verbatim. Discovery — learning the hosted relay's
 address and reading its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202).
-**What no branch has is the transport** — nothing dials or carries a relay session, so read this
-section as the contract both ends are being built against rather than as a description of what a
-phone does today. "What is not built yet" in §13 names the exact gap.
+**The transport now exists on the daemon side only** — `fyd` dials a rendezvous, claims it and carries
+a session; the browser still builds every request from one direct address — so read this section as the
+contract both ends are being built against rather than as a description of what a phone does today.
+"What is not built yet" in §13 names the exact remaining gap.
 
 Three addresses are involved and they are deliberately not the same thing:
 
@@ -305,7 +306,8 @@ carries its device token. The daemon accepts or sends `{"t":"closed", …}` for 
 never appears outside the encrypted channel, so a relay never sees it — this is the reason client
 authentication happens after keying rather than during.
 
-The token's own format belongs to the daemon's pairing API, not to this protocol.
+The token's own format belongs to the daemon's pairing API, not to this protocol. The exact record
+that carries it is §14.
 
 ---
 
@@ -677,20 +679,28 @@ The relay is incapable of decrypting content, including when a cap is hit.
 ### What is not built yet
 
 The relay, the control plane, the caps and the disclosure text are implemented and tested. **The gap
-is the transport, and only the transport.**
+is the transport — and it is now half closed: `fyd` dials, and the browser does not.**
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
 parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
 the relay address and whether the operator has switched it off. What that does not do is use it.
-**Nothing dials or carries a relay session — not `fyd`, not the PWA transport, on any branch.** The
-browser builds every request from a single direct `baseUrl` in
-`packages/pwa/src/lib/daemon-transport.ts`; `ConnectionMethod` — the carrier type that would replace
-it — has no consumer outside this package; and `packages/daemon/src` has no relay client at all. The
-decision layer is here too (`connectionPreferenceOrder` orders direct first, `chooseConnection`
-returns the which-carrier-and-why sentence); what is missing is the plumbing that would carry bytes
-over an address discovery hands it.
 
-Four named pieces. PR #202 provides the first two; the prerequisite is the other two:
+**`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
+protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
+layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
+the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket and its
+liveness, and the `relay` block of the daemon configuration document is where an operator points it.
+
+**The browser still cannot.** It builds every request from a single direct `baseUrl` in
+`packages/pwa/src/lib/daemon-transport.ts`, and `ConnectionMethod` — the carrier type that would
+replace it — still has no consumer outside `packages/relay`. The decision layer is there
+(`connectionPreferenceOrder` orders direct first, `chooseConnection` returns the which-carrier-and-why
+sentence); what is missing is the plumbing on the browser side that would carry bytes over an address
+discovery already hands it. So today a relay deployment gets you a relay with a daemon sitting in it,
+waiting for a client that cannot arrive.
+
+Five named pieces. PR #202 provides the first two, the daemon half of the third is built, and the rest
+is outstanding:
 
 1. **A build-time discovery origin in the PWA** — provided by #202. The relay lives on its own
    hostname, so the
@@ -703,14 +713,18 @@ Four named pieces. PR #202 provides the first two; the prerequisite is the other
 2. **A fetch-and-parse step** — also provided by #202 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
    treating `relayUrl: null` and any failure as "no hosted carrier".
-3. **A relay-capable transport on both ends** — the large piece, and entirely unstarted.
-   `packages/daemon/src` holds no relay client and no relay configuration whatsoever: it needs one
-   that dials out, the persisted key material it signs its rendezvous claim with, and the `fy`
-   command surface and config layout to point it at an address. On the browser side,
-   `DaemonConnection` in `packages/pwa/src/lib/daemon-connection.ts` is
-   `{ daemonId, baseUrl, deviceToken }` with no carrier field, so four files move together:
-   `daemon-connection.ts`, `connections.ts` for persistence, and `daemon-transport.ts` and
-   `event-transport.ts`, which both derive every request and socket from that one direct `baseUrl`.
+3. **A relay-capable transport on both ends** — the large piece. **The daemon end is built.**
+   `packages/daemon/src/lib/relay` dials out, signs its claim with the identity pairing minted (the
+   same key, deliberately: a second one would carry a fingerprint no paired browser has pinned), runs
+   a session per client and dispatches §14 requests into the daemon's own route table; the `relay`
+   block of the daemon configuration document points it at an address. Two things are still missing
+   on that end: a `fy` verb to write that block — an operator edits
+   `<state home>/config/daemon.json` today — and the two shapes §14 says the tunnel does not carry.
+   **The browser end is not built.** `DaemonConnection` in
+   `packages/pwa/src/lib/daemon-connection.ts` is still `{ daemonId, baseUrl, deviceToken }` with no
+   carrier field, so four files still move together: `daemon-connection.ts`, `connections.ts` for
+   persistence, and `daemon-transport.ts` and `event-transport.ts`, which both derive every request
+   and socket from that one direct `baseUrl`.
 4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for whichever carrier a live session won on.
 5. **Removal of the interim carrier chooser and self-hosting setup route.** The current PWA still
@@ -720,9 +734,93 @@ Four named pieces. PR #202 provides the first two; the prerequisite is the other
 
 PR #202 also surfaces the live advertisement state in onboarding. That work is **discovery-only**
 and says so on its own screen, which is the honest description: a browser can read the address and
-the kill switch, and can do nothing with either. Combine it with this branch and the remaining gap
-is the transport and onboarding cleanup, pieces 3 through 5.
+the kill switch, and can do nothing with either. Combined with the daemon end above, the remaining gap
+is the browser transport, disclosure and onboarding cleanup: the second half of piece 3, and pieces 4
+and 5 whole.
 
-Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
+Until those land, deploying a relay of any kind gets you a working relay with a daemon waiting in it,
+not a remote connection.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
 on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.
+
+---
+
+## 14. The tunnel above the channel
+
+§7 stops at "the plaintext". This section says what the plaintext **is**, because two endpoints that
+key a channel and then disagree about what to put in it have built a tunnel to nowhere. It is stated
+here rather than left to an implementation for the reason §1 gives: an invisible difference between
+two implementations is the expensive kind.
+
+One record carries exactly one JSON object, UTF-8, with a `t` discriminator. Every message is parsed
+rather than inspected, and a message that does not parse — bad UTF-8, bad JSON, an unknown `t`, an
+unexpected field — **ends the session** with `4400`. That is the same discipline §3 applies to
+frames, for the same reason: a party that could not read what it was sent does not know what it just
+failed to understand.
+
+### Client → daemon
+
+The record at sequence `1` is the client authentication §6 requires, and it is this:
+
+```json
+{ "t": "auth", "protocol": "ferretry-relay/1", "deviceToken": "…" }
+```
+
+Any other message at sequence `1` ends the session with `4400`. A token the daemon does not
+recognise ends it with `4403`. Both refusals happen inside the encrypted channel, so a relay sees a
+session close and never learns which of the two it was.
+
+Afterwards, any number of requests:
+
+```json
+{
+  "t": "req",
+  "id": 1,
+  "method": "GET",
+  "path": "/v1/sessions",
+  "query": [["sessionId", "fy_…"]],
+  "headers": { "content-type": "application/json" },
+  "body": "…"
+}
+```
+
+`query`, `headers` and `body` are optional; `id`, `method` and `path` are not.
+
+- **`id`** identifies the answer, and must be unique within the session. A repeat is `4400` rather
+  than an overwrite: an answer that could belong to either of two requests is worse than a closed
+  session.
+- **`path`** is the daemon's own raw pathname and must begin with a single `/`. Nothing normalises
+  it. A relayed request reaches exactly the route table a direct one reaches, and the authorization
+  boundary inspects the same string the handler is given.
+- **`query`** is a list of pairs, not an object, because `?sessionId=a&sessionId=b` is meaningful and
+  an object cannot hold it.
+- **`headers`** are lowercased and single-valued. **`authorization` is refused** with `4400`: the
+  credential for a relayed request is the device token that opened the session and nothing else, so a
+  request cannot promote itself past the grant it arrived under.
+- A relayed request is **never a loopback peer**. Everything a daemon grants a loopback caller — a
+  token in a query parameter, a host-scoped route — is unreachable through a relay by construction,
+  not by a check somebody has to remember.
+
+### Daemon → client
+
+```json
+{ "t": "authenticated", "protocol": "ferretry-relay/1" }
+{ "t": "res", "id": 1, "status": 200, "headers": { "content-type": "application/json" }, "body": "…" }
+{ "t": "oversize", "id": 1, "status": 200, "byteLength": 402641 }
+```
+
+`oversize` is the honest answer when an answer does not fit one record — §7 caps plaintext at 65492
+bytes, and the envelope is inside that. It is a typed refusal naming the size rather than a truncated
+body or an invented status, because a client that received half a session list and rendered it would
+show a fleet that does not exist. Paging or a chunked reply is unbuilt work, and this is what says so
+on the wire.
+
+Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
+numbers order the wire; they do not order the work.
+
+### What this tunnel does not carry
+
+The daemon's **protocol-switching** surfaces — `/v1/events`, terminal streams — and its
+**byte-shaped** dictation routes. One request and one answer is the wrong shape for a stream that
+keeps talking and for a multi-megabyte model download, so each needs an envelope of its own. §13
+records that gap rather than leaving a client to discover it as a socket that never opens.

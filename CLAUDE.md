@@ -74,9 +74,11 @@ relay endpoint and the daemon URL are runtime values. The hosted default therefo
 no-store runtime advertisement whose operator can change or disable it without a release.
 Running your own relay stays supported as an **expert opt-in path** with its own runbook,
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
-allowlist remains independent of the hosted deployment. The current PWA still has an interim
-three-way carrier chooser and self-hosting route; removing those is an explicit GAP, as is the
-**transport** that would carry a relay session on either end. Protocol §13 names both.
+allowlist remains independent of the hosted deployment. `packages/daemon` now **dials** a rendezvous
+and carries a session — the claim, the handshake, the record layer and the §14 tunnel into its own
+route table — but the **browser** end is still direct-only, so the PWA's interim three-way carrier
+chooser and self-hosting route are still there and removing them is still an explicit GAP. Protocol
+§13 names each remaining piece and its state.
 
 `packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
