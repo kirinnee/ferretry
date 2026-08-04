@@ -45,6 +45,21 @@ jobs:
           path: coverage/${{ matrix.mode }}
           if-no-files-found: warn
 
+  darwin-confinement:
+    name: Containment (macOS)
+    permissions:
+      contents: read
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # The one claim in this repository that a Linux runner cannot check for macOS: that the file
+      # viewer's confinement actually holds on the kernel the POSIX pinner was written for.
+      - name: Prove containment on macOS
+        run: nix develop .#ci -c ./scripts/ci/darwin-confinement.sh
+
   compile:
     name: Compile Binaries
     permissions:
