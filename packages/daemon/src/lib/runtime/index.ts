@@ -1,3 +1,4 @@
+export * from './arguments.ts';
 export * from './boot.ts';
 export * from './config.ts';
 export * from './mounts/analytics.ts';

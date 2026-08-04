@@ -188,6 +188,7 @@ import {
   type AnalyticsTranscriptEvidenceSource,
   type ApiServerHandle,
   type ApiServerPort,
+  answerArguments,
   type AssigneeObservation,
   AttentionService,
   advertisesForeignAddress,
@@ -3908,6 +3909,26 @@ async function execute(): Promise<number> {
   }
 }
 
+/**
+ * The command line, answered before anything is built.
+ *
+ * FIRST, and that is the whole point: `buildWorld` resolves a state home and opens a filesystem, and
+ * `start` creates the directory tree, takes the lifetime lock and probes the address. Asking this
+ * binary its version used to do all of that. Nothing below this branch runs for a query.
+ */
 if (import.meta.main) {
+  const answer = answerArguments(process.argv.slice(2), {
+    daemonName: DAEMON_NAME,
+    clientName: CLIENT_NAME,
+    version: daemonVersion,
+  });
+  if (answer.kind === 'print') {
+    writeSync(1, `${answer.text}\n`);
+    process.exit(answer.exitCode);
+  }
+  if (answer.kind === 'refuse') {
+    writeSync(2, `${answer.text}\n`);
+    process.exit(answer.exitCode);
+  }
   process.exit(await execute());
 }
