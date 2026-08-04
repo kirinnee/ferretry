@@ -249,9 +249,9 @@ export class DaemonController {
   }
 
   /**
-   * Bootstrap exactly once. Only a genuinely absent pointer takes this path; `current()` throws for
-   * every malformed, dangling or unverifiable state, so damaged evidence can never be overwritten
-   * as if this were a fresh installation.
+   * Bootstrap exactly once. Only a store with no durable promotion evidence takes this path;
+   * `current()` throws for a lost, malformed, dangling or unverifiable pointer, so damaged evidence
+   * can never be overwritten as if this were a fresh installation.
    */
   async #ensurePromotedSnapshot(): Promise<DaemonSnapshot> {
     const current = await this.deps.snapshots.current();

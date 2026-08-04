@@ -49,13 +49,15 @@ Keep agents alive, bounded, and recoverable without risking the daemon.
 
 **#31 is partially implemented.** Ferretry has a daemon-keyed, content-addressed snapshot store,
 strict verification, atomic promotion, rollback through the ordinary promotion path, explicit
-build/promote/list CLI commands, and install/start/restart launch through the stable pointer. kteam
-has no daemon artifact snapshot to port: its Home Manager wrapper and `DaemonService` execute the
-live `daemon-entry.ts` path directly (its `kteam snapshot` command captures a session pane instead).
-The remaining GAP is Nix rollback retention: one GC root protects the source closure needed by the
-selected/running snapshot, but older retained snapshots are not rooted simultaneously and can lose
-runtime dependencies after garbage collection. Keep this row open until roots follow snapshot
-lifetime (or snapshots materialize their complete runtime closure).
+build/promote/list CLI commands, and install/start/restart capture the promoted snapshot and execute
+its exact canonical artifact path. kteam has no daemon artifact snapshot to port:
+`modules/kteam-ts/src/index.ts` resolves `kteamd` and passes that wrapper to `DaemonService`;
+`DaemonService.install/start` execute it, and the Home Manager `modules/default.nix` wrapper then runs
+live `daemon-entry.ts`. Its `kteam snapshot` command captures a session pane and is unrelated. The
+remaining GAP is Nix rollback retention: the single per-daemon GC root protects only one snapshot
+source closure at a time, so older retained snapshots can lose runtime dependencies after garbage
+collection. Keep this row open until roots follow snapshot lifetime (or snapshots materialize their
+complete runtime closure).
 
 ## 🔎 Search, navigation & surfaces
 

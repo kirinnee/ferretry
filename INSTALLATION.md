@@ -69,21 +69,25 @@ releases it. This is a per-user operation and needs no `sudo`. If `nix-store` is
 daemon still starts and `fy` warns that garbage collection may remove runtime dependencies; a
 Homebrew or release-archive source is outside the store and is left alone.
 
-Ferretry currently holds one Nix root per daemon, not one per retained snapshot. Promotion leaves
-that root on the running version until restart, then moves it to the newly selected version. An older
-Nix-backed snapshot therefore keeps its copied executable but not necessarily its interpreter and
-runtime closure after a later garbage collection. Reliable post-GC rollback of those older snapshots
-remains a gap until roots are retained per snapshot.
+Ferretry currently holds one Nix root per daemon, not one per retained snapshot. Promotion alone
+leaves that root unchanged; the next actual `install`, `start`, or `restart` repoints it to the exact
+snapshot that launch uses. An older Nix-backed snapshot therefore keeps its copied executable but not
+necessarily its interpreter and runtime closure after a later garbage collection. Reliable post-GC
+rollback of those older snapshots remains a gap until roots are retained per snapshot.
 
 ## Daemon snapshots
 
 The daemon never launches the executable currently being edited or replaced on `PATH`. Ferretry
 copies it into a daemon-keyed, content-addressed store at
 `$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` (`~/.local/state/…` by default), verifies the complete
-copy and a strict manifest, makes both read-only, and atomically points `current` at the selected
-snapshot. `fy daemon install` and any start or restart that needs an executable build and promote the
-first snapshot only when that pointer has never existed. Malformed, dangling, or digest-damaged state
-is an error and is never treated as a fresh store.
+copy and a strict manifest, makes the artifact, manifest, and containing snapshot directory read-only,
+and atomically points `current` at the selected snapshot. A managed launch captures that verified
+snapshot and executes its exact canonical artifact path, so a later promotion cannot change the
+process being started. `fy daemon install` and any start or restart that needs an executable build and
+promote the first snapshot only when both `current` and the durable promotion marker are absent. Once
+promotion has occurred, a missing pointer is damaged state, not a fresh store; malformed, dangling,
+mutable, or digest-damaged evidence likewise fails closed. An explicit promotion of a verified
+retained ID repairs a lost pointer without live `fyd`.
 
 Build and inspect a candidate without changing the next daemon launch:
 
@@ -100,9 +104,11 @@ fy daemon snapshot promote sha256-<digest>
 fy daemon restart
 ```
 
-Promotion is atomic and does not alter the process already running. Rollback uses the same path:
-promote an older ID shown by `snapshot list`, then restart. Restart verifies the promoted artifact
-before stopping the incumbent, so damaged snapshot state fails without manufacturing downtime.
+Promotion is atomic and does not alter the process already running. The selected artifact is used by
+the next managed launch; rollback uses the same path: promote an older ID shown by `snapshot list`,
+then restart. Listing, promotion, and launches from a retained snapshot do not require the original
+source executable. Restart verifies the promoted artifact before stopping the incumbent, so damaged
+snapshot state fails without manufacturing downtime.
 
 ## GitHub release (one-line installer)
 
