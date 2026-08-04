@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { daemonId } from '../../src/lib/daemon-connection.ts';
 import {
   APP_BAR_DESTINATIONS,
   AppBar,
   type AppBarProps,
-  SidebarDrawerTrigger,
-  UPDATE_CHIP,
   appBarDestinationForRoute,
   crumbTrail,
   mobileDestinationMenuOpen,
+  SidebarDrawerTrigger,
+  UPDATE_CHIP,
 } from '../../src/shell/app-bar.tsx';
-import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { PALETTE_KEYSHORTCUTS } from '../../src/shell/palette-shortcut.ts';
 import { interact, mount } from '../support/dom.ts';
 
@@ -134,6 +134,23 @@ describe('AppBar destinations', () => {
 
     await mounted.unmount();
   });
+
+  it('groups app destinations away from identity and the centred session-search seam', async () => {
+    setViewport(DESKTOP);
+    const mounted = await mount(bar());
+    const primary = mounted.container.querySelector('[data-app-bar-primary]') as HTMLElement;
+    const destinationRow = mounted.container.querySelector('[data-app-bar-destination-row]') as HTMLElement;
+    const destinationNav = [...destinationRow.querySelectorAll('nav')].find(
+      element => element.getAttribute('aria-label') === 'Destinations',
+    ) as HTMLElement;
+
+    expect(primary.querySelector('nav[aria-label="Breadcrumb"]')).not.toBeNull();
+    expect(primary.querySelector('nav[aria-label="Destinations"]')).toBeNull();
+    expect(destinationNav.querySelectorAll('a')).toHaveLength(APP_BAR_DESTINATIONS.length);
+    expect(destinationNav.querySelector('[data-app-bar-destination-search]')).not.toBeNull();
+
+    await mounted.unmount();
+  });
 });
 
 describe('crumbTrail', () => {
@@ -168,18 +185,74 @@ describe('AppBar breadcrumb', () => {
 });
 
 describe('AppBar command palette entry', () => {
-  it('is always reachable and declares both live shortcuts', async () => {
+  it('lives with desktop destinations rather than impersonating current-session search', async () => {
+    setViewport(DESKTOP);
+    let opened = 0;
+    const mounted = await mount(bar({ onOpenPalette: () => (opened += 1) }));
+    const finder = mounted.container.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
+    const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
+
+    expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
+    expect(finder.getAttribute('aria-label')).toBe('Open command palette');
+    expect(slot.contains(finder)).toBe(false);
+
+    await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
+
+    expect(opened).toBe(1);
+
+    await mounted.unmount();
+  });
+
+  it('is reachable from the phone destination picker', async () => {
     setViewport(PHONE);
     let opened = 0;
     const mounted = await mount(bar({ onOpenPalette: () => (opened += 1) }));
-    const search = mounted.container.querySelector('[data-app-bar-search]') as HTMLButtonElement;
+    const trigger = byLabel('Choose destination') as HTMLButtonElement;
 
-    expect(search.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
-    expect(search.getAttribute('aria-label')).toBe('Open command palette');
+    await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
 
-    await interact(() => search.dispatchEvent(new Event('click', { bubbles: true })));
+    const sheet = document.getElementById(trigger.getAttribute('aria-controls') as string) as HTMLElement;
+    const finder = sheet.querySelector('[data-app-bar-destination-search]') as HTMLButtonElement;
+
+    expect(finder.getAttribute('aria-keyshortcuts')).toBe(PALETTE_KEYSHORTCUTS);
+    expect(finder.textContent).toContain('Find destination or session');
+
+    await interact(() => finder.dispatchEvent(new Event('click', { bubbles: true })));
 
     expect(opened).toBe(1);
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+
+    await mounted.unmount();
+  });
+});
+
+describe('AppBar current-session search seam', () => {
+  it('reserves a centred, empty slot without rendering a fake search', async () => {
+    setViewport(DESKTOP);
+    const mounted = await mount(bar());
+    const primary = mounted.container.querySelector('[data-app-bar-primary]') as HTMLElement;
+    const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
+
+    expect(primary.className).toContain('md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)]');
+    expect(primary.className).toContain('py-sm');
+    expect(primary.className).toContain('md:py-md');
+    expect(slot.className).toContain('justify-center');
+    expect(slot.children).toHaveLength(0);
+    expect(slot.querySelector('button, input')).toBeNull();
+
+    await mounted.unmount();
+  });
+
+  it('mounts item 6 in the reserved slot without moving app destinations', async () => {
+    setViewport(DESKTOP);
+    const mounted = await mount(bar({ currentSessionSearch: <input aria-label="Current session search" /> }));
+    const slot = mounted.container.querySelector('[data-app-bar-session-search-slot]') as HTMLElement;
+    const search = byLabel('Current session search') as HTMLInputElement;
+    const destinations = linksOf(mounted.container, 'Destinations');
+
+    expect(slot.contains(search)).toBe(true);
+    expect(destinations).toHaveLength(APP_BAR_DESTINATIONS.length);
+    expect(destinations.every(link => !slot.contains(link))).toBe(true);
 
     await mounted.unmount();
   });
@@ -256,6 +329,21 @@ describe('AppBar update chip', () => {
         new Event('click', { bubbles: true }),
       ),
     );
+
+    await mounted.unmount();
+  });
+
+  it('gives transient phone state a separate full-width row', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(bar({ connectionStatus: 'reconnecting', updateReady: 'update' }));
+    const primary = mounted.container.querySelector('[data-app-bar-primary]') as HTMLElement;
+    const status = mounted.container.querySelector('[data-app-bar-status]') as HTMLElement;
+
+    expect(primary.contains(status)).toBe(false);
+    expect(status.className).toContain('min-h-control');
+    expect(status.className).toContain('py-xs');
+    expect(status.textContent).toContain('reconnecting');
+    expect(status.textContent).toContain(UPDATE_CHIP.update.label);
 
     await mounted.unmount();
   });
