@@ -234,8 +234,16 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       admitted.push({ candidate, session, signature: analyticsIngestSignature(session, pricingFingerprint) });
     }
 
-    // Rows for sessions the daemon no longer holds documents for are dropped rather than kept: the
-    // records are authoritative, and an index outliving them would answer for a fleet that is gone.
+    /**
+     * A stored row whose session is no longer an ingestable one is DROPPED, for two different reasons
+     * that both come down to the records being authoritative.
+     *
+     * The session's documents are gone — an index outliving them would answer for a fleet that is not
+     * there. Or the session is no longer finished: a revive puts a stopped session back to work, and
+     * the totals ingested when it ended are no longer its final ones. Keeping that row would report a
+     * running session's spend as a completed run's, and the next pass will ingest it again when it
+     * ends for real.
+     */
     const live = new Set(admitted.map(entry => entry.session.id));
     const forgotten = [...stored.keys()].filter(id => !live.has(id));
     if (forgotten.length > 0) this.parts.store.forget(forgotten);
@@ -248,9 +256,12 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     let sourceErrors = 0;
     let usageRefused = 0;
     const rows: AnalyticsStoredSession[] = [];
-    for (let start = 0; start < pending.length; start += this.parts.concurrency) {
+    // At least one per batch, so a misconfigured concurrency is a slow pass rather than a loop that
+    // never advances.
+    const batchSize = Math.max(1, this.parts.concurrency);
+    for (let start = 0; start < pending.length; start += batchSize) {
       const batch = await Promise.all(
-        pending.slice(start, start + this.parts.concurrency).map(async entry => await this.materialize(entry, catalog)),
+        pending.slice(start, start + batchSize).map(async entry => await this.materialize(entry, catalog)),
       );
       for (const result of batch) {
         if (result.sourceError) sourceErrors += 1;

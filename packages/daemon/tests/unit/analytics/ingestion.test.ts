@@ -379,6 +379,25 @@ describe('AnalyticsIngestionService.ingest', () => {
     should(test.store.rows().map(row => row.raw.id)).deepEqual(['s1']);
   });
 
+  it('should forget a row whose session went back to work', async () => {
+    // A revive puts a stopped session back to running, so the totals ingested when it ended are no
+    // longer its final ones. Keeping the row would report a running session's spend as a finished run's.
+    // Arrange
+    const test = harness([candidate({ id: 's1', status: 'stopped' })], async () =>
+      readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+    );
+    await test.service.ingest();
+
+    // Act
+    test.setCandidates([candidate({ id: 's1', status: 'running' })]);
+    const second = await test.service.ingest();
+
+    // Assert
+    should(second.forgotten).equal(1);
+    should(second.gateRefused).equal(1);
+    should(test.store.rows()).be.empty();
+  });
+
   it('should fold every session when there are more of them than the concurrency allows', async () => {
     // Arrange
     const test = harness(
