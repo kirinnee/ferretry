@@ -6,6 +6,7 @@ import {
   configuredAt,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
+  overriddenBy,
   parseDaemonConfig,
 } from '../../../src/lib/runtime/config.ts';
 
@@ -147,6 +148,33 @@ describe('daemon configuration', () => {
     // Settling on the port already loaded still records the claim, so the next boot cannot move.
     should(configuredAt(derived, derived.port).portIsRecorded).be.true();
     should(configuredAt(derived, derived.port).bindUrl).equal(derived.bindUrl);
+  });
+
+  it('should let one run override the document without turning the override into a claim on disk', () => {
+    // Arrange
+    const document = parseDaemonConfig({ host: '127.0.0.1' });
+    const advertised = parseDaemonConfig({ publicUrl: 'https://box.example.test' });
+
+    // Act
+    const nothingSaid = overriddenBy(document, {});
+    const portOnly = overriddenBy(document, { port: 9_100 });
+    const both = overriddenBy(document, { host: '0.0.0.0', port: 9_100 });
+    const withAdvertisement = overriddenBy(advertised, { port: 9_100 });
+
+    // Assert — an untouched run is the very same object; nothing is rebuilt for nothing.
+    should(nothingSaid).equal(document);
+    // A port named on the command line is a CLAIM: it is bound or it fails, never silently moved.
+    should(portOnly.bindUrl).equal('http://127.0.0.1:9100');
+    should(portOnly.portIsRecorded).be.true();
+    should(both.bindUrl).equal('http://0.0.0.0:9100');
+    should(both.host).equal('0.0.0.0');
+    // A derived advertisement follows the override; an operator's own one is left where they put it.
+    should(portOnly.publicUrl).equal('http://127.0.0.1:9100');
+    should(withAdvertisement.publicUrl).equal('https://box.example.test');
+    // Overriding only the host keeps the document's port rather than inventing one.
+    should(overriddenBy(parseDaemonConfig({ port: 8_080 }), { host: 'localhost' }).bindUrl).equal(
+      'http://localhost:8080',
+    );
   });
 
   it('should refuse damaged or ambiguous pricing evidence before the daemon can use it', () => {

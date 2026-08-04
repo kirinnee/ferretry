@@ -83,6 +83,28 @@ describe('FileDaemonConfig', () => {
     should(written).not.have.property('publicUrl');
   });
 
+  it('should answer what is on disk without writing anything', async () => {
+    // Arrange
+    const fresh = documentStore();
+    const written = documentStore(JSON.stringify({ host: '127.0.0.1', port: 7_432 }));
+
+    // Act
+    const nothingYet = await fresh.store.peek();
+    const existing = await written.store.peek();
+
+    // Assert — `--print-config` and `--check` read through this, and a question must never provision:
+    // creating a state home as a side effect of asking is the `--version` defect all over again.
+    should(nothingYet.document).be.undefined();
+    should(fresh.text()).be.undefined();
+    should(nothingYet.config.portIsRecorded).be.false();
+    // The RAW document comes back beside the parsed one because provenance needs it: whether a value
+    // was written down or defaulted is exactly the question, and the parsed form has lost it.
+    should(existing.document).deepEqual({ host: '127.0.0.1', port: 7_432 });
+    should(existing.config.bindUrl).equal('http://127.0.0.1:7432');
+    // The document is named rather than described, so a refusal can point at the file to edit.
+    should(fresh.store.path).equal(paths.daemonConfig);
+  });
+
   it('should record into a state home whose document has not been written yet', async () => {
     // Arrange: the boot decides its address before anything else writes the document.
     const documents = documentStore();
