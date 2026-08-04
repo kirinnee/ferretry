@@ -36,6 +36,7 @@ import { DictationSheet, type DictationStage } from '../src/components/dictation
 import { FilesTab } from '../src/components/files-tab.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
+import { Markdown } from '../src/components/markdown.tsx';
 import { MigrateSheet } from '../src/components/migrate-sheet.tsx';
 import { NewSessionPage } from '../src/components/new-session-page.tsx';
 import { QuestionForm } from '../src/components/question-form.tsx';
@@ -169,6 +170,22 @@ const daemon = daemonConnection({
   deviceToken: 'harness-token',
 });
 const scope = daemonSessionScope(daemon, 'harness-session');
+
+/** Every reference state on one screen: proved, unproved, escaped, and in code. */
+const HARNESS_REFERENCE_PROSE = [
+  'Ask :zelda to read @src/api.ts:120-140 before &F12 lands, then clear !A3 with /summary',
+  'and watch :term/0a1b2c3d4e5f.',
+  '',
+  'Unproved stays prose: :ganon, @missing.ts, &F99, !A9, /nope. Escaped stays literal: \\:zelda.',
+  '',
+  'Inline code keeps its box and its bytes: `send :zelda "@src/api.ts:120"`.',
+  '',
+  '```ts',
+  'const owner = ":zelda"; // still a highlighted string literal',
+  'const path = "@src/api.ts:120";',
+  'if (a && b < c) open(path);',
+  '```',
+].join('\n');
 const settingsControls = new DaemonControlsStore();
 
 /**
@@ -1851,6 +1868,41 @@ function Shell() {
             },
           ]}
         />
+      ),
+    },
+    {
+      label: 'Reference standard',
+      render: () => (
+        // One card for the whole standard: every proved kind, an unproved token,
+        // an escaped token, and the same references inside an inline span and a
+        // highlighted fence — which is the pair a reviewer has to see side by
+        // side to judge whether code styling really survived the decoration.
+        <section aria-label="Reference standard harness" id="harness-references">
+          <Markdown
+            // Answers BOTH lookup forms, exactly as the live fleet resolver
+            // does: prose links are re-proved by session id at render, so a
+            // name-only fixture would paint every agent reference as prose.
+            agentReferenceResolver={({ name, sessionId }) =>
+              name === 'zelda' || sessionId === 'harness-session'
+                ? { daemonId: daemon.daemonId, sessionId: 'harness-session', name: 'zelda' }
+                : null
+            }
+            attentionReferenceResolver={id => id === 'A3'}
+            onAttentionOpen={() => {}}
+            onCodeReferenceOpen={() => {}}
+            onNavigate={() => {}}
+            onSkillOpen={() => {}}
+            onTaskOpen={() => {}}
+            onTerminalOpen={() => {}}
+            resolveFilePaths={async candidates =>
+              new Map(candidates.filter(path => path === 'src/api.ts').map(path => [path, path]))
+            }
+            skillReferenceResolver={name => name === 'summary'}
+            taskReferenceResolver={id => id === 'F12'}
+            terminalReferenceResolver={id => id === '0a1b2c3d4e5f'}
+            text={HARNESS_REFERENCE_PROSE}
+          />
+        </section>
       ),
     },
     {
