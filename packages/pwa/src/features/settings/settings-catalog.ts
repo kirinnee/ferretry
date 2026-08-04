@@ -20,6 +20,15 @@ export type SettingId =
   | 'dictation'
   | 'notifications';
 
+export type SettingsSectionId = 'appearance' | 'behaviour' | 'daemons';
+
+export interface SettingsSectionDefinition {
+  readonly id: SettingsSectionId;
+  readonly label: string;
+  readonly description: string;
+  readonly settingIds: readonly SettingId[];
+}
+
 export interface SettingDefinition {
   readonly id: SettingId;
   readonly label: string;
@@ -132,11 +141,58 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
   },
 ] as const;
 
+/**
+ * Settings is deliberately grouped by the thing a choice changes. Appearance
+ * owns presentation, Behaviour owns reader-local interaction, and Daemons owns
+ * runtime pairings. Keeping this catalog beside the individual definitions
+ * also gives deep links one unambiguous section to open.
+ */
+export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
+  {
+    id: 'appearance',
+    label: 'Appearance',
+    description: 'Text, colour, density, and conversation layout on this browser.',
+    settingIds: ['text-size', 'theme', 'density', 'chat-width'],
+  },
+  {
+    id: 'behaviour',
+    label: 'Behaviour',
+    description: 'How composing, dictation, and notifications behave on this browser.',
+    settingIds: ['composer-markdown', 'dictation', 'notifications'],
+  },
+  {
+    id: 'daemons',
+    label: 'Daemons',
+    description: 'Pair, check, switch, name, or remove the machines this browser can reach.',
+    settingIds: [],
+  },
+] as const;
+
+const SETTINGS_SECTION_BY_ID = new Map(SETTINGS_SECTIONS.map(section => [section.id, section]));
+const SETTINGS_SECTION_BY_SETTING = new Map(
+  SETTINGS_SECTIONS.flatMap(section => section.settingIds.map(id => [id, section.id] as const)),
+);
+
+export const settingsSectionDefinition = (id: SettingsSectionId): SettingsSectionDefinition => {
+  const definition = SETTINGS_SECTION_BY_ID.get(id);
+  if (definition === undefined) throw new Error(`Unknown settings section: ${id}`);
+  return definition;
+};
+
+export const isSettingsSectionId = (value: string | null | undefined): value is SettingsSectionId =>
+  Boolean(value && SETTINGS_SECTION_BY_ID.has(value as SettingsSectionId));
+
+export const settingsSectionForSetting = (id: SettingId): SettingsSectionId => {
+  const section = SETTINGS_SECTION_BY_SETTING.get(id);
+  if (section === undefined) throw new Error(`Setting ${id} does not belong to a settings section`);
+  return section;
+};
+
 export const SETTINGS_DESTINATION = {
   id: 'open-settings',
   label: 'Open settings',
-  description: 'Appearance, text size, conversation width, theme, and dashboard density.',
-  keywords: ['preferences', 'options', 'appearance', 'configure'],
+  description: 'Appearance, behaviour, and connected daemons for this browser.',
+  keywords: ['preferences', 'options', 'appearance', 'behaviour', 'daemon', 'pairing', 'configure'],
 } as const;
 
 export interface SettingsLinkDefinition {

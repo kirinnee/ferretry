@@ -1,3 +1,4 @@
+import { HealthViewSchema } from '@ferretry/protocol';
 import {
   createContext,
   type ReactNode,
@@ -23,12 +24,12 @@ import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
 import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
-import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
-import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from './features/onboarding/hosted-relay.ts';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
 import { OnboardingProgressStore, resetOnboardingProgress } from './features/onboarding/onboarding-progress.ts';
+import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
+import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -59,7 +60,15 @@ import {
   type PageHostSlots,
   type SessionChatPageProps,
 } from './lib/pages/page-host.tsx';
-import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey, setupPath } from './lib/pages/routes.ts';
+import {
+  connectionPickerPath,
+  daemonSessionsPath,
+  daemonSettingsPath,
+  daemonWardenPath,
+  type PageRoute,
+  routePageKey,
+  setupPath,
+} from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
@@ -612,14 +621,39 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
 
 function SettingsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
+  const connectionSnapshot = useConnectionSnapshot();
   const { navigate } = useRouter();
   const dictation = useSttSettings(store.stt);
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
+  const probeDaemon = useCallback(
+    async (daemon: DaemonConnection) => {
+      const client = await store.clients.client(daemon);
+      await client.request('/v1/health', HealthViewSchema, {}, 5_000);
+    },
+    [store.clients],
+  );
   return (
     <SettingsPage
       daemonId={connection.daemonId}
+      connections={connectionSnapshot.connections}
       controls={store.controls}
       dictation={{ daemon: connection, ...dictation }}
+      probeDaemon={probeDaemon}
+      onSelectDaemon={daemonId => {
+        store.connections.select(daemonId);
+        navigate(`${daemonSettingsPath(daemonId)}#daemons`);
+      }}
+      onRenameDaemon={(daemonId, label) => {
+        store.connections.rename(daemonId, label);
+      }}
+      onRemoveDaemon={daemonId => {
+        const removedActiveDaemon = daemonId === connection.daemonId;
+        store.connections.remove(daemonId);
+        if (!removedActiveDaemon) return;
+        const fallback = store.connections.getSnapshot().selectedDaemonId;
+        navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#daemons`);
+      }}
+      onAddDaemon={() => navigate(connectionPickerPath())}
       notifications={
         <NotificationSettingsView
           permission={notifications.permission}

@@ -158,6 +158,53 @@ describe('DaemonConnectionStore', () => {
     should(store.list().map(record => record.daemonId)).deepEqual(['c']);
   });
 
+  it('renames one pairing persistently without changing selection, recency, credentials, or caches', async () => {
+    const repository = new MemoryRepository();
+    const cache = new RecordingCache();
+    const store = new DaemonConnectionStore(undefined, { repository, caches: [cache], now: () => 40 });
+    store.add(connection('a'), { label: 'Old name', pairedAt: 3 });
+    store.add(connection('b'), { pairedAt: 4 });
+    await store.flush();
+    const before = store.get(daemonId('a'));
+    const selected = store.getSnapshot().selectedDaemonId;
+    const order = store.list().map(record => record.daemonId);
+    let notifications = 0;
+    const unsubscribe = store.subscribe(() => {
+      notifications += 1;
+    });
+
+    const renamed = store.rename(daemonId('a'), '  Work box  ');
+    const noOp = store.rename(daemonId('a'), 'Work box');
+    await store.flush();
+
+    should(renamed.label).equal('Work box');
+    should(renamed.daemonId).equal(before?.daemonId);
+    should(renamed.baseUrl).equal(before?.baseUrl);
+    should(renamed.deviceToken).equal(before?.deviceToken);
+    should(renamed.pairedAt).equal(before?.pairedAt);
+    should(renamed.lastSelectedAt).equal(before?.lastSelectedAt);
+    should(noOp).equal(renamed);
+    should(store.getSnapshot().selectedDaemonId).equal(selected);
+    should(store.list().map(record => record.daemonId)).deepEqual(order);
+    should(cache.cleared).deepEqual([]);
+    should(notifications).equal(1);
+
+    const savedRename = parseDaemonConnections(repository.writes.at(-1)?.value ?? null);
+    should(savedRename.connections.find(record => record.daemonId === daemonId('a'))?.label).equal('Work box');
+
+    const cleared = store.rename(daemonId('a'), '   ');
+    await store.flush();
+    should(cleared.label).be.undefined();
+    should(store.get(daemonId('a'))?.label).be.undefined();
+    const savedClear = parseDaemonConnections(repository.writes.at(-1)?.value ?? null);
+    should(savedClear.connections.find(record => record.daemonId === daemonId('a'))?.label).be.undefined();
+    should(store.getSnapshot().selectedDaemonId).equal(selected);
+    should(cache.cleared).deepEqual([]);
+    should(notifications).equal(2);
+
+    unsubscribe();
+  });
+
   it('loads tolerantly and keeps saving after a repository failure', async () => {
     const repository = new MemoryRepository(persisted([row('saved', 4)], 'saved'), false, true);
     const store = await DaemonConnectionStore.open({ repository, now: () => 9 });
@@ -177,5 +224,6 @@ describe('DaemonConnectionStore', () => {
     );
     const store = new DaemonConnectionStore();
     should(() => store.select(daemonId('missing'))).throw('daemon missing is not paired');
+    should(() => store.rename(daemonId('missing'), 'name')).throw('daemon missing is not paired');
   });
 });
