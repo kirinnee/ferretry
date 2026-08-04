@@ -117,12 +117,17 @@ describe('interrupted bootstrap recovery', () => {
   it.each([
     { directory: 'config' as const, root: ['daemon.lock'], state: [] },
     { directory: 'fleet' as const, root: ['config', 'daemon.lock'], state: [] },
-    { directory: 'state' as const, root: ['config', 'daemon.lock', 'fleet'], state: [] },
-    { directory: 'index' as const, root: ['config', 'daemon.lock', 'fleet', 'state'], state: [] },
-    { directory: 'sessions' as const, root: ['config', 'daemon.lock', 'fleet', 'state'], state: ['index'] },
+    { directory: 'logs' as const, root: ['config', 'daemon.lock', 'fleet'], state: [] },
+    { directory: 'state' as const, root: ['config', 'daemon.lock', 'fleet', 'logs'], state: [] },
+    { directory: 'index' as const, root: ['config', 'daemon.lock', 'fleet', 'logs', 'state'], state: [] },
+    {
+      directory: 'sessions' as const,
+      root: ['config', 'daemon.lock', 'fleet', 'logs', 'state'],
+      state: ['index'],
+    },
     {
       directory: 'temporary' as const,
-      root: ['config', 'daemon.lock', 'fleet', 'state'],
+      root: ['config', 'daemon.lock', 'fleet', 'logs', 'state'],
       state: ['index', 'sessions'],
     },
   ])('should recover a home abandoned while creating $directory', async ({ directory, root, state }) => {
@@ -145,7 +150,7 @@ describe('interrupted bootstrap recovery', () => {
     should(abandonedState).deepEqual(state);
     should(recovered.layout.created).be.true();
     should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
-    should(await entriesOf(home)).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'state']);
+    should(await entriesOf(home)).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'logs', 'state']);
     should(await entriesOf(paths.state)).deepEqual(['index', 'sessions', 'tmp']);
   });
 
@@ -187,6 +192,100 @@ describe('interrupted bootstrap recovery', () => {
     should(first.layout.created).be.true();
     should(second.layout.created).be.false();
     should((await stat(paths.layoutVersion)).mode & 0o777).equal(0o600);
+  });
+});
+
+/**
+ * A state home the CLI has touched but the daemon has never bootstrapped.
+ *
+ * `fy daemon start` creates the log directory so the service manager has somewhere to write, then
+ * launches the daemon. That happens before any lock, directory or marker of ours exists, so the very
+ * first daemon on a clean machine always meets a home holding exactly `logs/` — and, on a retry, the
+ * log of the attempt that failed.
+ */
+describe('pre-bootstrap state home', () => {
+  it.each([
+    { name: 'an empty log directory, as the first ever start leaves it', logs: [] },
+    { name: 'the log of a previous failed start', logs: ['fyd.log'] },
+    { name: 'several logs', logs: ['fyd.log', 'fyd-old.log'] },
+  ])('should initialize a home holding $name', async ({ logs }) => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const paths = pathsFor(home);
+    await mkdir(paths.logs, { recursive: true });
+    for (const log of logs) await writeFile(join(paths.logs, log), 'refusing to start\n');
+
+    // Act
+    const opened = await openStorage(home);
+
+    // Assert — the daemon must reach a bootstrapped home, not refuse its own log directory.
+    should(opened.layout.created).be.true();
+    should(await readFile(paths.layoutVersion, 'utf8')).equal('1\n');
+    should(await entriesOf(paths.logs)).deepEqual([...logs].sort());
+  });
+
+  it('should keep the log directory across a later open', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const paths = pathsFor(home);
+    await mkdir(paths.logs, { recursive: true });
+    await writeFile(join(paths.logs, 'fyd.log'), 'first boot\n');
+    const first = await openStorage(home);
+    await first.storage.close();
+    stores.delete(first.storage);
+
+    // Act — the second `fy daemon start` on an already-initialized home.
+    const second = await openStorage(home);
+
+    // Assert
+    should(first.layout.created).be.true();
+    should(second.layout.created).be.false();
+    should(await readFile(join(paths.logs, 'fyd.log'), 'utf8')).equal('first boot\n');
+    should((await stat(paths.logs)).mode & 0o777).equal(0o700);
+  });
+
+  it.each([
+    {
+      name: 'a scaffold directory the CLI never creates',
+      seed: async (paths: FoundationPaths) => await mkdir(paths.config, { recursive: true }),
+    },
+    {
+      name: 'an unknown root directory beside the logs',
+      seed: async (paths: FoundationPaths) => await mkdir(join(paths.home, 'workspaces'), { recursive: true }),
+    },
+    {
+      name: 'an unknown root file beside the logs',
+      seed: async (paths: FoundationPaths) => await writeFile(join(paths.home, 'notes.txt'), 'foreign'),
+    },
+    {
+      name: 'a file in the log directory that is not a log',
+      seed: async (paths: FoundationPaths) => await writeFile(join(paths.logs, 'notes.txt'), 'foreign'),
+    },
+    {
+      name: 'a name ending in .log that is a directory',
+      seed: async (paths: FoundationPaths) => await mkdir(join(paths.logs, 'archive.log'), { recursive: true }),
+    },
+    {
+      name: 'a subdirectory of the log directory',
+      seed: async (paths: FoundationPaths) => await mkdir(join(paths.logs, 'archive'), { recursive: true }),
+    },
+  ])('should still refuse a lockless home holding $name', async ({ seed }) => {
+    // Arrange — the log directory alone is legitimate; it does not license anything beside it.
+    const home = await createTemporaryHome();
+    const paths = pathsFor(home);
+    await mkdir(paths.logs, { recursive: true });
+    await seed(paths);
+    const before = await entriesOf(home);
+
+    // Act
+    const error = await capturedError(async () => await openStorage(home));
+
+    // Assert
+    should(error instanceof StateHomeLayoutError).be.true();
+    should((error as StateHomeLayoutError).decision.reason).equal('missing-marker');
+    should(await exists(paths.layoutVersion)).be.false();
+    should(await exists(paths.daemonLock)).be.false();
+    should(await entriesOf(home)).deepEqual(before);
   });
 });
 
@@ -241,6 +340,19 @@ describe('foreign state-home refusal', () => {
         await writeFile(join(paths.temporary, 'daemon.json.abc.tmp'), 'foreign');
       },
       survivor: (paths: FoundationPaths) => join(paths.temporary, 'daemon.json.abc.tmp'),
+    },
+    {
+      name: 'a non-log file in the log directory',
+      seed: async (paths: FoundationPaths) => {
+        await mkdir(paths.logs, { recursive: true });
+        await writeFile(join(paths.logs, 'notes.txt'), 'foreign');
+      },
+      survivor: (paths: FoundationPaths) => join(paths.logs, 'notes.txt'),
+    },
+    {
+      name: 'a directory below the log directory',
+      seed: async (paths: FoundationPaths) => await mkdir(join(paths.logs, 'archive'), { recursive: true }),
+      survivor: (paths: FoundationPaths) => join(paths.logs, 'archive'),
     },
     {
       name: 'an unknown directory below state',

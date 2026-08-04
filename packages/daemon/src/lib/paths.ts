@@ -12,6 +12,15 @@ export interface FoundationPaths {
   readonly routingCatalog: string;
   readonly fleet: string;
   readonly fleetManifest: string;
+  /**
+   * Where the daemon's own log is written, by whoever supervises it.
+   *
+   * Declared here even though nothing in this package writes to it. The CLI creates this directory
+   * before it launches the daemon, so it is the ONE entry that can legitimately exist in an
+   * otherwise-fresh state home — and a layout model that did not name it read our own log directory
+   * as somebody else's data and refused to bootstrap any clean machine.
+   */
+  readonly logs: string;
   readonly state: string;
   readonly index: string;
   readonly sessionIndex: string;
@@ -52,6 +61,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     routingCatalog: join(config, 'routing.json'),
     fleet,
     fleetManifest: join(fleet, 'manifest.json'),
+    logs: join(home, 'logs'),
     state,
     index,
     sessionIndex: join(index, 'sessions.sqlite'),
@@ -75,7 +85,7 @@ export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId)
 }
 
 export function requiredLayoutDirectories(paths: FoundationPaths): readonly string[] {
-  return [paths.home, paths.config, paths.fleet, paths.state, paths.index, paths.sessions, paths.temporary];
+  return [paths.home, paths.config, paths.fleet, paths.logs, paths.state, paths.index, paths.sessions, paths.temporary];
 }
 
 /**

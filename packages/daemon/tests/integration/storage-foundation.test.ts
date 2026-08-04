@@ -212,7 +212,7 @@ describe('state-home lifecycle', () => {
 
     // Assert
     should(first.layout.created).be.true();
-    should(firstEntries).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'state']);
+    should(firstEntries).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'logs', 'state']);
     should(await readFile(second.paths.layoutVersion, 'utf8')).equal('1\n');
     should(second.layout.created).be.false();
   });
