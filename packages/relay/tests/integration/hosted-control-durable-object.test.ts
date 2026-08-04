@@ -65,6 +65,17 @@ describe('hosted relay control Durable Object', () => {
     const metrics = await harness.object.fetch(request('/operator/metrics'));
     should(await metrics.json()).match({ configured: false, global: { trackedDaemons: 0 }, daemons: [] });
 
+    for (const [path, body] of [
+      ['/internal/reserve', { daemonId, reservationId: 'reservation_0001' }],
+      ['/internal/meter', { daemonId, bytes: 1 }],
+      ['/internal/inspect', { daemonId }],
+    ] as const) {
+      should(await (await harness.object.fetch(request(path, 'POST', body))).json()).match({
+        ok: false,
+        code: RELAY_CLOSE_CODES.hostedDisabled,
+      });
+    }
+
     harness.storage.values.set('metrics:daemon:orphan', {});
     should((await harness.object.fetch(request('/public/configuration'))).status).equal(503);
   });
