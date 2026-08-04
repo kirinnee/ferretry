@@ -248,7 +248,21 @@ describe('TmuxSessionLifecycleLauncher', () => {
     should(port.calls).deepEqual([
       ['has-session', '-t', 'fy-tmux-session'],
       ['has-session', '-t', 'fy-tmux-session'],
-      ['new-session', '-d', '-s', 'fy-tmux-session', '-c', '/workspace/project', AGENT, '--mode', 'auto'],
+      // A session with no stored environment still launches carrying its OWN id: the identity is
+      // derived from the record, so it does not depend on a file the session may never have had.
+      [
+        'new-session',
+        '-d',
+        '-s',
+        'fy-tmux-session',
+        '-c',
+        '/workspace/project',
+        '-e',
+        'FY_SESSION_ID=tmux-session',
+        AGENT,
+        '--mode',
+        'auto',
+      ],
       ['set-option', '-t', 'fy-tmux-session', 'remain-on-exit', 'on'],
       ['has-session', '-t', 'fy-tmux-session'],
       ['has-session', '-t', 'fy-tmux-session'],
@@ -511,6 +525,12 @@ describe('the composed session lifecycle', () => {
     // Assert — the pane really was launched carrying the secret, under the name the CLI reads.
     should(capability).be.a.String().and.not.be.empty();
     should(newSession).containDeep(['-e', `FY_SESSION_BOARD_CAPABILITY=${capability}`]);
+    // The stored secret and the DERIVED identity compose rather than displacing one another: the
+    // pane gets both, in the same launch, under the two names the CLI reads.
+    should(newSession).containDeep(['-e', `FY_SESSION_ID=${id}`]);
+    // The id is never written into the environment document. It is on the record already, so storing
+    // it would only create a second copy that a merge could contradict.
+    should(await environment.read(id)).not.have.property('FY_SESSION_ID');
     // `-e` is an option of new-session, so it has to precede the agent word to be an environment
     // entry at all rather than an argument handed to the agent.
     should(newSession?.indexOf('-e')).be.below(newSession?.indexOf(AGENT) ?? -1);

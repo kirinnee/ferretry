@@ -7,6 +7,7 @@ import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
   type SessionLifecycleEvent,
+  SESSION_ID_VARIABLE,
   type SessionLifecycleRecord,
   SessionLifecycleRecordSchema,
 } from './types.ts';
@@ -54,6 +55,29 @@ export function assignedTaskDocument(prompt: string): string {
 /** What is typed into a ready terminal so the agent picks its assignment up. */
 export function firstTurnInstruction(taskFile: string): string {
   return `Read the file ${taskFile} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+}
+
+/**
+ * The environment one pane is launched with: whatever the session's own environment store holds,
+ * plus the identity the daemon derives from the id itself.
+ *
+ * THE IDENTITY IS DERIVED, NEVER STORED, and it is written LAST so nothing can rename the session.
+ * The stored document is read-modify-written by a third party — a task board delivering a grant
+ * merges variables into it — and it can be absent entirely for a session created before the store
+ * existed. Either would cost a pane its own name if the id came from the file: a merge that shipped
+ * an `FY_SESSION_ID` would make the pane claim to be a different session, and a lost file would make
+ * it claim to be nobody. The id is on the record the launch is already reading, so this cannot fail
+ * for a reason the record cannot see.
+ *
+ * Both launch paths call it — the first launch and the revive that replaces a dead pane — because a
+ * session that could identify itself until its pane was replaced is worse than one that never could:
+ * the failure arrives later, in the middle of a conversation, and looks like the peer going silent.
+ */
+export function sessionPaneEnvironment(
+  id: SessionId,
+  stored: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return { ...stored, [SESSION_ID_VARIABLE]: id };
 }
 
 /** Everything the daemon had to resolve before a record could be built. */

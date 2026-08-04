@@ -17,9 +17,11 @@ import {
   PairingResponseSchema,
   ProposalViewSchema,
   RunManifestSchema,
+  SendResultSchema,
   SessionConfigSchema,
   SessionListSchema,
   SessionStateSchema,
+  type SessionView,
   SessionViewSchema,
   SocketTicketResponseSchema,
   TerminalListViewSchema,
@@ -43,6 +45,8 @@ import {
   type ProcessObservation,
   parseSessionId,
   type ResumeLauncher,
+  SESSION_ID_VARIABLE,
+  sessionPaneEnvironment,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   SocketTicketRegistry,
@@ -319,16 +323,29 @@ class RecordingResumeLauncher implements ResumeLauncher {
  */
 class StubProcessInventory implements ProcessInventoryPort {
   observation: ProcessObservation = { kind: 'observed', processes: [] };
+  /** How many times the gate actually walked a pane. A refusal decided ABOVE the gate leaves it at 0. */
+  collections = 0;
 
   async collect(): Promise<ProcessObservation> {
+    this.collections += 1;
     return this.observation;
   }
 }
 
 /** The wrapper name the seeded fleet publishes. It must match the lifecycle's auto-wrapper rule. */
 const WRAPPER = 'claude-auto-boot';
-/** The account a migration moves onto: a different harness family, so the relaunch argv must change. */
-const TARGET_WRAPPER = 'codex-auto-target';
+/**
+ * The account a migration moves onto: the SAME harness family, a different account, and a smaller
+ * context window.
+ *
+ * Same family because that is the only migration the daemon performs — a session keeps its
+ * transcript, its turn counter and its open tool ids across the move, and none of those means anything
+ * to another harness. Smaller window so the downgrade refusal stays reachable without inventing a
+ * session state.
+ */
+const TARGET_WRAPPER = 'claude-auto-target';
+/** An account of the OTHER family, published so the cross-family refusal has something real to name. */
+const CROSS_FAMILY_WRAPPER = 'codex-auto-target';
 
 /**
  * A fleet whose one account is published under a wrapper this host can actually run.
@@ -372,18 +389,18 @@ async function seedFleet(home: string): Promise<string> {
 }
 
 /**
- * A fleet with somewhere to migrate TO.
+ * A fleet with somewhere to migrate TO, and somewhere a migration must REFUSE to go.
  *
- * The two accounts differ in the two ways a migration has to survive: a different harness family, so
- * the relaunch argv cannot be the old one patched, and a smaller context window, so the downgrade
- * refusal is reachable without inventing a session state. The `[1m]` marker is the configuration
- * convention `contextWindowFor` reads — it is how a session comes to be running in a million-token
- * window in the first place.
+ * Three accounts, because a migration has three answers to give. The origin serves a million-token
+ * window — the `[1m]` marker is the configuration convention `contextWindowFor` reads, and it is how a
+ * session comes to be running in one. The same-family target serves the default 200k, so the downgrade
+ * refusal is reachable without inventing a session state. The cross-family account is published and
+ * available and this host can run it: it is refused for what it IS, not for anything missing about it.
  */
 async function seedMigrationFleet(home: string): Promise<void> {
   const binary = join(home, 'bin');
   await mkdir(binary, { recursive: true });
-  for (const wrapper of [WRAPPER, TARGET_WRAPPER])
+  for (const wrapper of [WRAPPER, TARGET_WRAPPER, CROSS_FAMILY_WRAPPER])
     await writeFile(join(binary, wrapper), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   await mkdir(join(home, 'fleet'), { recursive: true });
   await writeFile(
@@ -403,9 +420,19 @@ async function seedMigrationFleet(home: string): Promise<void> {
         {
           id: 'account-target',
           agent: TARGET_WRAPPER,
-          kind: 'codex',
+          kind: 'claude',
           mode: 'auto',
           displayName: 'Target',
+          defaultModel: 'claude-sonnet-5',
+          models: [{ id: 'claude-sonnet-5', available: true }],
+          available: true,
+        },
+        {
+          id: 'account-cross-family',
+          agent: CROSS_FAMILY_WRAPPER,
+          kind: 'codex',
+          mode: 'auto',
+          displayName: 'Other Family',
           defaultModel: 'gpt-5.6-terra',
           models: [{ id: 'gpt-5.6-terra', available: true }],
           available: true,
@@ -1500,6 +1527,142 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * ONE TEAMMATE TALKING TO ANOTHER, attributed, through the production composition root.
+   *
+   * THE CHAIN THIS CLOSES. `FY_SESSION_ID` appeared nowhere in this daemon, so the third link of a
+   * four-link chain was missing and the whole feature was dead:
+   *
+   *   1. the launcher exports the pane's own id as `FY_SESSION_ID` — proved against real `new-session`
+   *      arguments in `tests/integration/session/lifecycle/storage-and-tmux.test.ts`;
+   *   2. the CLI reads it and sends it as `x-ferretry-session-id` (`resolveConnection`, CLI suite);
+   *   3. the authorization boundary turns that header into `peer:<id>` and the send mount takes `from`
+   *      from THAT and never from the body — this case;
+   *   4. the send domain attributes the message and ends the recipient's park on it.
+   *
+   * Only the value in step 1 is what step 3 reads back, and it is the session's own id — so the header
+   * here carries exactly what a real pane would have in its environment. Before this, every peer
+   * message was anonymous: the receiving agent was told nothing about who was talking to it, and no
+   * `--peer` park could ever end.
+   *
+   * THE CONTROL MATTERS AS MUCH AS THE CASE. The same send with no session header must journal NO
+   * `from`, because that is the bug's own signature — an attribution that appears whatever the caller
+   * presents would prove nothing about where it came from.
+   */
+  it('should attribute a peer send to the sending session, and only when it identifies itself', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-peer-send');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: () => reviver,
+    };
+    await seedFleet(home);
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-ferretry-client': 'cli',
+    };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startSession = async (name: string, requestId: string): Promise<SessionView> => {
+      const response = await fetch(sessions, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': requestId },
+        body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: `work on ${name}`, name, cwd: home }),
+      });
+      const raw: unknown = await response.json();
+      if (response.status !== 201) throw new Error(`the fixture start failed: ${JSON.stringify(raw)}`);
+      return SessionViewSchema.parse(raw);
+    };
+    // Two real sessions, because attribution is a fact about a pair: the sender must be a session the
+    // daemon can resolve, or the reference degrades to an unattributed send.
+    const sender = await startSession('Peer Sender', 'req-peer-sender');
+    const recipient = await startSession('Peer Recipient', 'req-peer-recipient');
+    const journalOf = async (id: string): Promise<Array<Record<string, unknown>>> =>
+      (await readFile(join(home, 'state', 'sessions', id, 'events.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map(line => JSON.parse(line) as Record<string, unknown>);
+    const send = async (headers: Readonly<Record<string, string>>, message: string, requestId: string) =>
+      await fetch(`${sessions}/${recipient.config.id}/send`, {
+        method: 'POST',
+        headers: { ...cli, ...headers, 'x-fy-request-id': requestId },
+        body: JSON.stringify({ message }),
+      });
+
+    // Act
+    // A live harness at a prompt, so the message is handed to the agent rather than queued.
+    reviver.pane = { alive: true, dead: false, promptReady: true };
+    // THE HEADER VALUE IS TAKEN FROM THE PRODUCTION PANE ENVIRONMENT, not written as a literal: this is
+    // the same function the launcher hands to `tmux -e`, so the two halves of the chain meet on one
+    // value rather than on two spellings of it. A pane launched with no identity — the state this unit
+    // found the daemon in — presents nothing here, and every assertion about `from` below fails.
+    const paneEnvironment = sessionPaneEnvironment(parseSessionId(sender.config.id), {});
+    const attributed = await send(
+      { 'x-ferretry-session-id': paneEnvironment[SESSION_ID_VARIABLE] ?? '' },
+      'the gate is green, pick up the migration',
+      'req-peer-send-1',
+    );
+    const attributedBody: unknown = await attributed.json();
+    const afterAttributed = await journalOf(recipient.config.id);
+    const delivered = reviver.delivered.at(-1);
+    const outbox = await readFile(
+      join(home, 'state', 'sessions', sender.config.id, 'channel', 'outbox.jsonl'),
+      'utf8',
+    ).catch(() => undefined);
+    const inbox = await readFile(
+      join(home, 'state', 'sessions', recipient.config.id, 'channel', 'inbox.jsonl'),
+      'utf8',
+    );
+    // The control: the human's own CLI, holding the same admin token and naming no pane.
+    const anonymous = await send({}, 'and this one is from the human', 'req-peer-send-2');
+    const afterAnonymous = await journalOf(recipient.config.id);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(attributed.status).equal(200);
+    should(SendResultSchema.parse(attributedBody).config.id).equal(recipient.config.id);
+    // THE JOURNAL NAMES THE SENDER. `from` is the server's own resolution of the peer actor — the
+    // route reads it off `peer:<id>` and refuses to read it from the body — so this row is the proof
+    // that an in-pane caller can identify itself at all.
+    const accepted = afterAttributed.filter(entry => entry.type === 'control.send_accepted');
+    should(accepted).have.length(1);
+    should(accepted[0]?.data).match({ from: sender.config.id });
+    // The receiving agent is TOLD who is talking to it, in the payload it actually reads. An
+    // unattributed peer message is one an agent cannot reply to.
+    should(delivered).containEql(`session ${sender.config.id}`);
+    should(delivered).containEql('not from the human lead');
+    // Both halves of the conversation are durable: the recipient's inbox and the sender's own outbox.
+    should(inbox).containEql(`"from":"${sender.config.id}"`);
+    should(outbox).containEql(`"to":"${recipient.config.id}"`);
+    // AND THE CONTROL: the human's send is journalled with no sender at all. Attribution comes from
+    // the credential and the pane header, so a caller that names no pane is not given one.
+    const anonymousAccepted = afterAnonymous
+      .filter(entry => entry.type === 'control.send_accepted')
+      .filter(entry => (entry.data as Record<string, unknown>).sendId === 'req-peer-send-2');
+    should(anonymous.status).equal(200);
+    should(anonymousAccepted).have.length(1);
+    should(anonymousAccepted[0]?.data).not.have.property('from');
+  });
+
+  /**
    * Migrating a session onto another account, driven through the production composition root.
    *
    * This proves the destructive-migration SAFETY GATE does its job rather than merely being
@@ -1512,8 +1675,13 @@ describe('daemon boot lifecycle', () => {
    * the pane capture, which cannot be driven without running the very work they inspect — so the
    * verdicts, the blind-spot rules, the refusal, the report and the handoff are production's.
    *
-   * The order of the four calls is the argument:
+   * The order of the calls is the argument:
    *
+   *   * AN ACCOUNT OF THE WRONG HARNESS FAMILY is refused first of all, and nothing is even inspected.
+   *     The CLI has always called this operation same-kind while the daemon compared nothing, so a
+   *     claude session could be migrated onto a codex account: same id, same journal, same open tool
+   *     ids, and a harness that can read none of them. The account named here is published, available
+   *     and runnable — it is refused for what it is.
    *   * A SMALLER CONTEXT WINDOW is refused before anything is inspected, because a migration that
    *     truncates the conversation it exists to preserve is not one the caller asked for.
    *   * A DESTRUCTIVE process in the pane is refused with the inventory in the message, and nothing
@@ -1579,6 +1747,28 @@ describe('daemon boot lifecycle', () => {
     // Act
     // The pane is alive and at a prompt throughout: a migration must replace it anyway.
     reviver.pane = { alive: true, dead: false, promptReady: true };
+    // A CODEX ACCOUNT, for a claude session. Published, available, runnable — and not this session's
+    // family, which is the whole of the refusal. `allowContextDowngrade` is set so the refusal cannot
+    // be the window's; the ordering assertions below are what prove nothing was touched.
+    const crossFamily = await migrate(
+      { agent: CROSS_FAMILY_WRAPPER, allowContextDowngrade: true },
+      'req-migrate-cross-1',
+    );
+    const crossFamilyBody = (await crossFamily.json()) as { error: string; code: string };
+    const afterCrossFamily = await storedConfig();
+    // Counted here: everything below is meant to inspect the pane, and this refusal must not have.
+    const collectionsAfterCrossFamily = inventory.collections;
+    const reportAfterCrossFamily = await readFile(reportFile, 'utf8').catch(() => undefined);
+    const relaunchesAfterCrossFamily = reviver.relaunched.length;
+    const snapshotsAfterCrossFamily = reviver.snapshots.length;
+    // The same refusal presented again under the SAME request id, corrected to a same-family account.
+    // A pre-destruction refusal spends no receipt, so this must be evaluated afresh rather than
+    // answered from the ledger — the caller's remedy is to fix the account, not to mint a new id.
+    const correctedUnderSameId = await migrate(
+      { agent: TARGET_WRAPPER, allowContextDowngrade: true },
+      'req-migrate-cross-1',
+    );
+    const correctedBody = (await correctedUnderSameId.json()) as { error: string; code: string };
     // The session is `running` and its pane holds nothing: an agent mid-turn is work this gate will
     // not interrupt, and it says so rather than moving a session out from under a thinking agent.
     const midTurn = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-1');
@@ -1676,6 +1866,27 @@ describe('daemon boot lifecycle', () => {
     const movedBack = await migrate({ agent: WRAPPER }, 'req-migrate-back');
     const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns'))).sort();
     const secondReport = await readFile(reportFile, 'utf8');
+    // THE OTHER DIRECTION, which is a different session rather than a different request: a codex
+    // session asked to move onto a claude account. Both crossings were permitted before, and they fail
+    // differently — a claude transcript is unreadable to codex and a codex rollout is unreadable to
+    // claude — so neither is proved by the other.
+    const codexStart = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-migrate-codex-start' },
+      body: JSON.stringify({ agent: CROSS_FAMILY_WRAPPER, mode: 'auto', prompt: 'run on codex', cwd: home }),
+    });
+    const codexRaw: unknown = await codexStart.json();
+    if (codexStart.status !== 201) throw new Error(`the codex fixture start failed: ${JSON.stringify(codexRaw)}`);
+    const codexId = SessionViewSchema.parse(codexRaw).config.id;
+    const codexToClaude = await fetch(`${sessions}/${codexId}/migrate`, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-migrate-cross-2' },
+      body: JSON.stringify({ agent: TARGET_WRAPPER, allowContextDowngrade: true }),
+    });
+    const codexToClaudeBody = (await codexToClaude.json()) as { error: string; code: string };
+    const codexConfigAfter = JSON.parse(
+      await readFile(join(home, 'state', 'sessions', codexId, 'config.json'), 'utf8'),
+    ) as Record<string, unknown>;
     const unknownAgent = await migrate(
       { agent: 'claude-auto-nowhere', allowContextDowngrade: true },
       'req-migrate-unknown',
@@ -1691,6 +1902,32 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
+    // A CROSS-FAMILY TARGET IS REFUSED, and the refusal says which families it is refusing between so
+    // the operator knows what to name instead.
+    should(crossFamily.status).equal(409);
+    should(crossFamilyBody.code).equal('harness_mismatch');
+    should(crossFamilyBody.error).containEql('runs the claude harness');
+    should(crossFamilyBody.error).containEql(`${CROSS_FAMILY_WRAPPER} is a codex account`);
+    // AND IT IS REFUSED BEFORE ANYTHING DESTRUCTIVE, which these four facts are the whole of: the
+    // pane was never walked, no report was written, the pane was neither snapshotted nor replaced, and
+    // the configuration document still names the account the session started on. Every destructive step
+    // of a migration is behind at least one of those.
+    should(collectionsAfterCrossFamily).equal(0);
+    should(reportAfterCrossFamily).be.undefined();
+    should([relaunchesAfterCrossFamily, snapshotsAfterCrossFamily]).deepEqual([0, 0]);
+    should(afterCrossFamily).have.property('agent', WRAPPER);
+    should(afterCrossFamily).not.have.property('migration');
+    // The same request id, corrected to a same-family account, is EVALUATED AGAIN rather than answered
+    // from the ledger: it reaches the preflight and is refused on the session's condition instead.
+    should(correctedUnderSameId.status).equal(409);
+    should(correctedBody.code).equal('migration_refused');
+    // The reverse crossing is refused on its own terms, and that session is untouched too.
+    should(codexToClaude.status).equal(409);
+    should(codexToClaudeBody.code).equal('harness_mismatch');
+    should(codexToClaudeBody.error).containEql('runs the codex harness');
+    should(codexToClaudeBody.error).containEql(`${TARGET_WRAPPER} is a claude account`);
+    should(codexConfigAfter).have.property('agent', CROSS_FAMILY_WRAPPER);
+    should(codexConfigAfter).have.property('harness', 'codex');
     // An agent that is mid-turn is not migrated out from under itself, and the refusal names why:
     // the record claims work the inspection could not see, which is a blind spot, not an all-clear.
     should(midTurn.status).equal(409);
@@ -1714,11 +1951,12 @@ describe('daemon boot lifecycle', () => {
     should(moved.status).equal(200);
     should(movedBody.config.id).equal(id);
     should(movedBody.config.agent).equal(TARGET_WRAPPER);
-    should(movedBody.config.harness).equal('codex');
+    // The family did NOT change, because that is the only migration there is.
+    should(movedBody.config.harness).equal('claude');
     // The argv the NEXT relaunch will run is the target's executable, not the account it left.
     should((afterMove.command as readonly string[])[0]).equal(join(home, 'bin', TARGET_WRAPPER));
     // The transcript record went with the account. The target wrapper declares no harness home, so
-    // the honest answer is NO transcript — never the departed account's file under a codex parser.
+    // the honest answer is NO transcript — never the departed account's file read as the new one's.
     should(afterMove).not.have.property('transcript');
     // The stamp analytics reads to call a session migrated, with both ends of the move in it.
     should(afterMove.migration).have.properties({ from: WRAPPER, to: TARGET_WRAPPER });

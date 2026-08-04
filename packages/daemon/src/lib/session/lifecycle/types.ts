@@ -156,6 +156,27 @@ export interface SessionEnvironmentStore {
  */
 export const SESSION_BOARD_CAPABILITY_VARIABLE = 'FY_SESSION_BOARD_CAPABILITY';
 
+/**
+ * The environment variable a pane reads its OWN session id from.
+ *
+ * It is a wire contract with the CLI exactly as the capability above is: `resolveConnection` sends
+ * whatever it finds here as `x-ferretry-session-id`, the authorization boundary turns that into
+ * `peer:<id>`, and the send domain takes its `from` — the attribution, and whose declared wait a
+ * reply ends — from that actor and from nowhere else. A pane that cannot name itself is therefore a
+ * teammate whose every message is anonymous and whose park no reply can end, which is what
+ * "agents can talk to each other" actually rests on.
+ *
+ * IT IS AN IDENTIFIER, NOT A CREDENTIAL, and that is why it may live in an environment anything in
+ * the pane can read. The board capability beside it is a secret, and it is in the pane environment
+ * for the opposite reason — there is nowhere better for a per-session secret to travel, argv being
+ * world-readable through `/proc` — with a 0600 file, a hash-only record and no API projection paying
+ * for that decision. Nothing of the sort is owed to a session id: it is already in the URL of every
+ * request about that session, and naming yourself buys no authority here. The routes a peer calls are
+ * `admin`-scoped and the token is the fleet's, so this identifies the caller for attribution rather
+ * than authorizing it.
+ */
+export const SESSION_ID_VARIABLE = 'FY_SESSION_ID';
+
 /** The credential a session proves its own identity with, beside the hash the daemon keeps. */
 export interface SessionCredential {
   /** Handed to the session and to nobody else. */
