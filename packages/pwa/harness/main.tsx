@@ -70,8 +70,8 @@ import type { RemoteBrowserSocket } from '../src/features/browser/remote-browser
 import { rememberBrowserEngine } from '../src/features/browser/unified-browser-model.ts';
 import {
   DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
-  UnifiedBrowserSurface,
   type UnifiedBrowserDependencies,
+  UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
@@ -81,9 +81,6 @@ import type { OnboardingStepId } from '../src/features/onboarding/onboarding-mod
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
 import { OnboardingProgressStore } from '../src/features/onboarding/onboarding-progress.ts';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
-import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
-import type { QrScanHost } from '../src/lib/pair-scan.ts';
-import type { PairingArrival } from '../src/lib/pairing.ts';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
@@ -104,6 +101,7 @@ import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
+import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
 import { DETAILS_TAB_ORDER, type DetailsTab } from '../src/hooks/use-details-tab.ts';
 import { useLayoutMode } from '../src/hooks/use-layout-mode.ts';
 import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
@@ -120,6 +118,8 @@ import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
 import { daemonSessionsPath } from '../src/lib/pages/routes.ts';
 import { type SessionChatClient, SessionChatPage } from '../src/lib/pages/session-chat-page.tsx';
+import type { QrScanHost } from '../src/lib/pair-scan.ts';
+import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
@@ -3215,14 +3215,9 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
       },
       {
         key: 'workspace-tool-write',
-        // `content` is not decoration. `extractToolSummary`'s write branch does
-        // `stringifySafe(object['content']).split('\n')`, and `stringifySafe`
-        // returns `undefined` for an absent key while its signature claims
-        // `string` — so a Write call without one throws inside ToolGroup and,
-        // with no error boundary over the transcript, blanks the whole page.
-        // A real Write always carries its bytes, so the fixture does too; the
-        // crash itself is a production defect and is reported, not papered over
-        // here.
+        // Keep a representative content body in the visual fixture. The parser
+        // now also tolerates an incomplete Write record without blanking the
+        // workspace; that damaged-input branch is covered by its unit test.
         use: {
           name: 'Write',
           input: {
@@ -3303,7 +3298,6 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
  * stub that casts stops being evidence the moment the contract moves.
  */
 const WORKSPACE_CLIENT: SessionChatClient = {
-  answer: async () => WORKSPACE_SESSION,
   interrupt: async () => WORKSPACE_SESSION,
   resume: async () => WORKSPACE_SESSION,
   send: async () => ({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never,
@@ -3347,6 +3341,7 @@ function SessionWorkspaceHarness() {
       />
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
+          chatWidth="readable"
           client={WORKSPACE_CLIENT}
           connection={daemon}
           entries={WORKSPACE_ENTRIES}

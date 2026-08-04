@@ -21,17 +21,8 @@ import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 
-/**
- * `answer` remains in this Pick and is deliberately NEVER CALLED.
- *
- * The daemon build does not mount `/answer`, so the page presents a structured
- * question as unanswerable instead of rendering a form whose submit could only
- * throw. The member stays because the composition root and the visual harness
- * both build this object as a literal, and TypeScript's excess-property check
- * rejects their existing `answer` the moment it leaves the type — narrowing it
- * is a one-line follow-up in those two files, neither of which this change owns.
- */
-export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'>;
+/** Only daemon operations this workspace can truthfully invoke. */
+export type SessionChatClient = Pick<IFyApiClient, 'interrupt' | 'resume' | 'send' | 'stop'>;
 
 export interface SessionChatPageProps {
   readonly connection: DaemonConnection;

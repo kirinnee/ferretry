@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
-
+import { Composer } from '../../src/components/composer.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
-import { Composer } from '../../src/components/composer.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
@@ -36,7 +35,6 @@ const buttonNamed = (root: ReactTestInstance, label: string): ReactTestInstance 
 const client = (calls: string[], next: SessionView): SessionChatClient =>
   ({
     send: async () => ({ accepted: true }),
-    answer: async () => next,
     interrupt: async (id: string) => {
       calls.push(`interrupt:${id}`);
       return next;

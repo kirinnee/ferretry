@@ -414,6 +414,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('applies the persisted chat measure to the real session surface', async () => {
+    const { store, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId]);
+    await settle();
+    const surface = must(view.container.querySelector('[data-chat-width]'), 'the chat-width surface');
+    expect(surface.getAttribute('data-chat-width')).toBe('full');
+
+    await interact(() => store.controls.setDeviceControls({ chatWidth: 'readable' }));
+
+    expect(view.container.querySelector('[data-chat-width]')).toBe(surface);
+    expect(surface.getAttribute('data-chat-width')).toBe('readable');
+    await view.unmount();
+  });
+
   it('never crosses two daemons that own the same session id', async () => {
     const { reads, transcriptReads, view } = await renderShell(
       '/d/alpha/session/shared',

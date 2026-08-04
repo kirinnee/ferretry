@@ -422,6 +422,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
+  const controls = useSyncExternalStore(store.controls.subscribe, () => store.controls.controls(daemonId));
   const session = fleet.daemons.get(scope.daemonId)?.byId.get(scope.sessionId);
   const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
@@ -493,6 +494,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       </p>
       {session !== undefined && client !== null ? (
         <SessionChatPage
+          chatWidth={controls.chatWidth}
           client={client}
           connection={connection}
           entries={entries}
