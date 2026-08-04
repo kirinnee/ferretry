@@ -15,20 +15,21 @@
  * there instead of starting over. `docs/reference-standard.md` is the model: one
  * grammar, parsed once, proved before it is trusted.
  *
- * THE TWO DIRECTIONS USE DIFFERENT CARRIERS, AND THAT IS NOT AN OVERSIGHT.
+ * THE CARRIER IS DECIDED BY THE RECEIVER, AND THAT IS NOT AN OVERSIGHT.
  *
- * - Computer → phone is a QR. The phone has a camera and the computer has a
- *   screen, so the phone reads the computer directly and nothing is typed.
- * - Phone → computer is NOT a QR, because a computer has no camera pointed at a
- *   phone. It is a link to copy, share, or read off the phone and type. The QR
- *   would look like the same mechanism and be useless, which is worse than
- *   offering the honest one.
+ * - To a phone it is a QR. The phone has a camera and the sending computer has a
+ *   screen, so the phone reads it directly and nothing is typed.
+ * - To a computer it is NOT a QR, because nothing on a desk points a camera at
+ *   another screen — not a phone's, and not another computer's. It is a link to
+ *   copy, share, or read out and type. A QR here would look like the same
+ *   mechanism and be useless, which is worse than offering the honest one.
  *
- * NOTHING IDENTIFYING TRAVELS. The payload is a route id, a step id and at most a
- * connection choice — three closed unions, all of them already public constants
- * in this bundle. No daemon address, no code, no token, no name. A hand-off link
- * is safe to photograph, and it has to be, because photographing it is the point.
- * A pairing code travels the OTHER way, from `fy pair`, and never through here.
+ * NOTHING IDENTIFYING TRAVELS. The payload is a route, a step, and at most which
+ * computer, who installs it and which carrier — five closed unions, all of them
+ * already public constants in this bundle. No daemon address, no code, no token,
+ * no name. A hand-off link is safe to photograph, and it has to be, because
+ * photographing it is the point. A pairing code travels the OTHER way, from
+ * `fy pair`, and never through here.
  */
 
 import qrcode from 'qrcode-generator';
@@ -37,55 +38,122 @@ import {
   type ConnectionMethodId,
   firstOnboardingStep,
   isConnectionMethodId,
+  isDaemonRouteId,
+  isOnboardingDoerId,
   isOnboardingRouteId,
   isOnboardingStepId,
+  isSetupTargetId,
   isStepOfRoute,
+  isTargetPossible,
+  type OnboardingDaemonRouteId,
+  type OnboardingDoerId,
+  type OnboardingJourney,
   type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
+  presumedTarget,
+  type SetupTargetId,
 } from './onboarding-model.ts';
 import type { DeviceKind } from './device-kind.ts';
 
 /** The fragment key. Distinct from the `#v1;` a pairing link uses — these are not the same claim. */
 export const SETUP_HANDOFF_KEY = 'fy-setup';
 
-/** The payload grammar's version, so a future shape can be refused rather than misread. */
-export const SETUP_HANDOFF_VERSION = 'v1';
+/**
+ * The payload grammar's version, so a future shape can be refused rather than misread.
+ *
+ * It moved from `v1` to `v2` when the daemon subflow gained its two answers. A
+ * `v1` payload was three positional fields — version, route, step — and a route
+ * plus a step is no longer enough to say what journey somebody meant: `install`
+ * belongs to "this computer, by hand" and nothing in a `v1` link says so. Rather
+ * than infer it, a `v1` link is refused, and its reader answers the entry question
+ * once. These links are minutes-old artifacts of a setup in progress, so the cost
+ * of refusing one is a tap; the cost of guessing is a journey nobody chose.
+ */
+export const SETUP_HANDOFF_VERSION = 'v2';
 
 /** Where the other device should open, and what it should already have decided. */
 export interface SetupHandoff {
   readonly route: OnboardingRouteId;
   readonly step: OnboardingStepId;
+  /** Which computer runs the daemon. Only the daemon subflow has one. */
+  readonly target?: SetupTargetId | undefined;
+  /** Who installs it. Only the daemon subflow has one. */
+  readonly doer?: OnboardingDoerId | undefined;
   readonly connection?: ConnectionMethodId | undefined;
 }
+
+/** The keys a payload may carry, so an unknown one is refused rather than ignored. */
+const FIELDS = ['route', 'step', 'target', 'doer', 'connection'] as const;
 
 /**
  * The payload, as it appears after the `=`.
  *
  * Semicolons rather than JSON: this is read aloud, typed by hand and printed
  * inside a QR whose size grows with every character, and a base64 blob is three
- * of those things done badly. It is also legible — somebody who is about to open
- * a link on their laptop can see that it says `first-time` and `install` and
- * nothing else.
+ * of those things done badly. NAMED rather than positional since `v2` — five
+ * fields of which three are optional cannot be read by counting, and the reader
+ * about to open this on their laptop can still see that it says `first-time`,
+ * `this`, `self` and `install` and nothing else.
  */
 export const encodeSetupHandoff = (handoff: SetupHandoff): string =>
-  [SETUP_HANDOFF_VERSION, handoff.route, handoff.step, ...(handoff.connection ? [handoff.connection] : [])].join(';');
+  [
+    SETUP_HANDOFF_VERSION,
+    `route=${handoff.route}`,
+    ...(handoff.target === undefined ? [] : [`target=${handoff.target}`]),
+    ...(handoff.doer === undefined ? [] : [`doer=${handoff.doer}`]),
+    `step=${handoff.step}`,
+    ...(handoff.connection === undefined ? [] : [`connection=${handoff.connection}`]),
+  ].join(';');
+
+/** The named fields of a payload, or nothing if any token is not exactly one field. */
+const payloadFields = (raw: string): Map<string, string> | undefined => {
+  const [version, ...tokens] = raw.split(';');
+  if (version !== SETUP_HANDOFF_VERSION) return undefined;
+  const fields = new Map<string, string>();
+  for (const token of tokens) {
+    const at = token.indexOf('=');
+    const key = at < 0 ? '' : token.slice(0, at);
+    if (!FIELDS.some(known => known === key) || fields.has(key)) return undefined;
+    fields.set(key, token.slice(at + 1));
+  }
+  return fields;
+};
 
 /**
  * A payload, or nothing — never a partial one.
  *
  * PARSE, DO NOT VALIDATE, and refuse rather than repair. A link whose step is not
  * a step, or whose version is not this one, is not a hand-off with a typo in it;
- * it is something else, and guessing which route its author meant would land a
- * reader in a journey nobody chose. The chooser is always a correct answer here.
+ * it is something else, and guessing which journey its author meant would land a
+ * reader somewhere nobody chose. The entry chooser is always a correct answer here.
+ *
+ * A FIELD THAT COULD NOT MATTER IS A REFUSAL, not something to drop quietly. The
+ * pairing entry has no target, no doer and no carrier, and a daemon living on
+ * another machine has no carrier to choose here either — so a payload carrying one
+ * of those was not produced by this page, and the honest reading of a payload
+ * nobody here wrote is that it is not a hand-off.
  */
 export const parseSetupHandoff = (raw: string | null | undefined): SetupHandoff | undefined => {
   if (!raw) return undefined;
-  const [version, route, step, connection, ...rest] = raw.split(';');
-  if (version !== SETUP_HANDOFF_VERSION || rest.length > 0) return undefined;
+  const fields = payloadFields(raw);
+  if (fields === undefined) return undefined;
+  const route = fields.get('route');
+  const step = fields.get('step');
   if (!isOnboardingRouteId(route) || !isOnboardingStepId(step)) return undefined;
-  if (connection !== undefined && !isConnectionMethodId(connection)) return undefined;
-  return { route, step, ...(connection === undefined ? {} : { connection }) };
+  const target = fields.get('target');
+  const doer = fields.get('doer');
+  const connection = fields.get('connection');
+  if (target !== undefined && (!isSetupTargetId(target) || !isDaemonRouteId(route))) return undefined;
+  if (doer !== undefined && (!isOnboardingDoerId(doer) || !isDaemonRouteId(route))) return undefined;
+  if (connection !== undefined && (!isConnectionMethodId(connection) || target !== 'this')) return undefined;
+  return {
+    route,
+    step,
+    ...(target === undefined ? {} : { target }),
+    ...(doer === undefined ? {} : { doer }),
+    ...(connection === undefined ? {} : { connection }),
+  };
 };
 
 /**
@@ -124,28 +192,62 @@ export const setupHandoffUrl = (href: string, handoff: SetupHandoff): string => 
  * The same link with the place stripped off — the one a human can retype.
  *
  * A reader who is copying this off a phone screen onto a laptop keyboard should
- * not have to transcribe `#fy-setup=v1;first-time;install` correctly, and they do
- * not need to: the bare setup page asks the same question, and answering it by
- * hand costs one tap. Offered BESIDE the full link, never instead of it.
+ * not have to transcribe `#fy-setup=v2;route=first-time;target=this;doer=self;step=install`
+ * correctly, and they do not need to: the bare setup page asks the same question,
+ * and answering it by hand costs two taps. Offered BESIDE the full link, never
+ * instead of it.
  */
 export const setupPageUrl = (href: string): string => new URL('/setup', href).toString();
 
 /**
  * Where a hand-off actually lands, once the receiving device has had its say.
  *
- * The sender knows what it meant; only the receiver knows what it is. A computer
- * handing `add-client` at `pair` to a phone is proposing a step that phone's route
- * really does have. A stale or hostile link proposing `install` to a phone is
- * proposing something a phone cannot do, and the honest landing is that route's
- * own first step — the reader still gets the route they were sent to, and never a
- * screen their device cannot act on.
+ * THE SENDER KNOWS WHAT IT MEANT; ONLY THE RECEIVER KNOWS WHAT IT IS, and the two
+ * disagreements this has to survive are not the same:
+ *
+ * - A LINK PROPOSING SOMETHING THE HARDWARE FORBIDS loses. A stale or hostile
+ *   payload telling a phone that it runs the daemon proposes the one thing a phone
+ *   can never do, so the phone keeps its own forced answer and lands on the screen
+ *   that hands the daemon half to a computer. Refusing outright would drop
+ *   somebody who is mid-setup back to the beginning over a field they never typed.
+ * - A LINK THAT DOES NOT SAY ENOUGH ASKS. A payload with no doer names a journey
+ *   whose steps are not decided yet, and inventing one would be exactly the
+ *   damaged-state-as-empty-state mistake — so the reader is asked that question,
+ *   with everything the link DID say already answered.
  */
-export const landSetupHandoff = (
-  handoff: SetupHandoff,
-  device: DeviceKind,
-): { readonly path: OnboardingPath; readonly step: OnboardingStepId } => {
-  const path: OnboardingPath = { route: handoff.route, device, connection: handoff.connection };
-  return { path, step: isStepOfRoute(path, handoff.step) ? handoff.step : firstOnboardingStep(path) };
+export type SetupLanding =
+  | { readonly kind: 'walk'; readonly journey: OnboardingJourney; readonly step: OnboardingStepId }
+  | {
+      readonly kind: 'ask';
+      readonly question: 'target' | 'doer';
+      readonly route: OnboardingDaemonRouteId;
+      readonly target?: SetupTargetId | undefined;
+    };
+
+/** The journey a landing walks, opened at the proposed step when that step is really on it. */
+const walkFrom = (journey: OnboardingJourney, device: DeviceKind, step: OnboardingStepId): SetupLanding => {
+  const path: OnboardingPath = { ...journey, device };
+  return { kind: 'walk', journey, step: isStepOfRoute(path, step) ? step : firstOnboardingStep(path) };
+};
+
+export const landSetupHandoff = (handoff: SetupHandoff, device: DeviceKind): SetupLanding => {
+  const route = handoff.route;
+  if (!isDaemonRouteId(route)) return walkFrom({ route }, device, handoff.step);
+  const presumed = presumedTarget(route, device);
+  /* The device's own answer wins whenever the proposed one is impossible here. */
+  const target = handoff.target !== undefined && isTargetPossible(handoff.target, device) ? handoff.target : presumed;
+  if (target === undefined) return { kind: 'ask', question: 'target', route };
+  if (handoff.doer === undefined) return { kind: 'ask', question: 'doer', route, target };
+  return walkFrom(
+    {
+      route,
+      target,
+      doer: handoff.doer,
+      ...(handoff.connection === undefined || target !== 'this' ? {} : { connection: handoff.connection }),
+    },
+    device,
+    handoff.step,
+  );
 };
 
 /**
