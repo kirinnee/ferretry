@@ -50,6 +50,26 @@ export interface ITerminalSize {
 }
 
 /**
+ * Hands a URL to whatever this host uses to open one.
+ *
+ * THE POINT OF THIS PORT is the case where the daemon and the browser are the
+ * SAME MACHINE, which is the ordinary first run and the one the old flow served
+ * worst: it printed a QR and waited for the operator to photograph their own
+ * screen with a phone, so the phone could carry a code back to a browser
+ * eighteen inches away. `--open` sends the link straight to the local browser,
+ * and the reader lands in the app already paired.
+ *
+ * `open` RESOLVES TO WHETHER IT WORKED rather than throwing. A headless box, a
+ * remote shell, an SSH session without forwarding and a locked-down desktop are
+ * all ordinary places to run this, and none of them is an error — the QR and the
+ * link are still on the screen, which is what the reader falls back to. What
+ * would be a real failure is reporting success on a browser that never opened.
+ */
+export interface IBrowserOpener {
+  open(url: string): Promise<boolean>;
+}
+
+/**
  * The daemon calls pairing needs.
  *
  * `status` takes the pairing id and never the code. That is why a mint answers with both: a pairing id

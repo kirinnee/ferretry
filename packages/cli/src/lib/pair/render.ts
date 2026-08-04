@@ -204,3 +204,31 @@ export function renderUnconfirmed(reason: string, binaryName: string): string {
     `Run \`${binaryName} pair\` again once the daemon answers.`,
   ].join(' ');
 }
+
+/**
+ * Said when `--open` handed the link to this host's browser.
+ *
+ * The QR stays on the screen above it. A reader whose browser opened does not
+ * need it, and a reader who asked for `--open` on a machine that ALSO has a
+ * phone nearby may still prefer the phone — withdrawing the code the moment a
+ * window opened would take away a choice for no reason.
+ */
+export function renderOpenedBrowser(): string {
+  return 'Opened the pairing link in this host’s browser — it lands in Ferretry already paired.';
+}
+
+/**
+ * Said when it did not, which is not an error.
+ *
+ * A headless box, an SSH session and a locked-down desktop are all ordinary
+ * places to run this. The code is untouched and the screen above still holds the
+ * QR and the link, so this says what happened and points at what still works
+ * rather than reporting a failure the operator has to interpret.
+ */
+export function renderBrowserRefused(binaryName: string): string {
+  return (
+    'Could not open a browser on this host — no display, a remote shell, or a desktop that declined. ' +
+    `The code above is untouched: scan the QR, or paste the link into any browser that can reach this machine. ` +
+    `\`${binaryName} pair\` without --open prints the same screen.`
+  );
+}
