@@ -50,10 +50,12 @@ import {
   REFERENCE_ORIGIN_ATTRIBUTE,
   type ReferenceResolvers,
   type ResolvedReference,
+  type ResolvedSurfaceReference,
   referenceHref,
   referenceIdentity,
   remarkReferences,
   revalidateReference,
+  type SurfaceReferenceResolver,
   type TaskReferenceResolver,
 } from '../lib/references.ts';
 import { remarkTableLabels } from '../lib/remark-table-labels.ts';
@@ -101,11 +103,19 @@ export interface MarkdownProps {
   readonly taskReferenceResolver?: TaskReferenceResolver;
   /** Proves `!attention` against this session's ledger. */
   readonly attentionReferenceResolver?: AttentionReferenceResolver;
+  /** Proves `%terminal:…` against the surfaces THIS session owns. It is also what
+   *  makes a tombstone possible: only this resolver can say "closed" rather than
+   *  "unknown". */
+  readonly surfaceReferenceResolver?: SurfaceReferenceResolver;
   /** Session filesystem context. Without it, code-shaped text stays plain. */
   readonly resolveFilePaths?: FilePathResolver;
   readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
   readonly onCodeReferenceOpen?: (reference: CodeReference, opener?: HTMLElement | null) => void;
   readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
+  /** Focuses one proved live surface — the terminal or page the token names.
+   *  Without it a proved surface stays inert text, exactly like a task reference
+   *  in a surface that cannot open a task board. */
+  readonly onSurfaceOpen?: (reference: ResolvedSurfaceReference, opener?: HTMLElement | null) => void;
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
 }
@@ -116,10 +126,12 @@ export const Markdown = memo(function Markdown({
   agentReferenceResolver,
   taskReferenceResolver,
   attentionReferenceResolver,
+  surfaceReferenceResolver,
   resolveFilePaths,
   onTaskOpen,
   onCodeReferenceOpen,
   onAttentionOpen,
+  onSurfaceOpen,
   onNavigate,
 }: MarkdownProps) {
   const codeReferenceCandidates = useMemo(
@@ -158,6 +170,7 @@ export const Markdown = memo(function Markdown({
     file: path => resolvedPaths.get(path) ?? null,
     task: taskReferenceResolver,
     attention: attentionReferenceResolver,
+    surface: surfaceReferenceResolver,
   };
   // Re-proving a rendered link asks whether its CANONICAL path is still one we
   // resolved, not whether the authored candidate maps to it again.
@@ -187,6 +200,9 @@ export const Markdown = memo(function Markdown({
       case 'attention':
         onAttentionOpen?.(target.id, opener);
         break;
+      case 'surface':
+        onSurfaceOpen?.(target, opener);
+        break;
     }
   };
 
@@ -200,6 +216,8 @@ export const Markdown = memo(function Markdown({
         return onTaskOpen !== undefined;
       case 'attention':
         return onAttentionOpen !== undefined;
+      case 'surface':
+        return onSurfaceOpen !== undefined;
     }
   };
 
