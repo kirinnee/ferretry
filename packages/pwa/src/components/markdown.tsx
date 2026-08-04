@@ -225,7 +225,10 @@ export const Markdown = memo(function Markdown({
   const hasOpener = (target: ResolvedReference): boolean => {
     switch (target.kind) {
       case 'agent':
-        return true;
+        // A proved agent whose destination cannot be reached is still a dead
+        // link: the click handler prevents the browser's own navigation, so
+        // without `onNavigate` the anchor would swallow the press and do nothing.
+        return onNavigate !== undefined;
       case 'file':
         return onCodeReferenceOpen !== undefined;
       case 'task':

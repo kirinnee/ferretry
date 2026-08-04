@@ -141,7 +141,9 @@ describe('Markdown references', () => {
 
   test('should link a proved agent reference to its own daemon session path', () => {
     // Act
-    const tree = render(<Markdown agentReferenceResolver={agentResolver(daemonA)} text="ping :zelda" />);
+    const tree = render(
+      <Markdown agentReferenceResolver={agentResolver(daemonA)} onNavigate={() => undefined} text="ping :zelda" />,
+    );
 
     // Assert
     const anchor = anchorsOf(tree.root)[0];
@@ -253,6 +255,15 @@ describe('Markdown references', () => {
   test('should leave a proved reference inert when the host offers no opener for its kind', () => {
     // Act
     const tree = render(<Markdown taskReferenceResolver={() => true} text="see &F12" />);
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
+  test('should keep a proved agent reference as prose when it has nowhere to navigate', () => {
+    // Act — the click handler prevents the browser's own navigation, so an
+    // anchor without `onNavigate` would swallow the press and do nothing.
+    const tree = render(<Markdown agentReferenceResolver={agentResolver(daemonA)} text="ping :zelda" />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
