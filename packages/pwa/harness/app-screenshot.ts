@@ -98,8 +98,27 @@ function fail(message: string): never {
 
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * The relay directory origin this REVIEW bundle is built with.
+ *
+ * The shipped code only asks for an advertisement when the build supplied an
+ * origin, so a bundle built without one can never render the advertising or
+ * switched-off frames — it short-circuits, correctly, to "no directory". Building
+ * the review copy with an origin is what makes those frames reachable at all, and
+ * it exercises the whole chain: build constant, request, parse, readout.
+ *
+ * `.invalid` because the reserved TLD cannot resolve, and because this harness
+ * aborts every off-origin request anyway. Nothing here may address a real
+ * service, and the answers themselves come from request interception.
+ */
+const RELAY_DIRECTORY = 'https://relay-directory.example.invalid';
+
 process.stdout.write('📦 building the real bundle…\n');
-const build = spawnSync('./node_modules/.bin/vite', ['build'], { cwd: packageDir, stdio: 'inherit' });
+const build = spawnSync('./node_modules/.bin/vite', ['build'], {
+  cwd: packageDir,
+  stdio: 'inherit',
+  env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: RELAY_DIRECTORY },
+});
 if (build.error) fail(`vite could not be started: ${build.error.message}`);
 if (build.status !== 0) fail(`vite build exited ${build.status}`);
 
@@ -434,7 +453,7 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<chooser|install|daemon|connect|pair|brief|scan|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
+          '    setup-<chooser|install|daemon|connect|reach-*|pair|brief|scan|done>-<mobile|desktop> and setup-scan-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
     } else {
@@ -453,14 +472,21 @@ try {
        * named `brief` proves that the agent answer really leads there — a seeded
        * store would prove only that the component renders.
        */
+      /*
+       * A CONNECTION IS ANSWERED, NOT ADVANCED PAST. The carrier step is a chooser
+       * of its own since the pairing/connection split, so a journey that has to
+       * get beyond it names the row it presses. Walking it any other way stops on
+       * that screen and every later capture times out — which is exactly how this
+       * driver reported the split when it landed.
+       */
       const JOURNEYS = [
         { name: 'install', route: 'first-time', advances: 0, screen: 'install' },
         { name: 'daemon', route: 'first-time', advances: 1, screen: 'daemon' },
         { name: 'connect', route: 'first-time', advances: 2, screen: 'connect' },
-        { name: 'pair', route: 'first-time', advances: 3, screen: 'pair' },
+        { name: 'pair', route: 'first-time', advances: 2, screen: 'pair', connection: 'direct' },
         { name: 'brief', route: 'agent', advances: 0, screen: 'brief' },
-        /* The same step, the other framing: arrived holding a link, nothing to run. */
-        { name: 'scan', route: 'have-link', advances: 0, screen: 'pair' },
+        /* The scan half: arrived holding a link, so there is nothing to run first. */
+        { name: 'scan', route: 'have-link', advances: 0, screen: 'scan' },
       ] as const;
 
       const toChooser = async (page: Page): Promise<void> => {
@@ -473,6 +499,10 @@ try {
         await page.locator(`button[data-onboarding-route="${journey.route}"]`).click();
         for (let advance = 0; advance < journey.advances; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
+        }
+        const connection = 'connection' in journey ? journey.connection : undefined;
+        if (connection !== undefined) {
+          await page.locator(`[data-onboarding-connection="${connection}"]`).click();
         }
         await page.locator(setupStep(journey.screen)).waitFor({ state: 'visible' });
       };
@@ -514,20 +544,54 @@ try {
         }
       }
 
-      // 2b. THE CARRIER THAT CHANGES THE MOST. Direct is the default and is
-      // captured above; the deploy-your-own-relay branch is the one whose steps
-      // and commands actually differ, so it gets its own frame at both widths.
-      for (const viewport of VIEWPORTS) {
-        await capture(contextFor(viewport), async page => {
-          await toStep(page, journey('connect'));
-          await page.locator('[data-onboarding-method="own-relay"]').click();
-          await page.locator('[data-onboarding-method-caveat]').waitFor({ state: 'visible' });
-          await shot(page, `setup-relay-${viewport.name}`);
-        });
+      /*
+       * 2b. THE CARRIER STEP'S THREE ANSWERS, at both widths.
+       *
+       * The recommended row reports a runtime fact — whether Ferretry's default
+       * relay is advertising itself — so the three frames that matter are the
+       * three answers, and they must not look alike. Two are driven by fulfilling
+       * the real request the shipped code makes against the build's own directory
+       * origin; the third leaves that request UNROUTED, so this harness's
+       * off-origin abort makes it fail exactly as an unreachable directory would.
+       * Nothing is faked into the component.
+       */
+      const RELAY_ANSWERS = [
+        { name: 'available', body: JSON.stringify({ version: 1, relayUrl: 'https://relay.example.invalid' }) },
+        { name: 'disabled', body: JSON.stringify({ version: 1, relayUrl: null }) },
+        { name: 'undetermined', body: null },
+      ] as const;
+      for (const answer of RELAY_ANSWERS) {
+        for (const viewport of VIEWPORTS) {
+          await capture(contextFor(viewport), async page => {
+            if (answer.body !== null) {
+              await page.route('**/v1/default-relay', async route => {
+                await route.fulfill({
+                  status: 200,
+                  contentType: 'application/json; charset=utf-8',
+                  headers: { 'Cache-Control': 'no-store' },
+                  body: answer.body,
+                });
+              });
+            }
+            await toStep(page, journey('connect'));
+            // The readout arrives after first paint, so wait for the state the
+            // shipped parser resolved rather than for a timeout.
+            await page
+              .locator(`[data-onboarding-connection-chooser][data-onboarding-fallback="${answer.name}"]`)
+              .waitFor({ state: 'visible' });
+            await shot(page, `setup-reach-${answer.name}-${viewport.name}`);
+          });
+        }
       }
 
+      /*
+       * The KEYBOARD capture belongs to the scan half, not the `fy pair` half:
+       * since the split, the paste field lives on the stage that redeems a code.
+       * Pointing this at `pair` waits thirty seconds for a field that stage does
+       * not have — which is how the split announced itself here.
+       */
       const toPairStep = async (page: Page): Promise<void> => {
-        await toStep(page, journey('pair'));
+        await toStep(page, journey('scan'));
       };
 
       // 3. THE PAIR STEP WITH THE KEYBOARD UP. See VISUAL_VIEWPORT_SCRIPT for why
@@ -627,7 +691,7 @@ try {
         });
 
         // Screenshot FIRST: if the field is off-screen, this image is the evidence.
-        await shot(page, 'setup-pair-keyboard-mobile');
+        await shot(page, 'setup-scan-keyboard-mobile');
 
         const inside = settled && fit.top >= 0 && fit.bottom <= fit.visible;
         process.stdout.write(
@@ -639,7 +703,7 @@ try {
           defects.push(
             `#pairing-link is not inside the visual viewport with the keyboard open: ` +
               `box [${fit.top.toFixed(1)}, ${fit.bottom.toFixed(1)}] against a visible ` +
-              `[0, ${fit.visible.toFixed(1)}]. See harness/out/setup-pair-keyboard-mobile.png. ` +
+              `[0, ${fit.visible.toFixed(1)}]. See harness/out/setup-scan-keyboard-mobile.png. ` +
               `This is a production behaviour, not a harness problem — it is deliberately NOT ` +
               `worked around here with a scroll.`,
           );

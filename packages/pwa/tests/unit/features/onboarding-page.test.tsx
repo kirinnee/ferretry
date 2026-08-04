@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
+import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from '../../../src/features/onboarding/hosted-relay.ts';
 import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../src/features/onboarding/onboarding-page.tsx';
 import {
   type OnboardingProgressStorage,
@@ -55,6 +56,8 @@ interface PageOptions {
   readonly progress?: OnboardingProgressStore;
   readonly fleetReady?: boolean;
   readonly onOpenFleet?: () => void;
+  /** What the runtime advertisement said about the default relay. */
+  readonly fallback?: HostedRelayFallback;
 }
 
 const pageWith = async (options: PageOptions = {}) => {
@@ -66,6 +69,7 @@ const pageWith = async (options: PageOptions = {}) => {
       channel="apt"
       fleetReady={options.fleetReady ?? false}
       connectionStatus={null}
+      fallback={options.fallback ?? CHECKING_HOSTED_RELAY}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
       renderPairing={({ onPaired }) => (
         <>

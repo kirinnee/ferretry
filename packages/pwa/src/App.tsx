@@ -21,6 +21,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
+import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from './features/onboarding/hosted-relay.ts';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
 import { OnboardingProgressStore, resetOnboardingProgress } from './features/onboarding/onboarding-progress.ts';
@@ -336,13 +337,36 @@ function SetupGuide() {
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
   const selected = snapshot.selectedDaemonId;
+  /*
+   * IS THE DEFAULT RELAY ADVERTISING ITSELF RIGHT NOW?
+   *
+   * Asked once per visit to this screen, through the store’s injected fetcher so
+   * no suite dials out, and never from a compiled address — the origin is the
+   * build constant `hosted-relay.ts` documents. The read cannot reject, so there
+   * is no failure branch: “could not find out” arrives as a state and the chooser
+   * says so in those words rather than offering a carrier that may be switched off.
+   *
+   * `live` rather than an AbortController: the answer is a fact about the service,
+   * not about this component, so cancelling would save nothing and re-asking on a
+   * remount is the point. What must not happen is a set after unmount.
+   */
+  const [fallback, setFallback] = useState<HostedRelayFallback>(CHECKING_HOSTED_RELAY);
+  useEffect(() => {
+    let live = true;
+    void store.readDefaultRelay().then(answer => {
+      if (live) setFallback(answer);
+    });
+    return () => {
+      live = false;
+    };
+  }, [store]);
   return (
     <OnboardingPage
       progress={progress}
       write={clipboardWriter}
       channel={channel}
       fleetReady={selected !== null}
-      connectionStatus={selected === null ? null : 'Direct'}
+      fallback={fallback}
       onOpenFleet={() => {
         // The selected daemon IS the one just paired: adding a connection
         // selects it. Never a hardcoded prefix — the app's own route helper.

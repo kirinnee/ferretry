@@ -21,6 +21,25 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
+      # The default relay's discovery origin is a BUILD constant, because Pages is
+      # static: the relay is a separate Worker hostname and there is no proxy to
+      # reach it through. Passing `vars.HOSTED_RELAY_ORIGIN` straight through would
+      # have been silently wrong — that variable is optional for the relay's own
+      # deploy, which derives the workers.dev origin when it is blank, and this
+      # repository sets no variables at all. The Worker would have deployed at a
+      # real address while the production bundle compiled an empty one. The script
+      # resolves it the same way, from the same inputs, and fails the build rather
+      # than shipping a bundle with no default.
+      - name: Resolve the relay discovery origin
+        env:
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          origin="$(nix develop .#ci -c ./scripts/ci/relay-directory-origin.sh --require)"
+          printf 'FY_RELAY_DIRECTORY_ORIGIN=%s\n' "${origin}" >>"${GITHUB_ENV}"
+          echo "relay discovery origin for this build: ${origin:-<none>}"
       - name: Build static PWA bundle
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
       # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action

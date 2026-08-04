@@ -71,6 +71,7 @@ export * from '../features/lineage/lineage-surface-model.ts';
 export * from '../features/onboarding/command-block.tsx';
 export * from '../features/onboarding/command-syntax.ts';
 export * from '../features/onboarding/copy-button.tsx';
+export * from '../features/onboarding/hosted-relay.ts';
 export * from '../features/onboarding/onboarding-brand.tsx';
 export * from '../features/onboarding/onboarding-chooser.tsx';
 export * from '../features/onboarding/onboarding-model.ts';
