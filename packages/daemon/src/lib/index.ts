@@ -6,6 +6,7 @@ export * from './analytics/pricing.ts';
 export * from './analytics/query.ts';
 export * from './analytics/results.ts';
 export * from './analytics/session-record.ts';
+export * from './analytics/usage-fold.ts';
 export * from './api/index.ts';
 export * from './attachments/index.ts';
 export * from './attention/index.ts';

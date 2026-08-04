@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
+import fixture from '../../fixtures/transcript/claude.jsonl' with { type: 'text' };
 
 describe('ClaudeTranscriptParser', () => {
   it('should normalize the synthetic fixture into the common event model', () => {
@@ -132,6 +132,57 @@ describe('ClaudeTranscriptParser', () => {
     // Assert
     should(actual.every(result => result.events.length === 0)).be.true();
     should(actual.every(result => result.issues[0]?.code === 'invalid-record')).be.true();
+  });
+
+  it('should retain the cache-write split a 5-minute and 1-hour write are billed at', () => {
+    // Arrange: the retention split is the only evidence that separates two differently priced cache
+    // writes, and nothing downstream can recover it from the total.
+    const subject = new ClaudeTranscriptParser();
+    const input = {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [],
+        usage: {
+          input_tokens: 12,
+          output_tokens: 4,
+          cache_read_input_tokens: 3,
+          cache_creation_input_tokens: 5,
+          cache_creation: { ephemeral_5m_input_tokens: 4, ephemeral_1h_input_tokens: 1 },
+        },
+      },
+    };
+
+    // Act
+    const actual = subject.parseRecord(input);
+
+    // Assert
+    should(actual.events[0]).containDeep({
+      kind: 'usage',
+      usage: { cacheCreationInputTokens: 5, cacheWrite5mInputTokens: 4, cacheWrite1hInputTokens: 1 },
+    });
+  });
+
+  it('should leave the cache-write split absent when the harness records no retention detail', () => {
+    // Absent is not zero: a consumer must be able to see that it cannot price this write.
+    const subject = new ClaudeTranscriptParser();
+
+    const actual = subject.parseRecord({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [],
+        usage: { input_tokens: 12, output_tokens: 4, cache_creation_input_tokens: 5 },
+      },
+    });
+
+    const event = actual.events[0];
+    should(event).containDeep({ kind: 'usage', usage: { cacheCreationInputTokens: 5 } });
+    should(event?.kind).equal('usage');
+    if (event?.kind === 'usage') {
+      should(event.usage.cacheWrite5mInputTokens).be.undefined();
+      should(event.usage.cacheWrite1hInputTokens).be.undefined();
+    }
   });
 
   it('should suppress an all-zero usage block', () => {
