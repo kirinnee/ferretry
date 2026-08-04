@@ -22,12 +22,16 @@ this and use the app.
 ## Read this before you start: what you will and will not get
 
 Deploying this Worker gets you **a working relay**. It does not yet get you a remote connection,
-because the two ends that would dial it are not written.
+because the transport that would dial it is not written.
 
-- No code outside `packages/relay` reads a relay address. `packages/pwa/src/lib/daemon-transport.ts`
-  builds every request from one direct `baseUrl`, and `ConnectionMethod` — the carrier type that
-  would replace it — has no consumer outside that package.
+- `packages/pwa/src/lib/daemon-transport.ts` builds every request from one direct `baseUrl`, and
+  `ConnectionMethod` — the carrier type that would replace it — has no consumer outside
+  `packages/relay`.
 - `fyd` has no dial-out relay client at all.
+
+The browser _can_ already discover Ferretry's hosted relay and read its kill switch, from a
+build-time origin. That is discovery, not transport, and it does nothing for a relay of your own —
+see [The client gap, exactly](#the-client-gap-exactly).
 
 So today this runbook takes you as far as **"the relay is deployed, reachable, and serving the
 fingerprints I listed"**, verified at the Worker itself. The end-to-end sections below are written
@@ -348,17 +352,17 @@ request metadata.
 ### The client gap, exactly
 
 **There is no shipped interface for this step.** Nothing is missing from your relay; what is missing
-is the code on the two ends that would dial one. Naming it precisely so you can tell when it lands:
+is the transport on the two ends that would dial one. Naming it precisely so you can tell when it
+lands — the first two are done, and neither helps you:
 
-1. **A build-time discovery-origin constant in the PWA.** The relay lives on its own hostname, so
+1. ✅ **A build-time discovery-origin constant in the PWA.** The relay lives on its own hostname, so
    the browser cannot find a relay advertisement at its own origin. A relative `/v1/default-relay`
    is wrong, and the PWA is served as a static Cloudflare Pages bundle — no Function, no proxy — so
-   the discovery origin is compiled into the build. That origin identifies a _service_; it is not a
-   daemon URL and identifies no user.
-2. **A fetch-and-parse step** that reads the advertisement through `HostedRelayAdvertisementSchema`
-   and turns it into a carrier via `hostedRelayConnection` — both already exist in
-   `packages/relay/src/lib/hosted.ts` with no caller.
-3. **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
+   the discovery origin is compiled into the build as `FY_RELAY_DIRECTORY_ORIGIN`. That origin
+   identifies a _service_; it is not a daemon URL and identifies no user.
+2. ✅ **A fetch-and-parse step** that reads the advertisement through
+   `HostedRelayAdvertisementSchema` and turns it into a carrier via `hostedRelayConnection`.
+3. ⬜ **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
    - **The daemon.** `packages/daemon/src` has **no relay client and no relay configuration at
      all** — not a partial one, zero references to `packages/relay`. It needs a relay client that
      dials out and holds the socket open, the persisted key material it signs its rendezvous claim
@@ -369,7 +373,7 @@ is the code on the two ends that would dial one. Naming it precisely so you can 
      `daemon-connection.ts` (the carrier on the record), `connections.ts` (persisting it),
      `daemon-transport.ts` and `event-transport.ts` (both build every request and socket from that
      single direct `baseUrl` today).
-4. **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
+4. ⬜ **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
    `describeConnectionMethod` observer list for a _live session_, so a session on a relay never looks
    like a direct one.
 
@@ -377,18 +381,15 @@ The decision layer those four would call is already written and tested in
 `packages/relay/src/lib/connection.ts`: `connectionPreferenceOrder` puts direct first,
 `chooseConnection` returns the plain sentence saying which carrier won and what it passed over.
 
-**Prerequisite: [PR #198](https://github.com/kirinnee/ferretry/pull/198) (`986d1125`), and it is
-discovery-only.** It removes the carrier chooser from onboarding, reads the hosted advertisement at
-runtime, and compiles the discovery origin in as `FY_RELAY_DIRECTORY_ORIGIN` — supplied by the Pages
-workflow from the same repository variable the relay's own deploy uses, and shipping no directory at
-all rather than guessing when it is unset. That is pieces **1 and 2**. It says on its own screen that
-nothing dials a relay yet, because nothing does.
+Pieces 1 and 2 arrived with [PR #198](https://github.com/kirinnee/ferretry/pull/198), which also
+removed the carrier chooser from onboarding. It is **discovery-only**, and says on its own screen
+that nothing dials a relay yet, because nothing does.
 
-Pieces **3 and 4** are still unwritten, so merging #198 does not make the steps below runnable, and
-it does nothing for a relay of your own either way: what it discovers is the **hosted** deployment's
-advertisement, and `/v1/default-relay` is a hosted-mode route that your `wrangler.jsonc` deployment
-does not serve at all. Your relay is verified at the Worker, by
-[step 5](#step-5--verify-at-the-worker), and by nothing in a browser yet.
+**None of that helps a relay of your own**, and it is worth being blunt about why: what the browser
+discovers is the **hosted** deployment's advertisement, and `/v1/default-relay` is a hosted-mode
+route your `wrangler.jsonc` deployment does not serve at all. Pieces **3 and 4** are the ones that
+would let any browser dial any relay, and they are unwritten. Your relay is verified at the Worker,
+by [step 5](#step-5--verify-at-the-worker), and by nothing in a browser yet.
 
 **An expert override — a way to name a relay address for a specific daemon by hand — does not exist,
 and this document will not invent a command for it.** When one lands, the intended shape is unchanged

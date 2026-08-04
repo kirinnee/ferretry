@@ -66,8 +66,13 @@ export const SocketEndpointSchema = z
  * The stored carrier choice for one daemon.
  *
  * A relay address is a field here and nowhere else. There is no default address constant in this
- * package. `operator` changes the disclosure a surface owes the user; absent means the historical
- * bring-your-own shape, so existing stored pairings keep their exact meaning.
+ * package.
+ *
+ * `operator` selects nothing but the disclosure a surface owes the user — who runs the relay is not
+ * a wire difference, and both values take the identical path. It is optional because a stored record
+ * written before the field existed can only have described a relay its owner deployed, so absent is
+ * read as `'self'` rather than as an unknown: an old pairing keeps its exact meaning instead of
+ * being re-described as somebody else's service.
  */
 export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('direct'), daemonUrl: SocketEndpointSchema }),
