@@ -122,6 +122,17 @@ export interface SessionTerminalDeckProps {
   /** Display only — the daemon derives and enforces the shell's cwd itself. */
   readonly cwd?: string;
   readonly dependencies?: TerminalDeckDependencies;
+  /**
+   * The terminal this mount was opened FOR — a `terminal:<id>` side-pane tab
+   * (#35) or a proved `%terminal:<key>` reference.
+   *
+   * It selects that shell once the listing proves it exists, and does nothing
+   * at all when it does not: a tab naming a terminal this session has never had
+   * is damaged evidence, and selecting whatever happens to be first would put
+   * the reader in front of the wrong shell while telling them it is the right
+   * one.
+   */
+  readonly focusTerminalId?: string;
 }
 
 const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -398,6 +409,7 @@ export function SessionTerminalDeck({
   scope,
   cwd,
   dependencies = browserTerminalDeckDependencies(),
+  focusTerminalId,
 }: SessionTerminalDeckProps) {
   const [list, setList] = useState<TerminalListView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -448,6 +460,17 @@ export function SessionTerminalDeck({
   }, [expanded]);
 
   const terminals = list?.terminals ?? [];
+
+  // A tab opened FOR one terminal selects that terminal — once the listing has
+  // proved it exists. Before the listing lands there is nothing to prove it
+  // against, and after a shell exits the request simply stops matching, which
+  // leaves the reader on whatever they were on rather than on a silent swap.
+  useEffect(() => {
+    if (focusTerminalId === undefined) return;
+    if (!terminals.some(terminal => terminal.id === focusTerminalId)) return;
+    setActiveId(current => (current === focusTerminalId ? current : focusTerminalId));
+  }, [focusTerminalId, terminals]);
+
   const active = terminals.find(terminal => terminal.id === activeId) ?? null;
   const atSessionCap = list === null ? false : terminals.length >= list.limits.perSession;
   const atGlobalCap = list === null ? false : list.limits.runningGlobal >= list.limits.global;

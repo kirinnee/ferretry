@@ -2,6 +2,7 @@ import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Composer } from '../../components/composer.tsx';
+import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import {
@@ -18,7 +19,11 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, sessionActionSpecs } from '../../shell/session-actions.ts';
 import { type SidePaneSurfaceProps, SidePaneWorkspace, useSidePane } from '../../shell/side-pane.tsx';
-import type { SidePaneTabDefinition, SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
+import {
+  openSidePaneFileTab,
+  type SidePaneTabDefinition,
+  type SidePaneTabPresentation,
+} from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { ChatWidthPreference } from '../controls.ts';
@@ -119,17 +124,37 @@ function WorkspaceSurface({
   isActive,
 }: WorkspaceSurfaceProps) {
   let body: ReactNode;
-  if (tab.id === 'files' || tab.instance?.kind === 'file') {
+  if (tab.instance?.kind === 'file') {
+    // ONE TAB PER FILE (#35): this tab renders ITS file, not the picker. Two
+    // open files are two tabs, each with its own raw/diff choice and its own
+    // reading position.
+    body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
+  } else if (tab.id === 'files') {
+    // The picker: tree, listing, breadcrumbs. Every open it produces becomes a
+    // file tab in the pane's own strip, so this surface holds no second strip.
     // Markdown a file preview renders is the SAME reference surface the
     // transcript reads with, so a path in a README behaves like a path in a
     // message rather than being inert text in a viewer.
-    body = <FilesTab daemon={connection} scope={scope} cwd={session.config.cwd} markdown={references} />;
+    body = (
+      <FilesTab
+        daemon={connection}
+        scope={scope}
+        cwd={session.config.cwd}
+        markdown={references}
+        onOpenFile={(path, selection) => openSidePaneFileTab(scope, path, selection)}
+      />
+    );
   } else if (tab.id === 'terminals' || tab.instance?.kind === 'terminal') {
+    // The deck is still ONE surface (DESIGN-side-pane-tabs.md assigns its
+    // per-terminal split to the deck's own owner). A `terminal:<id>` tab is
+    // therefore addressable rather than separate: it selects ITS shell in the
+    // deck, and says nothing if that shell is not in the listing.
     body = (
       <SessionTerminalSurface
         connection={connection}
         scope={scope}
         {...(readSnapshot === undefined ? {} : { readSnapshot })}
+        {...(tab.instance?.kind === 'terminal' ? { focusTerminalId: tab.instance.key } : {})}
       />
     );
   } else if (tab.render !== undefined) {

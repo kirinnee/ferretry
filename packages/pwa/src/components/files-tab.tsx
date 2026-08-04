@@ -34,6 +34,7 @@ import {
   writeFilesTabState,
   type CodeReferenceOpenRequest,
   type ColumnCodeReference,
+  type FileLineSelection,
   type FileView,
   type OpenFileTab,
 } from './files-tab-model.ts';
@@ -62,6 +63,21 @@ export interface FilesTabProps {
   onRequestedReferenceHandled?: (sequence: number) => void;
   /** Proof and navigation the Markdown renderer needs; without it, prose. */
   markdown?: FilesMarkdownContext;
+  /**
+   * A host that owns a tab strip takes the opens.
+   *
+   * Handover #35 is one tab per file, and a host that gives every file its own
+   * tab must not ALSO have this pane hold a second, competing strip of its own.
+   * When this is supplied, the pane is purely the PICKER — the tree, the
+   * listing and the breadcrumbs — and every row-open, every code reference and
+   * every Markdown file link is handed to the host, which opens the file as its
+   * own `file:<path>` tab rendered by `FileInstanceSurface`.
+   *
+   * Without it (a standalone host with no strip — the harness card), the pane
+   * keeps its own open-file tabs and viewer, which is the only way it can show
+   * a file at all.
+   */
+  onOpenFile?: (path: string, selection?: FileLineSelection) => void;
 }
 
 export const FilesTab = ({
@@ -71,6 +87,7 @@ export const FilesTab = ({
   requestedReference,
   onRequestedReferenceHandled,
   markdown,
+  onOpenFile,
 }: FilesTabProps) => {
   const probe = useFsProbe(daemon, scope);
   const layout = useLayoutMode();
@@ -104,13 +121,29 @@ export const FilesTab = ({
     setStateKey(key);
   }, [key, scope, stateMatchesScope]);
 
+  // Read through a ref so the open callbacks keep stable identities whether or
+  // not a host claims the opens — a changing `onOpenFile` must not re-run the
+  // reference effect below and re-deliver a reference the pane already handled.
+  const hostOpenRef = useRef(onOpenFile);
+  hostOpenRef.current = onOpenFile;
+  const hostOwnsTabs = onOpenFile !== undefined;
+
   const repo = probe.changes?.repo ?? false;
   const changes = useMemo(() => probe.changes?.changes ?? [], [probe.changes]);
   const changesTruncated = probe.changes?.truncated ?? false;
   const changeMap = useMemo(() => new Map(changes.map(change => [change.path, change])), [changes]);
-  const active = stateMatchesScope && activePath ? (tabs.find(tab => tab.path === activePath) ?? null) : null;
+  // Remembered state can carry an `activePath` written before a host claimed
+  // the opens. A picker must not silently resurrect its own viewer from it, so
+  // host ownership decides, not the stored snapshot.
+  const active =
+    !hostOwnsTabs && stateMatchesScope && activePath ? (tabs.find(tab => tab.path === activePath) ?? null) : null;
 
   const openFile = useCallback((path: string) => {
+    const host = hostOpenRef.current;
+    if (host) {
+      host(path);
+      return;
+    }
     setTabs(current =>
       current.some(tab => tab.path === path)
         ? current.map(tab => (tab.path === path ? { path, view: 'normal' } : tab))
@@ -126,6 +159,11 @@ export const FilesTab = ({
   const openReference = useCallback((reference: ColumnCodeReference) => {
     if (!isOpenablePath(reference.path)) return;
     const selection = selectionFromReference(reference);
+    const host = hostOpenRef.current;
+    if (host) {
+      host(reference.path, selection);
+      return;
+    }
     setTabs(current =>
       current.some(tab => tab.path === reference.path)
         ? current.map(tab => (tab.path === reference.path ? { ...tab, selection } : tab))
@@ -351,7 +389,8 @@ export const FilesTab = ({
         </span>
       </div>
 
-      {tabs.length > 0 && (
+      {/* The host's strip is the ONE strip when it owns the opens (#35). */}
+      {!hostOwnsTabs && tabs.length > 0 && (
         <OpenFileTabs tabs={tabs} activePath={activePath} onActivate={setActivePath} onClose={closeFile} />
       )}
 

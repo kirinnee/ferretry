@@ -405,6 +405,13 @@ try {
           await page.getByLabel('Files browser').screenshot({ path: filesTarget });
           process.stdout.write(`📸 Files browser -> ${filesTarget}\n`);
 
+          // The body behind ONE file tab (#35), not the picker: its own path in
+          // the bar, its own raw/diff/refresh controls, its own bytes.
+          const fileInstanceTarget = join(outDir, `file-instance-${viewport.name}.png`);
+          await page.locator('#harness-file-instance').scrollIntoViewIfNeeded();
+          await page.getByLabel('File tab body').screenshot({ path: fileInstanceTarget });
+          process.stdout.write(`📸 File tab body -> ${fileInstanceTarget}\n`);
+
           const attachmentsTarget = join(outDir, `attachments-${viewport.name}.png`);
           // The thumbnail is `loading="lazy"` and the harness stacks it thousands
           // of pixels below the fold, so Chrome has not started decoding it yet.

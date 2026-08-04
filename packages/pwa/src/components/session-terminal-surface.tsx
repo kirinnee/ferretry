@@ -15,6 +15,8 @@ export interface SessionTerminalSurfaceProps {
   readonly listTerminals?: SurfaceTerminalLister;
   /** Test seam for the live deck; production opens real sockets. */
   readonly deck?: TerminalDeckDependencies;
+  /** The terminal a `terminal:<id>` side-pane tab was opened for (#35). */
+  readonly focusTerminalId?: string;
 }
 
 /**
@@ -39,6 +41,7 @@ export function SessionTerminalSurface({
   readSnapshot,
   listTerminals,
   deck,
+  focusTerminalId,
 }: SessionTerminalSurfaceProps) {
   const headingId = useId();
 
@@ -49,6 +52,7 @@ export function SessionTerminalSurface({
           connection={connection}
           scope={scope}
           {...(deck === undefined ? {} : { dependencies: deck })}
+          {...(focusTerminalId === undefined ? {} : { focusTerminalId })}
         />
       </div>
       <div className="shrink-0">

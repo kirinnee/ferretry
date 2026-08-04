@@ -127,7 +127,12 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       openSidePaneFileTab(scope, reference.path, fileSelection(reference.line, reference.endLine));
     },
     onTaskOpen: () => openSidePaneTab(scope, 'tasks'),
-    onAttentionOpen: () => openSidePaneTab(scope, 'attention'),
+    // No `onAttentionOpen`. Attention is deliberately NOT a side-pane tab
+    // (handover #35); its home is the focused action modal of #17, which does
+    // not exist yet. Omitting the opener makes a proved `!A3` render as text
+    // rather than as a link into a surface that is not there — `hasOpener` in
+    // markdown.tsx reads the omission, so this is the honest state, not a gap
+    // dressed as a dead link.
     onSkillOpen: () => openSidePaneTab(scope, 'skills'),
     ...(onNavigate === undefined ? {} : { onNavigate }),
     onSurfaceOpen: reference => {

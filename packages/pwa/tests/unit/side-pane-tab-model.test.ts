@@ -67,7 +67,7 @@ describe('instance identity', () => {
   });
 
   it('does not mistake a singleton id containing a colon for an instance', () => {
-    expect(parseSidePaneInstanceTabId('pins')).toBeNull();
+    expect(parseSidePaneInstanceTabId('tasks')).toBeNull();
     expect(parseSidePaneInstanceTabId('skills:groups')).toBeNull();
     expect(parseSidePaneInstanceTabId('file:')).toBeNull();
   });
@@ -75,15 +75,7 @@ describe('instance identity', () => {
 
 describe('the default strip', () => {
   it('starts every fresh strip on the human-chosen defaults, in strip order', () => {
-    expect(readSidePaneTabsState(scopeA).open).toEqual([
-      'pins',
-      'tasks',
-      'skills',
-      'lineage',
-      'mcp',
-      'attention',
-      'analytics',
-    ]);
+    expect(readSidePaneTabsState(scopeA).open).toEqual(['tasks', 'skills', 'lineage', 'mcp', 'analytics']);
     expect(readSidePaneTabsState(scopeA).active).toBeNull();
     expect(readSidePaneTabsState(scopeA).instances).toEqual({});
   });
@@ -99,17 +91,76 @@ describe('the default strip', () => {
   });
 });
 
+// Handover #35: "Pins and Attention do not belong in this bento/side-pane
+// model." They are not registered, not default-open, and not reachable by
+// asking for them — #63 owns pins, #17 owns Attention.
+describe('pins and attention are not side-pane tabs', () => {
+  it('registers neither id', () => {
+    expect(getSidePaneTabDefinition('pins')).toBeUndefined();
+    expect(getSidePaneTabDefinition('attention')).toBeUndefined();
+  });
+
+  it('keeps both out of the default strip', () => {
+    const defaults = new Set(readSidePaneTabsState(scopeA).open);
+
+    for (const id of ['pins', 'attention']) expect(defaults.has(id)).toBe(false);
+  });
+
+  it('refuses to open either one rather than parking a tab that resolves to nothing', () => {
+    const before = getSidePaneTabsVersion();
+
+    openSidePaneTab(scopeA, 'pins');
+    openSidePaneTab(scopeA, 'attention');
+
+    const state = readSidePaneTabsState(scopeA);
+    expect(state.open).not.toContain('pins');
+    expect(state.open).not.toContain('attention');
+    expect(state.active).toBeNull();
+    expect(getSidePaneTabsVersion()).toBe(before);
+  });
+
+  it('refuses any unregistered id, not just the two that left', () => {
+    openSidePaneTab(scopeA, 'ghost');
+
+    expect(readSidePaneTabsState(scopeA).open).not.toContain('ghost');
+    expect(readSidePaneTabsState(scopeA).active).toBeNull();
+  });
+
+  it('still opens an instance tab that is already live, which is not registered either', () => {
+    const id = openSidePaneFileTab(scopeA, 'src/api.ts');
+    activateSidePaneTab(scopeA, 'tasks');
+
+    openSidePaneTab(scopeA, id);
+
+    expect(readSidePaneTabsState(scopeA).active).toBe(id);
+  });
+
+  it('lets a caller register a pins tab of its own — the model bans neither name', () => {
+    const unregister = registerSidePaneTab({
+      id: 'pins',
+      label: 'Pins',
+      shortLabel: 'Pins',
+      closeLabel: 'Close pins',
+      icon: 'tasks',
+      order: 10,
+    });
+
+    openSidePaneTab(scopeA, 'pins');
+    expect(readSidePaneTabsState(scopeA).active).toBe('pins');
+
+    unregister();
+  });
+});
+
 describe('registry', () => {
   it('exposes the built-ins by id and in strip order', () => {
-    expect(getSidePaneTabDefinition('pins')?.shortLabel).toBe('Pins');
+    expect(getSidePaneTabDefinition('lineage')?.shortLabel).toBe('Tree');
     expect(getSidePaneTabDefinition('nope')).toBeUndefined();
     expect(getSidePaneTabDefinitions().map(def => def.id)).toEqual([
-      'pins',
       'tasks',
       'skills',
       'lineage',
       'mcp',
-      'attention',
       'analytics',
       'browser',
       'files',
@@ -123,7 +174,7 @@ describe('registry', () => {
       label: 'Zeta',
       shortLabel: 'Z',
       closeLabel: 'Close Zeta',
-      icon: 'pins',
+      icon: 'tasks',
       order: 5,
     });
     registerSidePaneTab({
@@ -131,7 +182,7 @@ describe('registry', () => {
       label: 'Alpha',
       shortLabel: 'A',
       closeLabel: 'Close Alpha',
-      icon: 'pins',
+      icon: 'tasks',
       order: 5,
     });
 
@@ -165,14 +216,21 @@ describe('registry', () => {
     expect(getSidePaneTabDefinition('search')).toBeUndefined();
 
     unsubscribe();
-    registerSidePaneTab({ id: 'x', label: 'X', shortLabel: 'X', closeLabel: 'Close X', icon: 'pins', order: 1 });
+    registerSidePaneTab({ id: 'x', label: 'X', shortLabel: 'X', closeLabel: 'Close X', icon: 'tasks', order: 1 });
     expect(notifications).toBe(2);
   });
 
   it('lets the last registration win and refuses a stale unregister', () => {
-    const first = { id: 'dupe', label: 'First', shortLabel: 'A', closeLabel: 'Close', icon: 'pins', order: 1 } as const;
+    const first = {
+      id: 'dupe',
+      label: 'First',
+      shortLabel: 'A',
+      closeLabel: 'Close',
+      icon: 'tasks',
+      order: 1,
+    } as const;
     const unregisterFirst = registerSidePaneTab(first);
-    registerSidePaneTab({ id: 'dupe', label: 'Second', shortLabel: 'B', closeLabel: 'Close', icon: 'pins', order: 1 });
+    registerSidePaneTab({ id: 'dupe', label: 'Second', shortLabel: 'B', closeLabel: 'Close', icon: 'tasks', order: 1 });
 
     unregisterFirst();
 
@@ -194,7 +252,7 @@ describe('registry', () => {
   });
 
   it('resets back to exactly the built-ins', () => {
-    registerSidePaneTab({ id: 'temp', label: 'Temp', shortLabel: 'T', closeLabel: 'Close', icon: 'pins', order: 1 });
+    registerSidePaneTab({ id: 'temp', label: 'Temp', shortLabel: 'T', closeLabel: 'Close', icon: 'tasks', order: 1 });
     resetSidePaneTabRegistry();
 
     expect(getSidePaneTabDefinitions()).toHaveLength(SIDE_PANE_BUILT_IN_TABS.length);
@@ -266,7 +324,7 @@ describe('opening singleton tabs', () => {
 
   it('re-activates an already open tab without duplicating it', () => {
     openSidePaneTab(scopeA, 'files');
-    openSidePaneTab(scopeA, 'pins');
+    openSidePaneTab(scopeA, 'tasks');
     openSidePaneTab(scopeA, 'files');
 
     const state = readSidePaneTabsState(scopeA);
@@ -481,13 +539,13 @@ describe('removal', () => {
 
     removeSidePaneTab(scopeA, 'analytics');
 
-    expect(readSidePaneTabsState(scopeA).active).toBe('attention');
+    expect(readSidePaneTabsState(scopeA).active).toBe('mcp');
   });
 
   it('closes the pane when the last tab goes', () => {
-    writeSidePaneTabsState(scopeA, { open: ['pins'], active: 'pins', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: 'tasks', instances: {} });
 
-    removeSidePaneTab(scopeA, 'pins');
+    removeSidePaneTab(scopeA, 'tasks');
 
     const state = readSidePaneTabsState(scopeA);
     expect(state.open).toEqual([]);
@@ -495,11 +553,11 @@ describe('removal', () => {
   });
 
   it('leaves the other tabs alone when an inactive tab is removed', () => {
-    activateSidePaneTab(scopeA, 'pins');
+    activateSidePaneTab(scopeA, 'skills');
 
     removeSidePaneTab(scopeA, 'tasks');
 
-    expect(readSidePaneTabsState(scopeA).active).toBe('pins');
+    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
   });
 
   it('disposes an instance and tells its owner, leaving no phantom tab behind', () => {
@@ -550,7 +608,7 @@ describe('strip order', () => {
   });
 
   it('sorts an unknown tab last without inventing a position for it', () => {
-    expect(sortSidePaneTabs(['ghost', 'pins', 'tasks'])).toEqual(['pins', 'tasks', 'ghost']);
+    expect(sortSidePaneTabs(['ghost', 'analytics', 'tasks'])).toEqual(['tasks', 'analytics', 'ghost']);
     expect(sortSidePaneTabs(['ghost-b', 'ghost-a'])).toEqual(['ghost-a', 'ghost-b']);
   });
 
@@ -575,18 +633,18 @@ describe('whole-state writes', () => {
       notifications += 1;
     });
 
-    writeSidePaneTabsState(scopeA, { open: ['analytics', 'pins'], active: 'pins', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['analytics', 'tasks'], active: 'tasks', instances: {} });
 
-    expect(readSidePaneTabsState(scopeA).open).toEqual(['pins', 'analytics']);
+    expect(readSidePaneTabsState(scopeA).open).toEqual(['tasks', 'analytics']);
     expect(notifications).toBe(1);
 
     unsubscribe();
-    writeSidePaneTabsState(scopeA, { open: ['pins'], active: 'pins', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: 'tasks', instances: {} });
     expect(notifications).toBe(1);
   });
 
   it('treats a missing instances map as no instances', () => {
-    writeSidePaneTabsState(scopeA, { open: ['pins'], active: null } as never);
+    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: null } as never);
 
     expect(readSidePaneTabsState(scopeA).instances).toEqual({});
   });

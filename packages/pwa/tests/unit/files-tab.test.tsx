@@ -468,3 +468,82 @@ describe('the Files tab', () => {
     }
   });
 });
+
+/**
+ * Handover #35 — one tab per file. A host that owns a tab strip takes the
+ * opens, and this pane must then be nothing but the picker: no second strip of
+ * its own, no viewer, no competing notion of which file is "active".
+ */
+describe('the Files tab as a picker for a host that owns the tabs', () => {
+  it('hands a row-open to the host instead of opening the file itself', async () => {
+    const opened: Array<[string, unknown]> = [];
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    const view = await open(
+      <FilesTab daemon={daemon} scope={scope} onOpenFile={(path, selection) => opened.push([path, selection])} />,
+    );
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+
+      expect(opened).toEqual([['a.ts', undefined]]);
+      // Still the listing, never a viewer: no back control, no file bytes.
+      expect(view.container.querySelector('[aria-label="Back to the file list"]')).toBeNull();
+      expect(view.container.textContent).not.toContain('contents of a.ts');
+      expect(asked.some(url => url.includes('/fs/file'))).toBe(false);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('renders no open-file strip of its own — the host owns the one strip', async () => {
+    const opened: string[] = [];
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} onOpenFile={path => opened.push(path)} />);
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+
+      expect(opened).toEqual(['a.ts']);
+      expect(view.container.querySelector('[aria-label="Open files"]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('hands a code reference to the host with its line range intact', async () => {
+    const opened: Array<[string, unknown]> = [];
+    fixture.listings = { '': { entries: [] } };
+    const view = await open(
+      <FilesTab
+        daemon={daemon}
+        scope={scope}
+        requestedReference={{ sequence: 1, reference: { path: 'src/api.ts', line: 4, endLine: 9 } }}
+        onOpenFile={(path, selection) => opened.push([path, selection])}
+      />,
+    );
+    try {
+      expect(opened).toEqual([['src/api.ts', { line: 4, endLine: 9 }]]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('does not resurrect a viewer from state remembered before the host claimed the opens', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    // A standalone mount remembers `a.ts` as its own open, active file.
+    const standalone = await open(<FilesTab daemon={daemon} scope={scope} />);
+    await click(standalone.container, 'Open file a.ts');
+    await settle();
+    expect(readFilesTabState(scope).activePath).toBe('a.ts');
+    await standalone.unmount();
+
+    const view = await open(<FilesTab daemon={daemon} scope={scope} onOpenFile={() => undefined} />);
+    try {
+      expect(view.container.querySelector('[aria-label="Back to the file list"]')).toBeNull();
+      expect(view.container.querySelector('[aria-label="Open files"]')).toBeNull();
+      expect(view.container.textContent).toContain('a.ts');
+    } finally {
+      await view.unmount();
+    }
+  });
+});
