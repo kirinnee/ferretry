@@ -647,10 +647,22 @@ Four named pieces, so the prerequisite is checkable rather than vague:
 2. **A fetch-and-parse step** that reads the advertisement through `HostedRelayAdvertisementSchema`
    and turns it into a carrier with `hostedRelayConnection`, treating `relayUrl: null` and any
    failure as "no hosted carrier".
-3. **A relay-capable transport.** `packages/pwa/src/lib/daemon-transport.ts` must accept a
-   `ConnectionMethod` rather than one direct `baseUrl`, and `fyd` needs the matching dial-out client.
+3. **A relay-capable transport on both ends** — the large piece, and entirely unstarted.
+   `packages/daemon/src` holds no relay client and no relay configuration whatsoever: it needs one
+   that dials out, the persisted key material it signs its rendezvous claim with, and the `fy`
+   command surface and config layout to point it at an address. On the browser side,
+   `DaemonConnection` in `packages/pwa/src/lib/daemon-connection.ts` is
+   `{ daemonId, baseUrl, deviceToken }` with no carrier field, so four files move together:
+   `daemon-connection.ts`, `connections.ts` for persistence, and `daemon-transport.ts` and
+   `event-transport.ts`, which both derive every request and socket from that one direct `baseUrl`.
 4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
-   `describeConnectionMethod` observer list for whichever carrier won.
+   `describeConnectionMethod` observer list for whichever carrier a live session won on.
+
+**Pieces 1 and 2 are in flight** as [PR #198](https://github.com/kirinnee/ferretry/pull/198)
+(`986d1125`), which drops the carrier chooser, reads this advertisement at runtime, and compiles the
+discovery origin in as `FY_RELAY_DIRECTORY_ORIGIN` — supplied by the Pages workflow from the same
+repository variable the relay's own deploy uses, and shipping no directory rather than guessing when
+unset. It is **discovery-only** and says so on its own screen. Pieces 3 and 4 remain.
 
 Until those land, deploying a relay of any kind gets you a working relay, not a remote connection.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and

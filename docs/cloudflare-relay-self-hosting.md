@@ -358,25 +358,41 @@ is the code on the two ends that would dial one. Naming it precisely so you can 
 2. **A fetch-and-parse step** that reads the advertisement through `HostedRelayAdvertisementSchema`
    and turns it into a carrier via `hostedRelayConnection` — both already exist in
    `packages/relay/src/lib/hosted.ts` with no caller.
-3. **A relay-capable transport on both ends.** `packages/pwa/src/lib/daemon-transport.ts` must take
-   a `ConnectionMethod` instead of a single direct `baseUrl`, and `fyd` needs the matching dial-out
-   client. Neither exists.
+3. **A relay-capable transport on both ends.** This is the large one, and it is unstarted.
+   - **The daemon.** `packages/daemon/src` has **no relay client and no relay configuration at
+     all** — not a partial one, zero references to `packages/relay`. It needs a relay client that
+     dials out and holds the socket open, the persisted key material it signs its rendezvous claim
+     with, and the `fy` command surface and config layout to point it at an address.
+   - **The browser.** `DaemonConnection` in `packages/pwa/src/lib/daemon-connection.ts` is
+     `{ daemonId, baseUrl, deviceToken }` — it has no carrier field, so there is nowhere to record
+     that a daemon is reached through a relay. Four files move together:
+     `daemon-connection.ts` (the carrier on the record), `connections.ts` (persisting it),
+     `daemon-transport.ts` and `event-transport.ts` (both build every request and socket from that
+     single direct `baseUrl` today).
 4. **Active-carrier disclosure on screen** — rendering `chooseConnection().reason` and the
-   `describeConnectionMethod` observer list, so a session on a relay never looks like a direct one.
+   `describeConnectionMethod` observer list for a _live session_, so a session on a relay never looks
+   like a direct one.
 
 The decision layer those four would call is already written and tested in
 `packages/relay/src/lib/connection.ts`: `connectionPreferenceOrder` puts direct first,
 `chooseConnection` returns the plain sentence saying which carrier won and what it passed over.
 
-**Prerequisite.** Onboarding as it stands today ([PR #195](https://github.com/kirinnee/ferretry/pull/195),
-merged as `255e1ac2`) deliberately shipped no client wiring and no default relay address — it says so
-in its own description. The follow-up that adds the four pieces above is separate work. Until a
-release contains it, the steps below cannot be run.
+**Prerequisite: [PR #198](https://github.com/kirinnee/ferretry/pull/198) (`986d1125`), and it is
+discovery-only.** It removes the carrier chooser from onboarding, reads the hosted advertisement at
+runtime, and compiles the discovery origin in as `FY_RELAY_DIRECTORY_ORIGIN` — supplied by the Pages
+workflow from the same repository variable the relay's own deploy uses, and shipping no directory at
+all rather than guessing when it is unset. That is pieces **1 and 2**. It says on its own screen that
+nothing dials a relay yet, because nothing does.
 
-**An expert override — a way to name a relay address for a specific daemon by hand — is being
-designed as part of that follow-up.** It does not exist yet, and this document will not invent a
-command for it. When it lands, the intended shape is unchanged from what the protocol already
-requires:
+Pieces **3 and 4** are still unwritten, so merging #198 does not make the steps below runnable, and
+it does nothing for a relay of your own either way: what it discovers is the **hosted** deployment's
+advertisement, and `/v1/default-relay` is a hosted-mode route that your `wrangler.jsonc` deployment
+does not serve at all. Your relay is verified at the Worker, by
+[step 5](#step-5--verify-at-the-worker), and by nothing in a browser yet.
+
+**An expert override — a way to name a relay address for a specific daemon by hand — does not exist,
+and this document will not invent a command for it.** When one lands, the intended shape is unchanged
+from what the protocol already requires:
 
 - the **same** relay address string is configured on the daemon and in the browser, because it is the
   `host` the daemon's claim signature covers, and a mismatch fails the claim rather than falling back;

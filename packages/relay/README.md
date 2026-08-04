@@ -83,8 +83,15 @@ implemented and tested.
 **The client ends are not wired yet, and that is the honest limit of this package.** Nothing outside
 `packages/relay` fetches `/v1/default-relay`; `packages/pwa/src/lib/daemon-transport.ts` still builds
 every request from one direct `baseUrl`, and `ConnectionMethod` has no consumer outside this package.
-The follow-up that closes it needs a build-time discovery-origin constant in the PWA (the relay has
-its own hostname, Pages stays static, so a relative path will not do), the fetch-and-parse step, a
-relay-capable transport on both ends, and active-carrier disclosure on screen. §13 of the protocol
-document lists all four. Until that ships, deploying a relay gets you a relay, not a remote
-connection.
+
+[PR #198](https://github.com/kirinnee/ferretry/pull/198) (`986d1125`) closes the **discovery** half:
+no more carrier chooser, the advertisement read at runtime, and the discovery origin compiled in as
+`FY_RELAY_DIRECTORY_ORIGIN` from the Pages workflow. It stops there, deliberately, and says so on the
+glass — nothing dials a relay yet.
+
+What remains is the transport. `packages/daemon/src` has no relay client and no relay configuration
+at all, and needs one plus its persisted claim key and a `fy` surface to configure it;
+`DaemonConnection` has no carrier field, so `daemon-connection.ts`, `connections.ts`,
+`daemon-transport.ts` and `event-transport.ts` move together. Then active-carrier disclosure for a
+live session. §13 of the protocol document lists all four pieces. Until they ship, deploying a relay
+gets you a relay, not a remote connection.
