@@ -86,6 +86,7 @@ describe('mobileDestinationMenuOpen', () => {
 
 describe('appBarDestinationForRoute', () => {
   it('marks the app-level destinations and nothing else', () => {
+    expect(appBarDestinationForRoute({ kind: 'projects', daemonId: DAEMON })).toBe('projects');
     expect(appBarDestinationForRoute({ kind: 'warden', daemonId: DAEMON })).toBe('warden');
     expect(appBarDestinationForRoute({ kind: 'analytics', daemonId: DAEMON })).toBe('analytics');
     expect(appBarDestinationForRoute({ kind: 'learning', daemonId: DAEMON })).toBe('learning');
@@ -102,6 +103,7 @@ describe('AppBar destinations', () => {
     const hrefs = linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'));
 
     expect(hrefs).toEqual([
+      '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
       '/d/workshop/learning',
@@ -113,6 +115,7 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ daemon: OTHER }));
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
+      '/d/laptop/projects',
       '/d/laptop/analytics',
       '/d/laptop/warden',
       '/d/laptop/learning',
@@ -127,7 +130,7 @@ describe('AppBar destinations', () => {
     const mounted = await mount(bar({ active: 'warden' }));
     const links = linksOf(mounted.container, 'Destinations');
 
-    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, 'page', null, null]);
+    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(links.map(link => link.getAttribute('aria-label'))).toEqual(
       APP_BAR_DESTINATIONS.map(destination => destination.label),
     );

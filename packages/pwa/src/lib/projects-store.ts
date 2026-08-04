@@ -27,6 +27,9 @@ import { daemonRequest } from './daemon-transport.ts';
 import type { FleetProject } from './fleet-grouping.ts';
 import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
+/** Keep Window.fetch in its WebIDL realm when the project store invokes it later. */
+const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+
 export type ProjectsLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /**
@@ -64,15 +67,16 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
 
 /**
  * Reads `/v1/projects` from exactly the paired daemon and narrows the protocol
- * rows to the structurally-compatible grouping shape. The metadata remains on
- * the record for the Projects page; grouping reads only name and path.
+ * rows to the grouping shape. The catalog's durable metadata stays daemon-side;
+ * fleet grouping needs only an explicit display name and canonical root.
  */
 export const fetchDaemonProjects = async (
   daemon: DaemonConnection,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<readonly FleetProject[]> => {
   const request = daemonRequest(daemon, '/v1/projects');
-  const response = await fetcher(request.url, request.init);
+  const send = fetcher;
+  const response = await send(request.url, request.init);
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
     throw new DaemonResponseError(
@@ -81,11 +85,11 @@ export const fetchDaemonProjects = async (
       typeof body.code === 'string' ? body.code : undefined,
     );
   }
-  return ProjectListSchema.parse(await response.json());
+  return ProjectListSchema.parse(await response.json()).map(project => ({ name: project.name, path: project.path }));
 };
 
 /** The browser port over `fetchDaemonProjects`. */
-export const daemonProjectsPort = (fetcher: DaemonFetch = fetch): DaemonProjectsPort => ({
+export const daemonProjectsPort = (fetcher: DaemonFetch = browserFetch): DaemonProjectsPort => ({
   projects: daemon => fetchDaemonProjects(daemon, fetcher),
 });
 

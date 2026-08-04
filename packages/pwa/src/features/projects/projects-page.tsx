@@ -1,7 +1,7 @@
-import { FolderGit2, FolderOpen, GitFork, TriangleAlert } from 'lucide-react';
-import { useAppStore } from '../../lib/store.tsx';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { FolderOpen, TriangleAlert } from 'lucide-react';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useAppStore } from '../../lib/store.tsx';
 
 /** One daemon's durable registry. A missing read is never rendered as an empty registry. */
 export function ProjectsPage({ connection }: { readonly connection: DaemonConnection }) {
@@ -42,22 +42,14 @@ export function ProjectsPage({ connection }: { readonly connection: DaemonConnec
         <ul className="m-0 grid list-none gap-sm p-0">
           {slice.projects.map(project => (
             <li className="kt-panel flex min-w-0 items-start gap-md p-panel" key={project.path}>
-              {project.git ? (
-                <FolderGit2 className="shrink-0 text-accent" size={18} aria-hidden="true" />
-              ) : (
-                <FolderOpen className="shrink-0 text-muted" size={18} aria-hidden="true" />
-              )}
+              <FolderOpen className="shrink-0 text-muted" size={18} aria-hidden="true" />
               <div className="min-w-0">
                 <h2 className="m-0 text-title font-semibold">{project.name}</h2>
                 <p className="mono m-0 truncate text-meta text-muted" title={project.path}>
                   {project.path}
                 </p>
-                <p className="m-0 mt-xs text-meta text-muted">
-                  {project.git ? 'Git attached' : 'Folder project'} · added from{' '}
-                  {(project.source ?? 'a registered folder').replaceAll('-', ' ')}
-                </p>
+                <p className="m-0 mt-xs text-meta text-muted">Registered workspace folder</p>
               </div>
-              {project.git && <GitFork className="ml-auto shrink-0 text-muted" size={16} aria-label="Git project" />}
             </li>
           ))}
         </ul>
