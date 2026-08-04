@@ -78,7 +78,11 @@ import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
-import { ProcfsSessionRootPinner, RunnerSessionGit } from '../src/adapters/session/filesystem/index.ts';
+import {
+  PosixSessionRootPinner,
+  ProcfsSessionRootPinner,
+  RunnerSessionGit,
+} from '../src/adapters/session/filesystem/index.ts';
 import { TmuxCodexPickerPane } from '../src/adapters/session/harness/index.ts';
 import {
   DurableTerminalPaneRegistrar,
@@ -270,6 +274,7 @@ import {
   type SessionDirectorySubsystem,
   SessionFilesystem,
   SessionHealthService,
+  type SessionRootPinner,
   type SessionHealthSettings,
   type SessionId,
   type SessionIdFactory,
@@ -344,6 +349,18 @@ void startSttWorker;
 /** The CLI a human drives. Named here rather than derived, because the daemon
  *  package cannot read the CLI package's `bin` without depending on it. */
 const CLIENT_NAME = 'fy';
+
+/**
+ * Which containment the working-tree viewer gets, decided by what this kernel can express.
+ *
+ * Linux keeps the procfs implementation, whose descriptor alias is a plain path and needs no borrowing
+ * of the working directory. Everywhere else the POSIX one gives the same guarantee by installing the
+ * held directory for the instant of each open — and refuses the whole surface if it cannot. Neither
+ * ever falls back to the configured pathname, which is the one answer that would be a lie.
+ */
+function sessionRootPinner(): SessionRootPinner {
+  return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
+}
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
@@ -3267,10 +3284,7 @@ export function buildWorld(): DaemonWorld {
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
-        sessionFilesystem: new SessionFilesystem(
-          new ProcfsSessionRootPinner(),
-          new RunnerSessionGit(new BunGitRunner()),
-        ),
+        sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
         scratchGc,
         warden: createWardenSubsystem({
           sessions,
