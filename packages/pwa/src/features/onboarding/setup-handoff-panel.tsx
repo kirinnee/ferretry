@@ -119,8 +119,24 @@ export function SetupHandoffPanel({ url, plainUrl, device, write, share, label }
         </p>
       )}
 
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
+      {/*
+        THE LINK AND ITS COPY CONTROL ARE ONE OBJECT.
+        They were two: a bare icon on a line of its own, then the URL under it.
+        An unlabelled icon with nothing beside it reads as an orphan — there is
+        no way to tell what it copies — so it lives in the same bordered box as
+        the thing it copies, exactly as `CommandBlock` does for a command.
+      */}
+      <div className="flex min-w-0 items-start gap-1 rounded-control border border-code-border bg-code-bg py-2 pl-2 pr-1">
+        <p
+          className="m-0 min-w-0 flex-1 self-center break-all font-mono text-meta leading-base text-code-fg"
+          data-onboarding-handoff-url=""
+        >
+          {url}
+        </p>
         <CopyButton text={url} label="Copy setup link" write={write} />
+      </div>
+
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         {share === undefined ? null : (
           <button
             type="button"
@@ -141,10 +157,6 @@ export function SetupHandoffPanel({ url, plainUrl, device, write, share, label }
           </button>
         )}
       </div>
-
-      <p className="m-0 break-all font-mono text-2xs leading-base text-faint" data-onboarding-handoff-url="">
-        {url}
-      </p>
 
       <p className="m-0 text-2xs leading-base text-faint">
         Rather type it? <span className="font-mono text-syn-string">{plainUrl}</span> asks the same question — you just

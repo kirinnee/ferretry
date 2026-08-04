@@ -274,7 +274,9 @@ describe('the first-time route on a computer', () => {
       must(view.container.querySelector('[data-onboarding-handoff-url]'), 'the printed link').textContent,
     ).toContain('#fy-setup=v1;add-client;pair');
     // Optional, and it says so — the reader is already finished.
-    expect(view.container.textContent).toContain('Skip it if you do not want one');
+    // Said ONCE. The advance note under every step already carries it, and the
+    // same sentence twice reads as a page that does not know what it has said.
+    expect(view.container.textContent).toContain('Skip it and add a device whenever you like');
     await next(view.container);
     expect(screenOf(view.container)).toBe('done');
     await view.unmount();

@@ -365,9 +365,6 @@ export function HandoffStage({ handoff }: { readonly handoff: ReactNode }) {
         code your computer is about to print.
       </p>
       {handoff}
-      <p className="m-0 text-2xs leading-base text-faint">
-        Skip it if you do not want one. You can add a device at any time from the fleet.
-      </p>
     </div>
   );
 }
