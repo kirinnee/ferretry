@@ -54,9 +54,9 @@ const STEPS: Readonly<Record<OnboardingStepId, OnboardingStep>> = Object.freeze(
   }),
   connect: Object.freeze({
     id: 'connect' as const,
-    title: 'Choose how to reach it',
+    title: 'How this reaches it',
     short: 'Reach',
-    summary: 'How this browser gets to that daemon.',
+    summary: 'Direct first, then Ferretry’s relay.',
   }),
   brief: Object.freeze({
     id: 'brief' as const,
@@ -108,7 +108,7 @@ const ROUTES: Readonly<Record<OnboardingRouteId, OnboardingRoute>> = Object.free
   'first-time': Object.freeze({
     id: 'first-time' as const,
     title: 'First time setup',
-    answer: 'Install, start the daemon, choose how to reach it, pair. Every new machine starts here.',
+    answer: 'Install, start the daemon, pair. Every new machine starts here.',
     steps: Object.freeze(['install', 'daemon', 'connect', 'pair', 'done'] as const),
   }),
   agent: Object.freeze({
@@ -303,133 +303,6 @@ export const PAIR_COMMAND = 'fy pair';
 export const PAIR_PRINT_COMMAND = 'fy pair --no-wait';
 /** What a serving daemon prints, so the reader knows what they are looking for. */
 export const DAEMON_SERVING_OUTPUT = 'fyd is serving';
-
-/* ---------- how a browser reaches a daemon, from docs/relay-protocol.md ---- */
-
-export type ConnectionMethodId = 'direct' | 'own-relay' | 'own-protocol';
-
-export interface ConnectionInstruction {
-  /** What to do. A command may sit under it; text alone means "go and look". */
-  readonly text: string;
-  readonly command?: string;
-  /** Names the block for its copy control. Required with a command, absurd without one. */
-  readonly copyLabel?: string;
-}
-
-export interface ConnectionMethod {
-  readonly id: ConnectionMethodId;
-  /** Two or three words: three of these share a 390px row. */
-  readonly label: string;
-  /** When this is the right answer. */
-  readonly answer: string;
-  /** The steps THIS method needs. The whole point of the choice. */
-  readonly instructions: readonly ConnectionInstruction[];
-  /** Something true the reader would otherwise discover the hard way. Never a warning we invented. */
-  readonly caveat?: string;
-}
-
-/**
- * WHY THERE IS NO DEFAULT RELAY ADDRESS.
- *
- * `docs/relay-protocol.md` §1 and §9: Ferretry ships no hosted relay and no
- * relay address compiled into anything. A single default would route every
- * user's traffic through one account, and because the carrier is end-to-end
- * encrypted that account could not police what it was carrying even in
- * principle. So the page offers a relay you DEPLOY, never a relay you are
- * silently already using.
- */
-export const NO_DEFAULT_RELAY_NOTE =
-  'Ferretry ships no relay address. There is no shared relay to fall back on: one default would carry ' +
-  'everyone through a single account, and the traffic is encrypted end to end, so that account could ' +
-  'not police what it carried.';
-
-/**
- * The relay is deployable and tested; the two ends that speak it are not wired.
- *
- * `packages/relay/README.md` — "Status" — says so plainly, and repeating it here
- * is the difference between a page that documents a route and a page that
- * promises one. Somebody who deploys a relay today gets a working relay and a
- * daemon that does not yet dial it.
- */
-export const RELAY_NOT_WIRED_CAVEAT =
-  'The relay itself is complete and tested, but the daemon and browser ends that speak to it are separate ' +
-  'work and are not wired up yet. Deploying one today gets you a relay, not yet a remote connection.';
-
-const METHODS: Readonly<Record<ConnectionMethodId, ConnectionMethod>> = Object.freeze({
-  direct: Object.freeze({
-    id: 'direct' as const,
-    label: 'Direct',
-    answer: 'Same network, a VPN, or any host this browser can already reach. Fewest parties, nothing to deploy.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: 'Nothing to deploy. Keep this browser and that machine on one network — same Wi-Fi, a VPN, or a host with a route to it.',
-      }),
-      Object.freeze({
-        text: 'Check the daemon is still serving, then pair.',
-        command: DAEMON_STATUS_COMMAND,
-        copyLabel: 'Copy status command',
-      }),
-    ] as const),
-  }),
-  'own-relay': Object.freeze({
-    id: 'own-relay' as const,
-    label: 'Your own relay',
-    answer: 'The daemon is behind NAT. Deploy the rendezvous Worker to your own Cloudflare account.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: "Print this daemon's fingerprint. It is public — it is in the pairing QR.",
-        command: PAIR_PRINT_COMMAND,
-        copyLabel: 'Copy fingerprint command',
-      }),
-      Object.freeze({
-        text: 'Get the relay source. It deploys from this repository.',
-        command: 'git clone https://github.com/kirinnee/ferretry',
-        copyLabel: 'Copy clone command',
-      }),
-      Object.freeze({
-        text: 'Put that fingerprint in packages/relay/wrangler.jsonc under vars.RELAY_DAEMON_IDS. A relay carries the daemons its operator listed and nobody else, so an empty list serves nobody.',
-      }),
-      Object.freeze({
-        text: 'Deploy it to your account. One command, and it bills to you.',
-        command: 'task relay:deploy',
-        copyLabel: 'Copy deploy command',
-      }),
-    ] as const),
-    caveat: RELAY_NOT_WIRED_CAVEAT,
-  }),
-  'own-protocol': Object.freeze({
-    id: 'own-protocol' as const,
-    label: 'Your own build',
-    answer: 'The wire contract is documented, so a relay can be implemented in any language, by anyone.',
-    instructions: Object.freeze([
-      Object.freeze({
-        text: 'Implement docs/relay-protocol.md. It is the contract, written so it can be implemented without reading this repository.',
-      }),
-      Object.freeze({
-        text: 'Read "Running your own relay" first. Sections 9 to 11 cover what a relay operator can and cannot see, and what you are taking on.',
-      }),
-    ] as const),
-    caveat: RELAY_NOT_WIRED_CAVEAT,
-  }),
-});
-
-export const CONNECTION_METHODS: readonly ConnectionMethod[] = Object.freeze([
-  METHODS.direct,
-  METHODS['own-relay'],
-  METHODS['own-protocol'],
-]);
-
-/** Total, because the id is a closed union. */
-export const connectionMethod = (id: ConnectionMethodId): ConnectionMethod => METHODS[id];
-
-/**
- * Direct is what the page opens on.
- *
- * `docs/relay-protocol.md` §1: direct is preferred whenever it is configured and
- * reachable, and an implementation must not make somebody opt out of a relay to
- * get the simple thing. So the simple thing is the one already selected.
- */
-export const DEFAULT_CONNECTION_METHOD: ConnectionMethodId = 'direct';
 
 /**
  * A public, self-contained brief for an AI coding agent.

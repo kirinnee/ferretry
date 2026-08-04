@@ -21,6 +21,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
+import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from './features/onboarding/hosted-relay.ts';
 import { detectInstallChannel } from './features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from './features/onboarding/onboarding-page.tsx';
 import { OnboardingProgressStore, resetOnboardingProgress } from './features/onboarding/onboarding-progress.ts';
@@ -336,11 +337,36 @@ function SetupGuide() {
   );
   const channel = useMemo(() => detectInstallChannel(navigator.userAgent), []);
   const selected = snapshot.selectedDaemonId;
+  /*
+   * IS THERE A FALLBACK CARRIER RIGHT NOW?
+   *
+   * Asked once per visit to this screen, through the store's injected fetcher so
+   * a suite never dials out, and never from a compiled address — the path is
+   * relative and the deployment routes it (`hosted-relay.ts` explains why). The
+   * read cannot reject, so there is no failure branch here: "could not find out"
+   * arrives as a state and the step says so in those words.
+   *
+   * `live` rather than an AbortController because the answer is a fact about the
+   * service and not about this component: cancelling the request would save
+   * nothing and re-asking on a remount is the point. What must not happen is a
+   * set after unmount.
+   */
+  const [fallback, setFallback] = useState<HostedRelayFallback>(CHECKING_HOSTED_RELAY);
+  useEffect(() => {
+    let live = true;
+    void store.readDefaultRelay().then(answer => {
+      if (live) setFallback(answer);
+    });
+    return () => {
+      live = false;
+    };
+  }, [store]);
   return (
     <OnboardingPage
       progress={progress}
       write={clipboardWriter}
       channel={channel}
+      fallback={fallback}
       fleetReady={selected !== null}
       onOpenFleet={() => {
         // The selected daemon IS the one just paired: adding a connection

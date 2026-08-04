@@ -22,6 +22,15 @@ jobs:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
       - name: Build static PWA bundle
+        # The hosted relay's discovery origin is a build constant because Pages is
+        # static: the relay is a separate Worker hostname and there is no proxy to
+        # reach it through. This is the SAME repository variable the hosted relay's
+        # own deploy uses, so the bundle and the Worker cannot name different
+        # services, and it is an origin rather than anything user-identifying.
+        # Unset is a supported state: the bundle then has no directory to ask and
+        # says so instead of guessing a hostname.
+        env:
+          FY_RELAY_DIRECTORY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
         run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
       # Wrangler runs through the pinned devshell rather than cloudflare/wrangler-action. The action
       # installs wrangler with whichever package manager it detects, picks bun from this repository's

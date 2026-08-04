@@ -77,6 +77,7 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
+import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
 import type { OnboardingRouteId, OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
 import {
@@ -636,6 +637,20 @@ const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingPro
 
 /** A clipboard the review page never actually needs to reach. */
 const HARNESS_CLIPBOARD: ClipboardWriter = async () => {};
+
+/**
+ * The three fallback answers the reach step can render, as fixed values.
+ *
+ * A review page must not ask the real relay directory anything, and the whole
+ * point of these frames is that "switched off" and "could not find out" look
+ * different from each other and from "available". A `.invalid` host, because the
+ * reserved TLD cannot resolve and nothing here may address a real service.
+ */
+const HARNESS_FALLBACK = {
+  available: { kind: 'available' as const, relayUrl: 'https://relay.example.invalid' },
+  disabled: { kind: 'disabled' as const },
+  undetermined: { kind: 'undetermined' as const, reason: 'this page could not reach the relay directory' },
+} satisfies Readonly<Record<string, HostedRelayFallback>>;
 
 /** The pre-filled arrival a phone's own camera app produces. */
 const HARNESS_ARRIVAL: PairingArrival = {
@@ -1604,6 +1619,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.choose}
             write={HARNESS_CLIPBOARD}
             channel="apt"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -1619,6 +1635,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.install}
             write={HARNESS_CLIPBOARD}
             channel="apt"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -1634,6 +1651,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.daemon}
             write={HARNESS_CLIPBOARD}
             channel="brew"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -1649,6 +1667,45 @@ function Shell() {
             progress={HARNESS_ONBOARDING.connect}
             write={HARNESS_CLIPBOARD}
             channel="brew"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      /*
+       * The same step with the kill switch thrown. It must not look like the
+       * available frame, and it must not look like the unknown one either: an
+       * operator switching the fallback off is a fact, and "this page cannot
+       * tell" is an absence of one.
+       */
+      label: 'Setup — relay switched off',
+      render: () => (
+        <section aria-label="Setup connect step with the relay disabled" id="harness-onboarding-connect-disabled">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.connect}
+            write={HARNESS_CLIPBOARD}
+            channel="brew"
+            fallback={HARNESS_FALLBACK.disabled}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — relay unknown',
+      render: () => (
+        <section aria-label="Setup connect step with an undetermined relay" id="harness-onboarding-connect-unknown">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.connect}
+            write={HARNESS_CLIPBOARD}
+            channel="brew"
+            fallback={HARNESS_FALLBACK.undetermined}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -1664,6 +1721,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.brief}
             write={HARNESS_CLIPBOARD}
             channel="apt"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -1679,6 +1737,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.scan}
             write={HARNESS_CLIPBOARD}
             channel="curl"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => (
@@ -1704,6 +1763,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.pair}
             write={HARNESS_CLIPBOARD}
             channel="curl"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
             renderPairing={() => (
@@ -1729,6 +1789,7 @@ function Shell() {
             progress={HARNESS_ONBOARDING.done}
             write={HARNESS_CLIPBOARD}
             channel="apt"
+            fallback={HARNESS_FALLBACK.available}
             fleetReady
             onOpenFleet={() => {}}
             renderPairing={() => null}
@@ -3200,6 +3261,7 @@ function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboarding
         progress={HARNESS_ONBOARDING[screen]}
         write={HARNESS_CLIPBOARD}
         channel="curl"
+        fallback={HARNESS_FALLBACK.available}
         fleetReady={screen === 'done'}
         onOpenFleet={() => {}}
         renderPairing={() => (

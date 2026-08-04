@@ -10,6 +10,11 @@ import {
   useSyncExternalStore,
 } from 'react';
 
+import {
+  bundledRelayDirectory,
+  type HostedRelayFallback,
+  readHostedRelayFallback,
+} from '../features/onboarding/hosted-relay.ts';
 import { daemonApiClient } from './api-client.ts';
 import {
   type DaemonConnectionRepository,
@@ -190,6 +195,20 @@ export interface AppStore {
    */
   readonly pushService: DaemonPushService;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
+  /**
+   * Whether Ferretry's hosted relay is advertising itself right now.
+   *
+   * Bound to the SAME injected fetcher as every other call, for the same reason
+   * `pushService` is: a suite or an offline shell that injects a fetcher must not
+   * get the real network back for one read. Never throws — the answer to "could
+   * not find out" is a state, not an exception.
+   *
+   * NO DIRECTORY IS CONFIGURED IN THIS BUILD, so today this resolves without
+   * making a request: the hosted relay is a separate Worker origin, nothing tells
+   * this page what that origin is, and inventing one is the single thing the
+   * design forbids. `hosted-relay.ts` records what would have to exist.
+   */
+  readonly readDefaultRelay: () => Promise<HostedRelayFallback>;
 }
 
 export interface CreateAppStoreOptions {
@@ -245,6 +264,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       connections.add(connection);
       return connection;
     },
+    // The origin is the build constant and nothing else — no literal here, no
+    // relative path, no guess. Unset in this build is a real state and answers
+    // `undetermined` without dialling anything.
+    readDefaultRelay: async () => await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher }),
   };
 }
 

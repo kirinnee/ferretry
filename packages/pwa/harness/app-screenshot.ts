@@ -98,8 +98,28 @@ function fail(message: string): never {
 
 mkdirSync(outDir, { recursive: true });
 
+/**
+ * The relay directory origin this REVIEW bundle is built with.
+ *
+ * The shipped code only asks for an advertisement when the build supplied an
+ * origin, so a bundle built without one can never render the available or
+ * switched-off states — it short-circuits, correctly, to "no directory". Building
+ * the review copy with an origin is therefore what makes those two frames
+ * reachable at all, and the whole chain gets exercised: build constant, request,
+ * parse, readout.
+ *
+ * `.invalid` because the reserved TLD cannot resolve, and because this harness
+ * aborts every off-origin request anyway. Nothing here may address a real
+ * service, and the answers themselves are supplied by request interception.
+ */
+const RELAY_DIRECTORY = 'https://relay-directory.example.invalid';
+
 process.stdout.write('📦 building the real bundle…\n');
-const build = spawnSync('./node_modules/.bin/vite', ['build'], { cwd: packageDir, stdio: 'inherit' });
+const build = spawnSync('./node_modules/.bin/vite', ['build'], {
+  cwd: packageDir,
+  stdio: 'inherit',
+  env: { ...process.env, FY_RELAY_DIRECTORY_ORIGIN: RELAY_DIRECTORY },
+});
 if (build.error) fail(`vite could not be started: ${build.error.message}`);
 if (build.status !== 0) fail(`vite build exited ${build.status}`);
 
@@ -434,7 +454,7 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<chooser|install|daemon|connect|pair|brief|scan|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
+          '    setup-<chooser|install|daemon|connect|reach-*|pair|brief|scan|done>-<mobile|desktop> and setup-pair-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
     } else {
@@ -514,16 +534,42 @@ try {
         }
       }
 
-      // 2b. THE CARRIER THAT CHANGES THE MOST. Direct is the default and is
-      // captured above; the deploy-your-own-relay branch is the one whose steps
-      // and commands actually differ, so it gets its own frame at both widths.
-      for (const viewport of VIEWPORTS) {
-        await capture(contextFor(viewport), async page => {
-          await toStep(page, journey('connect'));
-          await page.locator('[data-onboarding-method="own-relay"]').click();
-          await page.locator('[data-onboarding-method-caveat]').waitFor({ state: 'visible' });
-          await shot(page, `setup-relay-${viewport.name}`);
-        });
+      /*
+       * 2b. THE REACH STEP'S THREE ANSWERS, at both widths.
+       *
+       * The step reports a runtime fact — whether the hosted fallback is
+       * advertising itself — so the three frames that matter are the three
+       * answers, and they must not look alike. Two are driven by fulfilling the
+       * real request the shipped code makes against the build's own directory
+       * origin; the third leaves that request UNROUTED, so this harness's
+       * off-origin abort makes it fail exactly as an unreachable directory
+       * would. Nothing is faked into the component.
+       */
+      const RELAY_ANSWERS = [
+        { name: 'available', body: JSON.stringify({ version: 1, relayUrl: 'https://relay.example.invalid' }) },
+        { name: 'disabled', body: JSON.stringify({ version: 1, relayUrl: null }) },
+        { name: 'undetermined', body: null },
+      ] as const;
+      for (const answer of RELAY_ANSWERS) {
+        for (const viewport of VIEWPORTS) {
+          await capture(contextFor(viewport), async page => {
+            if (answer.body !== null) {
+              await page.route('**/v1/default-relay', async route => {
+                await route.fulfill({
+                  status: 200,
+                  contentType: 'application/json; charset=utf-8',
+                  headers: { 'Cache-Control': 'no-store' },
+                  body: answer.body,
+                });
+              });
+            }
+            await toStep(page, journey('connect'));
+            // The readout arrives after first paint, so wait for the state the
+            // shipped parser resolved rather than for a timeout.
+            await page.locator(`[data-onboarding-fallback="${answer.name}"]`).waitFor({ state: 'visible' });
+            await shot(page, `setup-reach-${answer.name}-${viewport.name}`);
+          });
+        }
       }
 
       const toPairStep = async (page: Page): Promise<void> => {

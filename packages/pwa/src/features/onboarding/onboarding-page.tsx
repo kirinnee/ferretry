@@ -41,10 +41,10 @@ import { type ReactNode, type RefObject, useEffect, useRef, useSyncExternalStore
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
+import type { HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
 import {
-  DEFAULT_CONNECTION_METHOD,
   type InstallChannelId,
   nextOnboardingStep,
   onboardingRoute,
@@ -85,6 +85,14 @@ export interface OnboardingPageProps {
   readonly onOpenFleet: () => void;
   /** Whether there is a paired daemon for the final action to open. */
   readonly fleetReady: boolean;
+  /**
+   * Whether the fallback carrier exists right now, read at runtime.
+   *
+   * A prop rather than a fetch in here: this file is a frame, the address is
+   * never a constant, and a screen that dialled out on its own could not be
+   * rendered by a test or a review harness without reaching the network.
+   */
+  readonly fallback: HostedRelayFallback;
 }
 
 /**
@@ -112,6 +120,7 @@ export function OnboardingPage({
   renderPairing,
   onOpenFleet,
   fleetReady,
+  fallback,
 }: OnboardingPageProps) {
   const at = useSyncExternalStore(progress.subscribe, progress.snapshot);
   /* One key for "which screen is on the glass", chooser included, so focus can follow it. */
@@ -208,6 +217,7 @@ export function OnboardingPage({
           renderPairing={renderPairing}
           onOpenFleet={onOpenFleet}
           fleetReady={fleetReady}
+          fallback={fallback}
           onGoTo={step => {
             progress.goTo(step);
           }}
@@ -228,6 +238,7 @@ interface RouteFlowProps {
   readonly renderPairing: (host: OnboardingPairingHost) => ReactNode;
   readonly onOpenFleet: () => void;
   readonly fleetReady: boolean;
+  readonly fallback: HostedRelayFallback;
   readonly onGoTo: (step: OnboardingStepId) => void;
   /** Back out of the route entirely, to the question. */
   readonly onLeaveRoute: () => void;
@@ -248,6 +259,7 @@ function RouteFlow({
   renderPairing,
   onOpenFleet,
   fleetReady,
+  fallback,
   onGoTo,
   onLeaveRoute,
 }: RouteFlowProps) {
@@ -283,6 +295,7 @@ function RouteFlow({
           channel={channel}
           pairing={pairing}
           fleetReady={fleetReady}
+          fallback={fallback}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
         />
@@ -342,6 +355,7 @@ interface StageProps {
   readonly channel: InstallChannelId;
   readonly pairing: ReactNode;
   readonly fleetReady: boolean;
+  readonly fallback: HostedRelayFallback;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
 }
@@ -355,7 +369,7 @@ interface StageProps {
  * different framing — and the framing comes from the route, not from a flag
  * threaded down through three components.
  */
-function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }: StageProps) {
+function Stage({ at, write, channel, pairing, fleetReady, fallback, onOpenFleet, onGoTo }: StageProps) {
   switch (at.current) {
     case 'install':
       return <InstallStage write={write} channel={channel} />;
@@ -363,7 +377,7 @@ function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }:
       return <DaemonStage write={write} />;
     case 'connect':
       /* Direct first, because `docs/relay-protocol.md` §1 prefers it whenever it works. */
-      return <ConnectStage write={write} method={DEFAULT_CONNECTION_METHOD} />;
+      return <ConnectStage fallback={fallback} />;
     case 'brief':
       return <BriefStage write={write} />;
     case 'pair':
@@ -385,7 +399,7 @@ function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }:
 const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
-  connect: 'Nothing here tests a route. Continue when you have picked one.',
+  connect: 'Nothing here tests a route, and there is nothing to pick. Continue.',
   brief: 'This page cannot see your agent. Continue when it shows you a QR or a link.',
   pair: 'This step finishes itself when the daemon answers.',
 };

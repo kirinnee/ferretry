@@ -78,44 +78,97 @@ describe('the install stage', () => {
 });
 
 describe('the connect stage', () => {
-  it('opens on direct and needs nothing deployed for it', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="direct" />);
-    const toolbar = must(view.container.querySelector('[role="toolbar"]'), 'the carrier switcher');
+  it('reports the order rather than asking the reader to choose one', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'available', relayUrl: 'https://relay.example.test' }} />);
 
-    expect(toolbar.getAttribute('aria-label')).toBe('Connection method');
-    expect(toolbar.querySelectorAll('button')).toHaveLength(3);
-    expect(must(toolbar.querySelector('[aria-pressed="true"]'), 'the chosen carrier').textContent).toBe('Direct');
-    expect(view.container.textContent).toContain('Nothing to deploy');
-    expect(view.container.querySelector('[data-onboarding-method-caveat]')).toBeNull();
+    // No toolbar, no pressed state, nothing to pick: the transport decides.
+    expect(view.container.querySelector('[role="toolbar"]')).toBeNull();
+    expect(view.container.querySelector('[aria-pressed]')).toBeNull();
+    expect(view.container.textContent).toContain('nothing to choose here');
+    // Two carriers in a real ordered list, in the order they are tried.
+    const steps = [...must(view.container.querySelector('ol'), 'the order').querySelectorAll('li')];
+    expect(steps).toHaveLength(2);
+    expect(steps[0]?.textContent).toContain('Direct');
+    expect(steps[1]?.textContent).toContain('hosted relay');
     await view.unmount();
   });
 
-  it('rewrites the steps, not just a label, when the carrier changes', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="direct" />);
-    const steps = (): number => must(view.container.querySelector('ol'), 'the steps').querySelectorAll('li').length;
-    const before = steps();
+  it('does not advertise running your own relay', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'disabled' }} />);
 
-    await click(must(view.container.querySelector('[data-onboarding-method="own-relay"]'), 'your own relay'));
+    // Still supported by the protocol and documented; deliberately not a fork in
+    // the road offered to somebody who has just installed a CLI.
+    expect(view.container.textContent).not.toContain('wrangler');
+    expect(view.container.textContent).not.toContain('relay:deploy');
+    expect(view.container.textContent).not.toContain('Cloudflare account');
+    // And nothing to run at all, so nothing to copy.
+    expect(view.container.querySelector('[data-onboarding-copy]')).toBeNull();
+    expect(view.container.querySelector('pre')).toBeNull();
+    await view.unmount();
+  });
 
-    expect(steps()).toBeGreaterThan(before);
-    expect(view.container.textContent).toContain('task relay:deploy');
-    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
-    // The honest limit, said where the reader is deciding rather than after.
-    expect(must(view.container.querySelector('[data-onboarding-method-caveat]'), 'the caveat').textContent).toContain(
-      'not wired up yet',
+  it('says the fallback is there, and where, when it is advertised', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'available', relayUrl: 'https://relay.example.test' }} />);
+    const stage = must(view.container.querySelector('[data-onboarding-fallback]'), 'the stage');
+
+    expect(stage.getAttribute('data-onboarding-fallback')).toBe('available');
+    // The address is shown because it names who would carry the traffic. It came
+    // from the runtime answer; there is no such string in the bundle.
+    expect(view.container.textContent).toContain('https://relay.example.test');
+    expect(view.container.textContent).toContain('only if direct');
+    await view.unmount();
+  });
+
+  it('states the kill switch as a constraint, not as an error', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'disabled' }} />);
+
+    expect(
+      must(view.container.querySelector('[data-onboarding-fallback]'), 'the stage').getAttribute(
+        'data-onboarding-fallback',
+      ),
+    ).toBe('disabled');
+    // What it means FOR THE READER: direct is now the only carrier.
+    expect(view.container.textContent).toContain('switched off');
+    expect(view.container.textContent).toContain('only carrier');
+    // Announced, because the answer lands after first paint.
+    expect(must(view.container.querySelector('[role="status"]'), 'the readout').textContent).toContain('switched off');
+    await view.unmount();
+  });
+
+  it('shows ignorance as ignorance, never as available and never as disabled', async () => {
+    const view = await mount(
+      <ConnectStage fallback={{ kind: 'undetermined', reason: 'this page could not reach the relay directory' }} />,
     );
+
+    expect(
+      must(view.container.querySelector('[data-onboarding-fallback]'), 'the stage').getAttribute(
+        'data-onboarding-fallback',
+      ),
+    ).toBe('undetermined');
+    expect(view.container.textContent).toContain('Unavailable');
+    expect(view.container.textContent).toContain('could not reach the relay directory');
+    // Not blamed on an operator who did nothing, and not claimed as a carrier.
+    expect(view.container.textContent).not.toContain('switched off');
+    expect(view.container.textContent).not.toContain('Available now');
     await view.unmount();
   });
 
-  it('keeps the reason there is no default relay one tap away', async () => {
-    const view = await mount(<ConnectStage write={async () => {}} method="own-protocol" />);
+  it('waits visibly rather than showing an answer it does not have', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'checking' }} />);
+
+    expect(view.container.textContent).toContain('Checking whether');
+    expect(view.container.textContent).not.toContain('Unavailable');
+    expect(view.container.textContent).not.toContain('Available now');
+    await view.unmount();
+  });
+
+  it('keeps what the hosted relay can see one tap away', async () => {
+    const view = await mount(<ConnectStage fallback={{ kind: 'available', relayUrl: 'https://relay.example.test' }} />);
     const aside = asideOf(view.container);
 
     expect(aside.open).toBe(false);
-    expect(aside.textContent).toContain('no relay address');
-    // A carrier a reader must build has nothing to copy, and prints nothing.
-    expect(view.container.querySelector('[data-onboarding-copy]')).toBeNull();
-    expect(view.container.textContent).toContain('docs/relay-protocol.md');
+    expect(aside.textContent).toContain('fingerprint');
+    expect(aside.textContent).toContain('could not read');
     await view.unmount();
   });
 });

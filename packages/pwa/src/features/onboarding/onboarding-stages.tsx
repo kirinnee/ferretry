@@ -29,10 +29,15 @@ import { type ReactNode, useState } from 'react';
 import { CommandBlock } from './command-block.tsx';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
 import {
+  CARRIER_ORDER_NOTE,
+  HOSTED_RELAY_DISABLED_NOTE,
+  HOSTED_RELAY_DISCLOSURE,
+  HOSTED_RELAY_UNDETERMINED_NOTE,
+  type HostedRelayFallback,
+  TRANSPORT_NOT_WIRED_NOTE,
+} from './hosted-relay.ts';
+import {
   AGENT_SETUP_PROMPT,
-  CONNECTION_METHODS,
-  type ConnectionMethodId,
-  connectionMethod,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
@@ -40,7 +45,6 @@ import {
   INSTALL_CHANNELS,
   type InstallChannelId,
   installChannel,
-  NO_DEFAULT_RELAY_NOTE,
   PAIR_COMMAND,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
@@ -158,80 +162,124 @@ export function DaemonStage({ write }: { readonly write: ClipboardWriter }) {
 }
 
 export interface ConnectStageProps {
-  readonly write: ClipboardWriter;
-  /** Which carrier is shown first. Direct, because direct is better whenever it works. */
-  readonly method: ConnectionMethodId;
+  /**
+   * What the runtime advertisement said about the fallback carrier.
+   *
+   * No clipboard seam any more: this step has no command to copy, because there
+   * is nothing for the reader to run. That is the change, not an omission.
+   */
+  readonly fallback: HostedRelayFallback;
 }
 
 /**
- * HOW A BROWSER REACHES A DAEMON — and the one choice that rewrites the rest.
+ * HOW A BROWSER REACHES A DAEMON — reported, not chosen, and not overstated.
  *
- * There are three carriers and they do not need the same work: direct needs
- * nothing deployed, your own relay needs four commands and a Cloudflare account,
- * your own implementation needs the protocol document. So this stage does not
- * merely record a preference — the instructions BELOW the choice are the
- * choice's, and they change with it. That is why this is its own step rather
- * than a switch inside the daemon step: a set of instructions that changes is a
- * page, not a toggle.
+ * This step used to be a three-way carrier chooser. It is not one any more,
+ * because choosing is not what happens: a direct connection is what Ferretry uses
+ * whenever the browser can reach the daemon, and the hosted relay exists to carry
+ * the traffic when it cannot. A toggle asked the reader to decide something the
+ * connection decides for itself, before there was a daemon to decide it about.
  *
- * There is deliberately no fourth option reading "use the Ferretry relay",
- * because there is no such thing. `NO_DEFAULT_RELAY_NOTE` says why, in the
- * disclosure, rather than leaving a reader to wonder what the default is.
+ * IT DOES NOT CLAIM A FALLBACK THAT CANNOT HAPPEN. `packages/relay` is complete
+ * and tested, and nothing mounts it: neither the daemon nor this browser dials a
+ * relay yet. So `TRANSPORT_NOT_WIRED_NOTE` is on the glass, in the warning tone,
+ * above everything else — a reader whose daemon is behind NAT needs to know that
+ * TODAY, not to discover it when pairing succeeds and nothing connects.
+ *
+ * THE ADVERTISEMENT IS STILL READ AND STILL SHOWN, in four states that are not
+ * each other: checking, available, switched off, and "this page does not know".
+ * Production is in the last one and says why, because nothing tells this page
+ * which origin serves the directory (`hosted-relay.ts` records what is missing).
+ *
+ * Running your own relay is supported by the protocol and documented in
+ * `docs/relay-protocol.md`; it is deliberately NOT advertised here, because a
+ * setup screen offering a Cloudflare deploy to somebody installing a CLI is a
+ * fork in a road that has one sensible direction.
+ *
+ * WHAT THIS STEP CANNOT SAY is which carrier is ACTIVE. Nothing is connected yet,
+ * this page has tested neither, and the live answer belongs to a transport that
+ * does not exist. Saying so is the only honest option available to it.
  */
-export function ConnectStage({ write, method }: ConnectStageProps) {
-  const [selected, setSelected] = useState<ConnectionMethodId>(method);
-  const chosen = connectionMethod(selected);
+export function ConnectStage({ fallback }: ConnectStageProps) {
   return (
-    <div className={STAGE}>
-      <div role="toolbar" aria-label="Connection method" className="grid grid-cols-1 gap-1 sm:grid-cols-3">
-        {CONNECTION_METHODS.map(option => (
-          <button
-            key={option.id}
-            type="button"
-            className={`${CHOICE} ${option.id === selected ? CHOICE_TONE.on : CHOICE_TONE.off}`}
-            aria-pressed={option.id === selected}
-            onClick={() => setSelected(option.id)}
-            data-onboarding-method={option.id}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+    <div className={STAGE} data-onboarding-fallback={fallback.kind}>
+      <p className="m-0 text-meta leading-base text-fg">{CARRIER_ORDER_NOTE}</p>
 
-      <p className="m-0 text-meta leading-base text-muted" data-onboarding-method-answer={chosen.id}>
-        {chosen.answer}
+      {/*
+        FIRST, AND IN THE WARNING TONE. The gap is the most consequential thing
+        on this step for the one reader it affects most: somebody whose daemon is
+        behind NAT, who would otherwise pair successfully and connect to nothing.
+      */}
+      <p className="m-0 text-meta leading-base text-warn" data-onboarding-transport-gap="">
+        {TRANSPORT_NOT_WIRED_NOTE}
       </p>
 
       {/*
-        A REAL ORDERED LIST. These are numbered steps in a sequence, so they are
-        an `<ol>`; the numbers are the marker rather than something drawn, and a
-        reader who hears the page hears "3 of 4" without us saying it.
+        A REAL ORDERED LIST, because the order is the whole point: two carriers,
+        in the order they are meant to be used, and a reader who hears the page
+        hears "1, 2".
       */}
       <ol className="m-0 flex list-decimal flex-col gap-2 pl-5 text-meta leading-base text-muted">
-        {chosen.instructions.map(instruction => (
-          <li key={instruction.text} className="min-w-0">
-            <p className="m-0 mb-1 text-meta leading-base text-fg">{instruction.text}</p>
-            {instruction.command === undefined ? null : (
-              <CommandBlock
-                command={instruction.command}
-                copyLabel={instruction.copyLabel ?? 'Copy command'}
-                write={write}
-              />
-            )}
-          </li>
-        ))}
+        <li className="min-w-0">
+          <p className="m-0 text-meta leading-base text-fg">Direct — straight to your daemon.</p>
+          <p className="m-0 text-meta leading-base text-muted">
+            Nothing to deploy and nobody else on the path. This is the path the app has today, and it needs the daemon
+            to be reachable from here: same network, a VPN, a tailnet, or a public address.
+          </p>
+        </li>
+        <li className="min-w-0">
+          <p className="m-0 text-meta leading-base text-fg">
+            Ferretry&rsquo;s hosted relay — the fallback, once anything dials it.
+          </p>
+          <FallbackReadout fallback={fallback} />
+        </li>
       </ol>
 
-      {chosen.caveat === undefined ? null : (
-        <p className="m-0 text-meta leading-base text-warn" data-onboarding-method-caveat="">
-          {chosen.caveat}
-        </p>
-      )}
-
-      <Aside summary="Why is there no default relay?">
-        <p className="m-0 text-meta leading-base text-muted">{NO_DEFAULT_RELAY_NOTE}</p>
+      <Aside summary="What the hosted relay would see">
+        <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
+          {HOSTED_RELAY_DISCLOSURE.map(line => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
       </Aside>
     </div>
+  );
+}
+
+/**
+ * The one live fact on this step, in the four states it can be in.
+ *
+ * `role="status"` because it is a readout that arrives after first paint: the
+ * page renders "checking", the answer lands, and a reader who is not watching
+ * this line is told rather than left with stale text.
+ */
+function FallbackReadout({ fallback }: { readonly fallback: HostedRelayFallback }) {
+  if (fallback.kind === 'checking') {
+    return (
+      <p className="m-0 text-meta leading-base text-muted" role="status">
+        Checking whether the hosted relay is available&hellip;
+      </p>
+    );
+  }
+  if (fallback.kind === 'available') {
+    return (
+      <p className="m-0 text-meta leading-base text-muted" role="status">
+        Available now, at <code className="font-mono text-syn-string">{fallback.relayUrl}</code>. Used only if direct
+        does not work.
+      </p>
+    );
+  }
+  if (fallback.kind === 'disabled') {
+    return (
+      <p className="m-0 text-meta leading-base text-warn" role="status">
+        {HOSTED_RELAY_DISABLED_NOTE}
+      </p>
+    );
+  }
+  return (
+    <p className="m-0 text-meta leading-base text-warn" role="status">
+      Unavailable &mdash; {fallback.reason}. {HOSTED_RELAY_UNDETERMINED_NOTE}
+    </p>
   );
 }
 

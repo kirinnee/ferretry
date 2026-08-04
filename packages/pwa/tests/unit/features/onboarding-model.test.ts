@@ -16,13 +16,10 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   AGENT_SETUP_PROMPT,
-  CONNECTION_METHODS,
-  connectionMethod,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
   DAEMON_STATUS_COMMAND,
-  DEFAULT_CONNECTION_METHOD,
   detectInstallChannel,
   firstOnboardingStep,
   furthestOnboardingStep,
@@ -32,7 +29,6 @@ import {
   isOnboardingStepId,
   isStepOfRoute,
   nextOnboardingStep,
-  NO_DEFAULT_RELAY_NOTE,
   ONBOARDING_ROUTES,
   onboardingRoute,
   onboardingRouteSteps,
@@ -43,7 +39,6 @@ import {
   PAIR_COMMAND,
   PAIR_PRINT_COMMAND,
   previousOnboardingStep,
-  RELAY_NOT_WIRED_CAVEAT,
   VERIFY_COMMAND,
 } from '../../../src/features/onboarding/onboarding-model.ts';
 
@@ -51,9 +46,6 @@ const repoFile = async (path: string): Promise<string> =>
   await Bun.file(new URL(`../../../../../${path}`, import.meta.url)).text();
 
 const installationDoc = await repoFile('INSTALLATION.md');
-const taskfile = await repoFile('Taskfile.yaml');
-const wrangler = await repoFile('packages/relay/wrangler.jsonc');
-const relayReadme = await repoFile('packages/relay/README.md');
 
 describe('the three entry paths', () => {
   it('offers exactly the three answers the reader was asked for', () => {
@@ -117,7 +109,7 @@ describe('the three entry paths', () => {
   });
 
   it('names every step it can put on the glass, and nothing else', () => {
-    expect(onboardingStep('connect').title).toBe('Choose how to reach it');
+    expect(onboardingStep('connect').title).toBe('How this reaches it');
     expect(onboardingStep('brief').short).toBe('Brief');
     expect(isOnboardingStepId('connect')).toBe(true);
     expect(isOnboardingStepId('finished')).toBe(false);
@@ -198,73 +190,6 @@ describe('install channels', () => {
     expect(detectInstallChannel('Mozilla/5.0 (Linux; Android 14; Pixel 8)')).toBe('curl');
     expect(detectInstallChannel('Mozilla/5.0 (Windows NT 10.0; Win64; x64)')).toBe('curl');
     expect(detectInstallChannel(undefined)).toBe('curl');
-  });
-});
-
-describe('how a browser reaches a daemon', () => {
-  it('offers the three carriers the protocol document describes', () => {
-    expect(CONNECTION_METHODS.map(method => method.id)).toEqual(['direct', 'own-relay', 'own-protocol']);
-    for (const method of CONNECTION_METHODS) {
-      expect(connectionMethod(method.id)).toBe(method);
-      // The whole point of the choice: each carrier carries its OWN steps.
-      expect(method.instructions.length).toBeGreaterThan(0);
-    }
-  });
-
-  it('prefers direct, and needs nothing deployed for it', () => {
-    // `docs/relay-protocol.md` §1: direct is preferred whenever it works, and
-    // nobody may be made to opt out of a relay to get the simple thing.
-    expect(DEFAULT_CONNECTION_METHOD).toBe('direct');
-    const direct = connectionMethod('direct');
-    expect(direct.instructions.some(step => step.text.includes('Nothing to deploy'))).toBe(true);
-    expect(direct.instructions.map(step => step.command)).toContain(DAEMON_STATUS_COMMAND);
-    // Direct carries no relay caveat, because it involves no relay.
-    expect(direct.caveat).toBeUndefined();
-  });
-
-  it('offers no hosted relay and no default relay address', () => {
-    const relayText = CONNECTION_METHODS.flatMap(method => [
-      method.label,
-      method.answer,
-      ...method.instructions.map(step => `${step.text} ${step.command ?? ''}`),
-    ]).join(' ');
-    // A default would route everyone through one account, and an end-to-end
-    // encrypted carrier cannot police what it carries. So there is no address.
-    expect(relayText).not.toMatch(/wss?:\/\//);
-    expect(relayText).not.toContain('workers.dev');
-    expect(relayText).not.toContain('ferretry-relay.');
-    expect(NO_DEFAULT_RELAY_NOTE).toContain('no relay address');
-  });
-
-  it('deploys a reader-owned relay with the commands the repo really ships', () => {
-    const own = connectionMethod('own-relay');
-    const commands = own.instructions.flatMap(step => (step.command === undefined ? [] : [step.command]));
-    // Pinned against the Taskfile and the deployment config, so the page cannot
-    // print a deploy command the repo does not have.
-    expect(commands).toContain('task relay:deploy');
-    expect(taskfile).toContain('relay:deploy:');
-    expect(commands).toContain(PAIR_PRINT_COMMAND);
-    expect(own.instructions.some(step => step.text.includes('RELAY_DAEMON_IDS'))).toBe(true);
-    expect(wrangler).toContain('RELAY_DAEMON_IDS');
-    for (const step of own.instructions) {
-      // A command without a name is a control nothing can announce.
-      if (step.command !== undefined) expect(step.copyLabel).toBeDefined();
-    }
-  });
-
-  it('says out loud that the two ends of a relay are not wired yet', () => {
-    // `packages/relay/README.md` says so, and a page that documented the route
-    // without saying it would be promising a connection it cannot deliver.
-    expect(relayReadme).toContain('not');
-    expect(RELAY_NOT_WIRED_CAVEAT).toContain('not wired up yet');
-    expect(connectionMethod('own-relay').caveat).toBe(RELAY_NOT_WIRED_CAVEAT);
-    expect(connectionMethod('own-protocol').caveat).toBe(RELAY_NOT_WIRED_CAVEAT);
-  });
-
-  it('points a reader building their own at the contract, with no commands to fake', () => {
-    const own = connectionMethod('own-protocol');
-    expect(own.instructions.some(step => step.text.includes('docs/relay-protocol.md'))).toBe(true);
-    expect(own.instructions.every(step => step.command === undefined)).toBe(true);
   });
 });
 

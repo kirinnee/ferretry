@@ -51,6 +51,8 @@ const SECTIONS = [
   'harness-onboarding-choose',
   'harness-onboarding-daemon',
   'harness-onboarding-connect',
+  'harness-onboarding-connect-disabled',
+  'harness-onboarding-connect-unknown',
   'harness-onboarding-brief',
   'harness-onboarding-scan',
   'harness-onboarding-pair',

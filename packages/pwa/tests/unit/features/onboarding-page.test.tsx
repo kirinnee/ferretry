@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
+import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from '../../../src/features/onboarding/hosted-relay.ts';
 import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../src/features/onboarding/onboarding-page.tsx';
 import {
   type OnboardingProgressStorage,
@@ -55,6 +56,8 @@ interface PageOptions {
   readonly progress?: OnboardingProgressStore;
   readonly fleetReady?: boolean;
   readonly onOpenFleet?: () => void;
+  /** What the runtime relay directory answered. Defaults to the pre-answer state. */
+  readonly fallback?: HostedRelayFallback;
 }
 
 const pageWith = async (options: PageOptions = {}) => {
@@ -64,6 +67,7 @@ const pageWith = async (options: PageOptions = {}) => {
       progress={options.progress ?? new OnboardingProgressStore({ storage: new MemoryStorage() })}
       write={async () => {}}
       channel="apt"
+      fallback={options.fallback ?? CHECKING_HOSTED_RELAY}
       fleetReady={options.fleetReady ?? false}
       onOpenFleet={options.onOpenFleet ?? (() => opened.push('fleet'))}
       renderPairing={({ onPaired }) => (
@@ -353,58 +357,52 @@ describe('the reach-it step', () => {
     await next(container);
   };
 
-  it('opens on direct, which needs nothing deployed', async () => {
-    const { view } = await pageWith();
+  it('reports the carrier order instead of asking the reader to pick one', async () => {
+    const { view } = await pageWith({ fallback: { kind: 'available', relayUrl: 'https://relay.example.test' } });
     await toConnect(view.container);
 
     expect(screenOf(view.container)).toBe('connect');
+    expect(view.container.textContent).toContain('nothing to choose here');
+    // The three-way carrier chooser is gone: nothing here is a choice.
+    expect(view.container.querySelector('[data-onboarding-method]')).toBeNull();
+    expect(view.container.querySelector('[role="toolbar"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('carries the runtime answer through the frame to the step', async () => {
+    const { view } = await pageWith({ fallback: { kind: 'available', relayUrl: 'https://relay.example.test' } });
+    await toConnect(view.container);
+
+    // The address is never a constant: it arrived as a prop from the composition
+    // root, which read it at runtime.
+    expect(view.container.textContent).toContain('https://relay.example.test');
     expect(
-      must(
-        view.container.querySelector('[data-onboarding-method][aria-pressed="true"]'),
-        'the chosen method',
-      ).getAttribute('data-onboarding-method'),
-    ).toBe('direct');
-    expect(view.container.textContent).toContain('Nothing to deploy');
-    // Direct involves no relay, so it carries no relay caveat.
-    expect(view.container.querySelector('[data-onboarding-method-caveat]')).toBeNull();
+      must(view.container.querySelector('[data-onboarding-fallback]'), 'the readout').getAttribute(
+        'data-onboarding-fallback',
+      ),
+    ).toBe('available');
     await view.unmount();
   });
 
-  it('changes the commands and the steps when the carrier changes', async () => {
-    const { view } = await pageWith();
+  it('surfaces the kill switch as a clear unavailable state', async () => {
+    const { view } = await pageWith({ fallback: { kind: 'disabled' } });
     await toConnect(view.container);
-    const steps = () => [...view.container.querySelectorAll('ol[class*="list-decimal"] > li')].length;
 
-    const directSteps = steps();
-    await click(buttonWith(view.container, '[data-onboarding-method="own-relay"]'));
-
-    // The whole point of the choice: different work, so different instructions.
-    expect(steps()).toBeGreaterThan(directSteps);
-    expect(view.container.textContent).toContain('task relay:deploy');
-    expect(view.container.textContent).toContain('RELAY_DAEMON_IDS');
-    expect(view.container.textContent).toContain('fy pair --no-wait');
-    // And the honest limit: the relay deploys, the two ends do not speak it yet.
-    expect(must(view.container.querySelector('[data-onboarding-method-caveat]'), 'the caveat').textContent).toContain(
-      'not wired up yet',
-    );
-
-    await click(buttonWith(view.container, '[data-onboarding-method="own-protocol"]'));
-    expect(view.container.textContent).toContain('docs/relay-protocol.md');
-    // Nothing to run, so nothing is printed as though it could be run.
-    expect(view.container.textContent).not.toContain('task relay:deploy');
+    expect(view.container.textContent).toContain('switched off');
+    expect(view.container.textContent).toContain('only carrier');
+    // Still advances: pairing does not depend on the fallback existing.
+    expect(view.container.querySelector('[data-onboarding-next]')).not.toBeNull();
     await view.unmount();
   });
 
-  it('offers no default relay, and says why rather than leaving a gap', async () => {
-    const { view } = await pageWith();
+  it('never advertises self-hosting, and prints no relay address of its own', async () => {
+    const { view } = await pageWith({ fallback: { kind: 'undetermined', reason: 'nothing answered' } });
     await toConnect(view.container);
 
-    const methods = [...view.container.querySelectorAll('[data-onboarding-method]')].map(node =>
-      node.getAttribute('data-onboarding-method'),
-    );
-    expect(methods).toEqual(['direct', 'own-relay', 'own-protocol']);
-    // No fourth option, and no address anywhere on the screen to be one.
-    expect(view.container.textContent).toContain('no relay address');
+    expect(view.container.textContent).toContain('Unavailable');
+    expect(view.container.textContent).not.toContain('relay:deploy');
+    expect(view.container.textContent).not.toContain('RELAY_DAEMON_IDS');
+    // No address anywhere on the screen, because this state has none to show.
     expect(view.container.innerHTML).not.toMatch(/wss?:\/\//);
     expect(view.container.textContent).not.toContain('workers.dev');
     await view.unmount();

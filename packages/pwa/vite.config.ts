@@ -41,7 +41,28 @@ import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
 
+/**
+ * The hosted relay's discovery ORIGIN, baked in at build time.
+ *
+ * The relay is a separate Worker on its own hostname and Pages stays static — no
+ * Functions, no proxy — so a relative path could never reach it. One shared,
+ * non-user-identifying origin is therefore a build constant, supplied by
+ * `FY_RELAY_DIRECTORY_ORIGIN`; `.github/workflows/pwa-pages.yaml` passes the same
+ * repository variable the hosted relay's own deploy uses, so the two cannot name
+ * different services.
+ *
+ * NO DEFAULT, deliberately. An unset variable ships a bundle with no directory,
+ * which `features/onboarding/hosted-relay.ts` reports as "this build has no relay
+ * directory to ask" — an honest state a local build or a fork is genuinely in. A
+ * literal here would be a hostname nobody verified, and the kill switch behind
+ * the real one is what makes shipping an origin safe in the first place.
+ */
+const relayDirectoryOrigin = process.env.FY_RELAY_DIRECTORY_ORIGIN ?? '';
+
 export default defineConfig({
+  define: {
+    __FY_RELAY_DIRECTORY__: JSON.stringify(relayDirectoryOrigin),
+  },
   // The static landing owns `/` and the PWA document is `/app/`, but their
   // public assets are emitted once at the site root. Keep every generated chunk
   // root-absolute: that lets the app load on daemon-qualified deep links without
