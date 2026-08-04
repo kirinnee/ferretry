@@ -1,5 +1,5 @@
-import type { AttentionId } from '@ferretry/protocol';
 import { describe, test } from 'bun:test';
+import type { AttentionId } from '@ferretry/protocol';
 import should from 'should';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
@@ -8,14 +8,19 @@ import {
   formatReference,
   parseReferenceHref,
   parseReferenceToken,
+  REFERENCE_CLOSED_ATTRIBUTE,
   type Reference,
+  type ResolvedAgent,
+  type ResolvedReference,
+  type ResolvedSurfaceReference,
   referenceHref,
   referenceIdentity,
   remarkReferences,
   resolveReference,
-  type ResolvedAgent,
-  type ResolvedReference,
   revalidateReference,
+  type SurfaceProof,
+  type SurfaceReference,
+  surfaceReferenceClosed,
 } from '../../src/lib/references.ts';
 
 const daemonId = 'daemon-a' as DaemonId;
@@ -609,5 +614,275 @@ describe('remarkReferences', () => {
 
     // Assert
     should(kids(tree)[0]).deepEqual({ type: 'thematicBreak' });
+  });
+});
+
+describe('surface references', () => {
+  const sessionId = 'sess-1';
+  const openTerminal = (key: string): SurfaceProof => ({
+    state: 'open',
+    daemonId,
+    sessionId,
+    surface: 'terminal',
+    key,
+  });
+  const resolvers = {
+    surface: (lookup: SurfaceReference) =>
+      lookup.key === 'live' ? openTerminal('live') : { state: 'closed' as const },
+  };
+  const resolved: ResolvedSurfaceReference = {
+    kind: 'surface',
+    daemonId,
+    sessionId,
+    surface: 'terminal',
+    key: 'ab12cd34ef56',
+  };
+
+  describe('the grammar', () => {
+    test('should parse a canonical terminal token', () => {
+      // Assert
+      should(parseReferenceToken('%terminal:ab12cd34ef56')).deepEqual({
+        kind: 'surface',
+        surface: 'terminal',
+        key: 'ab12cd34ef56',
+      });
+    });
+
+    test('should parse a browser page token, so a page slots in unchanged', () => {
+      // Assert
+      should(parseReferenceToken('%browser:page-7')).deepEqual({
+        kind: 'surface',
+        surface: 'browser',
+        key: 'page-7',
+      });
+    });
+
+    test('should case-fold the surface kind but never the owner-issued key', () => {
+      // Assert
+      should(parseReferenceToken('%TERMINAL:AB12')).deepEqual({
+        kind: 'surface',
+        surface: 'terminal',
+        key: 'AB12',
+      });
+    });
+
+    test('should refuse a surface kind this product cannot address', () => {
+      // Assert
+      should(parseReferenceToken('%editor:1')).be.null();
+    });
+
+    test('should refuse a keyless or dotted token', () => {
+      // Assert
+      should(parseReferenceToken('%terminal:')).be.null();
+      should(parseReferenceToken('%terminal:ab.cd')).be.null();
+      should(parseReferenceToken('%terminal:-lead')).be.null();
+    });
+
+    test('should find a surface token in prose without swallowing the sentence', () => {
+      // Act
+      const found = findReferences('drive %terminal:ab12cd34ef56, then stop.');
+
+      // Assert
+      should(found.map(match => match.raw)).deepEqual(['%terminal:ab12cd34ef56']);
+    });
+
+    test('should never read a percentage as a surface reference', () => {
+      // Assert
+      should(findReferences('cpu hit 50% and 3%terminal:x stayed prose')).deepEqual([]);
+    });
+
+    test('should format a surface reference back to its authored token', () => {
+      // Assert
+      should(formatReference({ kind: 'surface', surface: 'terminal', key: 'ab12' })).equal('%terminal:ab12');
+    });
+
+    test('should refuse to format a surface reference the grammar rejects', () => {
+      // Assert
+      should(() => formatReference({ kind: 'surface', surface: 'terminal', key: 'bad key' })).throw(
+        'invalid surface reference',
+      );
+      should(() => formatReference({ kind: 'surface', surface: 'editor' as 'terminal', key: 'ok' })).throw(
+        'invalid surface reference',
+      );
+    });
+  });
+
+  describe('proof', () => {
+    test('should resolve a live surface stamped with its daemon and session', () => {
+      // Act
+      const actual = resolveReference({ kind: 'surface', surface: 'terminal', key: 'live' }, resolvers);
+
+      // Assert
+      should(actual).deepEqual({ kind: 'surface', daemonId, sessionId, surface: 'terminal', key: 'live' });
+    });
+
+    test('should refuse a surface with no resolver at all', () => {
+      // Assert
+      should(resolveReference({ kind: 'surface', surface: 'terminal', key: 'live' }, {})).be.null();
+    });
+
+    test('should refuse a closed surface as a destination', () => {
+      // Assert
+      should(resolveReference({ kind: 'surface', surface: 'terminal', key: 'gone' }, resolvers)).be.null();
+    });
+
+    test('should refuse a resolver that answers with a different surface than the one asked for', () => {
+      // Arrange — a substituted answer would open a real but WRONG terminal.
+      const substitute = { surface: () => openTerminal('another') };
+
+      // Assert
+      should(resolveReference({ kind: 'surface', surface: 'terminal', key: 'live' }, substitute)).be.null();
+      should(
+        resolveReference({ kind: 'surface', surface: 'browser', key: 'live' }, { surface: () => openTerminal('live') }),
+      ).be.null();
+    });
+
+    test('should refuse an answer carrying no usable daemon or session', () => {
+      // Assert
+      should(
+        resolveReference(
+          { kind: 'surface', surface: 'terminal', key: 'live' },
+          { surface: () => ({ ...openTerminal('live'), daemonId: '  ' as DaemonId }) },
+        ),
+      ).be.null();
+      should(
+        resolveReference(
+          { kind: 'surface', surface: 'terminal', key: 'live' },
+          { surface: () => ({ ...openTerminal('live'), sessionId: '..' }) },
+        ),
+      ).be.null();
+    });
+
+    test('should refuse a token the grammar rejects even with a willing resolver', () => {
+      // Assert
+      should(
+        resolveReference(
+          { kind: 'surface', surface: 'terminal', key: 'bad key' },
+          { surface: () => openTerminal('bad key') },
+        ),
+      ).be.null();
+    });
+
+    test('should report a proved-closed surface as closed and nothing else', () => {
+      // Assert
+      should(surfaceReferenceClosed({ kind: 'surface', surface: 'terminal', key: 'gone' }, resolvers)).be.true();
+      should(surfaceReferenceClosed({ kind: 'surface', surface: 'terminal', key: 'live' }, resolvers)).be.false();
+      should(surfaceReferenceClosed({ kind: 'surface', surface: 'terminal', key: 'gone' }, {})).be.false();
+      should(surfaceReferenceClosed({ kind: 'surface', surface: 'terminal', key: 'bad key' }, resolvers)).be.false();
+    });
+
+    test('should read a throwing resolver as no evidence, never as a tombstone', () => {
+      // Arrange
+      const broken = {
+        surface: () => {
+          throw new Error('daemon unreachable');
+        },
+      };
+
+      // Assert
+      should(surfaceReferenceClosed({ kind: 'surface', surface: 'terminal', key: 'gone' }, broken)).be.false();
+      should(resolveReference({ kind: 'surface', surface: 'terminal', key: 'gone' }, broken)).be.null();
+    });
+  });
+
+  describe('the envelope', () => {
+    test('should carry the daemon, the session, the kind and the key', () => {
+      // Act
+      const href = referenceHref(resolved);
+
+      // Assert
+      should(parseReferenceHref(href)).deepEqual(resolved);
+    });
+
+    test('should refuse to encode a resolved surface the grammar rejects', () => {
+      // Assert
+      should(() => referenceHref({ ...resolved, key: 'bad key' })).throw('invalid resolved surface reference');
+    });
+
+    test('should refuse an embellished, short or unknown-kind envelope', () => {
+      // Assert
+      should(parseReferenceHref(`${referenceHref(resolved)}&extra=1`)).be.null();
+      should(
+        parseReferenceHref('#fy-reference?kind=surface&daemon=daemon-a&session=sess-1&surface=terminal'),
+      ).be.null();
+      should(
+        parseReferenceHref('#fy-reference?kind=surface&daemon=daemon-a&session=sess-1&surface=editor&key=1'),
+      ).be.null();
+    });
+
+    test('should identify a surface by facts a rename cannot move', () => {
+      // Assert
+      should(referenceIdentity(resolved)).equal('surface:daemon-a:sess-1:terminal:ab12cd34ef56');
+    });
+  });
+
+  describe('re-proof at click time', () => {
+    const live: ResolvedSurfaceReference = { ...resolved, key: 'live' };
+
+    test('should re-prove a surface that is still open', () => {
+      // Assert
+      should(revalidateReference(live, resolvers)).deepEqual(live);
+    });
+
+    test('should refuse a surface that closed while the transcript sat on screen', () => {
+      // Assert
+      should(revalidateReference({ ...resolved, key: 'gone' }, resolvers)).be.null();
+    });
+
+    test('should never re-prove across a daemon or a session boundary', () => {
+      // Assert — the resolver in hand belongs to (daemon-a, sess-1).
+      should(revalidateReference({ ...live, daemonId: 'daemon-b' as DaemonId }, resolvers)).be.null();
+      should(revalidateReference({ ...live, sessionId: 'sess-2' }, resolvers)).be.null();
+      should(revalidateReference(live, {})).be.null();
+    });
+  });
+
+  describe('the transform', () => {
+    const paragraph = (value: string): MdTree => ({
+      type: 'root',
+      children: [{ type: 'paragraph', children: [{ type: 'text', value }] }],
+    });
+
+    test('should link a live surface and title it for the reader', () => {
+      // Arrange
+      const tree = paragraph('watch %terminal:live now');
+
+      // Act
+      remarkReferences({ resolvers })(tree);
+
+      // Assert
+      const link = kids(kids(tree)[0])[1];
+      should(link?.type).equal('link');
+      should(link?.title).equal("Open this session's terminal live");
+      should(link?.data?.hProperties?.['data-fy-reference']).equal('surface:daemon-a:sess-1:terminal:live');
+    });
+
+    test('should tombstone a surface the owner proved gone, keeping the surrounding prose', () => {
+      // Arrange
+      const tree = paragraph('use %terminal:gone please');
+
+      // Act
+      remarkReferences({ resolvers })(tree);
+
+      // Assert
+      const children = kids(kids(tree)[0]);
+      should(children.map(node => node.type)).deepEqual(['text', 'delete', 'text']);
+      should(children[0]?.value).equal('use ');
+      should(children[2]?.value).equal(' please');
+      should(kids(children[1])[0]?.value).equal('%terminal:gone');
+      should(children[1]?.data?.hProperties?.[REFERENCE_CLOSED_ATTRIBUTE]).equal('terminal:gone');
+      should(children[1]?.data?.hProperties?.title).equal('This terminal (gone) is no longer open in this session');
+    });
+
+    test('should leave an unproved surface as plain prose rather than announcing a death', () => {
+      // Arrange
+      const tree = paragraph('maybe %terminal:live');
+
+      // Act — no surface resolver: the daemon was never asked.
+      remarkReferences({ resolvers: {} })(tree);
+
+      // Assert
+      should(tree).deepEqual(paragraph('maybe %terminal:live'));
+    });
   });
 });

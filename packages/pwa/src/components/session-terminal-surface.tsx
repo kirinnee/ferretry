@@ -2,6 +2,7 @@ import { useId } from 'react';
 
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { SessionSurfaceReferences, type SurfaceTerminalLister } from './session-surface-references.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from './terminal-snapshot.tsx';
 
 export interface SessionTerminalSurfaceProps {
@@ -9,6 +10,8 @@ export interface SessionTerminalSurfaceProps {
   readonly scope: DaemonSessionScope;
   /** Test seam; production keeps TerminalSnapshotView's daemon-bound reader. */
   readonly readSnapshot?: PaneSnapshotReader;
+  /** Test seam for the addressing list; production asks the paired daemon. */
+  readonly listTerminals?: SurfaceTerminalLister;
 }
 
 /**
@@ -21,11 +24,26 @@ export interface SessionTerminalSurfaceProps {
  * host-runtime identity merely to label a snapshot; the public session id is
  * never presented as if it were a tmux name.
  */
-export function SessionTerminalSurface({ connection, scope, readSnapshot }: SessionTerminalSurfaceProps) {
+export function SessionTerminalSurface({
+  connection,
+  scope,
+  readSnapshot,
+  listTerminals,
+}: SessionTerminalSurfaceProps) {
   const headingId = useId();
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-2 p-2" aria-labelledby={headingId}>
+      {/* ADDRESSING COMES FIRST, above the snapshot, because it is the half of
+          this pane that works: the daemon can name and attribute every terminal
+          it holds even though this build cannot yet render one interactively. */}
+      <div className="shrink-0">
+        <SessionSurfaceReferences
+          connection={connection}
+          scope={scope}
+          {...(listTerminals === undefined ? {} : { listTerminals })}
+        />
+      </div>
       <div className="shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="m-0 font-display text-title font-semibold" id={headingId}>

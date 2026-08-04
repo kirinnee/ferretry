@@ -1,10 +1,15 @@
-import type { AttentionId } from '@ferretry/protocol';
 import { describe, test } from 'bun:test';
-import should from 'should';
+import type { AttentionId } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
+import should from 'should';
 import { Markdown, referenceHasTrustedOrigin } from '../../src/components/markdown.tsx';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { referenceHref, referenceIdentity, type ResolvedReference } from '../../src/lib/references.ts';
+import {
+  type ResolvedReference,
+  type ResolvedSurfaceReference,
+  referenceHref,
+  referenceIdentity,
+} from '../../src/lib/references.ts';
 import { render, runAsync } from '../support/react.ts';
 
 /**
@@ -195,6 +200,70 @@ describe('Markdown references', () => {
 
     // Assert
     should(opened).deepEqual(['A3']);
+  });
+
+  test('should hand a proved surface reference to its opener, carrying daemon and session', () => {
+    // Arrange
+    const opened: ResolvedSurfaceReference[] = [];
+    const tree = render(
+      <Markdown
+        onSurfaceOpen={reference => opened.push(reference)}
+        surfaceReferenceResolver={lookup => ({
+          state: 'open',
+          daemonId: 'daemon-a' as DaemonId,
+          sessionId: 's1',
+          surface: lookup.surface,
+          key: lookup.key,
+        })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Act
+    const anchor = anchorsOf(tree.root)[0];
+    anchor?.props.onClick(primaryClick());
+
+    // Assert
+    should(anchor?.props.href).equal(
+      '#fy-reference?kind=surface&daemon=daemon-a&session=s1&surface=terminal&key=a1b2c3d4e5f6',
+    );
+    should(opened).deepEqual([
+      { kind: 'surface', daemonId: 'daemon-a' as DaemonId, sessionId: 's1', surface: 'terminal', key: 'a1b2c3d4e5f6' },
+    ]);
+  });
+
+  test('should leave a proved surface inert when the host cannot open one', () => {
+    // Act — no `onSurfaceOpen`: the pane that would show it is not mounted.
+    const tree = render(
+      <Markdown
+        surfaceReferenceResolver={lookup => ({
+          state: 'open',
+          daemonId: 'daemon-a' as DaemonId,
+          sessionId: 's1',
+          surface: lookup.surface,
+          key: lookup.key,
+        })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
+  test('should strike through a surface the daemon proved closed instead of linking it', () => {
+    // Act
+    const tree = render(
+      <Markdown
+        onSurfaceOpen={() => undefined}
+        surfaceReferenceResolver={() => ({ state: 'closed' })}
+        text="watch %terminal:a1b2c3d4e5f6"
+      />,
+    );
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+    should(JSON.stringify(tree.toJSON())).containEql('no longer open in this session');
   });
 
   test('should leave a proved reference inert when the host offers no opener for its kind', () => {
