@@ -64,6 +64,11 @@ Repo invariants live in [scripts/validate/](scripts/validate/) and run from pre-
 Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cli` is real at P0;
 `protocol`, `daemon`, `fleet`, and `pwa` are placeholders for the P1 lift.
 
+`packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
+Cloudflare rendezvous that can carry it. The wire contract is
+[docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
+There is no hosted relay and no default relay address; a relay is deployed by its own operator.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

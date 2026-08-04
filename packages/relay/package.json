@@ -1,0 +1,16 @@
+{
+  "name": "@ferretry/relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Carrier-agnostic end-to-end session protocol and the Workers rendezvous that carries it",
+  "type": "module",
+  "exports": {
+    ".": "./src/lib/index.ts",
+    "./adapters": "./src/adapters/index.ts"
+  },
+  "types": "./src/lib/index.ts",
+  "dependencies": {
+    "@ferretry/protocol": "workspace:*",
+    "zod": "4.4.3"
+  }
+}
