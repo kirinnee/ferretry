@@ -8,6 +8,7 @@ import {
   HOSTED_RELAY_CONFIG_VERSION,
   HOSTED_RELAY_DAY_MILLISECONDS,
   HOSTED_RELAY_MINUTE_MILLISECONDS,
+  hostedRelayDayStart,
   HostedRelayAdvertisementSchema,
   type HostedRelayConfiguration,
   HostedRelayConfigurationSchema,
@@ -385,6 +386,14 @@ describe('hosted relay daemon row reclamation', () => {
   function row(overrides: Partial<HostedRelayDaemonMetrics> = {}): HostedRelayDaemonMetrics {
     return { ...initialHostedRelayDaemonMetrics(daemonId, yesterday), lastActivityAt: yesterday, ...overrides };
   }
+
+  it('should name a UTC day by its first millisecond', () => {
+    should(hostedRelayDayStart(today)).equal(today);
+    should(hostedRelayDayStart(today + HOSTED_RELAY_DAY_MILLISECONDS - 1)).equal(today);
+    should(hostedRelayDayStart(today + HOSTED_RELAY_DAY_MILLISECONDS)).equal(today + HOSTED_RELAY_DAY_MILLISECONDS);
+    should(hostedRelayDayStart(0)).equal(0);
+    should(() => hostedRelayDayStart(-1)).throw();
+  });
 
   it('should forget only a validated row that is idle and finished with its accounting day', () => {
     should(reclaimableHostedRelayDaemon(row(), at)).be.true();

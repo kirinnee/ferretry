@@ -350,6 +350,11 @@ export function releaseHostedRelayConnection(
   };
 }
 
+/** The UTC day an instant belongs to, named by its first millisecond. */
+export function hostedRelayDayStart(at: number): number {
+  return windowStart(TimestampSchema.parse(at), HOSTED_RELAY_DAY_MILLISECONDS);
+}
+
 /**
  * May this stored daemon row be forgotten to make room for a daemon that has never been seen?
  *
@@ -366,7 +371,7 @@ export function releaseHostedRelayConnection(
  * reading of evidence nobody can account for is that it is still in use.
  */
 export function reclaimableHostedRelayDaemon(daemon: HostedRelayDaemonMetrics, at: number): boolean {
-  const today = windowStart(TimestampSchema.parse(at), HOSTED_RELAY_DAY_MILLISECONDS);
+  const today = hostedRelayDayStart(at);
   return (
     daemon.concurrentConnections === 0 &&
     daemon.day.startedAt < today &&

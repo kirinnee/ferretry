@@ -26,6 +26,8 @@ import {
   type HostedRelayReservation,
   HostedRelayReservationSchema,
   forgetHostedRelayDaemons,
+  HOSTED_RELAY_DAY_MILLISECONDS,
+  hostedRelayDayStart,
   initialHostedRelayConfiguration,
   initialHostedRelayGlobalMetrics,
   inspectHostedRelayCapacity,
@@ -62,6 +64,32 @@ const RECLAIM_BATCH = 64;
 
 /** One reason, used wherever the census and the durable rows fail to account for each other. */
 const CENSUS_DISAGREES = 'relay metrics and daemon rows disagree';
+
+/**
+ * The UTC day a healthy sweep covered and found nothing it was allowed to forget.
+ *
+ * A sweep that frees a batch amortises over the next several arrivals, but one that frees nothing
+ * amortises over none: without this, every subsequent first-time fingerprint re-reads the whole prefix
+ * through the one globally serialised control object, and hosted mode has no allowlist, so filling the
+ * census is one unauthenticated upgrade request per fingerprint.
+ *
+ * Skipping the repeat is exact rather than heuristic. Reclaiming requires an activity stamp from before
+ * the current day, and every touch and release stamps the current one, so no row can become reclaimable
+ * on a day a healthy sweep already found nothing on. The marker therefore only records a fact that
+ * cannot change until the day does — and it is written only after a sweep proved the census exact, so
+ * it never caches a disagreement. Damage detection is unaffected: the operator snapshot makes the same
+ * comparison on demand.
+ */
+const RECLAIM_BARREN_KEY = 'control:reclaim-barren';
+
+const ReclaimBarrenSchema = z.strictObject({
+  coveredDay: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(Number.MAX_SAFE_INTEGER)
+    .refine(value => value % HOSTED_RELAY_DAY_MILLISECONDS === 0, 'marker is not a UTC day boundary'),
+});
 
 const ReserveRequestSchema = z.strictObject({
   daemonId: DaemonIdSchema,
@@ -233,8 +261,26 @@ export class HostedRelayControlDurableObject {
         };
       }
       const reservationKey = `${RESERVATION_PREFIX}${input.reservationId}`;
-      if ((await transaction.get(reservationKey)) !== undefined) {
-        return { ok: true as const, value: { decision: internalDecision('relay reservation already exists') } };
+      const held = await transaction.get(reservationKey);
+      if (held !== undefined) {
+        /**
+         * The same identifier arriving twice is a retry, not a second connection.
+         *
+         * A caller whose answer was lost cannot tell "never landed" from "committed and the reply went
+         * missing", and the identifier it minted is the only thing that can ever release the slot. The
+         * stored reservation is itself the proof that the first attempt was admitted, so saying yes
+         * again hands that proof back without moving a single counter a second time. Identifiers are
+         * 128 random bits, so a genuine collision is not a case that needs serving — and evidence that
+         * will not parse, or that belongs to another daemon, is refused rather than reinterpreted.
+         */
+        const parsed = HostedRelayReservationSchema.safeParse(held);
+        if (!parsed.success) return { ok: false as const, reason: 'relay reservation state is damaged' };
+        return parsed.data.daemonId === input.daemonId
+          ? { ok: true as const, value: { decision: { ok: true as const } } }
+          : {
+              ok: true as const,
+              value: { decision: internalDecision('relay reservation belongs to another daemon') },
+            };
       }
       const daemonResult = await this.daemonMetrics(transaction, input.daemonId);
       if (!daemonResult.ok) return daemonResult;
@@ -243,15 +289,23 @@ export class HostedRelayControlDurableObject {
       // their accounting day, so the ceiling stays a ceiling instead of becoming permanent.
       let global = loaded.value.global;
       if (daemonResult.value === null && global.trackedDaemons >= loaded.value.configuration.limits.maxTrackedDaemons) {
-        // The sweep hands back candidates only once every stored row is accounted for against the
-        // census, so reaching past it means the two agree and no deletion can hide a disagreement.
-        const sweep = await sweepDaemonRows(transaction, global.trackedDaemons, now);
-        if (!sweep.ok) return sweep;
-        if (sweep.value.length !== 0) {
-          const forgotten = forgetHostedRelayDaemons(global, sweep.value.length);
-          if (forgotten === null) return { ok: false as const, reason: 'relay daemon census is damaged' };
-          for (const key of sweep.value) await transaction.delete(key);
-          global = forgotten;
+        const today = hostedRelayDayStart(now);
+        const barren = await readReclaimBarren(transaction);
+        if (!barren.ok) return barren;
+        if (barren.value !== today) {
+          // The sweep hands back candidates only once every stored row is accounted for against the
+          // census, so reaching past it means the two agree and no deletion can hide a disagreement.
+          const sweep = await sweepDaemonRows(transaction, global.trackedDaemons, now);
+          if (!sweep.ok) return sweep;
+          if (sweep.value.length === 0) {
+            await transaction.put(RECLAIM_BARREN_KEY, { coveredDay: today });
+          } else {
+            const forgotten = forgetHostedRelayDaemons(global, sweep.value.length);
+            if (forgotten === null) return { ok: false as const, reason: 'relay daemon census is damaged' };
+            for (const key of sweep.value) await transaction.delete(key);
+            global = forgotten;
+            await transaction.delete(RECLAIM_BARREN_KEY);
+          }
         }
       }
 
@@ -404,11 +458,14 @@ export class HostedRelayControlDurableObject {
       storage.get(GLOBAL_METRICS_KEY),
     ]);
     if (rawConfiguration === undefined && rawGlobal === undefined) {
-      const [daemonEvidence, reservationEvidence] = await Promise.all([
+      // A sweep marker counts as evidence too: an account with no configuration has never swept
+      // anything, so a marker here means the rest of the control state went missing around it.
+      const [daemonEvidence, reservationEvidence, barrenEvidence] = await Promise.all([
         storage.list({ prefix: DAEMON_METRICS_PREFIX, limit: 1 }),
         storage.list({ prefix: RESERVATION_PREFIX, limit: 1 }),
+        storage.get(RECLAIM_BARREN_KEY),
       ]);
-      if (daemonEvidence.size !== 0 || reservationEvidence.size !== 0) {
+      if (daemonEvidence.size !== 0 || reservationEvidence.size !== 0 || barrenEvidence !== undefined) {
         return { ok: false, reason: 'relay control state is incomplete' };
       }
       const now = this.runtime.now();
@@ -449,6 +506,23 @@ export class HostedRelayControlDurableObject {
 
 function daemonKey(daemonId: string): string {
   return `${DAEMON_METRICS_PREFIX}${DaemonIdSchema.parse(daemonId)}`;
+}
+
+/**
+ * Which UTC day, if any, a sweep has already found barren. Unreadable means damaged, not absent.
+ *
+ * Treating a marker nobody wrote as "no marker" would let stray control state silently decide that a
+ * whole day needs no sweeping, which is the one thing this key must never be able to do by accident.
+ */
+async function readReclaimBarren(
+  storage: HostedRelayControlStorageRead,
+): Promise<{ readonly ok: true; readonly value: number | null } | { readonly ok: false; readonly reason: string }> {
+  const raw = await storage.get(RECLAIM_BARREN_KEY);
+  if (raw === undefined) return { ok: true, value: null };
+  const parsed = ReclaimBarrenSchema.safeParse(raw);
+  return parsed.success
+    ? { ok: true, value: parsed.data.coveredDay }
+    : { ok: false, reason: 'relay reclaim marker is damaged' };
 }
 
 /**

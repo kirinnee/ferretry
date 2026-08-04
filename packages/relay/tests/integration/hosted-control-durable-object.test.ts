@@ -116,10 +116,12 @@ describe('hosted relay control Durable Object', () => {
       request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
     );
     should(await reserved.json()).deepEqual({ ok: true });
-    const duplicate = await harness.object.fetch(
+    // The same identifier again is a retry of a lost answer, and the stored reservation is the proof
+    // it was already admitted. Saying yes again must not move a counter — see the metrics below.
+    const retried = await harness.object.fetch(
       request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
     );
-    should(await duplicate.json()).match({ ok: false, code: RELAY_CLOSE_CODES.relayInternal });
+    should(await retried.json()).deepEqual({ ok: true });
 
     harness.runtime.clock += 1;
     should(
@@ -524,6 +526,192 @@ describe('hosted relay daemon row cap recovery', () => {
         )
       ).status,
     ).equal(503);
+  });
+
+  it('should page a mixed-case census correctly and reclaim from it', async () => {
+    // Fingerprints are base64url, so mixed case is the norm, and byte order disagrees with locale
+    // order on exactly that. Spanning more than one page is what turns the disagreement into either a
+    // lost row or an invented census mismatch.
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const mixedCase = Array.from({ length: 1_001 }, (_unused, index) => {
+      const suffix = `${alphabet[index % alphabet.length]}${alphabet[(index * 7) % alphabet.length]}${String(index).padStart(3, '0')}`;
+      return staleRow(`fy_daemon_${suffix.padEnd(43, 'Z')}`);
+    });
+    const harness = await atRowCap(mixedCase, []);
+    should(new Set(mixedCase.map(row => row.daemonId)).size).equal(1_001);
+
+    // A healthy census, so it must be accepted rather than reported as damaged.
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+    const remaining = [...harness.storage.values.keys()].filter(key => key.startsWith('metrics:daemon:'));
+    should(remaining.length).equal(1_001 - 64 + 1);
+    should((await harness.object.fetch(request('/operator/metrics'))).status).equal(200);
+  });
+});
+
+describe('hosted relay barren sweep marker', () => {
+  const day = HOSTED_RELAY_DAY_MILLISECONDS;
+
+  /** A full census of `count` rows that were all active today, so nothing is reclaimable. */
+  async function fullOfBusyRows(count: number, clock: number) {
+    const harness = makeObject();
+    await configure(harness, enabledConfiguration({ maxTrackedDaemons: count }));
+    for (let index = 0; index < count; index += 1) {
+      const id = `fy_daemon_${String(index).padStart(43, 'a')}`;
+      harness.storage.values.set(`metrics:daemon:${id}`, {
+        ...initialHostedRelayDaemonMetrics(id, clock),
+        lastActivityAt: clock,
+      });
+    }
+    harness.storage.values.set('metrics:global', {
+      ...initialHostedRelayGlobalMetrics(clock),
+      trackedDaemons: count,
+      lastActivityAt: clock,
+      firstActivityAt: clock,
+    });
+    harness.runtime.clock = clock;
+    harness.storage.listCalls = 0;
+    return harness;
+  }
+
+  const reserve = (harness: ReturnType<typeof makeObject>, id: string) =>
+    harness.object.fetch(request('/internal/reserve', 'POST', { daemonId, reservationId: id }));
+
+  it('should refuse a second arrival without re-reading a prefix it already found barren', async () => {
+    const clock = day * 4 + 7_000;
+    const harness = await fullOfBusyRows(3, clock);
+
+    should(await (await reserve(harness, 'reservation_0001')).json()).match({
+      ok: false,
+      code: RELAY_CLOSE_CODES.hostedCapacity,
+    });
+    const swept = harness.storage.listCalls;
+    should(swept).be.above(0);
+    should(harness.storage.values.get('control:reclaim-barren')).deepEqual({ coveredDay: day * 4 });
+
+    // Nothing was freed, and nothing can become reclaimable today, so the scan must not repeat.
+    harness.storage.listCalls = 0;
+    should(await (await reserve(harness, 'reservation_0002')).json()).match({
+      ok: false,
+      code: RELAY_CLOSE_CODES.hostedCapacity,
+    });
+    should(harness.storage.listCalls).equal(0);
+  });
+
+  it('should sweep again once the UTC day the marker covered is over', async () => {
+    const harness = await fullOfBusyRows(3, day * 4 + 7_000);
+    should(await (await reserve(harness, 'reservation_0001')).json()).match({ ok: false });
+
+    // Same rows, next day: they are now stale, so the marker must not hold the sweep back.
+    harness.runtime.clock = day * 5 + 1_000;
+    harness.storage.listCalls = 0;
+    should(await (await reserve(harness, 'reservation_0002')).json()).deepEqual({ ok: true });
+    should(harness.storage.listCalls).be.above(0);
+    // A sweep that freed rows leaves no stale marker behind.
+    should(harness.storage.values.has('control:reclaim-barren')).be.false();
+    should((await harness.object.fetch(request('/operator/metrics'))).status).equal(200);
+  });
+
+  it('should fail closed on a marker nobody could have written rather than ignore it', async () => {
+    const harness = await fullOfBusyRows(3, day * 4 + 7_000);
+    for (const damaged of [
+      { coveredDay: day * 4 + 1 }, // not a UTC day boundary
+      { coveredDay: -1 },
+      { coveredDay: day * 4, extra: true },
+      { broken: true },
+      'not-an-object',
+    ]) {
+      harness.storage.values.set('control:reclaim-barren', damaged);
+      should((await reserve(harness, 'reservation_0001')).status).equal(503);
+    }
+  });
+
+  it('should not let a marker survive as the only trace of a control object', async () => {
+    const harness = makeObject();
+    harness.storage.values.set('control:reclaim-barren', { coveredDay: 0 });
+    // Virgin state plus a sweep marker is not an unused account; it is one that lost the rest.
+    should((await harness.object.fetch(request('/public/configuration'))).status).equal(503);
+  });
+
+  it('should ignore a barren day entirely once the operator raises the ceiling', async () => {
+    const harness = await fullOfBusyRows(3, day * 4 + 7_000);
+    should(await (await reserve(harness, 'reservation_0001')).json()).match({ ok: false });
+    should(harness.storage.values.has('control:reclaim-barren')).be.true();
+
+    // Room above the census means there is nothing to reclaim for, so no sweep and no marker check.
+    await configure(harness, enabledConfiguration({ maxTrackedDaemons: 4 }));
+    harness.storage.listCalls = 0;
+    should(await (await reserve(harness, 'reservation_0002')).json()).deepEqual({ ok: true });
+    should(harness.storage.listCalls).equal(0);
+  });
+
+  it('should never record a barren day for a census it could not account for', async () => {
+    const harness = await fullOfBusyRows(3, day * 4 + 7_000);
+    // One row short of what the census claims: damaged, so nothing may be cached about it.
+    harness.storage.values.delete(`metrics:daemon:fy_daemon_${'0'.padStart(43, 'a')}`);
+    const refused = await reserve(harness, 'reservation_0001');
+    should(refused.status).equal(503);
+    should(await refused.json()).deepEqual({ error: 'relay metrics and daemon rows disagree' });
+    should(harness.storage.values.has('control:reclaim-barren')).be.false();
+  });
+});
+
+describe('hosted relay reservation retries', () => {
+  it('should treat the same identifier as proof of the admission it already granted', async () => {
+    const harness = makeObject();
+    await configure(harness);
+    const first = await harness.object.fetch(
+      request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+    );
+    should(await first.json()).deepEqual({ ok: true });
+    const before = await (await harness.object.fetch(request('/operator/metrics'))).json();
+
+    harness.runtime.clock += 5;
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+    // Answering a retry must move nothing: not the counters, not the reservation, not the clock stamps.
+    should(await (await harness.object.fetch(request('/operator/metrics'))).json()).match({
+      global: (before as { global: unknown }).global,
+    });
+    should([...harness.storage.values.keys()].filter(key => key.startsWith('reservation:')).length).equal(1);
+  });
+
+  it('should refuse a duplicate identifier whose evidence belongs elsewhere or cannot be read', async () => {
+    const harness = makeObject();
+    await configure(harness);
+    harness.storage.values.set('reservation:reservation_0001', {
+      reservationId: 'reservation_0001',
+      daemonId: otherDaemonId,
+      openedAt: 1_000,
+    });
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).match({ ok: false, code: RELAY_CLOSE_CODES.relayInternal });
+
+    harness.storage.values.set('reservation:reservation_0001', { broken: true });
+    should(
+      (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).status,
+    ).equal(503);
+    // Neither refusal invented a daemon row or a counter.
+    should(harness.storage.values.has(`metrics:daemon:${daemonId}`)).be.false();
   });
 });
 

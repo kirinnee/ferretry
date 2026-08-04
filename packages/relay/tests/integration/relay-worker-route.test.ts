@@ -1,14 +1,16 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type RelayEnvironment, relayFetch } from '../../src/adapters/index.ts';
-import relayWorker from '../../src/adapters/worker.ts';
+import { type HostedRelayControlNamespace, type RelayEnvironment, relayFetch } from '../../src/adapters/index.ts';
+import relayWorker, { HostedRelayControlDurableObject } from '../../src/adapters/worker.ts';
 import {
   type ControlMessage,
   decodeControlMessage,
+  DEFAULT_HOSTED_RELAY_LIMITS,
   RELAY_CLOSE_CODES,
   RELAY_PROTOCOL_ID,
   type RelayFrame,
 } from '../../src/lib/index.ts';
+import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
 import { type TestRuntime, testRuntime } from '../support/workers-fakes.ts';
 
 const daemonId = `fy_daemon_${'a'.repeat(43)}`;
@@ -311,5 +313,98 @@ describe('hosted relay worker routes', () => {
         )
       ).status,
     ).equal(503);
+  });
+});
+
+describe('hosted relay reservations whose answer is lost', () => {
+  /**
+   * A real control object behind a stub that commits and *then* loses the reply.
+   *
+   * This is the shape output gates do not protect against: they keep the callee's own state
+   * consistent, not the caller's knowledge of it. The reservation identifier the Worker minted is the
+   * only thing that can ever release the slot, and nothing else in the system has ever seen it.
+   */
+  async function lossyControl(reserveFails: () => boolean) {
+    const storage = new FakeHostedRelayControlStorage();
+    const runtime = { clock: 1_000, now: () => runtime.clock };
+    const control = new HostedRelayControlDurableObject({ storage }, {}, runtime);
+    const configured = await control.fetch(
+      new Request('https://relay-control.invalid/operator/configuration', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: 1, relayUrl: 'https://relay.example', limits: DEFAULT_HOSTED_RELAY_LIMITS }),
+      }),
+    );
+    should(configured.status).equal(200);
+
+    let reserves = 0;
+    const namespace: HostedRelayControlNamespace = {
+      idFromName: name => name,
+      get: () => ({
+        fetch: async (request: Request) => {
+          const path = new URL(request.url).pathname;
+          const response = await control.fetch(request);
+          if (path === '/internal/reserve') {
+            reserves += 1;
+            if (reserveFails()) throw new Error('durable object connection lost');
+          }
+          return response;
+        },
+      }),
+    };
+    const value: RelayEnvironment = {
+      RELAY_MODE: 'hosted',
+      RELAY_CONTROL: namespace,
+      RENDEZVOUS: {
+        idFromName: name => name,
+        get: () => ({ fetch: async () => new Response('durable', { status: 101 }) }),
+      },
+    };
+    return { storage, value, reserves: () => reserves };
+  }
+
+  const held = (storage: FakeHostedRelayControlStorage) =>
+    [...storage.values.keys()].filter(key => key.startsWith('reservation:')).length;
+  const concurrent = (storage: FakeHostedRelayControlStorage) =>
+    (storage.values.get('metrics:global') as { concurrentConnections: number }).concurrentConnections;
+
+  it('should recover a committed reservation by asking again with the same identifier', async () => {
+    let lose = true;
+    const hosted = await lossyControl(() => {
+      const failing = lose;
+      lose = false;
+      return failing;
+    });
+
+    const response = await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), hosted.value, testRuntime());
+    // The retry proved the first attempt had been admitted, so the socket is served, not refused.
+    should(response.status).equal(101);
+    should(hosted.reserves()).equal(2);
+    // Exactly one reservation and one connection: a retry must not double count.
+    should(held(hosted.storage)).equal(1);
+    should(concurrent(hosted.storage)).equal(1);
+  });
+
+  it('should give the slot back rather than strand it when the answer stays lost', async () => {
+    let lose = true;
+    const hosted = await lossyControl(() => lose);
+
+    // Sixteen ambiguous outcomes is exactly the per-daemon ceiling. Before the compensating release
+    // they were sixteen phantom connections nobody could clear, and the fingerprint was locked out.
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const refused = await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), hosted.value, testRuntime());
+      should(refused.status).equal(200);
+      should(held(hosted.storage)).equal(0);
+      should(concurrent(hosted.storage)).equal(0);
+    }
+
+    // The daemon is still admittable, which is the whole point.
+    lose = false;
+    const served = await relayFetch(upgrade(`/v1/rendezvous/${daemonId}/client`), hosted.value, testRuntime());
+    should(served.status).equal(101);
+    should(concurrent(hosted.storage)).equal(1);
+    should(await (await relayFetch(new Request('https://relay.example/v1/default-relay'), hosted.value)).json()).match({
+      relayUrl: 'https://relay.example',
+    });
   });
 });

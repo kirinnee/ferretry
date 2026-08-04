@@ -176,9 +176,25 @@ export async function relayFetch(
     if (control === undefined) {
       return refusalUpgrade(runtime, internalDecision('hosted relay accounting is unavailable'));
     }
+    /**
+     * Reserve, and treat a missing answer as unknown rather than as a refusal.
+     *
+     * A Durable Object call that fails after the callee committed looks identical to one that never
+     * landed, and the identifier minted here is the only thing that could ever release the slot the
+     * first attempt may have taken. Nothing else can: the rendezvous never saw the header, so no close,
+     * error or alarm covers it, and no reaper expires it. So ask again with the *same* identifier —
+     * an existing reservation for this daemon is the control object's own proof that the first attempt
+     * was admitted, and it answers yes without counting anything twice.
+     */
     const reservationId = toBase64Url(runtime.crypto.randomBytes(16));
-    const decision = await requestHostedRelayDecision(control, 'reserve', { daemonId: route.daemonId, reservationId });
-    if (decision === null) return refusalUpgrade(runtime, internalDecision('hosted relay accounting is unavailable'));
+    const reserve = () => requestHostedRelayDecision(control, 'reserve', { daemonId: route.daemonId, reservationId });
+    const decision = (await reserve()) ?? (await reserve());
+    if (decision === null) {
+      // Still unknown after the retry. Hand back whatever either attempt may have committed before
+      // refusing, since release is a no-op on a reservation that was never written.
+      await releaseHostedRelayReservation(control, reservationId);
+      return refusalUpgrade(runtime, internalDecision('hosted relay accounting is unavailable'));
+    }
     if (!decision.ok) return refusalUpgrade(runtime, decision);
 
     const headers = new Headers(request.headers);
