@@ -185,7 +185,11 @@ describe('terminal snapshot view', () => {
       element.scrollLeft = 24;
       await repoll();
       expect(element.scrollTop).toBe(500);
-      expect(element.scrollLeft).toBe(0);
+      // THE HORIZONTAL OFFSET IS THE READER'S, and a poll must not take it.
+      // Terminal lines are routinely wider than this pane, so the previous
+      // `scrollLeft = 0` yanked anyone reading the right-hand end of a line back
+      // to column 0 every three seconds. Only the tail is tracked.
+      expect(element.scrollLeft).toBe(24);
 
       // Scrolling away from the tail unpins: the next frame must not yank the
       // reader back down.

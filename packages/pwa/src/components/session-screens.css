@@ -511,6 +511,28 @@
   height: 44px;
   width: 44px;
 }
+/* THE CHAT MEASURE, on the transcript's own rows.
+ *
+ * `styles/index.css` already ships the surface half of this (`.kt-chat-surface
+ * [data-chat-width]`), but that only caps the SURFACE. kteam's other half caps
+ * the transcript's content box (`.kt-content`), and this port's transcript is
+ * `.fy-transcript`, which nothing was capping — so the reader's `balanced` and
+ * `readable` choices narrowed nothing on the session page. These three rules
+ * are the shipped ones, keyed to this port's class: the default measure applies,
+ * and `full`/`balanced` remove it exactly where the source removes it (`full`
+ * is uncapped by design; `balanced` caps the surface instead). The composer
+ * needs no rule of its own — it is inside the same surface, so both narrow
+ * together, which is the whole point of the setting. */
+.kt-chat-surface .fy-transcript {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--chat-measure-content, 880px);
+}
+.kt-chat-surface[data-chat-width='full'] .fy-transcript,
+.kt-chat-surface[data-chat-width='balanced'] .fy-transcript {
+  max-width: none;
+}
+
 .fy-transcript-shell {
   display: grid;
   min-height: 0;
@@ -611,6 +633,12 @@
   outline: 2px solid var(--fy-accent);
   outline-offset: 2px;
 }
+/* `resize: none`, because the height is owned in JS now. The composer measures
+ * its content before paint and writes `style.height` on every draft change
+ * (composer.tsx), so a drag handle could only ever set a height that the next
+ * keystroke discards — a control that visibly does nothing is worse than no
+ * control. `min-height` stays: it is the 44px touch floor, and it is the same
+ * number the auto-grow clamps to. */
 .fy-composer textarea {
   background: transparent;
   border: 0;
@@ -618,7 +646,7 @@
   color: inherit;
   font: inherit;
   min-height: 44px;
-  resize: vertical;
+  resize: none;
   width: 100%;
 }
 .fy-composer textarea:focus {

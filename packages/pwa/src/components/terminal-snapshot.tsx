@@ -87,10 +87,16 @@ export const TerminalSnapshotView = ({
       setStale(false);
       setErrorMessage(null);
       const element = scrollerRef.current;
-      if (element && pinnedRef.current) {
-        element.scrollTop = element.scrollHeight;
-        element.scrollLeft = 0;
-      }
+      // STICK TO THE BOTTOM, NEVER TO THE LEFT.
+      //
+      // Sticky-bottom is a real behaviour: new output arrives at the end, and a
+      // reader who is already there wants to stay there. Sticky-LEFT is not —
+      // this pane polls every 3s, and a terminal line is routinely wider than
+      // the pane (measured: a 640px `<pre>` in a 370px sheet), so resetting
+      // `scrollLeft` here yanked anyone reading the right-hand end of a line
+      // back to column 0 before they could finish it. The horizontal offset is
+      // the reader's; only the vertical one tracks the tail.
+      if (element && pinnedRef.current) element.scrollTop = element.scrollHeight;
     } catch (error) {
       // Keep the last good content and say so: a momentarily unreachable
       // daemon is not an empty terminal.
