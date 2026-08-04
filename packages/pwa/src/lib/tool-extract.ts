@@ -83,7 +83,7 @@ export const firstLine = (value: string): string => {
 const stringifySafe = (value: unknown): string => {
   if (typeof value === 'string') return value;
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(value, null, 2) ?? String(value);
   } catch {
     return String(value);
   }
@@ -177,11 +177,12 @@ export const extractToolSummary = (name: string | undefined, input: unknown): Ex
   if (lower === 'write') {
     const object = inputAsObject(input);
     const file = object ? firstString(object, FILE_KEYS) : undefined;
+    const content = object?.content;
     return {
       verb: 'Write',
       headline: file ? baseName(file) : 'Write',
       detail: file,
-      bodyLines: file ? [file, '', ...stringifySafe(object?.['content']).split('\n')] : [],
+      bodyLines: file ? (content === undefined ? [file] : [file, '', ...stringifySafe(content).split('\n')]) : [],
       kind: 'write',
       isExec: false,
       filePath: file,
