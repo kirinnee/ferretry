@@ -15,6 +15,7 @@ import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
+import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
@@ -321,6 +322,7 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     homeDirectory: homedir(),
     stateHome: environment.FY_HOME,
     configHome: environment.XDG_CONFIG_HOME,
+    stateDirectory: environment.XDG_STATE_HOME,
     userId: typeof process.getuid === 'function' ? process.getuid() : 0,
     daemonBinary: resolveDaemonBinary(environment, daemonName),
     daemonName,
@@ -341,6 +343,7 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     direct: new DirectSupervisor(layout, processes, files),
     health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
+    nix: new NixStoreGcRoot(processes),
     clock: new SystemMillisecondClock(),
     out,
   });

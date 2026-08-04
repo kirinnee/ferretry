@@ -90,6 +90,28 @@ describe('daemon layout', () => {
     should(actual.searchPath).equal('/only/here');
   });
 
+  it.each([
+    { name: 'XDG_STATE_HOME when the operator set one', input: '/tmp/xdg-state', expected: '/tmp/xdg-state' },
+    { name: '~/.local/state when it is unset', input: undefined, expected: `${HOME}/.local/state` },
+    { name: '~/.local/state when it is blank', input: '  ', expected: `${HOME}/.local/state` },
+  ])('should put the Nix GC root under $name', ({ input, expected }) => {
+    // Act
+    const actual = layout({ stateDirectory: input });
+
+    // Assert — never under the state home. That directory is the daemon's, its layout model refuses
+    // any entry it has not declared, and its filesystem port refuses symbolic links anywhere inside
+    // it — and this root is a symbolic link.
+    should(actual.nixGcRoot).equal(`${expected}/ferretry/nix/fyd`);
+    should(actual.nixGcRoot.startsWith(`${actual.stateHome}/`)).be.false();
+  });
+
+  it('should reject a relative XDG_STATE_HOME rather than resolve it against the cwd', () => {
+    // Act + Assert
+    should(() => resolveDaemonLayout(environment({ stateDirectory: 'state' }))).throw(
+      /XDG_STATE_HOME must be an absolute path/,
+    );
+  });
+
   it('should normalise a path with redundant segments', () => {
     // Act
     const actual = layout({ stateHome: '/tmp/a/../b' });
