@@ -61,6 +61,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey, setupPath } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
+import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
@@ -191,6 +192,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ label: 'Sessions' }];
     case 'new-session':
       return [{ href: sessions, label: 'Sessions' }, { label: 'New' }];
+    case 'projects':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Projects' }];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'settings':
@@ -691,11 +694,16 @@ function LearningRoute({ connection }: DaemonPageProps) {
   return <LearningPage connection={connection} />;
 }
 
+function ProjectsRoute({ connection }: DaemonPageProps) {
+  return <ProjectsPage connection={connection} />;
+}
+
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
   Sessions: SessionsRoute,
   NewSession: NewSessionRoute,
+  Projects: ProjectsRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,

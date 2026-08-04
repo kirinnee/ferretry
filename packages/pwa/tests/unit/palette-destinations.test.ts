@@ -43,6 +43,7 @@ describe('destinationPaletteEntries', () => {
 
     expect(entries.map(entry => entry.id)).toEqual([
       'destination-sessions',
+      'destination-projects',
       'destination-analytics',
       'destination-warden',
       'destination-learning',

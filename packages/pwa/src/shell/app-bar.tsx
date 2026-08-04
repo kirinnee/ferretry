@@ -23,6 +23,7 @@
 
 import {
   ChartNoAxesCombined,
+  FolderKanban,
   GraduationCap,
   LayoutGrid,
   RefreshCw,
@@ -37,6 +38,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
   daemonLearningPath,
+  daemonProjectsPath,
   daemonSettingsPath,
   daemonWardenPath,
   type Route,
@@ -84,6 +86,7 @@ export const SETTINGS_ENTRY = { label: 'Settings', title: 'Open appearance and d
 export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision and verdicts' } as const;
 export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
 export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
+export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
 
 /**
  * The app-level destinations appear in both the wide tab group and the phone
@@ -93,6 +96,7 @@ export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions 
  * destination, and stays with the other right-side controls.
  */
 export const APP_BAR_DESTINATIONS = [
+  { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
   { id: 'learning', ...LEARNING_ENTRY, path: daemonLearningPath, Icon: GraduationCap },
@@ -105,6 +109,7 @@ export type AppBarDestinationId = AppBarDestination['id'];
 /** Which destination, if any, the reader is currently on. */
 export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | null => {
   switch (route.kind) {
+    case 'projects':
     case 'analytics':
     case 'warden':
     case 'learning':

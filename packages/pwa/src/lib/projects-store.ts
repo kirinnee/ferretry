@@ -64,9 +64,8 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
 
 /**
  * Reads `/v1/projects` from exactly the paired daemon and narrows the protocol
- * rows to what grouping consumes. `lastActivity` is deliberately dropped: the
- * sidebar orders by session recency, and carrying a second freshness signal
- * into the grouping key is how two orderings drift apart.
+ * rows to the structurally-compatible grouping shape. The metadata remains on
+ * the record for the Projects page; grouping reads only name and path.
  */
 export const fetchDaemonProjects = async (
   daemon: DaemonConnection,
@@ -82,10 +81,7 @@ export const fetchDaemonProjects = async (
       typeof body.code === 'string' ? body.code : undefined,
     );
   }
-  return ProjectListSchema.parse(await response.json()).map(project => ({
-    name: project.name,
-    path: project.path,
-  }));
+  return ProjectListSchema.parse(await response.json());
 };
 
 /** The browser port over `fetchDaemonProjects`. */

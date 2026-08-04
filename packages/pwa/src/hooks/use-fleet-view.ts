@@ -51,7 +51,7 @@ const IDLE_SLICE: DaemonFleetSlice = Object.freeze({
   error: null,
 });
 
-/** No daemon serves a project list yet, so the shared empty is a stable identity. */
+/** A stable identity for callers that do not mount the daemon project registry. */
 const NO_PROJECTS: readonly FleetProject[] = Object.freeze([]);
 
 export interface FleetViewOptions {
@@ -60,8 +60,8 @@ export interface FleetViewOptions {
   /** Which paired daemon this screen is showing. Never optional. */
   readonly daemonId: DaemonId;
   /**
-   * Folders this daemon has registered. Empty until a `/v1/projects` exists, at
-   * which point every session groups by its cwd basename instead.
+   * Folders this daemon has deliberately registered. Unregistered sessions
+   * group by cwd basename without becoming projects.
    */
   readonly projects?: readonly FleetProject[];
   /** Most-recent-first inside each group: what the sidebar wants, not the table. */

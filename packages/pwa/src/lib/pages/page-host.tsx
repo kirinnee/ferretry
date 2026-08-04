@@ -18,6 +18,7 @@ export interface PageHostSlots {
   readonly Setup: ComponentType;
   readonly Sessions: ComponentType<DaemonPageProps>;
   readonly NewSession: ComponentType<DaemonPageProps>;
+  readonly Projects?: ComponentType<DaemonPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
@@ -55,6 +56,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
       return <slots.Sessions connection={matchedConnection} />;
     case 'new-session':
       return <slots.NewSession connection={matchedConnection} />;
+    case 'projects':
+      if (slots.Projects === undefined) throw new Error('the projects route is not mounted');
+      return <slots.Projects connection={matchedConnection} />;
     case 'session':
       return (
         <slots.SessionChat

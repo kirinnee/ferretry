@@ -44,13 +44,11 @@
  * bug this port exists to prevent, and grouping a fleet is a linear pass over a
  * list a reader can actually scroll.
  *
- * PROJECTS ARE NOT YET SERVED. Ferretry has no `/v1/projects` — not in the
- * protocol, not in the daemon — which `fleet-store.ts` records as the reason it
- * hydrates no project list. So `projects` is empty in practice today and every
- * session falls to the cwd-basename group, which needs no daemon call. The
- * registered-path branch is ported anyway: it is the half that decides which of
- * two nested folders a worktree belongs to, and reconstructing it later against
- * a live endpoint is how a port loses a behaviour.
+ * PROJECTS ARE DAEMON-SCOPED. The durable `/v1/projects` registry is hydrated
+ * by `projects-store.ts`; an unregistered session falls back to its cwd basename.
+ * The registered-path branch picks the longest nested root, so a Git worktree
+ * can remain beneath one explicitly registered Project without being enrolled
+ * as another.
  */
 
 import type { SessionView } from '@ferretry/protocol';
@@ -79,6 +77,11 @@ export const baseName = (path: string): string => {
 export interface FleetProject {
   readonly name: string;
   readonly path: string;
+  /** Durable registry metadata; grouping intentionally needs only name + path. */
+  readonly id?: string;
+  readonly source?: 'existing-folder' | 'clone' | 'new-folder' | 'confirmed-discovery';
+  readonly createdAt?: string;
+  readonly git?: { readonly commonDirectory: string };
 }
 
 /**
