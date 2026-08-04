@@ -9,7 +9,7 @@
  */
 
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonSettingsPath, daemonWardenPath } from '../../lib/pages/routes.ts';
+import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 
 export type SettingId =
   | 'text-size'
@@ -207,10 +207,10 @@ export interface SettingsLinkDefinition {
 export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
   {
     id: 'warden',
-    label: 'Warden & failover',
+    label: 'Warden',
     description:
-      'Configure warden accounts and the failover policy (fallback or round-robin), and see which account is active. Daemon-wide — lives on the Warden page.',
-    href: daemon => `${daemonWardenPath(daemon)}#config`,
+      'Supervision, current checks, account failover, and policy for this daemon. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
     keywords: ['warden', 'failover', 'round robin', 'fallback', 'account', 'quota', 'token', 'wrapper', 'supervision'],
   },
 ] as const;

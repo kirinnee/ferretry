@@ -110,11 +110,11 @@ describe('shared settings catalog', () => {
 
   test('keeps link-row destinations bound to the daemon being searched', () => {
     const warden = SETTINGS_LINKS.find(link => link.id === 'warden');
-    expect(warden?.href(alpha)).toBe('/d/daemon-alpha/warden#config');
-    expect(warden?.href(beta)).toBe('/d/daemon-beta/warden#config');
+    expect(warden?.href(alpha)).toBe('/d/daemon-alpha/settings#daemons');
+    expect(warden?.href(beta)).toBe('/d/daemon-beta/settings#daemons');
     for (const query of ['failover', 'round robin', 'warden', 'fallback']) {
       expect(settingsPaletteEntries(alpha, query).find(item => item.id === 'setting-link-warden')?.href).toBe(
-        '/d/daemon-alpha/warden#config',
+        '/d/daemon-alpha/settings#daemons',
       );
     }
     expect(settingsPaletteEntries(alpha, '').some(item => item.id === 'setting-link-warden')).toBe(false);

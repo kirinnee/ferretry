@@ -91,6 +91,7 @@ export * from '../features/onboarding/setup-handoff.ts';
 export * from '../features/onboarding/setup-handoff-panel.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
+export * from '../features/settings/daemon-settings-frame.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/settings/notification-settings.tsx';
 export * from '../features/settings/settings-catalog.ts';

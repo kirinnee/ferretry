@@ -3,6 +3,7 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 
 import type { DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
+import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -19,6 +20,8 @@ const memoryStorage = (): ControlsStorage => {
 /** Dictation is not the subject of this suite and must never dial a daemon. */
 const offlineFetch: FetchLike = () => new Promise<Response>(() => undefined);
 const pendingProbe: DaemonReachabilityProbe = () => new Promise(() => undefined);
+const unavailableWardenClient: WardenClientFactory = async () =>
+  Promise.reject(new Error('Warden unavailable in this test.'));
 
 const daemon = (id: string, baseUrl: string, deviceToken: string, label?: string): DaemonConnectionRecord => ({
   ...daemonConnection({ daemonId: id, baseUrl, deviceToken }),
@@ -64,6 +67,7 @@ const page = (options: PageOptions = {}) => {
         fetchImpl: offlineFetch,
       }}
       probeDaemon={options.probe ?? pendingProbe}
+      createWardenClient={unavailableWardenClient}
       onSelectDaemon={id => callbacks.selected.push(id)}
       onRenameDaemon={(id, label) => callbacks.renamed.push({ id, label })}
       onRemoveDaemon={id => callbacks.removed.push(id)}
@@ -247,7 +251,7 @@ describe('SettingsPage controls and daemon-qualified links', () => {
     run(() => view.unmount());
   });
 
-  it('keeps Warden and Back navigation on the routed daemon', () => {
+  it('keeps Back navigation on the routed daemon and mounts that daemon’s Warden frame', () => {
     const callbacks = calls();
     const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
     const view = render(page({ current, connections: [current], calls: callbacks }));
@@ -255,11 +259,13 @@ describe('SettingsPage controls and daemon-qualified links', () => {
     selectDesktopSection(view, 'daemons');
     const anchors = view.root.findAllByType('a');
     const back = anchors.find(anchor => anchor.props['aria-label'] === 'Back to sessions');
-    const warden = anchors.find(anchor => anchor.props.href === '/d/daemon%20beta/warden#config');
+    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
     run(() => back?.props.onClick({ button: 0, preventDefault: () => {} }));
-    run(() => warden?.props.onClick({ button: 0, preventDefault: () => {} }));
 
-    expect(callbacks.navigated).toEqual(['/d/daemon%20beta', '/d/daemon%20beta/warden#config']);
+    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
+      'daemon-settings-tab-warden',
+    );
+    expect(callbacks.navigated).toEqual(['/d/daemon%20beta']);
     run(() => view.unmount());
   });
 
