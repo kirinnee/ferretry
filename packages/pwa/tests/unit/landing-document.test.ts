@@ -16,16 +16,11 @@ describe('the static landing document', () => {
     expect(landing).toContain('href="/?stay"');
   });
 
-  it('positions the shipped product as the self-hosted Claude Code and Codex operating layer', () => {
-    expect(landing).toContain('the agent operating system for Claude Code + Codex');
-    expect(landing).toContain('Claude + Codex.');
+  it('positions Ferretry as the self-hosted guide for developers running agents', () => {
+    expect(landing).toContain('Your agents keep working.');
+    expect(landing).toContain('Ferretry is an agent operating system for Claude and Codex:');
     expect(landing).toContain('It does not replace either harness.');
     expect(landing).toContain('No Ferretry server.');
-    expect(landing).toContain('fy send');
-    expect(landing).toContain('Operator-triggered / target chosen explicitly');
-    expect(landing).toContain('Daemon-side / not browser-local');
-    expect(landing).toContain('On Linux hosts');
-    expect(landing).toContain('tailnet or tunnel');
   });
 
   it('does not market known unmounted or unenforced surfaces as complete', () => {
@@ -36,6 +31,11 @@ describe('the static landing document', () => {
     expect(landing).not.toContain('remote browser');
     expect(landing).not.toContain('structured question');
     expect(landing).not.toContain('spend and tokens');
+    expect(landing).not.toContain('from anywhere');
+    expect(landing).not.toContain('phone');
+    expect(landing).not.toContain('tunnel');
+    expect(landing).not.toContain('tailnet');
+    expect(landing).not.toContain('remote');
   });
 
   it('keeps a tab favicon without presenting itself as the installable app', () => {
@@ -46,19 +46,22 @@ describe('the static landing document', () => {
   });
 
   it('allows a valid, content-free pairing marker to redirect before paint and otherwise fails open', () => {
-    const script = /<script>([\s\S]*?)<\/script>/.exec(landing)?.[1];
-    expect(script).toBeDefined();
-    expect(script).toContain("localStorage.getItem('fy-has-pairings-v1') === '1'");
-    expect(script).toContain("has('stay')");
-    expect(script).toContain("location.replace('/app/')");
-    expect(script).toContain('try');
-    expect(script).toContain('catch');
-    expect(script).not.toContain('indexedDB');
+    const scripts = [...landing.matchAll(/<script>([\s\S]*?)<\/script>/g)].flatMap(match =>
+      match[1] === undefined ? [] : [match[1]],
+    );
+    expect(scripts).toHaveLength(2);
+    const redirectScript = scripts[0] ?? '';
+    expect(redirectScript).toContain("localStorage.getItem('fy-has-pairings-v1') === '1'");
+    expect(redirectScript).toContain("has('stay')");
+    expect(redirectScript).toContain("location.replace('/app/')");
+    expect(redirectScript).toContain('try');
+    expect(redirectScript).toContain('catch');
+    expect(redirectScript).not.toContain('indexedDB');
 
-    const hash = createHash('sha256')
-      .update(script ?? '')
-      .digest('base64');
-    expect(headers).toContain(`'sha256-${hash}'`);
+    for (const script of scripts) {
+      const hash = createHash('sha256').update(script).digest('base64');
+      expect(headers).toContain(`'sha256-${hash}'`);
+    }
   });
 
   it('routes both app navigation and QR pairing deep links to the PWA entry', () => {

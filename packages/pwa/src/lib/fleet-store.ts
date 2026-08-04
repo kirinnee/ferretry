@@ -71,10 +71,10 @@
  *     (`store.tsx:581-585`). Classifying that needs the transport's status
  *     code, and this module takes an injected port with no error vocabulary, so
  *     it belongs with the slice that owns `DaemonResponseError`.
- *   - `projects` and the transcript search snapshot. Ferretry has no
- *     `/v1/projects` and no `/v1/search` — not in the protocol, not in the
- *     daemon — so there is nothing to hydrate. Project grouping falls back to
- *     the `cwd` basename, which needs no daemon call.
+ *   - `projects` and the transcript search snapshot. Projects hydrate through
+ *     their dedicated daemon-scoped store; transcript search has no daemon
+ *     endpoint. Keeping project reads separate prevents a registry failure from
+ *     marking the session fleet itself errored.
  */
 
 import type { SessionState, SessionView } from '@ferretry/protocol';

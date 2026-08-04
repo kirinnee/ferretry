@@ -87,6 +87,7 @@ export const SHELL_DESTINATIONS = [
 const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   sessions: ['sessions', 'fleet', 'dashboard', 'home', 'teammates', 'list'],
   'new-session': ['new', 'start', 'spawn', 'launch', 'create', 'teammate', 'agent'],
+  projects: ['projects', 'project', 'workspace', 'folder', 'repository', 'repo'],
   analytics: ['analytics', 'usage', 'cost', 'spend', 'tokens', 'graph', 'chart', 'query', 'daily'],
   warden: ['warden', 'supervision', 'verdicts', 'accounts', 'failover', 'quota'],
   learning: ['learning', 'proposals', 'rules', 'lessons', 'scan'],

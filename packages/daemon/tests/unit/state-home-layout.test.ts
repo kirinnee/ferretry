@@ -91,6 +91,10 @@ describe('foundation paths', () => {
       analyticsIndex: '/tmp/fy-home/state/index/analytics.sqlite',
       sessions: '/tmp/fy-home/state/sessions',
       temporary: '/tmp/fy-home/state/tmp',
+      // One document, two readers: pairing mints and writes this key, and the relay claim signs with
+      // the same one. A second identity would carry a second fingerprint, and every paired browser
+      // pins the first.
+      daemonIdentity: '/tmp/fy-home/state/daemon-identity.json',
     });
     should(requiredLayoutDirectories(actual)).deepEqual([
       '/tmp/fy-home',

@@ -31,6 +31,8 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
+const SETTINGS_ONLY = process.argv.includes('--settings-only');
+
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
   'harness-new-session',
@@ -236,128 +238,222 @@ try {
         const page = await context.newPage();
         try {
           await page.goto(server.url.toString());
-          const target = join(outDir, `${viewport.name}.png`);
-          await page.screenshot({ path: target });
-          process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+          if (!SETTINGS_ONLY) {
+            const target = join(outDir, `${viewport.name}.png`);
+            await page.screenshot({ path: target });
+            process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
 
-          // The gallery bar carries BOTH transient states (reconnecting and an
-          // available update). It complements the at-rest workspace bar below
-          // and proves that 390px gets a breathing row instead of dropped state.
-          const statusTopBarTarget = join(outDir, `top-bar-status-${viewport.name}.png`);
-          await page.locator('[data-density-region="app-bar"]').first().screenshot({ path: statusTopBarTarget });
-          process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
+            // The gallery bar carries BOTH transient states (reconnecting and an
+            // available update). It complements the at-rest workspace bar below
+            // and proves that 390px gets a breathing row instead of dropped state.
+            const statusTopBarTarget = join(outDir, `top-bar-status-${viewport.name}.png`);
+            await page.locator('[data-density-region="app-bar"]').first().screenshot({ path: statusTopBarTarget });
+            process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
 
-          if (viewport.name === 'desktop') {
-            const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
-            await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
-            process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
+            if (viewport.name === 'desktop') {
+              const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
+              await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
+              process.stdout.write(`📸 fleet navigation rail -> ${fleetRailTarget}\n`);
+            }
+
+            // Scoped to its own card: the unified browser surface renders the SAME
+            // pane, display and live frame, so a page-wide locator for any of them
+            // is ambiguous by design rather than by accident.
+            const remoteBrowserCard = page.locator('[data-harness="remote-browser"]');
+            const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
+            await remoteBrowserCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
+            await remoteBrowserCard.getByLabel('Remote browser display').screenshot({ path: browserTarget });
+            process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
+            // The whole pane, not just the display: the tab strip, address bar and
+            // lifecycle controls are the part that has to match the original.
+            const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
+            await remoteBrowserCard.screenshot({ path: browserPaneTarget });
+            process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
+
+            // The unified surface is captured HERE, beside the standalone pane it
+            // embeds and while its display is still live. The harness stream socket
+            // is one-shot by design, so a shot taken later in the run would show
+            // the honest "stream stalled" state instead of the composition under
+            // review.
+            const unifiedPreviewTarget = join(outDir, `unified-browser-preview-${viewport.name}.png`);
+            await page.locator('[data-harness="unified-browser-preview"]').screenshot({ path: unifiedPreviewTarget });
+            process.stdout.write(`📸 Unified browser preview -> ${unifiedPreviewTarget}\n`);
+
+            const unifiedRealCard = page.locator('[data-harness="unified-browser-real"]');
+            const unifiedRealTarget = join(outDir, `unified-browser-real-${viewport.name}.png`);
+            await unifiedRealCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
+            await unifiedRealCard.screenshot({ path: unifiedRealTarget });
+            process.stdout.write(`📸 Unified browser real engine -> ${unifiedRealTarget}\n`);
+
+            // The engine selector and the escape actions live behind the one ⋯
+            // menu, so opening it is the only way to review them. Escape closes it
+            // again and returns focus to the trigger, leaving the page as the rest
+            // of this pass expects to find it.
+            const unifiedMenuTarget = join(outDir, `unified-browser-menu-${viewport.name}.png`);
+            await unifiedRealCard.getByLabel('Browser controls').click();
+            await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'visible' });
+            await unifiedRealCard.screenshot({ path: unifiedMenuTarget });
+            await page.keyboard.press('Escape');
+            await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
+            process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
+            const learningTarget = join(outDir, `learning-${viewport.name}.png`);
+            await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
+            process.stdout.write(`📸 learning -> ${learningTarget}\n`);
+            const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
+            await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
+            process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
+            const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
+            await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
+            process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
+            const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
+            await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
+            process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
+            const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
+            const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
+            // The production shell correctly locks html/body to one viewport and
+            // gives route pages their own scroller. In this harness the route is far
+            // down a stacked review page, so Chrome cannot stitch its full scroll
+            // area in place on a phone: the top is blank and the tail is clipped.
+            // Clone the already-rendered route into the viewport for this one shot.
+            // It keeps the exact component DOM/styles while removing only the
+            // harness stacking context that no production route has.
+            await globalAnalytics.evaluate(element => {
+              document.documentElement.style.height = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              document.body.style.height = 'auto';
+              document.body.style.overflow = 'auto';
+              document.body.replaceChildren(element.cloneNode(true));
+            });
+            await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
+            process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
+            // Restore the live React fixture after the static clone; later shots
+            // still exercise their real components, refs and async state.
+            await page.goto(server.url.toString());
+            const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
+            const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
+            await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
+            await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
+            process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
+            const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
+            await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
+            process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
+            const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
+            await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
+            process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
+            const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
+            await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
+            process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
+            // The dictation settings surface is several viewports tall. Chrome culls
+            // painting outside the viewport while an element screenshot scrolls, so
+            // the capture is taken against a temporarily tall viewport and the real
+            // one is restored immediately — otherwise most of the image is black.
+            const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
+            await page.setViewportSize({ width: viewport.width, height: 3_000 });
+            await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
+            await page.setViewportSize({ width: viewport.width, height: viewport.height });
+            process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
+            const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
+            await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
+            process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
+            const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
+            await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
+            process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
           }
 
-          // Scoped to its own card: the unified browser surface renders the SAME
-          // pane, display and live frame, so a page-wide locator for any of them
-          // is ambiguous by design rather than by accident.
-          const remoteBrowserCard = page.locator('[data-harness="remote-browser"]');
-          const browserTarget = join(outDir, `remote-browser-${viewport.name}.png`);
-          await remoteBrowserCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
-          await remoteBrowserCard.getByLabel('Remote browser display').screenshot({ path: browserTarget });
-          process.stdout.write(`📸 remote browser -> ${browserTarget}\n`);
-          // The whole pane, not just the display: the tab strip, address bar and
-          // lifecycle controls are the part that has to match the original.
-          const browserPaneTarget = join(outDir, `remote-browser-pane-${viewport.name}.png`);
-          await remoteBrowserCard.screenshot({ path: browserPaneTarget });
-          process.stdout.write(`📸 remote browser pane -> ${browserPaneTarget}\n`);
+          // Settings gets a production-sized canvas of its own. The gallery card
+          // above uses the same SettingsPageHarness component, but the standalone
+          // query removes the gallery gutters so these are true 390×844 and
+          // 1440×900 responsive captures rather than close approximations.
+          const settingsUrl = new URL(server.url);
+          settingsUrl.searchParams.set('settings-harness', '1');
+          await page.goto(settingsUrl.toString());
+          let settingsPage = page.getByLabel('Settings page preview', { exact: true });
+          await settingsPage.locator('[data-settings-section="appearance"]').waitFor({ state: 'visible' });
 
-          // The unified surface is captured HERE, beside the standalone pane it
-          // embeds and while its display is still live. The harness stream socket
-          // is one-shot by design, so a shot taken later in the run would show
-          // the honest "stream stalled" state instead of the composition under
-          // review.
-          const unifiedPreviewTarget = join(outDir, `unified-browser-preview-${viewport.name}.png`);
-          await page.locator('[data-harness="unified-browser-preview"]').screenshot({ path: unifiedPreviewTarget });
-          process.stdout.write(`📸 Unified browser preview -> ${unifiedPreviewTarget}\n`);
+          const appearanceTarget = join(outDir, `settings-appearance-${viewport.name}.png`);
+          await page.screenshot({ path: appearanceTarget });
+          process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
 
-          const unifiedRealCard = page.locator('[data-harness="unified-browser-real"]');
-          const unifiedRealTarget = join(outDir, `unified-browser-real-${viewport.name}.png`);
-          await unifiedRealCard.getByAltText('Live remote browser frame').waitFor({ state: 'visible' });
-          await unifiedRealCard.screenshot({ path: unifiedRealTarget });
-          process.stdout.write(`📸 Unified browser real engine -> ${unifiedRealTarget}\n`);
+          if (viewport.name === 'mobile') {
+            // Closed and open are both review states. The latter is a viewport
+            // shot because BottomSheet is fixed to the viewport, not to the
+            // Settings card that happened to open it.
+            const pickerDismissedTarget = join(outDir, 'settings-picker-dismissed-mobile.png');
+            await page.screenshot({ path: pickerDismissedTarget });
+            process.stdout.write(`📸 Settings picker dismissed -> ${pickerDismissedTarget}\n`);
 
-          // The engine selector and the escape actions live behind the one ⋯
-          // menu, so opening it is the only way to review them. Escape closes it
-          // again and returns focus to the trigger, leaving the page as the rest
-          // of this pass expects to find it.
-          const unifiedMenuTarget = join(outDir, `unified-browser-menu-${viewport.name}.png`);
-          await unifiedRealCard.getByLabel('Browser controls').click();
-          await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'visible' });
-          await unifiedRealCard.screenshot({ path: unifiedMenuTarget });
-          await page.keyboard.press('Escape');
-          await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
-          process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
-          const learningTarget = join(outDir, `learning-${viewport.name}.png`);
-          await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
-          process.stdout.write(`📸 learning -> ${learningTarget}\n`);
-          const analyticsTarget = join(outDir, `analytics-${viewport.name}.png`);
-          await page.getByLabel('Analytics cost ledger').screenshot({ path: analyticsTarget });
-          process.stdout.write(`📸 analytics -> ${analyticsTarget}\n`);
-          const analyticsResponseTarget = join(outDir, `analytics-response-${viewport.name}.png`);
-          await page.getByLabel('Analytics raw query result').screenshot({ path: analyticsResponseTarget });
-          process.stdout.write(`📸 analytics response -> ${analyticsResponseTarget}\n`);
-          const analyticsSeriesTarget = join(outDir, `analytics-time-series-${viewport.name}.png`);
-          await page.getByLabel('Analytics time series').screenshot({ path: analyticsSeriesTarget });
-          process.stdout.write(`📸 analytics time series -> ${analyticsSeriesTarget}\n`);
-          const globalAnalyticsTarget = join(outDir, `global-analytics-${viewport.name}.png`);
-          const globalAnalytics = page.getByRole('main', { name: 'Global analytics' });
-          // The production shell correctly locks html/body to one viewport and
-          // gives route pages their own scroller. In this harness the route is far
-          // down a stacked review page, so Chrome cannot stitch its full scroll
-          // area in place on a phone: the top is blank and the tail is clipped.
-          // Clone the already-rendered route into the viewport for this one shot.
-          // It keeps the exact component DOM/styles while removing only the
-          // harness stacking context that no production route has.
-          await globalAnalytics.evaluate(element => {
-            document.documentElement.style.height = 'auto';
-            document.documentElement.style.overflow = 'auto';
-            document.body.style.height = 'auto';
-            document.body.style.overflow = 'auto';
-            document.body.replaceChildren(element.cloneNode(true));
+            await settingsPage.locator('[data-settings-section-trigger]').click();
+            const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
+            await picker.waitFor({ state: 'visible' });
+            const pickerOpenTarget = join(outDir, 'settings-picker-open-mobile.png');
+            await page.screenshot({ path: pickerOpenTarget });
+            process.stdout.write(`📸 Settings picker open -> ${pickerOpenTarget}\n`);
+            await page.keyboard.press('Escape');
+            await picker.waitFor({ state: 'hidden' });
+          }
+
+          const selectSettingsSection = async (id: 'appearance' | 'behaviour' | 'daemons') => {
+            const label = { appearance: 'Appearance', behaviour: 'Behaviour', daemons: 'Daemons' }[id];
+            if (viewport.name === 'mobile') {
+              await settingsPage.locator('[data-settings-section-trigger]').click();
+              const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
+              await picker.waitFor({ state: 'visible' });
+              await picker.getByRole('button', { name: new RegExp(`^${label}`) }).click();
+              await picker.waitFor({ state: 'hidden' });
+            } else {
+              await settingsPage.getByRole('button', { name: new RegExp(`^${label}`) }).click();
+            }
+            await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
+          };
+
+          await selectSettingsSection('behaviour');
+          const behaviourTarget = join(outDir, `settings-behaviour-${viewport.name}.png`);
+          await page.screenshot({ path: behaviourTarget });
+          process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
+
+          await selectSettingsSection('daemons');
+          for (const state of ['reachable', 'unreachable', 'checking'] as const)
+            await settingsPage.locator(`[data-daemon-reachability="${state}"]`).waitFor({ state: 'visible' });
+          const daemonRows = await settingsPage.locator('[data-daemon-id]').count();
+          if (daemonRows !== 3) fail(`settings many-daemon fixture rendered ${daemonRows} rows instead of 3`);
+          const daemonsTarget = join(outDir, `settings-daemons-${viewport.name}.png`);
+          await page.screenshot({ path: daemonsTarget });
+          process.stdout.write(`📸 Settings Daemons (many) ${viewport.name} -> ${daemonsTarget}\n`);
+
+          const currentDaemon = settingsPage.locator('[data-daemon-id="harness-daemon"]');
+          await currentDaemon.getByText('Manage daemon', { exact: true }).click();
+          await currentDaemon.getByText('Removing this pairing only forgets it in this browser.').waitFor({
+            state: 'visible',
           });
-          await page.getByRole('main', { name: 'Global analytics' }).screenshot({ path: globalAnalyticsTarget });
-          process.stdout.write(`📸 global analytics -> ${globalAnalyticsTarget}\n`);
-          // Restore the live React fixture after the static clone; later shots
-          // still exercise their real components, refs and async state.
+          const removalTarget = join(outDir, `settings-removal-disclosure-${viewport.name}.png`);
+          await page.screenshot({ path: removalTarget });
+          process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
+
+          // The compact registry is a separate deterministic route rather than a
+          // DOM mutation: it remounts the reachability hooks exactly as a fresh
+          // one-daemon browser would and proves the empty space is intentional.
+          settingsUrl.searchParams.set('settings-daemons', 'one');
+          await page.goto(settingsUrl.toString());
+          settingsPage = page.getByLabel('Settings page preview', { exact: true });
+          if (viewport.name === 'mobile') {
+            await settingsPage.locator('[data-settings-section-trigger]').click();
+            const picker = page.getByRole('dialog', { name: 'Choose a settings section' });
+            await picker.getByRole('button', { name: /^Daemons/ }).click();
+            await picker.waitFor({ state: 'hidden' });
+          } else {
+            await settingsPage.getByRole('button', { name: /^Daemons/ }).click();
+          }
+          await settingsPage.locator('[data-settings-section="daemons"]').waitFor({ state: 'visible' });
+          await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
+          const oneDaemonRows = await settingsPage.locator('[data-daemon-id]').count();
+          if (oneDaemonRows !== 1) fail(`settings one-daemon fixture rendered ${oneDaemonRows} rows instead of 1`);
+          const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
+          await page.screenshot({ path: oneDaemonTarget });
+          process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);
+
+          // The rest of this pass still belongs to the full gallery.
           await page.goto(server.url.toString());
-          const sessionAnalyticsTarget = join(outDir, `session-analytics-${viewport.name}.png`);
-          const sessionAnalytics = page.getByLabel('Session analytics', { exact: true });
-          await sessionAnalytics.getByText('1 matched · 5 indexed').waitFor({ state: 'visible' });
-          await sessionAnalytics.screenshot({ path: sessionAnalyticsTarget });
-          process.stdout.write(`📸 session analytics -> ${sessionAnalyticsTarget}\n`);
-          const composerSettingsTarget = join(outDir, `markdown-composer-settings-${viewport.name}.png`);
-          await page.getByLabel('Markdown composer settings').screenshot({ path: composerSettingsTarget });
-          process.stdout.write(`📸 Markdown composer settings -> ${composerSettingsTarget}\n`);
-          const dictationShortcutTarget = join(outDir, `dictation-shortcut-${viewport.name}.png`);
-          await page.getByLabel('Dictation shortcut settings').screenshot({ path: dictationShortcutTarget });
-          process.stdout.write(`📸 Dictation shortcut settings -> ${dictationShortcutTarget}\n`);
-          const dictationPanelTarget = join(outDir, `dictation-panel-${viewport.name}.png`);
-          await page.locator('#harness-dictation-panel').screenshot({ path: dictationPanelTarget });
-          process.stdout.write(`📸 Dictation panel -> ${dictationPanelTarget}\n`);
-          // The dictation settings surface is several viewports tall. Chrome culls
-          // painting outside the viewport while an element screenshot scrolls, so
-          // the capture is taken against a temporarily tall viewport and the real
-          // one is restored immediately — otherwise most of the image is black.
-          const dictationSettingsTarget = join(outDir, `dictation-settings-${viewport.name}.png`);
-          await page.setViewportSize({ width: viewport.width, height: 3_000 });
-          await page.locator('#harness-dictation-settings').screenshot({ path: dictationSettingsTarget });
-          await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          process.stdout.write(`📸 Dictation settings -> ${dictationSettingsTarget}\n`);
-          const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
-          await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
-          process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
-          const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
-          await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
-          process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);
-          const settingsPageTarget = join(outDir, `settings-page-${viewport.name}.png`);
-          await page.getByLabel('Settings page preview').screenshot({ path: settingsPageTarget });
-          process.stdout.write(`📸 Settings page -> ${settingsPageTarget}\n`);
+          if (SETTINGS_ONLY) continue;
           const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
           await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
           process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);

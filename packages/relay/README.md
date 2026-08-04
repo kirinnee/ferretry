@@ -81,18 +81,28 @@ endpoint instead.
 The protocol, both relay operating modes, the runtime control plane and operator metrics are
 implemented and tested.
 
-**The transport is not wired, and that is the honest limit of this package.**
-[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies the discovery half — the PWA reads
-and parses `/v1/default-relay` from a build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
-the relay's address and whether the operator has switched it off — and surfaces that live state in
-onboarding. It stops there deliberately, and says so on the glass: nothing dials a relay.
+**The DAEMON end of the transport is wired; the BROWSER end is not.** That is the honest limit today,
+and it is a different limit from the one this section described before.
 
-Nothing here does either. `packages/pwa/src/lib/daemon-transport.ts` builds every request from one
-direct `baseUrl`, and `ConnectionMethod` has no consumer outside this package.
+[PR #202](https://github.com/kirinnee/ferretry/pull/202) supplies discovery — the PWA reads and parses
+`/v1/default-relay` from a build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn the relay's
+address and whether the operator has switched it off — and surfaces that live state in onboarding.
 
-What remains is the transport. `packages/daemon/src` has no relay client and no relay configuration
-at all, and needs one plus its persisted claim key and a `fy` surface to configure it;
-`DaemonConnection` has no carrier field, so `daemon-connection.ts`, `connections.ts`,
-`daemon-transport.ts` and `event-transport.ts` move together. Then active-carrier disclosure for a
-live session. §13 of the protocol document lists all four pieces. Until they ship, deploying a relay
-gets you a relay, not a remote connection.
+`packages/daemon` now dials. `src/lib/relay` holds the daemon half of the rendezvous — the claim it
+signs with the key pairing already minted, the per-session handshake, the record layer, the credit
+window, and the tunnel in §14 that carries one request and one answer into the daemon's own route
+table. `src/adapters/relay` is the outbound socket, its redial and its liveness sweep, and
+`DaemonRelayConfigSchema` is where an operator points it at an address. It is proved end to end over a
+real WebSocket against a server that verifies the claim and runs the client half.
+
+What remains is the BROWSER end. `packages/pwa/src/lib/daemon-transport.ts` still builds every request
+from one direct `baseUrl`, and `ConnectionMethod` still has no consumer outside this package, so
+`daemon-connection.ts`, `connections.ts`, `daemon-transport.ts` and `event-transport.ts` still move
+together — followed by active-carrier disclosure for a live session and removal of the interim
+chooser. §13 of the protocol document lists each piece and its state. Until the browser end ships,
+deploying a relay gets you a relay and a daemon sitting in it, not a remote connection.
+
+Two shapes the tunnel does not carry on either end, named in §14 rather than left to be discovered:
+the protocol-switching surfaces (`/v1/events`, terminal streams) and the byte-shaped dictation routes.
+There is also no `fy` verb for the configuration block yet — an operator writes `relay` into
+`<state home>/config/daemon.json` by hand.

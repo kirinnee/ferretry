@@ -2,11 +2,15 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   isSettingId,
+  isSettingsSectionId,
   SETTINGS_DEFINITIONS,
   SETTINGS_LINKS,
+  SETTINGS_SECTIONS,
   settingDefinition,
   settingsHref,
   settingsPaletteEntries,
+  settingsSectionDefinition,
+  settingsSectionForSetting,
 } from '../../../../src/features/settings/settings-catalog.ts';
 import { daemonId } from '../../../../src/lib/daemon-connection.ts';
 
@@ -32,12 +36,49 @@ describe('shared settings catalog', () => {
     }
   });
 
+  test('groups every control exactly once under the three stable logical sections', () => {
+    expect(SETTINGS_SECTIONS.map(section => section.id)).toEqual(['appearance', 'behaviour', 'daemons']);
+    expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons']);
+    expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
+      ['text-size', 'theme', 'density', 'chat-width'],
+      ['composer-markdown', 'dictation', 'notifications'],
+      [],
+    ]);
+
+    const grouped = SETTINGS_SECTIONS.flatMap(section => section.settingIds);
+    expect(grouped).toHaveLength(SETTINGS_DEFINITIONS.length);
+    expect(new Set(grouped).size).toBe(grouped.length);
+    expect(new Set(grouped)).toEqual(new Set(SETTINGS_DEFINITIONS.map(setting => setting.id)));
+    for (const section of SETTINGS_SECTIONS) {
+      expect(section.description.length).toBeGreaterThan(0);
+      expect(settingsSectionDefinition(section.id)).toBe(section);
+    }
+  });
+
+  test('resolves section ids and setting ownership without accepting invented values', () => {
+    expect(isSettingsSectionId('appearance')).toBe(true);
+    expect(isSettingsSectionId('behaviour')).toBe(true);
+    expect(isSettingsSectionId('daemons')).toBe(true);
+    expect(isSettingsSectionId('notifications')).toBe(false);
+    expect(isSettingsSectionId(null)).toBe(false);
+    expect(isSettingsSectionId(undefined)).toBe(false);
+
+    expect(settingsSectionForSetting('text-size')).toBe('appearance');
+    expect(settingsSectionForSetting('theme')).toBe('appearance');
+    expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
+    expect(settingsSectionForSetting('notifications')).toBe('behaviour');
+    expect(() => settingsSectionDefinition('invented' as never)).toThrow('Unknown settings section: invented');
+    expect(() => settingsSectionForSetting('invented' as never)).toThrow(
+      'Setting invented does not belong to a settings section',
+    );
+  });
+
   test('offers an explicit Open settings command before any query', () => {
     expect(settingsPaletteEntries(alpha, '')).toEqual([
       {
         id: 'open-settings',
         label: 'Open settings',
-        description: 'Appearance, text size, conversation width, theme, and dashboard density.',
+        description: 'Appearance, behaviour, and connected daemons for this browser.',
         settingId: null,
       },
     ]);

@@ -20,7 +20,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.119.0",
+      "version": "0.126.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -46,6 +46,7 @@
       },
       "dependencies": {
         "@ferretry/protocol": "workspace:*",
+        "@ferretry/relay": "workspace:*",
         "zod": "4.4.3",
       },
     },

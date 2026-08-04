@@ -7,6 +7,7 @@ import {
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   type MigrateSessionRequest,
+  type RegisterProjectRequest,
   SessionConfigSchema,
   SessionStateSchema,
   type SessionView,
@@ -16,6 +17,10 @@ import {
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
 } from '@ferretry/protocol';
+// One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
+// verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
+// is the class of bug this removes.
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { z } from 'zod';
 import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.ts';
@@ -29,6 +34,7 @@ import {
   BunApiServer,
   BunCommandRunner,
   BunProcessProbe,
+  BunRelayCarrier,
   BunSecretShell,
   BunSqliteIndexFactory,
   BunSttCommandRunner,
@@ -42,6 +48,7 @@ import {
   daemonSecretSourceProgram,
   FetchEnhancementTransport,
   FileDaemonConfig,
+  FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
   FileRoutingCatalog,
@@ -75,6 +82,7 @@ import {
   SystemFrameClock,
   TmuxPaneSnapshot,
   type ViewerSocket,
+  WebCryptoRelayIdentityKeys,
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
@@ -277,11 +285,14 @@ import {
   refuseHeldStateHome,
   refuseOccupiedAddress,
   refuseUnbindableAddress,
+  type RelayApiDispatch,
+  type RelayDeviceDirectory,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
   type RoutingCatalogPort,
+  readDaemonRelayIdentity,
   relaunchCommand,
   renderConfiguration,
   type RunOverrides,
@@ -597,6 +608,23 @@ export interface DaemonWorld {
    * production socket path can be exercised at an elapsed deadline without making an integration
    * test sleep for the public thirty-second ticket lifetime. */
   readonly createSocketTickets: () => SocketTicketBroker;
+  /**
+   * The OTHER carrier this daemon can be reached over: an outbound socket to a rendezvous.
+   *
+   * THE DAEMON DIALS. This is not a second listener — a daemon on `127.0.0.1` has no inbound route,
+   * and the only reason a relay makes it reachable is that the connection is opened outbound from
+   * behind the NAT. It carries the SAME dispatcher the bound address serves, so a relayed request
+   * reaches exactly the routes a direct one reaches and there is no second surface to keep in step.
+   *
+   * It answers a refusal rather than throwing, and the refusal is printed. A daemon with no relay and
+   * a daemon whose relay is broken look identical from the outside, and this migration has shipped
+   * that confusion three times: the sentence is the difference.
+   */
+  readonly createRelayCarrier: (
+    config: DaemonConfig,
+    dispatch: RelayApiDispatch,
+    devices: RelayDeviceDirectory,
+  ) => Promise<{ readonly carrier: BunRelayCarrier } | { readonly refusal: string }>;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -3260,6 +3288,26 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
+    createRelayCarrier: async (config, dispatch, devices) => {
+      // The key is the one PAIRING minted, read through the path both subsystems now share. A relay
+      // identity of its own would carry a different fingerprint from the one in the pairing QR, and
+      // every paired browser pins that one — so it would refuse the handshake, correctly, forever.
+      const identity = await readDaemonRelayIdentity(
+        stateFiles,
+        paths.daemonIdentity,
+        new WebCryptoRelayIdentityKeys(),
+      );
+      if (!identity.ok) return { refusal: identity.reason };
+      return {
+        carrier: new BunRelayCarrier({
+          config: config.relay,
+          crypto: new WebCryptoRelayCrypto(),
+          identity: identity.identity,
+          dispatch,
+          devices,
+        }),
+      };
+    },
     browserLogin: createBrowserLoginWorld(paths),
     createSubsystems: (
       storage,
@@ -3725,7 +3773,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings);
-  const catalogs = new NodeCatalog({ home: homedir(), projectRoots: config.projectRoots });
+  const skills = new NodeCatalog({ home: homedir() });
+  const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
+  const catalogs = {
+    projects: () => projects.projects(),
+    registerProject: (request: RegisterProjectRequest) => projects.register(request),
+    skills: (session: SessionView) => skills.skills(session),
+  };
   /**
    * The analytics materialization, opened under the lifetime lock this boot is already holding and
    * through the same confined filesystem port.
@@ -3789,13 +3843,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // ALL THREE parts of the surface are served by the one host, from the one credential set: the
   // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
   // routes that carry dictation audio.
+  // Hoisted, because the relay carrier below serves this exact dispatcher rather than a second one:
+  // every route a browser can reach directly it can reach relayed, on one authorization boundary.
+  const dispatcher = createMountedDispatcher(base, subsystems);
   let server: ApiServerHandle;
   try {
     server = await world.boot.binder.bind(
       async () =>
         await world.api.listen(
           {
-            http: createMountedDispatcher(base, subsystems),
+            http: dispatcher,
             sockets: createMountedSocketDispatcher(base, subsystems),
             raw: createMountedRawDispatcher(base, subsystems),
             corsOrigins: browserOrigins(config),
@@ -3822,6 +3879,29 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => server.closeSockets());
   cleanups.push(() => server.stop());
   world.notices.step('listening', config.bindUrl);
+  /**
+   * The relay carrier, dialled AFTER the bind and serving the very same dispatcher.
+   *
+   * AFTER, deliberately: a boot that hands over to an incumbent daemon on this address must not first
+   * claim the rendezvous that incumbent is holding — the claim is exclusive, so the loser of a bind
+   * race would knock the winner off the relay until the heartbeat sweep evicted the dead socket.
+   *
+   * A REFUSAL IS SAID OUT LOUD AND THE DAEMON KEEPS SERVING. Direct clients are unaffected by a relay
+   * this daemon could not dial, and the sentence is what stops "no relay configured" from looking
+   * exactly like "the relay is broken" — the two are indistinguishable from outside without it.
+   */
+  const relay = await world.createRelayCarrier(config, request => dispatcher.dispatch(request), {
+    identifyDevice: token => pairing.credentials.identify(token),
+  });
+  if ('carrier' in relay) {
+    relay.carrier.start();
+    cleanups.push(() => relay.carrier.stop());
+    const status = relay.carrier.status();
+    if (status.phase === 'none') world.notices.state(`no relay carrier — ${status.detail ?? 'no reason reported'}`);
+    else world.notices.step('dialling the relay', status.relayUrl);
+  } else {
+    world.notices.state(`no relay carrier — ${relay.refusal}`);
+  }
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period

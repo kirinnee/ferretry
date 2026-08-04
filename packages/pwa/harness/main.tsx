@@ -119,8 +119,9 @@ import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
 import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
 import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
+import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
-import { daemonConnection } from '../src/lib/daemon-connection.ts';
+import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
 import type { SessionGroup } from '../src/lib/fleet-grouping.ts';
@@ -176,6 +177,36 @@ const daemon = daemonConnection({
   baseUrl: 'https://daemon.invalid/',
   deviceToken: 'harness-token',
 });
+const unreachableDaemon = daemonConnection({
+  daemonId: 'unreachable-daemon',
+  baseUrl: 'https://offline.example.test',
+  deviceToken: 'offline-harness-token',
+});
+const checkingDaemon = daemonConnection({
+  daemonId: 'checking-daemon',
+  baseUrl: 'https://checking.example.test',
+  deviceToken: 'checking-harness-token',
+});
+const HARNESS_SETTINGS_CONNECTIONS = [
+  { ...daemon, label: 'Studio workstation', pairedAt: 1, lastSelectedAt: 3 },
+  { ...unreachableDaemon, label: 'Travel laptop', pairedAt: 1, lastSelectedAt: 2 },
+  { ...checkingDaemon, pairedAt: 1, lastSelectedAt: 1 },
+] as const satisfies readonly DaemonConnectionRecord[];
+
+type SettingsDaemonScenario = 'one' | 'many';
+
+const settingsDaemonScenario = (): SettingsDaemonScenario =>
+  new URLSearchParams(window.location.search).get('settings-daemons') === 'one' ? 'one' : 'many';
+
+const settingsConnections = (scenario: SettingsDaemonScenario): DaemonConnectionRecord[] =>
+  scenario === 'one'
+    ? [{ ...HARNESS_SETTINGS_CONNECTIONS[0] }]
+    : HARNESS_SETTINGS_CONNECTIONS.map(item => ({ ...item }));
+
+const harnessSettingsProbe = async (connection: DaemonConnection): Promise<void> => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  if (connection.daemonId === checkingDaemon.daemonId) await new Promise<void>(() => undefined);
+};
 const scope = daemonSessionScope(daemon, 'harness-session');
 
 /** Every reference state on one screen: proved, unproved, escaped, and in code. */
@@ -294,6 +325,99 @@ const harnessSttFetch: FetchLike = async url =>
         { status: 200, headers: { 'content-type': 'application/json' } },
       )
     : new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
+
+/**
+ * The settings fixture is also mounted on a page of its own by
+ * `?settings-harness=1`. That gives the screenshot driver the exact 390×844 and
+ * 1440×900 responsive canvas instead of measuring a route-sized component
+ * through the stacked gallery's gutters. The ordinary gallery card below uses
+ * this same component, so the standalone review surface cannot drift from it.
+ *
+ * `settings-daemons=one` narrows the registry to the healthy current pairing.
+ * The default `many` scenario deliberately carries one successful probe, one
+ * refusal, and one probe that never answers; all three reachability treatments
+ * can therefore be reviewed without a clock or a network request.
+ */
+function SettingsPageHarness({ standalone = false }: { readonly standalone?: boolean }) {
+  const [connections, setConnections] = useState<DaemonConnectionRecord[]>(() =>
+    settingsConnections(settingsDaemonScenario()),
+  );
+  const [activeDaemonId, setActiveDaemonId] = useState(daemon.daemonId);
+  const [settings, setSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
+  const activeConnection = connections.find(connection => connection.daemonId === activeDaemonId) ?? daemon;
+
+  const page = (
+    <SettingsPage
+      daemonId={activeDaemonId}
+      connections={connections}
+      controls={settingsControls}
+      dictation={{
+        daemon: activeConnection,
+        settings,
+        update: patch => setSettings(current => ({ ...current, ...patch })),
+        persisted: true,
+        fetchImpl: harnessSttFetch,
+      }}
+      notifications={
+        <NotificationSettingsView
+          permission="granted"
+          enabled
+          preferences={{
+            events: { attention: true, question: true, failed: true, completed: false },
+            interactiveOnly: false,
+          }}
+          delivery="active"
+          devices={[]}
+          onEnabled={() => {}}
+          onPreferences={() => {}}
+          onRevokeDevice={() => {}}
+        />
+      }
+      probeDaemon={harnessSettingsProbe}
+      onSelectDaemon={setActiveDaemonId}
+      onRenameDaemon={(daemonId, label) =>
+        setConnections(current =>
+          current.map(connection =>
+            connection.daemonId === daemonId
+              ? { ...connection, ...(label === undefined ? { label: undefined } : { label }) }
+              : connection,
+          ),
+        )
+      }
+      onRemoveDaemon={daemonId => {
+        const remaining = connections.filter(connection => connection.daemonId !== daemonId);
+        setConnections(remaining);
+        if (activeDaemonId === daemonId && remaining[0] !== undefined) setActiveDaemonId(remaining[0].daemonId);
+      }}
+      onAddDaemon={() => {}}
+    />
+  );
+
+  return standalone ? (
+    <section
+      id="harness-settings-page"
+      aria-label="Settings page preview"
+      className="kt-shell h-dvh overflow-hidden bg-surface"
+      data-settings-daemon-scenario={connections.length === 1 ? 'one' : 'many'}
+    >
+      {page}
+    </section>
+  ) : (
+    <Card
+      id="harness-settings-page"
+      aria-label="Settings page preview"
+      className="h-[800px] overflow-hidden sm:h-[760px]"
+      data-settings-daemon-scenario={connections.length === 1 ? 'one' : 'many'}
+    >
+      {page}
+    </Card>
+  );
+}
+
+function StandaloneSettingsPageHarness() {
+  useAppViewport();
+  return <SettingsPageHarness standalone />;
+}
 
 /**
  * The markdown composer preference is a single reader-wide setting, so the
@@ -2980,36 +3104,7 @@ function Shell() {
     },
     {
       label: 'Settings page preview',
-      render: () => (
-        <Card aria-label="Settings page preview" className="h-[800px] overflow-hidden sm:h-[760px]">
-          <SettingsPage
-            daemonId={daemon.daemonId}
-            controls={settingsControls}
-            dictation={{
-              daemon,
-              settings: sttSettings,
-              update: patch => setSttSettings(current => ({ ...current, ...patch })),
-              persisted: true,
-              fetchImpl: harnessSttFetch,
-            }}
-            notifications={
-              <NotificationSettingsView
-                permission="granted"
-                enabled
-                preferences={{
-                  events: { attention: true, question: true, failed: true, completed: false },
-                  interactiveOnly: false,
-                }}
-                delivery="active"
-                devices={[]}
-                onEnabled={() => {}}
-                onPreferences={() => {}}
-                onRevokeDevice={() => {}}
-              />
-            }
-          />
-        </Card>
-      ),
+      render: () => <SettingsPageHarness />,
     },
     {
       label: 'Attention ledger',
@@ -4099,8 +4194,11 @@ const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = 
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
+  const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
-    window.location.hash === '#session-workspace' ? (
+    settingsHarness ? (
+      <StandaloneSettingsPageHarness />
+    ) : window.location.hash === '#session-workspace' ? (
       <SessionWorkspaceHarness />
     ) : screen === undefined ? (
       <Shell />

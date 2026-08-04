@@ -52,7 +52,7 @@ export class StatePairingRepository implements PairingDeviceStore {
     private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic'>,
     private readonly cryptography = new NodePairingCryptography(),
   ) {
-    this.identityPath = join(paths.state, 'daemon-identity.json');
+    this.identityPath = paths.daemonIdentity;
     this.devicesPath = join(paths.state, 'devices.json');
   }
 

@@ -272,6 +272,20 @@ export class DaemonConnectionStore {
     return selected;
   }
 
+  /** Changes only the reader-local display name for one paired daemon. */
+  rename(id: DaemonId, nextLabel?: string): DaemonConnectionRecord {
+    const existing = this.get(id);
+    if (existing === undefined) throw new Error(`daemon ${id} is not paired`);
+    const displayLabel = label(nextLabel);
+    if (existing.label === displayLabel) return existing;
+    const { label: _previousLabel, ...connection } = existing;
+    const renamed: DaemonConnectionRecord =
+      displayLabel === undefined ? connection : { ...connection, label: displayLabel };
+    const connections = this.#snapshot.connections.map(record => (record.daemonId === id ? renamed : record));
+    this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
+    return renamed;
+  }
+
   remove(id: DaemonId): boolean {
     if (this.get(id) === undefined) return false;
     const connections = this.#snapshot.connections.filter(record => record.daemonId !== id);

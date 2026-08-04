@@ -24,7 +24,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import type { SessionStatus } from '@ferretry/protocol';
+import { HealthViewSchema, type SessionStatus } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { StrictMode } from 'react';
 
@@ -138,10 +138,18 @@ interface ShellOptions {
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
 }
 
+interface HealthRead {
+  readonly daemonId: DaemonId;
+  readonly path: string;
+  readonly schema: unknown;
+  readonly timeout: number | undefined;
+}
+
 const appStore = async (
   reads: string[],
   options: ShellOptions = {},
   transcriptReads: string[] = [],
+  healthReads: HealthRead[] = [],
 ): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
@@ -172,6 +180,10 @@ const appStore = async (
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
+        request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
+          healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
+          return {};
+        },
       } as unknown as FyApiClient;
     },
     // Only the pairing exchange has a shape the root itself depends on; every
@@ -185,7 +197,8 @@ const appStore = async (
 const renderShell = async (path: string, paired: readonly DaemonId[] = [], options: ShellOptions = {}) => {
   const reads: string[] = [];
   const transcriptReads: string[] = [];
-  const store = await appStore(reads, options, transcriptReads);
+  const healthReads: HealthRead[] = [];
+  const store = await appStore(reads, options, transcriptReads, healthReads);
   for (const daemon of paired) store.connections.add(daemon === alpha.daemonId ? alpha : beta);
   setPath(path);
   const view = await mount(
@@ -195,7 +208,7 @@ const renderShell = async (path: string, paired: readonly DaemonId[] = [], optio
       </StoreProvider>
     </RouterProvider>,
   );
-  return { reads, store, transcriptReads, view };
+  return { healthReads, reads, store, transcriptReads, view };
 };
 
 const settle = async (): Promise<void> => {
@@ -372,6 +385,16 @@ describe('AppShell', () => {
 
     expect(window.location.pathname).toBe('/setup');
     expect(view.container.querySelector('[data-onboarding="setup"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('mounts the daemon-scoped projects registry from its routed destination', async () => {
+    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId]);
+    await settle();
+
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not read this daemon’s project registry',
+    );
     await view.unmount();
   });
 
@@ -749,6 +772,7 @@ describe('route change accessibility', () => {
         { kind: 'setup' },
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
+        { kind: 'projects', daemonId: id },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -762,6 +786,7 @@ describe('route change accessibility', () => {
       'Set up',
       'Sessions',
       'Sessions, New',
+      'Sessions, Projects',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',
@@ -1132,6 +1157,70 @@ describe('browserPushEnrolment', () => {
 });
 
 /* ---------- the picker, the settings host, and the public root ------------ */
+
+describe('the settings route composition', () => {
+  it('probes each pairing through the typed health endpoint, then routes switch and add through existing flows', async () => {
+    const { healthReads, store, view } = await renderShell('/d/alpha/settings#daemons', [
+      alpha.daemonId,
+      beta.daemonId,
+    ]);
+    await settle();
+
+    expect(healthReads.map(read => String(read.daemonId)).sort()).toEqual(['alpha', 'beta']);
+    for (const read of healthReads) {
+      expect(read.path).toBe('/v1/health');
+      expect(read.schema).toBe(HealthViewSchema);
+      expect(read.timeout).toBe(5_000);
+    }
+    expect(
+      must(view.container.querySelector('[data-daemon-id="alpha"]'), 'alpha row').getAttribute('aria-current'),
+    ).toBe('true');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[aria-label="Use beta"]'), 'use beta').click(),
+    );
+    expect(store.connections.getSnapshot().selectedDaemonId).toBe(beta.daemonId);
+    expect(window.location.pathname).toBe('/d/beta/settings');
+    expect(window.location.hash).toBe('#daemons');
+
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
+    );
+    expect(window.location.pathname).toBe('/');
+    expect(view.container.querySelector('h1')?.textContent).toBe('Your daemons');
+    expect(view.container.textContent).toContain('Pair another daemon');
+    await view.unmount();
+  });
+
+  it('persists a routed daemon rename and sends active removal to the selected fallback settings', async () => {
+    const { store, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId, beta.daemonId]);
+    await settle();
+    const alphaRow = must(view.container.querySelector<HTMLElement>('[data-daemon-id="alpha"]'), 'alpha row');
+    const details = must(alphaRow.querySelector<HTMLDetailsElement>('details'), 'alpha management disclosure');
+    await interact(() => must(details.querySelector<HTMLElement>('summary'), 'manage daemon').click());
+
+    const input = must(details.querySelector<HTMLInputElement>('input'), 'display name');
+    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
+    await interact(() => {
+      setter.call(input, 'Primary workstation');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() =>
+      must(input.closest('form'), 'rename form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    expect(store.connections.get(alpha.daemonId)?.label).toBe('Primary workstation');
+
+    await interact(() =>
+      must(alphaRow.querySelector<HTMLButtonElement>('[data-remove-daemon="alpha"]'), 'remove alpha').click(),
+    );
+    expect(store.connections.get(alpha.daemonId)).toBeUndefined();
+    expect(window.location.pathname).toBe('/d/beta/settings');
+    expect(window.location.hash).toBe('#daemons');
+    await view.unmount();
+  });
+});
 
 describe('the connection picker slot', () => {
   it('pairs a fresh daemon and opens the daemon it just paired', async () => {

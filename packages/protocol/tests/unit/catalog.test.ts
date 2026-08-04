@@ -13,9 +13,20 @@ describe('catalog protocol contracts', () => {
       harness: 'codex',
       skills: [{ name: 'release', description: 'Publish a snapshot', scope: 'project', origin: 'both' }],
     });
-    should(ProjectInfoSchema.parse({ name: 'ferretry', path: '/work/ferretry' })).deepEqual({
+    should(
+      ProjectInfoSchema.parse({
+        id: '00000000-0000-4000-8000-000000000001',
+        name: 'ferretry',
+        path: '/work/ferretry',
+        source: 'existing-folder',
+        createdAt: '2026-08-04T00:00:00.000Z',
+      }),
+    ).deepEqual({
+      id: '00000000-0000-4000-8000-000000000001',
       name: 'ferretry',
       path: '/work/ferretry',
+      source: 'existing-folder',
+      createdAt: '2026-08-04T00:00:00.000Z',
     });
   });
 

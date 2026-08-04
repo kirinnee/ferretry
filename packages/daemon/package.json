@@ -1,6 +1,6 @@
 {
   "name": "@ferretry/daemon",
-  "version": "0.127.1",
+  "version": "0.129.0",
   "private": true,
   "description": "Per-host agent daemon runtime",
   "type": "module",
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@ferretry/protocol": "workspace:*",
+    "@ferretry/relay": "workspace:*",
     "zod": "4.4.3"
   }
 }
