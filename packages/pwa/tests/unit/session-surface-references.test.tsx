@@ -97,7 +97,56 @@ describe('SessionSurfaceReferences', () => {
     expect(output).toContain('Terminal 1');
     expect(output).toContain('No viewer attached');
     expect(output).toContain('Owner unrecorded');
-    expect(output).toContain('does not record who opened a terminal');
+    expect(output).toContain('reads as unrecorded rather than as yours');
+    run(() => page.unmount());
+  });
+
+  test('names the agent driving a shell, so a reader knows before typing into it', async () => {
+    // The whole reason ownership is on the row: the reader is deciding whether
+    // their keystrokes land in a shell something else is already using.
+    const owned = listing([TERMINAL]);
+    const page = render(
+      <SessionSurfaceReferences
+        connection={alpha}
+        listTerminals={async () => ({
+          ...owned,
+          terminals: owned.terminals.map(terminal => ({
+            ...terminal,
+            openedBy: { by: 'agent' as const, sessionId: 'mse7wwti-2a75bd9c' },
+          })),
+        })}
+        scope={scope}
+      />,
+    );
+    await settle();
+
+    const output = JSON.stringify(page.toJSON());
+    expect(output).toContain('Opened by an agent');
+    // The session id rides in the title, not the badge text: it is long enough
+    // to wrap the row on a phone, and the CLASS is what decides the hesitation.
+    expect(output).toContain('agent session mse7wwti-2a75bd9c');
+    expect(output).not.toContain('Owner unrecorded');
+    run(() => page.unmount());
+  });
+
+  test('distinguishes a paired device from the daemon host rather than merging them', async () => {
+    const owned = listing([TERMINAL, '0f0e0d0c0b0a']);
+    const openers = [{ by: 'human' as const, deviceId: 'device-7f3a' }, { by: 'local' as const }];
+    const page = render(
+      <SessionSurfaceReferences
+        connection={alpha}
+        listTerminals={async () => ({
+          ...owned,
+          terminals: owned.terminals.map((terminal, index) => ({ ...terminal, openedBy: openers[index] })),
+        })}
+        scope={scope}
+      />,
+    );
+    await settle();
+
+    const output = JSON.stringify(page.toJSON());
+    expect(output).toContain('Opened from a paired device');
+    expect(output).toContain('Opened on the daemon host');
     run(() => page.unmount());
   });
 

@@ -5,6 +5,7 @@ import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   createSurfaceReferenceResolver,
+  describeSurfaceOwnership,
   sessionSurfaces,
   surfaceReferenceIdentityKey,
 } from '../../src/lib/surface-references.ts';
@@ -61,6 +62,19 @@ describe('sessionSurfaces', () => {
         lastActivityAt: '2026-08-01T10:05:00.000Z',
       },
     ]);
+  });
+
+  test('should carry the opener the daemon attested, and absence as absence', () => {
+    // Act
+    const owned = sessionSurfaces(scopeA, listing([{ ...terminal(FIRST, 'build'), openedBy: { by: 'local' } }]));
+    const silent = sessionSurfaces(scopeA, listing([terminal(SECOND, 'logs')]));
+
+    // Assert
+    should(owned[0]?.ownership).deepEqual({ by: 'local' });
+    // A daemon that recorded nothing is reported as having recorded nothing.
+    // Defaulting to the reader's own device here would tell them nobody else is
+    // in a shell an agent may be driving.
+    should(silent[0]?.ownership).deepEqual({ by: 'unrecorded' });
   });
 
   test('should keep the daemon listing order rather than resorting under the reader', () => {
@@ -186,5 +200,35 @@ describe('surfaceReferenceIdentityKey', () => {
     should(surfaceReferenceIdentityKey(scopeA, listing([terminal(FIRST, 'x')]))).not.equal(
       surfaceReferenceIdentityKey(scopeB, listing([terminal(FIRST, 'x')])),
     );
+  });
+});
+
+describe('describeSurfaceOwnership', () => {
+  test('should reserve the warning tone for a shell an agent is driving', () => {
+    // The tone is the fast read. Colouring "unrecorded" like a hazard would
+    // teach the reader to ignore the colour that actually means "something else
+    // is typing in here".
+    // Act
+    const agent = describeSurfaceOwnership({ by: 'agent', sessionId: 'mse7wwti' });
+    const device = describeSurfaceOwnership({ by: 'human', deviceId: 'device-7f3a' });
+    const host = describeSurfaceOwnership({ by: 'local' });
+    const silent = describeSurfaceOwnership({ by: 'unrecorded' });
+
+    // Assert
+    should(agent).deepEqual({ text: 'Opened by an agent', tone: 'warn', detail: 'agent session mse7wwti' });
+    should(device).deepEqual({
+      text: 'Opened from a paired device',
+      tone: 'accent',
+      detail: 'device device-7f3a',
+    });
+    should(host).deepEqual({ text: 'Opened on the daemon host', tone: 'accent' });
+    should(silent).deepEqual({ text: 'Owner unrecorded', tone: 'pend' });
+  });
+
+  test('should offer no identity detail for the classes that have none', () => {
+    // Assert — a detail invented for `local` or `unrecorded` would be a claim
+    // about an identity the daemon never attested.
+    should(describeSurfaceOwnership({ by: 'local' }).detail).be.undefined();
+    should(describeSurfaceOwnership({ by: 'unrecorded' }).detail).be.undefined();
   });
 });

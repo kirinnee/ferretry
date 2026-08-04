@@ -35,7 +35,7 @@
  * key-agnostic already.
  */
 
-import type { TerminalListView, TerminalView } from '@ferretry/protocol';
+import type { SurfaceOpener, TerminalListView, TerminalView } from '@ferretry/protocol';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonSessionKey } from './daemon-scope.ts';
 import { formatReference, type SurfaceKind, type SurfaceProof, type SurfaceReferenceResolver } from './references.ts';
@@ -43,14 +43,45 @@ import { formatReference, type SurfaceKind, type SurfaceProof, type SurfaceRefer
 /**
  * Who opened a surface, as far as the owner can attest it.
  *
- * `unrecorded` is a first-class answer and is the only honest one for a terminal
- * this daemon cannot speak for — one opened before provenance was recorded, or by
- * a build that never recorded it. It is NOT rendered as "the human": a guess that
- * happens to be right most of the time is still a claim made without evidence,
- * and ownership is exactly the fact a reader consults before typing into a shell
- * an agent is driving.
+ * The three attested classes are the daemon's own (`SurfaceOpener`): a paired
+ * device is a human, `local` is the box's own credential with no agent named, and
+ * `agent` names the session driving it. The daemon derives all three from the
+ * credential that authenticated the request, so a remote device cannot label its
+ * own shell as an agent's.
+ *
+ * `unrecorded` is the FOURTH answer and is a first-class one: it is the only
+ * honest reading for a terminal this daemon cannot speak for — one opened before
+ * provenance was recorded, or by a build that never recorded it. It is NOT
+ * rendered as "the human": a guess that happens to be right most of the time is
+ * still a claim made without evidence, and ownership is exactly the fact a reader
+ * consults before typing into a shell an agent is driving.
  */
-export type SurfaceOwnership = { readonly by: 'unrecorded' };
+export type SurfaceOwnership = SurfaceOpener | { readonly by: 'unrecorded' };
+
+/**
+ * How a row states ownership, and the tone it deserves.
+ *
+ * `agent` is the one that carries a warning tone: it is the case where typing
+ * lands in a shell something else is already driving. `unrecorded` is neutral —
+ * it is an absence of evidence, not a hazard, and colouring it like one would
+ * teach a reader to ignore the colour that matters.
+ */
+export interface SurfaceOwnershipLabel {
+  readonly text: string;
+  /** A ROLE, not a colour — the shell's badge maps it to one. */
+  readonly tone: 'warn' | 'pend' | 'accent';
+  /** The identity behind the class, for a title attribute. Never invented. */
+  readonly detail?: string;
+}
+
+export const describeSurfaceOwnership = (ownership: SurfaceOwnership): SurfaceOwnershipLabel => {
+  if (ownership.by === 'agent')
+    return { text: 'Opened by an agent', tone: 'warn', detail: `agent session ${ownership.sessionId}` };
+  if (ownership.by === 'human')
+    return { text: 'Opened from a paired device', tone: 'accent', detail: `device ${ownership.deviceId}` };
+  if (ownership.by === 'local') return { text: 'Opened on the daemon host', tone: 'accent' };
+  return { text: 'Owner unrecorded', tone: 'pend' };
+};
 
 /** One addressable surface, as the picker, the pane header and Add to chat need
  *  it: the canonical token, plus the live facts that help a reader choose. */
@@ -95,7 +126,9 @@ export const sessionSurfaces = (
       key: terminal.id,
       token: surfaceToken('terminal', terminal.id),
       title: terminal.title,
-      ownership: { by: 'unrecorded' },
+      // An absent opener is the daemon saying it cannot speak for this pane, and
+      // it stays absent here rather than becoming a default.
+      ownership: terminal.openedBy ?? { by: 'unrecorded' },
       viewers: terminal.viewers,
       lastActivityAt: terminal.lastActivityAt,
     }),
