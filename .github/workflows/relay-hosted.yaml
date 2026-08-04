@@ -61,8 +61,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          nix develop .#ci -c bash -c \
-            'cd packages/relay && wrangler deploy --config wrangler.hosted.json'
+          nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/relay
+            bun install --frozen-lockfile
+            wrangler deploy --config wrangler.hosted.json
+          '
 
           # Derive a relay-only bearer from the existing high-entropy GitHub secret. The raw
           # Cloudflare token is never installed in the Worker; only this domain-separated digest is

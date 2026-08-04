@@ -93,6 +93,14 @@ rg -qF -- 'wrangler deploy --dry-run --config wrangler.jsonc' "${ci_workflow}" |
   fail "${ci_workflow} must compile the self-hosted relay configuration"
 rg -qF -- 'wrangler deploy --dry-run --config wrangler.hosted.json' "${ci_workflow}" ||
   fail "${ci_workflow} must compile the hosted relay configuration"
+# A clean Actions checkout has no node_modules. Both the credential-free rehearsal and the real
+# deployment must install from inside the relay package before Wrangler bundles workspace imports;
+# otherwise @ferretry/protocol and zod disappear only in CI/production while a prepared developer
+# checkout keeps passing. Keep this package-local, matching the repository's other build scripts.
+for worker_workflow in "${workflow}" "${ci_workflow}"; do
+  rg -U -q 'cd packages/relay[[:space:]]*\n[[:space:]]*bun install --frozen-lockfile' "${worker_workflow}" ||
+    fail "${worker_workflow} must install locked relay workspace dependencies before Wrangler runs"
+done
 if rg -qF -- 'bunx wrangler' "${workflow}"; then
   fail "${workflow} must use the flake-locked Wrangler, not resolve npm latest with bunx"
 fi

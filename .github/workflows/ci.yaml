@@ -36,6 +36,7 @@ jobs:
           nix develop .#ci -c bash -c '
             set -euo pipefail
             cd packages/relay
+            bun install --frozen-lockfile
             wrangler deploy --dry-run --config wrangler.jsonc
             wrangler deploy --dry-run --config wrangler.hosted.json
           '
