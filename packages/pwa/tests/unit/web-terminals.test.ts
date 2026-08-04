@@ -1,10 +1,11 @@
-import { FY_REQUEST_ID_HEADER, type TerminalListView, type TerminalView } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import { FY_REQUEST_ID_HEADER, type TerminalListView, type TerminalView } from '@ferretry/protocol';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   closeSessionTerminal,
   createSessionTerminal,
+  daemonTerminalTicket,
   listSessionTerminals,
   renameSessionTerminal,
   terminalLimitLabel,
@@ -158,6 +159,24 @@ describe('web terminal transport', () => {
       `ws://localhost:8787/v1/sessions/s/terminals/${TERMINAL_ID}/stream?ticket=t`,
     );
     expect(() => terminalStreamUrl(daemonA, scopeA, TERMINAL_ID, ' ')).toThrow('ticket must not be empty');
+  });
+
+  it('buys a terminal-scoped socket ticket with the device token kept in the request header', async () => {
+    const { calls, fetcher } = recorder({
+      ticket: `fy_ticket_${'t'.repeat(43)}`,
+      ttlSeconds: 30,
+      expiresAt: '2026-08-04T12:00:30.000Z',
+    });
+
+    await expect(daemonTerminalTicket(daemonA, scopeA, TERMINAL_ID, fetcher)).resolves.toBe(
+      `fy_ticket_${'t'.repeat(43)}`,
+    );
+
+    expect(calls[0]?.url).toBe(
+      `https://a.example.test/v1/sessions/shared%2Fsession/terminals/${TERMINAL_ID}/stream/ticket`,
+    );
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer token-a');
   });
 
   it('reports the session and box counts in the original wording', () => {

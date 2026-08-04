@@ -21,6 +21,7 @@ import {
   SessionListSchema,
   SessionStateSchema,
   SessionViewSchema,
+  SocketTicketResponseSchema,
   TerminalListViewSchema,
   TerminalViewSchema,
 } from '@ferretry/protocol';
@@ -44,6 +45,7 @@ import {
   type ResumeLauncher,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
+  SocketTicketRegistry,
   type TerminalRecord,
   type TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
@@ -2098,6 +2100,135 @@ describe('daemon boot lifecycle', () => {
     should(absent?.status).equal(404);
     // Shutdown ended the stream rather than leaving a redraw timer firing at a dead socket.
     should(closes).deepEqual([1000]);
+  });
+
+  it('should admit one paired-device terminal socket ticket and refuse every replay or wrong target', async () => {
+    // Arrange — two production daemon worlds prove that ticket state is local to its issuer. The
+    // controllable elapsed clock proves expiry without sleeping for the public thirty-second TTL.
+    const homeA = await tempDirectory('fyd-terminal-ticket-a');
+    const homeB = await tempDirectory('fyd-terminal-ticket-b');
+    const portA = await freeLoopbackPort();
+    const portB = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let releaseA = (): void => {};
+    let releaseB = (): void => {};
+    let now = 1_000;
+    let issued = 0;
+    const tickets = () =>
+      new SocketTicketRegistry({ now: () => now }, { ticket: () => `fy_ticket_${String(++issued).padStart(43, 't')}` });
+    const worldA = {
+      ...(await worldAt(homeA, portA, async () => {
+        await new Promise<void>(resolve => {
+          releaseA = resolve;
+        });
+      })),
+      terminalRuntime: new RecordingTerminalRuntime(),
+      createSocketTickets: tickets,
+    };
+    await seedSession(homeA, '2026-08-04T12:00:00.000Z');
+    const baseA = `http://127.0.0.1:${portA}`;
+    const exitA = start(worldA, cleanups);
+    // `FY_HOME` is process-scoped in this integration harness. Let A finish booting under its own
+    // home before seeding B, exactly as two daemon processes would have separate environments.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${baseA}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const worldB = {
+      ...(await worldAt(homeB, portB, async () => {
+        await new Promise<void>(resolve => {
+          releaseB = resolve;
+        });
+      })),
+      terminalRuntime: new RecordingTerminalRuntime(),
+      createSocketTickets: tickets,
+    };
+    await seedSession(homeB, '2026-08-04T12:00:00.000Z');
+    const exitB = start(worldB, cleanups);
+    const baseB = `http://127.0.0.1:${portB}`;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${baseB}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const adminA = (await readFile(join(homeA, 'api-token'), 'utf8')).trim();
+    const adminB = (await readFile(join(homeB, 'api-token'), 'utf8')).trim();
+    const headersA = { authorization: `Bearer ${adminA}`, 'x-ferretry-client': 'cli' };
+    const headersB = { authorization: `Bearer ${adminB}`, 'x-ferretry-client': 'cli' };
+    const pairingCode = (await (
+      await fetch(`${baseA}/v1/pair/code`, { method: 'POST', headers: headersA })
+    ).json()) as {
+      readonly code: string;
+    };
+    const paired = PairingResponseSchema.parse(
+      await (
+        await fetch(`${baseA}/v1/pair`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: pairingCode.code, deviceName: 'ticket phone' }),
+        })
+      ).json(),
+    );
+    const deviceA = { authorization: `Bearer ${paired.deviceToken}` };
+    const terminalsA = `${baseA}/v1/sessions/${SESSION_ID}/terminals`;
+    const terminalsB = `${baseB}/v1/sessions/${SESSION_ID}/terminals`;
+    const first = TerminalViewSchema.parse(
+      await (await fetch(terminalsA, { method: 'POST', headers: headersA })).json(),
+    );
+    const second = TerminalViewSchema.parse(
+      await (await fetch(terminalsA, { method: 'POST', headers: headersA })).json(),
+    );
+    const otherDaemonTerminal = TerminalViewSchema.parse(
+      await (await fetch(terminalsB, { method: 'POST', headers: headersB })).json(),
+    );
+    const streamA = (terminalId: string) => `${terminalsA}/${terminalId}/stream`;
+    const ticketA = async (terminalId: string): Promise<string> => {
+      const response = await fetch(`${streamA(terminalId)}/ticket`, { method: 'POST', headers: deviceA });
+      should(response.status).equal(201);
+      return SocketTicketResponseSchema.parse(await response.json()).ticket;
+    };
+    const handshake = async (url: string): Promise<number | undefined> =>
+      (
+        await fetch(url, {
+          headers: {
+            upgrade: 'websocket',
+            connection: 'upgrade',
+            'sec-websocket-version': '13',
+            'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
+          },
+        }).catch(() => undefined)
+      )?.status;
+
+    // Act — only the first ticketed upgrade becomes a socket; every later refusal is legible before
+    // protocol switch rather than an indistinguishable close frame.
+    const happyTicket = await ticketA(first.id);
+    const viewer = new WebSocket(`${streamA(first.id)}?ticket=${encodeURIComponent(happyTicket)}`);
+    await new Promise<void>((resolve, reject) => {
+      viewer.addEventListener('open', () => resolve());
+      viewer.addEventListener('error', () => reject(new Error('the ticketed terminal socket never opened')));
+    });
+    viewer.close();
+    const replayed = await handshake(`${streamA(first.id)}?ticket=${encodeURIComponent(happyTicket)}`);
+    const wrongTerminalTicket = await ticketA(first.id);
+    const wrongTerminal = await handshake(`${streamA(second.id)}?ticket=${encodeURIComponent(wrongTerminalTicket)}`);
+    const expiredTicket = await ticketA(first.id);
+    now += 30_000;
+    const expired = await handshake(`${streamA(first.id)}?ticket=${encodeURIComponent(expiredTicket)}`);
+    const foreignDaemonTicket = await ticketA(first.id);
+    const foreignDaemon = await handshake(
+      `${terminalsB}/${otherDaemonTerminal.id}/stream?ticket=${encodeURIComponent(foreignDaemonTicket)}`,
+    );
+    releaseA();
+    releaseB();
+    const [codeA, codeB] = await Promise.all([exitA, exitB]);
+    await runCleanups(cleanups);
+
+    // Assert
+    should(codeA).equal(0);
+    should(codeB).equal(0);
+    should(replayed).equal(401);
+    should(wrongTerminal).equal(401);
+    should(expired).equal(401);
+    should(foreignDaemon).equal(401);
   });
 
   /**

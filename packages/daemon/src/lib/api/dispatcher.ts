@@ -63,8 +63,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   // authenticates nothing there. It is tried only when the request could not authenticate on its own,
   // so a caller holding a real bearer never silently spends a single-use ticket.
   const authentication =
-    presented.kind === 'anonymous' && tickets !== undefined
-      ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '') ?? presented)
+    presented.kind === 'anonymous' && tickets !== undefined && lookup.kind === 'matched'
+      ? (tickets.redeem(queryValue(request, SOCKET_TICKET_QUERY_PARAMETER) ?? '', request.path) ?? presented)
       : presented;
   if (authentication.kind === 'anonymous')
     return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };

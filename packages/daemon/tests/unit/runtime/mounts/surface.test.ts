@@ -162,6 +162,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId',
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
+      'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
       // The human login window, and the per-session automation that is deliberately a stated refusal
       // rather than a 404: there is no browser worker program in this repository and no production
       // `BrowserViewerHost`. See the mount's own header.
@@ -199,9 +200,9 @@ describe('the mounted daemon surface', () => {
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
-      // The ticket counter for the socket table below. It is on THIS table, not that one: a browser
-      // buys a ticket over an ordinary request — the only kind that can carry a header — and spends it
-      // on the upgrade.
+      // The ticket counters for the socket table below. They are on THIS table, not that one: a
+      // browser buys a ticket over an ordinary request — the only kind that can carry a header — and
+      // spends it on the upgrade.
       'POST /v1/events/ticket',
     ]);
   });
