@@ -130,6 +130,21 @@ describe('file daemon snapshot store', () => {
     should(await readFile(second.binaryPath, 'utf8')).equal('#!/bin/sh\necho second\n');
   });
 
+  it('should remember that promotion occurred and refuse to bootstrap over a lost current pointer', async () => {
+    // Arrange
+    const subject = store();
+    const built = await subject.build();
+    await subject.promote(built.id);
+    await rm(join(root, 'current'));
+
+    // Act + Assert
+    await should(subject.current()).be.rejectedWith(/current is missing after this store was promoted/u);
+
+    // An explicit promotion is the operator-controlled repair path; it never needs live source.
+    should((await subject.promote(built.id)).id).equal(built.id);
+    should((await subject.current())?.id).equal(built.id);
+  });
+
   it('should list every verified snapshot newest first', async () => {
     // Arrange
     const subject = store();
@@ -228,6 +243,21 @@ describe('file daemon snapshot store', () => {
     await should(subject.list()).be.rejectedWith(/invalid snapshot entry/u);
   });
 
+  it('should never overwrite a damaged empty content-addressed target', async () => {
+    // Arrange
+    const subject = store();
+    const built = await subject.build();
+    const target = join(built.binaryPath, '..');
+    await chmod(target, 0o755);
+    await rm(built.binaryPath);
+    await rm(join(target, 'manifest.json'));
+    await chmod(target, 0o555);
+
+    // Act + Assert
+    await should(subject.build()).be.rejectedWith(/not a complete two-file daemon snapshot/u);
+    should(await readdir(target)).deepEqual([]);
+  });
+
   it('should treat a dangling or malformed current pointer as damaged, never absent', async () => {
     // Arrange
     const danglingStore = store();
@@ -267,6 +297,23 @@ describe('file daemon snapshot store', () => {
     await should(store().build()).be.rejectedWith(/is not a real directory/u);
   });
 
+  it('should accept a valid store reached through a symlinked ancestor', async () => {
+    // Arrange
+    const actualState = join(directory, 'actual-state');
+    const linkedState = join(directory, 'linked-state');
+    await mkdir(actualState);
+    await symlink(actualState, linkedState);
+    const subject = store({ root: join(linkedState, 'ferretry', 'daemon-snapshots', 'fyd') });
+
+    // Act
+    const built = await subject.build();
+    const promoted = await subject.promote(built.id);
+
+    // Assert
+    should(promoted.id).equal(built.id);
+    should((await subject.current())?.id).equal(built.id);
+  });
+
   it('should distinguish absent storage from a present but structurally incomplete store', async () => {
     // Arrange
     const subject = store();
@@ -275,6 +322,9 @@ describe('file daemon snapshot store', () => {
     should(await subject.list()).deepEqual([]);
     await mkdir(root, { recursive: true });
     await should(subject.list()).be.rejectedWith(/exists without its snapshots directory/u);
+
+    await mkdir(join(root, 'snapshots'));
+    await should(subject.current()).be.rejectedWith(/exists without its staging directory/u);
   });
 
   it('should reject missing, non-file, empty and non-executable sources', async () => {

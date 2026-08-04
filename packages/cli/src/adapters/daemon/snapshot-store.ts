@@ -3,6 +3,7 @@ import { type BigIntStats, createReadStream, type Stats } from 'node:fs';
 import {
   chmod,
   copyFile,
+  link,
   lstat,
   mkdir,
   open,
@@ -15,7 +16,7 @@ import {
   stat,
   symlink,
 } from 'node:fs/promises';
-import { isAbsolute, join, normalize, parse, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'node:path';
 import { z } from 'zod';
 import type {
   DaemonSnapshot,
@@ -30,6 +31,8 @@ const MANIFEST = 'manifest.json';
 const SNAPSHOTS = 'snapshots';
 const STAGING = 'staging';
 const CURRENT = 'current';
+const PROMOTED = 'promoted';
+const PROMOTED_VERSION = '1\n';
 
 const SnapshotManifestSchema = z
   .object({
@@ -130,10 +133,11 @@ async function syncDirectory(path: string): Promise<void> {
 /**
  * Filesystem-backed, content-addressed daemon snapshots.
  *
- * A build is copied and verified under `staging/`, made read-only, then renamed into `snapshots/`.
- * Promotion is a same-directory symlink rename, so a reader sees either the old complete target or
- * the new complete target. The source is statted before and after both copy and hashing; an editor
- * cannot produce a successful snapshot by changing the file halfway through the build.
+ * A build is copied and verified under `staging/`, made read-only, then published into an exclusively
+ * reserved directory under `snapshots/`. Promotion is a same-directory symlink rename, so a reader
+ * sees either the old complete target or the new complete target. The source is statted before and
+ * after both copy and hashing; an editor cannot produce a successful snapshot by changing the file
+ * halfway through the build.
  */
 export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
   private readonly root: string;
@@ -158,7 +162,6 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
 
     const stage = join(this.root, STAGING, this.uniqueId());
     await mkdir(stage, { mode: 0o700 });
-    let ownsStage = true;
     try {
       const stagedBinary = join(stage, this.options.daemon.name);
       await copyFile(source, stagedBinary);
@@ -198,27 +201,27 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
 
       const target = this.#snapshotDirectory(id);
       try {
-        await rename(stage, target);
-        ownsStage = false;
-        // Bun refuses to rename a read-only directory on some supported hosts. Publish the complete
-        // directory first, then drop its write bits before returning. A concurrent verifier in this
-        // tiny window fails closed on the mutable-directory check; it can never accept a partial
-        // snapshot as valid. A crash in the window likewise leaves a visibly damaged snapshot that
-        // a later build refuses to rewrite in place.
-        await chmod(target, 0o555);
-        await syncDirectory(join(this.root, SNAPSHOTS));
-        const snapshot = await this.#readSnapshot(id);
-        return { ...snapshot, created: true };
+        // `rename(stage, target)` is not exclusive on POSIX: it replaces an existing empty target
+        // directory. Reserve the content address with `mkdir` instead, then move only this builder's
+        // complete staged files into the directory it owns. During publication the target is mutable,
+        // so a concurrent verifier fails closed; a crash leaves damaged evidence that no later build
+        // overwrites or silently repairs.
+        await mkdir(target, { mode: 0o700 });
       } catch (error) {
         if (!['EEXIST', 'ENOTEMPTY'].includes(errorCode(error) ?? '')) throw error;
         const snapshot = await this.#readSnapshot(id);
         return { ...snapshot, created: false };
       }
+      await rename(stagedBinary, join(target, this.options.daemon.name));
+      await rename(stagedManifest, join(target, MANIFEST));
+      await syncDirectory(target);
+      await chmod(target, 0o555);
+      await syncDirectory(join(this.root, SNAPSHOTS));
+      const snapshot = await this.#readSnapshot(id);
+      return { ...snapshot, created: true };
     } finally {
-      if (ownsStage) {
-        await chmod(stage, 0o700).catch(() => undefined);
-        await rm(stage, { recursive: true, force: true }).catch(() => undefined);
-      }
+      await chmod(stage, 0o700).catch(() => undefined);
+      await rm(stage, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 
@@ -232,26 +235,37 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     try {
       await symlink(target, temporary, 'file');
       ownsTemporary = true;
+      // Publish durable evidence before the pointer. A crash or deletion can therefore never turn a
+      // store that was promoted into apparently fresh state. The brief damaged window before the
+      // first pointer appears is deliberately fail-closed, and an explicit promote repairs it.
+      await this.#ensurePromotionMarker();
       await rename(temporary, join(this.root, CURRENT));
       ownsTemporary = false;
       await syncDirectory(this.root);
     } finally {
       if (ownsTemporary) await rm(temporary, { force: true }).catch(() => undefined);
     }
-    const promoted = await this.current();
-    if (promoted === undefined || promoted.id !== id) {
-      throw new DaemonSnapshotStoreError('damaged', `snapshot promotion did not settle on ${id}`);
-    }
-    return promoted;
+    // A concurrent later promotion may already have superseded this one by the time the caller
+    // observes `current`. The successful rename above is this operation's linearization point, so
+    // return the exact verified snapshot it promoted rather than spuriously rejecting that race.
+    return snapshot;
   }
 
   async current(): Promise<DaemonSnapshot | undefined> {
+    const rootState = await this.#optionalLstat(this.root);
+    if (rootState === undefined) return undefined;
+    await this.#validateStore(rootState);
+
     const pointer = join(this.root, CURRENT);
+    const promoted = await this.#hasPromotionMarker();
     let pointerStat: Stats;
     try {
       pointerStat = await lstat(pointer);
     } catch (error) {
-      if (errorCode(error) === 'ENOENT') return undefined;
+      if (errorCode(error) === 'ENOENT') {
+        if (!promoted) return undefined;
+        throw new DaemonSnapshotStoreError('damaged', `${pointer} is missing after this store was promoted`);
+      }
       throw error;
     }
     if (!pointerStat.isSymbolicLink()) {
@@ -268,10 +282,18 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     ) {
       throw new DaemonSnapshotStoreError('damaged', `${pointer} has an invalid daemon snapshot target: ${target}`);
     }
+    if (!promoted) {
+      throw new DaemonSnapshotStoreError('damaged', `${pointer} exists without durable promotion evidence`);
+    }
     try {
       const snapshot = await this.#readSnapshot(id);
-      const resolved = await realpath(pointer);
-      if (resolved !== snapshot.binaryPath) {
+      // Canonicalize the target captured by `readlink`, not the live pointer: another valid promote
+      // may replace `current` after our read, and this observation still linearizes before it.
+      const [resolved, expected] = await Promise.all([
+        realpath(join(this.root, target)),
+        realpath(snapshot.binaryPath),
+      ]);
+      if (resolved !== expected) {
         throw new DaemonSnapshotStoreError('damaged', `${pointer} resolves outside snapshot ${id}`);
       }
       return snapshot;
@@ -286,13 +308,8 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
   async list(): Promise<readonly DaemonSnapshot[]> {
     const rootState = await this.#optionalLstat(this.root);
     if (rootState === undefined) return [];
-    this.#requireDirectory(rootState, this.root, true);
+    await this.#validateStore(rootState);
     const directory = join(this.root, SNAPSHOTS);
-    const snapshotState = await this.#optionalLstat(directory);
-    if (snapshotState === undefined) {
-      throw new DaemonSnapshotStoreError('damaged', `${this.root} exists without its ${SNAPSHOTS} directory`);
-    }
-    this.#requireDirectory(snapshotState, directory, true);
     const entries = await readdir(directory, { withFileTypes: true });
     const snapshots: DaemonSnapshot[] = [];
     for (const entry of entries) {
@@ -307,16 +324,77 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
   }
 
   async #ensureStore(): Promise<void> {
-    await mkdir(this.root, { recursive: true, mode: 0o700 });
-    await mkdir(join(this.root, SNAPSHOTS), { mode: 0o700 }).catch(error => {
+    await mkdir(dirname(this.root), { recursive: true, mode: 0o700 });
+    let created = false;
+    try {
+      await mkdir(this.root, { mode: 0o700 });
+      created = true;
+    } catch (error) {
       if (errorCode(error) !== 'EEXIST') throw error;
-    });
-    await mkdir(join(this.root, STAGING), { mode: 0o700 }).catch(error => {
-      if (errorCode(error) !== 'EEXIST') throw error;
-    });
-    for (const directory of [this.root, join(this.root, SNAPSHOTS), join(this.root, STAGING)]) {
-      this.#requireDirectory(await lstat(directory), directory, true);
     }
+    if (created) {
+      // Only the invocation that exclusively created the root may initialize it. Once the root is
+      // observable, missing structure is damage and must not be filled in by a later operation.
+      await mkdir(join(this.root, SNAPSHOTS), { mode: 0o700 });
+      await mkdir(join(this.root, STAGING), { mode: 0o700 });
+      await syncDirectory(this.root);
+    }
+    const rootState = await lstat(this.root);
+    await this.#validateStore(rootState);
+  }
+
+  async #validateStore(rootState: Stats): Promise<void> {
+    this.#requireDirectory(rootState, this.root, true);
+    for (const name of [SNAPSHOTS, STAGING]) {
+      const directory = join(this.root, name);
+      const state = await this.#optionalLstat(directory);
+      if (state === undefined) {
+        throw new DaemonSnapshotStoreError('damaged', `${this.root} exists without its ${name} directory`);
+      }
+      this.#requireDirectory(state, directory, true);
+    }
+    await this.#hasPromotionMarker();
+  }
+
+  /** A hard-link publication makes the marker visible only after its complete contents are durable. */
+  async #ensurePromotionMarker(): Promise<void> {
+    const marker = join(this.root, PROMOTED);
+    const temporary = join(this.root, `.${PROMOTED}-${this.uniqueId()}.tmp`);
+    let ownsTemporary = false;
+    let created = false;
+    try {
+      await durableWrite(temporary, PROMOTED_VERSION, 0o444);
+      ownsTemporary = true;
+      try {
+        await link(temporary, marker);
+        created = true;
+      } catch (error) {
+        if (errorCode(error) !== 'EEXIST') throw error;
+      }
+      if (created) await syncDirectory(this.root);
+      if (!(await this.#hasPromotionMarker())) {
+        throw new DaemonSnapshotStoreError('damaged', `${marker} was not published`);
+      }
+    } finally {
+      if (ownsTemporary) await rm(temporary, { force: true }).catch(() => undefined);
+    }
+  }
+
+  async #hasPromotionMarker(): Promise<boolean> {
+    const marker = join(this.root, PROMOTED);
+    const state = await this.#optionalLstat(marker);
+    if (state === undefined) return false;
+    this.#requireRegular(state, marker, false);
+    let contents: string;
+    try {
+      contents = await readFile(marker, 'utf8');
+    } catch (error) {
+      throw new DaemonSnapshotStoreError('damaged', `cannot read ${marker}: ${errorMessage(error)}`);
+    }
+    if (contents !== PROMOTED_VERSION) {
+      throw new DaemonSnapshotStoreError('damaged', `${marker} has an invalid promotion marker version`);
+    }
+    return true;
   }
 
   async #source(): Promise<string> {

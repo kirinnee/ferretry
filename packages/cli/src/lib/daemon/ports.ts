@@ -120,9 +120,9 @@ export interface DaemonSnapshotBuild extends DaemonSnapshot {
 /**
  * Immutable daemon artifacts and their atomic promoted pointer.
  *
- * `undefined` from `current` means the pointer has never existed. A malformed pointer, manifest or
- * artifact throws: damaged durable state must never be mistaken for an empty store and bootstrapped
- * over.
+ * `undefined` from `current` means durable evidence says this store has never been promoted. A
+ * missing or malformed pointer after promotion, manifest, marker or artifact throws: damaged durable
+ * state must never be mistaken for an empty store and bootstrapped over.
  */
 export interface IDaemonSnapshotPort {
   build(): Promise<DaemonSnapshotBuild>;
