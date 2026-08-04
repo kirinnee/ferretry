@@ -82,14 +82,15 @@ import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
 import type { ClipboardWriter } from '../src/features/onboarding/copy-button.tsx';
-import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
 import type { DeviceKind } from '../src/features/onboarding/device-kind.ts';
+import type { HostedRelayFallback } from '../src/features/onboarding/hosted-relay.ts';
 import type { OnboardingRouteId, OnboardingStepId } from '../src/features/onboarding/onboarding-model.ts';
 import { OnboardingPage } from '../src/features/onboarding/onboarding-page.tsx';
 import {
   ONBOARDING_PROGRESS_VERSION,
   OnboardingProgressStore,
 } from '../src/features/onboarding/onboarding-progress.ts';
+import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-panel.tsx';
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
@@ -623,10 +624,14 @@ const HARNESS_SCAN_HOST: QrScanHost = { supported: true, scan: async () => await
  * the right behaviour for an arrival and useless for a gallery that has to show
  * the middle of one. The fake answers with a fixed document and swallows every
  * write, so a review page can neither read nor overwrite the real reader's
- * `fy-onboarding-v2` progress.
+ * `fy-onboarding-v4` progress.
+ *
+ * THE JOURNEY IS SEEDED IN FULL, not just the route: which computer runs the
+ * daemon and who installs it are what decide the list of steps, and a document
+ * naming a route alone is refused by the parser rather than guessed at.
  */
 const harnessOnboarding = (
-  route: OnboardingRouteId,
+  journey: Record<string, string>,
   current: OnboardingStepId,
   device: DeviceKind = 'desktop',
 ): OnboardingProgressStore =>
@@ -637,7 +642,7 @@ const harnessOnboarding = (
         JSON.stringify({
           v: ONBOARDING_PROGRESS_VERSION,
           stage: 'walk',
-          route,
+          ...journey,
           current,
           furthest: current,
         }),
@@ -646,18 +651,29 @@ const harnessOnboarding = (
     paired: true,
   });
 
+/** The daemon subflow, walked by hand on the machine holding the page. */
+const hereByHand = (route: OnboardingRouteId = 'first-time'): Record<string, string> => ({
+  route,
+  target: 'this',
+  doer: 'self',
+});
+
 /**
- * A store parked on one of the two QUESTIONS.
+ * A store parked on one of the QUESTIONS.
  *
- * Seeded rather than left empty, because an empty store resolves to the FIRST
- * question and the device question is now one answer in — a gallery that could
- * only reach it by pressing a button could not show it as a still frame at all.
+ * Seeded rather than left empty, because an empty store resolves to the ENTRY
+ * question and both of the others are one or two answers in — a gallery that
+ * could only reach them by pressing buttons could not show them as still frames
+ * at all.
  */
-const harnessQuestion = (stage: 'who' | 'choose', device: DeviceKind = 'desktop'): OnboardingProgressStore =>
+const harnessQuestion = (
+  document: Record<string, string>,
+  device: DeviceKind = 'desktop',
+): OnboardingProgressStore =>
   new OnboardingProgressStore({
     device,
     storage: {
-      getItem: () => JSON.stringify({ v: ONBOARDING_PROGRESS_VERSION, stage }),
+      getItem: () => JSON.stringify({ v: ONBOARDING_PROGRESS_VERSION, ...document }),
       setItem: () => {},
     },
     paired: true,
@@ -666,60 +682,70 @@ const harnessQuestion = (stage: 'who' | 'choose', device: DeviceKind = 'desktop'
 /**
  * The screens the gallery shows, named by what a reviewer is looking at.
  *
- * The device-specific pair — `choose-mobile` and `need-computer` — are here
- * because they are the two screens whose whole point is that they render
- * DIFFERENTLY on a phone, and a gallery that only ever showed the desktop
- * reading of them would prove nothing about the rule they exist to keep.
+ * THE PAIRS ARE THE POINT, and each pair differs by one answer rather than by
+ * decoration:
  *
- * `who` leads because it is what a reader sees first, and the two agent frames
- * are here because that route is the one nothing else in the gallery covers: it
- * shares no step with any other answer.
+ * - `doer` and `doer-mobile`: the same question, above a STATED ASSUMPTION with a
+ *   way out on a computer and a STATED FACT on a phone, which is what replaced
+ *   asking a phone what it is.
+ * - `brief` and `brief-elsewhere`: the same prompt, with the share affordance that
+ *   only exists when the agent is on a machine this clipboard cannot reach.
+ * - `agent-pair` and `agent-pair-elsewhere`: "already paired in another tab" is
+ *   true only when the daemon is on this machine, and that is now an answer rather
+ *   than a guess from the device.
+ * - `elsewhere` and `elsewhere-mobile`: ONE screen that reads the same on both,
+ *   which is the whole claim of the recursion — a laptop setting up a server sees
+ *   what a phone sees.
  */
 type HarnessOnboardingScreen =
-  | 'who'
+  | 'entry'
+  | 'target'
+  | 'doer'
+  | 'doer-mobile'
   | 'brief'
+  | 'brief-elsewhere'
   | 'agent-pair'
-  | 'agent-pair-mobile'
-  | 'choose'
-  | 'choose-mobile'
+  | 'agent-pair-elsewhere'
   | 'install'
   | 'daemon'
   | 'connect'
   | 'local'
-  | 'need-computer'
+  | 'elsewhere'
+  | 'elsewhere-mobile'
   | 'handoff'
   | 'pair'
   | 'scan'
   | 'done';
 
 const HARNESS_ONBOARDING: Readonly<Record<HarnessOnboardingScreen, OnboardingProgressStore>> = {
-  /* No document at all: the FIRST question is what an empty store resolves to. */
-  who: new OnboardingProgressStore({ storage: undefined, device: 'desktop' }),
-  /* The agent route, whose two steps are shared with nothing else in the gallery. */
-  brief: harnessOnboarding('agent', 'brief'),
-  'agent-pair': harnessOnboarding('agent', 'agent-pair'),
-  /*
-   * The phone reading of the same step, which is here because it is the one place
-   * the agent route differs by device: `fy pair --open` opens a browser on the
-   * DAEMON'S machine, so "you may already be connected in another tab" is true on
-   * a computer and a lie on a phone. A gallery that only showed the desktop
-   * reading could not tell those two apart.
-   */
-  'agent-pair-mobile': harnessOnboarding('agent', 'agent-pair', 'mobile'),
-  choose: harnessQuestion('choose'),
-  'choose-mobile': harnessQuestion('choose', 'mobile'),
-  install: harnessOnboarding('first-time', 'install'),
-  daemon: harnessOnboarding('first-time', 'daemon'),
-  connect: harnessOnboarding('first-time', 'connect'),
+  /* No document at all: the ENTRY question is what an empty store resolves to. */
+  entry: new OnboardingProgressStore({ storage: undefined, device: 'desktop' }),
+  /* Which computer — asked outright only when a fleet is being added to from a computer. */
+  target: harnessQuestion({ stage: 'target', route: 'add-daemon' }),
+  doer: harnessQuestion({ stage: 'doer', route: 'first-time', target: 'this' }),
+  'doer-mobile': harnessQuestion({ stage: 'doer', route: 'first-time', target: 'other' }, 'mobile'),
+  brief: harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'brief'),
+  'brief-elsewhere': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'agent' }, 'brief', 'mobile'),
+  'agent-pair': harnessOnboarding({ route: 'first-time', target: 'this', doer: 'agent' }, 'agent-pair'),
+  'agent-pair-elsewhere': harnessOnboarding(
+    { route: 'first-time', target: 'other', doer: 'agent' },
+    'agent-pair',
+    'mobile',
+  ),
+  install: harnessOnboarding(hereByHand(), 'install'),
+  daemon: harnessOnboarding(hereByHand(), 'daemon'),
+  connect: harnessOnboarding(hereByHand(), 'connect'),
   /* The same-machine collapse: a daemon on this box, and nothing to scan. */
-  local: harnessOnboarding('first-time', 'local'),
-  /* A phone that asked to run agents, told the truth and handed the job onward. */
-  'need-computer': harnessOnboarding('first-time', 'need-computer', 'mobile'),
-  handoff: harnessOnboarding('first-time', 'handoff'),
-  pair: harnessOnboarding('add-client', 'pair'),
-  /* The scan step on the route that arrives holding a link: no `fy pair` to run here. */
-  scan: harnessOnboarding('add-client', 'scan'),
-  done: harnessOnboarding('first-time', 'done'),
+  local: harnessOnboarding(hereByHand(), 'local'),
+  /* The recursion, on a computer: the reader walks to the machine that will host it. */
+  elsewhere: harnessOnboarding({ route: 'add-daemon', target: 'other', doer: 'self' }, 'elsewhere'),
+  /* And on a phone, where the answer was forced rather than chosen. */
+  'elsewhere-mobile': harnessOnboarding({ route: 'first-time', target: 'other', doer: 'self' }, 'elsewhere', 'mobile'),
+  handoff: harnessOnboarding(hereByHand(), 'handoff'),
+  pair: harnessOnboarding({ route: 'add-client' }, 'pair'),
+  /* The scan step on the entry that arrives holding a link: no `fy pair` to run here. */
+  scan: harnessOnboarding({ route: 'add-client' }, 'scan'),
+  done: harnessOnboarding(hereByHand(), 'done'),
 };
 
 /**
@@ -732,6 +758,15 @@ const HARNESS_SETUP_HREF = 'https://ferretry.example.invalid/setup';
 
 /** A clipboard the review page never actually needs to reach. */
 const HARNESS_CLIPBOARD: ClipboardWriter = async () => {};
+
+/**
+ * A share sheet that exists and does nothing.
+ *
+ * Present so the frames whose whole point is the SHARE affordance actually draw
+ * it: the shipped code omits the button when the port is absent, which is the
+ * ordinary desktop case and would silently review as "the gap is still open".
+ */
+const HARNESS_SHARE: SetupSharePort = async () => {};
 
 /**
  * The three advertisement answers the connection chooser can render, as fixed
@@ -1794,11 +1829,11 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — who is doing this',
+      label: 'Setup — what do you have',
       render: () => (
-        <section aria-label="Setup first question" id="harness-onboarding-who">
+        <section aria-label="Setup entry question" id="harness-onboarding-entry">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING.who}
+            progress={HARNESS_ONBOARDING.entry}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="apt"
@@ -1822,6 +1857,29 @@ function Shell() {
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      /*
+       * The same prompt when the agent is on ANOTHER machine, which is the frame
+       * that proves the gap is closed: a clipboard does not cross devices, so this
+       * one carries the share sheet and the address of the page over there.
+       */
+      label: 'Setup — the prompt, for an agent elsewhere (phone)',
+      render: () => (
+        <section aria-label="Setup agent brief step for another machine" id="harness-onboarding-brief-elsewhere">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING['brief-elsewhere']}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="brew"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            share={HARNESS_SHARE}
             renderPairing={() => null}
           />
         </section>
@@ -1855,11 +1913,11 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — pair with what the agent printed (phone)',
+      label: 'Setup — pair with what an agent elsewhere printed (phone)',
       render: () => (
-        <section aria-label="Setup agent pairing step on a phone" id="harness-onboarding-agent-pair-mobile">
+        <section aria-label="Setup agent pairing step for another machine" id="harness-onboarding-agent-pair-elsewhere">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING['agent-pair-mobile']}
+            progress={HARNESS_ONBOARDING['agent-pair-elsewhere']}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="apt"
@@ -1882,11 +1940,29 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — which of these are you',
+      label: 'Setup — which computer runs it',
       render: () => (
-        <section aria-label="Setup entry chooser" id="harness-onboarding-choose">
+        <section aria-label="Setup target question" id="harness-onboarding-target">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING.choose}
+            progress={HARNESS_ONBOARDING.target}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      /* The assumption, stated, with the escape from it beside the answers. */
+      label: 'Setup — who installs it',
+      render: () => (
+        <section aria-label="Setup doer question" id="harness-onboarding-doer">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.doer}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="apt"
@@ -1950,11 +2026,12 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — what is this device (phone)',
+      /* The same question on a phone, above the FACT that replaced asking. */
+      label: 'Setup — who installs it (phone)',
       render: () => (
-        <section aria-label="Setup entry chooser on a phone" id="harness-onboarding-choose-mobile">
+        <section aria-label="Setup doer question on a phone" id="harness-onboarding-doer-mobile">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING['choose-mobile']}
+            progress={HARNESS_ONBOARDING['doer-mobile']}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="brew"
@@ -1994,14 +2071,37 @@ function Shell() {
       ),
     },
     {
-      label: 'Setup — you will need a computer (phone)',
+      /*
+       * THE RECURSION, ON BOTH KINDS OF DEVICE. The pair is the evidence for the
+       * claim that this is ONE screen: a phone that can never host a daemon and a
+       * computer standing up a second machine are told the same thing, in the same
+       * words, because in both cases the machine that matters is somewhere else.
+       */
+      label: 'Setup — open it on that computer (phone)',
       render: () => (
-        <section aria-label="Setup need a computer step" id="harness-onboarding-need-computer">
+        <section aria-label="Setup elsewhere step on a phone" id="harness-onboarding-elsewhere-mobile">
           <OnboardingPage
-            progress={HARNESS_ONBOARDING['need-computer']}
+            progress={HARNESS_ONBOARDING['elsewhere-mobile']}
             write={HARNESS_CLIPBOARD}
             href={HARNESS_SETUP_HREF}
             channel="brew"
+            fallback={HARNESS_FALLBACK.available}
+            fleetReady={false}
+            onOpenFleet={() => {}}
+            renderPairing={() => null}
+          />
+        </section>
+      ),
+    },
+    {
+      label: 'Setup — open it on that computer',
+      render: () => (
+        <section aria-label="Setup elsewhere step" id="harness-onboarding-elsewhere">
+          <OnboardingPage
+            progress={HARNESS_ONBOARDING.elsewhere}
+            write={HARNESS_CLIPBOARD}
+            href={HARNESS_SETUP_HREF}
+            channel="apt"
             fallback={HARNESS_FALLBACK.available}
             fleetReady={false}
             onOpenFleet={() => {}}

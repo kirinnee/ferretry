@@ -432,6 +432,21 @@ export class OnboardingProgressStore {
     return this.#commit(walk({ route: at.route, target: at.target, doer }, this.#device));
   }
 
+  /**
+   * CHANGES THE ANSWER FROM INSIDE THE JOURNEY, which is a different act from
+   * answering the question.
+   *
+   * A reader looking at commands they did not want should not have to find their
+   * way back to a question and re-answer it. The carrier choice does not survive:
+   * an agent is not asked it, so keeping it would leave a stored answer that the
+   * new journey never collects and `parseJourney` would refuse on the next load.
+   */
+  switchDoer(doer: OnboardingDoerId): OnboardingProgress {
+    const at = this.snapshot();
+    if (at.stage !== 'walk' || at.route === 'add-client') return at;
+    return this.#commit(walk({ route: at.route, target: at.target, doer }, this.#device));
+  }
+
   /** Answers the carrier chooser and immediately starts that answer's real work. */
   chooseConnection(connection: ConnectionMethodId): OnboardingProgress {
     const at = this.snapshot();

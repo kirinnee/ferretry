@@ -51,23 +51,29 @@ const SECTIONS = [
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
-  // The first question — who does the work — and the agent journey it opens,
-  // which shares no step with any other answer.
-  'harness-onboarding-who',
+  // The entry question — what the reader HAS, which is the only thing this page
+  // cannot detect — and the two questions the daemon subflow asks after it.
+  'harness-onboarding-entry',
+  'harness-onboarding-target',
+  // The assumption stated with a way out, and the phone where the same screen
+  // states a FACT instead, because the hardware answered the question.
+  'harness-onboarding-doer',
+  'harness-onboarding-doer-mobile',
   'harness-onboarding-brief',
+  // The same prompt for an agent on another machine: a clipboard does not cross
+  // devices, so this frame carries the share sheet and the page's own address.
+  'harness-onboarding-brief-elsewhere',
   'harness-onboarding-agent-pair',
-  // The phone reading of that step: no "already open in another tab", because on
-  // a phone that tab opened on a machine the reader is not holding.
-  'harness-onboarding-agent-pair-mobile',
-  'harness-onboarding-choose',
-  // The phone reading of the same question: still three answers, and the daemon
-  // one saying why it needs a computer rather than pretending this device can.
-  'harness-onboarding-choose-mobile',
+  // And that step without the "already open in another tab" line, which is true
+  // only when the daemon is on the machine reading the page.
+  'harness-onboarding-agent-pair-elsewhere',
   'harness-onboarding-daemon',
   'harness-onboarding-connect',
-  // The same-machine collapse, and the phone that was told the truth about it.
+  // The same-machine collapse, and the one screen that stands in for the whole
+  // "another computer, by hand" branch — the same on a phone and on a computer.
   'harness-onboarding-local',
-  'harness-onboarding-need-computer',
+  'harness-onboarding-elsewhere',
+  'harness-onboarding-elsewhere-mobile',
   'harness-onboarding-handoff',
   'harness-onboarding-scan',
   'harness-onboarding-pair',

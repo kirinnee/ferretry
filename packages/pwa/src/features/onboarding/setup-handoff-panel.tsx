@@ -7,16 +7,17 @@
  * one already decided. What travels here is the PLACE — route and step — encoded
  * by `setup-handoff.ts`, so the second device resumes rather than restarts.
  *
- * THE CARRIER IS CHOSEN BY WHICH DEVICE IS SENDING, and the two are not the same
+ * THE CARRIER IS DECIDED BY WHO IS RECEIVING, and the two are not the same
  * mechanism wearing different labels:
  *
- * - A COMPUTER SENDS A QR. The phone has a camera, the computer has a screen, and
- *   the phone reads the screen. Nothing is typed and nothing is transcribed.
- * - A PHONE DOES NOT SEND A QR. Nothing on a desk is pointing a camera at a phone.
- *   It sends a link — shared through the OS if this browser has that, copied if
- *   not, and printed in full so it can be read aloud or typed as a last resort.
- *   Drawing a QR here would look like the same affordance and be useless, which
- *   is worse than being honest about the asymmetry.
+ * - A PHONE IS SENT A QR. The phone has a camera, the sender has a screen, and the
+ *   phone reads the screen. Nothing is typed and nothing is transcribed.
+ * - A COMPUTER IS NOT SENT A QR. Nothing on a desk points a camera at another
+ *   screen — not at a phone's, and not at another computer's, which is the case
+ *   this used to get wrong by keying off the SENDER: a laptop handing a home
+ *   server its setup drew a QR that nothing could ever read. A computer is sent a
+ *   link — shared through the OS if this browser has that, copied if not, and
+ *   printed in full so it can be read aloud or typed as a last resort.
  *
  * THE SHORT URL IS ALWAYS THERE. A link carrying `#fy-setup=v1;first-time;install`
  * is not something a human retypes correctly, and they never have to: the bare
@@ -27,19 +28,28 @@
 
 import { Share2 } from 'lucide-react';
 
-import { CopyButton, type ClipboardWriter } from './copy-button.tsx';
-import type { DeviceKind } from './device-kind.ts';
+import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import type { HandoffReceiver } from './onboarding-model.ts';
 import { qrModules } from './setup-handoff.ts';
 
 /**
- * How this browser hands text to the operating system, or nothing.
+ * How this browser hands something to the operating system, or nothing.
  *
  * A port rather than a direct `navigator.share`, because the capability is
  * genuinely absent on most desktops and on Firefox, and a button that throws
  * `NotAllowedError` when pressed is worse than a button that was never drawn. The
- * composition root decides; this component only asks whether it exists.
+ * composition root decides; a component only asks whether it exists.
+ *
+ * BOTH `text` AND `url` ARE OPTIONAL, because the two things worth sending from
+ * this flow are not the same kind of thing: a hand-off is a URL, and an agent
+ * prompt is thirty lines of text that no URL can carry. `navigator.share` accepts
+ * either and requires at least one, which is exactly this shape.
  */
-export type SetupSharePort = (payload: { readonly title: string; readonly url: string }) => Promise<void>;
+export type SetupSharePort = (payload: {
+  readonly title: string;
+  readonly text?: string | undefined;
+  readonly url?: string | undefined;
+}) => Promise<void>;
 
 /** How wide the QR is drawn, in CSS pixels. */
 const QR_SIZE = 176;
@@ -91,8 +101,8 @@ export interface SetupHandoffPanelProps {
   readonly url: string;
   /** The same page with no place attached, for a reader who would rather type. */
   readonly plainUrl: string;
-  /** Which device is SENDING. Decides the carrier, not the label. */
-  readonly device: DeviceKind;
+  /** Which kind of device is RECEIVING. Decides the carrier, not the label. */
+  readonly receiver: HandoffReceiver;
   readonly write: ClipboardWriter;
   /** The OS share sheet, when this browser has one. */
   readonly share?: SetupSharePort | undefined;
@@ -100,10 +110,10 @@ export interface SetupHandoffPanelProps {
   readonly label: string;
 }
 
-export function SetupHandoffPanel({ url, plainUrl, device, write, share, label }: SetupHandoffPanelProps) {
+export function SetupHandoffPanel({ url, plainUrl, receiver, write, share, label }: SetupHandoffPanelProps) {
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-onboarding-handoff={device}>
-      {device === 'desktop' ? (
+    <div className="flex min-w-0 flex-col gap-2" data-onboarding-handoff={receiver}>
+      {receiver === 'phone' ? (
         <div className="flex min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 p-3">
           <HandoffQr url={url} label={label} />
           <div className="flex min-w-0 flex-1 flex-col gap-1">

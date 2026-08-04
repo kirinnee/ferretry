@@ -123,14 +123,19 @@ const STATE: Record<OnboardingStepId, DiagramState> = {
   },
   /*
    * Nothing is happening on either end, and the figure must not pretend
-   * otherwise: this device cannot be the machine, so the machine end is empty.
+   * otherwise: the machine that will run the agents is somewhere else and has
+   * nothing on it yet, so the machine end rests and stays empty.
+   *
+   * NOT "no terminal here", which is what this said while only a phone could see
+   * it. A reader at a laptop standing up a home server reaches this same screen
+   * and is not being refused anything.
    */
-  'need-computer': {
-    machine: 'no terminal here',
+  elsewhere: {
+    machine: 'not set up yet',
     browser: 'waiting',
     lit: { machine: false, browser: true, link: false },
     linked: false,
-    label: 'This device has no terminal, so it cannot run the daemon. Nothing is linked yet.',
+    label: 'The computer that will run your agents has nothing on it yet, so nothing is linked.',
   },
   /*
    * The link is live and the reader is being offered a SECOND browser. The
