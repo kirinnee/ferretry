@@ -7,6 +7,7 @@ import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
+import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { useComposerAutocomplete } from './composer-autocomplete.ts';
 import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
@@ -150,7 +151,13 @@ export function Composer({
             syncHighlight(input);
           }}
           onKeyDown={event => {
-            if (autocomplete.handleKeyDown(event)) return;
+            // The popover is what makes a completion real. Enter and Tab reach
+            // the controller only while a row is BOTH rendered and selected, so
+            // a list that is loading, empty or entirely refused can never eat a
+            // send — every other key still belongs to the open list.
+            const completionKey = event.key === 'Enter' || event.key === 'Tab';
+            const acceptable = autocomplete.open && autocomplete.activeIndex >= 0;
+            if ((!completionKey || acceptable) && autocomplete.handleKeyDown(event)) return;
             if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
               return;
             const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
@@ -171,6 +178,10 @@ export function Composer({
           value={draft}
           {...autocomplete.textareaAria}
         />
+        {/* Anchored to the input layer, opening UPWARD: the composer sits at the
+            bottom of the session, so a downward list would land off-screen and
+            under the on-screen keyboard. */}
+        <ComposerAutocompletePopover surface={autocomplete} />
       </div>
       <div className="fy-composer-actions">
         <p id={hintId}>{busy ? 'Queue for the next turn' : 'Enter to send · Shift+Enter for a new line'}</p>
