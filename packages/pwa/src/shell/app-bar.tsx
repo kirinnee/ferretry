@@ -31,7 +31,8 @@ import {
   ShieldCheck,
   Users,
 } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { type ReactNode, useId, useState } from 'react';
+import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
@@ -40,10 +41,9 @@ import {
   daemonWardenPath,
   type Route,
 } from '../lib/pages/routes.ts';
-import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { BottomSheet } from './bottom-sheet.tsx';
-import { RouteLink } from './route-link.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
+import { RouteLink } from './route-link.tsx';
 
 /** Why the reload chip is offered. */
 export type UpdateReason = 'update' | 'recovery';
@@ -170,9 +170,7 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
       onClick={onOpen}
       aria-label="Open the fleet sidebar"
       title="Open the fleet sidebar"
-      // The hover edge stays `--accent-border`: decorative tint on a control
-      // whose state never depends on it.
-      className="inline-flex shrink-0 items-center gap-xs rounded-control border border-border px-1.5 py-0.5 text-meta text-muted hover:border-accent-border hover:text-fg"
+      className="kt-btn kt-btn--sm shrink-0 items-center gap-xs text-muted"
     >
       <Users size={12} aria-hidden="true" />
       <span className="mono">{sessionCount}</span>
@@ -210,6 +208,80 @@ function DestinationLink({
   );
 }
 
+function DestinationFinderButton({ onOpen, roomy = false }: { onOpen: () => void; roomy?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
+      aria-label="Open command palette"
+      title="Find an app destination or session"
+      className={
+        roomy
+          ? 'kt-btn w-full items-center justify-start gap-sm px-control-x'
+          : 'kt-btn kt-btn--sm shrink-0 items-center gap-xs'
+      }
+      data-app-bar-destination-search=""
+    >
+      <Search size={roomy ? 16 : 14} aria-hidden="true" />
+      <span className={roomy ? 'text-ui font-semibold' : 'text-meta font-medium'}>
+        {roomy ? 'Search app & sessions' : 'Find'}
+      </span>
+      <span
+        className={
+          roomy ? 'mono ml-auto hidden text-meta text-muted min-[440px]:inline' : 'mono ml-auto text-meta text-muted'
+        }
+      >
+        {paletteShortcutLabel()}
+      </span>
+    </button>
+  );
+}
+
+function AppBarStatus({
+  connectionStatus,
+  updateReady,
+  onApplyUpdate,
+}: {
+  connectionStatus: ConnectionStatus;
+  updateReady: UpdateReason | null;
+  onApplyUpdate?: () => void;
+}) {
+  return (
+    <>
+      {/* QUIET connection state: nothing at all while the stream is open (the
+          normal case), and a small dot — never a modal, never an instruction
+          to refresh — while it is reconnecting. The cache keeps working and
+          catches up on its own. */}
+      {connectionStatus !== 'open' && (
+        <span
+          className="inline-flex shrink-0 items-center gap-xs text-meta text-muted"
+          title={connectionStatus === 'connecting' ? 'connecting to the daemon…' : 'reconnecting to the daemon…'}
+        >
+          <span className={`kt-dot ${connectionStatus === 'connecting' ? 'bg-warn' : 'bg-err'}`} />
+          <span>{connectionStatus === 'connecting' ? 'connecting' : 'reconnecting'}</span>
+        </span>
+      )}
+      {/* UPDATE / RECOVERY CHIP — an offer, never an interruption. A reload
+          throws away unsent composer text and the transcript scroll position,
+          so nothing here reloads on its own. */}
+      {updateReady && (
+        <button
+          type="button"
+          onClick={onApplyUpdate}
+          aria-live="polite"
+          title={UPDATE_CHIP[updateReady].title}
+          className="kt-badge shrink-0 items-center gap-xs hover:text-fg"
+          data-tone={updateReady === 'recovery' ? 'warn' : 'accent'}
+        >
+          <RefreshCw size={11} aria-hidden="true" />
+          {UPDATE_CHIP[updateReady].label}
+        </button>
+      )}
+    </>
+  );
+}
+
 export interface AppBarProps {
   readonly crumbs: readonly Crumb[];
   /** The daemon whose surfaces this bar navigates to. */
@@ -234,6 +306,13 @@ export interface AppBarProps {
   readonly onNavigate?: (to: string) => void;
   /** The theme control, on layouts wide enough for it. */
   readonly themeToggle?: ReactNode;
+  /**
+   * Item #6 owns the actual current-session file/task search. The bar owns its
+   * centred geometry now, so that work can mount one real control without
+   * restructuring app navigation again. Empty means an intentionally blank
+   * slot, never a disabled or decorative fake search.
+   */
+  readonly currentSessionSearch?: ReactNode;
 }
 
 export function AppBar({
@@ -248,6 +327,7 @@ export function AppBar({
   active = null,
   onNavigate,
   themeToggle,
+  currentSessionSearch,
 }: AppBarProps) {
   const layout = useLayoutMode();
   const [mobileDestinationsOpen, setMobileDestinationsOpen] = useState(false);
@@ -256,22 +336,31 @@ export function AppBar({
     setMobileDestinationsOpen(current => mobileDestinationMenuOpen(current, 'dismiss'));
   const selectMobileDestination = () =>
     setMobileDestinationsOpen(current => mobileDestinationMenuOpen(current, 'select'));
+  const openPaletteFromMobileDestinations = () => {
+    selectMobileDestination();
+    onOpenPalette();
+  };
+  const statusVisible = connectionStatus !== 'open' || updateReady !== null;
 
   return (
     // Not sticky: the shell does not scroll, so the bar is simply the first row
     // of a flex column that fills the viewport. Full bleed — no centred wrapper.
+    // Do not add filter/backdrop-filter/transform here: BottomSheet is a child,
+    // and a new stacking context would trap its fixed overlay under page content.
     <header data-density-region="app-bar" className="shrink-0 border-b border-border bg-[var(--bar-bg)]">
-      <div className="grid min-h-control w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-sm px-panel font-ui text-ui">
-        {/* The first column owns all desktop navigation. The equal flexible side
-            columns make the palette genuinely centred without absolute
-            positioning, even when status chips appear on the right. */}
-        <div className="flex min-w-0 items-center gap-sm">
+      <div
+        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-md font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md"
+        data-app-bar-primary=""
+      >
+        {/* Identity stays together at the start. Destinations have their own
+            group below on wider layouts and their own picker on phones. */}
+        <div className="flex min-w-0 items-center justify-self-start gap-md">
           {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
-          <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-sm text-muted min-[480px]:flex">
+          <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
             {crumbTrail(crumbs).map(({ crumb, trail, last }) => (
               // Keyed by the trail rather than the index: two crumbs on one
               // path can repeat a label, so only the accumulated path is unique.
-              <span key={trail} className="flex min-w-0 items-center gap-sm">
+              <span key={trail} className="flex min-w-0 items-center gap-md">
                 {crumb.href ? (
                   <RouteLink to={crumb.href} {...(onNavigate ? { onNavigate } : {})} className="truncate hover:text-fg">
                     {crumb.label}
@@ -283,67 +372,24 @@ export function AppBar({
               </span>
             ))}
           </nav>
-          <nav aria-label="Destinations" className="hidden min-w-0 items-center gap-xs md:flex">
-            {APP_BAR_DESTINATIONS.map(destination => (
-              <DestinationLink
-                key={destination.id}
-                destination={destination}
-                daemon={daemon}
-                {...(onNavigate ? { onNavigate } : {})}
-                active={active === destination.id}
-              />
-            ))}
-          </nav>
         </div>
-        {/* Always reachable, including at 390px: phones get an icon-only centre
-            button while wider layouts show the familiar Cmd/Ctrl+K reminder. */}
-        <button
-          type="button"
-          onClick={onOpenPalette}
-          aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
-          aria-label="Open command palette"
-          title="Jump to a session — the command palette"
-          className="kt-chrome inline-flex shrink-0 items-center gap-xs rounded-control border border-border-soft px-badge-x py-0.5 text-meta text-muted hover:border-border hover:text-fg"
-          data-app-bar-search
-        >
-          <Search size={14} aria-hidden="true" />
-          <span className="mono hidden sm:inline">{paletteShortcutLabel()}</span>
-        </button>
-        <div className="flex min-w-0 items-center justify-self-end gap-sm">
-          {/* QUIET connection state: nothing at all while the stream is open (the
-              normal case), and a small dot — never a modal, never an instruction
-              to refresh — while it is reconnecting. The cache keeps working and
-              catches up on its own. */}
-          {connectionStatus !== 'open' && (
-            <span
-              className="inline-flex shrink-0 items-center gap-xs text-meta text-muted"
-              title={connectionStatus === 'connecting' ? 'connecting to the daemon…' : 'reconnecting to the daemon…'}
-            >
-              <span className={`kt-dot ${connectionStatus === 'connecting' ? 'bg-warn' : 'bg-err'}`} />
-              <span className="hidden sm:inline">
-                {connectionStatus === 'connecting' ? 'connecting' : 'reconnecting'}
-              </span>
-            </span>
-          )}
-          {/* UPDATE / RECOVERY CHIP — an offer, never an interruption. A reload
-              throws away unsent composer text and the transcript scroll
-              position, so nothing here reloads on its own: the new worker sits
-              waiting until this is clicked. Two wordings because they are two
-              different facts. `aria-live=polite` announces the chip's arrival
-              without stealing focus mid-typing; `data-tone=warn` for recovery so
-              it does not read as routine. */}
-          {updateReady && (
-            <button
-              type="button"
-              onClick={onApplyUpdate}
-              aria-live="polite"
-              title={UPDATE_CHIP[updateReady].title}
-              className="kt-badge shrink-0 items-center gap-xs hover:text-fg"
-              data-tone={updateReady === 'recovery' ? 'warn' : 'accent'}
-            >
-              <RefreshCw size={11} aria-hidden="true" />
-              {UPDATE_CHIP[updateReady].label}
-            </button>
+
+        {/* A REAL SLOT, not a fake disabled search. Equal flexible side columns
+            keep this exact region centred in the viewport regardless of crumb,
+            status, update, or theme widths. Item #6 only has to supply a node. */}
+        <div className="flex min-h-control min-w-0 items-center justify-center" data-app-bar-session-search-slot="">
+          {currentSessionSearch && <div className="w-full max-w-[34rem]">{currentSessionSearch}</div>}
+        </div>
+
+        <div className="flex min-w-0 items-center justify-self-end gap-md">
+          {layout !== 'drawer' && (
+            <div className="flex min-w-0 items-center gap-md" data-app-bar-status="">
+              <AppBarStatus
+                connectionStatus={connectionStatus}
+                updateReady={updateReady}
+                {...(onApplyUpdate ? { onApplyUpdate } : {})}
+              />
+            </div>
           )}
           {/* Keep the established standalone picker for desktop. On a phone the
               only theme control is Settings, so hidden chrome does not mount a
@@ -368,6 +414,47 @@ export function AppBar({
           )}
         </div>
       </div>
+
+      {/* Desktop/tablet destinations form one explicit group on their own row.
+          The global palette belongs with app navigation; it no longer poses as
+          the current-session search in the centre slot. Phones get the modal
+          destination picker below, never a horizontal strip. */}
+      {layout !== 'drawer' && (
+        <div className="px-panel pb-sm font-ui text-ui" data-app-bar-destination-row="">
+          <nav
+            aria-label="Destinations"
+            className="mx-auto flex w-fit max-w-full items-center gap-xs rounded-panel border border-border-soft bg-surface px-sm py-xs"
+          >
+            <DestinationFinderButton onOpen={onOpenPalette} />
+            <span aria-hidden="true" className="mx-xs h-control-sm w-px shrink-0 bg-border-soft" />
+            {APP_BAR_DESTINATIONS.map(destination => (
+              <DestinationLink
+                key={destination.id}
+                destination={destination}
+                daemon={daemon}
+                {...(onNavigate ? { onNavigate } : {})}
+                active={active === destination.id}
+              />
+            ))}
+          </nav>
+        </div>
+      )}
+
+      {/* Transient phone state gets a full-width second row rather than being
+          wedged between the centred seam and destination trigger. */}
+      {layout === 'drawer' && statusVisible && (
+        <div
+          className="flex min-h-control items-center justify-center gap-md border-t border-border-soft px-panel py-xs font-ui"
+          data-app-bar-status=""
+        >
+          <AppBarStatus
+            connectionStatus={connectionStatus}
+            updateReady={updateReady}
+            {...(onApplyUpdate ? { onApplyUpdate } : {})}
+          />
+        </div>
+      )}
+
       <BottomSheet
         id={destinationDialogId}
         open={mobileDestinationsOpen}
@@ -376,12 +463,13 @@ export function AppBar({
         closeLabel="Dismiss destination picker"
         panelClassName="px-panel pb-panel"
       >
-        <div className="grid gap-sm pb-sm">
+        <div className="grid gap-md pb-md">
           <div className="grid gap-xs">
-            <h2 className="m-0 text-ui font-semibold text-fg">Choose destination</h2>
-            <p className="m-0 text-meta text-muted">Select a destination, or dismiss this menu.</p>
+            <h2 className="m-0 text-title font-semibold text-fg">Choose destination</h2>
+            <p className="m-0 text-ui text-muted">Select a destination, search the app, or dismiss this menu.</p>
           </div>
-          <nav aria-label="Destinations" className="grid gap-xs">
+          <DestinationFinderButton onOpen={openPaletteFromMobileDestinations} roomy />
+          <nav aria-label="Destinations" className="grid gap-sm border-t border-border-soft pt-md">
             {APP_BAR_DESTINATIONS.map(destination => (
               <DestinationLink
                 key={destination.id}

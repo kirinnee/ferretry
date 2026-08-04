@@ -231,6 +231,13 @@ try {
           await page.screenshot({ path: target });
           process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
 
+          // The gallery bar carries BOTH transient states (reconnecting and an
+          // available update). It complements the at-rest workspace bar below
+          // and proves that 390px gets a breathing row instead of dropped state.
+          const statusTopBarTarget = join(outDir, `top-bar-status-${viewport.name}.png`);
+          await page.locator('[data-density-region="app-bar"]').first().screenshot({ path: statusTopBarTarget });
+          process.stdout.write(`📸 top bar status ${viewport.name} -> ${statusTopBarTarget}\n`);
+
           if (viewport.name === 'desktop') {
             const fleetRailTarget = join(outDir, `fleet-navigation-rail-${viewport.name}.png`);
             await page.getByLabel('Fleet navigation rail preview').screenshot({ path: fleetRailTarget });
@@ -588,6 +595,69 @@ try {
           await page.locator('[data-transcript-kind]').last().waitFor({ state: 'visible' });
           await page.screenshot({ path: workspaceTarget });
           process.stdout.write(`📸 ${viewport.name} session workspace -> ${workspaceTarget}\n`);
+
+          // THE TOP BAR AS ITS OWN REVIEW SURFACE. The workspace capture proves
+          // the bar's share of the viewport; this tighter image makes its actual
+          // spacing legible. At 390px the destination picker is a distinct state,
+          // and dismissal is part of the interaction contract, so capture both
+          // sides of the same production trigger instead of posing an already-
+          // open component in the harness.
+          const topBar = page.locator('[data-density-region="app-bar"]');
+          const topBarTarget = join(outDir, `top-bar-${viewport.name}.png`);
+          await topBar.screenshot({ path: topBarTarget });
+          process.stdout.write(`📸 top bar ${viewport.name} -> ${topBarTarget}\n`);
+          const topBarGeometry = await page.evaluate(() => {
+            const header = document.querySelector<HTMLElement>('[data-density-region="app-bar"]');
+            const slot = document.querySelector<HTMLElement>('[data-app-bar-session-search-slot]');
+            const headerBox = header?.getBoundingClientRect();
+            const slotBox = slot?.getBoundingClientRect();
+            return {
+              height: headerBox === undefined ? null : Math.round(headerBox.height),
+              slotCentre: slotBox === undefined ? null : Math.round(slotBox.left + slotBox.width / 2),
+              viewportCentre: Math.round(window.innerWidth / 2),
+            };
+          });
+          process.stdout.write(
+            `   top bar geometry: height=${String(topBarGeometry.height)}px ` +
+              `slot centre=${String(topBarGeometry.slotCentre)}px viewport centre=${topBarGeometry.viewportCentre}px\n`,
+          );
+          if (
+            topBarGeometry.slotCentre === null ||
+            Math.abs(topBarGeometry.slotCentre - topBarGeometry.viewportCentre) > 1
+          ) {
+            fail(`the current-session search slot is not centred at ${viewport.name}`);
+          }
+          if (viewport.name === 'mobile') {
+            const destinationTrigger = page.getByRole('button', { name: 'Choose destination' });
+            await destinationTrigger.click();
+            const destinationDialog = page.getByRole('dialog', { name: 'Choose destination' });
+            await destinationDialog.waitFor({ state: 'visible' });
+            const pickerGeometry = await destinationDialog.evaluate(dialog => {
+              const box = dialog.getBoundingClientRect();
+              return {
+                left: Math.round(box.left),
+                right: Math.round(box.right),
+                viewport: window.innerWidth,
+                pageScrollsX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+              };
+            });
+            if (
+              pickerGeometry.pageScrollsX ||
+              pickerGeometry.left < 0 ||
+              pickerGeometry.right > pickerGeometry.viewport + 1
+            ) {
+              fail(`the mobile destination picker overflows its ${pickerGeometry.viewport}px viewport`);
+            }
+            const pickerTarget = join(outDir, 'top-bar-picker-open-mobile.png');
+            await page.screenshot({ path: pickerTarget });
+            process.stdout.write(`📸 top bar picker open mobile -> ${pickerTarget}\n`);
+
+            await destinationDialog.getByRole('button', { name: 'Dismiss', exact: true }).click();
+            await destinationDialog.waitFor({ state: 'hidden' });
+            const dismissedTarget = join(outDir, 'top-bar-picker-dismissed-mobile.png');
+            await topBar.screenshot({ path: dismissedTarget });
+            process.stdout.write(`📸 top bar picker dismissed mobile -> ${dismissedTarget}\n`);
+          }
 
           // Geometry, printed rather than eyeballed. A screenshot cannot tell a
           // pinned tail apart from a transcript that happens to be short, and it
