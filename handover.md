@@ -47,6 +47,16 @@ Keep agents alive, bounded, and recoverable without risking the daemon.
 |  31 |  ☐   | **Run the daemon from stable snapshots** | Run the daemon from a stable built snapshot instead of live source. This prevents half-written edits from taking down the daemon and fleet, and makes worktree parallelism, rollback, and controlled rollout safer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | —       | #3, #4, #30, #44, #48 |
 |   7 |  ☐   | **Add task-done control**                | Expose a discoverable Mark Done action in aggregate List and Kanban views, enforce shared-board permissions, and update the UI immediately.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | —       | #35, #43              |
 
+**#31 is partially implemented.** Ferretry has a daemon-keyed, content-addressed snapshot store,
+strict verification, atomic promotion, rollback through the ordinary promotion path, explicit
+build/promote/list CLI commands, and install/start/restart launch through the stable pointer. kteam
+has no daemon artifact snapshot to port: its Home Manager wrapper and `DaemonService` execute the
+live `daemon-entry.ts` path directly (its `kteam snapshot` command captures a session pane instead).
+The remaining GAP is Nix rollback retention: one GC root protects the source closure needed by the
+selected/running snapshot, but older retained snapshots are not rooted simultaneously and can lose
+runtime dependencies after garbage collection. Keep this row open until roots follow snapshot
+lifetime (or snapshots materialize their complete runtime closure).
+
 ## 🔎 Search, navigation & surfaces
 
 Make every important destination and object easy to find.

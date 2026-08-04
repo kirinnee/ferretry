@@ -469,8 +469,10 @@ Notes that change the backlog:
   `task-boards-cli.ts` exposes `membership` / `invite` / `invite-approve` / `invite-accept`;
   `api-server.ts` carries the ACL transport. These items build on the **ported** capability
   (minus `LegacyTaskScope`).
-- **Item 31** ("run the daemon from stable snapshots") is partly satisfied by construction: the
-  daemon becomes a compiled binary artifact rather than live source.
+- **Item 31** ("run the daemon from stable snapshots") now has a daemon-keyed, content-addressed
+  store, strict verification, atomic promotion and explicit rollout/rollback commands. It remains
+  open because the single per-daemon Nix GC root does not retain every older snapshot's runtime
+  closure, so rollback after garbage collection is not yet guaranteed for Nix-built binaries.
 - **Items 3 and 4** (gitlint in worktrees, untracked files hidden) are repo-tooling fixes that
   the worktree-heavy execution model in §6 will hit immediately. They are pulled **forward** —
   landing them early pays for itself across every subsequent unit.

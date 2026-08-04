@@ -60,13 +60,49 @@ Running straight from an ephemeral shell is also supported:
 nix shell github:kirinnee/ferretry
 ```
 
-A `nix shell` leaves the executables in the Nix store with nothing holding them, so a later
-`nix-collect-garbage` would delete them out from under an installed service. `fy daemon install`,
-`start` and `restart` therefore register a garbage-collection root themselves — an indirect root at
-`$XDG_STATE_HOME/ferretry/nix/fyd` (`~/.local/state/…` when that is unset), which `fy daemon
-uninstall` releases. It is a per-user operation and needs no `sudo`. If `nix-store` is unavailable the
-daemon still starts and `fy` warns that it is unpinned; a Homebrew or release-archive install is not
-in the store and is left alone.
+A `nix shell` leaves the executables in the Nix store with nothing holding them. The daemon runs from
+a copied snapshot outside the store, but that binary can still name a Nix-store ELF interpreter,
+RPATH, or script interpreter. `fy daemon install`, `start`, and `restart` therefore read the verified
+snapshot manifest and pin the Nix output containing its `sourceBinary`. The indirect root lives at
+`$XDG_STATE_HOME/ferretry/nix/fyd` (`~/.local/state/…` when that is unset), and `fy daemon uninstall`
+releases it. This is a per-user operation and needs no `sudo`. If `nix-store` is unavailable, the
+daemon still starts and `fy` warns that garbage collection may remove runtime dependencies; a
+Homebrew or release-archive source is outside the store and is left alone.
+
+Ferretry currently holds one Nix root per daemon, not one per retained snapshot. Promotion leaves
+that root on the running version until restart, then moves it to the newly selected version. An older
+Nix-backed snapshot therefore keeps its copied executable but not necessarily its interpreter and
+runtime closure after a later garbage collection. Reliable post-GC rollback of those older snapshots
+remains a gap until roots are retained per snapshot.
+
+## Daemon snapshots
+
+The daemon never launches the executable currently being edited or replaced on `PATH`. Ferretry
+copies it into a daemon-keyed, content-addressed store at
+`$XDG_STATE_HOME/ferretry/daemon-snapshots/fyd` (`~/.local/state/…` by default), verifies the complete
+copy and a strict manifest, makes both read-only, and atomically points `current` at the selected
+snapshot. `fy daemon install` and any start or restart that needs an executable build and promote the
+first snapshot only when that pointer has never existed. Malformed, dangling, or digest-damaged state
+is an error and is never treated as a fresh store.
+
+Build and inspect a candidate without changing the next daemon launch:
+
+```bash
+fy daemon snapshot build
+fy daemon snapshot list
+fy daemon snapshot list --json
+```
+
+Promote a verified candidate, then restart when you are ready to roll it out:
+
+```bash
+fy daemon snapshot promote sha256-<digest>
+fy daemon restart
+```
+
+Promotion is atomic and does not alter the process already running. Rollback uses the same path:
+promote an older ID shown by `snapshot list`, then restart. Restart verifies the promoted artifact
+before stopping the incumbent, so damaged snapshot state fails without manufacturing downtime.
 
 ## GitHub release (one-line installer)
 
