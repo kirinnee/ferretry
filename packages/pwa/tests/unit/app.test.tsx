@@ -132,9 +132,15 @@ interface ShellOptions {
    * silent on first sight, so a transition is the only thing that delivers.
    */
   readonly sessionStatus?: () => SessionStatus;
+  /** Daemon-owned normalized transcript tail returned by `logs`. */
+  readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
 }
 
-const appStore = async (reads: string[], options: ShellOptions = {}): Promise<AppStore> =>
+const appStore = async (
+  reads: string[],
+  options: ShellOptions = {},
+  transcriptReads: string[] = [],
+): Promise<AppStore> =>
   await createAppStore({
     repository: new MemoryRepository(),
     connectClient: async connection =>
@@ -154,6 +160,12 @@ const appStore = async (reads: string[], options: ShellOptions = {}): Promise<Ap
           (options.sessions ?? []).map(id =>
             sessionView(id, { state: { status: options.sessionStatus?.() ?? 'running' } }),
           ),
+        logs: async (sessionId: string) => {
+          transcriptReads.push(`${connection.daemonId}:${sessionId}`);
+          return typeof options.transcript === 'function'
+            ? options.transcript(connection.daemonId, sessionId)
+            : (options.transcript ?? '');
+        },
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
       }) as unknown as FyApiClient,
@@ -167,7 +179,8 @@ const appStore = async (reads: string[], options: ShellOptions = {}): Promise<Ap
 
 const renderShell = async (path: string, paired: readonly DaemonId[] = [], options: ShellOptions = {}) => {
   const reads: string[] = [];
-  const store = await appStore(reads, options);
+  const transcriptReads: string[] = [];
+  const store = await appStore(reads, options, transcriptReads);
   for (const daemon of paired) store.connections.add(daemon === alpha.daemonId ? alpha : beta);
   setPath(path);
   const view = await mount(
@@ -177,7 +190,7 @@ const renderShell = async (path: string, paired: readonly DaemonId[] = [], optio
       </StoreProvider>
     </RouterProvider>,
   );
-  return { reads, store, view };
+  return { reads, store, transcriptReads, view };
 };
 
 const settle = async (): Promise<void> => {
@@ -397,9 +410,14 @@ describe('AppShell', () => {
   });
 
   it('never crosses two daemons that own the same session id', async () => {
-    const { reads, view } = await renderShell('/d/alpha/session/shared', [alpha.daemonId, beta.daemonId]);
+    const { reads, transcriptReads, view } = await renderShell(
+      '/d/alpha/session/shared',
+      [alpha.daemonId, beta.daemonId],
+      { transcript: daemon => `assistant/message: ${daemon} transcript` },
+    );
     await settle();
     expect(view.container.querySelector('[data-session="shared"]')?.textContent).toContain('Alpha Agent');
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('alpha transcript');
 
     await popTo('/d/beta/session/shared');
     await settle();
@@ -408,7 +426,10 @@ describe('AppShell', () => {
     expect(session?.getAttribute('data-daemon')).toBe('beta');
     expect(session?.textContent).toContain('Beta Agent');
     expect(session?.textContent).not.toContain('Alpha Agent');
+    expect(view.container.querySelector('[role="log"]')?.textContent).toContain('beta transcript');
+    expect(view.container.querySelector('[role="log"]')?.textContent).not.toContain('alpha transcript');
     expect(reads).toEqual(['alpha:shared', 'beta:shared']);
+    expect(transcriptReads).toEqual(['alpha:shared', 'beta:shared']);
     await view.unmount();
   });
 
@@ -574,7 +595,7 @@ describe('the session route live regions', () => {
     expect(status.getAttribute('data-session-state')).toBe('failed');
     expect(status.textContent).toBe('This session could not be opened.');
     expect(view.container.querySelector('[data-session-error]')).toBe(alert);
-    expect(alert.textContent).toBe('Could not open this session: daemon refused the read');
+    expect(alert.textContent).toBe('Could not refresh this session: Session: daemon refused the read');
 
     await view.unmount();
   });

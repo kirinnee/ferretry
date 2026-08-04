@@ -11,7 +11,12 @@ import {
 } from 'react';
 
 import { NewSessionPage } from './components/new-session-page.tsx';
+import {
+  type SessionWorkspaceRefreshEnvironment,
+  startSessionWorkspaceRefresh,
+} from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
+import { Transcript } from './components/transcript.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
@@ -41,8 +46,6 @@ import type {
   PageNotificationLike,
 } from './lib/notify.ts';
 import { installPortraitLock } from './lib/orientation-lock.ts';
-import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
-import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import {
   type DaemonPageProps,
   PageHost,
@@ -51,9 +54,12 @@ import {
 } from './lib/pages/page-host.tsx';
 import { daemonSessionsPath, daemonWardenPath, type PageRoute, routePageKey, setupPath } from './lib/pages/routes.ts';
 import { WardenPage } from './lib/pages/warden-page.tsx';
+import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
+import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
 import { type PushEnrolment, type PushRegistrationLike, supportsWebPush } from './lib/push-enrolment.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
+import type { TranscriptEntry } from './lib/session-screens.ts';
 import { StoreProvider, useAppStore, useConnectionSnapshot } from './lib/store.tsx';
 import { AppBar, appBarDestinationForRoute, type Crumb } from './shell/app-bar.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
@@ -391,8 +397,19 @@ type SessionState = 'opening' | 'connected' | 'failed';
  */
 const SESSION_STATE_MESSAGE: Record<SessionState, string> = {
   opening: 'Opening this daemon-scoped session…',
-  connected: 'This session is connected. The conversation workspace is not assembled in this build yet.',
+  connected: 'This session is connected.',
   failed: 'This session could not be opened.',
+};
+
+const browserWorkspaceRefreshEnvironment: SessionWorkspaceRefreshEnvironment = {
+  visible: () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  setInterval: (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
+  clearInterval: handle => globalThis.clearInterval(handle as ReturnType<typeof globalThis.setInterval>),
+  onVisibility: callback => {
+    if (typeof document === 'undefined') return () => undefined;
+    document.addEventListener('visibilitychange', callback);
+    return () => document.removeEventListener('visibilitychange', callback);
+  },
 };
 
 function SessionRoute({ connection, scope }: SessionChatPageProps) {
@@ -403,18 +420,41 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribe, snapshot);
   const session = fleet.daemons.get(scope.daemonId)?.byId.get(scope.sessionId);
+  const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let current = true;
+    let stop: () => void = () => undefined;
     setError(null);
-    void store.fleet.fetchSession(connection, { daemonId, sessionId }).catch(reason => {
-      if (current) setError(reason instanceof Error ? reason.message : String(reason));
-    });
+    setEntries([]);
+    void store.clients
+      .client(connection)
+      .then(api => {
+        if (!current) return;
+        const control = startSessionWorkspaceRefresh({
+          api: {
+            logs: async id => await api.logs(id),
+            get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
+          },
+          sessionId,
+          environment: browserWorkspaceRefreshEnvironment,
+          onTranscript: setEntries,
+          onSession: view => {
+            store.fleet.upsertSession(daemonId, view);
+          },
+          onError: setError,
+        });
+        stop = control.stop;
+      })
+      .catch(reason => {
+        if (current) setError(reason instanceof Error ? reason.message : String(reason));
+      });
     return () => {
       current = false;
+      stop();
     };
-  }, [connection, daemonId, sessionId, store.fleet]);
+  }, [connection, daemonId, sessionId, store.clients, store.fleet]);
 
   useEffect(() => {
     const foreground = { daemonId, sessionId };
@@ -422,11 +462,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     return () => clearForegroundPinScope(foreground);
   }, [daemonId, sessionId]);
 
-  const sessionState: SessionState = error !== null ? 'failed' : session === undefined ? 'opening' : 'connected';
+  const sessionState: SessionState = session !== undefined ? 'connected' : error !== null ? 'failed' : 'opening';
 
   return (
     <main
-      className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3"
+      className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-hidden py-3"
       data-daemon={scope.daemonId}
       data-session={scope.sessionId}
     >
@@ -449,9 +489,17 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           {SESSION_STATE_MESSAGE[sessionState]}
         </p>
         <p className={error === null ? 'sr-only' : 'mb-0 mt-1 text-ui text-err'} role="alert" data-session-error="">
-          {error === null ? '' : `Could not open this session: ${error}`}
+          {error === null ? '' : `Could not refresh this session: ${error}`}
         </p>
       </section>
+      <div className="kt-panel grid min-h-0 flex-1 overflow-hidden">
+        <Transcript
+          busy={session?.state.status === 'running'}
+          daemonId={daemonId}
+          entries={entries}
+          sessionId={sessionId}
+        />
+      </div>
     </main>
   );
 }
