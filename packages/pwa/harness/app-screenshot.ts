@@ -56,6 +56,26 @@ const SCHEMES = ['light', 'dark'] as const;
 const PHONE = { width: 390, height: 844 } as const;
 
 /**
+ * WHAT A PHONE SAYS ABOUT ITSELF, which is the only thing `detectDeviceKind` reads.
+ *
+ * `isMobile` and `hasTouch` change the layout viewport, the pointer media query
+ * and the orientation — they do NOT change `navigator.userAgent`. Chromium keeps
+ * announcing itself as desktop Linux Chrome, `device-kind.ts` believes it (its
+ * unknown-case answer is `desktop`, deliberately), and every `-mobile` capture
+ * renders the DESKTOP flow at phone width. That is a screenshot that proves the
+ * opposite of what its name claims, and a whole unit's "verified on mobile"
+ * would inherit it.
+ *
+ * A literal string rather than `devices['Pixel 7']`: the registry entry also
+ * carries a `deviceScaleFactor` of 3, which would silently triple the pixel size
+ * of an already-reviewed capture set for no reason connected to device detection.
+ * This is a stock Android Chrome agent, which is what the `android` marker in
+ * `device-kind.ts` matches.
+ */
+const PHONE_USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+
+/**
  * A phone, emulated rather than merely sized — used for the `-mobile` SETUP
  * captures only.
  *
@@ -67,11 +87,20 @@ const PHONE = { width: 390, height: 844 } as const;
  * different thing from a phone and is precisely the state the keyboard capture
  * must not be confused with.
  *
+ * The user agent is here for the same reason and is not decoration: the setup
+ * flow ASKS FEWER QUESTIONS on a phone, so a capture taken without it is a
+ * picture of the wrong journey. `expectDevice` below asserts the app agreed.
+ *
  * Deliberately NOT applied to the brand captures above. Those are the images that
  * were reviewed and merged; re-emulating them now would silently change an
  * already-approved review set for no reason connected to this change.
  */
-const PHONE_CONTEXT = { viewport: PHONE, isMobile: true, hasTouch: true } as const;
+const PHONE_CONTEXT = {
+  viewport: PHONE,
+  isMobile: true,
+  hasTouch: true,
+  userAgent: PHONE_USER_AGENT,
+} as const;
 
 /** The keyboard-open visual viewport height, an Android-plausible ~414px of chrome. */
 const KEYBOARD_VISUAL_HEIGHT = 430;
@@ -541,6 +570,22 @@ try {
       const contextFor = (viewport: (typeof VIEWPORTS)[number]): BrowserContextOptions =>
         viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
 
+      /**
+       * DID THE APP AGREE THAT THIS IS A PHONE?
+       *
+       * The whole point of the emulation above, checked rather than assumed. The
+       * setup root publishes what `detectDeviceKind` decided, so a capture named
+       * `-mobile` that rendered the desktop journey is caught here instead of
+       * being reviewed as evidence. Queued as a defect rather than thrown, so the
+       * wrong-journey image is still on disk for a human to look at.
+       */
+      const expectDevice = async (page: Page, viewport: (typeof VIEWPORTS)[number], name: string): Promise<void> => {
+        const seen = await page.locator(SETUP_ROOT).first().getAttribute('data-onboarding-device');
+        if (seen !== viewport.name) {
+          defects.push(`setup-${name}-${viewport.name} rendered as data-onboarding-device="${String(seen)}"`);
+        }
+      };
+
       // 1. BOTH QUESTIONS, AT BOTH VIEWPORTS. The first one is the screen
       // everything else is reached through and the one the reader has to
       // recognise themselves in within two seconds; the second is the one that
@@ -562,6 +607,7 @@ try {
         for (const viewport of VIEWPORTS) {
           await capture(contextFor(viewport), async page => {
             await toStep(page, step);
+            await expectDevice(page, viewport, step.name);
             await shot(page, `setup-${step.name}-${viewport.name}`);
           });
         }
