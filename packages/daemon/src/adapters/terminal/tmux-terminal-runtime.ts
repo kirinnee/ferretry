@@ -1,5 +1,6 @@
 import type { TerminalSize } from '@ferretry/protocol';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
+import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';
 import {
   hexInputChunks,
   terminalPaneTarget,
@@ -13,6 +14,14 @@ const ID_OPTION = '@fy_terminal_id';
 const TITLE_OPTION = '@fy_terminal_title';
 const CREATED_OPTION = '@fy_terminal_created';
 const ROOT_OPTION = '@fy_terminal_root';
+/**
+ * Ownership rides on the PANE, not in daemon memory or a side file. That is what
+ * makes it durable in the sense #34 asks for: it survives a daemon restart and a
+ * redeploy, and it disappears exactly when the shell it describes does. A pane
+ * that predates this option simply answers with the empty string, which decodes
+ * to no opener at all.
+ */
+const OPENED_BY_OPTION = '@fy_terminal_opened_by';
 const SEPARATOR = '\t';
 
 export class TerminalRuntimeError extends Error {
@@ -50,6 +59,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       `#{${TITLE_OPTION}}`,
       `#{${CREATED_OPTION}}`,
       `#{${ROOT_OPTION}}`,
+      `#{${OPENED_BY_OPTION}}`,
       '#{session_activity}',
       '#{window_width}',
       '#{window_height}',
@@ -69,11 +79,15 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         title = '',
         created = '',
         root = '',
+        openedBy = '',
         activity = '',
         cols = '',
         rows = '',
       ] = line.split(SEPARATOR);
       const createdAtMs = Date.parse(created);
+      // An unreadable or unwritten opener contributes no key at all, so the view
+      // reports "unrecorded" rather than a class this build invented for it.
+      const opener = decodeTerminalOpener(openedBy);
       const record: TerminalRecord = {
         id,
         ownerId,
@@ -84,6 +98,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
         lastActivityAtMs: number(activity, this.now() / 1_000) * 1_000,
         cols: Math.max(1, Math.trunc(number(cols, 100))),
         rows: Math.max(1, Math.trunc(number(rows, 30))),
+        ...(opener === undefined ? {} : { openedBy: opener }),
       };
       if (!tmuxSession.startsWith('fy-webterm-') || !isRecordId(id) || !ownerId || !root.startsWith('/')) continue;
       records.push(record);
@@ -137,6 +152,13 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       tmuxSession,
       ROOT_OPTION,
       input.cwd,
+      // Written in the SAME command as the pane it describes: a second round
+      // trip could lose the race with a list that is already running, and a
+      // terminal that briefly reports no owner is a terminal a reader may type
+      // into believing nobody else is there.
+      ...(input.openedBy === undefined
+        ? []
+        : [';', 'set-option', '-t', tmuxSession, OPENED_BY_OPTION, encodeTerminalOpener(input.openedBy)]),
       ';',
       'set-window-option',
       '-t',
@@ -157,6 +179,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       createdAtMs,
       lastActivityAtMs: createdAtMs,
       ...input.size,
+      ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
     };
   }
 

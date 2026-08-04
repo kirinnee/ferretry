@@ -32,6 +32,7 @@ class FakeRuntime implements TerminalRuntimePort {
       title: input.title,
       root: input.cwd,
       ...input.size,
+      ...(input.openedBy === undefined ? {} : { openedBy: input.openedBy }),
     };
     this.records.set(record.id, record);
     return record;
@@ -75,6 +76,32 @@ function subject(runtime = new FakeRuntime(), maximumPerSession = 2) {
 }
 
 describe('ManagedTerminalService', () => {
+  it('should carry a derived opener onto the pane and through every later read', async () => {
+    // The service never sees a request body, so it cannot decide ownership — it
+    // forwards what the mount derived from the credential. What it MUST get
+    // right is that the opener survives the refresh cycle: `list` rebuilds every
+    // record from the runtime, and an opener lost there would make a terminal
+    // read as unrecorded moments after it was correctly attributed.
+    // Arrange
+    const { service } = subject();
+    const unattributed = subject().service;
+    const openedBy = { by: 'agent', sessionId: 'mse7wwti-2a75bd9c' } as const;
+
+    // Act
+    const created = await service.create('session-a', { openedBy });
+    const listed = await service.list('session-a');
+    const fetched = await service.get('session-a', created.id);
+    const anonymous = await unattributed.create('session-a');
+
+    // Assert
+    should(created.openedBy).deepEqual(openedBy);
+    should(listed.terminals.map(view => view.openedBy)).deepEqual([openedBy]);
+    should(fetched.openedBy).deepEqual(openedBy);
+    // A caller the daemon could not attest leaves the field ABSENT, which is how
+    // the wire says "unrecorded" — not `null`, and not a benign default.
+    should(anonymous).not.have.property('openedBy');
+  });
+
   it('should create, list, read, rename, resize, write, capture, and close an isolated terminal', async () => {
     // Arrange
     const { runtime, service } = subject();

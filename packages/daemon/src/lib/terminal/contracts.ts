@@ -1,4 +1,4 @@
-import type { TerminalSize } from '@ferretry/protocol';
+import type { SurfaceOpener, TerminalSize } from '@ferretry/protocol';
 
 export interface TerminalRecord extends TerminalSize {
   readonly id: string;
@@ -8,6 +8,12 @@ export interface TerminalRecord extends TerminalSize {
   readonly tmuxSession: string;
   readonly createdAtMs: number;
   readonly lastActivityAtMs: number;
+  /**
+   * Who opened this shell. ABSENT MEANS UNRECORDED — a pane created before the
+   * daemon recorded provenance, or one whose stored opener this build cannot
+   * read — and it travels to the wire as an absent field rather than a default.
+   */
+  readonly openedBy?: SurfaceOpener;
 }
 
 export interface TerminalSession {
@@ -27,6 +33,8 @@ export interface TerminalRuntimePort {
     readonly title: string;
     readonly cwd: string;
     readonly size: TerminalSize;
+    /** Omitted when nothing about the caller could be attested. */
+    readonly openedBy?: SurfaceOpener;
   }): Promise<TerminalRecord>;
   rename(record: TerminalRecord, title: string): Promise<void>;
   resize(record: TerminalRecord, size: TerminalSize): Promise<void>;

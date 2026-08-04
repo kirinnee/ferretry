@@ -90,6 +90,88 @@ describe('the terminal mount', () => {
       should(TerminalViewSchema.parse(jsonBody(second)).title).equal('Terminal 2');
     });
 
+    it('should record the local credential as the opener when nothing else is claimed', async () => {
+      // Arrange / Act
+      const { terminal } = await withTerminal();
+
+      // Assert
+      should(terminal.openedBy).deepEqual({ by: 'local' });
+    });
+
+    it('should record the agent a local caller opened the terminal for', async () => {
+      // This is #34's whole point: a reader must be able to see, on the row
+      // itself, that an agent is driving this shell before typing into it.
+      // Arrange
+      const dispatch = dispatcher();
+
+      // Act
+      const created = await dispatch.dispatch(
+        post('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti-2a75bd9c' }),
+      );
+
+      // Assert
+      should(created.status).equal(201);
+      should(TerminalViewSchema.parse(jsonBody(created)).openedBy).deepEqual({
+        by: 'agent',
+        sessionId: 'mse7wwti-2a75bd9c',
+      });
+    });
+
+    it('should record a paired device as the human holding it', async () => {
+      // Arrange — the device credential is the one a phone or a browser presents.
+      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(new FakeTerminals())), {
+        ...CREDENTIALS,
+        devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+      });
+
+      // Act
+      const created = await dispatch.dispatch(
+        post('/v1/sessions/s1/terminals', undefined, { authorization: 'Bearer device-secret' }),
+      );
+
+      // Assert
+      should(created.status).equal(201);
+      should(TerminalViewSchema.parse(jsonBody(created)).openedBy).deepEqual({ by: 'human', deviceId: 'device-1' });
+    });
+
+    it('should refuse a paired device that asks to be recorded as an agent', async () => {
+      // A device is a human by construction. Letting one label its own shell as
+      // an agent's would make every agent badge unreadable, and recording it as
+      // a human anyway would hide that the caller asked for something else.
+      // Arrange
+      const terminals = new FakeTerminals();
+      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), {
+        ...CREDENTIALS,
+        devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+      });
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post('/v1/sessions/s1/terminals', { agentSessionId: 'mse7wwti' }, { authorization: 'Bearer device-secret' }),
+      );
+      const listed = await dispatch.dispatch(
+        request({ method: 'GET', path: '/v1/sessions/s1/terminals', headers: human }),
+      );
+
+      // Assert
+      should(refused.status).equal(403);
+      should(jsonBody(refused)).have.property('code', 'forbidden');
+      // Refused means NOT OPENED: a shell must never outlive the refusal that
+      // was meant to prevent it.
+      should(TerminalListViewSchema.parse(jsonBody(listed)).terminals).be.empty();
+    });
+
+    it('should refuse an agent identity the wire could not carry', async () => {
+      // Arrange
+      const dispatch = dispatcher();
+
+      // Act
+      const refused = await dispatch.dispatch(post('/v1/sessions/s1/terminals', { agentSessionId: 'not a session' }));
+
+      // Assert
+      should(refused.status).equal(403);
+    });
+
     it('should refuse a size the protocol does not allow', async () => {
       // Arrange
       const dispatch = dispatcher();

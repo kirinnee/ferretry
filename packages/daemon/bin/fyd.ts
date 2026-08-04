@@ -2271,7 +2271,18 @@ function createTerminalSubsystem(
   };
   return {
     list: async sessionId => await service.list(sessionId).catch(translate),
-    create: async (sessionId, input) => await service.create(sessionId, input).catch(translate),
+    // The opener the mount DERIVED from the request's credential, forwarded unchanged. The service
+    // is deliberately not given the request body's `agentSessionId`: ownership is decided where the
+    // credential is, and a service that could read a claimed owner would eventually be asked to.
+    create: async (sessionId, input, openedBy) =>
+      await service
+        .create(sessionId, {
+          title: input.title,
+          cols: input.cols,
+          rows: input.rows,
+          ...(openedBy === undefined ? {} : { openedBy }),
+        })
+        .catch(translate),
     get: async (sessionId, terminalId) => await service.get(sessionId, terminalId).catch(translate),
     rename: async (sessionId, terminalId, title) => await service.rename(sessionId, terminalId, title).catch(translate),
     close: async (sessionId, terminalId) => await service.close(sessionId, terminalId).catch(translate),
