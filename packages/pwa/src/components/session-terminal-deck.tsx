@@ -95,6 +95,8 @@ export interface TerminalDeckDependencies {
   streamUrl(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<string>;
   openSocket(url: string): WebSocket;
   loadXterm(): Promise<XtermModules>;
+  /** Subscribes to the document theme attributes and returns its cleanup. */
+  watchTheme(repaint: () => void): () => void;
   /** Confirmation before a shell is killed. Injected so a test never blocks. */
   confirmClose(title: string): boolean;
   writeClipboard(text: string): Promise<void>;
@@ -111,6 +113,15 @@ export const browserTerminalDeckDependencies = (): TerminalDeckDependencies => (
   loadXterm: async () => {
     const [xterm, fit] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')]);
     return { Terminal: xterm.Terminal, FitAddon: fit.FitAddon };
+  },
+  watchTheme: repaint => {
+    if (typeof MutationObserver === 'undefined') return () => {};
+    const observer = new MutationObserver(repaint);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class'],
+    });
+    return () => observer.disconnect();
   },
   confirmClose: title => globalThis.confirm(`Close “${title}”? This ends its shell process.`),
   writeClipboard: async text => await navigator.clipboard.writeText(text),
@@ -211,7 +222,7 @@ function TerminalCanvas({
     if (host === null) return;
     let disposed = false;
     let observer: ResizeObserver | undefined;
-    let themeObserver: MutationObserver | undefined;
+    let stopWatchingTheme = () => {};
     let selectionDisposable: { dispose(): void } | undefined;
     let dataDisposable: { dispose(): void } | undefined;
     let binaryDisposable: { dispose(): void } | undefined;
@@ -233,6 +244,9 @@ function TerminalCanvas({
         });
         const fit = new FitAddon();
         xterm.loadAddon(fit);
+        stopWatchingTheme = dependencies.watchTheme(() => {
+          xterm.options.theme = terminalTheme();
+        });
         xterm.open(host);
         terminalRef.current = xterm;
         fitRef.current = fit;
@@ -270,15 +284,6 @@ function TerminalCanvas({
           observer = new ResizeObserver(() => fitAndResize());
           observer.observe(host);
         }
-        if (typeof MutationObserver !== 'undefined') {
-          themeObserver = new MutationObserver(() => {
-            xterm.options.theme = terminalTheme();
-          });
-          themeObserver.observe(document.documentElement, {
-            attributes: true,
-            attributeFilter: ['data-theme', 'class'],
-          });
-        }
         globalThis.requestAnimationFrame(fitAndResize);
         setReadyVersion(version => version + 1);
       })
@@ -291,7 +296,7 @@ function TerminalCanvas({
     return () => {
       disposed = true;
       observer?.disconnect();
-      themeObserver?.disconnect();
+      stopWatchingTheme();
       dataDisposable?.dispose();
       binaryDisposable?.dispose();
       selectionDisposable?.dispose();

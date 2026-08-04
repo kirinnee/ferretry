@@ -1,6 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { defaultDaemonConfig, parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
+import { FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import {
+  advertisesForeignAddress,
+  configuredAt,
+  defaultDaemonConfig,
+  defaultDaemonConfigDocument,
+  overriddenBy,
+  parseDaemonConfig,
+} from '../../../src/lib/runtime/config.ts';
 
 const pricingRate = (patch: Record<string, unknown> = {}) => ({
   pricingKey: 'operator:model-a:2026-08',
@@ -18,7 +26,7 @@ describe('daemon configuration', () => {
     // Act + Assert
     should(defaultDaemonConfig()).containDeep({
       host: '127.0.0.1',
-      publicUrl: 'http://127.0.0.1:7337',
+      publicUrl: `http://127.0.0.1:${String(FY_DEFAULT_DAEMON_PORT)}`,
       corsOrigins: ['https://ferretry.pages.dev'],
     });
     should(parseDaemonConfig({ host: 'localhost', port: 9000 })).containDeep({ publicUrl: 'http://localhost:9000' });
@@ -89,7 +97,84 @@ describe('daemon configuration', () => {
     ).throw();
     should(() => parseDaemonConfig({ corsOrigins: ['https://example.test/path'] })).throw();
     should(() => parseDaemonConfig({ host: '', port: 0 })).throw();
-    should(() => parseDaemonConfig({ host: 'localhost', port: 7337, unknown: true })).throw();
+    should(() => parseDaemonConfig({ host: 'localhost', port: 7431, unknown: true })).throw();
+  });
+
+  it('should never write a derived address into the document an operator edits', () => {
+    // The defect: the derived public URL was persisted as though an operator had chosen it, after
+    // which it stopped tracking `port` — so editing the port moved the bind and left everything that
+    // reads the advertised address behind, and the edit appeared to do nothing at all.
+    const document = defaultDaemonConfigDocument();
+
+    // Assert
+    should(document).not.have.property('publicUrl');
+    should(document).not.have.property('bindUrl');
+    // Nor the port: an unrecorded port is a preference this daemon may move off, and writing the
+    // default out would freeze it into a claim before anything had tried to bind it.
+    should(document).not.have.property('port');
+    // Serialization is what actually reaches the disk, so assert on that rather than the object.
+    should(JSON.parse(JSON.stringify(document))).not.have.property('publicUrl');
+  });
+
+  it('should tell a recorded port from a preferred one, because only one of them may move', () => {
+    // Act
+    const unrecorded = parseDaemonConfig({});
+    const recorded = parseDaemonConfig({ port: 9100 });
+
+    // Assert
+    should(unrecorded.portIsRecorded).be.false();
+    should(unrecorded.port).equal(FY_DEFAULT_DAEMON_PORT);
+    should(recorded.portIsRecorded).be.true();
+    should(recorded.bindUrl).equal('http://127.0.0.1:9100');
+  });
+
+  it('should move a derived advertisement with the port and leave a stated one alone', () => {
+    // Arrange
+    const derived = parseDaemonConfig({});
+    const stated = parseDaemonConfig({ publicUrl: 'https://box.example.test' });
+
+    // Act
+    const movedDerived = configuredAt(derived, 9200);
+    const movedStated = configuredAt(stated, 9200);
+
+    // Assert — a derived advertisement that stayed behind IS the defect; an operator's own one is a
+    // proxy or a tunnel they meant, and moving it would break the deployment they described.
+    should(movedDerived.bindUrl).equal('http://127.0.0.1:9200');
+    should(movedDerived.publicUrl).equal('http://127.0.0.1:9200');
+    should(advertisesForeignAddress(movedDerived)).be.false();
+    should(movedStated.bindUrl).equal('http://127.0.0.1:9200');
+    should(movedStated.publicUrl).equal('https://box.example.test');
+    should(advertisesForeignAddress(movedStated)).be.true();
+    // Settling on the port already loaded still records the claim, so the next boot cannot move.
+    should(configuredAt(derived, derived.port).portIsRecorded).be.true();
+    should(configuredAt(derived, derived.port).bindUrl).equal(derived.bindUrl);
+  });
+
+  it('should let one run override the document without turning the override into a claim on disk', () => {
+    // Arrange
+    const document = parseDaemonConfig({ host: '127.0.0.1' });
+    const advertised = parseDaemonConfig({ publicUrl: 'https://box.example.test' });
+
+    // Act
+    const nothingSaid = overriddenBy(document, {});
+    const portOnly = overriddenBy(document, { port: 9_100 });
+    const both = overriddenBy(document, { host: '0.0.0.0', port: 9_100 });
+    const withAdvertisement = overriddenBy(advertised, { port: 9_100 });
+
+    // Assert — an untouched run is the very same object; nothing is rebuilt for nothing.
+    should(nothingSaid).equal(document);
+    // A port named on the command line is a CLAIM: it is bound or it fails, never silently moved.
+    should(portOnly.bindUrl).equal('http://127.0.0.1:9100');
+    should(portOnly.portIsRecorded).be.true();
+    should(both.bindUrl).equal('http://0.0.0.0:9100');
+    should(both.host).equal('0.0.0.0');
+    // A derived advertisement follows the override; an operator's own one is left where they put it.
+    should(portOnly.publicUrl).equal('http://127.0.0.1:9100');
+    should(withAdvertisement.publicUrl).equal('https://box.example.test');
+    // Overriding only the host keeps the document's port rather than inventing one.
+    should(overriddenBy(parseDaemonConfig({ port: 8_080 }), { host: 'localhost' }).bindUrl).equal(
+      'http://localhost:8080',
+    );
   });
 
   it('should refuse damaged or ambiguous pricing evidence before the daemon can use it', () => {

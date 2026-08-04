@@ -20,8 +20,8 @@ describe('socket endpoints', () => {
   it('should accept secure schemes anywhere and insecure ones only on loopback', () => {
     should(SocketEndpointSchema.parse('https://box.example/')).equal('https://box.example');
     should(SocketEndpointSchema.parse('wss://box.example')).equal('wss://box.example');
-    should(SocketEndpointSchema.parse('http://127.0.0.1:7337')).equal('http://127.0.0.1:7337');
-    should(SocketEndpointSchema.parse('ws://localhost:7337')).equal('ws://localhost:7337');
+    should(SocketEndpointSchema.parse('http://127.0.0.1:7431')).equal('http://127.0.0.1:7431');
+    should(SocketEndpointSchema.parse('ws://localhost:7431')).equal('ws://localhost:7431');
     should(SocketEndpointSchema.safeParse('http://box.example').success).be.false();
     should(SocketEndpointSchema.safeParse('ftp://box.example').success).be.false();
     should(SocketEndpointSchema.safeParse('not a url').success).be.false();

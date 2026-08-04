@@ -97,8 +97,12 @@ pitwall/
 
 Key structural decisions:
 
-1. **The daemon is already a server** (Bun HTTP+WS on `127.0.0.1:7337`, token auth, serves the
+1. **The daemon is already a server** (Bun HTTP+WS on loopback, token auth, serves the
    SPA). We keep that shape; what changes is the trust model (§5) and CORS (today: none at all).
+   The address moved: the system being replaced listens on 7337 and runs on every machine this one
+   is installed onto, so the shipped default is single-sourced in `packages/protocol` and is not
+   that number. A first boot with no recorded port takes the first free address from it and writes
+   the choice into `config/daemon.json`; every port below is that recorded value, not a constant.
 2. **Files stay authoritative, SQLite stays a disposable index** — this philosophy survives the
    move untouched. `~/.pitwall/` mirrors today's `~/.kteam/` layout.
 3. **kfleet folds into the product** as `packages/fleet`. The three ugly couplings die:
@@ -139,7 +143,7 @@ host$ pitwall pair --name "Ernest's phone"
   daemon mints { code: 7F3K-Q2ND, ttl: 120 s, single-use }
   CLI renders the QR IN the terminal (works over ssh on headless boxes),
   prints the code + link URL, and opens the loopback pairing page
-  (http://127.0.0.1:7337/pair — big QR + copy button) when a display exists.
+  (http://127.0.0.1:<recorded port>/pair — big QR + copy button) when a display exists.
 
 QR encodes:  https://app.pitwall.dev/pair#v1;url=https://box.tailXXXX.ts.net;code=7F3K-Q2ND;fp=<daemon-fp>
   → scanning with the phone's NORMAL camera app opens the PWA pre-filled. Zero typing.
@@ -170,7 +174,7 @@ PWA stores the connection (url, daemonId, fp, token) in IndexedDB → connects.
 The **link** is the daemon's public URL, stored per connection in the PWA. Two first-class
 adapters, both wired by one command:
 
-- **`pitwall link tailscale`** → drives `tailscale serve --https=443 127.0.0.1:7337`.
+- **`pitwall link tailscale`** → drives `tailscale serve --https=443 127.0.0.1:<recorded port>`.
   URL `https://<host>.<tailnet>.ts.net`, TLS by tailscale, reachability limited to the tailnet
   (ACLs = outer wall). Device tokens still required — defense in depth, and it's what makes
   "one PWA, many daemons" uniform across link types.

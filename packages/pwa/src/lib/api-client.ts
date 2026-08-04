@@ -1,5 +1,5 @@
-import { FyApiClient } from '@ferretry/protocol/client';
 import type { FyClientOptions, IFyHttpTransport } from '@ferretry/protocol';
+import { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
 
 /**
@@ -15,6 +15,13 @@ export type DaemonApiClientOptions = Omit<FyClientOptions, 'baseUrl' | 'token' |
 type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 /**
+ * Keep the browser builtin in its WebIDL realm. `fetch` rejects calls whose
+ * receiver is not the Window/global object, so storing an unbound builtin on a
+ * transport and invoking it later would make a healthy paired daemon look down.
+ */
+const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+
+/**
  * Browser transport for a paired daemon. It refuses a typed-client URL that
  * leaves the paired origin and always includes credentials for daemon-side
  * access adapters. Authentication itself remains owned by FyApiClient.
@@ -23,7 +30,7 @@ export class DaemonHttpTransport implements IFyHttpTransport {
   readonly #origin: string;
   readonly #fetch: DaemonFetch;
 
-  constructor(daemon: DaemonConnection, fetcher: DaemonFetch = fetch) {
+  constructor(daemon: DaemonConnection, fetcher: DaemonFetch = browserFetch) {
     this.#origin = new URL(daemon.baseUrl).origin;
     this.#fetch = fetcher;
   }
@@ -31,7 +38,11 @@ export class DaemonHttpTransport implements IFyHttpTransport {
   send(url: string, init: RequestInit): Promise<Response> {
     const target = new URL(url);
     if (target.origin !== this.#origin) throw new Error('API client request must remain on the paired daemon');
-    return this.#fetch(target.toString(), { ...init, credentials: 'include' });
+    // Call through a local so a caller-supplied function never receives this
+    // transport as its receiver. The default above also keeps Window.fetch
+    // bound to its own realm.
+    const fetcher = this.#fetch;
+    return fetcher(target.toString(), { ...init, credentials: 'include' });
   }
 }
 

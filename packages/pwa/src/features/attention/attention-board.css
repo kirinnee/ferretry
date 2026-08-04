@@ -26,6 +26,11 @@
   --attn-tone-bg: var(--pend-bg);
   --attn-tone-border: var(--pend-border);
 }
+.kt-attn[data-kind='unknown'] {
+  --attn-tone: var(--err);
+  --attn-tone-bg: var(--err-bg);
+  --attn-tone-border: var(--err-border);
+}
 
 .kt-attn-rail {
   box-shadow: inset 2px 0 0 color-mix(in srgb, var(--attn-tone) 55%, transparent);

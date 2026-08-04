@@ -358,8 +358,13 @@ try {
           const learningHeaderTarget = join(outDir, `learning-header-${viewport.name}.png`);
           await page.getByLabel('Learning header').screenshot({ path: learningHeaderTarget });
           process.stdout.write(`📸 Learning header -> ${learningHeaderTarget}\n`);
+          // A four-kind ledger is taller than a phone viewport. Chrome may cull
+          // unpainted rows during an element screenshot, so temporarily borrow
+          // a tall viewport to capture the full, real phone-width board.
           const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
+          await page.setViewportSize({ width: viewport.width, height: 2_400 });
           await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
           process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
           await page.getByLabel('Pins trigger').screenshot({ path: pinsTriggerTarget });

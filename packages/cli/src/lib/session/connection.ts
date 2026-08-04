@@ -1,3 +1,4 @@
+import { FY_DEFAULT_DAEMON_URL as FY_PROTOCOL_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 
 /**
@@ -13,8 +14,15 @@ export const FY_SESSION_ID_HEADER = 'x-ferretry-session-id';
 /** How this client identifies itself in `FY_CLIENT_HEADER`. */
 export const FY_CLIENT_NAME = 'cli';
 
-/** Where `fyd` listens when the environment does not say otherwise. */
-export const FY_DEFAULT_DAEMON_URL = 'http://127.0.0.1:7337';
+/**
+ * Where `fyd` listens when the environment does not say otherwise.
+ *
+ * RE-EXPORTED from the protocol package rather than written out, because the daemon's own default
+ * has to be the same number and the two packages may not import each other. A client that kept its
+ * own copy of a moved default fails silently: it probes an address nothing holds and reports the
+ * daemon down while it serves perfectly one port away.
+ */
+export const FY_DEFAULT_DAEMON_URL = FY_PROTOCOL_DEFAULT_DAEMON_URL;
 
 export interface ConnectionInput {
   /** `FY_URL` — the daemon base URL; defaults to the local daemon. */

@@ -19,7 +19,7 @@ mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name pa
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source state-home-log-directory release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon nix-packages; do
+  for each in arch workspace-package-scopes name-single-source daemon-default-address state-home-log-directory release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
     "$0" "${each}"
   done
   exit 0
@@ -205,6 +205,65 @@ release-daemon)
   # executable files stops a CLI-only archive from being reported as a complete normal install.
   rg -qF 'for artifact in "${contents}"/*; do' scripts/release/install.sh
   rg -qF '[ "${#installed[@]}" -ge 2 ]' scripts/release/install.sh
+  ;;
+released-version)
+  # Both shipped executables stamp their own manifest version into what they report — the CLI's
+  # `--version`, the daemon's `/v1/health` and its version header — so a release that bumped only one
+  # of them shipped a daemon claiming 0.0.0. The bump script and the release assets must carry both,
+  # and the manifests must already agree with the released version in the tree.
+  released="$(cat VERSION)"
+  for package_dir in "${cli_pkg}" "${daemon_pkg}"; do
+    stamped="$(jq -r '.version' "${package_dir}/package.json")"
+    [ "${stamped}" != "${released}" ] &&
+      echo "❌ ${package_dir}/package.json is ${stamped} but VERSION is ${released}" >&2 && exit 1
+    rg -qF "${package_dir}" scripts/release/bump.sh || {
+      echo "❌ scripts/release/bump.sh does not stamp ${package_dir}" >&2
+      exit 1
+    }
+    rg -qF -e "- ${package_dir}/package.json" .releaserc.yaml || {
+      echo "❌ .releaserc.yaml does not commit ${package_dir}/package.json with the release" >&2
+      exit 1
+    }
+  done
+  ;;
+daemon-default-address)
+  # The well-known loopback address three production files must agree on. They live in packages that
+  # may not import one another, so it is single-sourced in the protocol package and every other
+  # production file derives it. A second copy fails SILENTLY — the client probes an address nothing
+  # holds and reports the daemon down while it serves one port away — so the literal is pinned here
+  # exactly as the two-name model is.
+  address_source="packages/protocol/src/lib/address.ts"
+  test -f "${address_source}"
+  port="$(rg -o -r '$1' 'FY_DEFAULT_DAEMON_PORT = ([0-9]+)' "${address_source}")"
+  [ -z "${port}" ] && echo "❌ ${address_source} does not declare FY_DEFAULT_DAEMON_PORT" >&2 && exit 1
+  production_files=()
+  while IFS= read -r -d '' path; do
+    [ "${path}" = "${address_source}" ] && continue
+    case "${path}" in
+    */src/* | */bin/*) production_files+=("${path}") ;;
+    esac
+  done < <(git ls-files -z -co --exclude-standard -- packages)
+  if [ "${#production_files[@]}" -gt 0 ]; then
+    set +e
+    strays="$(rg --line-number --fixed-strings -- "${port}" "${production_files[@]}")"
+    stray_status=$?
+    set -e
+    if [ "${stray_status}" -eq 0 ]; then
+      echo "❌ the default daemon port is written out instead of imported from ${address_source}:" >&2
+      printf '%s\n' "${strays}" >&2
+      exit 1
+    fi
+    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan package source for the default port" >&2 && exit "${stray_status}"
+  fi
+  # And the two consumers must actually read the single source rather than each other.
+  rg -qF 'FY_DEFAULT_DAEMON_PORT' packages/daemon/src/lib/runtime/config.ts || {
+    echo "❌ the daemon's configuration default does not read FY_DEFAULT_DAEMON_PORT" >&2
+    exit 1
+  }
+  rg -qF 'FY_DEFAULT_DAEMON_URL' packages/cli/src/lib/daemon/address.ts || {
+    echo "❌ the CLI's address resolution does not read FY_DEFAULT_DAEMON_URL" >&2
+    exit 1
+  }
   ;;
 nix-packages)
   # Nix's default package is the normal profile-install entry point. It must join the independently

@@ -157,6 +157,25 @@ describe('daemon API client', () => {
 });
 
 describe('daemon HTTP transport', () => {
+  it('should invoke a receiver-sensitive fetcher without the transport as its receiver', async () => {
+    // This is deliberately a non-arrow function: on main, `this.#fetch(...)`
+    // makes `this` the transport and real Window.fetch rejects that receiver.
+    let receiver: unknown = Symbol('not called');
+    const transport = new DaemonHttpTransport(paired('daemon-a', 'https://daemon-a.example.test', 'token-a'), function (
+      this: unknown,
+    ): Promise<Response> {
+      receiver = this;
+      return Promise.resolve(new Response());
+    });
+
+    // Act
+    await transport.send('https://daemon-a.example.test/v1/health', {});
+
+    // Assert — ES modules are strict, so an unbound call has no receiver.
+    should(receiver).be.undefined();
+    should(receiver).not.equal(transport);
+  });
+
   it('should include credentials only for the paired daemon origin', async () => {
     // Arrange
     let captured: { input: string | URL | Request; init?: RequestInit } | undefined;
