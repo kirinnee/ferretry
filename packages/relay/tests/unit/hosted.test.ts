@@ -180,8 +180,8 @@ describe('hosted relay connection admission', () => {
     should(perDaemon.daemon).match({ connectionRefusals: 1 });
 
     const global = admitHostedRelayConnection(
-      configuration({ maxConcurrentConnectionsPerDaemon: 1, maxConcurrentConnectionsGlobal: 1 }),
-      base.global,
+      configuration({ maxConcurrentConnectionsPerDaemon: 2, maxConcurrentConnectionsGlobal: 2 }),
+      { ...base.global, concurrentConnections: 2, peakConcurrentConnections: 2 },
       base.daemon,
       daemonId,
       at + 2,
