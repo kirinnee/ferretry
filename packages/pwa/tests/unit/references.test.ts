@@ -49,6 +49,10 @@ describe('parseReferenceToken', () => {
     ['&F12', { kind: 'task', id: 'F12' }],
     ['&f12', { kind: 'task', id: 'F12' }],
     ['!A3', { kind: 'attention', id: 'A3' }],
+    ['/liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
+    ['$liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
+    [':term/0a1b2c3d4e5f', { kind: 'terminal', id: '0a1b2c3d4e5f' }],
+    [':page/AB12cd_-.9', { kind: 'browser', id: 'AB12cd_-.9' }],
   ];
 
   for (const [raw, expected] of canonical) {
@@ -84,6 +88,26 @@ describe('parseReferenceToken', () => {
     '&A3',
     '!A0',
     'pin:thing',
+    '/',
+    '$',
+    '/1skill',
+    '/skill_name',
+    // Lowercase only: `$HOME` is a shell variable, not the `home` skill.
+    '/Liftoff-Ops',
+    '$HOME',
+    // A harness may accept these invocation forms; this grammar does not,
+    // because `:` and `/` are its own boundaries.
+    '/plugin:skill',
+    '$apps/web:deploy',
+    // Twelve lowercase hex digits exactly, mirroring the daemon's terminal ids.
+    ':term/0A1B2C3D4E5F',
+    ':term/0a1b2c3d4e5',
+    ':term/0a1b2c3d4e5fa',
+    ':term/',
+    ':page/',
+    ':page/-leading-punctuation',
+    ':page/trailing-',
+    ':page/trailing.',
   ];
 
   for (const raw of rejected) {
@@ -188,6 +212,20 @@ describe('formatReference', () => {
     // Assert
     should(formatCodeReference({ path: 'src/api.ts', line: 4 })).equal('@src/api.ts:4');
   });
+
+  test('should answer with the sigil a reader can type on either harness', () => {
+    // Assert — `$name` is an accepted authored alias, never the canonical form.
+    should(formatReference({ kind: 'skill', name: 'liftoff-ops' })).equal('/liftoff-ops');
+    should(formatReference({ kind: 'terminal', id: '0a1b2c3d4e5f' })).equal(':term/0a1b2c3d4e5f');
+    should(formatReference({ kind: 'browser', id: 'PAGE-1' })).equal(':page/PAGE-1');
+  });
+
+  test('should refuse to format an instance or skill reference it could not have parsed', () => {
+    // Assert
+    should(() => formatReference({ kind: 'skill', name: 'not a skill' })).throw(TypeError);
+    should(() => formatReference({ kind: 'terminal', id: 'nothex' })).throw(TypeError);
+    should(() => formatReference({ kind: 'browser', id: '' })).throw(TypeError);
+  });
 });
 
 describe('resolveReference', () => {
@@ -280,6 +318,9 @@ describe('referenceHref and parseReferenceHref', () => {
     { kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 },
     { kind: 'task', id: 'F12' },
     { kind: 'attention', id: 'A3' as AttentionId },
+    { kind: 'skill', name: 'summary' },
+    { kind: 'terminal', id: '0a1b2c3d4e5f' },
+    { kind: 'browser', id: 'PAGE-1' },
   ];
 
   for (const reference of roundTrip) {
@@ -373,6 +414,9 @@ describe('referenceIdentity', () => {
     should(referenceIdentity({ kind: 'file', path: 'a.ts' })).equal('file:a.ts::');
     should(referenceIdentity({ kind: 'task', id: 'F12' })).equal('task:F12');
     should(referenceIdentity({ kind: 'attention', id: 'A3' as AttentionId })).equal('attention:A3');
+    should(referenceIdentity({ kind: 'skill', name: 'summary' })).equal('skill:summary');
+    should(referenceIdentity({ kind: 'terminal', id: '0a1b2c3d4e5f' })).equal('terminal:0a1b2c3d4e5f');
+    should(referenceIdentity({ kind: 'browser', id: 'PAGE-1' })).equal('browser:PAGE-1');
   });
 });
 
@@ -457,6 +501,109 @@ describe('revalidateReference', () => {
     ).be.null();
   });
 });
+describe('skill, terminal and browser page references', () => {
+  test('should read both skill sigils as the same reference and keep the authored bytes', () => {
+    // Arrange
+    const text = 'Run /summary now, or $summary on Codex.';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual.map(match => match.raw)).deepEqual(['/summary', '$summary']);
+    should(actual.map(match => match.reference)).deepEqual([
+      { kind: 'skill', name: 'summary' },
+      { kind: 'skill', name: 'summary' },
+    ]);
+  });
+
+  test('should find namespaced instance tokens without stealing an agent callsign', () => {
+    // Arrange — an agent really can be called `term`; only `:term/` is an instance.
+    const text = 'ask :term about :term/0a1b2c3d4e5f and :page/PAGE-1.';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual.map(match => match.reference)).deepEqual([
+      { kind: 'agent', name: 'term' },
+      { kind: 'terminal', id: '0a1b2c3d4e5f' },
+      { kind: 'browser', id: 'PAGE-1' },
+    ]);
+  });
+
+  test('should leave a path-shaped or shell-shaped token alone as a lexical candidate', () => {
+    // Arrange — `/home/kirin` is a path, `$HOME` is a variable. Neither is a
+    // skill name, and `/tmp` is only ever a candidate: proof is what links.
+    const text = 'look in /home/kirin and $HOME';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(actual).deepEqual([]);
+  });
+
+  test('should prove each new kind only through its own live resolver', () => {
+    // Assert
+    should(resolveReference({ kind: 'skill', name: 'summary' }, { skill: name => name === 'summary' })).deepEqual({
+      kind: 'skill',
+      name: 'summary',
+    });
+    should(resolveReference({ kind: 'skill', name: 'summary' }, {})).be.null();
+    should(resolveReference({ kind: 'skill', name: 'summary' }, { skill: () => false })).be.null();
+    should(resolveReference({ kind: 'terminal', id: '0a1b2c3d4e5f' }, { terminal: () => true })).deepEqual({
+      kind: 'terminal',
+      id: '0a1b2c3d4e5f',
+    });
+    should(resolveReference({ kind: 'terminal', id: '0a1b2c3d4e5f' }, {})).be.null();
+    should(resolveReference({ kind: 'browser', id: 'PAGE-1' }, { browser: () => true })).deepEqual({
+      kind: 'browser',
+      id: 'PAGE-1',
+    });
+    should(resolveReference({ kind: 'browser', id: 'PAGE-1' }, {})).be.null();
+  });
+
+  test('should re-prove each new kind at click time', () => {
+    // Assert
+    should(revalidateReference({ kind: 'skill', name: 'summary' }, { skill: () => true })).deepEqual({
+      kind: 'skill',
+      name: 'summary',
+    });
+    should(revalidateReference({ kind: 'skill', name: 'summary' }, { skill: () => false })).be.null();
+    should(revalidateReference({ kind: 'terminal', id: '0a1b2c3d4e5f' }, { terminal: () => true })).deepEqual({
+      kind: 'terminal',
+      id: '0a1b2c3d4e5f',
+    });
+    should(revalidateReference({ kind: 'terminal', id: '0a1b2c3d4e5f' }, { terminal: () => false })).be.null();
+    should(revalidateReference({ kind: 'browser', id: 'PAGE-1' }, { browser: () => true })).deepEqual({
+      kind: 'browser',
+      id: 'PAGE-1',
+    });
+    should(revalidateReference({ kind: 'browser', id: 'PAGE-1' }, { browser: () => false })).be.null();
+  });
+
+  test('should refuse to encode an instance or skill payload the grammar rejects', () => {
+    // Assert
+    should(() => referenceHref({ kind: 'skill', name: 'not a skill' })).throw(TypeError);
+    should(() => referenceHref({ kind: 'terminal', id: 'NOTHEX' })).throw(TypeError);
+    should(() => referenceHref({ kind: 'browser', id: '.leading' })).throw(TypeError);
+  });
+
+  test('should reject an embellished or malformed envelope for every new kind', () => {
+    // Assert
+    should(parseReferenceHref('#fy-reference?kind=skill&name=summary&extra=1')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=skill&name=not%20a%20skill')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=skill')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=terminal&id=0a1b2c3d4e5f&extra=1')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=terminal&id=NOTHEX')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=terminal')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=browser&id=PAGE-1&extra=1')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=browser&id=')).be.null();
+    should(parseReferenceHref('#fy-reference?kind=browser')).be.null();
+  });
+});
+
 describe('remarkReferences', () => {
   /** The minimal mdast a paragraph of prose produces. */
   const paragraph = (value: string): MdTree => ({

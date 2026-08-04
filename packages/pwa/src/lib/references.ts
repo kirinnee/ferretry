@@ -2,7 +2,27 @@
  * One canonical reference grammar and proof gate for every Markdown surface.
  *
  * References are authored as plain sigil tokens:
- *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`
+ *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `/skill` or `$skill`
+ *   `:term/<id>` (terminal instance)  `:page/<id>` (browser page)
+ *
+ * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
+ * written by hand is not a reference and never becomes one: the renderer only
+ * trusts links this module's own transform produced.
+ *
+ * SKILLS ACCEPT TWO SIGILS AND MEAN ONE THING. Claude invokes a skill as
+ * `/name` and Codex as `$name` (`features/skills/skills-catalog.ts` owns that
+ * insertion contract), so both parse to the same `skill` reference and the
+ * authored bytes are what the reader keeps seeing. `formatReference` answers
+ * with the `/name` form because it is the one a reader can type on either
+ * harness.
+ *
+ * TERMINALS AND BROWSER PAGES SHARE THE AGENT SIGIL, namespaced. `:` already
+ * means "a live thing in this session you can open", and an agent callsign can
+ * never contain `/` (`AGENT_NAME`), so `:term/<id>` and `:page/<id>` cannot
+ * collide with `:zelda` — an agent literally named `term` still resolves as
+ * `:term`. Handover #64 supplies the live proof and the click destinations for
+ * both kinds; until it does, an instance token has no resolver and stays prose,
+ * which is the same rule every other kind obeys.
  *
  * **Syntax is never existence proof.** `findReferences` reports lexical
  * candidates; `resolveReference` requires the appropriate live resolver; and
@@ -55,7 +75,32 @@ export interface AttentionReference {
   readonly id: AttentionId;
 }
 
-export type Reference = AgentReference | FileReference | TaskReference | AttentionReference;
+export interface SkillReference {
+  readonly kind: 'skill';
+  /** Canonical lowercase skill name, without either sigil. */
+  readonly name: string;
+}
+
+/** One registered terminal instance inside the surface's own session. */
+export interface TerminalReference {
+  readonly kind: 'terminal';
+  readonly id: string;
+}
+
+/** One registered browser page inside the surface's own session. */
+export interface BrowserPageReference {
+  readonly kind: 'browser';
+  readonly id: string;
+}
+
+export type Reference =
+  | AgentReference
+  | FileReference
+  | TaskReference
+  | AttentionReference
+  | SkillReference
+  | TerminalReference
+  | BrowserPageReference;
 
 /** An agent reference that a live fleet has proved, daemon and session both. */
 export interface ResolvedAgentReference extends AgentReference {
@@ -63,7 +108,14 @@ export interface ResolvedAgentReference extends AgentReference {
   readonly sessionId: string;
 }
 
-export type ResolvedReference = ResolvedAgentReference | FileReference | TaskReference | AttentionReference;
+export type ResolvedReference =
+  | ResolvedAgentReference
+  | FileReference
+  | TaskReference
+  | AttentionReference
+  | SkillReference
+  | TerminalReference
+  | BrowserPageReference;
 
 export interface ReferenceMatch {
   readonly reference: Reference;
@@ -82,12 +134,52 @@ const TASK_ID = /^[BFIC][0-9]{1,9}$/iu;
 const TASK_TOKEN = /^&([BFIC][0-9]{1,9})$/iu;
 const ATTENTION_ID = /^A[1-9][0-9]*$/u;
 const ATTENTION_TOKEN = /^!(A[1-9][0-9]*)$/u;
+// A skill name is a directory name on the host, so the grammar is deliberately
+// narrower than the filesystem: lowercase words and hyphens only. Namespaced
+// forms a harness may accept elsewhere (`plugin:skill`, `apps/web:deploy`) are
+// NOT references, because their separators are this grammar's own boundaries.
+// LOWERCASE ONLY, unlike an agent callsign. A skill name is a directory name,
+// not a daemon-normalised identity, and `$HOME`/`$PATH` are far more common in
+// prose and in code than a capitalised skill invocation is. Reading `$HOME` as
+// `$home` would make the reference layer volunteer a candidate for every shell
+// variable a message contains.
+const SKILL_NAME = /^[a-z][a-z0-9-]{0,63}$/u;
+const SKILL_TOKEN = /^[/$]([a-z][a-z0-9-]{0,63})$/u;
+// Mirrors `TerminalIdSchema` — twelve lowercase hex digits, minted by the daemon.
+const TERMINAL_ID = /^[a-f0-9]{12}$/u;
+const TERMINAL_TOKEN = /^:term\/([a-f0-9]{12})$/u;
+// A browser page id is the worker's own opaque target id, so the grammar bounds
+// its shape and length rather than describing it. It must START and END
+// alphanumeric: `.` and `-` are legal inside an id and are also ordinary
+// sentence punctuation, so a trailing one would swallow the period that ends
+// `open :page/PAGE-1.`
+const BROWSER_PAGE_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$/u;
+const BROWSER_PAGE_TOKEN = /^:page\/([A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?)$/u;
 
 // Each alternative owns its right boundary. A colon may naturally follow
 // agent/task/attention prose, but it cannot terminate a file candidate because
 // it could be the start of a malformed location suffix.
-const REFERENCE_CANDIDATE =
-  /(^|[\s([{"'`<>=—–])(?:(:[a-z][a-z0-9-]{0,31})(?=$|[\s)\]}"'`,;!?<>:.=—–])|(&[BFIC][0-9]{1,9})(?=$|[\s)\]}"'`,;!?<>:.=—–])|(!A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])|(@(?!@)[/.\p{L}\p{N}_+@#-]*[\p{L}\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?)(?=$|[\s)\]}"'`,;!?<>.=—–]))/giu;
+//
+// Composed rather than written as one 500-character literal: seven alternatives
+// sharing two boundary sets is exactly the shape a single literal hides. The
+// alternatives are ordered longest-prefix-first so a namespaced instance token
+// is never read as an agent callsign that happens to be followed by a slash.
+// Ordinary quoted strings, not `String.raw`: a backtick is one of the boundary
+// characters, and `String.raw` would keep the backslash that escaping it needs —
+// which a `u`-mode character class rejects as an invalid escape.
+const BOUNDARY_BEFORE = '(^|[\\s([{"\'`<>=—–])';
+const BOUNDARY_AFTER = '(?=$|[\\s)\\]}"\'`,;!?<>:.=—–])';
+const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
+const CANDIDATE_ALTERNATIVES = [
+  `:term/[a-f0-9]{12}${BOUNDARY_AFTER}`,
+  `:page/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?${BOUNDARY_AFTER}`,
+  `:[a-z][a-z0-9-]{0,31}${BOUNDARY_AFTER}`,
+  `&[BFIC][0-9]{1,9}${BOUNDARY_AFTER}`,
+  `!A[1-9][0-9]*${BOUNDARY_AFTER}`,
+  `[/$][a-z][a-z0-9-]{0,63}${BOUNDARY_AFTER}`,
+  `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
+];
+const REFERENCE_CANDIDATE = new RegExp(`${BOUNDARY_BEFORE}(${CANDIDATE_ALTERNATIVES.join('|')})`, 'giu');
 
 function positiveInteger(value: string | undefined): number | undefined {
   if (!value || !INTEGER.test(value)) return undefined;
@@ -118,8 +210,17 @@ function validCodeReference(reference: CodeReference): boolean {
 
 /** Parse one complete canonical token. No legacy sigils or implicit paths. */
 export function parseReferenceToken(raw: string): Reference | null {
+  const terminal = raw.match(TERMINAL_TOKEN);
+  if (terminal?.[1]) return { kind: 'terminal', id: terminal[1] };
+
+  const page = raw.match(BROWSER_PAGE_TOKEN);
+  if (page?.[1]) return { kind: 'browser', id: page[1] };
+
   const agent = raw.match(AGENT_TOKEN);
   if (agent?.[1]) return { kind: 'agent', name: agent[1].toLowerCase() };
+
+  const skill = raw.match(SKILL_TOKEN);
+  if (skill?.[1]) return { kind: 'skill', name: skill[1].toLowerCase() };
 
   const task = raw.match(TASK_TOKEN);
   if (task?.[1]) return { kind: 'task', id: task[1].toUpperCase() };
@@ -174,6 +275,12 @@ export type AgentReferenceResolver = (lookup: AgentReferenceLookup) => ResolvedA
 export type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
 export type TaskReferenceResolver = (id: string) => boolean;
 export type AttentionReferenceResolver = (id: AttentionId) => boolean;
+/** Answers whether this session's own skills catalog carries that name. */
+export type SkillReferenceResolver = (name: string) => boolean;
+/** Answers whether that terminal instance is registered in this session. */
+export type TerminalReferenceResolver = (id: string) => boolean;
+/** Answers whether that browser page is registered in this session. */
+export type BrowserPageReferenceResolver = (id: string) => boolean;
 
 /**
  * The live proofs a Markdown surface can offer. Every one is optional: a surface
@@ -185,6 +292,9 @@ export interface ReferenceResolvers {
   readonly file?: FileReferenceResolver;
   readonly task?: TaskReferenceResolver;
   readonly attention?: AttentionReferenceResolver;
+  readonly skill?: SkillReferenceResolver;
+  readonly terminal?: TerminalReferenceResolver;
+  readonly browser?: BrowserPageReferenceResolver;
 }
 
 export interface RemarkReferencesOptions {
@@ -223,6 +333,20 @@ export function formatReference(reference: Reference | ResolvedReference): strin
     case 'attention':
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid attention reference');
       return `!${reference.id}`;
+    case 'skill': {
+      // `/name` over `$name`: it is the form the shipped harness invokes and the
+      // one the composer's `/` trigger inserts. `$name` remains a valid
+      // AUTHORED alias — this is the canonical rendering, not a rewrite of what
+      // a reader typed.
+      if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid skill reference');
+      return `/${reference.name.toLowerCase()}`;
+    }
+    case 'terminal':
+      if (!TERMINAL_ID.test(reference.id)) throw new TypeError('invalid terminal reference');
+      return `:term/${reference.id}`;
+    case 'browser':
+      if (!BROWSER_PAGE_ID.test(reference.id)) throw new TypeError('invalid browser page reference');
+      return `:page/${reference.id}`;
   }
 }
 
@@ -256,6 +380,12 @@ export function resolveReference(reference: Reference, resolvers: ReferenceResol
         return resolvers.task?.(reference.id) ? reference : null;
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
+      case 'skill':
+        return resolvers.skill?.(reference.name) ? reference : null;
+      case 'terminal':
+        return resolvers.terminal?.(reference.id) ? reference : null;
+      case 'browser':
+        return resolvers.browser?.(reference.id) ? reference : null;
     }
   } catch {
     return null;
@@ -298,6 +428,18 @@ export function referenceHref(reference: ResolvedReference): string {
       break;
     case 'attention':
       if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid resolved attention reference');
+      query.set('id', reference.id);
+      break;
+    case 'skill':
+      if (!SKILL_NAME.test(reference.name)) throw new TypeError('invalid resolved skill reference');
+      query.set('name', reference.name.toLowerCase());
+      break;
+    case 'terminal':
+      if (!TERMINAL_ID.test(reference.id)) throw new TypeError('invalid resolved terminal reference');
+      query.set('id', reference.id);
+      break;
+    case 'browser':
+      if (!BROWSER_PAGE_ID.test(reference.id)) throw new TypeError('invalid resolved browser page reference');
       query.set('id', reference.id);
       break;
   }
@@ -344,6 +486,21 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
     const id = one(query, 'id');
     return id && ATTENTION_ID.test(id) ? { kind: 'attention', id: id as AttentionId } : null;
   }
+  if (kind === 'skill') {
+    if (!exactKeys(query, ['kind', 'name'])) return null;
+    const name = one(query, 'name');
+    return name && SKILL_NAME.test(name) ? { kind: 'skill', name: name.toLowerCase() } : null;
+  }
+  if (kind === 'terminal') {
+    if (!exactKeys(query, ['kind', 'id'])) return null;
+    const id = one(query, 'id');
+    return id && TERMINAL_ID.test(id) ? { kind: 'terminal', id } : null;
+  }
+  if (kind === 'browser') {
+    if (!exactKeys(query, ['kind', 'id'])) return null;
+    const id = one(query, 'id');
+    return id && BROWSER_PAGE_ID.test(id) ? { kind: 'browser', id } : null;
+  }
   return null;
 }
 
@@ -358,6 +515,12 @@ export function referenceIdentity(reference: ResolvedReference): string {
       return `task:${reference.id}`;
     case 'attention':
       return `attention:${reference.id}`;
+    case 'skill':
+      return `skill:${reference.name}`;
+    case 'terminal':
+      return `terminal:${reference.id}`;
+    case 'browser':
+      return `browser:${reference.id}`;
   }
 }
 
@@ -386,6 +549,12 @@ export function revalidateReference(
         return resolvers.task?.(reference.id) ? reference : null;
       case 'attention':
         return resolvers.attention?.(reference.id) ? reference : null;
+      case 'skill':
+        return resolvers.skill?.(reference.name) ? reference : null;
+      case 'terminal':
+        return resolvers.terminal?.(reference.id) ? reference : null;
+      case 'browser':
+        return resolvers.browser?.(reference.id) ? reference : null;
     }
   } catch {
     return null;
@@ -405,6 +574,12 @@ function referenceTitle(reference: ResolvedReference): string {
       return `Open task &${reference.id}`;
     case 'attention':
       return `Open attention !${reference.id}`;
+    case 'skill':
+      return `Open the /${reference.name} skill`;
+    case 'terminal':
+      return `Open terminal ${formatReference(reference)}`;
+    case 'browser':
+      return `Open browser page ${formatReference(reference)}`;
   }
 }
 

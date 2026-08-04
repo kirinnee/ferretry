@@ -44,6 +44,7 @@ import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgentReferenceResolver,
   type AttentionReferenceResolver,
+  type BrowserPageReferenceResolver,
   type CodeReference,
   findReferences,
   parseReferenceHref,
@@ -54,7 +55,9 @@ import {
   referenceIdentity,
   remarkReferences,
   revalidateReference,
+  type SkillReferenceResolver,
   type TaskReferenceResolver,
+  type TerminalReferenceResolver,
 } from '../lib/references.ts';
 import { remarkTableLabels } from '../lib/remark-table-labels.ts';
 
@@ -101,11 +104,20 @@ export interface MarkdownProps {
   readonly taskReferenceResolver?: TaskReferenceResolver;
   /** Proves `!attention` against this session's ledger. */
   readonly attentionReferenceResolver?: AttentionReferenceResolver;
+  /** Proves `/skill` and `$skill` against this session's own skills catalog. */
+  readonly skillReferenceResolver?: SkillReferenceResolver;
+  /** Proves `:term/<id>` against this session's registered terminals (#64). */
+  readonly terminalReferenceResolver?: TerminalReferenceResolver;
+  /** Proves `:page/<id>` against this session's registered browser pages (#64). */
+  readonly browserPageReferenceResolver?: BrowserPageReferenceResolver;
   /** Session filesystem context. Without it, code-shaped text stays plain. */
   readonly resolveFilePaths?: FilePathResolver;
   readonly onTaskOpen?: (id: string, opener?: HTMLElement | null) => void;
   readonly onCodeReferenceOpen?: (reference: CodeReference, opener?: HTMLElement | null) => void;
   readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
+  readonly onSkillOpen?: (name: string, opener?: HTMLElement | null) => void;
+  readonly onTerminalOpen?: (id: string, opener?: HTMLElement | null) => void;
+  readonly onBrowserPageOpen?: (id: string, opener?: HTMLElement | null) => void;
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
 }
@@ -116,10 +128,16 @@ export const Markdown = memo(function Markdown({
   agentReferenceResolver,
   taskReferenceResolver,
   attentionReferenceResolver,
+  skillReferenceResolver,
+  terminalReferenceResolver,
+  browserPageReferenceResolver,
   resolveFilePaths,
   onTaskOpen,
   onCodeReferenceOpen,
   onAttentionOpen,
+  onSkillOpen,
+  onTerminalOpen,
+  onBrowserPageOpen,
   onNavigate,
 }: MarkdownProps) {
   const codeReferenceCandidates = useMemo(
@@ -158,6 +176,9 @@ export const Markdown = memo(function Markdown({
     file: path => resolvedPaths.get(path) ?? null,
     task: taskReferenceResolver,
     attention: attentionReferenceResolver,
+    skill: skillReferenceResolver,
+    terminal: terminalReferenceResolver,
+    browser: browserPageReferenceResolver,
   };
   // Re-proving a rendered link asks whether its CANONICAL path is still one we
   // resolved, not whether the authored candidate maps to it again.
@@ -187,6 +208,15 @@ export const Markdown = memo(function Markdown({
       case 'attention':
         onAttentionOpen?.(target.id, opener);
         break;
+      case 'skill':
+        onSkillOpen?.(target.name, opener);
+        break;
+      case 'terminal':
+        onTerminalOpen?.(target.id, opener);
+        break;
+      case 'browser':
+        onBrowserPageOpen?.(target.id, opener);
+        break;
     }
   };
 
@@ -200,6 +230,12 @@ export const Markdown = memo(function Markdown({
         return onTaskOpen !== undefined;
       case 'attention':
         return onAttentionOpen !== undefined;
+      case 'skill':
+        return onSkillOpen !== undefined;
+      case 'terminal':
+        return onTerminalOpen !== undefined;
+      case 'browser':
+        return onBrowserPageOpen !== undefined;
     }
   };
 

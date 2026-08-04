@@ -197,6 +197,59 @@ describe('Markdown references', () => {
     should(opened).deepEqual(['A3']);
   });
 
+  test('should hand a proved skill reference to its opener under either sigil', () => {
+    // Arrange
+    const opened: string[] = [];
+    const tree = render(
+      <Markdown
+        onSkillOpen={name => opened.push(name)}
+        skillReferenceResolver={name => name === 'summary'}
+        text="run /summary or $summary, never /missing"
+      />,
+    );
+
+    // Act
+    const anchors = anchorsOf(tree.root);
+    for (const anchor of anchors) anchor.props.onClick(primaryClick());
+
+    // Assert
+    should(anchors.map(anchor => textOf(anchor))).deepEqual(['/summary', '$summary']);
+    should(anchors[0]?.props.href).equal('#fy-reference?kind=skill&name=summary');
+    should(opened).deepEqual(['summary', 'summary']);
+  });
+
+  test('should hand a proved terminal or browser page instance to its opener', () => {
+    // Arrange
+    const terminals: string[] = [];
+    const pages: string[] = [];
+    const tree = render(
+      <Markdown
+        browserPageReferenceResolver={() => true}
+        onBrowserPageOpen={id => pages.push(id)}
+        onTerminalOpen={id => terminals.push(id)}
+        terminalReferenceResolver={() => true}
+        text="watch :term/0a1b2c3d4e5f and :page/PAGE-1"
+      />,
+    );
+
+    // Act
+    for (const anchor of anchorsOf(tree.root)) anchor.props.onClick(primaryClick());
+
+    // Assert
+    should(terminals).deepEqual(['0a1b2c3d4e5f']);
+    should(pages).deepEqual(['PAGE-1']);
+  });
+
+  test('should leave an instance token as prose while nothing can prove it', () => {
+    // Act — handover #64 supplies the live proof; until then it is text.
+    const tree = render(
+      <Markdown onBrowserPageOpen={() => {}} onTerminalOpen={() => {}} text="watch :term/0a1b2c3d4e5f" />,
+    );
+
+    // Assert
+    should(anchorsOf(tree.root)).be.empty();
+  });
+
   test('should leave a proved reference inert when the host offers no opener for its kind', () => {
     // Act
     const tree = render(<Markdown taskReferenceResolver={() => true} text="see &F12" />);
