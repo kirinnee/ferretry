@@ -34,6 +34,7 @@ import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prom
 import { Composer } from '../src/components/composer.tsx';
 import { DictationControl } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
+import { FileInstanceSurface } from '../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../src/components/files-tab.tsx';
 import type { CaptureMonitor } from '../src/components/input-waveform.tsx';
 import { LedgerMessage } from '../src/components/ledger-message.tsx';
@@ -353,7 +354,7 @@ const harnessChildSession = {
   config: { ...harnessSession.config, parent: 'harness-lead' },
 } as SessionView;
 
-openSidePaneTab(scope, 'pins');
+openSidePaneTab(scope, 'tasks');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
 
@@ -782,13 +783,44 @@ const HARNESS_FS_CHANGES = {
   ],
 };
 
+/**
+ * One real file body, so the file INSTANCE tab (#35) paints its own bytes
+ * rather than a network failure. The harness aborts every non-loopback request,
+ * so a file tab has nothing to show unless this answers for it.
+ */
+const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
+  'CLAUDE.md': {
+    path: 'CLAUDE.md',
+    lang: 'markdown',
+    content: [
+      '# Workspace agent guide',
+      '',
+      'Use the repository\u2019s nix shell for every command.',
+      'This file is a pure index \u2014 the linked documents own their subjects.',
+      '',
+      '## Non-negotiable invariants',
+      '',
+      '- **Name single-sourcing**: the PRODUCT name is the root package name;',
+      '  the BINARY name is the bin key in the CLI package.',
+      '- **The Homebrew cask is committed into this repo** under Casks/.',
+    ].join('\n'),
+  },
+  'Taskfile.yaml': {
+    path: 'Taskfile.yaml',
+    lang: 'yaml',
+    content: ['version: "3"', '', 'tasks:', '  test:', '    desc: Run unit, integration and SIT suites'].join('\n'),
+  },
+};
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
   if (url.hostname !== 'daemon.invalid' || !url.pathname.includes('/fs')) return await harnessFetch(input, init);
   const body = url.pathname.endsWith('/fs/changes')
     ? HARNESS_FS_CHANGES
-    : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
+    : url.pathname.endsWith('/fs/file')
+      ? (HARNESS_FS_FILES[url.searchParams.get('path') ?? ''] ?? { path: url.searchParams.get('path') ?? '' })
+      : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
   return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
 }) as typeof fetch;
 
@@ -2950,6 +2982,28 @@ function Shell() {
       ),
     },
     {
+      label: 'File tab body',
+      render: () => (
+        <Card aria-label="File tab body" className="min-w-0 overflow-hidden" id="harness-file-instance">
+          <div className="flex h-[26rem] flex-col" data-harness="file-instance-surface">
+            <FileInstanceSurface
+              daemon={daemon}
+              scope={scope}
+              instance={{
+                id: 'file:CLAUDE.md',
+                kind: 'file',
+                key: 'CLAUDE.md',
+                label: 'CLAUDE.md',
+                title: 'CLAUDE.md',
+                order: 1,
+                revision: 1,
+              }}
+            />
+          </div>
+        </Card>
+      ),
+    },
+    {
       label: 'Files browser',
       render: () => (
         <Card aria-label="Files browser" className="min-w-0 overflow-hidden" id="harness-files">
@@ -3506,7 +3560,7 @@ function OnboardingStageHarness({ screen }: { readonly screen: HarnessOnboarding
 // ---- the assembled session workspace ---------------------------------------
 //
 // A scope of its own, deliberately NOT the gallery's `scope`. The gallery opens
-// pins and two file tabs on that scope at module load (see the `openSidePaneTab`
+// tasks and two file tabs on that scope at module load (see the `openSidePaneTab`
 // calls above), and inheriting them would make this page open with a pane
 // already up — on a phone that means a focus-trapped sheet over the very
 // transcript and composer this fixture exists to show. Starting empty is also
