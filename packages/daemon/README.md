@@ -14,7 +14,7 @@ $FY_HOME/
 ├── layout-version
 ├── daemon.lock
 ├── config/
-│   └── daemon.json                 # reserved daemon configuration
+│   └── daemon.json                 # daemon configuration, incl. the analytics pricing catalog
 ├── fleet/
 │   └── manifest.json               # reserved for the fleet unit
 └── state/
@@ -59,6 +59,58 @@ the parsed root instead of extending a shared path hub.
   journals refresh metadata without a chunk scan; append-only growth scans only the suffix while
   retaining absolute source-line context. Replacements, shrinks, unsafe line continuations, and
   mismatched pointers fall back to a byte-zero rescan.
+
+## Analytics pricing catalog
+
+`fy analytics` reports what usage would have cost. It never guesses a rate: the daemon ships with
+an EMPTY catalog, and a model you have not priced stays `unpriced` with a reason rather than
+resolving to zero. Supply your own rates under `analyticsPricing` in `config/daemon.json`.
+
+The catalog belongs to one daemon's state home and is never shared with another.
+
+```jsonc
+{
+  "analyticsPricing": [
+    {
+      // Your own stable reference for this price. It is retained on every session it prices, so a
+      // later catalog edit cannot silently rewrite what a historical run was billed at.
+      "pricingKey": "acme:claude-opus-5:2026-08",
+      "modelId": "claude-opus-5",
+      // Other spellings the same model appears under in transcripts.
+      "aliases": ["opus-5"],
+      "provider": "anthropic",
+      // Integer USD MICROS per MILLION tokens. $15.00 per million input = 15000000.
+      // Never floating-point dollars: money that rounds is money that disagrees with itself.
+      "ratesUsdMicrosPerMillion": {
+        "input": 15000000,
+        "cachedRead": 1500000,
+        "cacheWrite5m": 18750000,
+        "cacheWrite1h": 30000000,
+        "output": 75000000,
+      },
+      // When YOU last checked this rate against its authoritative source.
+      "verifiedAt": "2026-08-01T00:00:00.000Z",
+      "validFrom": "2026-08-01T00:00:00.000Z",
+      // "validThrough" closes the window when you supersede this rate with a later entry.
+    },
+  ],
+}
+```
+
+Rules the daemon enforces, and what they cost you if you ignore them:
+
+- **A malformed catalog refuses startup.** Duplicate `pricingKey`s, two rates covering the same
+  model from the same instant, or one alias claimed by two models are all rejected before the
+  daemon runs. A daemon that started on an ambiguous catalog would report an amount that depended
+  on catalog order.
+- **`provider` decides how cache writes are billed.** For `anthropic`, set BOTH `cacheWrite5m` and
+  `cacheWrite1h` — Anthropic bills the two retentions differently, so a session that wrote to cache
+  is reported unpriced until both exist. For `openai`, set the single `cacheWrite` (use `0` if your
+  provider does not bill cache writes).
+- **Prices apply from `validFrom` onward, matched against when the session was created.** Raising a
+  rate does not re-bill last month; add a new entry and close the old one with `validThrough`.
+- **This is not your bill.** These rates value tokens as if they were bought per token. If the
+  account is a subscription, the marginal token cost is not what you pay, and every surface says so.
 
 ## Architecture
 
