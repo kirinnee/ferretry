@@ -10,26 +10,22 @@
 import {
   Cable,
   ChartNoAxesCombined,
-  CircleAlert,
   FileCode2,
   FolderGit2,
   GitFork,
   Globe2,
   ListTodo,
   type LucideIcon,
-  Pin,
   Sparkles,
   SquareTerminal,
 } from 'lucide-react';
 import type { SidePaneTabIconName } from './side-pane-tab-model.ts';
 
 export const SIDE_PANE_TAB_ICONS: Readonly<Record<SidePaneTabIconName, LucideIcon>> = {
-  pins: Pin,
   tasks: ListTodo,
   skills: Sparkles,
   lineage: GitFork,
   mcp: Cable,
-  attention: CircleAlert,
   analytics: ChartNoAxesCombined,
   browser: Globe2,
   files: FolderGit2,

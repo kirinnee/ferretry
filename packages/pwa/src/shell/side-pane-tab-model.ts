@@ -23,12 +23,12 @@
  *              destroyed by the app-level LRU, and an evicted-then-revisited
  *              session must come back to the tabs it had.
  *
- * Every session starts with the human's chosen default strip: pins, tasks,
- * skills, tree (lineage), mcp, needs (attention) and cost (analytics) — all
- * singletons, all utility tabs. Files, browser pages and terminals join the
- * strip as INSTANCE tabs when something opens them.
+ * Every session starts with the human's chosen default strip: tasks, skills,
+ * tree (lineage), mcp and cost (analytics) — all singletons, all utility tabs.
+ * Files, browser pages and terminals join the strip as INSTANCE tabs when
+ * something opens them.
  *
- * TWO DELIBERATE DEPARTURES FROM THE ORIGINAL:
+ * THREE DELIBERATE DEPARTURES FROM THE ORIGINAL:
  *
  *   1. State is keyed by `(daemonId, sessionId)`, never by session id alone
  *      (`docs/migration/surveys/pwa-shape.md` item 52). Two daemons routinely
@@ -38,6 +38,13 @@
  *      gone along with `setSidePaneBrowserDestination`. It existed purely as a
  *      back-compat seam for historical snapshot readers; Ferretry starts empty
  *      and has none. Live pages carry their own destination.
+ *   3. PINS AND ATTENTION ARE NOT TABS. `DESIGN-side-pane-tabs.md` lists both
+ *      among the wave-1 utility singletons; handover row #35 overrules it —
+ *      "Pins and Attention do not belong in this bento/side-pane model". They
+ *      have their own homes: #63 puts pins in a top link strip, #17 gives
+ *      Attention a focused action modal. Neither id is registered here, and
+ *      `openSidePaneTab` refuses an unregistered id rather than parking a tab
+ *      that resolves to nothing.
  */
 
 import type { ReactNode } from 'react';
@@ -132,12 +139,10 @@ const INSTANCE_KIND_RETAIN: Record<SidePaneInstanceKind, boolean> = { file: fals
 
 /** Every glyph the strip can show. `side-pane-tab-icons.tsx` resolves these. */
 export type SidePaneTabIconName =
-  | 'pins'
   | 'tasks'
   | 'skills'
   | 'lineage'
   | 'mcp'
-  | 'attention'
   | 'analytics'
   | 'browser'
   | 'files'
@@ -193,8 +198,10 @@ export interface SidePaneTabDefinition {
 //
 // Array order is the HISTORICAL surface key order (the bento launcher preserves
 // it); `order` is the STRIP order, which follows the human's default-tab
-// listing: pins, tasks, skills, tree, mcp, needs, cost — then the on-demand
-// catalogue entries web, files, terminals.
+// listing MINUS pins and needs: tasks, skills, tree, mcp, cost — then the
+// on-demand catalogue entries web, files, terminals. The two `order` values the
+// removed tabs held (10 and 60) are deliberately left as gaps rather than
+// renumbered, so a strip persisted by an earlier build sorts unchanged.
 //
 // `browser` is a CATALOGUE entry, not a strip tab: every open of it becomes a
 // per-page instance tab (`instanceKind`). `files` is the file PICKER — the
@@ -222,15 +229,6 @@ export const SIDE_PANE_BUILT_IN_TABS: readonly SidePaneTabDefinition[] = [
     closeLabel: 'Close tasks',
     icon: 'tasks',
     order: 20,
-    defaultOpen: true,
-  },
-  {
-    id: 'pins',
-    label: 'Pins',
-    shortLabel: 'Pins',
-    closeLabel: 'Close pins',
-    icon: 'pins',
-    order: 10,
     defaultOpen: true,
   },
   {
@@ -267,15 +265,6 @@ export const SIDE_PANE_BUILT_IN_TABS: readonly SidePaneTabDefinition[] = [
     closeLabel: 'Close analytics',
     icon: 'analytics',
     order: 70,
-    defaultOpen: true,
-  },
-  {
-    id: 'attention',
-    label: 'Attention',
-    shortLabel: 'Needs',
-    closeLabel: 'Close attention',
-    icon: 'attention',
-    order: 60,
     defaultOpen: true,
   },
   {
@@ -504,13 +493,20 @@ export function writeSidePaneTabsState(scope: DaemonSessionScope, next: SidePane
  *  land here, so opening a non-default surface always materialises its tab. A
  *  catalogue entry that spawns instances (`instanceKind`) redirects: it focuses
  *  the most recent instance of that kind, or creates a fresh one, so its
- *  singleton id never enters the strip. */
+ *  singleton id never enters the strip.
+ *
+ *  An id that is neither registered nor an already-open instance is REFUSED.
+ *  Pins and Attention left this model (handover #35) and their old callers are
+ *  exactly the shape this guards: parking an id that `resolveSidePaneTab`
+ *  cannot resolve produced a strip entry rendering nowhere and a pane the host
+ *  had to deactivate on the next effect. Absence must refuse, not invent. */
 export function openSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId): void {
   const definition = registry.get(id);
   if (definition?.instanceKind === 'browser') {
     openSidePaneBrowserTab(scope, null);
     return;
   }
+  if (definition === undefined && readSidePaneTabsState(scope).instances[id] === undefined) return;
   const current = readSidePaneTabsState(scope);
   const open = current.open.includes(id) ? current.open : sortSidePaneTabs([...current.open, id], current.instances);
   if (open === current.open && current.active === id) return;

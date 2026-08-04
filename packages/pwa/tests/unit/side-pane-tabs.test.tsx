@@ -15,7 +15,7 @@ const singleton = (id: string, label: string, extra: Partial<SidePaneTabDefiniti
   label,
   shortLabel: label.slice(0, 4),
   closeLabel: `Close ${label}`,
-  icon: 'pins',
+  icon: 'tasks',
   order: 10,
   ...extra,
 });

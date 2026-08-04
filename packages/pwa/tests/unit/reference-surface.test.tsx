@@ -168,23 +168,34 @@ describe('sessionReferenceSurface', () => {
     should(readSidePaneTabsState(scope).instances[id]?.selection).deepEqual({ line: 4 });
   });
 
-  test('should send task, attention and skill clicks to their own pane', () => {
+  test('should send task and skill clicks to their own pane', () => {
     // Arrange
     const surface = sessionReferenceSurface({ connection, scope });
 
     // Act
     surface.onTaskOpen?.('F12');
     const afterTask = readSidePaneTabsState(scope).active;
-    surface.onAttentionOpen?.('A3' as AttentionId);
-    const afterAttention = readSidePaneTabsState(scope).active;
     surface.onSkillOpen?.('summary');
 
     // Assert
-    should([afterTask, afterAttention, readSidePaneTabsState(scope).active]).deepEqual([
-      'tasks',
-      'attention',
-      'skills',
-    ]);
+    should([afterTask, readSidePaneTabsState(scope).active]).deepEqual(['tasks', 'skills']);
+  });
+
+  // Attention is deliberately NOT a side-pane tab (handover #35) and #17's
+  // focused modal does not exist yet. Omitting the opener is what makes a proved
+  // `!A3` render as text instead of a link into nothing — asserted here so the
+  // omission cannot be "fixed" back into a dead link by accident.
+  test('should offer no Attention opener while Attention has no surface to open', () => {
+    // Arrange
+    const surface = sessionReferenceSurface({ connection, scope });
+    const before = readSidePaneTabsState(scope).active;
+
+    // Act
+    surface.onAttentionOpen?.('A3' as AttentionId);
+
+    // Assert
+    should(surface.onAttentionOpen).be.undefined();
+    should(readSidePaneTabsState(scope).active).equal(before);
   });
 
   test('should open a proved terminal surface as that exact terminal instance', () => {
