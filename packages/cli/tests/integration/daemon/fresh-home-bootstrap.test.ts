@@ -86,7 +86,7 @@ async function startThroughTheCli(root: string): Promise<string> {
   const built = await snapshots.build();
   await snapshots.promote(built.id);
   const supervisor = new DirectSupervisor(layout, new BunDaemonProcess(), new FileServiceStore());
-  const handle = await supervisor.start();
+  const handle = await supervisor.start(built.binaryPath);
   if (handle.pid !== undefined) {
     // Reap the child immediately: this test is about the directory it was launched into.
     try {

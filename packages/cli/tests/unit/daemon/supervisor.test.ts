@@ -7,10 +7,11 @@ import {
   SystemdSupervisor,
   UnsupportedServiceManagerError,
 } from '../../../src/lib/daemon/supervisor';
-import { type CommandScript, FakeFiles, FakeProcesses, layout } from './fixtures';
+import { type CommandScript, daemonSnapshot, FakeFiles, FakeProcesses, layout } from './fixtures';
 
 const linux = layout();
 const mac = layout({ platform: 'darwin', userId: 501 });
+const artifact = daemonSnapshot();
 
 function systemd(script: CommandScript = []): {
   supervisor: SystemdSupervisor;
@@ -38,10 +39,11 @@ describe('systemd supervisor install', () => {
     const { supervisor, processes, files } = systemd();
 
     // Act
-    await supervisor.install();
+    await supervisor.install(artifact.binaryPath);
 
     // Assert
-    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${linux.daemonBinary}"`);
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${artifact.binaryPath}"`);
+    should(files.written.get(linux.systemdUnitFile)).not.containEql(`ExecStart="${linux.daemonBinary}"`);
     should(processes.ran).deepEqual([
       'systemctl --user daemon-reload',
       'systemctl --user enable fyd.service',
@@ -54,7 +56,7 @@ describe('systemd supervisor install', () => {
     const { supervisor, files } = systemd();
 
     // Act
-    await supervisor.install();
+    await supervisor.install(artifact.binaryPath);
 
     // Assert
     should(files.directories).deepEqual([`${linux.systemdUnitFile.replace('/fyd.service', '')}`, linux.logDirectory]);
@@ -65,7 +67,7 @@ describe('systemd supervisor install', () => {
     const { supervisor } = systemd([['enable', { code: 1, stdout: '', stderr: 'Failed to enable unit\n' }]]);
 
     // Act + Assert
-    await should(supervisor.install()).be.rejectedWith(/Failed to enable unit/u);
+    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/Failed to enable unit/u);
   });
 
   it('should still name the command when systemctl failed silently', async () => {
@@ -75,7 +77,7 @@ describe('systemd supervisor install', () => {
     // Act
     let caught: unknown;
     try {
-      await supervisor.install();
+      await supervisor.install(artifact.binaryPath);
     } catch (error) {
       caught = error;
     }
@@ -107,13 +109,14 @@ describe('systemd supervisor lifecycle', () => {
 
   it('should start through systemctl, which is already idempotent', async () => {
     // Arrange
-    const { supervisor, processes } = systemd();
+    const { supervisor, processes, files } = systemd();
 
     // Act
-    const actual = await supervisor.start();
+    const actual = await supervisor.start(artifact.binaryPath);
 
     // Assert
     should(processes.ran).containEql('systemctl --user start fyd.service');
+    should(files.written.get(linux.systemdUnitFile)).containEql(`ExecStart="${artifact.binaryPath}"`);
     should(actual.pid).be.undefined();
   });
 
@@ -200,10 +203,11 @@ describe('launchd supervisor install', () => {
     const { supervisor, processes, files } = launchd();
 
     // Act
-    await supervisor.install();
+    await supervisor.install(artifact.binaryPath);
 
     // Assert
     should(files.written.get(mac.launchAgentFile)).containEql('<key>Label</key><string>com.ferretry.fyd</string>');
+    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${artifact.binaryPath}</string>`);
     should(processes.ran).deepEqual([
       'launchctl bootout gui/501/com.ferretry.fyd',
       `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
@@ -215,7 +219,7 @@ describe('launchd supervisor install', () => {
     const { supervisor } = launchd([['bootout', { code: 3, stdout: '', stderr: 'No such process' }]]);
 
     // Act + Assert — an unloaded job cannot be booted out, so this must not abort the install.
-    await should(supervisor.install()).be.fulfilled();
+    await should(supervisor.install(artifact.binaryPath)).be.fulfilled();
   });
 
   it('should surface a bootstrap failure', async () => {
@@ -223,32 +227,39 @@ describe('launchd supervisor install', () => {
     const { supervisor } = launchd([['bootstrap', { code: 5, stdout: '', stderr: 'Input/output error' }]]);
 
     // Act + Assert
-    await should(supervisor.install()).be.rejectedWith(/Input\/output error/u);
+    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/Input\/output error/u);
   });
 });
 
 describe('launchd supervisor start', () => {
-  it('should kickstart a loaded job WITHOUT killing it', async () => {
-    // Arrange — kteam used `kickstart -k`, so `start` restarted a perfectly healthy daemon.
-    const { supervisor, processes } = launchd([['print', { code: 0, stdout: '\tstate = running\n', stderr: '' }]]);
+  it('should reload a cached legacy job after writing the exact snapshot arguments', async () => {
+    // Arrange — launchd keeps the ProgramArguments loaded at bootstrap even after the plist changes.
+    const { supervisor, processes, files } = launchd();
 
     // Act
-    await supervisor.start();
+    await supervisor.start(artifact.binaryPath);
 
     // Assert
-    should(processes.ran).containEql('launchctl kickstart gui/501/com.ferretry.fyd');
-    should(processes.ran.join(' ')).not.containEql('-k');
+    should(files.written.get(mac.launchAgentFile)).containEql(`<string>${artifact.binaryPath}</string>`);
+    should(processes.ran).deepEqual([
+      'launchctl bootout gui/501/com.ferretry.fyd',
+      `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
+    ]);
+    should(processes.ran.join(' ')).not.containEql('kickstart');
   });
 
-  it('should bootstrap the job when it is not loaded at all', async () => {
+  it('should tolerate bootout when no cached job is loaded, then bootstrap the new definition', async () => {
     // Arrange
-    const { supervisor, processes } = launchd([['print', { code: 113, stdout: '', stderr: 'Could not find service' }]]);
+    const { supervisor, processes } = launchd([['bootout', { code: 3, stdout: '', stderr: 'No such process' }]]);
 
     // Act
-    await supervisor.start();
+    await supervisor.start(artifact.binaryPath);
 
     // Assert
-    should(processes.ran).containEql(`launchctl bootstrap gui/501 ${mac.launchAgentFile}`);
+    should(processes.ran).deepEqual([
+      'launchctl bootout gui/501/com.ferretry.fyd',
+      `launchctl bootstrap gui/501 ${mac.launchAgentFile}`,
+    ]);
   });
 });
 
@@ -344,7 +355,7 @@ describe('direct supervisor', () => {
     const { supervisor } = direct();
 
     // Act + Assert
-    await should(supervisor.install()).be.rejectedWith(UnsupportedServiceManagerError);
+    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(UnsupportedServiceManagerError);
     await should(supervisor.uninstall()).be.rejectedWith(/systemd user services on Linux/u);
   });
 
@@ -353,12 +364,13 @@ describe('direct supervisor', () => {
     const { supervisor, processes, files } = direct();
 
     // Act
-    const actual = await supervisor.start();
+    const actual = await supervisor.start(artifact.binaryPath);
 
     // Assert
     should(files.directories).deepEqual([linux.logDirectory]);
     should(processes.launched).have.length(1);
-    should(processes.launched[0]?.argv).deepEqual([linux.daemonBinary]);
+    should(processes.launched[0]?.argv).deepEqual([artifact.binaryPath]);
+    should(processes.launched[0]?.argv).not.deepEqual([linux.daemonBinary]);
     should(processes.launched[0]?.environment).deepEqual({ FY_HOME: linux.stateHome, PATH: linux.searchPath });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);

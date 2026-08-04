@@ -172,10 +172,11 @@ export interface IDaemonSupervisor {
   readonly manager: DaemonManagerKind;
   /** Is a service definition installed for this host? */
   installed(): Promise<boolean>;
-  install(): Promise<void>;
+  /** Install supervision and launch this exact verified immutable artifact. */
+  install(executable: string): Promise<void>;
   uninstall(): Promise<void>;
-  /** Bring the daemon up. Idempotent: never disturbs a healthy incumbent. */
-  start(): Promise<DaemonStartHandle>;
+  /** Bring this exact verified immutable artifact up; the controller guards healthy incumbents. */
+  start(executable: string): Promise<DaemonStartHandle>;
   stop(request: StopRequest): Promise<void>;
   /** `handle` lets the direct supervisor watch the child it just started. */
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport>;
@@ -189,6 +190,4 @@ export interface IDaemonSupervisor {
  */
 export interface IServiceDefinitionSupervisor extends IDaemonSupervisor {
   readonly definitionPath: string;
-  /** Rewrite the definition to the current promoted snapshot without disturbing a running daemon. */
-  refresh(): Promise<void>;
 }

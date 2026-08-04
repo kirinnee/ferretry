@@ -89,6 +89,7 @@ describe('daemon install', () => {
 
     // Assert
     should(service.calls).containEql('install');
+    should(service.installedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).containEql('fyd user service installed from');
     should(out.text).containEql('and started (pid 4242)');
   });
@@ -158,7 +159,7 @@ describe('daemon start', () => {
 
     // Assert
     should(service.calls).containEql('start');
-    should(service.calls.indexOf('refresh')).be.below(service.calls.indexOf('start'));
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).equal('ok: fyd ready (pid 4242)');
   });
 
@@ -174,6 +175,7 @@ describe('daemon start', () => {
 
     // Assert
     should(direct.calls).containEql('start');
+    should(direct.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(service.calls).not.containEql('start');
   });
 
@@ -300,8 +302,8 @@ describe('daemon restart', () => {
     await controller.restart();
 
     // Assert
-    should(service.calls.indexOf('refresh')).be.below(service.calls.indexOf('stop'));
     should(service.calls.indexOf('stop')).be.below(service.calls.indexOf('start'));
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).endWith('ok: fyd restarted (pid 4242)');
   });
 
@@ -317,6 +319,7 @@ describe('daemon restart', () => {
 
     // Assert
     should(service.stops).be.empty();
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.lines[0]).equal('warn: fyd was not running; starting it');
     should(out.text).containEql('ok: fyd restarted (pid 4242)');
   });
@@ -540,6 +543,36 @@ describe('nix garbage-collection root', () => {
     should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
   });
 
+  it('should launch the exact snapshot it verified and pinned even when promotion moves concurrently', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    const selected = daemonSnapshot({
+      id: `sha256-${'c'.repeat(64)}`,
+      sourceBinary: STORE_BINARY,
+      binaryPath: '/immutable/snapshots/selected/fyd',
+    });
+    const later = daemonSnapshot({
+      id: `sha256-${'d'.repeat(64)}`,
+      sourceBinary: '/opt/fy/bin/later-fyd',
+      binaryPath: '/immutable/snapshots/later/fyd',
+    });
+    snapshots.currentAnswer = selected;
+    const nix = new FakeNixGcRoot();
+    nix.links.set(STORE_BINARY, STORE_BINARY);
+    nix.afterRealPath = () => {
+      snapshots.currentAnswer = later;
+    };
+    const subject = harness({ probes: [undefined, health()], snapshots, nix });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert — promotion changed after capture, but pinning and execution stay bound to snapshot A.
+    should(nix.realPaths).deepEqual([selected.sourceBinary]);
+    should(subject.service.startedExecutables).deepEqual([selected.binaryPath]);
+    should(subject.service.startedExecutables).not.containEql(later.binaryPath);
+  });
+
   it('should start the daemon anyway when the pin fails, and say so', async () => {
     // Arrange — no `nix-store` on PATH is the ordinary case here, and it must not fail the start.
     const subject = fromTheStore({ probes: [undefined, health()] });
@@ -625,7 +658,9 @@ describe('daemon snapshots', () => {
 
     // Assert
     should(snapshots.calls).deepEqual([`promote:${older.id}`]);
-    should(out.text).equal(`ok: fyd snapshot ${older.id} promoted; the running daemon is unchanged until restart`);
+    should(out.text).equal(
+      `ok: fyd snapshot ${older.id} promoted; the running daemon is unchanged until the next managed launch`,
+    );
   });
 
   it('should render the promoted marker and a machine-readable snapshot list', async () => {

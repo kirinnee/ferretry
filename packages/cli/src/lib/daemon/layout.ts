@@ -49,7 +49,7 @@ export interface DaemonLayout {
   readonly logFile: string;
   /** The installed executable from which an operator deliberately builds snapshots. */
   readonly sourceDaemonBinary: string;
-  /** Stable atomic pointer to the promoted snapshot; every supervisor executes this path. */
+  /** Stable atomic selection pointer; supervisors execute the captured snapshot path, never this. */
   readonly daemonBinary: string;
   /** Daemon-keyed root of the CLI-owned immutable snapshot store. */
   readonly snapshotRoot: string;

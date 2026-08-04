@@ -178,9 +178,11 @@ export class FakeNixGcRoot implements INixGcRootPort {
   readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
   readonly released: string[] = [];
   failure: string | undefined;
+  afterRealPath: (() => void) | undefined;
 
   realPath(path: string): Promise<string> {
     this.realPaths.push(path);
+    this.afterRealPath?.();
     return Promise.resolve(this.links.get(path) ?? path);
   }
 
@@ -279,6 +281,8 @@ export class SteppingClock implements IClockPort {
 export class FakeSupervisor implements IServiceDefinitionSupervisor {
   readonly calls: string[] = [];
   readonly stops: StopRequest[] = [];
+  readonly installedExecutables: string[] = [];
+  readonly startedExecutables: string[] = [];
   startHandle: DaemonStartHandle = { pid: 777 };
   installedAnswer = true;
   reports: DaemonSupervisorReport[] = [];
@@ -295,8 +299,9 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
     return Promise.resolve(this.installedAnswer);
   }
 
-  install(): Promise<void> {
+  install(executable: string): Promise<void> {
     this.calls.push('install');
+    this.installedExecutables.push(executable);
     return this.installError === undefined ? Promise.resolve() : Promise.reject(this.installError);
   }
 
@@ -305,13 +310,9 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
     return Promise.resolve();
   }
 
-  refresh(): Promise<void> {
-    this.calls.push('refresh');
-    return Promise.resolve();
-  }
-
-  start(): Promise<DaemonStartHandle> {
+  start(executable: string): Promise<DaemonStartHandle> {
     this.calls.push('start');
+    this.startedExecutables.push(executable);
     return Promise.resolve(this.startHandle);
   }
 

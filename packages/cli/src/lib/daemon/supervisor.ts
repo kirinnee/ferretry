@@ -50,19 +50,19 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     return await this.files.exists(this.definitionPath);
   }
 
-  async install(): Promise<void> {
-    await this.refresh();
+  async install(executable: string): Promise<void> {
+    await this.#refresh(executable);
     await this.#require(['enable', this.layout.systemdUnitName]);
     await this.#require(['restart', this.layout.systemdUnitName]);
   }
 
-  async refresh(): Promise<void> {
+  async #refresh(executable: string): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.systemdUnitFile));
     await this.files.ensureDirectory(this.layout.logDirectory);
     await this.files.writePrivate(
       this.layout.systemdUnitFile,
       renderSystemdUnit({
-        daemonBinary: this.layout.daemonBinary,
+        daemonBinary: executable,
         stateHome: this.layout.stateHome,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
@@ -79,8 +79,8 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     await this.#require(['daemon-reload']);
   }
 
-  async start(): Promise<DaemonStartHandle> {
-    await this.files.ensureDirectory(this.layout.logDirectory);
+  async start(executable: string): Promise<DaemonStartHandle> {
+    await this.#refresh(executable);
     await this.#require(['start', this.layout.systemdUnitName]);
     return {};
   }
@@ -137,21 +137,26 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     return await this.files.exists(this.definitionPath);
   }
 
-  async install(): Promise<void> {
-    await this.refresh();
+  async install(executable: string): Promise<void> {
+    await this.#reload(executable);
+  }
+
+  /** Rewrite and reload: launchd caches ProgramArguments from bootstrap, not from the plist path. */
+  async #reload(executable: string): Promise<void> {
+    await this.#writeDefinition(executable);
     // An unloaded job cannot be booted out, so this failure is expected and ignored.
     await this.processes.run(['launchctl', 'bootout', this.layout.launchdServiceTarget]);
     await this.#require(['bootstrap', this.layout.launchdDomain, this.layout.launchAgentFile]);
   }
 
-  async refresh(): Promise<void> {
+  async #writeDefinition(executable: string): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.launchAgentFile));
     await this.files.ensureDirectory(this.layout.logDirectory);
     await this.files.writePrivate(
       this.layout.launchAgentFile,
       renderLaunchAgentPlist({
         label: this.layout.launchdLabel,
-        daemonBinary: this.layout.daemonBinary,
+        daemonBinary: executable,
         stateHome: this.layout.stateHome,
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
@@ -165,17 +170,8 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     await this.files.remove(this.layout.launchAgentFile);
   }
 
-  async start(): Promise<DaemonStartHandle> {
-    await this.files.ensureDirectory(this.layout.logDirectory);
-    const loaded = await this.processes.run(['launchctl', 'print', this.layout.launchdServiceTarget]);
-    // `kickstart` without `-k` starts a stopped job and leaves a running one alone. kteam passed `-k`,
-    // which means "kill the running instance first" — so its `start` restarted a perfectly healthy
-    // daemon, dropping every in-flight request for no reason.
-    await this.#require(
-      loaded.code === 0
-        ? ['kickstart', this.layout.launchdServiceTarget]
-        : ['bootstrap', this.layout.launchdDomain, this.layout.launchAgentFile],
-    );
+  async start(executable: string): Promise<DaemonStartHandle> {
+    await this.#reload(executable);
     return {};
   }
 
@@ -224,7 +220,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
     return Promise.resolve(false);
   }
 
-  install(): Promise<void> {
+  install(_executable: string): Promise<void> {
     return Promise.reject(new UnsupportedServiceManagerError());
   }
 
@@ -232,10 +228,10 @@ export class DirectSupervisor implements IDaemonSupervisor {
     return Promise.reject(new UnsupportedServiceManagerError());
   }
 
-  async start(): Promise<DaemonStartHandle> {
+  async start(executable: string): Promise<DaemonStartHandle> {
     await this.files.ensureDirectory(this.layout.logDirectory);
     return await this.processes.spawnDetached({
-      argv: [this.layout.daemonBinary],
+      argv: [executable],
       environment: { FY_HOME: this.layout.stateHome, PATH: this.layout.searchPath },
       logFile: this.layout.logFile,
     });

@@ -94,7 +94,7 @@ export class DaemonController {
     const service = this.#service();
     // Before the definition is written, so a unit file never names a store path nothing is holding.
     await this.#pinDaemonBinary(snapshot);
-    await service.install();
+    await service.install(snapshot.binaryPath);
     const health = await this.#awaitReady(service, {});
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
   }
@@ -121,8 +121,7 @@ export class DaemonController {
     const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
     await this.#pinDaemonBinary(snapshot);
-    await this.#refreshDefinition(owner);
-    const handle = await owner.start();
+    const handle = await owner.start(snapshot.binaryPath);
     const health = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
   }
@@ -143,13 +142,12 @@ export class DaemonController {
     // must leave the currently running daemon alone, not turn a repairable refusal into downtime.
     const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
-    await this.#refreshDefinition(owner);
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
     // Restart is when an upgraded executable is picked up, so the root is re-pointed here too.
     await this.#pinDaemonBinary(snapshot);
-    const handle = await owner.start();
+    const handle = await owner.start(snapshot.binaryPath);
     const ready = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
   }
@@ -189,7 +187,7 @@ export class DaemonController {
   async promoteSnapshot(id: string): Promise<void> {
     const snapshot = await this.deps.snapshots.promote(id);
     this.deps.out.success(
-      `${this.#name} snapshot ${snapshot.id} promoted; the running daemon is unchanged until restart`,
+      `${this.#name} snapshot ${snapshot.id} promoted; the running daemon is unchanged until the next managed launch`,
     );
   }
 
@@ -262,12 +260,6 @@ export class DaemonController {
     const promoted = await this.deps.snapshots.promote(built.id);
     this.deps.out.warn(`no promoted ${this.#name} snapshot existed; built and promoted ${promoted.id}`);
     return promoted;
-  }
-
-  /** A stopped legacy unit may still name live source; refresh it before the next managed start. */
-  async #refreshDefinition(owner: IDaemonSupervisor): Promise<void> {
-    const service = this.deps.service;
-    if (service !== undefined && owner === service) await service.refresh();
   }
 
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */
