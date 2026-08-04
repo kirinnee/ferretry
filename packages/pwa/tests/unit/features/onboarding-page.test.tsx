@@ -17,6 +17,7 @@ import { describe, expect, it } from 'bun:test';
 
 import type { DeviceKind } from '../../../src/features/onboarding/device-kind.ts';
 import { CHECKING_HOSTED_RELAY, type HostedRelayFallback } from '../../../src/features/onboarding/hosted-relay.ts';
+import type { OnboardingStepId } from '../../../src/features/onboarding/onboarding-model.ts';
 import { OnboardingPage, scheduleFocusedOnboardingControl } from '../../../src/features/onboarding/onboarding-page.tsx';
 import {
   type OnboardingProgressStorage,
@@ -148,7 +149,7 @@ const walking = (options: {
   readonly route?: 'first-time' | 'add-daemon' | 'add-client';
   readonly target?: 'this' | 'other';
   readonly doer?: 'self' | 'agent';
-  readonly step: string;
+  readonly step: OnboardingStepId;
   readonly storage?: OnboardingProgressStorage;
   readonly paired?: boolean;
 }): OnboardingProgressStore => {
@@ -163,7 +164,7 @@ const walking = (options: {
     store.chooseTarget(options.target ?? 'this', route);
     store.chooseDoer(options.doer ?? 'self');
   }
-  store.goTo(options.step as never);
+  store.goTo(options.step);
   return store;
 };
 
