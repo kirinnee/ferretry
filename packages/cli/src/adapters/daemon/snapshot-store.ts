@@ -16,7 +16,7 @@ import {
   stat,
   symlink,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, normalize, parse, relative, sep } from 'node:path';
+import { dirname, isAbsolute, join, normalize, parse, sep } from 'node:path';
 import { z } from 'zod';
 import type {
   DaemonSnapshot,
@@ -216,6 +216,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       await rename(stagedManifest, join(target, MANIFEST));
       await syncDirectory(target);
       await chmod(target, 0o555);
+      await syncDirectory(target);
       await syncDirectory(join(this.root, SNAPSHOTS));
       const snapshot = await this.#readSnapshot(id);
       return { ...snapshot, created: true };
@@ -230,7 +231,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     const snapshot = await this.#readSnapshot(id);
     await this.#ensureStore();
     const temporary = join(this.root, `.current-${this.uniqueId()}.tmp`);
-    const target = relative(this.root, snapshot.binaryPath);
+    const target = join(SNAPSHOTS, id, this.options.daemon.name);
     let ownsTemporary = false;
     try {
       await symlink(target, temporary, 'file');
@@ -289,10 +290,8 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       const snapshot = await this.#readSnapshot(id);
       // Canonicalize the target captured by `readlink`, not the live pointer: another valid promote
       // may replace `current` after our read, and this observation still linearizes before it.
-      const [resolved, expected] = await Promise.all([
-        realpath(join(this.root, target)),
-        realpath(snapshot.binaryPath),
-      ]);
+      const resolved = await realpath(join(this.root, target));
+      const expected = snapshot.binaryPath;
       if (resolved !== expected) {
         throw new DaemonSnapshotStoreError('damaged', `${pointer} resolves outside snapshot ${id}`);
       }
@@ -479,15 +478,22 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
     if (manifest.id !== id || manifest.digest !== id.slice('sha256-'.length) || !isAbsolute(manifest.sourceBinary)) {
       throw new DaemonSnapshotStoreError('damaged', `${manifestPath} does not identify snapshot ${id}`);
     }
-    const actual = await digestFile(binaryPath);
+    const [actual, canonicalSnapshots, canonicalBinary] = await Promise.all([
+      digestFile(binaryPath),
+      realpath(join(this.root, SNAPSHOTS)),
+      realpath(binaryPath),
+    ]);
     if (actual.digest !== manifest.digest || actual.bytes !== manifest.bytes) {
       throw new DaemonSnapshotStoreError('damaged', `${binaryPath} does not match its snapshot manifest`);
+    }
+    if (canonicalBinary !== join(canonicalSnapshots, id, this.options.daemon.name)) {
+      throw new DaemonSnapshotStoreError('damaged', `${binaryPath} resolves outside snapshot ${id}`);
     }
     return {
       id,
       daemon: manifest.daemon,
       sourceBinary: manifest.sourceBinary,
-      binaryPath,
+      binaryPath: canonicalBinary,
       bytes: manifest.bytes,
       createdAt: manifest.createdAt,
     };

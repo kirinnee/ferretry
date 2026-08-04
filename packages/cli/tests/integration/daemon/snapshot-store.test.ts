@@ -7,6 +7,7 @@ import {
   readdir,
   readFile,
   readlink,
+  realpath,
   rename,
   rm,
   stat,
@@ -311,6 +312,11 @@ describe('file daemon snapshot store', () => {
 
     // Assert
     should(promoted.id).equal(built.id);
+    should(promoted.binaryPath).startWith(await realpath(actualState));
+    should(promoted.binaryPath).not.startWith(linkedState);
+    should(await readlink(join(linkedState, 'ferretry', 'daemon-snapshots', 'fyd', 'current'))).equal(
+      `snapshots/${built.id}/fyd`,
+    );
     should((await subject.current())?.id).equal(built.id);
   });
 

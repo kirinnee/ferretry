@@ -106,7 +106,7 @@ export interface DaemonSnapshot {
   readonly daemon: DaemonSnapshotIdentity;
   /** The resolved artifact that was complete and stable while this snapshot was built. */
   readonly sourceBinary: string;
-  /** The immutable executable inside this snapshot. */
+  /** The canonical immutable executable inside this snapshot, independent of ancestor aliases. */
   readonly binaryPath: string;
   readonly bytes: number;
   readonly createdAt: string;
