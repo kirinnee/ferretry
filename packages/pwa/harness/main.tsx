@@ -666,10 +666,7 @@ const hereByHand = (route: OnboardingRouteId = 'first-time'): Record<string, str
  * could only reach them by pressing buttons could not show them as still frames
  * at all.
  */
-const harnessQuestion = (
-  document: Record<string, string>,
-  device: DeviceKind = 'desktop',
-): OnboardingProgressStore =>
+const harnessQuestion = (document: Record<string, string>, device: DeviceKind = 'desktop'): OnboardingProgressStore =>
   new OnboardingProgressStore({
     device,
     storage: {

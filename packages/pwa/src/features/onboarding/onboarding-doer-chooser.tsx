@@ -53,20 +53,18 @@ const ICON: Readonly<Record<OnboardingDoerId, ReactNode>> = {
 const ROW =
   'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-bg focus-visible:outline-focus focus-visible:outline-offset-focus';
 
-/** What the machine line says, per how the machine came to be decided. */
-const WHERE: Readonly<Record<TargetBasis, Readonly<Record<SetupTargetId, string>>>> = {
-  forced: {
-    this: 'This computer will run your agents.',
-    other: 'Ferretry runs on a computer. This phone becomes your remote control.',
-  },
-  assumed: {
-    this: 'This computer will run your agents.',
-    other: 'Another computer will run your agents.',
-  },
-  chosen: {
-    this: 'This computer will run your agents.',
-    other: 'Another computer will run your agents.',
-  },
+/**
+ * Which machine, in one line.
+ *
+ * A FACT gets its own sentence rather than a cell in a basis-by-target table:
+ * that table would have had a "this phone runs the daemon" entry, and a string
+ * nothing can ever render is a claim nobody can check.
+ */
+const PHONE_FACT = 'Ferretry runs on a computer. This phone becomes your remote control.';
+
+const WHERE: Readonly<Record<SetupTargetId, string>> = {
+  this: 'This computer will run your agents.',
+  other: 'Another computer will run your agents.',
 };
 
 export interface OnboardingDoerChooserProps {
@@ -108,7 +106,7 @@ export function OnboardingDoerChooser({
           {basis === 'forced' ? (
             <Smartphone size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
           ) : null}
-          <span className="min-w-0">{WHERE[basis][target]}</span>
+          <span className="min-w-0">{basis === 'forced' ? PHONE_FACT : WHERE[target]}</span>
         </p>
         <h2 id="onboarding-doer-title" className="m-0 font-display text-title font-bold tracking-display text-fg">
           Who installs it?
