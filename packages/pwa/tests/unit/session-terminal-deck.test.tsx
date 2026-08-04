@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
+import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import '../support/dom.ts';
@@ -539,6 +539,26 @@ describe('SessionTerminalDeck pane wiring', () => {
 });
 
 describe('SessionTerminalDeck theming', () => {
+  test('watches document theme attributes through the browser dependency', async () => {
+    const priorTheme = document.documentElement.getAttribute('data-theme');
+    let markRepainted: () => void = () => {};
+    let repaints = 0;
+    const repainted = new Promise<void>(resolve => {
+      markRepainted = resolve;
+    });
+    const stopWatchingTheme = browserTerminalDeckDependencies().watchTheme(() => {
+      repaints += 1;
+      markRepainted();
+    });
+
+    document.documentElement.setAttribute('data-theme', 'terminal-deck-test-theme');
+    await repainted;
+    expect(repaints).toBe(1);
+    stopWatchingTheme();
+    if (priorTheme === null) document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', priorTheme);
+  });
+
   test('repaints the pane when the reader changes theme', async () => {
     // The pane is not a DOM node with classes — xterm holds its own colour
     // table, so a theme switch that only changed CSS variables would leave a
