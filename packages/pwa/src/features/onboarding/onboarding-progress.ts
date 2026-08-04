@@ -26,14 +26,16 @@
  */
 
 import {
+  type ConnectionMethodId,
   firstOnboardingStep,
   furthestOnboardingStep,
+  isConnectionMethodId,
   isOnboardingRouteId,
   isOnboardingStepId,
   isStepOfRoute,
-  onboardingStepIndex,
   type OnboardingRouteId,
   type OnboardingStepId,
+  onboardingStepIndex,
 } from './onboarding-model.ts';
 
 export const ONBOARDING_PROGRESS_KEY = 'fy-onboarding-v2';
@@ -50,6 +52,8 @@ export interface OnboardingWalking {
   readonly v: typeof ONBOARDING_PROGRESS_VERSION;
   readonly stage: 'walk';
   readonly route: OnboardingRouteId;
+  /** The second chooser's answer. Only first-time setup has one. */
+  readonly connection?: ConnectionMethodId;
   /** Where the reader is now. */
   readonly current: OnboardingStepId;
   /** The furthest step they have reached on this route, which is what stays jumpable. */
@@ -100,13 +104,22 @@ export const parseOnboardingProgress = (raw: string | null | undefined): Onboard
   if (fields.v !== ONBOARDING_PROGRESS_VERSION) return fresh();
   if (fields.stage === 'choose') return fresh();
   if (fields.stage !== 'walk') return fresh();
-  const { route, current, furthest } = fields;
+  const { route, current, furthest, connection } = fields;
   if (!isOnboardingRouteId(route)) return fresh();
   if (!isOnboardingStepId(current) || !isOnboardingStepId(furthest)) return fresh();
+  if (connection !== undefined && (!isConnectionMethodId(connection) || route !== 'first-time')) return fresh();
   /* A step from another route's list is not this reader's place; it is a mismatch. */
-  if (!isStepOfRoute(route, current) || !isStepOfRoute(route, furthest)) return fresh();
-  if (onboardingStepIndex(route, current) > onboardingStepIndex(route, furthest)) return fresh();
-  return { v: ONBOARDING_PROGRESS_VERSION, stage: 'walk', route, current, furthest };
+  if (!isStepOfRoute(route, current, connection) || !isStepOfRoute(route, furthest, connection)) return fresh();
+  if (onboardingStepIndex(route, current, connection) > onboardingStepIndex(route, furthest, connection))
+    return fresh();
+  return {
+    v: ONBOARDING_PROGRESS_VERSION,
+    stage: 'walk',
+    route,
+    ...(connection === undefined ? {} : { connection }),
+    current,
+    furthest,
+  };
 };
 
 /**
@@ -218,6 +231,21 @@ export class OnboardingProgressStore {
     return this.#commit(enterOnboardingRoute(route));
   }
 
+  /** Answers the second chooser and immediately starts that answer's real work. */
+  chooseConnection(connection: ConnectionMethodId): OnboardingProgress {
+    const at = this.snapshot();
+    if (at.stage !== 'walk' || at.route !== 'first-time' || at.current !== 'connect') return at;
+    const current = connection === 'own-relay' ? 'relay-fingerprint' : 'pair';
+    return this.#commit({
+      v: ONBOARDING_PROGRESS_VERSION,
+      stage: 'walk',
+      route: at.route,
+      connection,
+      current,
+      furthest: current,
+    });
+  }
+
   /** Back to the question, keeping nothing: the next answer may be a different route. */
   backToChooser(): OnboardingProgress {
     return this.#commit(fresh());
@@ -232,13 +260,14 @@ export class OnboardingProgressStore {
    */
   goTo(step: OnboardingStepId): OnboardingProgress {
     const at = this.snapshot();
-    if (at.stage !== 'walk' || !isStepOfRoute(at.route, step)) return at;
+    if (at.stage !== 'walk' || !isStepOfRoute(at.route, step, at.connection)) return at;
     return this.#commit({
       v: ONBOARDING_PROGRESS_VERSION,
       stage: 'walk',
       route: at.route,
+      ...(at.connection === undefined ? {} : { connection: at.connection }),
       current: step,
-      furthest: furthestOnboardingStep(at.route, at.furthest, step),
+      furthest: furthestOnboardingStep(at.route, at.furthest, step, at.connection),
     });
   }
 

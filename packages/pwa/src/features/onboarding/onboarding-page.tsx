@@ -43,25 +43,29 @@ import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
+import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
 import {
-  DEFAULT_CONNECTION_METHOD,
+  type ConnectionMethodId,
   type InstallChannelId,
   nextOnboardingStep,
+  type OnboardingStepId,
   onboardingRoute,
   onboardingStep,
   onboardingStepCount,
-  type OnboardingStepId,
   onboardingStepIndex,
   previousOnboardingStep,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
 import {
   BriefStage,
-  ConnectStage,
   DaemonStage,
   DoneStage,
   InstallStage,
   PairStage,
+  RelayAllowStage,
+  RelayDeployStage,
+  RelayFingerprintStage,
+  RelaySourceStage,
   ScanStage,
 } from './onboarding-stages.tsx';
 import { OnboardingTrack } from './onboarding-track.tsx';
@@ -211,6 +215,9 @@ export function OnboardingPage({
           onGoTo={step => {
             progress.goTo(step);
           }}
+          onChooseConnection={connection => {
+            progress.chooseConnection(connection);
+          }}
           onLeaveRoute={() => {
             progress.backToChooser();
           }}
@@ -229,6 +236,7 @@ interface RouteFlowProps {
   readonly onOpenFleet: () => void;
   readonly fleetReady: boolean;
   readonly onGoTo: (step: OnboardingStepId) => void;
+  readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   /** Back out of the route entirely, to the question. */
   readonly onLeaveRoute: () => void;
 }
@@ -249,17 +257,26 @@ function RouteFlow({
   onOpenFleet,
   fleetReady,
   onGoTo,
+  onChooseConnection,
   onLeaveRoute,
 }: RouteFlowProps) {
   const route = onboardingRoute(at.route);
   const step = onboardingStep(at.current);
-  const count = onboardingStepCount(at.route);
-  const position = onboardingStepIndex(at.route, at.current);
+  const count = onboardingStepCount(at.route, at.connection);
+  const position = onboardingStepIndex(at.route, at.current, at.connection);
   const first = position === 0;
   const pairing = renderPairing({ onPaired: () => onGoTo('done') });
   return (
     <>
-      {count > 2 && <OnboardingTrack route={at.route} current={at.current} furthest={at.furthest} onJump={onGoTo} />}
+      {count > 2 && (
+        <OnboardingTrack
+          route={at.route}
+          connection={at.connection}
+          current={at.current}
+          furthest={at.furthest}
+          onJump={onGoTo}
+        />
+      )}
 
       <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
@@ -285,6 +302,7 @@ function RouteFlow({
           fleetReady={fleetReady}
           onOpenFleet={onOpenFleet}
           onGoTo={onGoTo}
+          onChooseConnection={onChooseConnection}
         />
       </section>
 
@@ -302,7 +320,7 @@ function RouteFlow({
               type="button"
               className="kt-btn min-h-[44px]"
               data-variant="ghost"
-              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(at.route, at.current))}
+              onClick={first ? onLeaveRoute : () => onGoTo(previousOnboardingStep(at.route, at.current, at.connection))}
               data-onboarding-back={first ? 'chooser' : 'step'}
             >
               <ArrowLeft size={16} aria-hidden="true" />
@@ -310,19 +328,19 @@ function RouteFlow({
             </button>
             {/*
               NEXT EXISTS ONLY WHERE THE PAGE CANNOT CHECK.
-              Install, the daemon and the carrier choice happen in a terminal
+              Install, the daemon and `fy pair` happen in a terminal
               this page will never see, so blocking on them would block forever.
               Pairing is the opposite: the daemon answers, in this tab, and that
               answer is the only thing that may declare the journey finished. A
               Next button here would manufacture a "you are set up" for a browser
               that is paired with nothing.
             */}
-            {at.current !== 'pair' && (
+            {at.current !== 'scan' && at.current !== 'connect' && (
               <button
                 type="button"
                 className="kt-btn ml-auto min-h-[44px] flex-1"
                 data-variant="primary"
-                onClick={() => onGoTo(nextOnboardingStep(at.route, at.current))}
+                onClick={() => onGoTo(nextOnboardingStep(at.route, at.current, at.connection))}
                 data-onboarding-next=""
               >
                 Next
@@ -344,32 +362,40 @@ interface StageProps {
   readonly fleetReady: boolean;
   readonly onOpenFleet: () => void;
   readonly onGoTo: (step: OnboardingStepId) => void;
+  readonly onChooseConnection: (connection: ConnectionMethodId) => void;
 }
 
 /**
  * The step's body, and the ONE place a route changes what a step means.
  *
- * `pair` is the case that earns this function: on the "I have a link" route
- * there is nothing to run, so printing `fy pair` would describe a thing that has
- * already happened on a machine the reader may not be near. Same pairing surface,
- * different framing — and the framing comes from the route, not from a flag
- * threaded down through three components.
+ * `scan` is shared by every route that has a fresh pairing code. The command is
+ * always its own preceding step, except for "I have a link", where somebody
+ * else already ran it on the computer that produced the code.
  */
-function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }: StageProps) {
+function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo, onChooseConnection }: StageProps) {
   switch (at.current) {
     case 'install':
       return <InstallStage write={write} channel={channel} />;
     case 'daemon':
       return <DaemonStage write={write} />;
     case 'connect':
-      /* Direct first, because `docs/relay-protocol.md` §1 prefers it whenever it works. */
-      return <ConnectStage write={write} method={DEFAULT_CONNECTION_METHOD} />;
+      return <OnboardingConnectionChooser onChoose={onChooseConnection} />;
+    case 'relay-fingerprint':
+      return <RelayFingerprintStage write={write} />;
+    case 'relay-source':
+      return <RelaySourceStage write={write} />;
+    case 'relay-allow':
+      return <RelayAllowStage />;
+    case 'relay-deploy':
+      return <RelayDeployStage write={write} />;
     case 'brief':
       return <BriefStage write={write} />;
     case 'pair':
-      return at.route === 'have-link' ? <ScanStage pairing={pairing} /> : <PairStage write={write} pairing={pairing} />;
+      return <PairStage write={write} />;
+    case 'scan':
+      return <ScanStage pairing={pairing} />;
     case 'done':
-      return <DoneStage fleetReady={fleetReady} onOpenFleet={onOpenFleet} onBackToPairing={() => onGoTo('pair')} />;
+      return <DoneStage fleetReady={fleetReady} onOpenFleet={onOpenFleet} onBackToPairing={() => onGoTo('scan')} />;
   }
 }
 
@@ -385,7 +411,12 @@ function Stage({ at, write, channel, pairing, fleetReady, onOpenFleet, onGoTo }:
 const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   install: 'This page cannot see your terminal. Continue when the install finishes.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
-  connect: 'Nothing here tests a route. Continue when you have picked one.',
+  connect: 'Choose the route that matches this machine. Direct is still preferred whenever it is reachable.',
+  'relay-fingerprint': 'This page cannot see your terminal. Continue once you have copied the fingerprint.',
+  'relay-source': 'This page cannot see your terminal. Continue once the checkout is ready.',
+  'relay-allow': 'This page cannot read your configuration. Continue once the fingerprint is listed.',
+  'relay-deploy': 'This page cannot see the deployment. Continue once it finishes.',
   brief: 'This page cannot see your agent. Continue when it shows you a QR or a link.',
-  pair: 'This step finishes itself when the daemon answers.',
+  pair: 'This page cannot see your terminal. Continue once the QR code or link is on your computer.',
+  scan: 'This step finishes itself when the daemon answers.',
 };

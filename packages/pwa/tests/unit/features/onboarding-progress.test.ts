@@ -170,6 +170,23 @@ describe('OnboardingProgressStore', () => {
     expect(store.snapshot()).toEqual(enterOnboardingRoute('have-link'));
   });
 
+  it('persists the second chooser answer with the expanded self-hosted route', () => {
+    const storage = new MemoryStorage();
+    const store = new OnboardingProgressStore({ storage });
+    store.choose('first-time');
+    store.goTo('connect');
+
+    expect(store.chooseConnection('own-relay')).toEqual({
+      v: 2,
+      stage: 'walk',
+      route: 'first-time',
+      connection: 'own-relay',
+      current: 'relay-fingerprint',
+      furthest: 'relay-fingerprint',
+    });
+    expect(new OnboardingProgressStore({ storage }).snapshot()).toEqual(store.snapshot());
+  });
+
   it('refuses a step that is not on this route, rather than inventing a place', () => {
     const store = new OnboardingProgressStore({ storage: undefined });
     // The chooser is up: no route, so there is no step to be on.
