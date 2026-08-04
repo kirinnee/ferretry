@@ -49,6 +49,16 @@ const config: Config = {
         'code-bg': 'var(--code-bg)',
         'code-border': 'var(--code-border)',
         'code-fg': 'var(--code-fg)',
+        // The syntax ramp every theme already ships for `highlight.css`. Exposed
+        // as utilities so a hand-tokenized command (the setup screen's shell
+        // blocks) is coloured from the SAME tokens as a rendered code fence,
+        // rather than from a second palette invented beside it.
+        'syn-comment': 'var(--syn-comment)',
+        'syn-keyword': 'var(--syn-keyword)',
+        'syn-string': 'var(--syn-string)',
+        'syn-type': 'var(--syn-type)',
+        'syn-number': 'var(--syn-number)',
+        'syn-meta': 'var(--syn-meta)',
         ok: 'var(--ok)',
         'ok-bg': 'var(--ok-bg)',
         'ok-border': 'var(--ok-border)',

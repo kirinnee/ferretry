@@ -66,11 +66,16 @@ export {
 export * from '../features/lineage/lineage-name.tsx';
 export * from '../features/lineage/lineage-surface-model.ts';
 export * from '../features/lineage/lineage-surface.tsx';
+export * from '../features/onboarding/command-block.tsx';
+export * from '../features/onboarding/command-syntax.ts';
 export * from '../features/onboarding/copy-button.tsx';
 export * from '../features/onboarding/onboarding-brand.tsx';
 export * from '../features/onboarding/onboarding-model.ts';
 export * from '../features/onboarding/onboarding-page.tsx';
 export * from '../features/onboarding/onboarding-progress.ts';
+export * from '../features/onboarding/onboarding-stages.tsx';
+export * from '../features/onboarding/onboarding-track.tsx';
+export * from '../features/onboarding/setup-diagram.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
