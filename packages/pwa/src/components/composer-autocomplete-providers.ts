@@ -103,8 +103,10 @@ export interface ComposerReferenceProviderOptions extends ComposerProviderScopeO
 }
 
 /** Injected so a test can drive the surfaces family without a live daemon; the
- *  default is the one authenticated terminal listing call. */
-export type ComposerTerminalLister = (
+ *  default is the one authenticated terminal listing call. Deliberately not
+ *  exported: it is named only by the option types below, and an exported alias
+ *  nobody imports is dead surface the repo's own gate refuses. */
+type ComposerTerminalLister = (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch,
