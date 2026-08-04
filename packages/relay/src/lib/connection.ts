@@ -5,10 +5,10 @@
  *    address, a VPN, a public host. Fewest hops, fewest parties, lowest latency. It is the
  *    preferred carrier whenever it is configured and reachable, not a fallback, and nobody has to
  *    opt out of a relay to get it.
- * 2. **Relay** — the Workers rendezvous in this package, deployed either into your own Cloudflare
- *    account or as Ferretry's metered hosted service. Those are equal choices in onboarding, not a
- *    hidden fallback chain. The hosted service changes who operates and pays for the carrier; it
- *    does not create a third wire protocol or a weaker security model.
+ * 2. **Relay** — the Workers rendezvous in this package. Ferretry's metered hosted service is the
+ *    automatic fallback only after direct fails; running the same carrier in your own Cloudflare
+ *    account remains an expert override, not an onboarding choice. Who operates and pays for the
+ *    relay changes, but the wire protocol and security model do not.
  *
  * A hosted relay anyone can reach is abusable precisely because its operator cannot read what it
  * carries. Ferretry accepts that risk for its hosted deployment and bounds the bill with runtime
@@ -21,8 +21,10 @@
  * the same way. Choosing a carrier changes latency, dependency and what an onlooker can observe —
  * it never changes what protects the traffic.
  *
- * The carrier is per daemon, stored with the pairing, so one daemon can be direct on a home
- * network while another is relayed, both at once.
+ * The model is deliberately per daemon, so the future client mounting can persist one daemon as
+ * direct and another as relayed without inventing a global carrier switch. That persistence and
+ * transport are not mounted yet; this module defines the decision and disclosure contract they
+ * must consume.
  */
 
 import { z } from 'zod';

@@ -29,7 +29,7 @@ describe('socket endpoints', () => {
     should(SocketEndpointSchema.safeParse('https://box.example/#fragment').success).be.false();
   });
 
-  it('should store a carrier per daemon, with no relay address baked in', () => {
+  it('should parse each carrier shape with no relay address baked in', () => {
     should(ConnectionMethodSchema.parse(direct)).deepEqual(direct);
     should(ConnectionMethodSchema.parse(relay)).deepEqual(relay);
     should(ConnectionMethodSchema.parse(hosted)).deepEqual(hosted);
