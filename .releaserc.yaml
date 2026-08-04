@@ -26,4 +26,7 @@ plugins:
         - Changelog.md
         - Changelog.old.md
         - packages/cli/package.json
+        # The daemon stamps its own manifest version into what it reports over HTTP, so a release
+        # that did not carry it shipped a daemon that could not say what it was.
+        - packages/daemon/package.json
         - VERSION

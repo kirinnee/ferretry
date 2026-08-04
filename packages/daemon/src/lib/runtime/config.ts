@@ -1,5 +1,7 @@
+import { daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
+import type { RunOverrides } from './arguments.ts';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
 
@@ -157,10 +159,34 @@ export const DaemonRelayConfigSchema = z
 
 export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
 
-export const DaemonConfigSchema = z
+/**
+ * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.
+ *
+ * SEPARATE from the parsed configuration below, because the two are written back to disk very
+ * differently. A DEFAULT is a value this deployment picked and an operator may edit — writing it out
+ * makes it visible and editable, which is the point. A DERIVATION is a value computed from other
+ * fields, and persisting one is a defect: once on disk it stops tracking the field it came from, so
+ * the operator edits `port`, the derived `publicUrl` keeps the old number, and the daemon appears to
+ * ignore the edit entirely. That is exactly what happened — `port` was a field an operator could
+ * change with no error, no message and no change in behaviour, which is worse than the collision it
+ * was being changed to escape. So: nothing derived is ever written here, and everything derived is
+ * recomputed on every read, which makes disagreement between the two unrepresentable.
+ */
+export const DaemonConfigDocumentSchema = z
   .object({
     host: HostSchema.default('127.0.0.1'),
-    port: PortSchema.default(7337),
+    /**
+     * The address this daemon owns. OPTIONAL, and the absence means something specific.
+     *
+     * A recorded port — whether an operator typed it or a first boot wrote down what it took — is a
+     * claim on that exact address: it is bound or the boot refuses, because a daemon whose address
+     * moves on its own is worse than one that fails, and every client that pinned it would be left
+     * looking at nothing. An ABSENT port is the only case where this daemon may choose, and it
+     * chooses once and records the answer, so the next boot is back in the first case.
+     */
+    port: PortSchema.optional(),
+    /** The address this daemon is REACHED at, when that is not the address it binds. Operator-owned
+     *  and optional: absent means "the same one", and absent is what a written document carries. */
     publicUrl: z.url().optional(),
     /** Exact browser origins allowed to call this daemon, including the public pairing exchange. */
     corsOrigins: z.array(CorsOriginSchema).max(32).readonly().default(['https://ferretry.pages.dev']),
@@ -177,16 +203,137 @@ export const DaemonConfigSchema = z
     analyticsPricing: AnalyticsPricingCatalogSchema.default([]),
     projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
   })
-  .strict()
-  .transform(value => ({ ...value, publicUrl: value.publicUrl ?? `http://${value.host}:${value.port}` }));
+  .strict();
+
+export type DaemonConfigDocument = z.output<typeof DaemonConfigDocumentSchema>;
+
+/**
+ * The document plus everything derived from it: the port to try, the two addresses, and which of
+ * them the document actually recorded.
+ *
+ * `bindUrl` is what this daemon LISTENS on and is therefore what an incumbent probe must ask: a
+ * responder is only this boot's problem when it holds the very socket the bind wants. Probing the
+ * advertised URL instead is how a stale advertisement sent a boot to interrogate an unrelated
+ * program on a port it was not even going to bind.
+ *
+ * `publicUrl` is what this daemon is REACHED at, which is the same address unless an operator said
+ * otherwise, and it is what pairing links and browser origins carry.
+ *
+ * The two `…IsRecorded` flags exist because a value's ORIGIN changes what may be done with it, and
+ * once derivation happens on every read there is otherwise no way to tell a default from a choice.
+ * A recorded port is claimed; an unrecorded one is a preference this boot may move off. A recorded
+ * public URL survives a moved port; an unrecorded one follows it.
+ */
+export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(value => {
+  const port = value.port ?? FY_DEFAULT_DAEMON_PORT;
+  const bindUrl = daemonAddress(value.host, port);
+  return {
+    ...value,
+    port,
+    portIsRecorded: value.port !== undefined,
+    bindUrl,
+    publicUrl: value.publicUrl ?? bindUrl,
+    publicUrlIsRecorded: value.publicUrl !== undefined,
+  };
+});
 
 export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
 
-/** Parses a complete configuration document and derives its canonical public URL. */
+/**
+ * The same configuration once a port has actually been decided.
+ *
+ * It exists so the decision happens BEFORE anything reads an address. Pairing links, browser origins
+ * and the advertised URL are all assembled from this document while the subsystems are built, and a
+ * boot that only learned its real port at bind time would have handed every one of them the port it
+ * did not take. So the port is settled first and threaded through as configuration, which is what it
+ * is.
+ *
+ * An operator's own `publicUrl` SURVIVES the move — they were describing a proxy or a tunnel, not
+ * this daemon's socket — while a derived one follows the port, because a derived advertisement that
+ * stayed behind is precisely the defect this file exists to have removed.
+ */
+export function configuredAt(config: DaemonConfig, port: number): DaemonConfig {
+  if (port === config.port) return { ...config, portIsRecorded: true };
+  const bindUrl = daemonAddress(config.host, port);
+  return {
+    ...config,
+    port,
+    portIsRecorded: true,
+    bindUrl,
+    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+  };
+}
+
+/** Parses a complete configuration document and derives its canonical addresses. */
 export function parseDaemonConfig(value: unknown): DaemonConfig {
   return DaemonConfigSchema.parse(value);
 }
 
+/**
+ * The document a first boot writes into a fresh state home.
+ *
+ * The DOCUMENT rather than the parsed configuration, so no derived address is ever persisted. A
+ * first boot that wrote `publicUrl` out would freeze it at the port it happened to default to, and
+ * every later edit of `port` would move the bind while the advertisement stayed behind.
+ */
+export function defaultDaemonConfigDocument(): DaemonConfigDocument {
+  return DaemonConfigDocumentSchema.parse({});
+}
+
 export function defaultDaemonConfig(): DaemonConfig {
   return parseDaemonConfig({});
+}
+
+/**
+ * Whether this daemon is advertised at an address other than the one it binds.
+ *
+ * A LEGITIMATE deployment — a daemon behind a reverse proxy or a tunnel — so it is a fact to state,
+ * never a refusal. It is worth stating because the historical cause was a defect rather than a
+ * choice: homes written before derived values stopped being persisted still carry a `publicUrl`
+ * frozen at whatever the port was on the day the home was created.
+ */
+export function advertisesForeignAddress(config: DaemonConfig): boolean {
+  return new URL(config.publicUrl).origin !== new URL(config.bindUrl).origin;
+}
+
+/**
+ * The configuration one run actually uses, once the command line has had its say.
+ *
+ * A PORT NAMED ON THE COMMAND LINE IS A CLAIM, exactly like a recorded one: somebody who pins an
+ * address is telling you something, and they get that address or a clear failure — never a silent
+ * fallback to somewhere else. It is not written down, because it was said about this run only.
+ */
+export function overriddenBy(config: DaemonConfig, overrides: RunOverrides): DaemonConfig {
+  if (overrides.host === undefined && overrides.port === undefined) return config;
+  const host = overrides.host ?? config.host;
+  const port = overrides.port ?? config.port;
+  const bindUrl = daemonAddress(host, port);
+  return {
+    ...config,
+    host,
+    port,
+    portIsRecorded: overrides.port !== undefined || config.portIsRecorded,
+    bindUrl,
+    publicUrl: config.publicUrlIsRecorded ? config.publicUrl : bindUrl,
+  };
+}
+
+/**
+ * Reading and recording this daemon's configuration document.
+ *
+ * AN INTERFACE rather than the one adapter, because `--config` names a document outside the state
+ * home and the state home's filesystem port refuses every path outside it — correctly, since that
+ * confinement is what stops the daemon's own state escaping. An operator naming their own file is a
+ * different act from the daemon addressing its own state, so it gets a different adapter and the
+ * boot depends on neither.
+ */
+export interface DaemonConfigStore {
+  /** The document an operator edits, so a refusal can name the file rather than describe it. */
+  readonly path: string;
+  /** What is on disk right now, parsed and raw, writing nothing. */
+  peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }>;
+  /** The configuration to run on, seeding the document when the state home has none. */
+  load(): Promise<DaemonConfig>;
+  /** Writes down the address this daemon took, so it is the same one next time. */
+  record(port: number): Promise<void>;
 }

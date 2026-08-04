@@ -54,7 +54,7 @@ describe('daemon transport', () => {
     // Arrange
     const loopback = daemonConnection({
       daemonId: 'loopback',
-      baseUrl: 'http://127.0.0.1:7337',
+      baseUrl: 'http://127.0.0.1:7431',
       deviceToken: 'loopback-token',
     });
 
@@ -63,7 +63,7 @@ describe('daemon transport', () => {
     const missingTicket = (): unknown => daemonEventUrl(loopback, ' ');
 
     // Assert
-    should(actual).equal('ws://127.0.0.1:7337/v1/events?ticket=ticket-2');
+    should(actual).equal('ws://127.0.0.1:7431/v1/events?ticket=ticket-2');
     should(missingTicket).throw('websocket ticket must not be empty');
   });
 });

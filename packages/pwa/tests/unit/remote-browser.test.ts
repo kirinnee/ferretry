@@ -104,11 +104,11 @@ describe('remote browser transport', () => {
     );
     expect(
       remoteBrowserStreamUrl(
-        daemonConnection({ daemonId: 'loop', baseUrl: 'http://127.0.0.1:7337', deviceToken: 'x' }),
+        daemonConnection({ daemonId: 'loop', baseUrl: 'http://127.0.0.1:7431', deviceToken: 'x' }),
         daemonSessionScope({ daemonId: 'loop' as never }, 'x'),
         't',
       ),
-    ).toBe('ws://127.0.0.1:7337/v1/sessions/x/browser/stream?ticket=t');
+    ).toBe('ws://127.0.0.1:7431/v1/sessions/x/browser/stream?ticket=t');
     expect(() => remoteBrowserStreamUrl(daemon, scope, ' ')).toThrow('browser stream ticket must not be empty');
   });
 });

@@ -1,3 +1,4 @@
+export * from './arguments.ts';
 export * from './boot.ts';
 export * from './config.ts';
 export * from './mounts/analytics.ts';
@@ -27,4 +28,5 @@ export * from './mounts/task-boards.ts';
 export * from './mounts/tasks.ts';
 export * from './mounts/terminals.ts';
 export * from './mounts/warden.ts';
+export * from './provenance.ts';
 export * from './secrets.ts';
