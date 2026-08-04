@@ -19,7 +19,7 @@ mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name pa
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon nix-packages; do
+  for each in arch workspace-package-scopes name-single-source state-home-log-directory release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon nix-packages; do
     "$0" "${each}"
   done
   exit 0
@@ -98,6 +98,35 @@ name-single-source)
   rg -qF "package_name: ${name}" .goreleaser.yaml
   rg -qF "binary \"${name}\"" "Casks/${product}.rb"
   rg -qF "BINARY=\"${name}\"" scripts/release/install.sh
+  ;;
+state-home-log-directory)
+  # The CLI creates `<state home>/logs` before it launches the daemon, so the daemon's very first
+  # boot on a clean machine always meets a home holding that directory and nothing else. The layout
+  # model has to know the directory is ours: when it did not, it classified our own log directory as
+  # somebody else's data and refused to bootstrap ANY fresh machine — and wrote the refusal into the
+  # log file inside the directory that caused it.
+  #
+  # The two packages derive the name independently, because `packages/cli` does not depend on
+  # `@ferretry/daemon` and must not start to for one string. This is where they are held to one word.
+  cli_layout="${cli_pkg}/src/lib/daemon/layout.ts"
+  daemon_paths="${daemon_pkg}/src/lib/paths.ts"
+  daemon_layout="${daemon_pkg}/src/adapters/storage/state-home-layout.ts"
+
+  cli_logs="$(rg -o -r '$1' "logDirectory = join\(stateHome, '([^']+)'\)" "${cli_layout}")"
+  [ -z "${cli_logs}" ] && echo "❌ ${cli_layout} no longer derives a log directory under the state home" >&2 && exit 1
+  daemon_logs="$(rg -o -r '$1' "logs: join\(home, '([^']+)'\)" "${daemon_paths}")"
+  [ -z "${daemon_logs}" ] && echo "❌ ${daemon_paths} does not name a log directory in FoundationPaths" >&2 && exit 1
+  [ "${cli_logs}" != "${daemon_logs}" ] &&
+    echo "❌ the CLI creates '<state home>/${cli_logs}' but the daemon layout declares '${daemon_logs}'" >&2 && exit 1
+
+  rg -A4 'export function requiredLayoutDirectories' "${daemon_paths}" | rg -qF 'paths.logs' || {
+    echo "❌ ${daemon_paths} does not require the log directory, so bootstrap would not create it" >&2
+    exit 1
+  }
+  rg -qF 'paths.logs' "${daemon_layout}" || {
+    echo "❌ ${daemon_layout} does not admit the log directory, so a fresh home would refuse to bootstrap" >&2
+    exit 1
+  }
   ;;
 release-backup-order)
   yq -o=json '.' .releaserc.yaml | jq -e '
