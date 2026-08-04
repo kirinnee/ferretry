@@ -373,6 +373,16 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('mounts the daemon-scoped projects registry from its routed destination', async () => {
+    const { view } = await renderShell('/d/alpha/projects', [alpha.daemonId]);
+    await settle();
+
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not read this daemon’s project registry',
+    );
+    await view.unmount();
+  });
+
   it('replays the whole thing when a paired browser adds another machine', async () => {
     // This browser finished setup — for a DIFFERENT host. Every new machine is a
     // first-time setup for that machine, so "set up another machine" must not
@@ -708,6 +718,7 @@ describe('route change accessibility', () => {
         { kind: 'setup' },
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
+        { kind: 'projects', daemonId: id },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -721,6 +732,7 @@ describe('route change accessibility', () => {
       'Set up',
       'Sessions',
       'Sessions, New',
+      'Sessions, Projects',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',

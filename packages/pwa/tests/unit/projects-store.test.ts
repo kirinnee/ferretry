@@ -25,6 +25,15 @@ const workstation = daemonConnection({
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
+const project = (name: string, path: string, extras: Record<string, unknown> = {}) => ({
+  id: name === 'ferretry' ? '00000000-0000-4000-8000-000000000001' : '00000000-0000-4000-8000-000000000002',
+  name,
+  path,
+  source: 'existing-folder',
+  createdAt: '2026-08-01T09:00:00.000Z',
+  ...extras,
+});
+
 const ferretry: FleetProject = { name: 'ferretry', path: '/home/k/ferretry' };
 const worktree: FleetProject = { name: 'ferretry-wt', path: '/home/k/ferretry/wt' };
 
@@ -44,8 +53,8 @@ describe('fetchDaemonProjects', () => {
       seen = String(url);
       authorization = new Headers(init?.headers).get('authorization') ?? '';
       return json([
-        { name: 'ferretry', path: '/home/k/ferretry', lastActivity: '2026-08-01T09:00:00.000Z' },
-        { name: 'ferretry-wt', path: '/home/k/ferretry/wt' },
+        project('ferretry', '/home/k/ferretry', { lastActivity: '2026-08-01T09:00:00.000Z' }),
+        project('ferretry-wt', '/home/k/ferretry/wt'),
       ]);
     });
 
@@ -74,7 +83,7 @@ describe('fetchDaemonProjects', () => {
 
 describe('daemonProjectsPort', () => {
   it('is the browser port over one fetch', async () => {
-    const port = daemonProjectsPort(async () => json([{ name: 'ferretry', path: '/home/k/ferretry' }]));
+    const port = daemonProjectsPort(async () => json([project('ferretry', '/home/k/ferretry')]));
     expect(await port.projects(laptop)).toEqual([ferretry]);
   });
 });

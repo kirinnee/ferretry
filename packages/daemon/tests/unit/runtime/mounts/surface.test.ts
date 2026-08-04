@@ -69,6 +69,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessions: sessionDirectory([sessionView('s1')]),
   catalogs: {
     projects: async () => [],
+    registerProject: async () => {
+      throw new Error('not used by this surface fixture');
+    },
     skills: async session => ({ harness: session.config.harness, skills: [] }),
   },
   sessionControl: new FakeSessionControl(),
@@ -153,6 +156,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',
+      'POST /v1/projects',
       'GET /v1/sessions/:sessionId/skills',
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',

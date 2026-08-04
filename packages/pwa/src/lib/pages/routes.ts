@@ -28,6 +28,11 @@ export interface DaemonNewSessionRoute {
   readonly daemonId: DaemonId;
 }
 
+export interface DaemonProjectsRoute {
+  readonly kind: 'projects';
+  readonly daemonId: DaemonId;
+}
+
 export interface DaemonSessionRoute {
   readonly kind: 'session';
   readonly daemonId: DaemonId;
@@ -57,6 +62,7 @@ export interface DaemonLearningRoute {
 export type DaemonPageRoute =
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
+  | DaemonProjectsRoute
   | DaemonSessionRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
@@ -113,6 +119,9 @@ export const daemonSessionsPath = (id: DaemonId): string => `/d/${encodeURICompo
 /** Builds the canonical new-session pathname for one daemon. */
 export const daemonNewSessionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/new`;
 
+/** Builds the canonical durable-project hub pathname for one daemon. */
+export const daemonProjectsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/projects`;
+
 /** Builds the canonical session pathname for one daemon and session. */
 export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   const scope = daemonSessionScope({ daemonId: id }, sessionId);
@@ -142,6 +151,7 @@ export const parseRoute = (pathname: string): Route => {
 
   if (sessionSegment === undefined && remainder.length === 0) {
     if (destination === 'new') return { kind: 'new-session', daemonId: id };
+    if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
@@ -168,6 +178,8 @@ export const routePath = (route: Route): string => {
       return daemonSessionsPath(route.daemonId);
     case 'new-session':
       return daemonNewSessionPath(route.daemonId);
+    case 'projects':
+      return daemonProjectsPath(route.daemonId);
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'settings':
