@@ -1,5 +1,6 @@
 import {
   PutSecretRequestSchema,
+  RemovedSecretSchema,
   SecretListSchema,
   SecretSummarySchema,
   SecretUseRequestSchema,
@@ -9,13 +10,10 @@ import {
   type SecretUseRequest,
   type SecretUseResult,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 import type { ISecretGateway, SecretApiClient } from './ports.ts';
 
 /** The daemon's secret surface. Four paths, and none of them reads a value back. */
 export const SECRETS_PATH = '/v1/secrets';
-
-const RemovedSchema = z.object({ name: z.string(), removed: z.literal(true) }).strict();
 
 /**
  * Speaks the secret routes through the protocol client.
@@ -40,7 +38,7 @@ export class ProtocolSecretGateway implements ISecretGateway {
   }
 
   async remove(name: string): Promise<void> {
-    await this.client.request(`${SECRETS_PATH}/${encodeURIComponent(name)}`, RemovedSchema, { method: 'DELETE' });
+    await this.client.request(`${SECRETS_PATH}/${encodeURIComponent(name)}`, RemovedSecretSchema, { method: 'DELETE' });
   }
 
   async use(request: SecretUseRequest): Promise<SecretUseResult> {

@@ -131,6 +131,11 @@ export const SecretListSchema = z
   .strict();
 export type SecretList = z.infer<typeof SecretListSchema>;
 
+/** What a delete answers. The name is echoed so a client can confirm WHICH secret went, and
+ *  `removed` is a literal `true` because a 404 is how "there was none" is reported. */
+export const RemovedSecretSchema = z.object({ name: SecretNameSchema, removed: z.literal(true) }).strict();
+export type RemovedSecret = z.infer<typeof RemovedSecretSchema>;
+
 /** Creating a secret, or replacing one that exists. There is no distinct edit: a value is opaque. */
 export const PutSecretRequestSchema = z
   .object({
