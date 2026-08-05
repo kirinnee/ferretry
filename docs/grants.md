@@ -135,6 +135,40 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 same provenance treatment every other value gets, because a person reading a permission report is
 usually asking which of these they chose and which something chose for them.
 
+## Finding out without reading this document
+
+Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
+meeting a denial should not have to know this file exists:
+
+| refusal        | what the sentence says to do                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `not-granted`  | `fy daemon config set <capability> --use` / `--configure`, on the host                         |
+| `locked`       | enter the password — or, if you do not have it, `fy daemon password set` / `clear` at the host |
+| `rate-limited` | wait for the lockout, or `fy daemon password set` at the host                                  |
+| `undetermined` | `fy daemon config` on the host, to see and repair the document                                 |
+
+`locked` is the one worth explaining. Its reader may not be the operator: the axis is granted, nothing
+is broken, and "unlock first" is a complete instruction for whoever holds the password and **no
+instruction at all** for whoever does not. It names both remedies and says which is whose.
+
+`fyd --check` states the posture in one line, and states it **after** answering whether anything off
+the host can reach this daemon at all:
+
+```
+grants       nothing off this host can reach this daemon (host 127.0.0.1, no relay), so no grant applies today
+```
+
+```
+grants       reachable off this host (the relay at wss://…) — a remote caller may use everything, and change settings for everything
+             ! no operator password is set, so any paired device can change this machine's fleet and settings without one; set one with `fy daemon password set`
+```
+
+Reachability counts the **relay**, not just the bind address. The daemon dials _out_ to a rendezvous,
+so a loopback bind is reachable from anywhere the moment a relay is enabled — a check that read `host`
+alone would tell somebody running the hosted relay that nothing could reach them. And on a daemon
+nothing can reach, the capabilities are not recited at all: that would be noise implying a boundary
+which is not doing anything.
+
 ## Changes take effect immediately
 
 `fy daemon config set …` writes the document and moves the daemon's in-memory answer in the same

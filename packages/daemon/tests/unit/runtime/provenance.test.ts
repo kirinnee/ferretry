@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import should from 'should';
 import { parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
 import {
@@ -157,26 +158,38 @@ describe('the grant posture a `--check` reports', () => {
     should(said).match(/nothing off this host can reach this daemon/u);
   });
 
-  it('should name each capability when only some are granted, and say everything when all are', () => {
-    // Act
-    const partial = posture({ host: '0.0.0.0', grants: { terminal: { use: false }, warden: { configure: false } } });
-    const all = posture({ host: '0.0.0.0' });
+  /**
+   * Every capability at one setting.
+   *
+   * DERIVED FROM THE CONTRACT rather than spelled out, so a case says what it means — "all of them",
+   * "none of them" — and a sixth capability cannot make it quietly assert something else. A literal
+   * list here would have to be edited by whoever adds one, and the failure would look like their bug.
+   */
+  const every = (value: boolean) =>
+    Object.fromEntries(DAEMON_CAPABILITIES.map(name => [name, { use: value, configure: value }]));
 
-    // Assert — the refused ones are absent rather than listed as denied; this is a posture, not a table.
-    should(partial).match(/may use fleet, browser, filesystem, warden/u);
-    should(partial).not.match(/may use[^,]*terminal/u);
-    should(partial).match(/change settings for fleet, terminal, browser, filesystem/u);
+  it('should name each capability when only some are granted, and say everything when all are', () => {
+    // Act — the partial case names its own exclusions rather than relying on the defaults, which an
+    // added capability is free to choose differently.
+    const partial = posture({
+      host: '0.0.0.0',
+      grants: { ...every(true), terminal: { use: false, configure: true }, warden: { use: true, configure: false } },
+    });
+    const all = posture({ host: '0.0.0.0', grants: every(true) });
+
+    // Assert — each list is read out of the sentence rather than matched loosely, because the two
+    // lists differ and a substring test passes on the WRONG one: `terminal` is absent from the use
+    // list and present in the configure list, so `not.match(/terminal/)` would fail on a correct
+    // sentence and `match(/terminal/)` would pass on a broken one.
+    const lists = /may use (.*), and change settings for (.*)$/u.exec(partial.split('\n')[0] ?? '');
+    should(lists?.[1]).equal('fleet, browser, filesystem, warden');
+    should(lists?.[2]).equal('fleet, terminal, browser, filesystem');
     should(all).match(/may use everything, and change settings for everything/u);
   });
 
   it('should say `nothing` rather than an empty list when every axis is off', () => {
     // Act
-    const said = posture({
-      host: '0.0.0.0',
-      grants: Object.fromEntries(
-        ['fleet', 'terminal', 'browser', 'filesystem', 'warden'].map(name => [name, { use: false, configure: false }]),
-      ),
-    });
+    const said = posture({ host: '0.0.0.0', grants: every(false) });
 
     // Assert
     should(said).match(/may use nothing, and change settings for nothing/u);
