@@ -1,16 +1,18 @@
 import type { HealthView } from '@ferretry/protocol';
 import type { DaemonLayout } from './layout.ts';
+import { nixStorePathOf } from './nix-store.ts';
 import type {
+  DaemonSnapshot,
   DaemonStartHandle,
   IClockPort,
   IDaemonHealthPort,
   IDaemonLogPort,
   IDaemonOutput,
+  IDaemonSnapshotPort,
   IDaemonSupervisor,
   INixGcRootPort,
   IServiceDefinitionSupervisor,
 } from './ports.ts';
-import { nixStorePathOf } from './nix-store.ts';
 import { livenessOf } from './probe.ts';
 import {
   beginReadinessWait,
@@ -63,6 +65,7 @@ export interface DaemonControllerDeps {
   readonly logs: IDaemonLogPort;
   /** Holds a Nix-store daemon against garbage collection; a no-op for any other installation. */
   readonly nix: INixGcRootPort;
+  readonly snapshots: IDaemonSnapshotPort;
   readonly clock: IClockPort;
   readonly out: IDaemonOutput;
   readonly readiness?: ReadinessPolicy;
@@ -87,10 +90,11 @@ export class DaemonController {
   }
 
   async install(): Promise<void> {
+    const snapshot = await this.#ensurePromotedSnapshot();
     const service = this.#service();
     // Before the definition is written, so a unit file never names a store path nothing is holding.
-    await this.#pinDaemonBinary();
-    await service.install();
+    await this.#pinDaemonBinary(snapshot);
+    await service.install(snapshot.binaryPath);
     const health = await this.#awaitReady(service, {});
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
   }
@@ -115,8 +119,17 @@ export class DaemonController {
       return;
     }
     const owner = await this.#owner();
-    await this.#pinDaemonBinary();
-    const handle = await owner.start();
+    const incumbent = await owner.inspect();
+    if (incumbent.state === 'running') {
+      // A service manager reports `activating` as running. Leave that incumbent's executable and
+      // sole GC root untouched, but still honor `start`'s contract to wait until its API serves.
+      const ready = await this.#awaitReady(owner, {}, true);
+      this.deps.out.success(`${this.#name} ready (pid ${String(ready.pid)})`);
+      return;
+    }
+    const snapshot = await this.#ensurePromotedSnapshot();
+    await this.#pinDaemonBinary(snapshot);
+    const handle = await owner.start(snapshot.binaryPath);
     const health = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
   }
@@ -133,13 +146,16 @@ export class DaemonController {
   }
 
   async restart(): Promise<void> {
+    // Verify the complete promoted artifact before stopping the incumbent. Damaged snapshot state
+    // must leave the currently running daemon alone, not turn a repairable refusal into downtime.
+    const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     if (await this.#running(owner, health)) await this.#pressStop(owner, health?.pid);
     else this.deps.out.warn(`${this.#name} was not running; starting it`);
     // Restart is when an upgraded executable is picked up, so the root is re-pointed here too.
-    await this.#pinDaemonBinary();
-    const handle = await owner.start();
+    await this.#pinDaemonBinary(snapshot);
+    const handle = await owner.start(snapshot.binaryPath);
     const ready = await this.#awaitReady(owner, handle);
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
   }
@@ -169,28 +185,61 @@ export class DaemonController {
     if (code !== 0) this.deps.out.setExitCode(code);
   }
 
+  async buildSnapshot(): Promise<void> {
+    const snapshot = await this.deps.snapshots.build();
+    this.deps.out.success(
+      `${this.#name} snapshot ${snapshot.id} ${snapshot.created ? 'built' : 'already complete'} from ${snapshot.sourceBinary}`,
+    );
+  }
+
+  async promoteSnapshot(id: string): Promise<void> {
+    const snapshot = await this.deps.snapshots.promote(id);
+    this.deps.out.success(
+      `${this.#name} snapshot ${snapshot.id} promoted; the running daemon is unchanged until the next managed launch`,
+    );
+  }
+
+  async listSnapshots(options: DaemonCommandOptions): Promise<void> {
+    const [snapshots, current] = await Promise.all([this.deps.snapshots.list(), this.deps.snapshots.current()]);
+    const views = snapshots.map(snapshot => ({ ...snapshot, current: snapshot.id === current?.id }));
+    if (options.json === true) {
+      this.deps.out.success(JSON.stringify({ daemon: this.#name, snapshots: views }));
+      return;
+    }
+    if (views.length === 0) {
+      this.deps.out.warn(`no ${this.#name} snapshots have been built`);
+      return;
+    }
+    this.deps.out.success(
+      views.map(snapshot => `${snapshot.current ? '*' : ' '} ${snapshot.id}  ${snapshot.createdAt}`).join('\n'),
+    );
+  }
+
   get #name(): string {
     return this.deps.layout.daemonName;
   }
 
   /**
-   * Hold a Nix-store daemon against garbage collection, or say why we could not.
+   * Hold the Nix-store closure a copied daemon snapshot still depends on, or say why we could not.
    *
-   * `nix shell github:…` is a supported way to run this, and it leaves the executable in the store
-   * with nothing rooting it — so a later `nix-collect-garbage` deletes it out from under an installed
-   * service, which then breaks with no user action. Any other installation resolves outside the store
-   * and is left alone. A failure is reported and the verb continues: an unpinned daemon that runs
-   * beats a working install refused over a pin that did not take.
+   * `nix shell github:…` is a supported way to run this. The promoted executable is an ordinary copy,
+   * but its ELF interpreter, RPATH or script interpreter can still name the Nix output recorded as
+   * `sourceBinary` in its verified manifest. Any other source resolves outside the store and is left
+   * alone. A failure is reported and the verb continues: an unpinned daemon that runs beats a working
+   * install refused over a pin that did not take.
    */
-  async #pinDaemonBinary(): Promise<void> {
-    const resolved = await this.deps.nix.realPath(this.deps.layout.daemonBinary);
+  async #pinDaemonBinary(snapshot: DaemonSnapshot): Promise<void> {
+    // The promoted executable is a copied file outside /nix/store. Its manifest records the real
+    // source output whose loader and shared-library closure the copy still needs at runtime.
+    const resolved = await this.deps.nix.realPath(snapshot.sourceBinary);
     const storePath = nixStorePathOf(resolved);
     if (storePath === undefined) return;
     const failure = await this.deps.nix.pin(storePath, this.deps.layout.nixGcRoot);
     if (failure === undefined) return;
     this.deps.out.warn(
-      `${this.#name} runs from the Nix store but could not be pinned against garbage collection (${failure}); ` +
-        `a later nix-collect-garbage may delete it — install with \`nix profile install\` to have Nix hold it instead`,
+      `${this.#name} snapshot was built from the Nix store but its runtime closure could not be pinned ` +
+        `against garbage collection (${failure}); a later nix-collect-garbage may remove dependencies ` +
+        `the snapshot needs — install with \`nix profile install\` to have Nix hold them instead`,
     );
   }
 
@@ -207,6 +256,20 @@ export class DaemonController {
     return service;
   }
 
+  /**
+   * Bootstrap exactly once. Only a store with no durable promotion evidence takes this path;
+   * `current()` throws for a lost, malformed, dangling or unverifiable pointer, so damaged evidence
+   * can never be overwritten as if this were a fresh installation.
+   */
+  async #ensurePromotedSnapshot(): Promise<DaemonSnapshot> {
+    const current = await this.deps.snapshots.current();
+    if (current !== undefined) return current;
+    const built = await this.deps.snapshots.build();
+    const promoted = await this.deps.snapshots.promote(built.id);
+    this.deps.out.warn(`no promoted ${this.#name} snapshot existed; built and promoted ${promoted.id}`);
+    return promoted;
+  }
+
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */
   #handleFor(health: HealthView | undefined): DaemonStartHandle | undefined {
     return health === undefined ? undefined : { pid: health.pid };
@@ -218,8 +281,9 @@ export class DaemonController {
   }
 
   /** Poll until the daemon serves HTTP, it is observed to have died, or the deadline passes. */
-  async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle): Promise<HealthView> {
+  async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle, initiallyAlive = false): Promise<HealthView> {
     let state = beginReadinessWait(this.deps.clock.now());
+    if (initiallyAlive) state = { ...state, sawAlive: true };
     while (true) {
       const health = await this.deps.health.probe();
       if (health !== undefined) return health;

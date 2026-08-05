@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -17,6 +17,7 @@ import {
 import { StateHomeLayoutError } from '../../../../daemon/src/lib/index.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
+import { FileDaemonSnapshotStore } from '../../../src/adapters/daemon/snapshot-store.ts';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 
@@ -65,8 +66,8 @@ function layoutFor(root: string): ReturnType<typeof resolveDaemonLayout> {
     homeDirectory: root,
     stateHome: join(root, 'state'),
     configHome: join(root, 'config-home'),
+    stateDirectory: join(root, 'cli-state'),
     userId: 1000,
-    daemonBinary: NOTHING,
     daemonName: 'fyd',
     product: 'ferretry',
     searchPath: '/usr/bin:/bin',
@@ -76,8 +77,15 @@ function layoutFor(root: string): ReturnType<typeof resolveDaemonLayout> {
 /** Exactly what `fy daemon start` does to the filesystem before the daemon is running. */
 async function startThroughTheCli(root: string): Promise<string> {
   const layout = layoutFor(root);
+  const snapshots = new FileDaemonSnapshotStore({
+    root: layout.snapshotRoot,
+    daemon: { product: layout.product, name: layout.daemonName },
+    sourceBinary: NOTHING,
+  });
+  const built = await snapshots.build();
+  await snapshots.promote(built.id);
   const supervisor = new DirectSupervisor(layout, new BunDaemonProcess(), new FileServiceStore());
-  const handle = await supervisor.start();
+  const handle = await supervisor.start(built.binaryPath);
   if (handle.pid !== undefined) {
     // Reap the child immediately: this test is about the directory it was launched into.
     try {
@@ -87,6 +95,14 @@ async function startThroughTheCli(root: string): Promise<string> {
     }
   }
   return layout.stateHome;
+}
+
+async function makeWritable(path: string): Promise<void> {
+  const state = await lstat(path).catch(() => undefined);
+  if (state === undefined || state.isSymbolicLink()) return;
+  await chmod(path, state.isDirectory() ? 0o700 : 0o600);
+  if (!state.isDirectory()) return;
+  for (const entry of await readdir(path)) await makeWritable(join(path, entry));
 }
 
 /** The daemon's own bootstrap, composed the way `packages/daemon/bin/fyd.ts` composes it. */
@@ -117,7 +133,10 @@ async function entriesOf(path: string): Promise<readonly string[]> {
 afterEach(async () => {
   for (const storage of stores) await storage.close().catch(() => undefined);
   stores.clear();
-  for (const home of homes) await rm(home, { recursive: true, force: true });
+  for (const home of homes) {
+    await makeWritable(home);
+    await rm(home, { recursive: true, force: true });
+  }
   homes.clear();
 });
 

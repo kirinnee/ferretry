@@ -15,32 +15,32 @@
  * port and could answer the CLI's health probe from the host's live daemon. This serves health on the
  * ephemeral port the E2E fixture leased instead, so the journey is hermetic.
  *
- * Point `FY_DAEMON_BIN` at this file where it sits — it imports the daemon by relative path, so a copy
- * elsewhere would not resolve — and leave a `fyd.port` file in the fixture's `bin/` directory.
+ * The fixture may copy this file anywhere. It leaves `fyd.port` and `fyd.repository-root` in the
+ * first `PATH` directory; the latter lets this relocated script import the real daemon adapters by
+ * absolute URL without inheriting a repository-specific environment variable.
  */
 import { readFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
-import {
-  BunSqliteIndexFactory,
-  DaemonStorageFactory,
-  KeyedSerialExecutor,
-  RuntimeEnvironment,
-  SqliteHomeLockFactory,
-  StateFileSystemFactory,
-  StateHomeLayout,
-  SystemClock,
-} from '../../packages/daemon/src/adapters/index.ts';
-import daemonPackage from '../../packages/daemon/package.json' with { type: 'json' };
+import { delimiter, isAbsolute, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import type * as DaemonAdapters from '../../packages/daemon/src/adapters/index.ts';
 
-/** Derived from the package's `.bin` key, the same single source the real daemon reads it from. */
-const DAEMON_NAME = Object.keys(daemonPackage.bin ?? {})[0] ?? daemonPackage.name;
+let daemonName = 'fyd';
 
 function fail(message: string): never {
   // The real daemon reports a startup failure on stderr, which its supervisor has already redirected
   // into the log file. Mirroring that is the whole point: on a broken build this is the line the user
   // finds in `~/.ferretry/logs/fyd.log`.
-  process.stderr.write(`${DAEMON_NAME}: ${message}\n`);
+  process.stderr.write(`${daemonName}: ${message}\n`);
   process.exit(1);
+}
+
+function sidecar(directory: string, name: string): string {
+  const path = join(directory, name);
+  try {
+    return readFileSync(path, 'utf8').trim();
+  } catch {
+    fail(`no sidecar at ${path}`);
+  }
 }
 
 /**
@@ -56,31 +56,42 @@ function fail(message: string): never {
 const binDirectory = (process.env.PATH ?? '').split(delimiter)[0] ?? '';
 if (binDirectory === '') fail('PATH must name the E2E bin directory first');
 const portFile = join(binDirectory, 'fyd.port');
-let portText: string;
+const portText = sidecar(binDirectory, 'fyd.port');
+const repositoryRoot = sidecar(binDirectory, 'fyd.repository-root');
+if (!isAbsolute(repositoryRoot)) fail('the repository-root sidecar must hold an absolute path');
+
+type DaemonPackage = { readonly bin?: Readonly<Record<string, string>>; readonly name?: string };
+let daemonPackage: DaemonPackage;
 try {
-  portText = readFileSync(portFile, 'utf8').trim();
-} catch {
-  fail(`no port sidecar at ${portFile}`);
+  daemonPackage = JSON.parse(
+    readFileSync(join(repositoryRoot, 'packages', 'daemon', 'package.json'), 'utf8'),
+  ) as DaemonPackage;
+} catch (error) {
+  fail(`cannot read the daemon package: ${error instanceof Error ? error.message : String(error)}`);
 }
+daemonName = Object.keys(daemonPackage.bin ?? {})[0] ?? daemonPackage.name ?? daemonName;
+
 if (!/^[0-9]+$/.test(portText)) fail(`${portFile} must hold an integer port`);
 const port = Number.parseInt(portText, 10);
 if (port < 1024 || port > 65_535) fail(`${portFile} must hold an unprivileged port from 1024 through 65535`);
 
-const factory = new DaemonStorageFactory(
-  new RuntimeEnvironment(),
-  new StateFileSystemFactory(),
-  new StateHomeLayout(),
-  new SqliteHomeLockFactory(),
-  new BunSqliteIndexFactory(),
-  new SystemClock(),
-  () => new KeyedSerialExecutor(),
+const adaptersUrl = pathToFileURL(join(repositoryRoot, 'packages', 'daemon', 'src', 'adapters', 'index.ts')).href;
+const adapters = (await import(adaptersUrl)) as typeof DaemonAdapters;
+const factory = new adapters.DaemonStorageFactory(
+  new adapters.RuntimeEnvironment(),
+  new adapters.StateFileSystemFactory(),
+  new adapters.StateHomeLayout(),
+  new adapters.SqliteHomeLockFactory(),
+  new adapters.BunSqliteIndexFactory(),
+  new adapters.SystemClock(),
+  () => new adapters.KeyedSerialExecutor(),
 );
 
 const opened = await factory.open().catch((error: unknown) => {
   fail(error instanceof Error ? error.message : String(error));
 });
 
-process.stdout.write(`${DAEMON_NAME}: state home ready (created ${String(opened.layout.created)})\n`);
+process.stdout.write(`${daemonName}: state home ready (created ${String(opened.layout.created)})\n`);
 
 const health = {
   ok: true,

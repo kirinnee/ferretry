@@ -18,9 +18,11 @@ import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import { FileDaemonSnapshotStore } from '../src/adapters/daemon/snapshot-store';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
 import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
 import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
+import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
@@ -64,7 +66,6 @@ import { MigrationController } from '../src/lib/migration/controller';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
-import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
@@ -311,9 +312,10 @@ function resolveDaemonBinary(environment: Record<string, string | undefined>, da
 /**
  * Builds the daemon-control controller.
  *
- * Constructed lazily, per invocation: resolving the layout can fail (no `fyd` on `PATH`, a nonsensical
+ * Constructed lazily, per invocation: resolving the layout can fail (for example, on a nonsensical
  * `FY_HOME`) and that must surface as an error from `fy daemon …`, never as a CLI that cannot even
- * print `--help`.
+ * print `--help`. The live daemon executable is resolved later still, only if a snapshot build needs
+ * it; retained snapshots remain operable after the source installation disappears.
  */
 function buildDaemonController(environment: Record<string, string | undefined>, out: ICliIo): DaemonController {
   const daemonName = `${BINARY_NAME}d`;
@@ -324,7 +326,6 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     configHome: environment.XDG_CONFIG_HOME,
     stateDirectory: environment.XDG_STATE_HOME,
     userId: typeof process.getuid === 'function' ? process.getuid() : 0,
-    daemonBinary: resolveDaemonBinary(environment, daemonName),
     daemonName,
     product: PRODUCT_NAME,
     searchPath: environment.PATH ?? '',
@@ -344,6 +345,11 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
+    snapshots: new FileDaemonSnapshotStore({
+      root: layout.snapshotRoot,
+      daemon: { product: layout.product, name: layout.daemonName },
+      sourceBinary: () => resolveDaemonBinary(environment, daemonName),
+    }),
     clock: new SystemMillisecondClock(),
     out,
   });

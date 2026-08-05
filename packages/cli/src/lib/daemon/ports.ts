@@ -93,6 +93,44 @@ export interface INixGcRootPort {
   release(rootPath: string): Promise<void>;
 }
 
+/** The daemon identity persisted in a snapshot, never inferred from its containing directory. */
+export interface DaemonSnapshotIdentity {
+  readonly product: string;
+  readonly name: string;
+}
+
+/** One verified immutable daemon snapshot. */
+export interface DaemonSnapshot {
+  /** Content address: `sha256-` plus the executable's lowercase digest. */
+  readonly id: string;
+  readonly daemon: DaemonSnapshotIdentity;
+  /** The resolved artifact that was complete and stable while this snapshot was built. */
+  readonly sourceBinary: string;
+  /** The canonical immutable executable inside this snapshot, independent of ancestor aliases. */
+  readonly binaryPath: string;
+  readonly bytes: number;
+  readonly createdAt: string;
+}
+
+/** Building an identical executable reuses its already-verified immutable snapshot. */
+export interface DaemonSnapshotBuild extends DaemonSnapshot {
+  readonly created: boolean;
+}
+
+/**
+ * Immutable daemon artifacts and their atomic promoted pointer.
+ *
+ * `undefined` from `current` means durable evidence says this store has never been promoted. A
+ * missing or malformed pointer after promotion, manifest, marker or artifact throws: damaged durable
+ * state must never be mistaken for an empty store and bootstrapped over.
+ */
+export interface IDaemonSnapshotPort {
+  build(): Promise<DaemonSnapshotBuild>;
+  promote(id: string): Promise<DaemonSnapshot>;
+  current(): Promise<DaemonSnapshot | undefined>;
+  list(): Promise<readonly DaemonSnapshot[]>;
+}
+
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */
 export interface IClockPort {
   now(): number;
@@ -134,10 +172,11 @@ export interface IDaemonSupervisor {
   readonly manager: DaemonManagerKind;
   /** Is a service definition installed for this host? */
   installed(): Promise<boolean>;
-  install(): Promise<void>;
+  /** Install supervision and launch this exact verified immutable artifact. */
+  install(executable: string): Promise<void>;
   uninstall(): Promise<void>;
-  /** Bring the daemon up. Idempotent: never disturbs a healthy incumbent. */
-  start(): Promise<DaemonStartHandle>;
+  /** Bring this exact verified immutable artifact up; the controller guards healthy incumbents. */
+  start(executable: string): Promise<DaemonStartHandle>;
   stop(request: StopRequest): Promise<void>;
   /** `handle` lets the direct supervisor watch the child it just started. */
   inspect(handle?: DaemonStartHandle): Promise<DaemonSupervisorReport>;

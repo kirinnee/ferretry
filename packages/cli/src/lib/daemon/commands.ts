@@ -60,4 +60,31 @@ export function registerDaemonCommands(program: Command, controller: () => Daemo
     .action(async (flags: DaemonCommandOptions) => {
       await controller().logs(flags);
     });
+
+  const snapshots = daemon
+    .command('snapshot')
+    .description('build, inspect and atomically promote immutable daemon snapshots');
+
+  snapshots
+    .command('build')
+    .description('copy and verify the installed daemon without changing what will run')
+    .action(async () => {
+      await controller().buildSnapshot();
+    });
+
+  snapshots
+    .command('promote')
+    .description('atomically select a verified snapshot for the next daemon start')
+    .argument('<id>', 'content-addressed snapshot id')
+    .action(async (id: string) => {
+      await controller().promoteSnapshot(id);
+    });
+
+  snapshots
+    .command('list')
+    .description('list every verified snapshot and mark the promoted one')
+    .option('--json', 'print the machine-readable list instead of the human summary')
+    .action(async (flags: DaemonCommandOptions) => {
+      await controller().listSnapshots(flags);
+    });
 }

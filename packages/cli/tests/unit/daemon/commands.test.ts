@@ -9,6 +9,7 @@ import {
   FakeHealth,
   FakeLogs,
   FakeNixGcRoot,
+  FakeSnapshots,
   FakeSupervisor,
   health,
   layout,
@@ -25,11 +26,13 @@ function run(
   service: FakeSupervisor;
   out: CapturedOutput;
   logs: FakeLogs;
+  snapshots: FakeSnapshots;
   built: () => number;
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
   const out = new CapturedOutput();
   const logs = new FakeLogs();
+  const snapshots = new FakeSnapshots();
   let builds = 0;
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
@@ -42,13 +45,14 @@ function run(
       health: new FakeHealth(probes),
       logs,
       nix: new FakeNixGcRoot(),
+      snapshots,
       clock: new SteppingClock(),
       out,
       readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
       shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     });
   });
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), service, out, logs, built: () => builds };
+  return { parsed: program.parseAsync(['node', 'fy', ...argv]), service, out, logs, snapshots, built: () => builds };
 }
 
 describe('daemon command surface', () => {
@@ -141,6 +145,31 @@ describe('daemon command surface', () => {
 
     // Assert
     should(logs.shown[0]?.follow).be.true();
+  });
+
+  it('should route snapshot build, promotion and list through the mounted store', async () => {
+    // Arrange + Act
+    const build = run(['daemon', 'snapshot', 'build']);
+    await build.parsed;
+    const promote = run(['daemon', 'snapshot', 'promote', `sha256-${'b'.repeat(64)}`]);
+    await promote.parsed;
+    const list = run(['daemon', 'snapshot', 'list']);
+    await list.parsed;
+
+    // Assert
+    should(build.snapshots.calls).deepEqual(['build']);
+    should(promote.snapshots.calls).deepEqual([`promote:sha256-${'b'.repeat(64)}`]);
+    should(list.snapshots.calls).deepEqual(['list', 'current']);
+  });
+
+  it('should pass --json to the snapshot list renderer', async () => {
+    // Arrange + Act
+    const { parsed, out } = run(['daemon', 'snapshot', 'list', '--json']);
+    await parsed;
+
+    // Assert
+    const payload = JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '') as { daemon?: string };
+    should(payload.daemon).equal('fyd');
   });
 
   it('should build the controller only when a verb actually runs', async () => {

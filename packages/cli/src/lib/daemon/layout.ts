@@ -22,12 +22,10 @@ export interface DaemonEnvironmentInput {
   readonly stateHome?: string | undefined;
   /** `XDG_CONFIG_HOME` when set — systemd user units live under it. */
   readonly configHome?: string | undefined;
-  /** `XDG_STATE_HOME` when set — the Nix garbage-collection root lives under it. */
+  /** `XDG_STATE_HOME` when set — CLI-owned installation artifacts live under it. */
   readonly stateDirectory?: string | undefined;
   /** The invoking user's numeric id, which names the launchd domain. */
   readonly userId: number;
-  /** The daemon executable this CLI supervises. */
-  readonly daemonBinary: string;
   /** Base name of that executable: it names the systemd unit and the launchd label. */
   readonly daemonName: string;
   /** The product name, which prefixes the reverse-DNS launchd label. */
@@ -42,10 +40,13 @@ export interface DaemonLayout {
   readonly manager: DaemonManagerKind;
   /** Base name of the daemon executable — what a human calls the thing these commands manage. */
   readonly daemonName: string;
+  /** Product namespace carried in every snapshot manifest. */
+  readonly product: string;
   readonly stateHome: string;
   readonly logDirectory: string;
   readonly logFile: string;
-  readonly daemonBinary: string;
+  /** Daemon-keyed root of the CLI-owned immutable snapshot store. */
+  readonly snapshotRoot: string;
   readonly searchPath: string;
   /** `fyd.service` — the unit name every `systemctl --user` verb takes. */
   readonly systemdUnitName: string;
@@ -148,20 +149,21 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
       : requireDirectory(input.stateDirectory, 'XDG_STATE_HOME');
   const daemonName = requireName(input.daemonName, 'daemon name');
   const product = requireName(input.product, 'product name');
-  const daemonBinary = requireDirectory(input.daemonBinary, 'daemon binary');
   const userId = requireUserId(input.userId, 'user id');
 
   const logDirectory = join(stateHome, 'logs');
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
+  const snapshotRoot = join(stateDirectory, product, 'daemon-snapshots', daemonName);
 
   return {
     manager: managerForPlatform(input.platform),
     daemonName,
+    product,
     stateHome,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
-    daemonBinary,
+    snapshotRoot,
     searchPath: input.searchPath,
     systemdUnitName: `${daemonName}.service`,
     systemdUnitFile: join(configHome, 'systemd', 'user', `${daemonName}.service`),
