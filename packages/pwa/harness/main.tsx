@@ -572,9 +572,10 @@ function DictationFlowHarness({
     <div className="flex min-w-0 flex-col gap-2" data-dictation-stage={stage}>
       <Label>{label}</Label>
       {/* The panel is anchored above its composer, so each example needs its own
-          positioned box at the same width. */}
-      <div className="relative h-[72px] min-w-0">
-        <div className="absolute inset-x-0 top-[72px]">{sheet}</div>
+          positioned box at the same width. Reserve the wrapped mobile error
+          strip's full height so it cannot paint over this fixture's label. */}
+      <div className="relative h-[120px] min-w-0">
+        <div className="absolute inset-x-0 top-[120px]">{sheet}</div>
       </div>
       <div className="flex items-center gap-2">{control}</div>
     </div>
