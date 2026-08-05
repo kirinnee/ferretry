@@ -256,7 +256,7 @@ describe('the web app manifest', () => {
     const modes: readonly ResolvedMode[] = ['light', 'dark'];
     // An empty family list would make the loop below vacuous and this test a
     // green assertion about nothing.
-    expect(THEME_FAMILIES.length).toBe(7);
+    expect(THEME_FAMILIES.length).toBe(11);
     for (const family of THEME_FAMILIES) {
       for (const mode of modes) {
         expect(manifestHrefFor(MANIFEST_HREF, family.id, mode)).toBe(MANIFEST_HREF);

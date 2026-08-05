@@ -121,7 +121,7 @@ describe('useTheme', () => {
     await flipOsTo(false);
 
     // Assert
-    expect(attrOf(view.container)).toBe('ember-light');
+    expect(attrOf(view.container)).toBe('phosphor-light');
     await view.unmount();
   });
 
@@ -233,13 +233,13 @@ describe('useTheme', () => {
       window.dispatchEvent(
         new StorageEvent('storage', {
           key: THEME_PREFERENCES_KEY,
-          newValue: '{"family":"notebook","mode":"dark","textScale":"default"}',
+          newValue: '{"family":"ledger","mode":"dark","textScale":"default"}',
         }),
       );
     });
 
     // Assert
-    expect(attrOf(view.container)).toBe('notebook-dark');
+    expect(attrOf(view.container)).toBe('ledger-dark');
 
     // Act — after unmount the listener is gone and the tab stops reacting.
     await view.unmount();
