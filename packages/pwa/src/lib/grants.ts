@@ -153,7 +153,7 @@ export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'f
  *
  * ## THIS MUST COME FROM THE DAEMON, AND THAT IS THE WHOLE CORRECTNESS RULE
  *
- * A browser sitting on `http://127.0.0.1:7431` can be reaching the daemon **through the relay**, and a
+ * A browser sitting on `http://127.0.0.1` can be reaching the daemon **through the relay**, and a
  * relayed hop is never loopback — `tunnelApiRequest` sets `loopback: false` unconditionally, whatever
  * address the request appears to carry. So a mark derived from `location.hostname`, the daemon's
  * `baseUrl`, or anything else the page can see would tell a remote user they were local: the exact

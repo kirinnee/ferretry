@@ -4942,12 +4942,21 @@ function Shell() {
       ),
     },
     {
-      // No answer from the daemon. It says so rather than assuming the friendly reading: absence of
-      // evidence is not evidence of loopback.
+      /**
+       * No answer from the daemon. It says so rather than assuming the friendly reading: absence of
+       * evidence is not evidence of loopback.
+       *
+       * THE FIXTURE HAS TO CARRY NO CAPABILITIES TO REACH THIS. The posture is derived from `mayGrant`,
+       * so a list of capabilities always determines one — passing the locked fixture here rendered
+       * "Remote — governed" under a frame labelled "cannot tell", which is a screenshot that quietly
+       * documents the wrong thing. An empty list is the honest way to model a daemon that said nothing,
+       * and it is also the real case: `unknown` is what a caller sees when the read produced no
+       * capabilities to infer from.
+       */
       label: 'Capability list — cannot tell',
       render: () => (
         <div data-harness="capability-list-unknown">
-          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCKED.capabilities} />
+          <CapabilityList connection={daemon} capabilities={[]} />
         </div>
       ),
     },

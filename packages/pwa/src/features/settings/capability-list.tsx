@@ -12,7 +12,7 @@
  *
  * ## THE DIRECT-LOCAL MARK COMES FROM THE DAEMON, NEVER FROM THE PAGE
  *
- * This is the correctness rule the whole surface stands on. A browser on `http://127.0.0.1:7431` can be
+ * This is the correctness rule the whole surface stands on. A browser on `http://127.0.0.1` can be
  * reaching the daemon through the relay, and a relayed hop is never loopback. So the posture arrives as
  * a value the DAEMON derived from the carrier; this component reads no hostname, no `location`, and no
  * `baseUrl`, and there is deliberately no code path here that could. `tests/…/capability-list.test.tsx`
