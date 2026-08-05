@@ -30,6 +30,15 @@ const validClaude = JSON.stringify({
   sessionId: 'foreign-claude',
   message: { role: 'user', content: 'Read-only history must stay honest.' },
 });
+const validCodex = JSON.stringify({
+  timestamp: '2026-08-01T12:01:00.000Z',
+  type: 'response_item',
+  payload: {
+    type: 'message',
+    role: 'user',
+    content: [{ type: 'input_text', text: 'Codex history is read-only too.' }],
+  },
+});
 
 function importer(files: ForeignHistoryFiles) {
   return new ForeignHistoryImporter(
@@ -42,20 +51,24 @@ function importer(files: ForeignHistoryFiles) {
 describe('ForeignHistoryImporter', () => {
   test('indexes valid Claude fixtures in place and labels them read-only', async () => {
     const source = `${CLAUDE_ROOT}/project/foreign-claude.jsonl`;
+    const codexSource = `${CODEX_ROOT}/2026/08/foreign-codex.jsonl`;
     const history = importer(
       new FixtureFiles(
         {
           [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
           [`${CLAUDE_ROOT}/project`]: [{ name: 'foreign-claude.jsonl', kind: 'file' }],
+          [CODEX_ROOT]: [{ name: '2026', kind: 'directory' }],
+          [`${CODEX_ROOT}/2026`]: [{ name: '08', kind: 'directory' }],
+          [`${CODEX_ROOT}/2026/08`]: [{ name: 'foreign-codex.jsonl', kind: 'file' }],
         },
-        { [source]: `${validClaude}\n` },
+        { [source]: `${validClaude}\n`, [codexSource]: `${validCodex}\n` },
       ),
     );
 
     const listing = await history.list();
 
     expect(listing.skipped).toEqual([]);
-    expect(listing.conversations).toHaveLength(1);
+    expect(listing.conversations).toHaveLength(2);
     expect(listing.conversations[0]).toMatchObject({
       harness: 'claude',
       title: 'Read-only history must stay honest.',
@@ -67,6 +80,7 @@ describe('ForeignHistoryImporter', () => {
     if (first === undefined) throw new Error('expected a discovered fixture conversation');
     const imported = await history.get(first.id);
     expect(imported?.events).toHaveLength(1);
+    expect(listing.conversations.some(conversation => conversation.harness === 'codex')).toBe(true);
   });
 
   test('reports malformed history as skipped rather than an empty conversation', async () => {

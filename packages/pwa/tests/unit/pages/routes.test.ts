@@ -4,6 +4,7 @@ import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   connectionPickerPath,
   daemonAnalyticsPath,
+  daemonImportedHistoryPath,
   daemonLearningPath,
   daemonNewSessionPath,
   daemonProjectsPath,
@@ -11,11 +12,11 @@ import {
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
-  setupPath,
   decodeRouteSegment,
   parseRoute,
   routePageKey,
   routePath,
+  setupPath,
 } from '../../../src/lib/pages/routes.ts';
 
 const daemonA = daemonId('daemon/a');
@@ -34,6 +35,7 @@ describe('route path builders', () => {
       daemonWardenPath(daemonA),
       daemonAnalyticsPath(daemonA),
       daemonLearningPath(daemonA),
+      daemonImportedHistoryPath(daemonA),
     ];
 
     // Assert
@@ -47,6 +49,7 @@ describe('route path builders', () => {
       '/d/daemon%2Fa/warden',
       '/d/daemon%2Fa/analytics',
       '/d/daemon%2Fa/learning',
+      '/d/daemon%2Fa/history',
     ]);
   });
 
@@ -71,6 +74,7 @@ describe('route parsing', () => {
       parseRoute('/d/daemon%2Fa/warden'),
       parseRoute('/d/daemon%2Fa/analytics'),
       parseRoute('/d/daemon%2Fa/learning'),
+      parseRoute('/d/daemon%2Fa/history'),
     ];
 
     // Assert
@@ -83,6 +87,7 @@ describe('route parsing', () => {
       { kind: 'warden', daemonId: daemonA },
       { kind: 'analytics', daemonId: daemonA },
       { kind: 'learning', daemonId: daemonA },
+      { kind: 'imported-history', daemonId: daemonA },
     ]);
   });
 
@@ -171,6 +176,7 @@ describe('route identity', () => {
       parseRoute('/d/daemon-b/warden'),
       parseRoute('/d/daemon-b/analytics'),
       parseRoute('/d/daemon-b/learning'),
+      parseRoute('/d/daemon-b/history'),
     ];
 
     // Act
@@ -188,6 +194,7 @@ describe('route identity', () => {
       ['/d/daemon-b/warden', 'warden:"daemon-b"'],
       ['/d/daemon-b/analytics', 'analytics:"daemon-b"'],
       ['/d/daemon-b/learning', 'learning:"daemon-b"'],
+      ['/d/daemon-b/history', 'imported-history:"daemon-b"'],
     ]);
     should(routePageKey(daemonBSession)).not.equal(routePageKey(daemonASession));
   });
