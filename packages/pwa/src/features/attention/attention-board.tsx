@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowRight,
   BadgeCheck,
+  Bot,
   BookOpen,
   Check,
   ChevronDown,
@@ -83,8 +84,78 @@ export const describeResponse = (response: AttentionResponse): string => {
   return `Answered: ${response.answer}`;
 };
 
-const actor = (by: AttentionBy, name: string | null): string =>
-  by === 'agent' ? `agent ${name ?? '(unnamed)'}` : by === 'human' ? 'you' : 'the daemon';
+/**
+ * An agent's display name is optional in the recorded ledger and is null for most
+ * real work, so the session it acted from is the fallback that carries audit value:
+ * a person can look a session up, where a generic placeholder identifies nobody.
+ */
+const agentLabel = (name: string | null, session: string | null): string =>
+  name ?? session ?? 'an unidentified session';
+
+const actor = (by: AttentionBy, name: string | null, session: string | null): string =>
+  by === 'agent' ? `agent ${agentLabel(name, session)}` : by === 'human' ? 'you' : 'the daemon';
+
+type AttentionResolution = Pick<
+  ResolvedAttentionItem,
+  'resolvedBy' | 'resolvedByName' | 'resolvedBySession' | 'disposition' | 'response'
+>;
+
+/**
+ * A dismissal is audit evidence, not a generic completed state. The badge makes
+ * clears performed without the human especially easy to scan — and it keeps an
+ * agent that answered on the human's behalf distinct from one that withdrew its
+ * own request, because only the recorded response separates the two.
+ */
+export function resolutionBadge({
+  resolvedBy,
+  resolvedByName,
+  resolvedBySession,
+  disposition,
+  response,
+}: AttentionResolution): { label: string; className: string; icon: typeof Check } {
+  const agent = agentLabel(resolvedByName, resolvedBySession);
+  if (disposition === 'dismissed') {
+    if (resolvedBy === 'agent') {
+      return {
+        label: `dismissed by agent ${agent}`,
+        className: 'border-warn/50 bg-warn/10 text-warn',
+        icon: Bot,
+      };
+    }
+    if (resolvedBy === 'human') {
+      return {
+        label: 'dismissed by you',
+        className: 'border-border bg-surface-2 text-muted',
+        icon: UserRoundCheck,
+      };
+    }
+    return {
+      label: 'dismissed by the daemon',
+      className: 'border-border bg-surface-2 text-muted',
+      icon: Check,
+    };
+  }
+  if (resolvedBy === 'agent') {
+    return {
+      label: `${response ? 'answered' : 'retracted'} by agent ${agent}`,
+      className: 'border-warn/50 bg-warn/10 text-warn',
+      icon: Bot,
+    };
+  }
+  if (resolvedBy === 'human') {
+    return {
+      label: 'done by you',
+      className: 'border-ok/50 bg-ok/10 text-ok',
+      icon: UserRoundCheck,
+    };
+  }
+  return {
+    label: 'cleared by the daemon',
+    className: 'border-border bg-surface-2 text-muted',
+    icon: Check,
+  };
+}
+
 const prose = (text: string, className = '') => (
   <p className={cn('kt-attn-prose m-0 whitespace-pre-wrap break-words', className)}>{text}</p>
 );
@@ -287,7 +358,7 @@ function AttentionRow({
       </div>
       <div className="mt-sm flex flex-wrap items-center gap-x-sm gap-y-xs text-meta text-faint">
         <span>
-          {sourceLabel(item.source)} · raised by {actor(item.raisedBy, item.raisedByName)} ·{' '}
+          {sourceLabel(item.source)} · raised by {actor(item.raisedBy, item.raisedByName, item.raisedBySession)} ·{' '}
           {new Date(item.waitingSince).toLocaleString()}
         </span>
         <button
@@ -462,23 +533,37 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttention
         <p className="m-0 py-row-y text-meta text-faint">No recorded resolutions.</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-sm p-0 pb-row-y pt-xs">
-          {items.map(item => (
-            <li
-              key={`${item.id}:${item.resolvedAt}`}
-              className="min-w-0 border-l-2 border-border-soft pl-sm text-meta leading-base"
-            >
-              <p className="m-0 font-medium text-muted">{item.subject}</p>
-              <p className="m-0 text-faint">
-                {attentionReference(item.id)} ·{' '}
-                {item.disposition === 'dismissed'
-                  ? `dismissed by ${actor(item.resolvedBy, item.resolvedByName)}`
-                  : `done by ${actor(item.resolvedBy, item.resolvedByName)}`}{' '}
-                · {new Date(item.resolvedAt).toLocaleString()}
-              </p>
-              {item.response && <p className="m-0 font-medium text-muted">{describeResponse(item.response)}</p>}
-              {item.resolutionNote && prose(item.resolutionNote, 'text-faint')}
-            </li>
-          ))}
+          {items.map(item => {
+            const badge = resolutionBadge(item);
+            const BadgeIcon = badge.icon;
+            return (
+              <li
+                key={`${item.id}:${item.resolvedAt}`}
+                className={cn(
+                  'min-w-0 border-l-2 pl-sm text-meta leading-base',
+                  item.resolvedBy === 'agent' ? 'border-warn/60' : 'border-border-soft',
+                )}
+              >
+                <p className="m-0 font-medium text-muted">{item.subject}</p>
+                <p className="m-0 flex flex-wrap items-center gap-x-sm gap-y-xs text-faint">
+                  <span
+                    className={cn(
+                      'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
+                      badge.className,
+                    )}
+                  >
+                    <BadgeIcon size={11} aria-hidden="true" />
+                    {badge.label}
+                  </span>
+                  <span>
+                    {attentionReference(item.id)} · {new Date(item.resolvedAt).toLocaleString()}
+                  </span>
+                </p>
+                {item.response && <p className="m-0 font-medium text-muted">{describeResponse(item.response)}</p>}
+                {item.resolutionNote && prose(item.resolutionNote, 'text-faint')}
+              </li>
+            );
+          })}
         </ul>
       )}
     </details>

@@ -4,15 +4,17 @@ import { homedir } from 'node:os';
 import {
   buildFleetIdentities,
   buildFleetScaffold,
+  buildFleetUsageCollector,
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
-  FleetUsageCollector,
 } from '@ferretry/fleet';
 import {
+  AnthropicUsageProbe,
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
+  fetchQuota,
   PlatformFleetCredentialStore,
   ProcessFleetLoginPort,
   readFleetWrapperScript,
@@ -39,7 +41,7 @@ import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { FileDaemonSnapshotStore } from '../src/adapters/daemon/snapshot-store';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
 import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
-import { SystemUsageClock, UnprovisionedUsageProbe } from '../src/adapters/fleet/usage-probe';
+import { SystemUsageClock } from '../src/adapters/fleet/usage-probe';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
@@ -519,14 +521,13 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
   const configPath = configured === '' ? defaultConfigPath(layout) : configured;
   // The one place allowed to read the platform and the environment: the store itself takes both as
   // values, which is what lets a test drive the macOS path on a host that is not macOS.
-  const identityService = new FleetIdentityService(
-    new PlatformFleetCredentialStore({
-      platform: process.platform,
-      command: new SpawnCredentialCommand(),
-      now: () => Date.now(),
-      keychainAccount: world.environment.USER ?? '',
-    }),
-  );
+  const credentialStore = new PlatformFleetCredentialStore({
+    platform: process.platform,
+    command: new SpawnCredentialCommand(),
+    now: () => Date.now(),
+    keychainAccount: world.environment.USER ?? '',
+  });
+  const identityService = new FleetIdentityService(credentialStore);
   return new FleetController({
     config: new FileFleetConfigSource(configPath),
     manifests: new FileFleetManifestSource(layout.manifestPath),
@@ -548,12 +549,17 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     applier: new FileFleetProvisioner([layout.fleetDirectory]),
     // Built per invocation from the loaded configuration, so `usage.concurrency` and
     // `usage.atLimitPercent` are honoured instead of parsed and dropped.
+    // The same collector the daemon builds, from the same factory, over the same probe: two call
+    // sites assembling their own is how `fy fleet usage` and GET /v1/fleet/usage come to disagree about
+    // whether an account has quota left. The credential store is shared with login, so the token a
+    // probe uses is the one a login wrote.
     usage: {
       forConfig: config =>
-        new FleetUsageCollector(new UnprovisionedUsageProbe(), new SystemUsageClock(), {
-          concurrency: config.usage.concurrency,
-          atLimitPercent: config.usage.atLimitPercent,
-        }),
+        buildFleetUsageCollector(
+          config,
+          new AnthropicUsageProbe({ fetch: fetchQuota, credentials: credentialStore }),
+          new SystemUsageClock(),
+        ),
     },
     // One credential store for both verbs: `--status` reads through it and a login copies through it,
     // so what a report says a home holds is the same reading a copy decides on.

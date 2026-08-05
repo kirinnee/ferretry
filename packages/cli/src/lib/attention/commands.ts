@@ -9,7 +9,8 @@ import type {
 } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
-const SESSION_HELP = 'target another session (defaults to the session this command runs inside)';
+const SESSION_HELP =
+  'target another session; an agent may mutate only its own session (defaults to the current session)';
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
@@ -27,6 +28,9 @@ const ASK_KINDS = `--kind says what the human DOES:
   choice       pick one --option (repeat --option; 2 or more required)
   review       say the answer is good, or ask for a clarification
   open         write a full answer (the default)`;
+
+const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
+A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
 
 /** Add the shared flags every attention verb carries. */
 function scoped(command: Command): Command {
@@ -101,7 +105,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .command('dismiss')
       .description('dismiss an item without answering it — recorded with who dismissed it')
       .argument('<id>', 'the attention reference, like !A3')
-      .option('-n, --note <text>', 'a note recorded with the dismissal'),
+      .option('-n, --note <text>', 'a note recorded with the dismissal')
+      .addHelpText('after', `\n${DISMISS_POLICY}`),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.dismiss(id, merged<AttentionResolveOptions>(command));
   });

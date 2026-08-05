@@ -36,7 +36,7 @@ him, not by line count.
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
 | E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Reports everything unknown       | **Yes**                                                               |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers for Anthropic       | **Was yes**; Anthropic closed, other providers still GAP              |
 | G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
@@ -46,9 +46,10 @@ him, not by line count.
 
 Three facts that the capability rows assume and that are easy to miss:
 
-1. **`fy fleet usage` reports every account as `unavailable` today.** The only `FleetUsageProbe`
-   implementation is `UnprovisionedUsageProbe` (`packages/cli/src/adapters/fleet/usage-probe.ts:11`).
-   It is honest about it, but there is no quota data anywhere in the product.
+1. **`fy fleet usage` now reports real Anthropic numbers.** `AnthropicUsageProbe`
+   (`packages/fleet/src/adapters/anthropic-usage-probe.ts`) serves both `fy fleet usage` and
+   `GET /v1/fleet/usage` from one implementation. Both placeholder probes are deleted. A non-Anthropic
+   account still reports an honest failure rather than a number — see [F](#f--know-whos-out-of-quota).
 2. **The reachability gate cannot see this package's dead capability.**
    `scripts/validate/composition-reachability.ts:22` roots a package with no `bin` at its `exports`,
    so everything under `packages/fleet`'s barrel is "reachable" by definition. `FleetLoginService`
@@ -280,17 +281,36 @@ Ported, and pure, and tested:
 | `cli/serve.ts:73` Prometheus rendering               | `lib/usage.ts:243` `renderFleetUsageMetrics` — **never called** |
 | `cli/serve.ts:200` `/usage` envelope                 | `lib/usage.ts:229` `renderFleetUsageJson` — **never called**    |
 
-Ferretry's collector is also stricter in the right place: a _failed_ probe can never set `atLimit`
-(`usage.ts:211`). Only a successful reading or a proven-unavailable state can exhaust an account.
+Ferretry's collector is also stricter in the right place: a _failed_ probe can never set `atLimit`.
+Only a successful reading or a proven-unavailable state can exhaust an account.
 
-Missing: **every call that would produce a number.** Anthropic stored-OAuth (`core/usage.ts:306`),
-Anthropic external-token via `max_tokens:1` quota headers (`:245` — note the headers are fractions in
-0..1 while the JSON endpoint is 0..100, and mixing them is a 100× error), Codex/ChatGPT (`:333`),
-z.ai (`:382`), MiniMax (`:487`), plus classification (`:741`), **deduplication by credential**
-(`:824` — many wrappers share one credential; kfleet probes each unique credential once), pre-probe
-token refresh (`:624`), donor healing (`:885`), secrets-file resolution (`:703`), local credential
-reading (`core/creds.ts` — **now PORTED**, as `adapters/credential-store.ts`), and the entire
-CLIProxyAPI availability source (`core/cliproxy-usage.ts`, 308 lines).
+That rule caught a real false exhaustion when the real probe landed. The daemon placeholder answered
+`unavailable`, which the collector correctly read as at-limit — so **every** account reported at its
+limit and routing had nothing left to pick. An account whose credential cannot be read is now a
+failed reading with a reason and explicitly **not** at its limit: unknown is not exhausted.
+
+**Anthropic now produces numbers.** Both readings are ported and both are live:
+
+| kfleet                                     | Ferretry                                                                   |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| `core/usage.ts:306` stored-OAuth probe     | `adapters/anthropic-usage-probe.ts` — `GET /api/oauth/usage`               |
+| `core/usage.ts:245` external-token headers | same file — the `max_tokens:1` fallback, taken on a `403`                  |
+| `core/usage.ts:142` stored-usage parse     | `lib/quota.ts` `parseStoredUsageBody` (**0..100**)                         |
+| `core/usage.ts:188` header parse           | `lib/quota.ts` `parseQuotaHeaders` (**0..1**)                              |
+| `core/usage.ts:824` dedup by credential    | `lib/usage.ts` `identityOf` — grouped by **declared identity**, no hashing |
+| `core/creds.ts` local credential reading   | `adapters/credential-store.ts` `material`                                  |
+
+**The 100× landmine is worse than a scale mismatch: both sources call the field `utilization`.**
+`GET /api/oauth/usage` returns `five_hour.utilization` in `0..100`; the
+`anthropic-ratelimit-unified-5h-utilization` header is a fraction in `0..1`. Same name, 100× apart.
+They are read by two separately-named functions, and the tests feed `0.42` and `42` to both because
+each value is wrong under the other's rule. A percentage reaching the header reader is **refused**
+rather than clamped to 100, because clamping would look like a real reading while hiding the mix-up.
+
+Still **GAP**, and deliberately so rather than covered thinly: Codex/ChatGPT (`core/usage.ts:333`),
+z.ai (`:382`), MiniMax (`:487`), classification (`:741`), pre-probe token refresh (`:624`), donor
+healing (`:885`), and secrets-file resolution (`:703`). The entire CLIProxyAPI availability source
+(`core/cliproxy-usage.ts`, 308 lines) is **not to be ported**.
 
 **CLIProxyAPI is out of scope by the owner’s decision** — it is not to be ported. Its configuration is
 not silently dropped: `usage.cliProxy` is a **hard refusal** at plan time
@@ -640,7 +660,9 @@ the next reader concluding otherwise from a name search.
 | `core/login.ts:331` `interactiveLogin`                              | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                      |
 | `cli/init.ts`                                                       | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                           |
 | `core/health.ts`, `core/harness-probe.ts` (rest)                    | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)    |
-| `core/usage.ts` (probes)                                            | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
+| `core/usage.ts:245,306` Anthropic probes                            | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                          |
+| `core/usage.ts:824` dedup by credential                             | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                |
+| `core/usage.ts` (other providers)                                   | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
 | `core/cliproxy-usage.ts`                                            | —                                                                                                | **not to be ported** (owner); config refused      |
 | `core/creds.ts`                                                     | `adapters/credential-store.ts`                                                                   | ported by this unit                               |
 | `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity`          | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                               |

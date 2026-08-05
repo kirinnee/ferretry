@@ -46,13 +46,15 @@ const raise = {
 } as const;
 
 describe('attentionActor', () => {
-  it('should treat only an in-pane peer as an agent and everyone else as the human', () => {
+  it('should accept only established peer, admin, or paired-device provenance', () => {
     // Arrange / Act / Assert
     should(attentionActor('peer:s1')).deepEqual({ kind: 'agent', sessionId: 's1', name: null });
     should(attentionActor('admin-cli')).deepEqual({ kind: 'human' });
     should(attentionActor('admin-ui')).deepEqual({ kind: 'human' });
-    should(attentionActor('peer:')).deepEqual({ kind: 'human' });
-    should(attentionActor(undefined)).deepEqual({ kind: 'human' });
+    should(attentionActor('device:browser-1')).deepEqual({ kind: 'human' });
+    for (const unavailable of ['peer:', 'peer:not/a/session', 'device:', 'warden:s1', 'unknown', undefined]) {
+      should(() => attentionActor(unavailable)).throw(/established human or session provenance/u);
+    }
   });
 });
 
@@ -148,6 +150,40 @@ describe('attention routes', () => {
     // Assert
     should(dismissed.status).equal(200);
     should(jsonBody(dismissed)).have.property('count', 0);
+  });
+
+  it('should let an agent dismiss its own item but refuse every other provenance', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const own = await dispatch(post(raise, agentIn('s1')));
+    const ownId = (jsonBody(own).items as readonly { id: string }[])[0]?.id;
+
+    // Act
+    const ownDismissal = await dispatch(post({ action: 'dismiss', id: ownId }, agentIn('s1')));
+    const humanRaised = await dispatch(post({ ...raise, subject: 'human-raised request' }));
+    const humanId = (jsonBody(humanRaised).items as readonly { id: string }[])[0]?.id;
+    const forgedDismissal = await dispatch(post({ action: 'dismiss', id: humanId }, agentIn('s1')));
+
+    // Assert
+    should(ownDismissal.status).equal(200);
+    should((jsonBody(ownDismissal).resolved as readonly { disposition: string; resolvedBy: string }[])[0]).containDeep({
+      disposition: 'dismissed',
+      resolvedBy: 'agent',
+    });
+    should(forgedDismissal.status).equal(403);
+    should(jsonBody(forgedDismissal)).have.property('code', 'forbidden');
+  });
+
+  it('should refuse an agent targeting another session before a phantom board can be created', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch(post(raise, agentIn('other-session')));
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).have.property('code', 'forbidden');
   });
 
   it('should report an action against an unknown item as not found', async () => {

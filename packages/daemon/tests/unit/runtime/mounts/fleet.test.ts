@@ -29,11 +29,15 @@ async function fixture(): Promise<FleetFixture> {
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
   const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
+  // A platform is required rather than defaulted, so a test always states which credential path it
+  // drives. No usage probe is injected, so the route builds the real one; it finds no credential in
+  // this temporary home, which is the honest 'not logged in' answer rather than a fabricated zero.
   const subsystem = createDaemonFleetSubsystem({
     paths,
     userHome,
     clock: { now: () => GENERATED_AT_MS },
     files: new StateFileSystem(paths),
+    platform: 'linux',
   });
   const credentials = {
     ...CREDENTIALS,
@@ -273,12 +277,18 @@ describe('the daemon fleet mount', () => {
     should(manifest.accounts[0]?.wrapper).equal(wrapper);
     const usage = FleetUsageSnapshotSchema.parse(JSON.parse(usageResponse.body));
     should(usage.at).equal(GENERATED_AT_MS);
+    // The route now builds the real Anthropic probe. This home has no credential, so the honest
+    // answer is a failed reading with a reason — and, importantly, NOT at its limit: an account
+    // nobody could read is unknown, not exhausted. The previous placeholder reported every account
+    // `unavailable`, which the collector then read as at-limit and would have blocked all routing.
     should(usage.accounts[0]).containEql({
       accountId: ACCOUNT_ID,
-      unavailable: true,
-      unavailableReason: 'no provider quota probe is provisioned on this daemon',
-      atLimit: true,
+      provider: 'anthropic',
+      ok: false,
+      authOk: false,
+      atLimit: false,
     });
+    should(usage.accounts[0]?.error).match(/no readable access token/u);
     should(wrapper.startsWith(subject.root)).be.true();
     should(subject.paths.fleetManifest.startsWith(subject.root)).be.true();
   });

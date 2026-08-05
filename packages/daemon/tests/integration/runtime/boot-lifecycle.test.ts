@@ -868,6 +868,12 @@ describe('daemon boot lifecycle', () => {
    * and the directory each view reports is the one the layout actually put the documents in — which
    * the case checks by reading a file out of it. A session the index does not hold is absent, and a
    * session whose documents no longer satisfy the protocol is refused rather than reported missing.
+   *
+   * The mounted attention board is held to those same two answers on those same two ids, because its
+   * existence proof is this registry. A board with no ledger file is legitimately empty, so a check
+   * that read only the ledger would answer `200 { count: 0 }` both for a session that does not exist
+   * and for one whose documents are damaged — the failure mode that hides a session waiting on the
+   * human behind an empty board.
    */
   it('should list and read the seeded sessions through the mounted session read', async () => {
     // Arrange
@@ -902,6 +908,13 @@ describe('daemon boot lifecycle', () => {
     const one = await fetch(`${sessions}/wire-one`, { headers });
     const absent = await fetch(`${sessions}/wire-ghost`, { headers });
     const unusable = await fetch(`${sessions}/wire-bad`, { headers });
+    // The same three sessions asked for their attention board. The board's existence proof is the
+    // session registry, so each answer is the registry's answer rather than the ledger file's — and
+    // none of these sessions has ever written an `attention.json`, so a ledger-only check would have
+    // served all three the same empty board.
+    const liveBoard = await fetch(`${sessions}/wire-one/attention`, { headers });
+    const absentBoard = await fetch(`${sessions}/wire-ghost/attention`, { headers });
+    const unusableBoard = await fetch(`${sessions}/wire-bad/attention`, { headers });
     const listedBody = SessionListSchema.parse(await listed.json());
     const oneBody = SessionViewSchema.parse(await one.json());
     release();
@@ -928,6 +941,20 @@ describe('daemon boot lifecycle', () => {
     // Omitted from the list, but answerable here: "it does not exist" would be a lie.
     should(unusable.status).equal(500);
     should((await unusable.json()) as { code: string }).have.property('code', 'unusable_session_document');
+    // The control: a session the registry proves, with no ledger written, DOES get the empty board.
+    // Without this line the two refusals below could be a route that fails for everyone.
+    should(liveBoard.status).equal(200);
+    should((await liveBoard.json()) as { count: number }).have.property('count', 0);
+    // The attention board answers on the same two ids, and a missing ledger file is an empty board
+    // ONLY when the registry can prove the session. A session nothing holds is not-found rather than
+    // a 200 board with nothing on it, which is what a ledger-only existence check would have served.
+    should(absentBoard.status).equal(404);
+    should((await absentBoard.json()) as { code: string }).have.property('code', 'not-found');
+    // Session document damage fails the board CLOSED. Neither answer here is 200: the daemon cannot
+    // prove the session exists, so it must not report "no attention" for a session that may well be
+    // blocked on the human — a silent empty board is the failure mode that hides a waiting session.
+    should(unusableBoard.status).equal(500);
+    should((await unusableBoard.json()) as { code: string }).have.property('code', 'internal_error');
   });
 
   /**

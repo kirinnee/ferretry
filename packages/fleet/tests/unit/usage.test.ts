@@ -4,8 +4,8 @@ import type { FleetManifest } from '../../src/lib/manifest.ts';
 import {
   clampUsagePercent,
   escapePrometheusLabel,
-  FleetUsageCollector,
   type FleetUsageClock,
+  FleetUsageCollector,
   type FleetUsageProbe,
   FleetUsageProbeResultSchema,
   FleetUsageSnapshotSchema,
@@ -290,5 +290,149 @@ describe('fleet usage normalization', () => {
     // Assert
     should(parseProbe).throw();
     should(parseSnapshot).throw();
+  });
+});
+
+describe('FleetUsageCollector probing once per credential', () => {
+  it('should probe an identity once and give every account on it the same reading', async () => {
+    // Arrange — three lanes of one provider account. They share a quota, so asking three times asks
+    // the same question three times, and on a throttled account those are the worst calls to spend.
+    const probed: string[] = [];
+    const subject = new FleetUsageCollector(
+      probe(account_ => {
+        probed.push(account_.id);
+        return Promise.resolve({ provider: 'anthropic', usageBased: true, ok: true, shortWindow: { usedPercent: 42 } });
+      }),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+
+    // Act
+    const snapshot = await subject.collect(manifest([account('a'), account('b'), account('c')]));
+
+    // Assert — one call, three rows, all carrying the reading.
+    should(probed).deepEqual(['a']);
+    should(snapshot.accounts).have.length(3);
+    should(snapshot.accounts.map(row => row.shortWindow?.usedPercent)).deepEqual([42, 42, 42]);
+    should(snapshot.accounts.map(row => row.accountId)).deepEqual(['a', 'b', 'c']);
+  });
+
+  it('should probe each identity separately', async () => {
+    // Arrange
+    const probed: string[] = [];
+    const subject = new FleetUsageCollector(
+      probe(account_ => {
+        probed.push(account_.id);
+        return Promise.resolve({ usageBased: true, ok: true });
+      }),
+      clock,
+      { identityOf: account_ => (account_.id === 'c' ? 'claude:other' : 'claude:kirin') },
+    );
+
+    // Act
+    await subject.collect(manifest([account('a'), account('b'), account('c')]));
+
+    // Assert — two credentials, two calls.
+    should(probed.sort()).deepEqual(['a', 'c']);
+  });
+
+  it('should probe once per account when no grouping is supplied', async () => {
+    // Arrange — the previous behaviour, unchanged for a caller that shares nothing.
+    const probed: string[] = [];
+    const subject = new FleetUsageCollector(
+      probe(account_ => {
+        probed.push(account_.id);
+        return Promise.resolve({ usageBased: true, ok: true });
+      }),
+      clock,
+    );
+
+    // Act
+    await subject.collect(manifest([account('a'), account('b')]));
+
+    // Assert
+    should(probed.sort()).deepEqual(['a', 'b']);
+  });
+
+  it('should never probe or represent an account the manifest declares unavailable', async () => {
+    // Arrange — an unavailable lane must not be able to suppress its siblings by being chosen first.
+    const probed: string[] = [];
+    const subject = new FleetUsageCollector(
+      probe(account_ => {
+        probed.push(account_.id);
+        return Promise.resolve({ usageBased: true, ok: true, shortWindow: { usedPercent: 7 } });
+      }),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+    const accounts = manifest([
+      account('a', { available: false, unavailableReason: 'the harness is missing' }),
+      account('b'),
+    ]);
+
+    // Act
+    const snapshot = await subject.collect(accounts);
+
+    // Assert — 'a' sorts first but was skipped; 'b' represented the identity and still got its reading.
+    should(probed).deepEqual(['b']);
+    const [first, second] = snapshot.accounts;
+    should(first?.unavailable).be.true();
+    should(first?.unavailableReason).equal('the harness is missing');
+    should(second?.shortWindow?.usedPercent).equal(7);
+  });
+
+  it('should give every account on a failed identity the same honest failure', async () => {
+    // Arrange
+    const subject = new FleetUsageCollector(
+      probe(() => Promise.reject(new Error('socket hang up'))),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+
+    // Act
+    const snapshot = await subject.collect(manifest([account('a'), account('b')]));
+
+    // Assert — a failure fans out as a failure, never as a reading and never as at-limit.
+    should(snapshot.accounts.map(row => row.ok)).deepEqual([false, false]);
+    should(snapshot.accounts.map(row => row.error)).deepEqual(['socket hang up', 'socket hang up']);
+    should(snapshot.accounts.map(row => row.atLimit)).deepEqual([false, false]);
+  });
+
+  it('should not let a failed probe mark a shared identity at its limit', async () => {
+    // Arrange — the stricter-than-source rule, now that one failure reaches many rows.
+    const subject = new FleetUsageCollector(
+      probe(() => Promise.resolve({ usageBased: true, ok: false, atLimit: true, shortWindow: { usedPercent: 100 } })),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+
+    // Act
+    const snapshot = await subject.collect(manifest([account('a'), account('b')]));
+
+    // Assert
+    should(snapshot.accounts.map(row => row.atLimit)).deepEqual([false, false]);
+  });
+
+  it('should fan a proven-unavailable reading to every account on the identity', async () => {
+    // Arrange
+    const subject = new FleetUsageCollector(
+      probe(() =>
+        Promise.resolve({
+          usageBased: true,
+          ok: false,
+          unavailable: true,
+          unavailableReason: 'this credential was rejected',
+        }),
+      ),
+      clock,
+      { identityOf: () => 'claude:kirin' },
+    );
+
+    // Act
+    const snapshot = await subject.collect(manifest([account('a'), account('b')]));
+
+    // Assert — one dead credential takes out every lane on it, which is the truth.
+    should(snapshot.accounts.map(row => row.unavailable)).deepEqual([true, true]);
+    should(snapshot.accounts.map(row => row.atLimit)).deepEqual([true, true]);
   });
 });

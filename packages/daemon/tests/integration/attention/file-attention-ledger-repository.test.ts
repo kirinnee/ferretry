@@ -37,7 +37,11 @@ describe('FileAttentionLedgerRepository', () => {
   it('should atomically persist and reload lifecycle state below the injected session directory', async () => {
     // Arrange
     const { repository } = await createRepository();
-    const service = new AttentionService(repository, { now: () => '2026-07-31T10:00:00Z' });
+    const service = new AttentionService(
+      repository,
+      { now: () => '2026-07-31T10:00:00Z' },
+      { has: async sessionId => sessionId === 'session-1' },
+    );
 
     // Act
     const created = await service.raise('session-1', request, { kind: 'agent', sessionId: 'session-1', name: 'Ada' });
@@ -53,7 +57,11 @@ describe('FileAttentionLedgerRepository', () => {
   it('should serialize concurrent mutations so no attention item is lost', async () => {
     // Arrange
     const { repository } = await createRepository();
-    const service = new AttentionService(repository, { now: () => '2026-07-31T10:00:00Z' });
+    const service = new AttentionService(
+      repository,
+      { now: () => '2026-07-31T10:00:00Z' },
+      { has: async sessionId => sessionId === 'session-1' },
+    );
 
     // Act
     await Promise.all(
