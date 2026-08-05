@@ -1,11 +1,18 @@
-# Survey — the daemon still gets its quota numbers from kfleet
+# Survey — the daemon used to get its quota numbers from kfleet
 
-**The finding, in one line:** Ferretry's daemon serves `/usage`, `/v1/usage` and `/metrics` from a
-cached feed whose only two sources are **kfleet** — an HTTP call to its `serve`, or a shell-out to its
-CLI. The tool the migration exists to delete is currently a runtime dependency of the daemon's quota.
+> **IMPLEMENTED.** The design below was built as written: `FleetUsageSource`
+> (`packages/daemon/src/adapters/usage/fleet-usage-source.ts`) over `accountUsageFromFleet`
+> (`packages/daemon/src/lib/usage/fleet-usage.ts`), wired first in `createUsageFeed`. The manifest
+> join, the fail-closed window mapping and the collapsed cadence all landed. What did **not** land is
+> recorded under [Where this stopped](#where-this-stopped). The document is kept because it is the
+> rationale, not a plan.
 
-Nothing here is broken. Both paths work. But they are two parallel quota systems, and only one of them
-is native.
+**The finding, in one line:** Ferretry's daemon served `/usage`, `/v1/usage` and `/metrics` from a
+cached feed whose only two sources were **kfleet** — an HTTP call to its `serve`, or a shell-out to its
+CLI. The tool the migration exists to delete was a runtime dependency of the daemon's quota.
+
+Nothing here was broken. Both paths worked. But they were two parallel quota systems, and only one of
+them was native.
 
 ## The two paths
 
@@ -39,7 +46,7 @@ honestly — but the advisor, quota-failover and every scraper then have no quot
 `fy fleet usage` on the same host reports real numbers. Capability F reads as closed from the CLI and
 open from the daemon.
 
-## What to build
+## What to build — built
 
 A `UsageSourcePort` backed by the fleet collector, wired **first** in `createUsageFeed`, ahead of the two
 kfleet sources. That single change gives the existing loop, `/metrics` and `/usage` native numbers, makes
@@ -102,19 +109,32 @@ is what makes "native first, kfleet behind it" a safe intermediate state rather 
 absent. Filling them with a plausible default invents a reading, which is the failure mode this whole
 section is about.
 
-## Also still open
+## Also still open — resolved
 
-- **`usage.interval` and `usage.jitter`** configure nothing in the fleet path and are refused at plan time
-  (`capabilities.ts`). Path A has its own `usage.refreshSeconds`, which is a **second** way to say the
-  same thing. Collapse them to one name when the paths merge; do **not** implement the refused pair
-  separately, or the fleet grows two schedules that can disagree.
-- **`usage.timeout` reaches nothing, and is not refused.** Neither composition root passes it to
-  `AnthropicUsageProbe`, so every probe uses the adapter default. That is precisely the "configuration
-  parsed and silently dropped" class the capability refusals exist to prevent, and this one slipped
-  through because the probe landed after the refusal list. Either thread it through or add it to
-  `CAPABILITY_CHECKS`; leaving it as-is is the one option that is wrong.
-- **`usage.enabled: false` is silently ignored.** It defaults to `true`, so the capability list treats it
-  as "not a request" — but somebody who writes `false` has made a request, and nothing honours it.
-- `renderFleetUsageJson` is uncalled; `/v1/fleet/usage` returns the snapshot directly. If the paths merge
-  as described, both fleet renderers become **unnecessary** rather than uncalled, which is the better
-  outcome — delete them then rather than finding a caller for them now.
+- `usage.interval` and `usage.jitter` configured nothing and were refused at plan time
+  (`capabilities.ts`). Path A had its own `usage.refreshSeconds`, a **second** way to say the same
+  thing. **Collapsed:** `usage.interval` is the one name, it drives `CachedUsageFeed`'s refresh through
+  `usageRefreshMs`, and it is no longer refused. `usage.refreshSeconds` is deleted from the daemon
+  configuration. `usage.jitter` stays refused, with a consequence line that now says why: the feed
+  re-collects on snapshot age rather than on a timer, so there is no synchronized cycle to spread.
+- `renderFleetUsageJson` and `renderFleetUsageMetrics` are **unnecessary rather than uncalled**:
+  `/metrics` renders the native feed through `api/metrics.ts` `renderUsageMetrics`, and
+  `/v1/fleet/usage` returns the snapshot directly. Deleting the pair is a separate, safe cleanup.
+- Two settings found while implementing this, both parsed and dropped, both landed after the refusal
+  list was written. **Fixed:** `usage.timeout` now reaches the probe from both composition roots, and
+  `usage.enabled: false` now stops the daemon's unattended collection instead of being read as "not a
+  request" because it defaults to true. An explicit `fy fleet usage` is unaffected: a person asking is
+  not a background cycle.
+
+## Where this stopped
+
+- **The two external sources are still wired, behind the native one.** Removing them is a declared
+  **GAP**. Ordering matters: a host part-way through the migration may still be running kfleet, and a
+  daemon whose own fleet has not been applied yet should keep reporting whatever is answering. The
+  loop's semantics make native-first safe to land first — `undefined` skips to the next source, a
+  non-empty result wins and stops, and an empty array does not short-circuit — so a native source with
+  nothing to say cannot suppress a kfleet source that has something.
+- **`retryAt` and a positive `availability` have no counterpart in a collector row.** They are omitted
+  rather than defaulted; a defaulted availability is an invented claim about an account.
+- **Non-Anthropic providers are still a GAP in the collector itself**, unchanged by this. The daemon
+  now carries whatever the collector can prove, which for those accounts is an honest failure.

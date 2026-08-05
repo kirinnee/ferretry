@@ -26,8 +26,9 @@ written, and [H](#h--keep-it-fresh) is written against them rather than against 
 
 ## Scorecard
 
-Can the owner delete kfleet today? **No — six capabilities short**, down from nine before this unit. Ordered by what actually stops
-him, not by line count.
+Can the owner delete kfleet today? **No — four capabilities short: C, G, H and I**, counted off the
+table below rather than carried forward, because the running total had drifted from the rows twice.
+Ordered by what actually stops him, not by line count.
 
 | #   | Capability — what a person uses kfleet for                          | Ferretry today                   | Blocks deleting kfleet?                                               |
 | --- | ------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
@@ -36,7 +37,7 @@ him, not by line count.
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
 | E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI only           | **Yes — the daemon still shells out to kfleet for quota**             |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes** — the daemon shelled out to kfleet; _closed by this unit_ |
 | G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
@@ -44,13 +45,16 @@ him, not by line count.
 | K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper            | **Was yes**, for automation; _closed by this unit_                    |
 | L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                          | No — annoying, not blocking                                           |
 
-Four facts that the capability rows assume and that are easy to miss:
+Five facts that the capability rows assume and that are easy to miss:
 
-1. **The daemon still gets its quota from kfleet, so F is not closed.** `/usage`, `/v1/usage` and
-   `/metrics` — read by the advisor, quota-failover and the PWA — are served from a cached feed whose
-   only two sources are an HTTP call to kfleet's `serve` and a shell-out to its CLI. The native
-   collector below is reachable only from `fy fleet usage`. Closing this is one `UsageSourcePort`, with
-   one join that silently breaks routing if got wrong: [quota-two-paths.md](quota-two-paths.md).
+1. **The daemon used to get its quota from kfleet, and that was the sharpest blocker on this list.**
+   `/usage`, `/v1/usage` and `/metrics` — read by the advisor, quota-failover and the PWA — were served
+   from a cached feed whose only two sources were an HTTP call to kfleet's `serve` and a shell-out to
+   its CLI, so deleting kfleet would have blinded all three while `fy fleet usage` on the same host
+   kept working. **Closed** by one `UsageSourcePort` over the native collector, wired ahead of them,
+   with the manifest join that silently breaks routing if got wrong:
+   [quota-two-paths.md](quota-two-paths.md). The two external sources stay wired behind it, so kfleet
+   remains usable as a fallback during the migration rather than required.
 1. **`fy fleet usage` now reports real Anthropic numbers.** `AnthropicUsageProbe`
    (`packages/fleet/src/adapters/anthropic-usage-probe.ts`) serves both `fy fleet usage` and
    `GET /v1/fleet/usage` from one implementation. Both placeholder probes are deleted. A non-Anthropic
@@ -60,9 +64,14 @@ Four facts that the capability rows assume and that are easy to miss:
    so everything under `packages/fleet`'s barrel is "reachable" by definition. `FleetLoginService`
    passed every gate for weeks while nothing called it. `groupByIdentity` was the same, and is
    now reached through `buildFleetIdentities`; `renderFleetUsageJson` and
-   `renderFleetUsageMetrics` still are not called. A green build is not evidence of absorption here.
+   `renderFleetUsageMetrics` are still not called, and are now **unnecessary** rather than merely
+   uncalled — see [F](#f--know-whos-out-of-quota). A green build is not evidence of absorption here.
 1. **Configuration used to be accepted and silently ignored** — `sharedHistory`, `health.*`, most of
    `usage.*` parsed cleanly and reached nothing. Closed by this unit: the plan now refuses.
+1. **Two more settings were parsed and dropped after the refusal list was written.** `usage.timeout`
+   reached neither composition root and `usage.enabled: false` was read as "not a request" because it
+   defaults to true. Both now reach something. A refusal list only holds if every setting added after
+   it is either honoured or added to it.
 
 ---
 
@@ -276,15 +285,15 @@ automation can route around an exhausted one. This is why kfleet's `serve` expos
 
 Ported, and pure, and tested:
 
-| kfleet                                               | Ferretry                                                        |
-| ---------------------------------------------------- | --------------------------------------------------------------- |
-| `core/usage.ts:993` at-limit rule                    | `lib/usage.ts:140` `isAtLimit`                                  |
-| `core/usage.ts:466` corroborate-before-condemning    | `lib/usage.ts:153` `isCorroboratedAuthRejection`                |
-| `core/usage.ts:382` "sort windows by reset horizon"  | `lib/usage.ts:112` `normalizeUsageWindows`                      |
-| `core/usage.ts:444` `100 − remaining`                | `lib/usage.ts:82` `usedPercentFromRemaining`                    |
-| `core/usage.ts:912` aggregation, bounded concurrency | `lib/usage.ts:172` `FleetUsageCollector`                        |
-| `cli/serve.ts:73` Prometheus rendering               | `lib/usage.ts:243` `renderFleetUsageMetrics` — **never called** |
-| `cli/serve.ts:200` `/usage` envelope                 | `lib/usage.ts:229` `renderFleetUsageJson` — **never called**    |
+| kfleet                                               | Ferretry                                                    |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
+| `core/usage.ts:993` at-limit rule                    | `lib/usage.ts:140` `isAtLimit`                              |
+| `core/usage.ts:466` corroborate-before-condemning    | `lib/usage.ts:153` `isCorroboratedAuthRejection`            |
+| `core/usage.ts:382` "sort windows by reset horizon"  | `lib/usage.ts:112` `normalizeUsageWindows`                  |
+| `core/usage.ts:444` `100 − remaining`                | `lib/usage.ts:82` `usedPercentFromRemaining`                |
+| `core/usage.ts:912` aggregation, bounded concurrency | `lib/usage.ts:172` `FleetUsageCollector`                    |
+| `cli/serve.ts:73` Prometheus rendering               | `api/metrics.ts` `renderUsageMetrics`, over the native feed |
+| `cli/serve.ts:200` `/usage` envelope                 | `api/routes/usage.ts`, over the native feed                 |
 
 Ferretry's collector is also stricter in the right place: a _failed_ probe can never set `atLimit`.
 Only a successful reading or a proven-unavailable state can exhaust an account.
@@ -422,9 +431,14 @@ the right place, without a second process.
 
 Two things it does **not** yet do, and both are the same two gaps as before:
 
-- **There is no loop.** `/v1/fleet/usage` collects when asked. `usage.interval` still configures
-  nothing, so an answer is only as fresh as the request — which is fine while the answer is empty,
-  and becomes the stale-quota problem the moment it is not.
+- **There is a loop for quota now, and `usage.interval` configures it.** The daemon's `CachedUsageFeed`
+  collects natively and serves one snapshot for exactly `usage.interval` seconds before re-collecting,
+  so quota re-probes without anyone asking. It is lazy — the age is checked when something reads, not
+  on a timer — so an idle daemon still answers with the age stamped on it rather than silently stale.
+  `usage.interval` is no longer refused at plan time, and it is the ONLY name for that cadence: the
+  daemon's own `usage.refreshSeconds` was a second one and is deleted. `usage.jitter` stays refused,
+  because a lazy refresh has no synchronized cycle to spread. An unattended loop that ticks on its own
+  is still [H](#h--keep-it-fresh)'s to build, and `/v1/fleet/usage` itself still collects when asked.
 - **There is still no probe.** The daemon constructs its own `UnprovisionedFleetUsageProbe`, the
   counterpart of the CLI's. Two honest placeholders, not a duplication problem — but it does mean the
   provider probes of [F](#f--know-whos-out-of-quota) belong in `packages/fleet` where both consume
