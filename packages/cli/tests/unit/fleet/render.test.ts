@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
+import type { FleetHealth, FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
 import should from 'should';
 import {
   renderAccount,
@@ -13,6 +13,7 @@ import {
   renderScaffoldResult,
   renderUsage,
   renderUsageRow,
+  renderHealth,
 } from '../../../src/lib/fleet/render';
 import {
   ACCOUNT_ID,
@@ -209,6 +210,26 @@ describe('usage rendering', () => {
     should(renderUsage(usageSnapshot()).split('\n')[0]).equal('1 account');
     should(renderUsage(usageSnapshot([usageRow({ atLimit: true })])).split('\n')[0]).equal('1 account, 1 at limit');
     should(renderUsage(usageSnapshot([]))).equal('No accounts to report usage for.');
+  });
+});
+
+describe('health rendering', () => {
+  it('should distinguish down and unknown accounts while preserving cached evidence', () => {
+    // Arrange
+    const rows: FleetHealth[] = [
+      { accountId: 'a', kind: 'claude', state: 'down', cached: false, checkedAt: 1, ms: 2, error: 'no sentinel' },
+      { accountId: 'b', kind: 'codex', state: 'unknown', cached: true, checkedAt: 1, ms: 0 },
+    ];
+
+    // Act
+    const rendered = renderHealth({ at: 1, accounts: rows });
+
+    // Assert
+    should(rendered).equal('2 accounts, 1 down, 1 unknown\n  a  DOWN — no sentinel\n  b  UNKNOWN (cached)');
+  });
+
+  it('should explain an empty health snapshot without pretending a probe ran', () => {
+    should(renderHealth({ at: 1, accounts: [] })).equal('No accounts to probe for health.');
   });
 });
 

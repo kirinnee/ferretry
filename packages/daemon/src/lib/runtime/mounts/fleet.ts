@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   buildFleetUsageCollector,
+  buildFleetHealthCollector,
   type FleetApplyPlan,
   type FleetApplyResult,
   type FleetConfig,
@@ -12,6 +13,8 @@ import {
   FleetPlan,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
+  type FleetHealthProbe,
+  type FleetHealthSnapshot,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
@@ -20,6 +23,8 @@ import {
   fetchQuota,
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
+  ProcessFleetHealthProbe,
+  runFleetHealthProcess,
 } from '@ferretry/fleet/adapters';
 import { z } from 'zod';
 import { parseBody } from '../../api/body.ts';
@@ -46,6 +51,8 @@ export interface FleetSubsystem {
   updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView>;
   plan(): Promise<FleetApplyPlan>;
   usage(): Promise<FleetUsageSnapshot>;
+  /** Explicit liveness evidence, keyed to this daemon's FY_HOME. */
+  health(): Promise<FleetHealthSnapshot>;
   apply(): Promise<FleetApplyResult>;
 }
 
@@ -60,6 +67,7 @@ export interface DaemonFleetOptions {
   /** The state filesystem owns the durable, atomic replacement of config.yaml. */
   readonly files: Pick<FileSystemPort, 'writeTextAtomic'>;
   readonly usageProbe?: FleetUsageProbe;
+  readonly healthProbe?: FleetHealthProbe;
   /**
    * This host's platform, spelled the way the Node runtime spells it, and the keychain `acct` attribute the
    * credential store falls back to on macOS. Both are supplied rather than read: the composition root
@@ -243,6 +251,15 @@ class MountedFleet implements FleetSubsystem {
     ).collect(manifest);
   }
 
+  async health(): Promise<FleetHealthSnapshot> {
+    const [config, manifest] = [await this.config(), await this.loadManifest()];
+    return await buildFleetHealthCollector(
+      config,
+      this.options.healthProbe ?? this.healthProbe(),
+      this.options.clock,
+    ).collect(manifest);
+  }
+
   /**
    * This host's provider probe. Shared with the CLI so neither can drift from the other.
    *
@@ -262,6 +279,15 @@ class MountedFleet implements FleetSubsystem {
         now: () => this.options.clock.now(),
         keychainAccount: this.options.keychainAccount ?? '',
       }),
+    });
+  }
+
+  private healthProbe(): FleetHealthProbe {
+    return new ProcessFleetHealthProbe({
+      process: runFleetHealthProcess,
+      // This is under the mounted daemon's state home: one daemon cannot reuse another's success.
+      cachePath: join(this.options.paths.fleet, 'health-successes.json'),
+      now: () => this.options.clock.now(),
     });
   }
 
@@ -375,6 +401,13 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       scope: 'admin',
       noStore: true,
       handle: async () => await respond(() => subsystem.usage()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/health',
+      scope: 'admin',
+      noStore: true,
+      handle: async () => await respond(() => subsystem.health()),
     },
     {
       method: 'POST',

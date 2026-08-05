@@ -37,9 +37,9 @@ Ordered by what actually stops him, not by line count.
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
 | E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes** — the daemon shelled out to kfleet; _closed by this unit_ |
-| G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
-| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes**; native Anthropic closed, other providers still GAP       |
+| G   | [Know which accounts actually work](#g--know-what-actually-works)   | **Carried**                      | No                                                                    |
+| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | **Carried**                      | No                                                                    |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
 | J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                  | **Was yes**; _closed by this unit_                                    |
 | K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper            | **Was yes**, for automation; _closed by this unit_                    |
@@ -47,14 +47,11 @@ Ordered by what actually stops him, not by line count.
 
 Five facts that the capability rows assume and that are easy to miss:
 
-1. **The daemon used to get its quota from kfleet, and that was the sharpest blocker on this list.**
-   `/usage`, `/v1/usage` and `/metrics` — read by the advisor, quota-failover and the PWA — were served
-   from a cached feed whose only two sources were an HTTP call to kfleet's `serve` and a shell-out to
-   its CLI, so deleting kfleet would have blinded all three while `fy fleet usage` on the same host
-   kept working. **Closed** by one `UsageSourcePort` over the native collector, wired ahead of them,
-   with the manifest join that silently breaks routing if got wrong:
-   [quota-two-paths.md](quota-two-paths.md). The two external sources stay wired behind it, so kfleet
-   remains usable as a fallback during the migration rather than required.
+1. **The daemon now gets quota from its native fleet first.** `/usage`, `/v1/usage` and `/metrics` —
+   read by the advisor, quota-failover and the PWA — share `CachedUsageFeed` over the native
+   `FleetUsageSource`; the older kfleet HTTP and command sources remain fallback only for an
+   unapplied fleet. The source joins usage rows back to manifest wrappers, not account ids, so routing
+   continues to address the executable a session can launch: [quota-two-paths.md](quota-two-paths.md).
 1. **`fy fleet usage` now reports real Anthropic numbers.** `AnthropicUsageProbe`
    (`packages/fleet/src/adapters/anthropic-usage-probe.ts`) serves both `fy fleet usage` and
    `GET /v1/fleet/usage` from one implementation. Both placeholder probes are deleted. A non-Anthropic
@@ -326,22 +323,11 @@ z.ai (`:382`), MiniMax (`:487`), classification (`:741`), pre-probe token refres
 healing (`:885`), and secrets-file resolution (`:703`). The entire CLIProxyAPI availability source
 (`core/cliproxy-usage.ts`, 308 lines) is **not to be ported**.
 
-**The daemon used to get its quota from kfleet — `PORTED`.** `/usage`, `/v1/usage` and `/metrics` are
-served from a cached feed whose only two sources were an HTTP call to kfleet's `serve` and a shell-out
-to its CLI, so the tool this migration exists to delete was a **runtime dependency of the daemon's
-quota** — and every consumer of it: the advisor, quota-failover, every session's quota block and every
-Prometheus scraper. That was a blocker on deleting kfleet and had not been recorded as one.
-
-Closed by `FleetUsageSource` (`daemon/src/adapters/usage/fleet-usage-source.ts`) over
-`accountUsageFromFleet` (`daemon/src/lib/usage/fleet-usage.ts`), wired **first** in `createUsageFeed`
-ahead of the two external sources. No second refresh loop: the existing `CachedUsageFeed` keeps its
-lazy refresh, its shared in-flight read, its retention of the last good snapshot and its rendered
-`/metrics`, and only the numbers underneath became native. On a host with no kfleet, the daemon now
-reports the same real Anthropic numbers `fy fleet usage` does.
-
-The join is the feature: a collector row is keyed by the manifest's opaque `accountId`, a feed row by
-`agent` — the executable name `quota-failover/service.ts` hands to `migrate(...)`. See
-[quota-two-paths.md](quota-two-paths.md).
+**The daemon now gets its quota from the native fleet collector.** `FleetUsageSource` is first in the
+same cached feed that serves `/usage`, `/v1/usage` and `/metrics`; the former kfleet HTTP and command
+sources are fallback only for a host whose fleet has not been applied. Its manifest join maps a usage
+row onto `account.wrapper`, never `accountId`, so advisor and quota-failover routing still targets the
+launchable executable. See [quota-two-paths.md](quota-two-paths.md).
 
 `renderFleetUsageMetrics` and `renderFleetUsageJson` are therefore **unnecessary rather than uncalled**:
 `/metrics` renders the same collection through `api/metrics.ts` `renderUsageMetrics`, and
@@ -380,7 +366,16 @@ an exact-sentinel reply, so a silent failure that exits 0 still counts as down
 `launch`, `process_error`, `unexpected_reply`) and successes cached for 15 minutes; failures are
 never cached.
 
-**Ferretry's answer: nothing on `main`.**
+**Ferretry's answer: carried.** `FleetHealthCollector`
+(`packages/fleet/src/lib/health.ts`) is the shared account-scoped collector consumed by both
+`fy fleet health` and `GET /v1/fleet/health`. `ProcessFleetHealthProbe`
+(`packages/fleet/src/adapters/process-health-probe.ts`) launches each wrapper with the sentinel
+prompt and accepts health only for exit 0 **and** an exact `FERRETRY_HEALTH_OK` reply. A clean exit
+with extra, empty, or different stdout is `unexpected_reply`, never healthy. It preserves the
+source failure classifications (`rate_limited`, `authentication`, `timeout`, `launch`,
+`process_error`, `unexpected_reply`), caches only a success for 15 minutes, and scopes that cache
+to each daemon's `FY_HOME/fleet` directory. A skipped or unstartable probe is `unknown`; it is not
+rendered as healthy or down.
 
 **Did PR #231 reimplement this?** No, and there is no conflict — this was worth checking, because two
 notions of "is Claude installed" that disagree would be worse than one.
@@ -411,8 +406,7 @@ wants that to survive a reboot. kfleet's answer is `kfleet serve` (an HTTP serve
 which writes a launchd agent or a systemd `--user` unit, sources `~/.secrets` so the API-key probes
 have their keys, and enables lingering.
 
-**Ferretry's answer: the supervision half already exists and is better. The probing half does not
-exist.**
+**Ferretry's answer: carried, without a second service.**
 
 `fy daemon install|uninstall|start|stop|restart|status|logs` is already shipped
 (`packages/cli/src/lib/daemon/commands.ts`) with both launchd and systemd support
@@ -424,31 +418,22 @@ second service manager, a second port, or the `/bin/sh -c '. ~/.secrets; …'` t
 API keys into a launchd job; Ferretry's wrappers already declare their `$NAME` references and guard
 them.
 
-**The routes landed while this unit was writing.** `feat(daemon): mount fleet routes (#237)` merged
-to `main` and serves `GET /v1/fleet/{accounts,config,plan,usage}` and `POST /v1/fleet/apply`
-(`packages/daemon/src/lib/runtime/mounts/fleet.ts`). So the endpoint half of `serve` now exists, in
-the right place, without a second process.
+`FleetRefreshService` is mounted as `MountedSubsystems.fleetRefresh` and constructed once for the
+daemon's own `FY_HOME` in `packages/daemon/bin/fyd.ts`. On boot and at the declared cadence it drives
+the existing daemon-wide `CachedUsageFeed` plus `FleetSubsystem.health()`; `GET /v1/fleet/health`,
+`/usage`, `/v1/usage` and `/metrics` therefore read current, shared evidence without needing a caller
+to trigger collection.
 
-Two things it does **not** yet do, and both are the same two gaps as before:
+There is one cadence name: the fleet declaration's `usage.interval`. `usageRefreshMs` turns it into
+the same refresh period used by `CachedUsageFeed`; a daemon without a fleet declaration keeps the
+five-minute default. The timer never turns a failure into a hot retry loop, and neither collector is
+replaced: quota retains its last good snapshot and marks it stale; health keeps its daemon-scoped
+success cache at `<FY_HOME>/fleet/health-successes.json`. The refresh service only serializes timer
+ticks, so it cannot duplicate either cache or cross daemon state homes.
 
-- **There is a loop for quota now, and `usage.interval` configures it.** The daemon's `CachedUsageFeed`
-  collects natively and serves one snapshot for exactly `usage.interval` seconds before re-collecting,
-  so quota re-probes without anyone asking. It is lazy — the age is checked when something reads, not
-  on a timer — so an idle daemon still answers with the age stamped on it rather than silently stale.
-  `usage.interval` is no longer refused at plan time, and it is the ONLY name for that cadence: the
-  daemon's own `usage.refreshSeconds` was a second one and is deleted. `usage.jitter` stays refused,
-  because a lazy refresh has no synchronized cycle to spread. An unattended loop that ticks on its own
-  is still [H](#h--keep-it-fresh)'s to build, and `/v1/fleet/usage` itself still collects when asked.
-- **There is still no probe.** The daemon constructs its own `UnprovisionedFleetUsageProbe`, the
-  counterpart of the CLI's. Two honest placeholders, not a duplication problem — but it does mean the
-  provider probes of [F](#f--know-whos-out-of-quota) belong in `packages/fleet` where both consume
-  one implementation, rather than in either caller.
-
-`renderFleetUsageMetrics` and `renderFleetUsageJson` (`lib/usage.ts:229,243`) remain uncalled: the
-daemon's route returns the snapshot rather than either rendering, so a Prometheus scrape has nothing
-to read yet.
-
-**Coordination:** the daemon-side work is that unit's; this one built none of it.
+The native `FleetUsageSource` and `FleetHealthProbe` live in `packages/fleet`, shared by CLI and
+daemon consumers. This is deliberately not `kfleet serve` or `kfleet service`: Ferretry's existing
+supervised daemon already survives reboot and already owns the HTTP surface.
 
 ---
 

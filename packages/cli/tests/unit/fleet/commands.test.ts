@@ -8,6 +8,7 @@ import {
   FrozenClock,
   RecordingApplier,
   RecordingIdentitySource,
+  RecordingHealthCollector,
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
@@ -21,6 +22,7 @@ function run(argv: string[]) {
   const applier = new RecordingApplier();
   const recommendations = new RecordingRecommendationGateway();
   const usage = new RecordingUsageCollector();
+  const health = new RecordingHealthCollector();
   const logins = new RecordingLoginService();
   const identities = new RecordingIdentitySource();
   const scaffolder = new RecordingScaffolder();
@@ -36,6 +38,7 @@ function run(argv: string[]) {
       planner: new RecordingPlanner(),
       applier,
       usage,
+      health,
       identities,
       logins,
       clock: new FrozenClock(),
@@ -48,6 +51,7 @@ function run(argv: string[]) {
     applier,
     recommendations,
     usage,
+    health,
     logins,
     identities,
     scaffolder,
@@ -101,6 +105,15 @@ describe('fleet command surface', () => {
 
     // Assert
     should(usage.collected).have.length(1);
+  });
+
+  it('should explicitly probe fleet health', async () => {
+    // Arrange + Act
+    const { parsed, health } = run(['fleet', 'health']);
+    await parsed;
+
+    // Assert
+    should(health.collected).have.length(1);
   });
 
   it('should recommend from the trailing words, probing quota by default', async () => {

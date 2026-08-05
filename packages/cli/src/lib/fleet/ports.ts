@@ -2,6 +2,7 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetHealthSnapshot,
   FleetIdentity,
   FleetIdentityStatus,
   FleetLoginRequest,
@@ -57,6 +58,13 @@ export interface IFleetUsageCollectorFactory {
 
 export interface IFleetUsageCollector {
   collect(manifest: FleetManifest): Promise<FleetUsageSnapshot>;
+}
+
+export interface IFleetHealthCollectorFactory {
+  forConfig(config: FleetConfig): IFleetHealthCollector;
+}
+interface IFleetHealthCollector {
+  collect(manifest: FleetManifest): Promise<FleetHealthSnapshot>;
 }
 
 /**

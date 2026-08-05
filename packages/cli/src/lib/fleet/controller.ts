@@ -10,6 +10,7 @@ import type {
   IFleetPlanner,
   IFleetScaffolder,
   IFleetUsageCollectorFactory,
+  IFleetHealthCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
 import {
@@ -21,6 +22,7 @@ import {
   renderRecommendation,
   renderScaffoldResult,
   renderUsage,
+  renderHealth,
 } from './render.ts';
 
 /** Options every fleet command accepts. */
@@ -56,6 +58,8 @@ export interface FleetControllerDeps {
   readonly planner: IFleetPlanner;
   readonly applier: IFleetApplier;
   readonly usage: IFleetUsageCollectorFactory;
+  /** Optional while embedders migrate; the production composition always supplies it. */
+  readonly health?: IFleetHealthCollectorFactory;
   readonly identities: IFleetIdentitySource;
   readonly logins: IFleetLoginService;
   readonly clock: IFleetClock;
@@ -123,6 +127,14 @@ export class FleetController {
       this.deps.out.warn('Every account is at its limit — nothing can be launched until a window resets.');
     }
     this.#report(snapshot, options, () => renderUsage(snapshot));
+  }
+
+  /** Explicit only: this spends a tiny provider turn, so it is never an incidental list refresh. */
+  async health(options: FleetCommandOptions): Promise<void> {
+    if (this.deps.health === undefined) throw new Error('fleet health probing is not configured for this CLI');
+    const collector = this.deps.health.forConfig(await this.deps.config.load());
+    const snapshot = await collector.collect(await this.#manifest());
+    this.#report(snapshot, options, () => renderHealth(snapshot));
   }
 
   /**

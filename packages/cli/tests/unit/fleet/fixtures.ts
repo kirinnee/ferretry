@@ -2,6 +2,8 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetHealth,
+  FleetHealthSnapshot,
   FleetIdentity,
   FleetIdentityStatus,
   FleetLoginRequest,
@@ -24,6 +26,7 @@ import type {
   IFleetScaffolder,
   IFleetUsageCollector,
   IFleetUsageCollectorFactory,
+  IFleetHealthCollectorFactory,
   IRecommendationGateway,
 } from '../../../src/lib/fleet/ports';
 import type { RecommendationRequest, TeamRecommendation } from '../../../src/lib/fleet/wire';
@@ -108,6 +111,22 @@ export function usageRow(overrides: Partial<FleetUsage> = {}): FleetUsage {
 
 export function usageSnapshot(accounts: readonly FleetUsage[] = [usageRow()]): FleetUsageSnapshot {
   return { at: 1_785_000_000_000, accounts } as FleetUsageSnapshot;
+}
+
+function healthRow(overrides: Partial<FleetHealth> = {}): FleetHealth {
+  return {
+    accountId: ACCOUNT_ID,
+    kind: 'claude',
+    state: 'healthy',
+    cached: false,
+    checkedAt: 1_785_000_000_000,
+    ms: 4,
+    ...overrides,
+  } as FleetHealth;
+}
+
+function healthSnapshot(accounts: readonly FleetHealth[] = [healthRow()]): FleetHealthSnapshot {
+  return { at: 1_785_000_000_000, accounts } as FleetHealthSnapshot;
 }
 
 export function recommendation(overrides: Partial<TeamRecommendation> = {}): TeamRecommendation {
@@ -198,6 +217,24 @@ export class RecordingUsageCollector implements IFleetUsageCollector, IFleetUsag
   }
 
   collect(manifest: FleetManifest): Promise<FleetUsageSnapshot> {
+    this.collected.push(manifest);
+    return Promise.resolve(this.snapshot);
+  }
+}
+
+/** The health twin of the usage fixture, including the per-configuration construction boundary. */
+export class RecordingHealthCollector implements IFleetHealthCollectorFactory {
+  readonly collected: FleetManifest[] = [];
+  readonly configs: FleetConfig[] = [];
+
+  constructor(private readonly snapshot: FleetHealthSnapshot = healthSnapshot()) {}
+
+  forConfig(config: FleetConfig) {
+    this.configs.push(config);
+    return this;
+  }
+
+  collect(manifest: FleetManifest): Promise<FleetHealthSnapshot> {
     this.collected.push(manifest);
     return Promise.resolve(this.snapshot);
   }

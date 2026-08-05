@@ -74,6 +74,11 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       await controller.usage(merged(command));
     },
   );
+  scoped(fleet.command('health').description('explicitly verify each wrapper can complete a sentinel turn')).action(
+    async (_flags: unknown, command: Command) => {
+      await controller.health(merged(command));
+    },
+  );
 
   scoped(
     fleet
