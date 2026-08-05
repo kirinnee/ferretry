@@ -1,8 +1,9 @@
-import { daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import { DAEMON_CAPABILITIES, daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
+import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
 
 const HostSchema = z.string().trim().min(1).max(255);
@@ -161,6 +162,36 @@ export const DaemonRelayConfigSchema = z
   .strict();
 
 export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
+
+/**
+ * What the operator has agreed the UI may do on this machine, per capability and per axis.
+ *
+ * EVERY FIELD HAS A DEFAULT, so a document that says nothing is a complete decision rather than an
+ * undetermined one — and the defaults are permissive, because the product's principle is that a
+ * person controls as much as possible from the UI and the security layer is something a cautious
+ * operator turns ON. See `DEFAULT_CAPABILITY_GRANTS` for why each answer is what it is.
+ *
+ * SILENCE AND DAMAGE ARE DIFFERENT THINGS, and this is where the difference is drawn. An omitted
+ * capability means "the operator did not say", which this schema answers with the product default. A
+ * capability spelled `{"use": "yes"}` means the document is WRONG, which `strictObject` and the
+ * boolean turn into a parse failure — and a parse failure refuses the boot rather than falling back
+ * to anything. Unknown is never permitted.
+ */
+export const CapabilityGrantsDocumentSchema = z
+  .strictObject(
+    Object.fromEntries(
+      DAEMON_CAPABILITIES.map(capability => [
+        capability,
+        z
+          .strictObject({
+            use: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].use),
+            configure: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].configure),
+          })
+          .prefault({}),
+      ]),
+    ),
+  )
+  .prefault({});
 
 /**
  * The document an operator owns: exactly the fields `config/daemon.json` holds, and nothing derived.

@@ -14,6 +14,7 @@
  */
 
 import type { ApiCredentials } from './authentication.ts';
+import type { CapabilityGuard } from './capability.ts';
 import { authorizeRequest } from './dispatcher.ts';
 import { ApiError } from './error.ts';
 import type { ApiRequest, ApiResponse } from './http.ts';
@@ -135,6 +136,13 @@ export class ApiSocketDispatcher {
     private readonly router: ApiRouter<SocketRoute>,
     private readonly credentials: ApiCredentials,
     private readonly tickets: SocketTicketRedeemer,
+    /**
+     * The operator's per-capability decision, over the SAME boundary the request/response dispatcher
+     * uses. A terminal stream is the capability `terminal`, and a socket table that skipped this
+     * check would be a hole straight through the feature: the daemon would refuse to CREATE a
+     * terminal an operator had denied and then happily hand a browser the socket that drives one.
+     */
+    private readonly guard?: CapabilityGuard,
   ) {}
 
   /**
@@ -150,7 +158,7 @@ export class ApiSocketDispatcher {
   }
 
   async upgrade(request: ApiRequest): Promise<SocketUpgradeDecision> {
-    const authorized = authorizeRequest(this.router, this.credentials, request, this.tickets);
+    const authorized = authorizeRequest(this.router, this.credentials, request, this.tickets, this.guard);
     if (authorized.kind === 'unrouted') return { outcome: 'unclaimed' };
     if (authorized.kind === 'refused') return { outcome: 'refused', response: authorized.response };
     try {
