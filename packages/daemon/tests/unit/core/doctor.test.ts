@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { DoctorReport } from '@ferretry/protocol';
 import should from 'should';
 import { readDoctorReport, renderDoctorReport } from '../../../src/lib/core/doctor.ts';
 import type { HarnessPreflight } from '../../../src/lib/core/harness-readiness.ts';
@@ -66,6 +67,60 @@ describe('doctor report', () => {
     should(noConfinement.checks.find(check => check.name === 'directory syscalls')?.status).equal('missing');
     should(renderDoctorReport(noConfinement).join('\n')).match(/PATH presence is all this report proves/u);
     should(renderDoctorReport(noConfinement).join('\n')).match(/note\s+jq/u);
+  });
+});
+
+describe('doctor report rendering', () => {
+  it('should explain impact only for dependencies that are actually missing', () => {
+    const subject: DoctorReport = {
+      checks: [
+        {
+          name: 'tmux',
+          requirement: 'required',
+          status: 'present',
+          summary: 'found on PATH',
+          impact: 'Sessions cannot start or be managed.',
+        },
+        {
+          name: 'bash',
+          requirement: 'required',
+          status: 'missing',
+          summary: 'not found on PATH',
+          impact: 'Generated fleet wrappers cannot run.',
+        },
+        {
+          name: 'jq',
+          requirement: 'optional',
+          status: 'missing',
+          summary: 'not found on PATH',
+          impact: 'Generated Claude wrappers skip their first-run JSON seeding step.',
+        },
+        {
+          name: 'launchctl',
+          requirement: 'capability',
+          status: 'not_applicable',
+          summary: 'not used on this operating system',
+          impact: 'This service manager is not used on this operating system.',
+        },
+      ],
+      harnesses: [],
+      ready: false,
+      limitation: 'PATH presence is all this report proves.',
+    };
+
+    should(renderDoctorReport(subject)).deepEqual([
+      'ok       tmux             found on PATH',
+      'missing  bash             not found on PATH — Generated fleet wrappers cannot run.',
+      'note     jq               not found on PATH — Generated Claude wrappers skip their first-run JSON seeding step.',
+      'n/a      launchctl        not used on this operating system',
+      'note     limitation        PATH presence is all this report proves.',
+    ]);
+    should(subject.checks.map(check => check.impact)).deepEqual([
+      'Sessions cannot start or be managed.',
+      'Generated fleet wrappers cannot run.',
+      'Generated Claude wrappers skip their first-run JSON seeding step.',
+      'This service manager is not used on this operating system.',
+    ]);
   });
 });
 
