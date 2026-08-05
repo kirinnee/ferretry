@@ -675,8 +675,13 @@ try {
 
           // Every panel the daemon owns, in the order the frame lists them.
           for (const [label, slug, ready] of [
-            ['Secrets', 'secrets', '[aria-label="Secrets unavailable"], [aria-label="Loading secrets"]'],
-            ['Environment', 'environment', '#daemon-settings-tab-environment'],
+            // Both of these wait for SETTLED content, not for a spinner or a
+            // refusal: the harness daemon answers `/v1/secrets` and
+            // `/v1/fleet/environment` in the page, so a capture that still showed
+            // "Reading…" or "Failed to fetch" would be a regression to review,
+            // not a state to accept.
+            ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
+            ['Environment', 'environment', '[aria-label="Target environment entries"]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
             ['Fleet', 'fleet', '[data-fleet-configuration]'],
