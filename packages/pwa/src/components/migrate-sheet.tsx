@@ -9,13 +9,27 @@ import {
   ServerCog,
   ShieldAlert,
 } from 'lucide-react';
-import { type FormEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { daemonApiClient } from '../lib/api-client.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
+import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
 import { Button } from '../shell/primitives.tsx';
 import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
+import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
+import { DaemonAccountPicker } from './daemon-pickers.tsx';
 import {
   type MigrationFailure,
   type MigrationTarget,
@@ -72,11 +86,75 @@ export interface MigrateSheetProps {
   readonly onClose: () => void;
   readonly onMigrated: (connection: DaemonConnection, scope: DaemonSessionScope, view: SessionView) => void;
   readonly migrateSession?: MigrateSession;
+  /**
+   * This daemon's published account roster.
+   *
+   * Optional because the field it feeds is an OFFER, not a requirement: without
+   * it the sheet keeps the plain wrapper text box, which is also what a reader
+   * gets when the roster read fails. Nothing downstream of this prop can make a
+   * wrapper unsubmittable.
+   */
+  readonly accountPicker?: DaemonAccountPickerStore;
+  /**
+   * The daemon's CACHED `/v1/usage` feed, joined onto the offered rows.
+   *
+   * A decoration on the roster and never a gate on it: an unread or unreadable
+   * feed leaves every row saying `quota —`, which is the honest reading, and
+   * never a confident 0 %.
+   */
+  readonly usage?: DaemonUsageStore;
 }
 
 type MigrationPhase = 'form' | 'confirm' | 'submitting' | 'downgrade' | 'refused';
 
 const readableNumber = (value: number): string => new Intl.NumberFormat().format(value);
+
+/** Shared identities, so a "nothing here" state cannot re-render by itself. */
+const NO_MODELS: readonly string[] = Object.freeze([]);
+const NO_USAGE_ROWS: readonly AccountUsageRow[] = Object.freeze([]);
+const UNREAD_USAGE: DaemonUsageSlice = Object.freeze({ feed: null, status: 'idle' as const, error: null });
+
+interface CachedAccountUsage {
+  readonly rows: readonly AccountUsageRow[];
+  /** Why the quota beside the rows is missing or stale. Never fails the roster. */
+  readonly error: string | null;
+}
+
+/**
+ * The daemon's cached quota feed, read only while this sheet is really offering
+ * a choice.
+ *
+ * The store is OPTIONAL and the hook still runs unconditionally, because the
+ * alternative — reading it inside the branch that renders the picker — would
+ * make a hook call depend on a prop. `watch` is refcounted in the store, so a
+ * sheet that joins while the dashboard is already polling costs no second
+ * timer; `active` is what keeps a closed sheet from starting a first one.
+ *
+ * It reads the CACHED feed and nothing else. The live per-account probe is a
+ * button, and it is the store below that owns it.
+ */
+const useCachedAccountUsage = (
+  store: DaemonUsageStore | undefined,
+  connection: DaemonConnection,
+  active: boolean,
+): CachedAccountUsage => {
+  useEffect(() => {
+    if (store === undefined || !active) return undefined;
+    return store.watch(connection);
+  }, [store, connection, active]);
+  const subscribe = useCallback(
+    (listener: () => void) => (store === undefined ? () => undefined : store.subscribe(listener)),
+    [store],
+  );
+  const read = useCallback(() => store?.usage(connection.daemonId) ?? UNREAD_USAGE, [store, connection.daemonId]);
+  const slice = useSyncExternalStore(subscribe, read, read);
+  return {
+    rows: slice.feed?.accounts ?? NO_USAGE_ROWS,
+    // Only a failed read is worth a sentence. A feed that simply has no row for
+    // an account is already said, per row, by the row itself.
+    error: slice.status === 'error' ? slice.error : null,
+  };
+};
 
 /**
  * Destructive account/model migration, guarded by the daemon's in-operation
@@ -93,15 +171,25 @@ export function MigrateSheet({
   onClose,
   onMigrated,
   migrateSession = migrateSessionWithDaemon,
+  accountPicker,
+  usage,
 }: MigrateSheetProps) {
   const { config, state } = view;
   const headingId = useId();
   const agentHelpId = useId();
+  const agentFieldId = `${headingId}-agent`;
   const modelId = useId();
   const modelListId = useId();
   const currentModel = (config.model || config.modelHint || '').trim();
   const [agent, setAgent] = useState(config.agent);
   const [model, setModel] = useState(currentModel);
+  /**
+   * What the MODEL field offers after an account was chosen — suggestions only.
+   * The chosen account's own default is deliberately absent from every write
+   * path: blank already means "that account's default", and writing the string
+   * would turn a default into a pin nobody asked for.
+   */
+  const [accountModels, setAccountModels] = useState<readonly string[]>(NO_MODELS);
   const [phase, setPhase] = useState<MigrationPhase>('form');
   const [failure, setFailure] = useState<MigrationFailure | null>(null);
   const [downgradeAcknowledged, setDowngradeAcknowledged] = useState(false);
@@ -124,6 +212,7 @@ export function MigrateSheet({
     setPhase('form');
     setFailure(null);
     setDowngradeAcknowledged(false);
+    setAccountModels(NO_MODELS);
     submitLock.current = false;
     requestIdentity.current = null;
   }, [open, connection.daemonId, scope.daemonId, scope.sessionId, config.id]);
@@ -138,16 +227,36 @@ export function MigrateSheet({
   const scopeMismatch = connection.daemonId !== scope.daemonId || scope.sessionId !== config.id;
   const hasRuntimeChange = migrationHasRuntimeChange(config.agent, currentModel, config.modelHint, target);
   const canReview = canMutate && !scopeMismatch && target !== null && hasRuntimeChange && !context.conversationTooLarge;
-  const suggestions = migrationModelSuggestions(currentModel);
+  // The chosen account's models lead, because they are the ones the reader has
+  // just given this daemon's word for; the current model's own variants stay,
+  // because moving account and keeping the window is the common migration.
+  const suggestions = useMemo(
+    () => [...new Set([...accountModels, ...migrationModelSuggestions(currentModel)])],
+    [accountModels, currentModel],
+  );
   const caution = migrationRoutingCaution(agent);
   const terminal = TERMINAL_STATUSES.has(state.status);
   const busy = statusMark(view).klass === 'active';
+  const quota = useCachedAccountUsage(usage, connection, open && canMutate && accountPicker !== undefined);
 
   const editAgent = (next: string): void => {
     setAgent(next);
+    // Typed-over: whatever account the suggestions came from is no longer the
+    // one in the box, and a stale suggestion list is a claim about the wrong
+    // account. A chosen row re-populates it immediately afterwards.
+    setAccountModels(NO_MODELS);
     setFailure(null);
     setDowngradeAcknowledged(false);
     setPhase('form');
+  };
+
+  /**
+   * A chosen row, AFTER `editAgent` has already committed its wrapper — the
+   * control writes the value and then reports the option, so this only ever
+   * adds what the value alone cannot carry.
+   */
+  const chooseAccount = (account: AccountPickerOption): void => {
+    setAccountModels(account.models.filter(entry => entry.available).map(entry => entry.id));
   };
 
   const editModel = (next: string): void => {
@@ -207,6 +316,16 @@ export function MigrateSheet({
   // still run consistently if authority changes while this host stays mounted.
   if (!canMutate) return null;
 
+  // One sentence, two fields. It is the target of `aria-describedby` either
+  // way, so a reader hears the same account it names whichever control they are
+  // standing in.
+  const agentHelp = (
+    <span id={agentHelpId} className="text-meta leading-base text-muted">
+      Current account: <span className="mono">{config.agent}</span>. Cross-CLI migration is not offered: Claude and
+      Codex cannot resume each other’s conversation format.
+    </span>
+  );
+
   return (
     <BottomSheet
       id={`migrate-${config.id}`}
@@ -250,28 +369,61 @@ export function MigrateSheet({
               <h2 id={`${headingId}-account-heading`} className="m-0 text-ui font-semibold text-fg">
                 Target account
               </h2>
-              <p className="mt-1 text-meta leading-base text-muted">
-                This daemon does not publish an account picker yet. Enter a configured {config.harness} account.
-              </p>
-              <label className="mt-2 grid gap-1.5 text-ui text-fg" htmlFor={`${headingId}-agent`}>
-                <span className="font-semibold">Agent wrapper</span>
-                <input
-                  id={`${headingId}-agent`}
-                  aria-describedby={agentHelpId}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  className="kt-input !min-h-[44px] w-full mono"
-                  onChange={event => editAgent(event.target.value)}
-                  placeholder="codex-auto-atomi"
-                  required
-                  spellCheck={false}
-                  value={agent}
-                />
-                <span id={agentHelpId} className="text-meta leading-base text-muted">
-                  Current account: <span className="mono">{config.agent}</span>. Cross-CLI migration is not offered:
-                  Claude and Codex cannot resume each other’s conversation format.
-                </span>
-              </label>
+              {accountPicker === undefined ? (
+                <>
+                  {/* Says nothing about whether this daemon publishes a roster:
+                      the field is mounted without one here, which is a fact
+                      about this surface and not evidence about the host. */}
+                  <p className="mt-1 text-meta leading-base text-muted">Enter a configured {config.harness} account.</p>
+                  <label className="mt-2 grid gap-1.5 text-ui text-fg" htmlFor={agentFieldId}>
+                    <span className="font-semibold">Agent wrapper</span>
+                    <input
+                      id={agentFieldId}
+                      aria-describedby={agentHelpId}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      className="kt-input !min-h-[44px] w-full mono"
+                      onChange={event => editAgent(event.target.value)}
+                      placeholder="codex-auto-atomi"
+                      required
+                      spellCheck={false}
+                      value={agent}
+                    />
+                    {agentHelp}
+                  </label>
+                </>
+              ) : (
+                <>
+                  <p className="mt-1 text-meta leading-base text-muted">
+                    Only this daemon’s {config.harness} accounts are offered. A wrapper it has never published is still
+                    submitted exactly as typed — the daemon is the thing that accepts or refuses one.
+                  </p>
+                  {/* Not a wrapping `<label>`: the rows are inside this control,
+                      and a click on one inside a label would be re-dispatched at
+                      the input and close the panel under the finger. */}
+                  <div className="mt-2 grid gap-1.5 text-ui text-fg">
+                    <label className="font-semibold" htmlFor={agentFieldId}>
+                      Agent wrapper
+                    </label>
+                    <DaemonAccountPicker
+                      connection={connection}
+                      describedBy={agentHelpId}
+                      harness={config.harness}
+                      id={agentFieldId}
+                      label="Agent wrapper"
+                      offerHealthCheck={true}
+                      onAccountChosen={chooseAccount}
+                      onValueChange={editAgent}
+                      placeholder="codex-auto-atomi"
+                      store={accountPicker}
+                      usage={quota.rows}
+                      usageError={quota.error}
+                      value={agent}
+                    />
+                    {agentHelp}
+                  </div>
+                </>
+              )}
               {caution ? (
                 <p className="mt-2 flex items-start gap-xs text-ui leading-base text-warn">
                   <CircleHelp aria-hidden="true" className="mt-0.5 shrink-0" size={14} />

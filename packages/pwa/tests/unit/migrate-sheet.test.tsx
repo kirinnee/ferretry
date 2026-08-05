@@ -12,9 +12,12 @@ import {
   migrateSessionWithDaemon,
   migrationRequestKey,
 } from '../../src/components/migrate-sheet.tsx';
+import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
+import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { mount } from '../support/dom.ts';
+import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -497,5 +500,462 @@ describe('MigrateSheet', () => {
     expect(seen).toHaveLength(3);
     expect(seen[2]?.agent).toBe('codex-auto-other');
     expect(seen[2]?.requestId).not.toBe(seen[0]?.requestId);
+  });
+});
+
+// ─── the connected account field ─────────────────────────────────────────────
+
+/**
+ * These run against a real document rather than the renderer tree above,
+ * because the thing under test is a combobox: focus reveals its list, a pointer
+ * pair chooses a row, and a disabled row's refusal is a pointer fact. None of
+ * that is visible to a shallow tree.
+ *
+ * The fixtures deliberately include one account of the OTHER CLI, one that the
+ * host says is unavailable, and one wrapper with no quota row, because each is
+ * a separate claim this field must not make: no cross-CLI target, no hidden
+ * unavailable account, no 0 % invented out of a missing reading.
+ */
+
+const pickerAccount = (overrides: Partial<PickerAccount> = {}): PickerAccount => ({
+  id: '11111111-1111-4111-8111-111111111111',
+  kind: 'codex',
+  mode: 'auto',
+  wrapper: 'codex-auto-loge',
+  home: '/homes/codex-auto-loge',
+  displayName: 'Loge Codex',
+  defaultModel: 'gpt-5.6-sol[1m]',
+  models: [{ id: 'gpt-5.6-sol[1m]', available: true }],
+  available: true,
+  unavailableReason: null,
+  ...overrides,
+});
+
+const atomi = pickerAccount({
+  id: '22222222-2222-4222-8222-222222222222',
+  wrapper: 'codex-auto-atomi',
+  home: '/homes/codex-auto-atomi',
+  displayName: 'Atomi Codex',
+  defaultModel: 'gpt-5.6-terra',
+  models: [
+    { id: 'gpt-5.6-terra', available: true },
+    { id: 'gpt-5.6-sol', available: true },
+    { id: 'gpt-5.5-legacy', available: false, unavailableReason: 'withdrawn from this account' },
+  ],
+});
+
+const archived = pickerAccount({
+  id: '33333333-3333-4333-8333-333333333333',
+  wrapper: 'codex-auto-archive',
+  home: '/homes/codex-auto-archive',
+  displayName: 'Archive Codex',
+  defaultModel: null,
+  models: [],
+  available: false,
+  unavailableReason: 'this host has no such executable on its PATH',
+});
+
+const otherHarness = pickerAccount({
+  id: '44444444-4444-4444-8444-444444444444',
+  kind: 'claude',
+  wrapper: 'claude-auto-loge',
+  home: '/homes/claude-auto-loge',
+  displayName: 'Loge Claude',
+  defaultModel: 'claude-opus-5',
+  models: [{ id: 'claude-opus-5', available: true }],
+});
+
+const ROSTER: readonly PickerAccount[] = [pickerAccount(), atomi, archived, otherHarness];
+
+/** Only the current wrapper has a reading, so the others prove "unknown ≠ 0 %". */
+const QUOTA_FEED = {
+  stale: false,
+  accounts: [{ agent: 'codex-auto-loge', fiveHourPercent: 37, weeklyPercent: 61, atLimit: false, authOk: true }],
+};
+
+interface Roster {
+  readonly port: DaemonAccountPickerPort;
+  /** How many times the EXPENSIVE live probe has run. */
+  probes(): number;
+}
+
+const roster = (catalog: DaemonAccountPickerPort['catalog'] = async () => ({ accounts: ROSTER })): Roster => {
+  let probes = 0;
+  return {
+    port: {
+      catalog,
+      health: async () => {
+        probes += 1;
+        return {
+          health: new Map([
+            [
+              atomi.id,
+              {
+                accountId: atomi.id,
+                kind: 'codex' as const,
+                state: 'healthy' as const,
+                cached: false,
+                checkedAt: 1,
+                ms: 2,
+              },
+            ],
+          ]),
+          error: null,
+        };
+      },
+    },
+    probes: () => probes,
+  };
+};
+
+const quotaStore = (feed: unknown = QUOTA_FEED): DaemonUsageStore =>
+  // The visibility gate is pinned shut so the shared poll can never fire a
+  // second read mid-assertion; the sheet's own first read is unconditional.
+  new DaemonUsageStore({ usage: async () => feed }, { isHidden: () => true });
+
+describe('MigrateSheet account picker', () => {
+  let live: Mounted | undefined;
+
+  afterEach(async () => {
+    await live?.unmount();
+    live = undefined;
+  });
+
+  const showSheet = async (element: ReactElement): Promise<void> => {
+    live = await mount(element);
+  };
+
+  const container = (): HTMLElement => must(live, 'a mounted migrate sheet').container;
+
+  const combobox = (): HTMLInputElement => {
+    const node = container().querySelector('input[role="combobox"]');
+    if (!(node instanceof HTMLInputElement)) throw new Error('the account picker is not mounted');
+    return node;
+  };
+
+  const modelField = (): HTMLInputElement => {
+    const node = container().querySelectorAll('input:not([type="checkbox"])')[1];
+    if (!(node instanceof HTMLInputElement)) throw new Error('the model field is not mounted');
+    return node;
+  };
+
+  /** Focus is what reveals the list, exactly as a reader's tap or Tab does. */
+  const openRoster = async (): Promise<void> => {
+    await interact(() => combobox().focus());
+  };
+
+  const rows = (): readonly Element[] => [...container().querySelectorAll('[role="option"]')];
+
+  const rowText = (index: number): string => must(rows()[index], `row ${index}`).textContent ?? '';
+
+  const panelState = (): string | null =>
+    container().querySelector('[data-picker-state]')?.getAttribute('data-picker-state') ?? null;
+
+  const typeWrapper = async (value: string): Promise<void> => {
+    const input = combobox();
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  const chooseRow = async (index: number): Promise<void> => {
+    const row = must(rows()[index], `row ${index}`);
+    await interact(() => {
+      for (const kind of ['pointerdown', 'pointerup']) {
+        const event = new Event(kind, { bubbles: true, cancelable: true });
+        Object.assign(event, { pointerId: 7 });
+        row.dispatchEvent(event);
+      }
+    });
+  };
+
+  const control = (label: string): HTMLButtonElement =>
+    must(
+      [...container().querySelectorAll('button')].find(node => (node.textContent ?? '').includes(label)),
+      `the ${label} button`,
+    );
+
+  const pressControl = async (label: string): Promise<void> => {
+    await interact(() => control(label).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
+  };
+
+  const submitForm = async (): Promise<void> => {
+    const form = must(container().querySelector('form'), 'the migration form');
+    await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  };
+
+  const recorder = (): { readonly calls: unknown[][]; readonly migrateSession: MigrateSession } => {
+    const calls: unknown[][] = [];
+    return {
+      calls,
+      migrateSession: async (...args) => {
+        calls.push(args);
+        return source('stopped');
+      },
+    };
+  };
+
+  it('offers only this daemon’s same-CLI accounts, and never a row from the other one', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+    await openRoster();
+    // The typed value doubles as the query, so clearing it is what asks for the
+    // whole published roster rather than the row already in the box.
+    await typeWrapper('');
+
+    expect(rows()).toHaveLength(3);
+    expect(rows().map(row => row.textContent)).toEqual([
+      expect.stringContaining('Loge Codex'),
+      expect.stringContaining('Atomi Codex'),
+      expect.stringContaining('Archive Codex'),
+    ]);
+    expect(container().textContent).not.toContain('Loge Claude');
+    expect(container().textContent).not.toContain('claude-auto-loge');
+  });
+
+  it('carries a chosen account through review into the migration, and pins no model of its own', async () => {
+    const { calls, migrateSession } = recorder();
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(roster().port),
+          migrateSession,
+          usage: quotaStore(),
+          view: source('stopped'),
+        })}
+      />,
+    );
+    await openRoster();
+    await typeWrapper('atomi');
+    await chooseRow(0);
+
+    expect(combobox().value).toBe('codex-auto-atomi');
+    // Atomi's own default is gpt-5.6-terra. Choosing the account must leave the
+    // session's current model exactly where it was.
+    expect(modelField().value).toBe('gpt-5.6-sol[1m]');
+
+    await submitForm();
+    await pressControl('Relaunch on selected runtime');
+
+    expect(calls.map(call => call.slice(0, 3))).toEqual([
+      [daemonA, scopeA, { agent: 'codex-auto-atomi', model: 'gpt-5.6-sol[1m]', allowContextDowngrade: false }],
+    ]);
+  });
+
+  it('keeps migrating a typed wrapper when the roster read fails outright', async () => {
+    const { calls, migrateSession } = recorder();
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(
+            roster(async () => {
+              throw new Error('the account manifest could not be read');
+            }).port,
+          ),
+          migrateSession,
+          usage: quotaStore(),
+          view: source('stopped'),
+        })}
+      />,
+    );
+    await openRoster();
+
+    expect(panelState()).toBe('failed');
+    expect(container().textContent).toContain('the account manifest could not be read');
+    expect(container().textContent).toContain('This field still accepts a typed value.');
+
+    await typeWrapper('codex-auto-unpublished');
+    await submitForm();
+    await pressControl('Relaunch on selected runtime');
+
+    expect(calls.map(call => call[2])).toEqual([
+      { agent: 'codex-auto-unpublished', model: 'gpt-5.6-sol[1m]', allowContextDowngrade: false },
+    ]);
+  });
+
+  it('refuses to select an unavailable account while leaving its wrapper typeable', async () => {
+    const { calls, migrateSession } = recorder();
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(roster().port),
+          migrateSession,
+          usage: quotaStore(),
+          view: source('stopped'),
+        })}
+      />,
+    );
+    await openRoster();
+    await typeWrapper('archive');
+
+    expect(rows()).toHaveLength(1);
+    expect(must(rows()[0], 'the archived row').getAttribute('aria-disabled')).toBe('true');
+    expect(rowText(0)).toContain('this host has no such executable on its PATH');
+
+    await chooseRow(0);
+    expect(combobox().value).toBe('archive');
+
+    // The daemon, not this browser, is the thing that refuses a launch.
+    await typeWrapper('codex-auto-archive');
+    await submitForm();
+    await pressControl('Relaunch on selected runtime');
+
+    expect(calls.map(call => call[2])).toEqual([
+      { agent: 'codex-auto-archive', model: 'gpt-5.6-sol[1m]', allowContextDowngrade: false },
+    ]);
+  });
+
+  it('leaves Review disabled when the account chosen is the one already running', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+    await openRoster();
+    await typeWrapper('');
+    await chooseRow(0);
+
+    expect(combobox().value).toBe('codex-auto-loge');
+    expect(control('Review migration').disabled).toBeTrue();
+  });
+
+  it('offers the chosen account’s available models as suggestions without writing one', async () => {
+    const { calls, migrateSession } = recorder();
+    const blank = source('stopped');
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(roster().port),
+          migrateSession,
+          usage: quotaStore(),
+          view: { ...blank, config: { ...blank.config, model: '', modelHint: '' } } as SessionView,
+        })}
+      />,
+    );
+    await openRoster();
+    await typeWrapper('atomi');
+    await chooseRow(0);
+
+    expect(modelField().value).toBe('');
+    const offered = [...container().querySelectorAll('datalist option')].map(option => option.getAttribute('value'));
+    expect(offered).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol']);
+
+    await submitForm();
+    await pressControl('Relaunch on selected runtime');
+
+    // Blank stays blank: the daemon resolves the account's own default.
+    expect(calls.map(call => call[2])).toEqual([{ agent: 'codex-auto-atomi', allowContextDowngrade: false }]);
+  });
+
+  it('drops the previous account’s suggestions as soon as the wrapper is typed over', async () => {
+    const blank = source('stopped');
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(roster().port),
+          usage: quotaStore(),
+          view: { ...blank, config: { ...blank.config, model: '', modelHint: '' } } as SessionView,
+        })}
+      />,
+    );
+    await openRoster();
+    await typeWrapper('atomi');
+    await chooseRow(0);
+    await typeWrapper('codex-auto-elsewhere');
+
+    expect([...container().querySelectorAll('datalist option')]).toHaveLength(0);
+  });
+
+  it('runs the expensive host probe only when the check is pressed, never on open', async () => {
+    const probe = roster();
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(probe.port), usage: quotaStore() })} />,
+    );
+    await openRoster();
+    await typeWrapper('');
+
+    expect(rows()).toHaveLength(3);
+    expect(probe.probes()).toBe(0);
+
+    await pressControl('Check accounts');
+
+    expect(probe.probes()).toBe(1);
+    expect(must(container().querySelector('[data-picker-health]'), 'the health block').textContent).toContain(
+      '1 account checked',
+    );
+  });
+
+  it('renders a wrapper with no cached reading as unknown rather than as zero percent', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+    await openRoster();
+    await typeWrapper('');
+
+    expect(rowText(0)).toContain('5h 37%');
+    expect(rowText(1)).toContain('quota —');
+    expect(rowText(1)).not.toContain('0%');
+  });
+
+  it('says the quota feed failed beside the rows instead of failing the roster with it', async () => {
+    await showSheet(
+      <MigrateSheet
+        {...props({
+          accountPicker: new DaemonAccountPickerStore(roster().port),
+          usage: quotaStore({ stale: 'not a feed' }),
+        })}
+      />,
+    );
+    await openRoster();
+    await typeWrapper('');
+
+    expect(rows()).toHaveLength(3);
+    expect(must(container().querySelector('[data-picker-advisory]'), 'the quota advisory').textContent).toContain(
+      'the daemon returned an account feed this client cannot read',
+    );
+  });
+
+  it('shows no frame of the previous daemon’s accounts after the sheet switches daemon', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const store = new DaemonAccountPickerStore(
+      roster(async daemon => {
+        if (daemon.daemonId === daemonA.daemonId) return { accounts: ROSTER };
+        await gate;
+        return { accounts: [] };
+      }).port,
+    );
+    const usage = quotaStore();
+    await showSheet(<MigrateSheet {...props({ accountPicker: store, usage })} />);
+    await openRoster();
+    await typeWrapper('');
+    expect(rowText(1)).toContain('Atomi Codex');
+
+    const remote = source();
+    await must(live, 'a mounted migrate sheet').render(
+      <MigrateSheet
+        {...props({
+          accountPicker: store,
+          connection: daemonB,
+          scope: scopeB,
+          usage,
+          view: { ...remote, config: { ...remote.config, agent: 'codex-auto-remote' } } as SessionView,
+        })}
+      />,
+    );
+    await openRoster();
+
+    expect(combobox().value).toBe('codex-auto-remote');
+    expect(panelState()).toBe('loading');
+    expect(rows()).toHaveLength(0);
+    expect(container().textContent).not.toContain('Atomi Codex');
+
+    await interact(async () => {
+      release();
+      await gate;
+    });
   });
 });
