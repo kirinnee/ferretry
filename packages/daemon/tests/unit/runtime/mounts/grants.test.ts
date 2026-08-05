@@ -226,3 +226,43 @@ describe('the operator password route', () => {
     should(subsystem.hasPassword()).be.false();
   });
 });
+
+describe('a failure that is not a grant refusal', () => {
+  it('should become a server fault rather than being blamed on the caller', async () => {
+    // The taxonomy only restates refusals the subsystem NAMED. Anything else is the daemon's fault,
+    // and dressing a defect up as a 4xx sends the person looking at their own request.
+    // Arrange
+    const subsystem = grantSubsystem();
+    await subsystem.refresh();
+    const broken = {
+      ...subsystem,
+      refresh: async () => undefined,
+      hasPassword: () => false,
+      view: (presentation: Parameters<typeof subsystem.view>[0]) => subsystem.view(presentation),
+      unlock: async () => {
+        throw new Error('the verifier file vanished mid-request');
+      },
+      patch: async () => {
+        throw new Error('the document vanished mid-request');
+      },
+      setPassword: async () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(broken)), CREDENTIALS);
+
+    // Act
+    const unlocked = await dispatcher.dispatch(post('/v1/grants/unlock', { password: 'anything' }));
+    const patched = await dispatcher.dispatch(
+      request({
+        method: 'PATCH',
+        path: '/v1/grants',
+        headers: human,
+        loopback: false,
+        body: JSON.stringify({ fleet: { use: false } }),
+      }),
+    );
+
+    // Assert
+    should(unlocked.status).equal(500);
+    should(patched.status).equal(500);
+  });
+});

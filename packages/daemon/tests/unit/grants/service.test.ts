@@ -452,3 +452,20 @@ describe('the operator password itself', () => {
     should(context.service.decide({ capability: 'fleet', axis: 'configure' }, remote).refusal).equal('ungated');
   });
 });
+
+describe('the sentence a refusal carries', () => {
+  it('should compose it here, because only this layer knows the command a person types', () => {
+    // The authorization boundary has no business knowing what this product's client is called, so it
+    // asks the guard — which is what lets a refusal name the next step instead of saying "forbidden".
+    // Arrange
+    const { service } = world();
+
+    // Act
+    const said = service.explain({ capability: 'warden', axis: 'configure' }, 'not-granted');
+    const nothing = service.explain({ capability: 'warden', axis: 'configure' }, 'granted');
+
+    // Assert
+    should(said).match(/fy daemon config set warden --configure/u);
+    should(nothing).be.undefined();
+  });
+});
