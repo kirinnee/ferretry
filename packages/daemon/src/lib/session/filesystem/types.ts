@@ -19,8 +19,9 @@
  *     content and in diff, and applied to the LEXICAL path as well as the canonical one.
  *  5. Gitignore gate — content of a gitignored path is refused, and a gitignored DIRECTORY cannot be
  *     enumerated either, because the filenames inside one are themselves the leak.
- *  6. Caps — one mebibyte per file, two thousand entries per listing, a NUL inside the sniff window
- *     means binary and no content.
+ *  6. Caps — one mebibyte per file, two thousand entries per listing. A NUL inside the sniff window
+ *     means binary and no *text* content; the explicitly requested, policy-gated base64 representation
+ *     is how an isolated client preview can render a permitted image or PDF without a credential in its URL.
  */
 
 /** Largest file whose bytes are served. Bigger files report their real size and no content. */
@@ -136,6 +137,14 @@ export interface FsFileView {
   readonly mtime?: string;
   /** Present only when content is actually served. */
   readonly content?: string;
+  /**
+   * Present only after the caller explicitly asks for the bounded byte representation.
+   *
+   * This remains JSON instead of a credential-bearing document URL: the PWA fetches it through the
+   * paired daemon request, creates a short-lived object URL locally, and never hands the rendered
+   * document a daemon token or device grant.
+   */
+  readonly base64?: string;
   /** A NUL byte inside the first {@link BINARY_SNIFF_BYTES}. */
   readonly binary?: boolean;
   /** Larger than the cap; `size` still reports the real size. */

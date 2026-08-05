@@ -40,6 +40,9 @@ import {
   type OpenFileTab,
 } from './files-tab-model.ts';
 import { Markdown, type MarkdownProps } from './markdown.tsx';
+import { RichFilePreview, richFileKind } from './rich-file-preview.tsx';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 
 /** Everything the Markdown renderer needs that only the pane's host can prove. */
 export type FilesMarkdownContext = Omit<MarkdownProps, 'text' | 'className'>;
@@ -363,13 +366,21 @@ export interface FileBodyProps {
   selection?: FileLineSelection;
   targetLineRef?: RefObject<HTMLSpanElement | null>;
   markdown?: FilesMarkdownContext;
+  /** Rich bytes stay behind an authenticated fetch and are rendered from a local object URL. */
+  preview?: {
+    readonly daemon: DaemonConnection;
+    readonly scope: DaemonSessionScope;
+    readonly revision: number;
+  };
 }
 
-export const FileBody = ({ file, path, raw = false, selection, targetLineRef, markdown }: FileBodyProps) => {
+export const FileBody = ({ file, path, raw = false, selection, targetLineRef, markdown, preview }: FileBodyProps) => {
   const refusal = fileRefusal(file);
   const content = file.content ?? '';
   const lang = file.lang ?? langFromPath(path);
   const renderedMarkdown = isMarkdownPath(path) && selection === undefined;
+  const richKind = richFileKind(path);
+  const showRichPreview = !raw && selection === undefined && richKind !== null && preview !== undefined;
   const html = useMemo(
     () => (refusal || raw || renderedMarkdown ? null : highlightToHtml(content, lang)),
     [refusal, raw, renderedMarkdown, content, lang],
@@ -381,7 +392,12 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
     </div>
   ) : null;
 
-  if (refusal)
+  // A binary response is deliberately content-free on the ordinary text route.
+  // A recognised rich type is the one exception: its separately requested,
+  // bounded bytes still pass the daemon's containment and secrets gates before
+  // this component creates a local object URL. `tooLarge`, denied and ignored
+  // remain hard refusals with no client-side escape hatch.
+  if (refusal && !(file.binary && showRichPreview))
     return (
       <Note tone="warn" role="status">
         {refusal}
@@ -394,6 +410,8 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         <Markdown text={content} {...markdown} />
       </div>
     );
+  if (showRichPreview && preview)
+    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (selection)
     return (
       <>

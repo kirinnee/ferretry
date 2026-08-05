@@ -455,6 +455,7 @@ export const FilesTab = ({
                 selection={active.selection}
                 targetLineRef={targetLineRef}
                 markdown={markdown}
+                preview={{ daemon, scope, revision: file.revision }}
               />
             ) : (
               <Note role="status">Nothing to show.</Note>

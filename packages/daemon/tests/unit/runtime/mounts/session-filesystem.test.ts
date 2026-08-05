@@ -163,6 +163,38 @@ describe('the file route', () => {
     should(jsonBody(response)).match({ content: 'old\n', rev: 'head' });
   });
 
+  it('serves a bounded, policy-gated base64 representation only when explicitly requested', async () => {
+    const dispatch = fixture({ tree: treeOf(['photo.png', textFile('\u0000\u0001png')]) });
+
+    const response = await dispatch({
+      path: '/v1/sessions/s1/fs/file',
+      query: [
+        ['path', 'photo.png'],
+        ['format', 'base64'],
+      ],
+      headers: human,
+    });
+
+    should(response.status).eql(200);
+    should(jsonBody(response)).match({ path: 'photo.png', base64: 'AAFwbmc=' });
+    should(response.headers.get('cache-control')).eql('no-store');
+  });
+
+  it('refuses an unknown file representation rather than quietly serving another one', async () => {
+    const dispatch = fixture({ tree: tree() });
+    const response = await dispatch({
+      path: '/v1/sessions/s1/fs/file',
+      query: [
+        ['path', 'a.ts'],
+        ['format', 'raw'],
+      ],
+      headers: human,
+    });
+
+    should(response.status).eql(400);
+    should(jsonBody(response)).have.property('code', 'invalid_format');
+  });
+
   it('should require the path parameter rather than defaulting to the root', async () => {
     // Arrange
     const dispatch = fixture({ tree: tree() });

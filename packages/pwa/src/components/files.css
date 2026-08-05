@@ -724,6 +724,77 @@ button.kt-fs-row:active {
   padding: var(--pad-panel);
 }
 
+/* ---- rich file previews -------------------------------------------------
+   Preview URLs are local object URLs. HTML/PDF frames have a zero-permission
+   sandbox; SVG is deliberately an image, never a document frame. */
+.kt-rich-file {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--pad-panel);
+}
+
+.kt-rich-file-frame {
+  width: 100%;
+  min-height: min(60dvh, 720px);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.kt-rich-file-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(60dvh, 720px);
+  margin-inline: auto;
+  object-fit: contain;
+}
+
+.kt-rich-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+
+.kt-rich-file-table {
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-sm);
+}
+
+.kt-rich-file-table table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.kt-rich-file-table th,
+.kt-rich-file-table td {
+  max-width: 40ch;
+  padding: var(--gap-xs) var(--gap-sm);
+  overflow-wrap: anywhere;
+  text-align: start;
+  vertical-align: top;
+}
+
+.kt-rich-file-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+}
+
+.kt-rich-file-table tr + tr > * {
+  border-top: var(--stroke) solid var(--border-soft);
+}
+
+.kt-rich-file-table * + * {
+  border-inline-start: var(--stroke) solid var(--border-soft);
+}
+
 /* LINKS IN RENDERED PROSE GET THE 44px FLOOR TOO.
    `index.css` exempts `.md a` / `p a` / `li a` from the coarse-pointer floor —
    WCAG 2.5.8 does exempt a link inside a sentence, and a 44px BOX there would

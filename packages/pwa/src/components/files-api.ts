@@ -44,6 +44,8 @@ export interface FsFile {
   denied?: boolean;
   ignored?: boolean;
   content?: string;
+  /** Explicitly requested bounded bytes. Never a URL: preview code creates a local object URL. */
+  base64?: string;
 }
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
@@ -59,6 +61,8 @@ const query = (path: string, extra?: Record<string, string>): string => {
 export const listUrl = (scope: DaemonSessionScope, path: string) => `${root(scope)}${query(path)}`;
 export const fileUrl = (scope: DaemonSessionScope, path: string, rev?: 'head') =>
   `${root(scope)}/file${query(path, rev ? { rev } : undefined)}`;
+export const previewUrl = (scope: DaemonSessionScope, path: string) =>
+  `${root(scope)}/file${query(path, { format: 'base64' })}`;
 export const changesUrl = (scope: DaemonSessionScope) => `${root(scope)}/changes`;
 export const diffUrl = (scope: DaemonSessionScope, path: string) => `${root(scope)}/diff${query(path)}`;
 const failure = async (response: Response): Promise<DaemonResponseError> => {
@@ -75,7 +79,10 @@ const request = async <T>(
   fetcher: DaemonFetch = browserFetch,
   signal?: AbortSignal,
 ): Promise<T> => {
-  const target = daemonRequest(daemon, path, { signal });
+  // The daemon also marks these responses `no-store`; setting the request side
+  // makes a reader's explicit refresh a network read even behind a broken or
+  // overly-helpful intermediary cache.
+  const target = daemonRequest(daemon, path, { signal, cache: 'no-store' });
   const response = await fetcher(target.url, target.init);
   if (!response.ok) throw await failure(response);
   return (response.headers.get('content-type') ?? '').includes('application/json')
@@ -103,6 +110,16 @@ export const fsApi = {
   ) => {
     assertScopeDaemon(daemon, scope);
     return request<FsFile>(daemon, fileUrl(scope, path, rev), fetcher, signal);
+  },
+  preview: (
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    path: string,
+    signal?: AbortSignal,
+    fetcher?: DaemonFetch,
+  ) => {
+    assertScopeDaemon(daemon, scope);
+    return request<FsFile>(daemon, previewUrl(scope, path), fetcher, signal);
   },
   changes: (daemon: DaemonConnection, scope: DaemonSessionScope, signal?: AbortSignal, fetcher?: DaemonFetch) => {
     assertScopeDaemon(daemon, scope);

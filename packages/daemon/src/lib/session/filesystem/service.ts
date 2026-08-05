@@ -123,6 +123,8 @@ export class SessionFilesystem {
     relativePath: string,
     options: {
       readonly rev?: 'head';
+      /** Return the bounded, policy-gated bytes as base64 rather than decoding them as text. */
+      readonly base64?: boolean;
       readonly maxBytes?: number;
       /** @internal Test-only barrier; see {@link AfterValidationHook}. */
       readonly afterValidation?: AfterValidationHook;
@@ -134,8 +136,8 @@ export class SessionFilesystem {
       const rel = normalizeRelativePath(relativePath);
       if (rel === '') throw new FsError('invalid_path', 'a file path is required');
       return options.rev === 'head'
-        ? await this.readHead(pinned, rel, maxBytes)
-        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation);
+        ? await this.readHead(pinned, rel, maxBytes, options.base64)
+        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64);
     } finally {
       await pinned.close();
     }
@@ -260,7 +262,7 @@ export class SessionFilesystem {
    * already be gone. Git still runs from the PINNED root, so a cwd swapped for a symlink to another
    * repository cannot answer for this one.
    */
-  private async readHead(pinned: PinnedRoot, rel: string, maxBytes: number): Promise<FsFileView> {
+  private async readHead(pinned: PinnedRoot, rel: string, maxBytes: number, base64 = false): Promise<FsFileView> {
     const refusalBeforeRead = await this.refusalFor(pinned, rel);
     if (refusalBeforeRead) return { ...refusalBeforeRead, rev: 'head' };
 
@@ -272,6 +274,7 @@ export class SessionFilesystem {
     if (refusalAfterRead) return { ...refusalAfterRead, rev: 'head' };
     if (!blob) throw new FsError('not_found', `not in HEAD: ${rel}`);
     if (!blob.bytes) return { path: rel, size: blob.size, tooLarge: true, rev: 'head' };
+    if (base64) return { path: rel, size: blob.size, base64: Buffer.from(blob.bytes).toString('base64'), rev: 'head' };
     if (looksBinary(blob.bytes)) return { path: rel, size: blob.size, binary: true, rev: 'head' };
     return { path: rel, size: blob.size, content: new TextDecoder().decode(blob.bytes), rev: 'head' };
   }
@@ -281,6 +284,7 @@ export class SessionFilesystem {
     rel: string,
     maxBytes: number,
     afterValidation: AfterValidationHook | undefined,
+    base64 = false,
   ): Promise<FsFileView> {
     // Evaluate policy before the walk and again after it. Retaining both verdicts is what prevents a
     // rename or replacement from evaluating the gate on one tree while the pinned descriptor supplies
@@ -307,6 +311,7 @@ export class SessionFilesystem {
 
       const bytes = await opened.read(maxBytes);
       if (bytes === undefined) return { ...view, tooLarge: true };
+      if (base64) return { ...view, base64: Buffer.from(bytes).toString('base64') };
       if (looksBinary(bytes)) return { ...view, binary: true };
       return { ...view, content: new TextDecoder().decode(bytes) };
     } finally {
