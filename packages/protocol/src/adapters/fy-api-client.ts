@@ -47,6 +47,7 @@ import {
   WardenVerdictsViewSchema,
 } from '../lib/service.ts';
 import {
+  type AnswerSessionRequest,
   AnswerSessionRequestSchema,
   type FyEvent,
   FyEventListSchema,
@@ -474,13 +475,22 @@ export class FyApiClient implements IFyApiClient {
     return this.#post(id, 'send', SendRequestSchema, input, SendResultSchema);
   }
 
-  answer(id: string, toolUseId: string, labels: string[], other?: string, responses?: string[]): Promise<SessionView> {
+  answer(
+    id: string,
+    toolUseId: string,
+    labels: string[],
+    other?: string,
+    responses?: string[],
+    answers?: AnswerSessionRequest['answers'],
+    requestId?: string,
+  ): Promise<SessionView> {
     return this.#post(
       id,
       'answer',
       AnswerSessionRequestSchema,
-      { toolUseId, labels, other, responses },
+      { toolUseId, labels, other, responses, answers },
       SessionViewSchema,
+      requestId,
     );
   }
 

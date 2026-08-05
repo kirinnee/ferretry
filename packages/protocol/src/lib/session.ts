@@ -530,11 +530,34 @@ export const SendRequestSchema = z.strictObject({
 });
 export type SendRequest = z.infer<typeof SendRequestSchema>;
 
+/**
+ * One answer in an ordered structured-question set.
+ *
+ * The legacy `labels`/`other`/`responses` fields below cannot represent a
+ * multi-select question inside a multi-question set: `responses` has room for
+ * only one string per question.  This discriminated shape is deliberately
+ * exclusive, so a free-form answer can never be mistaken for an option label,
+ * and preserves every selected label in question order.
+ */
+export const StructuredQuestionAnswerSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('selection'),
+    labels: z.array(z.string().min(1)).min(1),
+  }),
+  z.strictObject({
+    kind: z.literal('other'),
+    text: z.string().trim().min(1),
+  }),
+]);
+export type StructuredQuestionAnswer = z.infer<typeof StructuredQuestionAnswerSchema>;
+
 export const AnswerSessionRequestSchema = z.strictObject({
   toolUseId: z.string().min(1),
   labels: z.array(z.string().min(1)),
   other: z.string().optional(),
   responses: z.array(z.string()).optional(),
+  /** Lossless ordered answers. Legacy fields remain for older callers. */
+  answers: z.array(StructuredQuestionAnswerSchema).min(1).optional(),
 });
 export type AnswerSessionRequest = z.infer<typeof AnswerSessionRequestSchema>;
 

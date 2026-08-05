@@ -282,11 +282,33 @@ const CASES: readonly MethodCase[] = [
     expected: sessionView,
   },
   {
-    name: 'answer with free text and responses',
-    invoke: client => client.answer(SESSION_ID, 'tool-1', ['other'], 'ship it', ['first', 'second']),
+    name: 'answer with free text, legacy responses, and lossless ordered answers',
+    invoke: client =>
+      client.answer(
+        SESSION_ID,
+        'tool-1',
+        ['other'],
+        'ship it',
+        ['first', 'second'],
+        [
+          { kind: 'selection', labels: ['first', 'also first'] },
+          { kind: 'other', text: 'second' },
+        ],
+        'question-request-1',
+      ),
     verb: 'POST',
     path: '/v1/sessions/session-1/answer',
-    body: { toolUseId: 'tool-1', labels: ['other'], other: 'ship it', responses: ['first', 'second'] },
+    body: {
+      toolUseId: 'tool-1',
+      labels: ['other'],
+      other: 'ship it',
+      responses: ['first', 'second'],
+      answers: [
+        { kind: 'selection', labels: ['first', 'also first'] },
+        { kind: 'other', text: 'second' },
+      ],
+    },
+    requestId: 'question-request-1',
     response: sessionResponse,
     expected: sessionView,
   },
