@@ -3377,6 +3377,95 @@ describe('daemon boot lifecycle', () => {
     should(said.steps.join('\n')).match(new RegExp(`address chosen.*${String(preferredPort + 1)}`, 'u'));
   });
 
+  it('should warn at startup when no agent harness is ready, and start anyway', async () => {
+    // Arrange: a state home with no fleet manifest, which is what a fresh install looks like before
+    // anyone has installed Claude Code or Codex.
+    const home = await tempDirectory('fyd-no-harness');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    let release = (): void => {};
+    const stopped = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const world = { ...(await worldAt(home, port, async () => await stopped)), notices: said.port };
+
+    // Act
+    const booting = start(world, cleanups);
+    let health: Response | undefined;
+    for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
+      health = await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined);
+      if (health === undefined) await Bun.sleep(25);
+    }
+    release();
+    const code = await booting;
+    await runCleanups(cleanups);
+
+    // Assert — IT STARTS. Someone may install a harness minutes after the daemon comes up, and a
+    // daemon that refused until they had would be strictly worse than one that says what is missing.
+    should(code).equal(0);
+    should(health?.status).equal(200);
+    // But it says so at startup rather than leaving a person to discover it as a confusing failure
+    // the first time they try to launch an agent.
+    should(said.steps.join('\n')).match(/harnesses checked — claude: none; codex: none/u);
+    const warning = said.stated.find(message => message.includes('no agent harness is ready'));
+    should(warning).be.a.String();
+    // A diagnosis without a remedy leaves the reader where they were.
+    should(warning).match(/fleet apply/u);
+    // And it never overclaims in the other direction either.
+    should(warning).match(/can serve its API but cannot start a session/u);
+  });
+
+  it('should report a harness it can launch without claiming it is signed in', async () => {
+    // Arrange: a published account whose wrapper this host really can run. `sh` stands in for a
+    // harness so the test proves the resolution rather than requiring Claude Code on the runner.
+    const home = await tempDirectory('fyd-harness');
+    const port = await freeLoopbackPort();
+    await seedHome(home, port);
+    await mkdir(join(home, 'fleet'), { recursive: true });
+    await writeFile(
+      join(home, 'fleet', 'manifest.json'),
+      JSON.stringify({
+        accounts: [
+          {
+            id: 'account-1',
+            agent: 'sh',
+            kind: 'claude',
+            mode: 'auto',
+            displayName: 'stand-in',
+            defaultModel: null,
+            models: [],
+            available: true,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const said = recordingNotices();
+    let release = (): void => {};
+    const stopped = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const world = { ...buildWorld(), notices: said.port, untilShutdown: async () => await stopped };
+
+    // Act
+    const booting = start(world, cleanups);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(25);
+    }
+    release();
+    const code = await booting;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(said.steps.join('\n')).match(/harnesses checked — claude: sh; codex: none/u);
+    // NOTHING IS WARNED, because one harness is the bar and Codex being absent is not a fault.
+    should(said.stated.filter(message => message.includes('no agent harness is ready'))).be.empty();
+  });
+
   it('should trace every boot milestone so a stall names the step it stalled on', async () => {
     // Arrange
     const home = await tempDirectory('fyd-journal');
@@ -3408,6 +3497,7 @@ describe('daemon boot lifecycle', () => {
       'state home opened',
       'configuration loaded',
       'address is free',
+      'harnesses checked',
       'subsystems mounted',
       'listening',
       'ready',

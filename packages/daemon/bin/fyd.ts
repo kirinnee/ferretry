@@ -189,6 +189,7 @@ import {
 } from '../src/adapters/worktrees/index.ts';
 import {
   type AccountInventoryPort,
+  accountLaunchability,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -244,7 +245,9 @@ import {
   type FoundationPaths,
   foreignAdvertisementNotice,
   HarnessQuirkService,
+  harnessAbsentWarning,
   harnessMigrationRefusal,
+  harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isTaskBoardError,
@@ -262,6 +265,7 @@ import {
   type NameClaim,
   type NameSubsystem,
   normalizeCallsign,
+  type ExecutableResolverPort,
   type ObservedSession,
   overriddenBy,
   type OpenedAnalyticsIndexStore,
@@ -293,8 +297,10 @@ import {
   ReviveDedupeConflict,
   type RoutingCatalogPort,
   readDaemonRelayIdentity,
+  readHarnessPreflight,
   relaunchCommand,
   renderConfiguration,
+  renderHarnessPreflight,
   type RunOverrides,
   renderInitialAttachmentSection,
   resolveStateHome,
@@ -459,6 +465,15 @@ export interface DaemonWorld {
    * otherwise inexplicable configuration.
    */
   readonly stateHome: { readonly path: string; readonly fromEnvironment: boolean };
+  /**
+   * How this host resolves an agent harness: the published fleet and this machine's own `PATH`.
+   *
+   * THE SAME PAIR A START RESOLVES AN ACCOUNT FROM, deliberately, and it is a world field so the
+   * preflight can be driven from a test without installing Claude Code on the machine running it.
+   * A boot reports on these two facts; `resolveStartAccount` refuses on them. Reusing the pair is
+   * what stops a preflight promising a harness that a start would then reject.
+   */
+  readonly harnesses: { readonly accounts: AccountInventoryPort; readonly executables: ExecutableResolverPort };
   /**
    * Where a boot states what stopped it.
    *
@@ -935,18 +950,6 @@ const SESSION_START_DEFAULTS = {
 } as const;
 
 /**
- * Turning a published wrapper name into something this host can execute.
- *
- * A PORT rather than a `Bun.which` call at the point of use, because it is the one step in a start
- * that depends on the machine the daemon happens to be running on: a test proves the refusal a fleet
- * naming an uninstalled wrapper deserves without needing that wrapper installed to do it.
- */
-interface ExecutableResolverPort {
-  /** The absolute executable, or `undefined` when this host has no such program. */
-  resolve(name: string): string | undefined;
-}
-
-/**
  * Naming a request body by its content, which is how the protocol client identifies the start it is
  * recovering.
  *
@@ -1032,7 +1035,14 @@ function composeOpeningMessage(
   }
 }
 
-/** The account this start names, or a refusal that says which half of the resolution failed. */
+/**
+ * The account this start names, or a refusal that says which half of the resolution failed.
+ *
+ * THE LAUNCHABILITY RULE IS THE DOMAIN'S, not a second copy written here. `fyd --check` and the boot
+ * preflight report on whether a harness could serve, and they answer that question by asking this
+ * same `accountLaunchability`. Two spellings of "could a start run this?" would eventually disagree,
+ * and the disagreement would be a preflight that promises a harness a start then refuses.
+ */
 async function resolveStartAccount(
   accounts: AccountInventoryPort,
   requested: string,
@@ -1047,21 +1057,11 @@ async function resolveStartAccount(
       'unknown_agent',
       `no account in the fleet manifest is published as ${JSON.stringify(requested)}`,
     );
-  if (!account.available)
-    throw new SessionControlError(
-      'unavailable',
-      `account ${account.agent} cannot serve a session: ${account.unavailableReason ?? 'the manifest reports it unavailable'}`,
-    );
-  // The manifest publishes an executable NAME; the lifecycle demands an absolute path, because the
-  // wrapper authorization is what stops this daemon launching anything else. Resolving it against
-  // this host's PATH is the only step that can tell a fleet the daemon cannot actually run.
-  const executable = executables.resolve(account.agent);
-  if (executable === undefined)
-    throw new SessionControlError(
-      'unavailable',
-      `the fleet publishes ${account.agent} but this host has no such executable on its PATH`,
-    );
-  return { account, executable };
+  const launchability = accountLaunchability(account, executables);
+  // Both halves are `unavailable` to a caller: the account exists and cannot serve. Which half is
+  // the operator's business, and it is the reason the rule reports the two separately.
+  if (launchability.kind !== 'launchable') throw new SessionControlError('unavailable', launchability.reason);
+  return { account, executable: launchability.executable };
 }
 
 /** How each allocation refusal is answered. A taken callsign is a conflict a human can resolve by
@@ -3140,6 +3140,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         : new ExplicitDaemonConfig(overrides.configFile),
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
+    // The SAME two collaborators a start resolves an account from, so the preflight cannot report
+    // one answer while a launch gives another.
+    harnesses: { accounts, executables },
     notices: bootJournal(overrides.logLevel),
     secrets: new DaemonSecretsLoader(
       new BunSecretShell({
@@ -3758,6 +3761,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
   if (advertisesForeignAddress(config))
     world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
+  /**
+   * Whether this host can launch an agent at all.
+   *
+   * EARLY, AND NEVER A REFUSAL. A daemon with no harness installed starts perfectly and can do
+   * nothing — healthy by every internal measure and useless to the person in front of it, which is
+   * exactly the class of failure this trail exists to stop shipping. But someone may install a
+   * harness minutes after the daemon comes up, so it is said rather than enforced: a daemon that
+   * refuses to start until they have is strictly worse than one that starts and says what is missing.
+   *
+   * It is a `state` rather than a `step` when nothing is ready, so no log level can filter away the
+   * one line that explains why launching a session will fail.
+   */
+  const harnesses = readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables);
+  world.notices.step('harnesses checked', harnessPreflightSummary(harnesses));
+  if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
 
   const usage = world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
@@ -4062,6 +4080,19 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
   const say = (text: string): void => void writeSync(1, `${text}\n`);
   say(`state home   ${world.stateHome.path}`);
   say(`config file  ${world.config.path}${peeked.document === undefined ? '  (not written yet)' : ''}`);
+  /**
+   * The harnesses, BEFORE the address, so every one of the exits below has already reported them.
+   *
+   * It does not change the exit code, and that is deliberate rather than an omission: this command
+   * answers "would this daemon start", and a daemon with no harness installed starts perfectly. What
+   * it cannot do is launch a session, which is a different sentence and is printed as one. Refusing
+   * here would also contradict the boot, which warns and starts.
+   */
+  for (const line of renderHarnessPreflight(
+    readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables),
+    CLIENT_NAME,
+  ))
+    say(line);
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });
     if (occupant.kind === 'vacant') {
