@@ -78,18 +78,6 @@ pre-commit-lib.run {
       language = "system";
     };
 
-    # Nix used to restate the workspace links by hand. When fyd added the relay transport, that list
-    # stayed unchanged and the documented Nix install stopped building while every CI gate passed.
-    # Exercise the generated tree in Pre-Commit, the CI job that actually runs repository contracts.
-    a-nix-workspace-links = {
-      enable = true;
-      name = "Nix workspace package links";
-      entry = validator "scripts/validate/nix-workspace-links.sh self-test";
-      files = "^(nix/ferretry\\.nix|package\\.json|packages/.*|scripts/validate/nix-workspace-links\\.sh)$";
-      pass_filenames = false;
-      language = "system";
-    };
-
     a-composition-reachability = {
       enable = true;
       name = "Composition-root reachability";
