@@ -657,9 +657,10 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         id: 'resource-limits',
         label: 'Resource limits',
         description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
-        Surface: ({ connection: activeConnection }: { readonly connection: DaemonConnection }) => (
-          <CgroupConfigSurface connection={activeConnection} />
-        ),
+        // Referenced directly rather than wrapped: this surface takes only `connection`, so a
+        // pass-through arrow would add a component factory nothing renders — an uncovered line that
+        // exists solely to rename its own argument. Doctor below genuinely needs one; it also passes `read`.
+        Surface: CgroupConfigSurface,
       },
       {
         id: 'doctor',
