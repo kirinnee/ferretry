@@ -78,6 +78,8 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
+import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -225,6 +227,43 @@ const HARNESS_REFERENCE_PROSE = [
   '```',
 ].join('\n');
 const settingsControls = new DaemonControlsStore();
+
+/** Positive fixture evidence: this is not a claim that either account is signed in. */
+const HARNESS_FLEET: FleetReadState = {
+  kind: 'available',
+  harnesses: [
+    { kind: 'claude', launchable: ['claude-auto-studio'], blocked: [] },
+    {
+      kind: 'codex',
+      launchable: ['codex-auto-studio'],
+      blocked: ['the fleet publishes codex-auto-archive but this host has no such executable on its PATH'],
+    },
+  ],
+  accounts: [
+    {
+      id: 'studio-claude-auto',
+      wrapper: 'claude-auto-studio',
+      harness: 'claude',
+      label: 'Studio Claude',
+      available: true,
+    },
+    {
+      id: 'studio-codex-auto',
+      wrapper: 'codex-auto-studio',
+      harness: 'codex',
+      label: 'Studio Codex',
+      available: true,
+    },
+    {
+      id: 'archive-codex-auto',
+      wrapper: 'codex-auto-archive',
+      harness: 'codex',
+      label: 'Archive Codex',
+      available: false,
+      unavailableReason: 'The archive account is disabled while its provider is unavailable.',
+    },
+  ],
+};
 
 /**
  * A skills catalog covering both scopes and every origin chip, so the row
@@ -3105,6 +3144,16 @@ function Shell() {
     {
       label: 'Settings page preview',
       render: () => <SettingsPageHarness />,
+    },
+    {
+      label: 'Fleet inventory preview',
+      render: () => (
+        <Card id="harness-fleet-inventory" aria-label="Fleet inventory preview">
+          <PanelBody>
+            <FleetSurface daemonId={daemon.daemonId} state={HARNESS_FLEET} />
+          </PanelBody>
+        </Card>
+      ),
     },
     {
       label: 'Attention ledger',

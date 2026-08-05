@@ -57,6 +57,8 @@ export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/browser/unified-browser-model.ts';
 export * from '../features/browser/unified-browser-surface.tsx';
+export * from '../features/fleet/fleet-model.ts';
+export * from '../features/fleet/fleet-surface.tsx';
 export * from '../features/learning/learning-header.tsx';
 export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
 export {
@@ -85,8 +87,8 @@ export * from '../features/onboarding/onboarding-stages.tsx';
 export * from '../features/onboarding/onboarding-target-chooser.tsx';
 export * from '../features/onboarding/onboarding-track.tsx';
 export * from '../features/onboarding/setup-diagram.tsx';
-export * from '../features/onboarding/setup-handoff-panel.tsx';
 export * from '../features/onboarding/setup-handoff.ts';
+export * from '../features/onboarding/setup-handoff-panel.tsx';
 export * from '../features/pins/pins-board.tsx';
 export * from '../features/pins/pins-trigger.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
