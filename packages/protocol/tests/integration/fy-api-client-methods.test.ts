@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { FyTransportError, type FyApiClient } from '../../src/adapters/fy-api-client.ts';
+import { type FyApiClient, FyTransportError } from '../../src/adapters/fy-api-client.ts';
 import {
   analyticsResponse,
   cgroupConfigView,
@@ -315,6 +315,25 @@ const CASES: readonly MethodCase[] = [
     verb: 'POST',
     path: '/v1/sessions/session-1/resume',
     body: { message: 'carry on' },
+    response: sessionResponse,
+    expected: sessionView,
+  },
+  {
+    name: 'runtime model and effort',
+    invoke: client =>
+      client.runtime(SESSION_ID, { action: 'model', model: 'gpt-5.6-sol', effort: 'high' }, 'runtime-1'),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/runtime',
+    body: { action: 'model', model: 'gpt-5.6-sol', effort: 'high' },
+    response: sessionResponse,
+    expected: sessionView,
+  },
+  {
+    name: 'runtime opens Codex native picker without claiming a selected model',
+    invoke: client => client.runtime(SESSION_ID, { action: 'model' }),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/runtime',
+    body: { action: 'model' },
     response: sessionResponse,
     expected: sessionView,
   },

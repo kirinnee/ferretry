@@ -97,18 +97,21 @@ export const runtimeSwitchDisabledReason = (
 
 /**
  * The model chip's readout: the observed runtime model, going STALE (not wrong)
- * after a switch until fresh evidence lands. The launch request is a last resort
- * and is never presented as observed truth.
+ * after a switch until fresh evidence lands. A configured launch request is not
+ * evidence of the model actually in use, so it is deliberately never displayed.
  */
 export const runtimeModelChipLabel = (view: SessionView): string => {
   const observed = view.state.observedModel?.trim();
   if (observed) return observed;
-  const requested = view.config.model?.trim() || view.config.modelHint?.trim();
-  return requested || 'set model';
+  return 'model unavailable';
 };
 
 /** The callbacks a sheet body drives so the bar's readouts stay honest. */
 export interface RuntimeSwitchLifecycle {
+  /** Whether this particular sheet is open. The shared body uses this to read
+   * its catalog only while it is visible, without maintaining a second sheet
+   * state outside the composer runtime. */
+  readonly open: boolean;
   /** A switch was submitted: the readout goes stale-until-evidence. */
   readonly onSwitchSubmitted: () => void;
   /** The submit failed, so nothing is pending and the readout is current again. */
@@ -350,6 +353,7 @@ export function ComposerRuntimeWithKeyboard({
       : 'Set reasoning effort';
 
   const modelLifecycle: RuntimeSwitchLifecycle = {
+    open: modelOpen,
     onSwitchSubmitted: submitted,
     onSwitchFailed: failed,
     onClaudeEffortSent: setSentClaudeEffort,
@@ -357,6 +361,7 @@ export function ComposerRuntimeWithKeyboard({
   };
   const effortLifecycle: RuntimeSwitchLifecycle = {
     ...modelLifecycle,
+    open: effortOpen,
     onClose: () => setEffortOpen(false),
   };
 

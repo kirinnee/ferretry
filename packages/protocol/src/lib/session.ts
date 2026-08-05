@@ -86,7 +86,14 @@ export const RuntimeModelCatalogSchema = z.object({
 export type RuntimeModelCatalog = z.infer<typeof RuntimeModelCatalogSchema>;
 
 export const RuntimeControlRequestSchema = z.discriminatedUnion('action', [
-  z.strictObject({ action: z.literal('model'), model: z.string().min(1) }),
+  // Codex's native picker can be opened without selecting a target. It is a
+  // real control operation, but deliberately makes no claim about the eventual
+  // model; targeted callers supply both opaque values unchanged.
+  z.strictObject({
+    action: z.literal('model'),
+    model: z.string().min(1).optional(),
+    effort: z.string().min(1).optional(),
+  }),
   z.strictObject({ action: z.literal('effort'), effort: z.string().min(1) }),
   z.strictObject({ action: z.literal('compact') }),
 ]);

@@ -3,15 +3,16 @@ import type { SessionView } from '@ferretry/protocol';
 import type { ComponentProps, ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { ComposerRuntime } from '../../src/components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
-import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
@@ -105,6 +106,32 @@ describe('SessionChatPage', () => {
     expect(buttonNamed(page.root, 'Interrupt turn')).toBeDefined();
     expect(buttonNamed(page.root, 'Stop session')).toBeDefined();
     run(() => page.unmount());
+  });
+
+  test('mounts runtime controls only when the paired client can invoke the runtime route', () => {
+    const next = sessionView('shared');
+    const runtimeClient: SessionChatClient = {
+      ...client([], next),
+      runtime: async () => next,
+    };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={next}
+      />,
+    );
+    try {
+      const runtime = page.root.findByType(ComposerRuntime);
+      expect(runtime.props.view.config.id).toBe('shared');
+      expect(runtime.props.canControl).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
   });
 
   test('states the missing browser pane in visible text rather than a disabled control', () => {
