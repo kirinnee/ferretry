@@ -3518,6 +3518,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           paths,
           userHome: homedir(),
           clock: millisecondClock,
+          files: stateFiles,
           platform: process.platform,
           keychainAccount: process.env.USER ?? '',
         }),
