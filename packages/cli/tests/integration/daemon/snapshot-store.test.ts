@@ -111,6 +111,43 @@ describe('file daemon snapshot store', () => {
     should(await readFile(join(second.binaryPath, '..', 'manifest.json'), 'utf8')).equal(firstManifest);
   });
 
+  it('should never replace a content address another builder is still publishing', async () => {
+    // Arrange
+    let reportClaim!: () => void;
+    let releaseClaim!: () => void;
+    const claimed = new Promise<void>(resolve => {
+      reportClaim = resolve;
+    });
+    const released = new Promise<void>(resolve => {
+      releaseClaim = resolve;
+    });
+    const first = store({
+      uniqueId: () => 'builder-a',
+      afterTargetClaim: async () => {
+        reportClaim();
+        await released;
+      },
+    });
+    const second = store({ uniqueId: () => 'builder-b' });
+
+    // Act
+    const publishing = first.build();
+    await claimed;
+    try {
+      await should(second.build()).be.rejectedWith(/mutable; snapshots must be read-only/u);
+    } finally {
+      releaseClaim();
+    }
+    const published = await publishing;
+    const reused = await second.build();
+
+    // Assert
+    should(published.created).be.true();
+    should(reused.created).be.false();
+    should(reused.id).equal(published.id);
+    should(await readFile(published.binaryPath, 'utf8')).equal('#!/bin/sh\necho first\n');
+  });
+
   it('should promote and roll back only by atomic pointer replacement', async () => {
     // Arrange
     const subject = store();
@@ -129,6 +166,40 @@ describe('file daemon snapshot store', () => {
     should(await readlink(join(root, 'current'))).equal(`snapshots/${first.id}/fyd`);
     should(await readFile(first.binaryPath, 'utf8')).equal('#!/bin/sh\necho first\n');
     should(await readFile(second.binaryPath, 'utf8')).equal('#!/bin/sh\necho second\n');
+  });
+
+  it('should return the snapshot each concurrent promotion published even after it is superseded', async () => {
+    // Arrange
+    const subject = store();
+    const first = await subject.build();
+    await writeExecutable('#!/bin/sh\necho second\n');
+    const second = await subject.build();
+    let reportPublished!: () => void;
+    let releasePublished!: () => void;
+    const published = new Promise<void>(resolve => {
+      reportPublished = resolve;
+    });
+    const released = new Promise<void>(resolve => {
+      releasePublished = resolve;
+    });
+    const paused = store({
+      afterPromotionPublish: async () => {
+        reportPublished();
+        await released;
+      },
+    });
+
+    // Act
+    const promotingFirst = paused.promote(first.id);
+    await published;
+    const promotedSecond = await subject.promote(second.id);
+    releasePublished();
+    const promotedFirst = await promotingFirst;
+
+    // Assert
+    should(promotedFirst.id).equal(first.id);
+    should(promotedSecond.id).equal(second.id);
+    should((await subject.current())?.id).equal(second.id);
   });
 
   it('should remember that promotion occurred and refuse to bootstrap over a lost current pointer', async () => {

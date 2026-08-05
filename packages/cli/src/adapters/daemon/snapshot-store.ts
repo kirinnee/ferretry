@@ -69,8 +69,10 @@ export interface FileDaemonSnapshotStoreOptions {
   readonly sourceBinary: string | (() => string);
   readonly now?: (() => Date) | undefined;
   readonly uniqueId?: (() => string) | undefined;
-  /** Observation seam used by deterministic race tests; production leaves it absent. */
+  /** Observation seams used by deterministic race tests; production leaves them absent. */
   readonly afterCopy?: (() => Promise<void>) | undefined;
+  readonly afterTargetClaim?: (() => Promise<void>) | undefined;
+  readonly afterPromotionPublish?: (() => Promise<void>) | undefined;
 }
 
 interface FileDigest {
@@ -128,6 +130,50 @@ async function syncDirectory(path: string): Promise<void> {
     await handle.sync();
   } finally {
     await handle.close();
+  }
+}
+
+/**
+ * Create a missing directory chain and persist each new directory entry before returning.
+ *
+ * `mkdir({ recursive: true })` does not fsync the parents it changes. That is unsafe for the
+ * snapshot-store parent: a crash could otherwise lose the whole initialized store and make a
+ * previously promoted daemon look genuinely fresh. Existing symlinked ancestors remain valid;
+ * `stat` deliberately follows them, while the managed root and its children are validated with
+ * `lstat` separately.
+ */
+async function ensureDirectoryHierarchy(path: string): Promise<void> {
+  const missing: string[] = [];
+  let cursor = path;
+  while (true) {
+    try {
+      const state = await stat(cursor);
+      if (!state.isDirectory()) {
+        throw new DaemonSnapshotStoreError('damaged', `${cursor} is not a directory`);
+      }
+      break;
+    } catch (error) {
+      if (error instanceof DaemonSnapshotStoreError || errorCode(error) !== 'ENOENT') throw error;
+      const parent = dirname(cursor);
+      if (parent === cursor) throw error;
+      missing.push(cursor);
+      cursor = parent;
+    }
+  }
+
+  for (const directory of missing.reverse()) {
+    try {
+      await mkdir(directory, { mode: 0o700 });
+    } catch (error) {
+      if (errorCode(error) !== 'EEXIST') throw error;
+      const state = await stat(directory);
+      if (!state.isDirectory()) {
+        throw new DaemonSnapshotStoreError('damaged', `${directory} is not a directory`);
+      }
+    }
+    // Sync even after EEXIST: a competing creator may have published the entry without persisting
+    // its parent yet, and this invocation must not return relying on that unstated guarantee.
+    await syncDirectory(dirname(directory));
   }
 }
 
@@ -208,6 +254,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
         // so a concurrent verifier fails closed; a crash leaves damaged evidence that no later build
         // overwrites or silently repairs.
         await mkdir(target, { mode: 0o700 });
+        await this.options.afterTargetClaim?.();
       } catch (error) {
         if (!['EEXIST', 'ENOTEMPTY'].includes(errorCode(error) ?? '')) throw error;
         const snapshot = await this.#readSnapshot(id);
@@ -244,6 +291,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       await rename(temporary, join(this.root, CURRENT));
       ownsTemporary = false;
       await syncDirectory(this.root);
+      await this.options.afterPromotionPublish?.();
     } finally {
       if (ownsTemporary) await rm(temporary, { force: true }).catch(() => undefined);
     }
@@ -324,7 +372,8 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
   }
 
   async #ensureStore(): Promise<void> {
-    await mkdir(dirname(this.root), { recursive: true, mode: 0o700 });
+    const parent = dirname(this.root);
+    await ensureDirectoryHierarchy(parent);
     let created = false;
     try {
       await mkdir(this.root, { mode: 0o700 });
@@ -338,6 +387,10 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       await mkdir(join(this.root, SNAPSHOTS), { mode: 0o700 });
       await mkdir(join(this.root, STAGING), { mode: 0o700 });
       await syncDirectory(this.root);
+      // Publish the fully initialized root only after its own children are durable. Without this
+      // parent sync, a crash can lose the directory entry and erase the evidence that promotion ever
+      // happened, allowing a later launch to bootstrap damaged state as though it were fresh.
+      await syncDirectory(parent);
     }
     const rootState = await lstat(this.root);
     await this.#validateStore(rootState);

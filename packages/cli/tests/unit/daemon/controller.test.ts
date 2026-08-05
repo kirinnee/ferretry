@@ -152,7 +152,10 @@ describe('daemon start', () => {
 
   it('should start through the installed service manager and wait until it serves', async () => {
     // Arrange
-    const { controller, out, service } = harness({ probes: [undefined, undefined, health()] });
+    const { controller, out, service } = harness({
+      probes: [undefined, undefined, health()],
+      serviceReports: [stoppedReport],
+    });
 
     // Act
     await controller.start();
@@ -161,6 +164,24 @@ describe('daemon start', () => {
     should(service.calls).containEql('start');
     should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).equal('ok: fyd ready (pid 4242)');
+  });
+
+  it('should leave a supervised incumbent alone while its API is temporarily unavailable', async () => {
+    // Arrange
+    const { controller, out, service, snapshots, nix } = harness({
+      probes: [undefined],
+      serviceFallback: runningReport,
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert — rewriting the unit and its sole GC root while the old process remains active can
+    // leave that incumbent running from snapshot A while only snapshot B's closure is protected.
+    should(out.text).equal('ok: fyd is already running (pid 4242); its API is not ready');
+    should(service.calls).not.containEql('start');
+    should(snapshots.calls).be.empty();
+    should(nix.realPaths).be.empty();
   });
 
   it('should fall back to a direct launch when no service definition is installed', async () => {
@@ -183,6 +204,7 @@ describe('daemon start', () => {
     // Arrange — the clock advances 100ms per read, so the 300ms threshold arrives mid-wait.
     const { controller, out } = harness({
       probes: [undefined, undefined, undefined, undefined, health()],
+      serviceReports: [stoppedReport],
       serviceFallback: runningReport,
     });
 
@@ -473,7 +495,10 @@ describe('nix garbage-collection root', () => {
 
   it.each([
     { verb: 'install' as const, options: { serviceInstalled: false } },
-    { verb: 'start' as const, options: { probes: [undefined, health()] } },
+    {
+      verb: 'start' as const,
+      options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
+    },
     {
       verb: 'restart' as const,
       options: {
@@ -501,7 +526,7 @@ describe('nix garbage-collection root', () => {
     // Arrange — a CLI-created path inside the state home is the defect that stopped every fresh
     // machine from starting the daemon, and this root is a symbolic link besides, which the daemon's
     // filesystem port refuses anywhere under its home.
-    const subject = fromTheStore({ probes: [undefined, health()] });
+    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
     await subject.controller.start();
@@ -513,7 +538,7 @@ describe('nix garbage-collection root', () => {
 
   it('should leave a binary that does not come from the store untouched', async () => {
     // Arrange — the fixture's daemon is a plain /opt install, as brew or GoReleaser would leave it.
-    const subject = harness({ probes: [undefined, health()] });
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
     await subject.controller.start();
@@ -562,7 +587,7 @@ describe('nix garbage-collection root', () => {
     nix.afterRealPath = () => {
       snapshots.currentAnswer = later;
     };
-    const subject = harness({ probes: [undefined, health()], snapshots, nix });
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport], snapshots, nix });
 
     // Act
     await subject.controller.start();
@@ -575,7 +600,7 @@ describe('nix garbage-collection root', () => {
 
   it('should start the daemon anyway when the pin fails, and say so', async () => {
     // Arrange — no `nix-store` on PATH is the ordinary case here, and it must not fail the start.
-    const subject = fromTheStore({ probes: [undefined, health()] });
+    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
     subject.nix.failure = 'nix-store is not on PATH';
 
     // Act

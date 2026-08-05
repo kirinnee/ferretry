@@ -118,8 +118,14 @@ export class DaemonController {
       this.deps.out.success(`${this.#name} is already serving (pid ${String(serving.pid)})`);
       return;
     }
-    const snapshot = await this.#ensurePromotedSnapshot();
     const owner = await this.#owner();
+    const incumbent = await owner.inspect();
+    if (incumbent.state === 'running') {
+      const pid = incumbent.pid === undefined ? '' : ` (pid ${String(incumbent.pid)})`;
+      this.deps.out.success(`${this.#name} is already running${pid}; its API is not ready`);
+      return;
+    }
+    const snapshot = await this.#ensurePromotedSnapshot();
     await this.#pinDaemonBinary(snapshot);
     const handle = await owner.start(snapshot.binaryPath);
     const health = await this.#awaitReady(owner, handle);
