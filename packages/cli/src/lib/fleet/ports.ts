@@ -9,6 +9,7 @@ import type {
   FleetManifest,
   FleetScaffoldResult,
   FleetUsageSnapshot,
+  FleetHealthSnapshot,
 } from '@ferretry/fleet';
 import type { IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
@@ -57,6 +58,13 @@ export interface IFleetUsageCollectorFactory {
 
 export interface IFleetUsageCollector {
   collect(manifest: FleetManifest): Promise<FleetUsageSnapshot>;
+}
+
+export interface IFleetHealthCollectorFactory {
+  forConfig(config: FleetConfig): IFleetHealthCollector;
+}
+export interface IFleetHealthCollector {
+  collect(manifest: FleetManifest): Promise<FleetHealthSnapshot>;
 }
 
 /**

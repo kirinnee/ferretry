@@ -9,6 +9,8 @@ import type {
   FleetScaffoldResult,
   FleetUsage,
   FleetUsageSnapshot,
+  FleetHealth,
+  FleetHealthSnapshot,
   FleetWriteOperation,
 } from '@ferretry/fleet';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
@@ -93,6 +95,24 @@ export function renderUsage(snapshot: FleetUsageSnapshot): string {
   const exhausted = snapshot.accounts.filter(account => account.atLimit).length;
   const header = `${plural(snapshot.accounts.length, 'account')}${exhausted === 0 ? '' : `, ${exhausted} at limit`}`;
   return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
+}
+
+export function renderHealthRow(health: FleetHealth): string {
+  const reason = health.error === undefined ? '' : ` — ${health.error}`;
+  return `  ${health.accountId}  ${health.state.toUpperCase()}${health.cached ? ' (cached)' : ''}${reason}`;
+}
+
+export function renderHealth(snapshot: FleetHealthSnapshot): string {
+  if (snapshot.accounts.length === 0) return 'No accounts to probe for health.';
+  const down = snapshot.accounts.filter(account => account.state === 'down').length;
+  const unknown = snapshot.accounts.filter(account => account.state === 'unknown').length;
+  const suffix = [down === 0 ? '' : `${down} down`, unknown === 0 ? '' : `${unknown} unknown`]
+    .filter(Boolean)
+    .join(', ');
+  return [
+    `${snapshot.accounts.length} accounts${suffix === '' ? '' : `, ${suffix}`}`,
+    ...snapshot.accounts.map(renderHealthRow),
+  ].join('\n');
 }
 
 /**
