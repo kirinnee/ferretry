@@ -7,7 +7,7 @@ import {
   editableCgroupConfig,
 } from '../../../src/features/settings/cgroup-settings.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { render, runAsync } from '../../support/react.ts';
+import { render, run, runAsync } from '../../support/react.ts';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceToken: `token-${id}` });
@@ -107,5 +107,50 @@ describe('CgroupConfigCard', () => {
     expect(saved).toEqual([
       { enabled: true, fleet: { cpuPercent: 60, memoryPercent: 80 }, perAgent: { cpuPercent: 40, memoryPercent: 40 } },
     ]);
+    expect(JSON.stringify(renderer.toJSON())).toContain('Saved. Restart requirements');
+  });
+
+  it('reports a failed apply without treating the requested limits as active', async () => {
+    const client: Pick<IFyApiClient, 'cgroupConfig' | 'updateCgroupConfig'> = {
+      cgroupConfig: async () => view(),
+      updateCgroupConfig: async () => Promise.reject(new Error('systemd user manager unavailable')),
+    };
+    const renderer = render(<CgroupConfigSurface connection={connection('a')} createClient={async () => client} />);
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await runAsync(async () => {
+      renderer.root.findAllByType('input')[1]?.props.onChange({ target: { value: '60' } });
+      await Promise.resolve();
+    });
+    await runAsync(async () => {
+      renderer.root.findAllByType('button')[0]?.props.onClick();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain('Apply failed: ');
+    expect(text).toContain('systemd user manager unavailable');
+    expect(text).toContain('may retain their prior limits');
+  });
+
+  it('cleans up an in-flight daemon read when the surface unmounts', async () => {
+    let resolve: ((value: CgroupConfigView) => void) | undefined;
+    const delayed = new Promise<CgroupConfigView>(next => {
+      resolve = next;
+    });
+    const renderer = render(
+      <CgroupConfigSurface
+        connection={connection('a')}
+        createClient={async () => ({ cgroupConfig: async () => delayed, updateCgroupConfig: async () => view() })}
+      />,
+    );
+    run(() => renderer.unmount());
+    await runAsync(async () => {
+      resolve?.(view());
+      await Promise.resolve();
+    });
+    expect(renderer.toJSON()).toBeNull();
   });
 });
