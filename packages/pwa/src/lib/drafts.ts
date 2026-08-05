@@ -170,3 +170,20 @@ export class DaemonDraftStore {
     }
   }
 }
+
+/**
+ * The document-lifetime draft store, owned here so the composition root can register it for daemon
+ * invalidation.
+ *
+ * It used to be a module default inside `composer.tsx`. That made it the one daemon-scoped store in
+ * the bundle the connection registry could not reach: `clearDaemon` existed and was tested, and
+ * nothing ever called it. Unpairing a daemon therefore left that daemon's drafts in `localStorage`
+ * under `fy-drafts-v1`, where a later pairing that minted the same daemon id would read them back —
+ * and minting the same id is exactly what a RE-pair does.
+ *
+ * It is constructed here rather than in `createAppStore` because the composer needs a value for its
+ * `draftStore` default at module load, before any React context exists. A component may still be
+ * handed its own store — that is what the tests do — but this is the one the reader's browser uses,
+ * so this is the one that has to be invalidated.
+ */
+export const documentDraftStore = new DaemonDraftStore();

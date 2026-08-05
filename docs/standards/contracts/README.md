@@ -23,6 +23,7 @@ invariant fits in one file, a type or a test is the better home for it.
 | `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                      |
 | `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths |
 | `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root   |
+| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's  |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 
@@ -105,6 +106,51 @@ delete it when a live wiring already exists elsewhere. There is deliberately no 
 that cannot be resolved either way is a decision for a human, and the gate holds the commit until
 somebody makes it.
 
+## Daemon scoping
+
+`daemon-scope.sh` fails when a PWA surface could read one daemon's data as another's.
+
+One browser can be paired to several daemons at once, and a daemon's ids — session, task, pin,
+board — are unique only WITHIN the daemon that minted them. Two daemons therefore routinely hand the
+same browser the same id for different things, so anything the bundle remembers about daemon-owned
+data has to be keyed by `(daemonId, …)`.
+
+That has been carried by hand for the whole migration. Every unit brief repeats it,
+`docs/migration/surveys/pwa-shape.md` lists 56 single-daemon assumptions with `file:line`, and
+surfaces were still being found by eye afterwards. An invariant that depends on every author
+remembering it is not an invariant, which is the same reason `name-single-source` and
+`state-home-log-directory` exist.
+
+Three passes, each catching a different way a surface goes unscoped:
+
+| Pass         | Fails when                                                                                                                                          |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retain`     | module-scope mutable state remembers daemon data without keying through `daemonSessionKey()`                                                        |
+| `access`     | a module opens a request or a socket without carrying a `DaemonConnection` — the only type that pairs an origin with the device token minted for it |
+| `invalidate` | a class declares `clearDaemon()` — i.e. declares itself daemon-scoped — and the connection registry never receives it                               |
+
+`invalidate` is the one that found a live defect. `DaemonDraftStore` was a module default inside
+`composer.tsx`, which made it the only daemon-scoped store in the bundle the registry could not
+reach: `clearDaemon` existed, was tested, and was called by nothing. Unpairing left that daemon's
+drafts in `localStorage` under `fy-drafts-v1`, where the next pairing to mint the same daemon id
+would read them back — and minting the same id is exactly what a RE-pair does.
+
+**Why it is not a grep for `daemonId`.** That has been tried in this repo and it fails open: a file
+that only MENTIONS the name in a comment passes. Every pattern here is matched against cleaned
+source — comments blanked and string bodies emptied first, line numbers preserved so a report is
+still a coordinate — and each pass asks a structural question (what is this map keyed BY, does this
+class reach the registry) rather than a lexical one.
+
+**It fails closed about itself.** When a container escapes into a function the pass cannot follow,
+it demands an allowlist line rather than assuming the benign reading. It also refuses to report a
+vacuous pass: no PWA sources, no cache registry, or a registry holding nothing exits `2`.
+
+`daemon-scope-allowlist.txt` carries the reviewed exceptions, one exact `<pass> <target> # <reason>`
+per line — no globs, so silencing a new finding always costs a reviewable line in the diff, and a
+stale entry is a hard failure. Only two shapes of reason are acceptable: the value is **not daemon
+data**, or a named **owner** forwards `clearDaemon` to it. "It is keyed by daemon so staleness is
+harmless" is not one of them — daemon ids are durable across a re-pair.
+
 ## Action pinning
 
 `config/action-trust.json` (`schemaVersion: 1`) classifies every action as `trusted` or
@@ -121,6 +167,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/no-legacy-state.sh             # package migration boundary
 ./scripts/validate/composition-reachability.sh    # production code is actually mounted
 ./scripts/validate/composition-invocation.sh      # every world field has a caller
+./scripts/validate/daemon-scope.sh                # no PWA surface reads another daemon's data
 ./scripts/validate/action-pins.sh trusted
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```
