@@ -4,9 +4,11 @@ import { useState } from 'react';
 import {
   AccountHealthCheck,
   AccountPickerField,
+  accountEmptyCopy,
   accountFieldOptions,
   accountFieldSource,
   DaemonAccountPicker,
+  checkedAmongOffered,
   DaemonProjectPicker,
   ProjectPickerField,
   projectFieldOptions,
@@ -360,6 +362,63 @@ describe('projectFieldSource', () => {
   });
 });
 
+// ─── empty copy and the health count ─────────────────────────────────────────
+
+describe('accountEmptyCopy', () => {
+  it('claims nothing about the host when no filter is in play', () => {
+    expect(accountEmptyCopy(undefined, true).notice).toBe(
+      'This daemon publishes no accounts. Type a wrapper name instead.',
+    );
+    expect(accountEmptyCopy(undefined, true).status).toContain('publishes no accounts');
+  });
+
+  it('names the harness only when the host published something else', () => {
+    const claude = accountEmptyCopy('claude', true);
+    expect(claude.notice).toBe('This daemon publishes no Claude accounts. Type a wrapper name instead.');
+    expect(claude.status).toContain('though it publishes others');
+    expect(accountEmptyCopy('codex', true).notice).toContain('no Codex accounts');
+  });
+
+  it('keeps the fleet-wide sentence for an empty manifest, filtered or not', () => {
+    expect(accountEmptyCopy('codex', false).notice).toBe(
+      'This daemon publishes no accounts. Type a wrapper name instead.',
+    );
+  });
+
+  it('claims less when the caller cannot say whether anything is published', () => {
+    // An unread roster must not be described as "publishes no Codex accounts,
+    // though it publishes others" — nobody knows that yet.
+    expect(accountEmptyCopy('codex', undefined).notice).toContain('publishes no accounts');
+  });
+});
+
+describe('checkedAmongOffered', () => {
+  const options = must(accountFieldOptions(accountPickerOptions([account(), codex], usage, null)), 'options').map(
+    option => option.account,
+  );
+  const health = (...ids: readonly string[]) =>
+    new Map(
+      ids.map(id => [
+        id,
+        { accountId: id, kind: 'claude' as const, state: 'healthy' as const, cached: false, checkedAt: 1, ms: 2 },
+      ]),
+    );
+
+  it('counts only the rows this field offers', () => {
+    const codexOnly = [must(options[1], 'the codex option')];
+
+    // The probe checked both; a Codex-only list may claim only its own row.
+    expect(checkedAmongOffered(options, health(account().id, codex.id))).toBe(2);
+    expect(checkedAmongOffered(codexOnly, health(account().id, codex.id))).toBe(1);
+    expect(checkedAmongOffered(codexOnly, health(account().id))).toBe(0);
+  });
+
+  it('is zero when nothing has been checked or nothing is offered', () => {
+    expect(checkedAmongOffered(options, null)).toBe(0);
+    expect(checkedAmongOffered(null, health(account().id))).toBe(0);
+  });
+});
+
 // ─── account rows ────────────────────────────────────────────────────────────
 
 const accountField = async (
@@ -638,6 +697,69 @@ describe('AccountPickerField', () => {
     await interact(() => pressKey(input(), 'ArrowDown'));
     expect(must(rows()[0], 'row 0').getAttribute('data-current')).toBe('true');
     expect(find('[aria-label="current choice"]')).not.toBeNull();
+  });
+
+  /**
+   * A migration narrows the roster to one harness. On a host with Claude accounts
+   * and no Codex one, "this daemon publishes no accounts" is a false statement
+   * about the host, invented from a decision the browser made — and the one that
+   * sends somebody to provision an account they already have.
+   */
+  it('names the harness when the FILTER emptied the list, not the host', async () => {
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => ({
+        accounts: [account(), account({ id: 'other', wrapper: 'claude-auto-two', home: '/h2' })],
+      }),
+      health: async () => ({ health: new Map(), error: null }),
+    });
+    await show(
+      <DaemonAccountPicker
+        connection={laptop}
+        harness="codex"
+        id="fy-test-agent"
+        label="Account"
+        onValueChange={() => undefined}
+        store={store}
+        usage={usage}
+        value=""
+      />,
+    );
+    await openList();
+
+    expect(panelState()).toBe('empty');
+    expect(panelText()).toContain('publishes no Codex accounts');
+    expect(panelText()).not.toContain('publishes no accounts.');
+    // Spoken as well as shown, and it says WHY the list is empty.
+    expect(must(find('[role="status"]'), 'the live region').textContent).toBe(
+      'This daemon publishes no Codex accounts, though it publishes others. Type a wrapper name instead.',
+    );
+  });
+
+  it('keeps the fleet-wide sentence when the manifest really is empty', async () => {
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => ({ accounts: [] }),
+      health: async () => ({ health: new Map(), error: null }),
+    });
+    await show(
+      <DaemonAccountPicker
+        connection={laptop}
+        harness="codex"
+        id="fy-test-agent"
+        label="Account"
+        onValueChange={() => undefined}
+        store={store}
+        usage={usage}
+        value=""
+      />,
+    );
+    await openList();
+
+    expect(panelState()).toBe('empty');
+    expect(panelText()).toContain('This daemon publishes no accounts.');
+    expect(panelText()).not.toContain('Codex');
+    expect(must(find('[role="status"]'), 'the live region').textContent).toBe(
+      'This daemon publishes no accounts. Type a wrapper name instead.',
+    );
   });
 
   it('says a positively empty roster is empty, in words about accounts', async () => {
@@ -964,6 +1086,56 @@ describe('DaemonAccountPicker', () => {
     await openList();
     expect(rowText(0)).toContain('healthy');
     expect(rowText(1)).toContain('unchecked');
+  });
+
+  /**
+   * The probe checks the WHOLE fleet — that is the host's business and the button
+   * says so. The completion count is a sentence about the list in front of the
+   * reader, so a one-row Codex migration must never report the two Claude rows
+   * that were also probed.
+   */
+  it('counts only the harness rows on screen, while still disclosing the whole-fleet cost', async () => {
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => ({
+        accounts: [account(), codex, account({ id: 'third', wrapper: 'claude-auto-three', home: '/h3' })],
+      }),
+      health: async () => ({
+        // Every published account came back — three of them.
+        health: new Map(
+          [account().id, codex.id, 'third'].map(id => [
+            id,
+            { accountId: id, kind: 'claude' as const, state: 'healthy' as const, cached: false, checkedAt: 9, ms: 12 },
+          ]),
+        ),
+        error: null,
+      }),
+    });
+    await show(
+      <DaemonAccountPicker
+        connection={laptop}
+        harness="codex"
+        id="fy-test-agent"
+        label="Account"
+        offerHealthCheck={true}
+        onValueChange={() => undefined}
+        store={store}
+        usage={usage}
+        value=""
+      />,
+    );
+
+    // The cost disclosure stays whole-fleet, because that is what will happen.
+    expect(root().textContent).toContain('starts each published account once');
+
+    await press(checkButton());
+
+    // One Codex row is offered, so exactly one is claimed — not three.
+    expect(healthStatusText()).toContain('1 account checked.');
+    expect(healthStatusText()).not.toContain('3 accounts');
+    await openList();
+    expect(rows()).toHaveLength(1);
+    expect(rowText(0)).toContain('Atelier Codex');
+    expect(rowText(0)).toContain('healthy');
   });
 
   it('keeps a refused probe out of the roster and says so without disabling anything', async () => {

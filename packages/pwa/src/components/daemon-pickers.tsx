@@ -374,22 +374,76 @@ export interface AccountPickerFieldProps extends DaemonPickerFieldProps {
    * rows below simply say `quota —`, which is already the honest reading.
    */
   readonly advisory?: string;
+  /**
+   * Which harness this field is narrowed to, when it is narrowed at all.
+   *
+   * Only ever used to WORD the empty state — the filtering itself happens in the
+   * projection, before any of this. See `accountEmptyCopy`.
+   */
+  readonly harness?: PickerAccount['kind'];
+  /**
+   * Whether the daemon published ANY account, whatever harness it was for.
+   *
+   * The one fact that tells a filtered-empty list apart from an empty host, and
+   * the field cannot derive it: by the time options reach here the other harness's
+   * accounts have already been filtered out, so an empty array looks the same
+   * either way. `undefined` means the caller does not know, which is read as the
+   * cautious answer — the generic sentence, which claims less.
+   */
+  readonly publishesAnyAccount?: boolean;
 }
+
+/**
+ * WHY AN EMPTY LIST NEEDS TWO DIFFERENT SENTENCES.
+ *
+ * A migration narrows the roster to one harness, because Claude and Codex cannot
+ * resume each other's conversation format. On a host with three Claude accounts
+ * and no Codex one, a Codex migration therefore has an empty list and a fleet
+ * that is emphatically not empty — and "this daemon publishes no accounts" would
+ * be a false statement about the host, invented from a decision this browser
+ * made. It is also the statement that sends somebody to go and provision an
+ * account they already have.
+ *
+ * So the copy names the filter whenever the filter is what emptied the list, and
+ * keeps the honest fleet-wide sentence for a manifest that really is empty.
+ * Returned as a visible/spoken pair rather than one string, because the two
+ * channels must not be able to drift.
+ */
+export const accountEmptyCopy = (
+  harness: PickerAccount['kind'] | undefined,
+  publishesAnyAccount: boolean | undefined,
+): { readonly notice: string; readonly status: string } => {
+  if (harness === undefined || publishesAnyAccount !== true) {
+    return {
+      notice: 'This daemon publishes no accounts. Type a wrapper name instead.',
+      status: 'This daemon publishes no accounts. Type a wrapper name instead.',
+    };
+  }
+  const label = fleetHarnessLabel(harness);
+  return {
+    notice: `This daemon publishes no ${label} accounts. Type a wrapper name instead.`,
+    status: `This daemon publishes no ${label} accounts, though it publishes others. Type a wrapper name instead.`,
+  };
+};
 
 export function AccountPickerField({
   source,
   onAccountChosen,
   healthCheck,
   advisory,
+  harness,
+  publishesAnyAccount,
   ...field
 }: AccountPickerFieldProps): ReactNode {
+  const empty = accountEmptyCopy(harness, publishesAnyAccount);
   return (
     <div className="grid gap-xs">
       <PickerCombobox
         describedBy={field.describedBy}
         id={field.id}
         label={field.label}
-        emptyNotice="This daemon publishes no accounts. Type a wrapper name instead."
+        emptyNotice={empty.notice}
+        emptyStatus={empty.status}
         onSelect={option => onAccountChosen?.(option.account)}
         onValueChange={field.onValueChange}
         placeholder={field.placeholder}
@@ -523,6 +577,24 @@ export interface DaemonAccountPickerProps extends DaemonPickerFieldProps {
 }
 
 /**
+ * How many of the rows THIS FIELD OFFERS came back with a health result.
+ *
+ * The probe route checks the whole fleet — that is the host's business and the
+ * button's copy says so plainly, which is the disclosure that has to stay. But
+ * the completion count is a sentence about the list in front of the reader, and
+ * on a Codex migration showing one row "3 accounts checked" is simply not about
+ * anything they can see. It also reads as an invitation to look for the other two.
+ *
+ * So the count is an intersection: offered rows that have a result. A row the
+ * probe skipped stays `unchecked` in its own right-hand rail, which is where a
+ * reader looks for the per-account answer anyway.
+ */
+export const checkedAmongOffered = (
+  offered: readonly AccountPickerOption[] | null,
+  health: ReadonlyMap<string, PickerAccountHealth> | null,
+): number => (offered === null || health === null ? 0 : offered.filter(option => health.has(option.id)).length);
+
+/**
  * The field a write surface mounts.
  *
  * It subscribes to the roster ONCE and projects everything from that one
@@ -546,6 +618,8 @@ export function DaemonAccountPicker({
   return (
     <AccountPickerField
       {...field}
+      {...(harness === undefined ? {} : { harness })}
+      {...(slice.catalog === null ? {} : { publishesAnyAccount: slice.catalog.accounts.length > 0 })}
       {...(onAccountChosen === undefined ? {} : { onAccountChosen })}
       {...(usageError === undefined || usageError === null ? {} : { advisory: usageError })}
       {...(offerHealthCheck
@@ -553,7 +627,7 @@ export function DaemonAccountPicker({
             healthCheck: {
               status: slice.healthStatus,
               error: slice.healthError,
-              checked: slice.health?.size ?? 0,
+              checked: checkedAmongOffered(scoped, slice.health),
               onCheck: () => {
                 void store.checkHealth(connection).catch(() => {});
               },

@@ -118,6 +118,20 @@ export interface PickerComboboxProps<Option extends PickerOption> {
    * what did not match.
    */
   readonly noMatchNotice?: string;
+  /**
+   * What a positively empty catalogue SAYS OUT LOUD, when that is narrower than
+   * "nothing is published".
+   *
+   * The model's own sentence is the honest default for a host that publishes
+   * nothing at all. It is wrong for a consumer that has FILTERED: a migration
+   * offering only same-harness accounts on a host full of the other kind has an
+   * empty list and a fleet that is not empty, and telling a screen-reader user
+   * the daemon publishes nothing would be a claim about the host drawn from a
+   * decision this control made. `emptyNotice` already fixes the visible half;
+   * this is the spoken half, and they exist as a pair so the two channels cannot
+   * disagree.
+   */
+  readonly emptyStatus?: string;
 }
 
 /** Shared panel chrome: the popover silhouette every state is drawn inside. */
@@ -140,10 +154,26 @@ export function PickerCombobox<Option extends PickerOption>({
   onSelect,
   emptyNotice,
   noMatchNotice,
+  emptyStatus,
 }: PickerComboboxProps<Option>) {
   const generated = useId();
   const base = id ?? pickerIdBase(generated);
   const ids: PickerIds = pickerIds(base);
+  /**
+   * The popup itself, which is NOT the same element as the option list.
+   *
+   * `aria-expanded` says a popup is showing, so `aria-controls` has to name the
+   * thing that is showing — and in four of the five states that thing is a notice
+   * rather than a listbox. Pointing at the listbox id in those states would be a
+   * reference to an element that is not in the document, which is worse than
+   * silence: a reader is told to go somewhere that does not exist. So the panel
+   * carries its own id and `aria-controls` names the panel, while
+   * `aria-activedescendant` stays restricted to a real list of options.
+   *
+   * Derived here rather than added to `pickerIds`, which is a shared shape this
+   * change has no business widening.
+   */
+  const panelId = `${base}-panel`;
   const [focused, setFocused] = useState(false);
   // Escape closes the list without closing the field. Held separately from
   // focus so dismissing does not eject the caret, and cleared by the next
@@ -213,7 +243,9 @@ export function PickerCombobox<Option extends PickerOption>({
         aria-expanded={open}
         aria-autocomplete="list"
         aria-haspopup="listbox"
-        aria-controls={listboxMounted ? ids.listbox : undefined}
+        // The panel whenever one is showing, in every state; the ACTIVE ROW only
+        // when there is a real list to have a cursor in.
+        aria-controls={open ? panelId : undefined}
         aria-activedescendant={listboxMounted ? activeId : undefined}
         aria-describedby={describedBy}
         autoCapitalize="none"
@@ -250,7 +282,7 @@ export function PickerCombobox<Option extends PickerOption>({
       />
 
       {open ? (
-        <div className={PANEL_CLASS} data-picker-state={list.kind}>
+        <div className={PANEL_CLASS} data-picker-state={list.kind} id={panelId}>
           {/* Above the rows, not instead of them. A refresh that failed over a
               read that had succeeded leaves usable rows AND a warning, and this
               is the strip that lets a surface show both rather than picking one.
@@ -329,7 +361,14 @@ export function PickerCombobox<Option extends PickerOption>({
           already coalesces politely, and a timer here would be one more thing
           to leak on unmount. */}
       <span aria-atomic="true" aria-live="polite" className="sr-only" id={ids.status} role="status">
-        {pickerStatusLabel(list)}
+        {/* The model owns every sentence but one. A consumer that filtered its own
+            options knows something this control cannot: that the empty list is a
+            fact about the FILTER rather than about the host. `staleReason` is
+            re-appended by hand so an override cannot silently drop the warning the
+            model would have carried. */}
+        {list.kind === 'empty' && emptyStatus !== undefined
+          ? `${emptyStatus}${pickerStaleReason(list) === undefined ? '' : ' These choices may be out of date.'}`
+          : pickerStatusLabel(list)}
       </span>
     </div>
   );

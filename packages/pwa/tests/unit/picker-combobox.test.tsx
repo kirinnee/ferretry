@@ -119,6 +119,9 @@ const rowId = (index: number): string => {
 
 const listbox = (): Element | null => document.querySelector('[role="listbox"]');
 
+/** The popover itself — the element `aria-expanded` is announcing. */
+const panel = (): Element | null => document.querySelector('[data-picker-state]');
+
 const panelState = (): string | null =>
   document.querySelector('[data-picker-state]')?.getAttribute('data-picker-state') ?? null;
 
@@ -185,7 +188,12 @@ describe('the offered list', () => {
     await open();
 
     expect(activeId()).toBe(rowId(0));
-    expect(input().getAttribute('aria-controls')).toBe(must(listbox(), 'the listbox').getAttribute('id'));
+    // The panel is the controlled popup in every state, so the reference does not
+    // change target as the list comes and goes. The list itself lives inside it,
+    // which is what keeps that reference meaningful.
+    const controlled = must(panel(), 'the panel');
+    expect(input().getAttribute('aria-controls')).toBe(controlled.getAttribute('id'));
+    expect(controlled.contains(must(listbox(), 'the listbox'))).toBe(true);
   });
 
   it('marks exactly one row selected and the unavailable one disabled', async () => {
@@ -371,13 +379,95 @@ describe('the pointer', () => {
   });
 });
 
+/**
+ * `aria-expanded` announces that a popup is showing. `aria-controls` has to name
+ * the popup that IS showing — and in four of the five open states that is a notice
+ * rather than a listbox, so pointing at the listbox id would reference an element
+ * absent from the document. A dangling reference is worse than none: it sends a
+ * reader somewhere that does not exist.
+ *
+ * `aria-activedescendant` is the opposite case. It names a CURSOR, and only a real
+ * list has one, so it must stay absent in every other state.
+ */
+describe('what aria-expanded promises, in every state', () => {
+  const cases = [
+    { what: 'loading', source: { kind: 'loading' } as PickerSource<TestOption>, list: false },
+    {
+      what: 'failed',
+      source: { kind: 'failed', reason: 'the daemon refused the read' } as PickerSource<TestOption>,
+      list: false,
+    },
+    { what: 'empty', source: { kind: 'ready', options: [] } as PickerSource<TestOption>, list: false },
+    { what: 'options', source: ready, list: true },
+  ] as const;
+
+  for (const scenario of cases) {
+    it(`points aria-controls at the mounted panel while ${scenario.what}`, async () => {
+      await open({ source: scenario.source });
+
+      const id = must(panel(), 'the panel').getAttribute('id');
+      expect(id).not.toBeNull();
+      expect(id).toMatch(/-panel$/u);
+      expect(input().getAttribute('aria-expanded')).toBe('true');
+      expect(input().getAttribute('aria-controls')).toBe(id);
+      // The reference resolves: nothing here is announcing an element that is
+      // not in the document.
+      expect(document.getElementById(id as string)).not.toBeNull();
+      // Only a real list has a cursor to point at.
+      expect(input().getAttribute('aria-activedescendant') === null).toBe(!scenario.list);
+    });
+  }
+
+  it('points aria-controls at the mounted panel with a query that matched nothing', async () => {
+    await open();
+    await type('nothing-matches-this');
+
+    expect(panelState()).toBe('no-match');
+    const id = must(panel(), 'the panel').getAttribute('id');
+    expect(input().getAttribute('aria-controls')).toBe(id);
+    expect(document.getElementById(id as string)).not.toBeNull();
+    expect(input().getAttribute('aria-activedescendant')).toBeNull();
+  });
+
+  it('claims no popup and controls nothing while closed', async () => {
+    await picker();
+
+    expect(input().getAttribute('aria-expanded')).toBe('false');
+    expect(panel()).toBeNull();
+    expect(input().getAttribute('aria-controls')).toBeNull();
+    expect(input().getAttribute('aria-activedescendant')).toBeNull();
+  });
+
+  it('gives two pickers on one page distinct panel ids', async () => {
+    function Pair() {
+      return (
+        <>
+          <PickerCombobox<TestOption> label="Account" onValueChange={() => undefined} source={ready} value="" />
+          <PickerCombobox<TestOption> label="Project" onValueChange={() => undefined} source={ready} value="" />
+        </>
+      );
+    }
+    live = await mount(<Pair />);
+    const fields = [...document.querySelectorAll('input[role="combobox"]')];
+    await interact(() => (fields[0] as HTMLInputElement).focus());
+    const first = must(panel(), 'the first panel').getAttribute('id');
+    await interact(() => (fields[1] as HTMLInputElement).focus());
+    const second = must(panel(), 'the second panel').getAttribute('id');
+
+    expect(first).not.toBeNull();
+    expect(second).not.toBe(first);
+  });
+});
+
 describe('the four states that are not a list', () => {
   it('says a read is still running, and keeps the field editable', async () => {
     await open({ source: { kind: 'loading' } });
 
     expect(panelState()).toBe('loading');
     expect(listbox()).toBeNull();
-    expect(input().getAttribute('aria-controls')).toBeNull();
+    // The popup that IS showing, rather than the list that is not: see the
+    // aria-controls suite below for the whole table.
+    expect(input().getAttribute('aria-controls')).toBe(must(panel(), 'the panel').getAttribute('id'));
     expect(input().getAttribute('aria-activedescendant')).toBeNull();
     expect(input().hasAttribute('disabled')).toBe(false);
     expect(statusText()).toBe('Reading the available choices…');
@@ -417,6 +507,43 @@ describe('the four states that are not a list', () => {
     expect(document.querySelector('[data-picker-state="empty"]')?.textContent).toContain(
       'This daemon publishes no accounts.',
     );
+  });
+
+  /**
+   * A consumer that FILTERED its own options knows the list is empty because of
+   * the filter rather than because of the host — a fact this control cannot see,
+   * and one a screen-reader user needs as much as a sighted one.
+   */
+  it('lets the consumer word the SPOKEN empty case too, so both channels agree', async () => {
+    await open({
+      source: { kind: 'ready', options: [] },
+      emptyNotice: 'This daemon publishes no Codex accounts.',
+      emptyStatus: 'This daemon publishes no Codex accounts, though it publishes others.',
+    });
+
+    expect(statusText()).toBe('This daemon publishes no Codex accounts, though it publishes others.');
+    expect(statusText()).not.toContain('Nothing is published');
+  });
+
+  it('keeps the model sentence spoken when only the visible half was overridden', async () => {
+    await open({ source: { kind: 'ready', options: [] }, emptyNotice: 'no Codex accounts here' });
+
+    expect(statusText()).toBe('Nothing is published to choose from. Type a value instead.');
+  });
+
+  it('never lets an overridden empty sentence swallow the staleness warning', async () => {
+    await open({
+      source: { kind: 'ready', options: [], staleReason: 'the last refresh failed' },
+      emptyStatus: 'This daemon publishes no Codex accounts.',
+    });
+
+    expect(statusText()).toBe('This daemon publishes no Codex accounts. These choices may be out of date.');
+  });
+
+  it('speaks a consumer empty sentence only in the empty state', async () => {
+    await open({ source: { kind: 'loading' }, emptyStatus: 'This daemon publishes no Codex accounts.' });
+
+    expect(statusText()).toBe('Reading the available choices…');
   });
 
   it('falls back to generic wording when the consumer supplies none', async () => {
