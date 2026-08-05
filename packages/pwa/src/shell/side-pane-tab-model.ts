@@ -375,6 +375,10 @@ export interface SidePaneTabsState {
   readonly open: readonly SidePaneTabId[];
   /** The showing tab; null means the pane is closed (the strip survives). */
   readonly active: SidePaneTabId | null;
+  /** A browser instance may temporarily replace the workspace. This remains in
+   *  the daemon/session record so one daemon cannot inherit another daemon's
+   *  full-screen reader after a switch. */
+  readonly fullViewport?: boolean;
   /** Open instance tabs by id. Everything in here is also in `open`. */
   readonly instances: Readonly<Record<SidePaneTabId, SidePaneTabInstance>>;
 }
@@ -395,6 +399,7 @@ function defaultState(): SidePaneTabsState {
       .filter(def => def.defaultOpen)
       .map(def => def.id),
     active: null,
+    fullViewport: false,
     instances: NO_INSTANCES,
   };
   return defaultOpenCache;
@@ -485,7 +490,12 @@ function write(scope: DaemonSessionScope, next: SidePaneTabsState): void {
 /** Low-level whole-state write — the test seam and the restore path. */
 export function writeSidePaneTabsState(scope: DaemonSessionScope, next: SidePaneTabsState): void {
   const instances = next.instances ?? NO_INSTANCES;
-  write(scope, { ...next, instances, open: sortSidePaneTabs(next.open, instances) });
+  write(scope, {
+    ...next,
+    fullViewport: next.fullViewport === true,
+    instances,
+    open: sortSidePaneTabs(next.open, instances),
+  });
 }
 
 /** Add a tab to the strip if absent and make it active. The single open path:
@@ -510,7 +520,7 @@ export function openSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId): v
   const current = readSidePaneTabsState(scope);
   const open = current.open.includes(id) ? current.open : sortSidePaneTabs([...current.open, id], current.instances);
   if (open === current.open && current.active === id) return;
-  write(scope, { ...current, open, active: id });
+  write(scope, { ...current, open, active: id, fullViewport: false });
 }
 
 function openInstance(scope: DaemonSessionScope, instance: SidePaneTabInstance): void {
@@ -519,7 +529,7 @@ function openInstance(scope: DaemonSessionScope, instance: SidePaneTabInstance):
   const open = current.open.includes(instance.id)
     ? current.open
     : sortSidePaneTabs([...current.open, instance.id], instances);
-  write(scope, { ...current, open, instances, active: instance.id });
+  write(scope, { ...current, open, instances, active: instance.id, fullViewport: false });
 }
 
 /** ONE TAB PER FILE. Opening a path already in the strip focuses its existing
@@ -636,14 +646,30 @@ export function setSidePaneInstanceLabel(
 export function activateSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId): void {
   const current = readSidePaneTabsState(scope);
   if (!current.open.includes(id) || current.active === id) return;
-  write(scope, { ...current, active: id });
+  write(scope, { ...current, active: id, fullViewport: false });
 }
 
 /** Close the pane. The strip — which tabs the reader chose — survives. */
 export function deactivateSidePane(scope: DaemonSessionScope): void {
   const current = readSidePaneTabsState(scope);
   if (current.active === null) return;
-  write(scope, { ...current, active: null });
+  write(scope, { ...current, active: null, fullViewport: false });
+}
+
+/**
+ * Let the active browser instance take the entire application viewport.
+ *
+ * This deliberately refuses every other tab kind. A stale callback after a
+ * browser tab closed must not turn a files or terminal pane into a layout that
+ * has no browser exit chrome. Like all side-pane state, the flag lives under
+ * `(daemonId, sessionId)`, never in a process-wide singleton.
+ */
+export function setSidePaneFullViewport(scope: DaemonSessionScope, fullViewport: boolean): void {
+  const current = readSidePaneTabsState(scope);
+  const active = current.active === null ? undefined : current.instances[current.active];
+  if (active?.kind !== 'browser') return;
+  if (current.fullViewport === fullViewport) return;
+  write(scope, { ...current, fullViewport });
 }
 
 // Closing an instance tab DISPOSES that instance; whoever owns its live backing
@@ -680,7 +706,13 @@ export function removeSidePaneTab(scope: DaemonSessionScope, id: SidePaneTabId):
     delete next[id];
     instances = next;
   }
-  write(scope, { ...current, open, active, instances });
+  write(scope, {
+    ...current,
+    open,
+    active,
+    instances,
+    fullViewport: current.active === id ? false : current.fullViewport,
+  });
   if (closed) for (const listener of instanceCloseListeners) listener(scope, closed);
 }
 
