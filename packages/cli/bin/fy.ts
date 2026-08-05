@@ -604,17 +604,6 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
           new SystemUsageClock(),
         ),
     },
-    health: {
-      forConfig: config =>
-        buildFleetHealthCollector(
-          config,
-          new ProcessFleetHealthProbe({
-            process: runFleetHealthProcess,
-            cachePath: `${layout.fleetDirectory}/health-successes.json`,
-          }),
-          new SystemUsageClock(),
-        ),
-    },
     // One credential store for both verbs: `--status` reads through it and a login copies through it,
     // so what a report says a home holds is the same reading a copy decides on.
     identities: {
