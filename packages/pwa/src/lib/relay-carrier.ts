@@ -234,13 +234,15 @@ export const openRelaySession = async ({
   if (url === null) {
     // `connectionSocketUrl` refuses a fingerprint a rendezvous cannot address. That
     // is a refusal, not an address to improvise around.
-    throw new RelaySessionError(
-      'this daemon fingerprint cannot address a rendezvous',
-      RELAY_CLOSE_CODES.protocolError,
-    );
+    throw new RelaySessionError('this daemon fingerprint cannot address a rendezvous', RELAY_CLOSE_CODES.protocolError);
   }
   const socket = dial(url);
-  const session = new RelayClientSession({ crypto, daemonId: daemon.daemonId, deviceToken: daemon.deviceToken, socket });
+  const session = new RelayClientSession({
+    crypto,
+    daemonId: daemon.daemonId,
+    deviceToken: daemon.deviceToken,
+    socket,
+  });
   const timers = new Set<() => void>();
   const stop = (): void => {
     for (const cancel of timers) cancel();
@@ -417,34 +419,51 @@ export class DaemonCarrierRouter {
 
   async #over(entry: CarrierEntry, method: ConnectionMethod, url: string, init: RequestInit): Promise<Response> {
     if (method.kind === 'direct') return await this.#network(url, init);
-    entry.session ??= openRelaySession({
+    const session = await this.#session(entry, method);
+    try {
+      return relayResponse(await session.request(relayTunnelRequest(url, init)));
+    } catch (reason) {
+      // The carrier failed under this request, so another carrier may be tried — and
+      // the request itself is LOST rather than retried on this one: §9 says frames in
+      // flight are gone and known to be gone, so re-requesting is the caller's call.
+      if (!session.live()) throw reason;
+      // The daemon ANSWERED. A `409`, an `oversize` refusal — that is a result, and
+      // trying another carrier after it would silently re-send a mutation.
+      throw new RelayAnswerError(reason);
+    }
+  }
+
+  /**
+   * The live session for this connection, re-dialled when the last one is gone.
+   *
+   * §9 is explicit that reconnection is not resumption: a session is bound to its
+   * sockets, and when one drops the session is over. So a dead session is replaced
+   * rather than revived, and the replacement has new keys and a new identifier.
+   * Reusing a dead one would be a request that can never be answered.
+   */
+  async #session(
+    entry: CarrierEntry,
+    method: Extract<ConnectionMethod, { kind: 'relay' }>,
+  ): Promise<RelayClientSession> {
+    const existing = entry.session;
+    if (existing !== undefined) {
+      const current = await existing.catch(() => undefined);
+      if (current?.live() === true) return current;
+      entry.session = undefined;
+    }
+    const opening = openRelaySession({
       crypto: this.#crypto,
       dial: this.#dial,
       daemon: entry.connection,
       method,
       ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
     });
-    let session: RelayClientSession;
+    entry.session = opening;
     try {
-      session = await entry.session;
+      return await opening;
     } catch (reason) {
-      // A rendezvous that would not carry this session is a carrier that failed, so
-      // the next one may be tried. The session promise is dropped rather than kept:
-      // §9 says a session is bound to its socket, so a retry is a new session.
       entry.session = undefined;
       throw reason;
-    }
-    // Past this point the carrier worked. Whatever the daemon says — a `409`, an
-    // `oversize` refusal — is an ANSWER, and answering is not a reason to try
-    // another carrier: falling through would silently re-send a mutation.
-    try {
-      return relayResponse(await session.request(relayTunnelRequest(url, init)));
-    } catch (reason) {
-      if (!session.live()) {
-        entry.session = undefined;
-        throw reason;
-      }
-      throw new RelayAnswerError(reason);
     }
   }
 
@@ -465,4 +484,3 @@ const sameMethod = (left: ConnectionMethod, right: ConnectionMethod): boolean =>
   left.kind === right.kind &&
   (left.kind === 'direct' ? left.daemonUrl : left.relayUrl) ===
     (right.kind === 'direct' ? right.daemonUrl : right.relayUrl);
-
