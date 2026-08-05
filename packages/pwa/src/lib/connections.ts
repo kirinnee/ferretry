@@ -4,6 +4,9 @@ import {
   type DaemonId,
   daemonConnection,
   daemonId,
+  daemonRelayCarrier,
+  type RelayCarrier,
+  sameDaemonConnection,
 } from './daemon-connection.ts';
 
 /** Repository key reserved for the browser's IndexedDB-backed connection record. */
@@ -59,6 +62,34 @@ const label = (value: unknown): string | undefined => {
   return normalized === '' ? undefined : normalized;
 };
 
+/**
+ * A STORED RELAY CARRIER, AND THE ONE THAT IS DELIBERATELY NOT RESTORED.
+ *
+ * A relay somebody runs themselves has no runtime source: its address is a value
+ * its owner supplied, so forgetting it across a reload would silently take the
+ * only carrier a NAT-bound daemon had. That one is persisted, and an absent
+ * `operator` reads as `'self'` — the relay package's own documented rule, because
+ * a record written before the field existed can only have described a relay its
+ * owner deployed.
+ *
+ * FERRETRY'S HOSTED CARRIER IS NOT RESTORED FROM STORAGE, EVER. Its address is a
+ * `no-store` runtime advertisement precisely so its operator can change or
+ * withdraw it without an app release (§13), and `relayUrl: null` is a kill switch.
+ * A browser that dialled a remembered hosted address would be a browser the kill
+ * switch does not reach — the switch not working. So a stored hosted row is
+ * dropped on load and the live advertisement is asked again, which is strictly
+ * stronger than surviving a reload.
+ */
+const relayFrom = (value: unknown): RelayCarrier | undefined => {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (raw.kind !== 'relay' || typeof raw.relayUrl !== 'string') return undefined;
+  const operator = raw.operator === undefined ? 'self' : raw.operator;
+  if (operator !== 'self') return undefined;
+  return { kind: 'relay', relayUrl: raw.relayUrl, operator };
+};
+
 const recordFrom = (value: unknown): DaemonConnectionRecord | undefined => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
@@ -77,6 +108,7 @@ const recordFrom = (value: unknown): DaemonConnectionRecord | undefined => {
       daemonId: raw.daemonId,
       baseUrl: raw.baseUrl,
       deviceToken: raw.deviceToken,
+      relay: relayFrom(raw.relay),
     });
     const displayLabel = label(raw.label);
     return { ...connection, ...(displayLabel ? { label: displayLabel } : {}), pairedAt, lastSelectedAt };
@@ -140,8 +172,15 @@ const serialized = (snapshot: DaemonConnectionsSnapshot): string =>
     connections: snapshot.connections,
   });
 
-const sameConnection = (left: DaemonConnection, right: DaemonConnection): boolean =>
-  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+/**
+ * The liveness test, borrowed rather than restated.
+ *
+ * This used to be a second copy of the field-by-field comparison in
+ * `daemon-connection.ts`. Two copies is how a field added to one — the relay
+ * carrier, here — gets forgotten by the other, and the forgotten one is the one
+ * that decides whether a daemon's caches are invalidated.
+ */
+const sameConnection = sameDaemonConnection;
 
 /**
  * Document-lifetime registry for every runtime-paired daemon.
@@ -284,6 +323,30 @@ export class DaemonConnectionStore {
     const connections = this.#snapshot.connections.map(record => (record.daemonId === id ? renamed : record));
     this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
     return renamed;
+  }
+
+  /**
+   * Records the rendezvous this daemon may be reached through, or that there is none.
+   *
+   * Called from the composition root with whatever the live advertisement says, on
+   * every load — so `undefined` here is a real answer and not an omission: a relay
+   * that was switched off, or a discovery that could not be completed, must leave
+   * this browser with direct as its only carrier rather than a remembered address.
+   *
+   * DAEMON CACHES ARE NOT CLEARED. A carrier change moves where the bytes travel;
+   * it does not rotate a credential and it does not change whose data this is. What
+   * DOES re-derive is anything holding a live connection, because
+   * `sameDaemonConnection` counts the carrier — which is the boundary that matters.
+   */
+  attachRelay(id: DaemonId, relay: RelayCarrier | undefined): DaemonConnectionRecord | undefined {
+    const existing = this.get(id);
+    if (existing === undefined) return undefined;
+    if (existing.relay?.relayUrl === relay?.relayUrl && existing.relay?.operator === relay?.operator) return existing;
+    const { relay: _previous, ...rest } = existing;
+    const updated: DaemonConnectionRecord = relay === undefined ? rest : { ...rest, relay: daemonRelayCarrier(relay) };
+    const connections = this.#snapshot.connections.map(record => (record.daemonId === id ? updated : record));
+    this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
+    return updated;
   }
 
   remove(id: DaemonId): boolean {

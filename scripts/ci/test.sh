@@ -14,11 +14,20 @@ cd "${root_dir}"
 # only place CI looks at them.
 ./scripts/validate/relay-config.sh
 
+# The per-test budget, ON THE COMMAND LINE. `[test] timeout` in a bunfig is ignored by
+# Bun, so a tier that needs longer than the 5-second default has to say so here. The
+# unit tier deliberately keeps the default: a unit test that needs two minutes is a unit
+# test that is doing something else.
+timeout_flag=()
+if [[ ${mode} != "unit" ]]; then
+  timeout_flag=(--timeout 120000)
+fi
+
 if [[ ${mode} == "sit" ]]; then
   [[ -d dist/bin ]] && chmod -R +x dist/bin
   [[ -n ${CLI_BIN:-} ]] && chmod +x "${CLI_BIN}"
   echo "🧪 Running sit tests..."
-  SIT_DRIVER=binary bun test --config=bunfig.sit.toml
+  SIT_DRIVER=binary bun test --config=bunfig.sit.toml "${timeout_flag[@]}"
   echo "✅ sit tests passed"
   exit 0
 fi
@@ -69,7 +78,7 @@ echo "🧪 Running ${mode} tests with coverage..."
 rm -rf "${coverage_dir}"
 
 set +e
-bun test --config="${config}" --coverage
+bun test --config="${config}" "${timeout_flag[@]}" --coverage
 test_status=$?
 set -e
 

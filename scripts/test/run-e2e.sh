@@ -98,6 +98,7 @@ echo "🧪 Typechecking the E2E harness..."
 ./node_modules/.bin/tsc --noEmit --project tests/e2e/tsconfig.json
 
 echo "🧪 Running isolated E2E journeys..."
-bun test tests/e2e --config=bunfig.e2e.toml
+# `--timeout` on the command line because `[test] timeout` in a bunfig is ignored by Bun.
+bun test tests/e2e --config=bunfig.e2e.toml --timeout 120000
 
 echo "✅ Isolated E2E journeys passed"

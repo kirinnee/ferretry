@@ -209,16 +209,16 @@ describe('activeCarrierStatus', () => {
     // This line used to be the literal 'Direct', passed in by the composition
     // root whenever anything was paired — the same claim for every carrier, and
     // measured by nothing.
-    expect(activeCarrierStatus('direct')).toContain('only carrier this build dials');
-    expect(activeCarrierStatus(undefined)).toContain('only carrier this build dials');
-    // A reader who chose a relay is told BOTH facts: what is carrying it, and
-    // that their choice is not that thing yet.
-    expect(activeCarrierStatus('default-relay')).toContain('default relay is chosen');
-    expect(activeCarrierStatus('default-relay')).toContain('nothing dials a relay yet');
-    expect(activeCarrierStatus('own-relay')).toContain('your own relay is chosen');
-    for (const chosen of ['direct', 'default-relay', 'own-relay'] as const) {
-      expect(activeCarrierStatus(chosen)).toContain('Direct');
+    // It then said nothing dials a relay, which was true when written and is not
+    // now: both ends dial. What is still true at the END OF SETUP is that pairing
+    // itself is always direct, so that is what this says — and it points at the one
+    // surface that reports a MEASURED carrier rather than deriving one here.
+    for (const chosen of ['direct', 'default-relay', 'own-relay', undefined] as const) {
+      expect(activeCarrierStatus(chosen)).toContain('Direct — pairing is always direct');
+      expect(activeCarrierStatus(chosen)).toContain('Settings › Daemons');
+      expect(activeCarrierStatus(chosen)).not.toContain('nothing dials a relay yet');
     }
+    expect(activeCarrierStatus('own-relay')).toContain('through your own relay');
   });
 });
 
@@ -232,8 +232,11 @@ describe('what the step says', () => {
     // It describes the arrangement. Claiming the app already falls back would be
     // a claim about behaviour that does not exist yet.
     expect(HOSTED_RELAY_ROW_NOTE).not.toContain('falls back');
-    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('neither the');
-    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('dials it yet');
+    // Both ends dial now, so the note names the two real constraints instead of
+    // claiming the fallback cannot happen at all.
+    expect(TRANSPORT_NOT_WIRED_NOTE).not.toContain('dials it yet');
+    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('Pairing itself always goes straight to the daemon');
+    expect(TRANSPORT_NOT_WIRED_NOTE).toContain('live updates need a direct connection');
   });
 
   it('discloses what the hosted relay can and cannot see, and never advertises an address', () => {

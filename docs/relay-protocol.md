@@ -36,10 +36,10 @@ The decision layer for that behaviour is in this package today: `connectionPrefe
 `packages/relay/src/lib/connection.ts` orders direct first, and `chooseConnection` returns the
 which-carrier-and-why sentence a surface can show verbatim. Discovery — learning the hosted relay's
 address and reading its kill switch — is provided by [PR #202](https://github.com/kirinnee/ferretry/pull/202).
-**The transport now exists on the daemon side only** — `fyd` dials a rendezvous, claims it and carries
-a session; the browser still builds every request from one direct address — so read this section as the
-contract both ends are being built against rather than as a description of what a phone does today.
-"What is not built yet" in §13 names the exact remaining gap.
+**The transport now exists on both sides** — `fyd` dials a rendezvous and carries a session, and the
+browser arrives at one, attempting direct first and falling back automatically. What a phone can do
+over a relay is every request/response route and nothing that needs a stream; "What is not built yet"
+in §13 names each remaining shape exactly.
 
 Three addresses are involved and they are deliberately not the same thing:
 
@@ -678,8 +678,10 @@ The relay is incapable of decrypting content, including when a cap is hit.
 
 ### What is not built yet
 
-The relay, the control plane, the caps and the disclosure text are implemented and tested. **The gap
-is the transport — and it is now half closed: `fyd` dials, and the browser does not.**
+The relay, the control plane, the caps and the disclosure text are implemented and tested. **The
+transport gap is now closed on both ends: `fyd` dials, and the browser arrives.** What remains is
+narrower and is listed exactly below — three shapes this tunnel does not carry, and one screen that
+has not caught up with §1.
 
 Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202): the PWA reads and
 parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
@@ -691,15 +693,25 @@ layer, the credit window, and the §14 tunnel that turns a relayed request into 
 the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket and its
 liveness, and the `relay` block of the daemon configuration document is where an operator points it.
 
-**The browser still cannot.** It builds every request from a single direct `baseUrl` in
-`packages/pwa/src/lib/daemon-transport.ts`, and `ConnectionMethod` — the carrier type that would
-replace it — still has no consumer outside `packages/relay`. The decision layer is there
-(`connectionPreferenceOrder` orders direct first, `chooseConnection` returns the which-carrier-and-why
-sentence); what is missing is the plumbing on the browser side that would carry bytes over an address
-discovery already hands it. So today a relay deployment gets you a relay with a daemon sitting in it,
-waiting for a client that cannot arrive.
+**The browser now can.** `packages/pwa/src/lib/relay-session.ts` is the client half of §6, §7, §8 and
+§14 — the handshake against the fingerprint pairing pinned, the record layer, the credit window and the
+tunnel — and `packages/pwa/src/lib/relay-carrier.ts` is what decides and dials.
+`DaemonConnection` carries a relay carrier, `connections.ts` persists one, and every daemon-bound
+request goes through the router, which attempts direct first and falls back automatically.
+`packages/pwa/tests/integration/relay-carrier-end-to-end.test.ts` wires the browser client, the real
+`RendezvousDurableObject` and the daemon's real `RelayLink` together and asserts the rendezvous saw
+neither a payload nor the device token.
 
-Five named pieces. PR #202 provides the first two, the daemon half of the third is built, and the rest
+Two properties of that client are worth stating here because they are contract, not implementation:
+
+- **The carrier is chosen by trying it, not by a health check.** The first request is attempted over
+  direct, and only a TRANSPORT failure moves on. A daemon that answered `503` is reachable and saying
+  so, and is not demoted to a relay.
+- **Discovery is re-read every load and never restored from storage.** A hosted address kept in
+  browser storage would be a browser `relayUrl: null` does not reach. An address its owner supplied
+  themselves has no runtime source and is persisted; Ferretry's hosted one is not.
+
+Five named pieces. PR #202 provides the first two, the third is now built on both ends, and the rest
 is outstanding:
 
 1. **A build-time discovery origin in the PWA** — provided by #202. The relay lives on its own
@@ -713,33 +725,47 @@ is outstanding:
 2. **A fetch-and-parse step** — also provided by #202 — that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
    treating `relayUrl: null` and any failure as "no hosted carrier".
-3. **A relay-capable transport on both ends** — the large piece. **The daemon end is built.**
-   `packages/daemon/src/lib/relay` dials out, signs its claim with the identity pairing minted (the
-   same key, deliberately: a second one would carry a fingerprint no paired browser has pinned), runs
-   a session per client and dispatches §14 requests into the daemon's own route table; the `relay`
-   block of the daemon configuration document points it at an address. Two things are still missing
-   on that end: a `fy` verb to write that block — an operator edits
-   `<state home>/config/daemon.json` today — and the two shapes §14 says the tunnel does not carry.
-   **The browser end is not built.** `DaemonConnection` in
-   `packages/pwa/src/lib/daemon-connection.ts` is still `{ daemonId, baseUrl, deviceToken }` with no
-   carrier field, so four files still move together: `daemon-connection.ts`, `connections.ts` for
-   persistence, and `daemon-transport.ts` and `event-transport.ts`, which both derive every request
-   and socket from that one direct `baseUrl`.
+3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,
+   signs its claim with the identity pairing minted (the same key, deliberately: a second one would
+   carry a fingerprint no paired browser has pinned), runs a session per client and dispatches §14
+   requests into the daemon's own route table; the `relay` block of the daemon configuration document
+   points it at an address. `packages/pwa/src/lib/relay-session.ts` and `relay-carrier.ts` are the
+   browser end. **What is still missing around it:**
+   - A `fy` verb to write the daemon's `relay` block — an operator edits
+     `<state home>/config/daemon.json` today.
+   - **The three shapes this tunnel does not carry** (see §14): `/v1/events`, terminal streams, and
+     the byte-shaped dictation routes. The browser now REFUSES these on a relay carrier rather than
+     opening a socket at an address the relay exists because it cannot reach, so a relayed connection
+     is a working request/response surface with no live updates and says so.
+   - **The pairing exchange itself cannot be relayed, by construction.** A relayed session is opened
+     with the device grant `POST /v1/pair` has not issued yet, so the first contact with a daemon is
+     always direct. A phone that can never reach a daemon directly therefore cannot pair with it at
+     all. Closing that needs an out-of-band enrolment path this protocol does not have, and inventing
+     one under the tunnel would mean a rendezvous carrying an unauthenticated exchange.
+   - **Not every browser call site is routed yet.** The composition root hands the carrier-aware
+     fetcher to everything it already injects one into — the projects, usage and push ports. The
+     feature modules that default their `fetcher` parameter to the global `fetch`
+     (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`, `web-terminals.ts`,
+     `remote-browser.ts`, `skills-api.ts`, `files-api.ts`, `attachment-source.ts`,
+     `runtime-models.ts`, `stt/*`, `analytics-api.ts`) are still direct-only. They FAIL rather than
+     mislead — a request to an unreachable daemon address is a visible error, not a blank screen —
+     but until the fetcher is threaded to them those surfaces are unavailable over a relay.
 4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
-   `describeConnectionMethod` observer list for whichever carrier a live session won on.
+   `describeConnectionMethod` observer list for whichever carrier a live session won on. The router
+   holds that answer (`DaemonCarrierRouter.choice`); rendering it is outstanding.
 5. **Removal of the interim carrier chooser and self-hosting setup route.** The current PWA still
    renders `onboarding-connection-chooser.tsx`, offers `own-relay`, and routes it through
    `SELF_HOSTED_RELAY_STEPS`. The conforming flow uses the automatic order above and leaves
    self-hosting to the expert runbook.
 
-PR #202 also surfaces the live advertisement state in onboarding. That work is **discovery-only**
-and says so on its own screen, which is the honest description: a browser can read the address and
-the kill switch, and can do nothing with either. Combined with the daemon end above, the remaining gap
-is the browser transport, disclosure and onboarding cleanup: the second half of piece 3, and pieces 4
-and 5 whole.
+PR #202 also surfaced the live advertisement state in onboarding, and that screen's own text still
+says a relay is not dialled by anything — which was true when it was written and is not now. Piece 5
+is where it is corrected.
 
-Until those land, deploying a relay of any kind gets you a working relay with a daemon waiting in it,
-not a remote connection.
+**Deploying a relay now gets you a remote connection**, for everything the tunnel carries: any
+request/response route, on any daemon whose fingerprint a browser pinned by pairing with it directly
+at least once. It does not get you live updates, terminal streams, dictation uploads, first-time
+pairing over the relay, or the feature surfaces listed in piece 3 above.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
 on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.
 
@@ -824,3 +850,13 @@ The daemon's **protocol-switching** surfaces — `/v1/events`, terminal streams 
 **byte-shaped** dictation routes. One request and one answer is the wrong shape for a stream that
 keeps talking and for a multi-megabyte model download, so each needs an envelope of its own. §13
 records that gap rather than leaving a client to discover it as a socket that never opens.
+
+**A conforming client must refuse these on a relayed carrier rather than fall back to the daemon's own
+address.** That address is precisely the one the relay exists because the browser cannot reach, so a
+socket opened there is a subscribed viewer receiving nothing, forever — the failure this document
+spends §7 and §9 avoiding, arriving through the front door instead. The browser's
+`packages/pwa/src/lib/event-transport.ts` refuses, and refuses BEFORE it spends a single-use event
+ticket the daemon would otherwise have burned for nothing.
+
+It also does not carry the **pairing exchange** — `POST /v1/pair` — and cannot: the session is opened
+with the device grant that exchange issues. §13 states the consequence.

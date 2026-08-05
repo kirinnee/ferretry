@@ -3,23 +3,27 @@ vars:
   MODE: '{{.MODE | default "unit"}}'
   CONFIG: '{{.CONFIG | default "bunfig.unit.toml"}}'
   WORKSPACE_ROOT: packages
+  # The per-test budget, ON THE COMMAND LINE because `[test] timeout` in a bunfig is
+  # ignored by Bun. Empty for the unit tier, which wants the 5-second default: a unit
+  # test that needs longer is a unit test that is doing something else.
+  TIMEOUT: '{{.TIMEOUT | default ""}}'
 tasks:
   # Internal building blocks — parameterized by MODE/CONFIG and reached only via the test:* root tasks.
   default:
     internal: true
     desc: 'Run {{.MODE}} tests'
     cmds:
-      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}}
+      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}}
   coverage:
     internal: true
     desc: 'Run {{.MODE}} tests with coverage (lcov + text artifacts)'
     cmds:
-      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} --coverage
+      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}} --coverage
   watch:
     internal: true
     desc: 'Run {{.MODE}} tests in watch mode'
     cmds:
-      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} --watch
+      - bun test {{.WORKSPACE_ROOT}} --config={{.CONFIG}} {{.TIMEOUT}} --watch
   e2e:
     internal: true
     desc: 'Run the isolated E2E harness'

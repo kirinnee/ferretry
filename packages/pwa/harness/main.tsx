@@ -23,6 +23,7 @@ import type {
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
+import { chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -297,6 +298,23 @@ const HARNESS_SKILLS: SkillsCatalog = {
  * point of these cards is what the strip and the settings surface LOOK like, at
  * both widths, not whether a microphone exists in headless Chrome.
  */
+/**
+ * A carrier a reader would actually want to see rendered: the RELAYED one.
+ *
+ * Direct is the boring case and the one every other harness screen already implies.
+ * What is worth looking at is the fallback disclosure — the reason sentence naming
+ * why direct was passed over, the hosted operator's observer list, and the warning
+ * that live updates do not travel over a relay.
+ */
+const HARNESS_RELAYED_CARRIER = chooseConnection([
+  {
+    method: { kind: 'direct', daemonUrl: 'https://studio.tail1234.ts.net' },
+    reachable: false,
+    detail: 'Failed to fetch',
+  },
+  { method: { kind: 'relay', relayUrl: 'https://relay.ferretry.dev', operator: 'hosted' }, reachable: true },
+]);
+
 const HARNESS_STT_SETTINGS: SttSettings = {
   ...DEFAULT_STT_SETTINGS,
   dictionary: ['ferretry = ferretree', 'nitroso'],
@@ -413,6 +431,8 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         />
       }
       probeDaemon={harnessSettingsProbe}
+      carrier={HARNESS_RELAYED_CARRIER}
+      relayAdvertised
       readWardenStatus={async connection => {
         if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
         return WARDEN;
