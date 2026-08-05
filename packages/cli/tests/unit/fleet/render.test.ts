@@ -68,7 +68,7 @@ describe('apply plan rendering', () => {
     const rendered = renderApplyPlan(plan());
 
     // Assert
-    should(rendered.split('\n')[0]).equal('1 account, 2 operations — nothing has been written');
+    should(rendered.split('\n')[0]).equal('1 account, 2 operations, 0 history changes — nothing has been written');
     should(rendered).containEql('directory /state/fleet/bin');
     should(rendered).containEql('manifest   /state/fleet/manifest.json');
   });
@@ -100,6 +100,99 @@ describe('apply plan rendering', () => {
     should(renderApplyPlan(sweeping)).containEql('/state/fleet/bin (keeping 2)');
   });
 
+  it('should name the exact winner and preserved loser for every history collision', () => {
+    // Arrange
+    const incoming = '/state/fleet/homes/b/projects/thread.jsonl';
+    const pooled = '/state/fleet/shared/claude/projects/thread.jsonl';
+    const preservedAt = '/state/fleet/shared/claude/.migration-conflicts/b/projects/thread.jsonl';
+    const collision = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 1,
+          links: 2,
+          changes: [
+            {
+              kind: 'collision',
+              incoming,
+              pooled,
+              winner: incoming,
+              loser: pooled,
+              preservedAt,
+            },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(collision);
+
+    // Assert
+    should(rendered).containEql(
+      `collision ${incoming} ↔ ${pooled}; winner ${incoming}; preserve loser ${pooled} at ${preservedAt}`,
+    );
+  });
+
+  it('should describe every history action and both Codex ownership transitions', () => {
+    // Arrange
+    const detailed = plan({
+      operations: [
+        {
+          kind: 'codex-sqlite-ownership',
+          path: '/homes/codex/config.toml',
+          markerPath: '/homes/codex/.ferretry-sqlite-home.json',
+          sqliteHome: '/state/fleet/shared/codex/sqlite',
+          enabled: true,
+        },
+        {
+          kind: 'codex-sqlite-ownership',
+          path: '/homes/old/config.toml',
+          markerPath: '/homes/old/.ferretry-sqlite-home.json',
+          sqliteHome: '/state/fleet/shared/codex/sqlite',
+          enabled: false,
+        },
+      ],
+      sharedHistory: [
+        {
+          kind: 'codex',
+          pool: '/state/fleet/shared/codex',
+          migrated: 2,
+          conflicts: 0,
+          links: 2,
+          changes: [
+            { kind: 'create-pooled-entry', path: '/pool/sessions', entryType: 'directory' },
+            { kind: 'move', source: '/home/sessions/a', destination: '/pool/sessions/a' },
+            {
+              kind: 'merge-jsonl',
+              source: '/home/history.jsonl',
+              destination: '/pool/history.jsonl',
+              sourcePreservedAt: '/pool/.migration-conflicts/a/history.jsonl',
+            },
+            { kind: 'link', path: '/home/sessions', target: '/pool/sessions' },
+            { kind: 'already-shared', path: '/other/sessions', target: '/pool/sessions' },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(detailed);
+
+    // Assert
+    should(rendered).containEql('own sqlite_home=/state/fleet/shared/codex/sqlite');
+    should(rendered).containEql("restore/remove only Ferretry's owned sqlite_home");
+    should(rendered).containEql('create directory /pool/sessions');
+    should(rendered).containEql('rename /home/sessions/a → /pool/sessions/a');
+    should(rendered).containEql(
+      'merge /home/history.jsonl → /pool/history.jsonl; preserve source at /pool/.migration-conflicts/a/history.jsonl',
+    );
+    should(rendered).containEql('link /home/sessions → /pool/sessions');
+    should(rendered).containEql('keep shared link /other/sessions → /pool/sessions');
+  });
+
   it('should report what an apply actually did', () => {
     // Act
     const rendered = renderApplyResult(applyResult());
@@ -107,6 +200,353 @@ describe('apply plan rendering', () => {
     // Assert
     should(rendered).containEql('applied 1 account in 2 operations');
     should(rendered).not.containEql('pruned');
+  });
+
+  it('should report each harness pool an apply migrated', () => {
+    // Act
+    const rendered = renderApplyResult(
+      applyResult({
+        sharedHistory: [
+          {
+            kind: 'claude',
+            pool: '/state/fleet/shared/claude',
+            migrated: 3,
+            conflicts: 1,
+            links: 4,
+            changes: [],
+          },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql(
+      'shared claude: 3 migrated entries, 1 collisions preserved, 4 links → /state/fleet/shared/claude',
+    );
+  });
+
+  it('should warn that a pooled Codex rollout may not be listed for resume yet, in a dry run', () => {
+    // Arrange
+    const codex = plan({
+      sharedHistory: [
+        { kind: 'codex', pool: '/state/fleet/shared/codex', migrated: 2, conflicts: 0, links: 2, changes: [] },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(codex);
+
+    // Assert
+    should(rendered).containEql('Codex resume');
+    should(rendered).containEql('does not re-index it');
+    should(rendered).containEql('No history is deleted.');
+  });
+
+  it('should not warn about Codex resume when only Claude history is pooled', () => {
+    // Arrange
+    const claudeOnly = plan({
+      sharedHistory: [
+        { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 1, conflicts: 0, links: 1, changes: [] },
+      ],
+    });
+
+    // Act + Assert
+    should(renderApplyPlan(claudeOnly)).not.containEql('Codex resume');
+    should(renderApplyPlan(plan())).not.containEql('Codex resume');
+  });
+
+  it('should repeat the Codex resume caveat after an apply that actually pooled it', () => {
+    // Arrange
+    const pooled = applyResult({
+      sharedHistory: [
+        { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 1, conflicts: 0, links: 1, changes: [] },
+        { kind: 'codex', pool: '/state/fleet/shared/codex', migrated: 3, conflicts: 0, links: 3, changes: [] },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyResult(pooled);
+
+    // Assert
+    should(rendered).containEql('shared codex: 3 migrated entries');
+    should(rendered).containEql('is linked into every Codex home');
+    should(rendered).containEql('No history is deleted.');
+    should(rendered).not.containEql('lost');
+  });
+
+  it('should leave a Claude-only apply free of the Codex caveat', () => {
+    // Act + Assert
+    should(renderApplyResult(applyResult())).not.containEql('Codex resume');
+  });
+
+  it('should promise a pool link only for the emptied directories that actually get one', () => {
+    // Arrange: the domain drains every depth, but only the shared-history entry is linked.
+    const emptied = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 2,
+          conflicts: 0,
+          links: 1,
+          changes: [{ kind: 'link', path: '/homes/b/projects', target: '/state/fleet/shared/claude/projects' }],
+          emptiedSourceDirectories: ['/homes/b/projects/p1/deep', '/homes/b/projects/p1', '/homes/b/projects'],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(emptied);
+
+    // Assert: the linked entry and the drained descendants are two different sentences.
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link to the pool:\n      /homes/b/projects\n',
+    );
+    should(rendered).containEql(
+      '2 source directories emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:\n      /homes/b/projects/p1/deep\n      /homes/b/projects/p1',
+    );
+    // And the false claim the old wording made over the whole list is gone.
+    should(rendered).not.containEql('3 source directories emptied by moving');
+    should(rendered).not.containEql("takes each one's place");
+  });
+
+  it('should never claim a link replaces a nested directory when nothing is linked at all', () => {
+    // Arrange: drained descendants with no link change of their own.
+    const nested = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 0,
+          links: 0,
+          changes: [],
+          emptiedSourceDirectories: ['/homes/a/projects/p1'],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(nested);
+
+    // Assert
+    should(rendered).containEql('1 source directory emptied further down and removed with nothing put back');
+    should(rendered).containEql('/homes/a/projects/p1');
+    should(rendered).not.containEql('replaced by a link to the pool');
+  });
+
+  it('should say nothing about descendants when only the entry directory was emptied', () => {
+    // Arrange
+    const flat = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 0,
+          links: 1,
+          changes: [{ kind: 'link', path: '/homes/a/projects', target: '/state/fleet/shared/claude/projects' }],
+          emptiedSourceDirectories: ['/homes/a/projects'],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(flat);
+
+    // Assert
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link',
+    );
+    should(rendered).not.containEql('emptied further down');
+  });
+
+  it('should keep the same split in the record of what an apply did', () => {
+    // Act
+    const rendered = renderApplyResult(
+      applyResult({
+        sharedHistory: [
+          {
+            kind: 'claude',
+            pool: '/state/fleet/shared/claude',
+            migrated: 2,
+            conflicts: 0,
+            links: 1,
+            changes: [{ kind: 'link', path: '/homes/a/projects', target: '/state/fleet/shared/claude/projects' }],
+            emptiedSourceDirectories: ['/homes/a/projects/p1', '/homes/a/projects'],
+          },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link to the pool:\n      /homes/a/projects\n',
+    );
+    should(rendered).containEql(
+      '1 source directory emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:\n      /homes/a/projects/p1',
+    );
+  });
+
+  it('should say an unreadable home makes apply refuse the pool, not skip the home', () => {
+    // Arrange
+    const refused = plan({
+      sharedHistory: [
+        {
+          kind: 'codex',
+          pool: '/state/fleet/shared/codex',
+          migrated: 0,
+          conflicts: 0,
+          links: 0,
+          changes: [],
+          refusals: [
+            {
+              account: 'b',
+              home: '/homes/b',
+              path: '/homes/b/sessions',
+              reason: 'EACCES: permission denied',
+            },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(refused);
+
+    // Assert
+    should(rendered).containEql('1 account home could not be read, so an apply REFUSES the whole codex pool');
+    should(rendered).containEql('quietly leave these out');
+    should(rendered).containEql('b (/homes/b) — EACCES: permission denied; refused at /homes/b/sessions');
+    should(rendered).containEql('make that home readable, or stop declaring it');
+  });
+
+  it('should speak of several unreadable homes in the plural', () => {
+    // Arrange
+    const refused = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 0,
+          conflicts: 0,
+          links: 0,
+          changes: [],
+          refusals: [
+            { account: 'b', home: '/homes/b', path: '/homes/b', reason: 'EACCES' },
+            { account: 'c', home: '/homes/c', path: '/homes/c', reason: 'EIO' },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(refused);
+
+    // Assert
+    should(rendered).containEql('2 account homes could not be read');
+    should(rendered).containEql('make those homes readable, or stop declaring them');
+  });
+
+  it('should state per merge which lines are appended and where later writes stay instead', () => {
+    // Arrange
+    const merging = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 0,
+          conflicts: 0,
+          links: 0,
+          changes: [
+            {
+              kind: 'merge-jsonl',
+              source: '/homes/a/history.jsonl',
+              destination: '/pool/history.jsonl',
+              sourcePreservedAt: '/pool/.migration-conflicts/a/history.jsonl',
+            },
+            {
+              kind: 'merge-jsonl',
+              source: '/homes/b/history.jsonl',
+              destination: '/pool/history.jsonl',
+              sourcePreservedAt: '/pool/.migration-conflicts/b/history.jsonl',
+            },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(merging);
+
+    // Assert: each merge names its own preserved file, because that is the file a person would open.
+    should(rendered).containEql(
+      'prompt history /homes/a/history.jsonl: only the lines observed here are appended to /pool/history.jsonl; whatever is written to it afterwards stays at /pool/.migration-conflicts/a/history.jsonl and never joins the pool',
+    );
+    should(rendered).containEql(
+      'whatever is written to it afterwards stays at /pool/.migration-conflicts/b/history.jsonl and never joins the pool',
+    );
+    should(rendered).containEql('no prompt is discarded either way');
+    should(rendered).containEql('pool prompt history while these accounts are idle');
+    should(rendered).not.containEql('lost');
+  });
+
+  it('should carry the merge caveat into the applied report too', () => {
+    // Act
+    const rendered = renderApplyResult(
+      applyResult({
+        sharedHistory: [
+          {
+            kind: 'claude',
+            pool: '/state/fleet/shared/claude',
+            migrated: 1,
+            conflicts: 0,
+            links: 1,
+            changes: [
+              {
+                kind: 'merge-jsonl',
+                source: '/homes/a/history.jsonl',
+                destination: '/pool/history.jsonl',
+                sourcePreservedAt: '/pool/.migration-conflicts/a/history.jsonl',
+              },
+            ],
+            refusals: [{ account: 'b', home: '/homes/b', path: '/homes/b', reason: 'EACCES' }],
+          },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql('only the lines observed here are appended to /pool/history.jsonl');
+    should(rendered).containEql('stays at /pool/.migration-conflicts/a/history.jsonl and never joins the pool');
+    should(rendered).containEql('an apply REFUSES the whole claude pool');
+  });
+
+  it('should stay silent about emptied directories, merges and refusals when there are none', () => {
+    // Arrange
+    const quiet = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 0,
+          conflicts: 0,
+          links: 1,
+          changes: [{ kind: 'link', path: '/homes/a/sessions', target: '/pool/sessions' }],
+          emptiedSourceDirectories: [],
+          refusals: [],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(quiet);
+
+    // Assert
+    should(rendered).containEql('link /homes/a/sessions → /pool/sessions');
+    should(rendered).not.containEql('source director');
+    should(rendered).not.containEql('prompt history');
+    should(rendered).not.containEql('could not be read');
   });
 
   it('should name every wrapper that was swept away', () => {

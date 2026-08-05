@@ -6,9 +6,9 @@
  * with no filesystem in sight — and so `--dry-run` is the same code path minus the last step.
  */
 import type { FleetConfig } from './config.ts';
-import type { HarnessKind } from './manifest.ts';
-import type { FleetManifest } from './manifest.ts';
+import type { FleetManifest, HarnessKind } from './manifest.ts';
 import type { SettingsFormat, SettingsObject } from './settings.ts';
+import type { SharedHistoryPreview, SharedHistoryRequest } from './shared-history.ts';
 
 /** Every directory the fleet owns. Supplied by the composition root, never discovered. */
 export interface FleetLayout {
@@ -69,6 +69,19 @@ export type FleetWriteOperation =
       readonly preserveExisting: boolean;
     }
   | {
+      /**
+       * Maintain Ferretry's ownership sidecar for Codex's `sqlite_home` override. The following
+       * `settings` operation writes the actual value when enabled; this operation captures the
+       * original first, or restores it on disable only when the current value is still ours.
+       */
+      readonly kind: 'codex-sqlite-ownership';
+      /** Codex `config.toml`; also the bounded path reported by dry-run. */
+      readonly path: string;
+      readonly markerPath: string;
+      readonly sqliteHome: string;
+      readonly enabled: boolean;
+    }
+  | {
       readonly kind: 'prune';
       /** Directory to sweep. Only its direct children are considered. */
       readonly path: string;
@@ -87,6 +100,13 @@ export interface FleetApplyPlan {
   readonly manifest: FleetManifest;
   readonly manifestPath: string;
   readonly operations: readonly FleetWriteOperation[];
+  /** Filesystem-observed separately so dry-run can report exact moves and collision winners. */
+  readonly sharedHistoryRequests?: readonly SharedHistoryRequest[];
+}
+
+/** A plan plus the exact read-only history migration evidence observed for this invocation. */
+export interface FleetApplyPreview extends FleetApplyPlan {
+  readonly sharedHistory: readonly SharedHistoryPreview[];
 }
 
 export interface FleetPlanBuilder {
@@ -94,6 +114,7 @@ export interface FleetPlanBuilder {
 }
 
 export interface FleetProvisioner {
+  preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
   apply(plan: FleetApplyPlan): Promise<FleetApplyResult>;
 }
 
@@ -103,6 +124,8 @@ export interface FleetApplyResult {
   readonly manifestPath: string;
   /** Managed wrappers removed because no account or command claims them any more. */
   readonly prunedWrappers: readonly string[];
+  /** Exact moves, links, merges and preserved collisions completed for each enabled harness. */
+  readonly sharedHistory: readonly SharedHistoryPreview[];
 }
 
 export class FleetApplyService {
@@ -114,5 +137,10 @@ export class FleetApplyService {
   async apply(config: FleetConfig, layout: FleetLayout, generatedAt: string): Promise<FleetApplyResult> {
     const plan = this.plans.build(config, layout, generatedAt);
     return await this.provisioner.apply(plan);
+  }
+
+  async preview(config: FleetConfig, layout: FleetLayout, generatedAt: string): Promise<FleetApplyPreview> {
+    const plan = this.plans.build(config, layout, generatedAt);
+    return await this.provisioner.preview(plan);
   }
 }

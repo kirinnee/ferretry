@@ -1,5 +1,6 @@
 import type {
   FleetApplyPlan,
+  FleetApplyPreview,
   FleetApplyResult,
   FleetConfig,
   FleetHealth,
@@ -73,7 +74,7 @@ export function manifest(accounts: readonly FleetManifestAccount[] = [account()]
   return { version: 1, generatedAt: GENERATED_AT, accounts } as FleetManifest;
 }
 
-export function plan(overrides: Partial<FleetApplyPlan> = {}): FleetApplyPlan {
+export function plan(overrides: Partial<FleetApplyPreview> = {}): FleetApplyPreview {
   return {
     manifest: manifest(),
     manifestPath: '/state/fleet/manifest.json',
@@ -81,6 +82,8 @@ export function plan(overrides: Partial<FleetApplyPlan> = {}): FleetApplyPlan {
       { kind: 'directory', path: '/state/fleet/bin', mode: 0o700 },
       { kind: 'file', path: '/state/fleet/bin/fy-claude-work', content: '#!/bin/sh\n', mode: 0o755 },
     ],
+    sharedHistoryRequests: [],
+    sharedHistory: [],
     ...overrides,
   };
 }
@@ -91,6 +94,7 @@ export function applyResult(overrides: Partial<FleetApplyResult> = {}): FleetApp
     operationCount: 2,
     manifestPath: '/state/fleet/manifest.json',
     prunedWrappers: [],
+    sharedHistory: [],
     ...overrides,
   };
 }
@@ -189,8 +193,14 @@ export class RecordingPlanner implements IFleetPlanner {
 /** An applier recording every plan it was handed. */
 export class RecordingApplier implements IFleetApplier {
   readonly applied: FleetApplyPlan[] = [];
+  readonly previewed: FleetApplyPlan[] = [];
 
   constructor(private readonly result: FleetApplyResult = applyResult()) {}
+
+  preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
+    this.previewed.push(plan);
+    return Promise.resolve({ ...plan, sharedHistory: [] });
+  }
 
   apply(plan: FleetApplyPlan): Promise<FleetApplyResult> {
     this.applied.push(plan);

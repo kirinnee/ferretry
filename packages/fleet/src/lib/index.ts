@@ -16,5 +16,27 @@ export * from './provisioning.ts';
 export * from './quota.ts';
 export * from './scaffold.ts';
 export * from './settings.ts';
+export {
+  planSharedHistory,
+  type SharedHistoryAction,
+  type SharedHistoryChange,
+  type SharedHistoryDirectoryNode,
+  type SharedHistoryEntry,
+  type SharedHistoryEntryType,
+  type SharedHistoryFileNode,
+  type SharedHistoryFileSystem,
+  type SharedHistoryHome,
+  SharedHistoryMigration,
+  SharedHistoryMigrationError,
+  type SharedHistoryNode,
+  type SharedHistoryObservation,
+  type SharedHistoryObservedHome,
+  type SharedHistoryOtherNode,
+  type SharedHistoryPlan,
+  type SharedHistoryPreview,
+  type SharedHistoryRequest,
+  type SharedHistorySymbolicLinkNode,
+  sharedHistoryEntries,
+} from './shared-history.ts';
 export * from './usage.ts';
 export * from './wrappers.ts';

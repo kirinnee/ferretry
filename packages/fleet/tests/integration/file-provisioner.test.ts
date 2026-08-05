@@ -6,6 +6,7 @@ import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../src/lib/provisioning.ts';
+import type { SharedHistoryMigration, SharedHistoryRequest } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -51,9 +52,11 @@ describe('FileFleetProvisioner', () => {
     const subject = new FileFleetProvisioner([root]);
 
     // Act
+    const preview = await subject.preview(plan);
     await subject.apply(plan);
 
     // Assert
+    should(preview.operations).deepEqual(plan.operations);
     (await stat(root)).isDirectory().should.be.true();
   });
 
@@ -82,7 +85,13 @@ describe('FileFleetProvisioner', () => {
     const actual = await subject.apply(plan);
 
     // Assert
-    should(actual).deepEqual({ accountCount: 1, operationCount: 4, manifestPath, prunedWrappers: [] });
+    should(actual).deepEqual({
+      accountCount: 1,
+      operationCount: 4,
+      manifestPath,
+      prunedWrappers: [],
+      sharedHistory: [],
+    });
     should(await readFile(wrapper, 'utf8')).containEql('exec true');
     should((await stat(wrapper)).mode & 0o777).equal(0o755);
     should(await readFile(copied, 'utf8')).equal('placeholder material\n');
@@ -116,6 +125,118 @@ describe('FileFleetProvisioner', () => {
     // Assert
     await should(promise).be.rejected();
     should(await readFile(manifestPath, 'utf8')).equal('{"version":"previous"}\n');
+  });
+
+  it('should publish landed ordinary operations before surfacing a shared-history failure', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const wrapper = path.join(root, 'fleet', 'bin', 'alias-with-hyphens');
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const expectedHistory = {
+      kind: 'claude' as const,
+      pool: path.join(root, 'fleet', 'shared', 'claude'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+    };
+    let manifestObservedByMigration: unknown;
+    let wrapperObservedByMigration: string | undefined;
+    const sharedHistory = {
+      preview: async () => expectedHistory,
+      materialize: async () => {
+        manifestObservedByMigration = JSON.parse(await readFile(manifestPath, 'utf8'));
+        wrapperObservedByMigration = await readFile(wrapper, 'utf8');
+        throw new Error('shared-history migration failed');
+      },
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath,
+      operations: [{ kind: 'file', path: wrapper, content: '#!/bin/sh\nexec true "$@"\n', mode: 0o755 }],
+      sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const preview = await subject.preview(plan);
+    const promise = subject.apply(plan);
+
+    // Assert — preview is prospective, but apply never returns a successful migration result.
+    should(preview.sharedHistory).deepEqual([expectedHistory]);
+    await should(promise).be.rejectedWith(/shared-history migration failed/u);
+    should(manifestObservedByMigration).deepEqual(manifest());
+    should(wrapperObservedByMigration).equal('#!/bin/sh\nexec true "$@"\n');
+    should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(manifest());
+  });
+
+  it('should preflight every history kind and refuse before any apply mutation', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const wrapper = path.join(root, 'fleet', 'bin', 'alias-with-hyphens');
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const clean = {
+      kind: 'claude' as const,
+      pool: path.join(root, 'fleet', 'shared', 'claude'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [],
+    };
+    const refused = {
+      kind: 'codex' as const,
+      pool: path.join(root, 'fleet', 'shared', 'codex'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [
+        {
+          account: 'codex-outside',
+          home: other,
+          path: other,
+          reason: `refusing shared-history access outside configured roots: ${other}`,
+        },
+      ],
+    };
+    const previewedKinds: string[] = [];
+    const materializedKinds: string[] = [];
+    const sharedHistory = {
+      preview: async (request: SharedHistoryRequest) => {
+        previewedKinds.push(request.kind);
+        return request.kind === 'claude' ? clean : refused;
+      },
+      materialize: async (request: SharedHistoryRequest) => {
+        materializedKinds.push(request.kind);
+        return request.kind === 'claude' ? clean : refused;
+      },
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath,
+      operations: [{ kind: 'file', path: wrapper, content: '#!/bin/sh\nexec true "$@"\n', mode: 0o755 }],
+      sharedHistoryRequests: [
+        { kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] },
+        { kind: 'codex', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const promise = subject.apply(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(
+      /refusing to migrate codex history while 1 account home\(s\) cannot be read: codex-outside/u,
+    );
+    should(previewedKinds).deepEqual(['claude', 'codex']);
+    should(materializedKinds).deepEqual([]);
+    should(await Bun.file(wrapper).exists()).be.false();
+    should(await Bun.file(manifestPath).exists()).be.false();
   });
 
   it('should force a copied asset writable so the harness can rewrite what it owns', async () => {
@@ -342,6 +463,240 @@ describe('FileFleetProvisioner', () => {
     });
   });
 
+  describe('Codex shared SQLite ownership', () => {
+    it('should record the original sqlite_home, inject the shared value, and restore only its own value', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, 'model = "user"\nsqlite_home = "/private/sqlite"\n');
+      const subject = new FileFleetProvisioner([root]);
+      const enablePlan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      };
+      const disablePlan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+
+      // Act — enable, then disable without a configured settings layer.
+      const enablePreview = await subject.preview(enablePlan);
+      const enableResult = await subject.apply(enablePlan);
+      const enabled = await readFile(config, 'utf8');
+      const sidecar = JSON.parse(await readFile(marker, 'utf8'));
+      const disablePreview = await subject.preview(disablePlan);
+      const disableResult = await subject.apply(disablePlan);
+
+      // Assert
+      should(enablePreview.operations).deepEqual(enablePlan.operations);
+      should(enableResult.operationCount).equal(2);
+      should(disablePreview.operations).deepEqual(disablePlan.operations);
+      should(disableResult.operationCount).equal(1);
+      should(enabled).containEql(`sqlite_home = "${sqliteHome}"`);
+      should(sidecar).deepEqual({
+        version: 1,
+        sqliteHome,
+        createdConfig: false,
+        original: { present: true, value: '/private/sqlite' },
+      });
+      should(await readFile(config, 'utf8')).containEql('sqlite_home = "/private/sqlite"');
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it('should omit and not count disabled ownership when no enable sidecar ever existed', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      const configText = 'model = "kept"\n';
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, configText);
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const preview = await subject.preview(plan);
+      const actual = await subject.apply(plan);
+
+      // Assert
+      should(plan.operations).have.length(1);
+      should(preview.operations).deepEqual([]);
+      should(actual.operationCount).equal(0);
+      should(await readFile(config, 'utf8')).equal(configText);
+      await should(lstat(marker)).be.rejected();
+      should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(manifest());
+    });
+
+    it('should remove a config it created only when the exact owned value remains', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      await should(lstat(config)).be.rejected();
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it('should leave a user-replaced sqlite_home untouched while removing its ownership sidecar', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      const subject = new FileFleetProvisioner([root]);
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+      await Bun.write(config, 'sqlite_home = "/user/replaced"\n');
+
+      // Act
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      should(await readFile(config, 'utf8')).equal('sqlite_home = "/user/replaced"\n');
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it.each([
+      ['sidecar', '{"version":2}\n', 'model = "kept"\n'],
+      [
+        'config',
+        '{"version":1,"sqliteHome":"/shared","createdConfig":false,"original":{"present":false}}\n',
+        '= broken',
+      ],
+    ])('should fail closed on an invalid %s', async (_kind, markerText, configText) => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, configText);
+      await Bun.write(marker, markerText);
+      const subject = new FileFleetProvisioner([root]);
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+
+      // Act + Assert
+      await should(subject.preview(plan)).be.rejected();
+      await should(subject.apply(plan)).be.rejected();
+      should(await readFile(config, 'utf8')).equal(configText);
+      should(await readFile(marker, 'utf8')).equal(markerText);
+    });
+
+    it.each(['sidecar', 'config'])('should fail closed on a symlinked %s', async kind => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const outside = path.join(root, `${kind}-target`);
+      const configText = `sqlite_home = "${sqliteHome}"\n`;
+      const markerText = `${JSON.stringify({
+        version: 1,
+        sqliteHome,
+        createdConfig: false,
+        original: { present: false },
+      })}\n`;
+      await mkdir(home, { recursive: true });
+      if (kind === 'sidecar') {
+        await Bun.write(config, configText);
+        await Bun.write(outside, markerText);
+        await symlink(outside, marker);
+      } else {
+        await Bun.write(marker, markerText);
+        await Bun.write(outside, configText);
+        await symlink(outside, config);
+      }
+      const subject = new FileFleetProvisioner([root]);
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+
+      // Act + Assert — the linked target and the link itself are both untouched.
+      await should(subject.preview(plan)).be.rejectedWith(/must be a regular file/u);
+      await should(subject.apply(plan)).be.rejectedWith(/must be a regular file/u);
+      should(await readFile(outside, 'utf8')).equal(kind === 'sidecar' ? markerText : configText);
+      should((await lstat(kind === 'sidecar' ? marker : config)).isSymbolicLink()).be.true();
+    });
+  });
+
   describe('prune operations', () => {
     it('should remove only marked files that nothing claims any more', async () => {
       // Arrange
@@ -426,6 +781,45 @@ describe('FileFleetProvisioner', () => {
     await should(promise).be.rejectedWith(/outside configured fleet roots/);
   });
 
+  it.each(['preview', 'apply'] as const)('should reject an invalid manifest during %s preflight', async method => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const invalidManifest = { ...manifest(), generatedAt: 'not-an-instant' } as unknown as FleetManifest;
+    const plan: FleetApplyPlan = {
+      manifest: invalidManifest,
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const promise = method === 'preview' ? subject.preview(plan) : subject.apply(plan);
+
+    // Assert
+    await should(promise).be.rejected();
+  });
+
+  it.each(['preview', 'apply'] as const)(
+    'should refuse a manifest outside the configured roots during %s preflight',
+    async method => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const other = await temporaryDirectory();
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(other, 'manifest.json'),
+        operations: [],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = method === 'preview' ? subject.preview(plan) : subject.apply(plan);
+
+      // Assert
+      await should(promise).be.rejectedWith(/outside configured fleet roots/u);
+    },
+  );
+
   it('should require at least one allowed root', () => {
     // Act
     const act = () => new FileFleetProvisioner([]);
@@ -434,14 +828,144 @@ describe('FileFleetProvisioner', () => {
     should(act).throw(/at least one allowed fleet root/);
   });
 
-  it('should refuse destinations outside the configured roots', async () => {
+  it('should reject an out-of-root operation during preview when sharing is disabled', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const other = await temporaryDirectory();
     const plan: FleetApplyPlan = {
       manifest: manifest(),
       manifestPath: path.join(root, 'fleet', 'manifest.json'),
-      operations: [{ kind: 'file', path: path.join(other, 'escape'), content: 'no\n', mode: 0o600 }],
+      operations: [{ kind: 'directory', path: other, mode: 0o700 }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const promise = subject.preview(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(`refusing to write outside configured fleet roots: ${other}`);
+  });
+
+  it('should keep an enabled out-of-root account visible when its history preview refuses it', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const config = path.join(other, 'config.toml');
+    const marker = path.join(other, '.ferretry-sqlite-home.json');
+    const refusal = {
+      account: 'account-outside',
+      home: other,
+      path: other,
+      reason: `refusing shared-history access outside configured roots: ${other}`,
+    };
+    const expectedHistory = {
+      kind: 'codex' as const,
+      pool: path.join(root, 'fleet', 'shared', 'codex'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [refusal],
+    };
+    const sharedHistory = {
+      preview: async () => expectedHistory,
+      materialize: async () => expectedHistory,
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'directory', path: other, mode: 0o700 },
+        {
+          kind: 'codex-sqlite-ownership',
+          path: config,
+          markerPath: marker,
+          sqliteHome: path.join(root, 'fleet', 'shared', 'codex', 'sqlite'),
+          enabled: true,
+        },
+      ],
+      sharedHistoryRequests: [
+        {
+          kind: 'codex',
+          poolRoot: path.join(root, 'fleet', 'shared'),
+          homes: [{ account: 'account-outside', path: other }],
+        },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const actual = await subject.preview(plan);
+
+    // Assert — preview neither reads nor hides unbounded ordinary operations; history explains why.
+    should(actual.operations).deepEqual(plan.operations);
+    should(actual.sharedHistory).deepEqual([expectedHistory]);
+  });
+
+  it('should not let one refused home mask an unrelated out-of-root preview operation', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const refusedHome = await temporaryDirectory();
+    const unrelatedHome = await temporaryDirectory();
+    const unrelatedPath = path.join(unrelatedHome, 'unrelated');
+    const expectedHistory = {
+      kind: 'codex' as const,
+      pool: path.join(root, 'fleet', 'shared', 'codex'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [
+        {
+          account: 'account-refused',
+          home: refusedHome,
+          path: refusedHome,
+          reason: `refusing shared-history access outside configured roots: ${refusedHome}`,
+        },
+      ],
+    };
+    const sharedHistory = {
+      preview: async () => expectedHistory,
+      materialize: async () => expectedHistory,
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'directory', path: refusedHome, mode: 0o700 },
+        { kind: 'file', path: unrelatedPath, content: 'must refuse\n', mode: 0o600 },
+      ],
+      sharedHistoryRequests: [
+        {
+          kind: 'codex',
+          poolRoot: path.join(root, 'fleet', 'shared'),
+          homes: [{ account: 'account-refused', path: refusedHome }],
+        },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const promise = subject.preview(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(`refusing to write outside configured fleet roots: ${unrelatedPath}`);
+  });
+
+  it('should refuse every destination outside the configured roots before apply writes anything', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const first = path.join(root, 'fleet', 'first');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'file', path: first, content: 'first\n', mode: 0o600 },
+        { kind: 'file', path: path.join(other, 'escape'), content: 'no\n', mode: 0o600 },
+      ],
     };
     const subject = new FileFleetProvisioner([root]);
 
@@ -449,6 +973,36 @@ describe('FileFleetProvisioner', () => {
     const promise = subject.apply(plan);
 
     // Assert
-    await should(promise).be.rejectedWith(/outside configured fleet roots/);
+    await should(promise).be.rejectedWith(/outside configured fleet roots/u);
+    should(await Bun.file(first).exists()).be.false();
+  });
+
+  it('should canonically refuse a destination whose existing ancestor links outside before apply writes', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const fleet = path.join(root, 'fleet');
+    const linkedAncestor = path.join(fleet, 'linked-outside');
+    const first = path.join(fleet, 'first');
+    const escaped = path.join(linkedAncestor, 'escaped');
+    await mkdir(fleet, { recursive: true });
+    await symlink(other, linkedAncestor);
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(fleet, 'manifest.json'),
+      operations: [
+        { kind: 'file', path: first, content: 'first\n', mode: 0o600 },
+        { kind: 'file', path: escaped, content: 'escaped\n', mode: 0o600 },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const promise = subject.apply(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(/outside configured fleet roots/u);
+    should(await Bun.file(first).exists()).be.false();
+    should(await Bun.file(path.join(other, 'escaped')).exists()).be.false();
   });
 });

@@ -1,6 +1,6 @@
 import type {
   CredentialState,
-  FleetApplyPlan,
+  FleetApplyPreview,
   FleetApplyResult,
   FleetHealth,
   FleetHealthSnapshot,
@@ -12,6 +12,8 @@ import type {
   FleetUsage,
   FleetUsageSnapshot,
   FleetWriteOperation,
+  SharedHistoryChange,
+  SharedHistoryPreview,
 } from '@ferretry/fleet';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
@@ -27,9 +29,160 @@ function operationTarget(operation: FleetWriteOperation): string {
       return `${operation.path} ← ${operation.source}`;
     case 'prune':
       return `${operation.path} (keeping ${operation.keep.length})`;
+    case 'codex-sqlite-ownership':
+      return operation.enabled
+        ? `${operation.path} (own sqlite_home=${operation.sqliteHome}; sidecar ${operation.markerPath})`
+        : `${operation.path} (restore/remove only Ferretry's owned sqlite_home; sidecar ${operation.markerPath})`;
     default:
       return operation.path;
   }
+}
+
+function historyChange(change: SharedHistoryChange): string {
+  switch (change.kind) {
+    case 'create-pooled-entry':
+      return `create ${change.entryType} ${change.path}`;
+    case 'move':
+      return `rename ${change.source} → ${change.destination}`;
+    case 'collision':
+      return `collision ${change.incoming} ↔ ${change.pooled}; winner ${change.winner}; preserve loser ${change.loser} at ${change.preservedAt}`;
+    case 'merge-jsonl':
+      return `merge ${change.source} → ${change.destination}; preserve source at ${change.sourcePreservedAt}`;
+    case 'link':
+      return `link ${change.path} → ${change.target}`;
+    default:
+      return `keep shared link ${change.path} → ${change.target}`;
+  }
+}
+
+/**
+ * The one thing pooling Codex history cannot promise yet.
+ *
+ * Codex offers a session for resume from its own index, and Ferretry does not yet reconcile a pooled
+ * rollout into that index — the upstream re-indexing command is a declared GAP. The rollout is on
+ * disk and linked into every Codex home either way, so the honest statement is "present, possibly
+ * not listed yet", and it is worth three lines: a person who starts Codex, sees a short resume list
+ * and is told nothing concludes that Ferretry ate their history.
+ *
+ * Written in the present tense so the same words are true before an apply and after one, and shown
+ * only for Codex — Claude reads its transcripts straight off the pooled directories, so attaching
+ * this to a Claude-only run would be a warning about nothing.
+ */
+const CODEX_HISTORY_CAVEAT: readonly string[] = [
+  '  ! Codex resume: a pooled rollout stays on disk and is linked into every Codex home, but Ferretry',
+  `${INDENT}does not re-index it. Codex may not list a migrated session for resume until it reconciles`,
+  `${INDENT}its own index. No history is deleted.`,
+];
+
+function sharesCodexHistory(previews: readonly SharedHistoryPreview[]): boolean {
+  return previews.some(preview => preview.kind === 'codex');
+}
+
+/** Structural, so the renderer needs nothing exported from the domain beyond the preview itself. */
+type SharedHistoryRefusal = NonNullable<SharedHistoryPreview['refusals']>[number];
+
+type SharedHistoryMerge = Extract<SharedHistoryChange, { kind: 'merge-jsonl' }>;
+
+function isMerge(change: SharedHistoryChange): change is SharedHistoryMerge {
+  return change.kind === 'merge-jsonl';
+}
+
+type SharedHistoryLink = Extract<SharedHistoryChange, { kind: 'link' }>;
+
+function isLink(change: SharedHistoryChange): change is SharedHistoryLink {
+  return change.kind === 'link';
+}
+
+const directoryCount = (count: number): string =>
+  plural(count, 'source directory').replace('directorys', 'directories');
+
+/**
+ * The account-home directories that stop existing, split by what stands where they were.
+ *
+ * A directory being emptied and removed is the only part of this migration that takes away something
+ * a person put there, so each one is named rather than counted, and the reason it is safe travels on
+ * the same line — the contents left first.
+ *
+ * But `emptiedSourceDirectories` is every directory the migration drained, at every depth, and only
+ * the shared-history entry at the top of each one gets a pool symlink put back. Saying "a link takes
+ * each one's place" over that whole list is simply false for the nested ones: those are removed with
+ * nothing put back, which is correct — the entry above them already carries the link — and is a
+ * different sentence. The `link` changes in this same preview name exactly the entry-level paths, so
+ * the split is read off the evidence already being reported rather than guessed from path shapes.
+ */
+function emptiedSourceLines(preview: SharedHistoryPreview): string[] {
+  const emptied = preview.emptiedSourceDirectories ?? [];
+  if (emptied.length === 0) return [];
+  const linked = new Set(preview.changes.filter(isLink).map(change => change.path));
+  const replaced = emptied.filter(path => linked.has(path));
+  const drained = emptied.filter(path => !linked.has(path));
+  return [
+    ...(replaced.length === 0
+      ? []
+      : [
+          `${INDENT}${directoryCount(replaced.length)} emptied by moving every entry into the pool, then replaced by a link to the pool:`,
+          ...replaced.map(path => `${INDENT}  ${path}`),
+        ]),
+    ...(drained.length === 0
+      ? []
+      : [
+          `${INDENT}${directoryCount(drained.length)} emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:`,
+          ...drained.map(path => `${INDENT}  ${path}`),
+        ]),
+  ];
+}
+
+/**
+ * What a prompt-history merge does and does not carry across.
+ *
+ * The pooled file is only ever appended to, so the merge cannot lose what is already pooled. What it
+ * cannot capture is the other direction: the source file is quarantined by rename, and an agent that
+ * already holds it open keeps writing into that same quarantined copy, whose lines therefore never
+ * reach the pool. Every one of those lines is still on disk at the preserved path — so the honest
+ * report names the path, says migrating an idle account avoids the split, and never calls it a loss.
+ *
+ * Stated per merge because the preserved path differs per account, and a person chasing one missing
+ * prompt needs the exact file, not a general warning.
+ */
+function mergeCaveatLines(preview: SharedHistoryPreview): string[] {
+  const merges = preview.changes.filter(isMerge);
+  if (merges.length === 0) return [];
+  return [
+    ...merges.map(
+      merge =>
+        `${INDENT}prompt history ${merge.source}: only the lines observed here are appended to ${merge.destination}; whatever is written to it afterwards stays at ${merge.sourcePreservedAt} and never joins the pool`,
+    ),
+    `${INDENT}  the pooled file is only appended to and every preserved copy is kept, so no prompt is discarded either way — pool prompt history while these accounts are idle if you want their last lines in the pool rather than beside it`,
+  ];
+}
+
+/**
+ * The homes that could not be read, and what that costs.
+ *
+ * A refusal is not a skip, and the difference is the whole point of printing it: an apply that meets
+ * one migrates nothing for this harness rather than pooling the homes it happened to manage to read.
+ * A report that listed these quietly would describe a partial migration that never happens.
+ */
+function refusalLines(preview: SharedHistoryPreview): string[] {
+  const refusals: readonly SharedHistoryRefusal[] = preview.refusals ?? [];
+  if (refusals.length === 0) return [];
+  return [
+    `${INDENT}! ${plural(refusals.length, 'account home')} could not be read, so an apply REFUSES the whole ${preview.kind} pool — it does not migrate the rest and quietly leave these out:`,
+    ...refusals.map(
+      refusal => `${INDENT}  ${refusal.account} (${refusal.home}) — ${refusal.reason}; refused at ${refusal.path}`,
+    ),
+    `${INDENT}  make ${refusals.length === 1 ? 'that home' : 'those homes'} readable, or stop declaring ${refusals.length === 1 ? 'it' : 'them'}, and run this again.`,
+  ];
+}
+
+/**
+ * Everything about one pool that neither the counts nor the change list already say.
+ *
+ * Shared by the dry run and the applied report so the two cannot drift: a caveat a person reads
+ * before deciding must still be there in the record of what was decided.
+ */
+function sharedHistoryDetail(preview: SharedHistoryPreview): string[] {
+  return [...emptiedSourceLines(preview), ...mergeCaveatLines(preview), ...refusalLines(preview)];
 }
 
 /**
@@ -38,10 +191,17 @@ function operationTarget(operation: FleetWriteOperation): string {
  * `--dry-run` prints exactly this and stops, so what a human reviews is the same value the applier
  * consumes — kteam's dry run re-derived a summary and could disagree with the real thing.
  */
-export function renderApplyPlan(plan: FleetApplyPlan): string {
-  const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')} — nothing has been written`;
+export function renderApplyPlan(plan: FleetApplyPreview): string {
+  const historyChanges = plan.sharedHistory.reduce((total, preview) => total + preview.changes.length, 0);
+  const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')}, ${plural(historyChanges, 'history change')} — nothing has been written`;
   const operations = plan.operations.map(operation => `  ${operation.kind.padEnd(9)} ${operationTarget(operation)}`);
-  return [header, ...operations, `  manifest   ${plan.manifestPath}`].join('\n');
+  const history = plan.sharedHistory.flatMap(preview => [
+    `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
+    ...preview.changes.map(change => `    ${historyChange(change)}`),
+    ...sharedHistoryDetail(preview),
+  ]);
+  const caveat = sharesCodexHistory(plan.sharedHistory) ? CODEX_HISTORY_CAVEAT : [];
+  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...caveat].join('\n');
 }
 
 /** What an apply actually did, including anything it swept away. */
@@ -53,6 +213,13 @@ export function renderApplyResult(result: FleetApplyResult): string {
   if (result.prunedWrappers.length > 0) {
     lines.push(`  pruned ${plural(result.prunedWrappers.length, 'wrapper')}: ${result.prunedWrappers.join(', ')}`);
   }
+  for (const shared of result.sharedHistory) {
+    lines.push(
+      `  shared ${shared.kind}: ${shared.migrated} migrated entries, ${shared.conflicts} collisions preserved, ${shared.links} links → ${shared.pool}`,
+      ...sharedHistoryDetail(shared),
+    );
+  }
+  if (sharesCodexHistory(result.sharedHistory)) lines.push(...CODEX_HISTORY_CAVEAT);
   return lines.join('\n');
 }
 

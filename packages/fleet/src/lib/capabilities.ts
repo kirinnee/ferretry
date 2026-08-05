@@ -1,8 +1,8 @@
 /**
  * What the configuration asks for that this build does not do.
  *
- * The schema in `config.ts` is the whole of the tool this replaces: it accepts `sharedHistory`,
- * `health` and every `usage` knob because a migrating operator's file has them. Accepting a key is
+ * The schema in `config.ts` is the whole of the tool this replaces: it accepts `health` and every
+ * `usage` knob because a migrating operator's file has them. Accepting a key is
  * not the same as honouring it, and the difference used to be invisible — a fleet could be told to
  * pool its sessions across accounts, apply cleanly, and pool nothing, with no line of output saying
  * so. A fleet that believes its transcripts are shared, or that something is watching its quota,
@@ -49,18 +49,6 @@ const USAGE_JITTER_DEFAULT = 0.25;
  * check are one statement. The fleet survey under `docs/migration/surveys/` names the source of each.
  */
 const CAPABILITY_CHECKS: readonly CapabilityCheck[] = [
-  {
-    key: 'sharedHistory.claude',
-    capability: 'pooling every Claude account’s session state so any account can resume any session',
-    consequence: 'each account keeps its own transcripts, and no session is resumable from another account',
-    requested: config => config.sharedHistory.claude,
-  },
-  {
-    key: 'sharedHistory.codex',
-    capability: 'pooling every Codex account’s rollouts and shared SQLite runtime state',
-    consequence: 'each account keeps its own rollouts, and no thread is resumable from another account',
-    requested: config => config.sharedHistory.codex,
-  },
   {
     key: 'usage.cliProxy',
     capability: 'reading runtime availability from a local CLIProxyAPI pool',

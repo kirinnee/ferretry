@@ -1,9 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, mkdtemp, readFile, readlink, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type FleetApplyPlan,
+  type FleetApplyPreview,
   FleetConfigSchema,
   type FleetHealthProbe,
   FleetHealthSnapshotSchema,
@@ -11,9 +12,9 @@ import {
   FleetUsageSnapshotSchema,
 } from '@ferretry/fleet';
 import should from 'should';
+import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
@@ -22,6 +23,7 @@ import { CREDENTIALS, human } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
+const SECOND_ACCOUNT_ID = '00000000-0000-4000-8000-000000000002';
 const temporaryDirectories: string[] = [];
 
 interface FleetFixture {
@@ -276,6 +278,83 @@ describe('the daemon fleet mount', () => {
       plan.operations.some(operation => operation.kind === 'file' && operation.path.endsWith('/fy-claude-work')),
     ).be.true();
     should(await fileExists(subject.paths.fleetManifest)).be.false();
+  });
+
+  it('should preview an exact history collision and then migrate the same disposable homes', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(
+      subject,
+      `
+sharedHistory:
+  claude: true
+agents:
+  - name: first
+    kind: claude
+    routes:
+      default:
+        id: ${ACCOUNT_ID}
+        wrapper: fy-claude-first
+        home: claude-first
+        defaultModel: opus
+        models: [opus]
+  - name: second
+    kind: claude
+    routes:
+      default:
+        id: ${SECOND_ACCOUNT_ID}
+        wrapper: fy-claude-second
+        home: claude-second
+        defaultModel: opus
+        models: [opus]
+`,
+    );
+    const homeA = join(subject.paths.fleet, 'homes', 'claude-first');
+    const homeB = join(subject.paths.fleet, 'homes', 'claude-second');
+    const fileA = join(homeA, 'projects', 'project', 'conversation.jsonl');
+    const fileB = join(homeB, 'projects', 'project', 'conversation.jsonl');
+    await mkdir(join(homeA, 'projects', 'project'), { recursive: true });
+    await mkdir(join(homeB, 'projects', 'project'), { recursive: true });
+    await writeFile(fileA, 'older\n', 'utf8');
+    await writeFile(fileB, 'newer\n', 'utf8');
+    await utimes(fileA, 10, 10);
+    await utimes(fileB, 20, 20);
+    const pool = join(subject.paths.fleet, 'shared', 'claude');
+    const pooledFile = join(pool, 'projects', 'project', 'conversation.jsonl');
+    // The pooled loser belongs to the first account, so that is the identity it is quarantined under.
+    const preserved = join(pool, '.migration-conflicts', ACCOUNT_ID, 'projects', 'project', 'conversation.jsonl');
+
+    // Act
+    const previewResponse = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: human }));
+    const preview = JSON.parse(previewResponse.body) as FleetApplyPreview;
+    const beforeApply = await lstat(join(homeA, 'projects'));
+    const appliedResponse = await subject.dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/fleet/apply', headers: human }),
+    );
+
+    // Assert — GET /plan observed and named the winner without touching either source.
+    should(previewResponse.status).equal(200);
+    const collision = preview.sharedHistory[0]?.changes.find(change => change.kind === 'collision');
+    should(collision).deepEqual({
+      kind: 'collision',
+      incoming: fileB,
+      pooled: pooledFile,
+      winner: fileB,
+      loser: pooledFile,
+      preservedAt: preserved,
+    });
+    should(beforeApply.isDirectory()).be.true();
+
+    // POST /apply performed that outcome and returned the same exact migration evidence.
+    should(appliedResponse.status).equal(200);
+    const applied = jsonBody(appliedResponse) as { sharedHistory: FleetApplyPreview['sharedHistory'] };
+    should(applied.sharedHistory[0]?.changes).containDeep([collision]);
+    should((await lstat(join(homeA, 'projects'))).isSymbolicLink()).be.true();
+    should((await lstat(join(homeB, 'projects'))).isSymbolicLink()).be.true();
+    should(await readlink(join(homeA, 'projects'))).equal(join(pool, 'projects'));
+    should(await readlink(join(homeB, 'projects'))).equal(join(pool, 'projects'));
+    should(await readFile(pooledFile, 'utf8')).equal('newer\n');
+    should(await readFile(preserved, 'utf8')).equal('older\n');
   });
 
   it('should apply only inside disposable roots and then serve manifest and honest usage evidence', async () => {

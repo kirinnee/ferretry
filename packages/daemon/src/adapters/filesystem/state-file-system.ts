@@ -1,7 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
-import { chmod, type FileHandle, lstat, mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises';
-import { dirname, join, relative, sep } from 'node:path';
+import {
+  chmod,
+  type FileHandle,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+} from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import {
   type DirectoryEntry,
   type DurableAppend,
@@ -32,6 +44,11 @@ function fingerprintOf(information: Stats): JournalFingerprint {
   };
 }
 
+function pathIsInside(parent: string, candidate: string): boolean {
+  const fromParent = relative(parent, candidate);
+  return fromParent === '' || (!fromParent.startsWith(`..${sep}`) && fromParent !== '..' && !isAbsolute(fromParent));
+}
+
 export class StateFileSystem implements FileSystemPort {
   constructor(
     private readonly paths: FoundationPaths,
@@ -43,13 +60,30 @@ export class StateFileSystem implements FileSystemPort {
     return path;
   }
 
+  /**
+   * Fleet provisioning owns one deliberately narrow class of links beneath the state home:
+   * account history entries under `fleet/homes` point into the same daemon's `fleet/shared` pool.
+   * Resolve the complete link chain before accepting it, so a planted intermediate link cannot use
+   * this exemption to escape the shared pool. Every link elsewhere keeps the blanket refusal below.
+   */
+  private async isProvisionedFleetHistoryLink(path: string): Promise<boolean> {
+    const homes = join(this.paths.fleet, 'homes');
+    if (path === homes || !pathIsInside(homes, path)) return false;
+    try {
+      return pathIsInside(join(this.paths.fleet, 'shared'), await realpath(path));
+    } catch {
+      // A dangling, unreadable, or cyclic link is not provisioner-owned evidence. Fail closed.
+      return false;
+    }
+  }
+
   private async checked(path: string): Promise<string> {
     const target = this.contained(path);
     const fromHome = relative(this.paths.home, target);
     let current: string = this.paths.home;
     try {
       const information = await lstat(current);
-      if (information.isSymbolicLink())
+      if (information.isSymbolicLink() && !(await this.isProvisionedFleetHistoryLink(current)))
         throw new Error(`symbolic links are not allowed inside the state home: ${current}`);
     } catch (error) {
       if (isMissing(error)) return target;
@@ -60,7 +94,7 @@ export class StateFileSystem implements FileSystemPort {
       current = join(current, component);
       try {
         const information = await lstat(current);
-        if (information.isSymbolicLink())
+        if (information.isSymbolicLink() && !(await this.isProvisionedFleetHistoryLink(current)))
           throw new Error(`symbolic links are not allowed inside the state home: ${current}`);
       } catch (error) {
         if (isMissing(error)) break;

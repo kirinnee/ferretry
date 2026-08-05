@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { UnimplementedFleetCapabilityError } from '../../src/lib/capabilities.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import { declaredAssetFields, FleetPlan, UnknownDefaultHomeError, UnsupportedAssetError } from '../../src/lib/plan.ts';
 import type { ResolvedAccount } from '../../src/lib/profiles.ts';
@@ -100,17 +99,39 @@ describe('FleetPlan', () => {
 
     // Assert
     should(wrapper).match({ path: '/state/fleet/bin/fy-claude-work', mode: 0o755 });
-    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR='claude-work'`);
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(
+      `export CLAUDE_CONFIG_DIR='/state/fleet/homes/claude-work'`,
+    );
   });
 
-  it('should keep the declared account name in the wrapper but publish the Ferretry-home expansion', () => {
+  it('should bind a bare relative wrapper home to the same Ferretry directory the manifest publishes', () => {
     // Act
     const actual = subject.build(config(), LAYOUT, GENERATED_AT);
     const [wrapper] = operationsOf(actual, 'file');
 
-    // Assert — the script stays portable; the manifest and the filesystem need an absolute path.
-    should(wrapper?.kind === 'file' && wrapper.content).containEql("'claude-work'");
+    // Assert
+    should(wrapper?.kind === 'file' && wrapper.content).containEql("'/state/fleet/homes/claude-work'");
     should(actual.manifest.accounts[0]?.home).equal('/state/fleet/homes/claude-work');
+  });
+
+  it.each([
+    ['~', '"$HOME"', '/home/tester'],
+    ['~/.claude-work', '"$HOME/.claude-work"', '/home/tester/.claude-work'],
+    ['$HOME', '"$HOME"', '/home/tester'],
+    ['$HOME/.claude-work', '"$HOME/.claude-work"', '/home/tester/.claude-work'],
+  ])('should preserve the portable wrapper spelling for an explicit home alias (%s)', (home, rendered, published) => {
+    // Arrange
+    const input = config({
+      agents: [{ name: 'work', kind: 'claude', routes: { default: route({ home }) } }],
+    });
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+    const [wrapper] = operationsOf(actual, 'file');
+
+    // Assert
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR=${rendered}`);
+    should(actual.manifest.accounts[0]?.home).equal(published);
   });
 
   it('should resolve a relative account home under the homes directory', () => {
@@ -397,16 +418,53 @@ describe('FleetPlan', () => {
   });
 });
 
-describe('FleetPlan capability refusal', () => {
-  it('should refuse to plan a configuration that asks for a capability this build lacks', () => {
+describe('FleetPlan shared history', () => {
+  it('should plan the Codex pool, homes, wrapper environment, owned setting, and migration request', () => {
     // Arrange
-    const input = config({ sharedHistory: { codex: true } });
+    const input = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work' }) },
+        },
+      ],
+      defaultHomes: { codex: ID_CODEX },
+      sharedHistory: { codex: true },
+    });
 
     // Act
-    const act = (): unknown => subject.build(input, LAYOUT, GENERATED_AT);
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
-    // Assert — refused while planning, so `--dry-run` cannot print a plan an apply could not honour.
-    should(act).throw(UnimplementedFleetCapabilityError);
+    // Assert — this value is what dry-run observes and enriches with exact collision outcomes.
+    should(actual.sharedHistoryRequests).deepEqual([
+      {
+        kind: 'codex',
+        poolRoot: '/state/fleet/shared',
+        homes: [
+          { account: ID_CODEX, path: '/state/fleet/homes/codex-work' },
+          { account: `${ID_CODEX}.default`, path: '/home/tester/.codex' },
+        ],
+      },
+    ]);
+    should(operationsOf(actual, 'directory').map(operation => operation.path)).containEql(
+      '/state/fleet/shared/codex/sqlite',
+    );
+    should(operationsOf(actual, 'codex-sqlite-ownership')).have.length(2);
+    should(operationsOf(actual, 'settings')).containDeep([
+      {
+        path: '/state/fleet/homes/codex-work/config.toml',
+        layers: [{ from: 'inline', settings: { sqlite_home: '/state/fleet/shared/codex/sqlite' } }],
+      },
+      {
+        path: '/home/tester/.codex/config.toml',
+        layers: [{ from: 'inline', settings: { sqlite_home: '/state/fleet/shared/codex/sqlite' } }],
+      },
+    ]);
+    const [wrapper] = operationsOf(actual, 'file');
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(
+      "export CODEX_SQLITE_HOME='/state/fleet/shared/codex/sqlite'",
+    );
   });
 
   it('should plan normally when the same sections carry their defaults', () => {
@@ -415,5 +473,35 @@ describe('FleetPlan capability refusal', () => {
 
     // Assert
     should(actual.manifest.accounts).have.length(1);
+    should(actual.sharedHistoryRequests).deepEqual([]);
+  });
+
+  it('should retain disabled Codex ownership reconciliation without planning a settings rewrite', () => {
+    // Arrange
+    const input = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work' }) },
+        },
+      ],
+    });
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — apply needs this operation if an earlier enable left an ownership sidecar behind.
+    should(operationsOf(actual, 'codex-sqlite-ownership')).deepEqual([
+      {
+        kind: 'codex-sqlite-ownership',
+        path: '/state/fleet/homes/codex-work/config.toml',
+        markerPath: '/state/fleet/homes/codex-work/.ferretry-sqlite-home.json',
+        sqliteHome: '/state/fleet/shared/codex/sqlite',
+        enabled: false,
+      },
+    ]);
+    should(operationsOf(actual, 'settings')).deepEqual([]);
+    should(actual.sharedHistoryRequests).deepEqual([]);
   });
 });
