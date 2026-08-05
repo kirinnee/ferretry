@@ -364,6 +364,22 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         onFailure: failure => {
           if (!isCurrent(token)) return;
           if (liveSessionRef.current === session) liveSessionRef.current = null;
+          // A cancellation is not a failed take, WHENEVER it arrives. The
+          // engine can report `aborted` while recognition is still open — a
+          // second recognizer taking the microphone, or the browser abandoning
+          // the session — and that has to land where a reader-initiated cancel
+          // lands: idle, no error, nothing to dismiss. The `finish()` catch
+          // below already does this for the abort that arrives after Stop;
+          // without the same rule here the two identical situations differed
+          // only by timing, and the earlier one showed a generic "Dictation
+          // failed" for a take nobody failed. This coupling is also why
+          // `dictationFailureCopy` deliberately has no `aborted` case.
+          if (failure.code === 'aborted') {
+            setLiveText('');
+            setError(null);
+            setPhase('idle');
+            return;
+          }
           setError({ code: failure.code, message: failure.message });
           setPhase('error');
         },

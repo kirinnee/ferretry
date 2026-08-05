@@ -17,6 +17,16 @@ import { NonNegativeFiniteSchema } from './common.ts';
 export const SttEnhancementProviderSchema = z.literal('groq');
 export type SttEnhancementProvider = z.infer<typeof SttEnhancementProviderSchema>;
 
+/**
+ * How many vocabulary entries one request may carry.
+ *
+ * Exported because it is the ONLY dictionary bound on this wire, and a client that guesses a larger
+ * one loses every correction rather than a few terms: the daemon re-parses with this same schema and
+ * refuses the whole request. A reader's own dictionary may be longer — a client is expected to send
+ * the first entries up to this limit rather than refuse the transcript.
+ */
+export const MAX_STT_DICTIONARY_ENTRIES = 128;
+
 export const SttEnhancementRequestSchema = z.strictObject({
   text: z.string().max(8_000),
   provider: SttEnhancementProviderSchema,
@@ -30,7 +40,7 @@ export const SttEnhancementRequestSchema = z.strictObject({
         aliases: z.array(z.string().trim().min(1).max(64)).optional(),
       }),
     )
-    .max(128)
+    .max(MAX_STT_DICTIONARY_ENTRIES)
     .optional(),
 });
 export type SttEnhancementRequest = z.infer<typeof SttEnhancementRequestSchema>;

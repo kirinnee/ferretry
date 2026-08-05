@@ -245,6 +245,39 @@ describe('browserRecognitionErrorFrom', () => {
     should(browserRecognitionErrorFrom({ error: 'service-not-allowed' }).code).equal('recognition-unavailable');
     should(browserRecognitionErrorFrom({ error: 'language-not-supported' }).code).equal('recognition-unavailable');
   });
+
+  it('maps every alias onto the same code as the Web Speech value beside it', () => {
+    // One `error` value and one DOM `name` share each branch. Line coverage
+    // cannot tell them apart, so each alias is named here on purpose.
+    const cases: readonly [{ error?: string; name?: string }, string][] = [
+      [{ error: 'not-allowed' }, 'permission-denied'],
+      [{ name: 'NotAllowedError' }, 'permission-denied'],
+      [{ name: 'SecurityError' }, 'permission-denied'],
+      [{ error: 'audio-capture' }, 'no-microphone'],
+      [{ name: 'NotReadableError' }, 'no-microphone'],
+      [{ name: 'NotFoundError' }, 'no-microphone'],
+      [{ error: 'service-not-allowed' }, 'recognition-unavailable'],
+      [{ error: 'language-not-supported' }, 'recognition-unavailable'],
+      [{ error: 'phrases-not-supported' }, 'recognition-unavailable'],
+      [{ name: 'NotSupportedError' }, 'recognition-unavailable'],
+      [{ error: 'aborted' }, 'aborted'],
+      [{ name: 'AbortError' }, 'aborted'],
+      [{ error: 'anything-the-spec-adds-later' }, 'recognition-failed'],
+    ];
+
+    for (const [failure, code] of cases) should(browserRecognitionErrorFrom(failure).code).equal(code);
+  });
+
+  it('prefers the engine’s own message, trimmed, and never re-wraps its own error', () => {
+    should(browserRecognitionErrorFrom({ error: 'network', message: '  service unreachable  ' }).message).equal(
+      'service unreachable',
+    );
+    should(browserRecognitionErrorFrom({ error: 'network', message: '   ' }).message).match(/could not be reached/u);
+    should(browserRecognitionErrorFrom(null).code).equal('recognition-failed');
+
+    const already = browserRecognitionErrorFrom({ error: 'not-allowed' });
+    should(browserRecognitionErrorFrom(already)).equal(already);
+  });
 });
 
 describe('BrowserRecognitionSession', () => {
@@ -337,6 +370,66 @@ describe('BrowserRecognitionSession', () => {
     provider.fireTimers();
     should(limited()).equal(1);
     should(provider.recognition.aborts).equal(0);
+  });
+
+  it('ignores a stray end after the take has already settled', async () => {
+    const { provider, session, transcripts } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+    provider.recognition.result([{ text: 'settled words', final: true }]);
+    const finished = session.finish();
+    provider.recognition.onend?.();
+    should(await finished).equal('settled words');
+
+    const settled = transcripts.length;
+    // Some engines emit a second `end` of their own after the one that settled
+    // the take. The panel is closed and the words are already in the draft, so
+    // neither another caption nor another recognition cycle may follow.
+    provider.recognition.onend?.();
+    should(transcripts).have.length(settled);
+    should(provider.recognition.starts).equal(1);
+  });
+
+  it('ignores an end that arrives after a failure or a cancel', () => {
+    const failed = sessionHarness();
+    failed.session.start();
+    failed.provider.recognition.onstart?.();
+    failed.provider.recognition.result([{ text: 'half a thought', final: false }]);
+    failed.provider.recognition.onerror?.({ error: 'not-allowed' });
+    const afterFailure = failed.transcripts.length;
+    failed.provider.recognition.onend?.();
+    should(failed.transcripts).have.length(afterFailure);
+    should(failed.failures).have.length(1);
+
+    const cancelled = sessionHarness();
+    cancelled.session.start();
+    cancelled.provider.recognition.onstart?.();
+    cancelled.provider.recognition.result([{ text: 'never mind', final: true }]);
+    cancelled.session.cancel();
+    const afterCancel = cancelled.transcripts.length;
+    cancelled.provider.recognition.onend?.();
+    should(cancelled.transcripts).have.length(afterCancel);
+    should(cancelled.provider.recognition.starts).equal(1);
+  });
+
+  it('reads a result list that only offers item(), as older WebKit does', async () => {
+    const { provider, session } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+
+    const alternative = { transcript: 'item shaped words', confidence: 0.9 };
+    const first = { isFinal: true, length: 1, item: (index: number) => (index === 0 ? alternative : null) };
+    // The second result has neither an index nor an alternative to offer: an
+    // engine mid-rewrite. It contributes nothing rather than throwing.
+    const second = { isFinal: false, length: 1, item: () => null };
+    provider.recognition.onresult?.({
+      resultIndex: 0,
+      results: { length: 3, item: (index: number) => [first, second][index] ?? null },
+    });
+
+    const finished = session.finish();
+    provider.recognition.onend?.();
+    should(await finished).equal('item shaped words');
   });
 
   it('fails closed when the browser never settles Stop', async () => {

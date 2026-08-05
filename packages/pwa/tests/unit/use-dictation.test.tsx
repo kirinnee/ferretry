@@ -294,6 +294,24 @@ describe('useDictation', () => {
     await view.unmount();
   });
 
+  it('treats an abort while recognition is still open as the same cancellation', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({ recognition: provider });
+    await record(view, provider);
+    await interact(() => provider.speak('half a thought'));
+    // Nobody pressed Stop: the browser abandoned the session on its own, which
+    // is what a second recognizer taking the microphone looks like from here.
+    await interact(() => provider.fail('aborted', 'Speech recognition was cancelled.'));
+
+    // Identical to the abort that lands during finishing — a cancelled take is
+    // not a failure the reader has to read and dismiss.
+    expect(view.handle().phase).toBe('idle');
+    expect(view.handle().error).toBeNull();
+    expect(view.handle().liveText).toBe('');
+    expect(view.drafts).toEqual([]);
+    await view.unmount();
+  });
+
   it('fails closed when the browser never settles Stop', async () => {
     const provider = fakeRecognitionProvider();
     const view = await harness({ recognition: provider });

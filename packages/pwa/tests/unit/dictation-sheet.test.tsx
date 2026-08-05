@@ -70,21 +70,29 @@ describe('dictationFailureCopy', () => {
   it('names each microphone refusal', () => {
     expect(dictationFailureCopy('permission-denied').title).toBe('Microphone blocked');
     expect(dictationFailureCopy('no-microphone').title).toBe('No microphone found');
-    expect(dictationFailureCopy('audio-unavailable').title).toBe('Microphone busy');
-    expect(dictationFailureCopy('no-media-devices').hint).toContain('secure (https)');
-    expect(dictationFailureCopy('capture-failed').title).toBe('Recording could not start');
   });
 
   it('names each browser refusal without inventing a daemon to blame', () => {
     expect(dictationFailureCopy('recognition-unavailable').title).toBe('Dictation unavailable here');
     expect(dictationFailureCopy('recognition-network').title).toContain('Browser speech service');
     expect(dictationFailureCopy('recognition-failed').title).toBe('Browser recognition failed');
-    expect(dictationFailureCopy('too-long').title).toBe('Recording too long');
     expect(dictationFailureCopy('bad-audio').title).toBe("Didn't catch that");
     // The retired daemon vocabulary must not survive as unreachable copy.
     for (const retired of ['unauthorized', 'unavailable', 'busy', 'network']) {
       expect(dictationFailureCopy(retired).title).toBe('Dictation failed');
     }
+  });
+
+  it('writes no copy for codes this panel can never be shown', () => {
+    // Capture codes that died with the daemon engine: nothing raises them, so a
+    // headline for them would be copy proving only that a test can call this.
+    for (const dead of ['audio-unavailable', 'no-media-devices', 'capture-failed', 'too-long']) {
+      expect(dictationFailureCopy(dead).title).toBe('Dictation failed');
+    }
+    // `aborted` IS a live BrowserRecognitionErrorCode, but a cancelled take is
+    // returned to idle by use-dictation — in `onFailure` and in the `finish()`
+    // catch alike — so it never reaches this panel either.
+    expect(dictationFailureCopy('aborted').title).toBe('Dictation failed');
   });
 
   it('falls back to a plain headline for an unknown or absent code', () => {
@@ -100,6 +108,15 @@ describe('dictationStripStatus', () => {
     const status = dictationStripStatus('recording', '', undefined, failure);
     expect(status).toContain('press Stop');
     expect(status).toContain('only updates your draft');
+  });
+
+  it('discloses the browser vendor’s service where a sighted reader can read it', () => {
+    // The honest sentence used to live only in sr-only text and in Settings,
+    // while the visible strip said "handled by this browser" — which most
+    // people read as "on this device".
+    const status = dictationStripStatus('recording', '', undefined, failure);
+    expect(status).toContain('vendor’s online speech service');
+    expect(status).toContain('Ferretry only updates your draft');
   });
 
   it('shows a caption verbatim when the browser produced one', () => {

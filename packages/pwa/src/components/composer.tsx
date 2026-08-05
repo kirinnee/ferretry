@@ -219,16 +219,32 @@ export function Composer({
     });
   };
 
+  // The autocomplete controller caches the selection it was last told about, so
+  // it is read through a ref here: the dictation callback below must stay stable
+  // across renders, and the controller object is rebuilt on every one.
+  const syncAutocompleteSelection = useRef(autocomplete.syncSelection);
+  syncAutocompleteSelection.current = autocomplete.syncSelection;
+
   const applyDictation = useCallback((result: { readonly text: string; readonly caret: number }): void => {
     setDraft(result.text);
     requestAnimationFrame(() => {
       const input = inputRef.current;
       if (input === null) return;
+      // DELIBERATELY NOT `focus()`, unlike `insertNewline` and `replaceDraft`
+      // above: dictation is the one path a phone reader takes to AVOID the
+      // on-screen keyboard, and focusing the textarea summons it straight over
+      // the words they just spoke. The caret still moves, so typing after a tap
+      // continues from the transcript rather than from a stale position.
       try {
         input.setSelectionRange(result.caret, result.caret);
       } catch {
         // The draft still landed; a detached textarea can refuse selection.
       }
+      // Told separately BECAUSE there is no focus and therefore no `select`
+      // event: without this the controller keeps the caret from before the
+      // transcript, and a reference the dictated text ended on stays unoffered
+      // until the next keystroke.
+      syncAutocompleteSelection.current({ start: result.caret, end: result.caret });
     });
   }, []);
 

@@ -101,6 +101,50 @@ describe('Composer dictation slot', () => {
     await composer.unmount();
   });
 
+  it('hands the landed caret to the autocomplete without summoning the keyboard', async () => {
+    const provider = promptRecognition();
+    // A trigger at the caret makes the autocomplete providers ask this daemon
+    // for candidates. Nothing here is about that request, so it never leaves the
+    // process: the assertion is that the list opened at all.
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
+    const composer = await mount(
+      <Composer
+        api={api}
+        daemon={daemon}
+        dictationRecognition={provider}
+        // Correction off: this case is about the caret, and the exact words are
+        // the assertion.
+        dictationSettings={{ ...DEFAULT_STT_SETTINGS, enhancement: false }}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        sessionId="caret-synced"
+      />,
+    );
+    const textarea = textareaOf(composer.container);
+
+    await interact(() => micButton(composer.container).click());
+    await interact(() => provider.begin());
+    await interact(() => provider.speak('/'));
+    await interact(() =>
+      must(
+        composer.container.querySelector<HTMLButtonElement>('button[aria-label^="Stop recording"]'),
+        'the stop button',
+      ).click(),
+    );
+    await settleFrame();
+
+    expect(textarea.value).toBe('/');
+    // The autocomplete controller was told where the caret landed, so a
+    // reference the transcript ended on is offered immediately rather than
+    // after the next keystroke.
+    expect(textarea.getAttribute('aria-expanded')).toBe('true');
+    // And the textarea was deliberately NOT focused: focusing it here opens the
+    // phone keyboard over the words the reader just spoke to avoid typing.
+    expect(document.activeElement).not.toBe(textarea);
+    await composer.unmount();
+    globalThis.fetch = realFetch;
+  });
+
   it('forwards this session-s history reader only when the host actually has one', async () => {
     const asked: string[] = [];
     const withHistory: Pick<IFyApiClient, 'send'> & Partial<Pick<IFyApiClient, 'history'>> = {

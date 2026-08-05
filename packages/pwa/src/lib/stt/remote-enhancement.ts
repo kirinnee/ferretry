@@ -16,6 +16,7 @@
  * therefore never be posted to a daemon the reader did not choose.
  */
 
+import { MAX_STT_DICTIONARY_ENTRIES } from '@ferretry/protocol';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { daemonRequest } from '../daemon-transport.ts';
 import type { DictionaryEntry } from './enhancement.ts';
@@ -143,7 +144,12 @@ export async function requestRemoteEnhancement(
       provider: input.provider,
       model: input.model,
       text: input.text,
-      dictionary: input.dictionary,
+      // The reader's dictionary is allowed to be longer than this wire accepts
+      // — local deterministic correction uses all of it. The daemon re-parses
+      // with the protocol schema and refuses the WHOLE request over the bound,
+      // so sending an over-long list would silently cost a reader with a large
+      // vocabulary every remote correction instead of a few terms.
+      dictionary: input.dictionary.slice(0, MAX_STT_DICTIONARY_ENTRIES),
       context: input.context,
       userContext: input.userContext,
     }),

@@ -83,10 +83,21 @@ export interface DictationFailureCopy {
  * rather than the message (not). The message itself is shown underneath — this
  * is only the headline and the one actionable hint.
  *
- * The vocabulary is the union of what this product can actually raise:
- * `BrowserRecognitionErrorCode` from `lib/stt/browser-recognition.ts` and the
+ * The vocabulary is what can actually REACH this panel: the visible half of
+ * `BrowserRecognitionErrorCode` (`lib/stt/browser-recognition.ts`) plus the
  * `enhancement-` prefix the hook attaches to a post-transcription correction
- * failure.
+ * failure. Two absences are deliberate:
+ *
+ *   1. `aborted` is a cancellation, not a failed take, and `use-dictation.ts`
+ *      converts it to idle in BOTH places the session can report it — the
+ *      `onFailure` callback while recognition is still open, and the rejection
+ *      of `finish()`. A case here would be copy no reader could ever see, and
+ *      writing one would suggest the panel decides that, which it does not.
+ *   2. The capture vocabulary that died with the daemon engine —
+ *      `audio-unavailable`, `no-media-devices`, `capture-failed`, `too-long` —
+ *      has no producer left. Nothing raises it, so it falls to the default
+ *      headline like any other unknown code rather than living on as copy that
+ *      proves only that a test can call this function with a string.
  */
 export function dictationFailureCopy(code: string | undefined): DictationFailureCopy {
   if (code?.startsWith('enhancement-')) {
@@ -103,12 +114,6 @@ export function dictationFailureCopy(code: string | undefined): DictationFailure
       };
     case 'no-microphone':
       return { title: 'No microphone found' };
-    case 'audio-unavailable':
-      return { title: 'Microphone busy', hint: 'Another app is using it. Close it and try again.' };
-    case 'no-media-devices':
-      return { title: 'Microphone unavailable', hint: 'This page needs a secure (https) connection to record.' };
-    case 'capture-failed':
-      return { title: 'Recording could not start', hint: 'The microphone stopped before any audio was captured.' };
     case 'recognition-unavailable':
       return { title: 'Dictation unavailable here' };
     case 'recognition-network':
@@ -118,8 +123,6 @@ export function dictationFailureCopy(code: string | undefined): DictationFailure
       };
     case 'recognition-failed':
       return { title: 'Browser recognition failed', hint: 'Try again or use another supported browser.' };
-    case 'too-long':
-      return { title: 'Recording too long' };
     case 'bad-audio':
       return { title: "Didn't catch that", hint: 'No usable audio was captured. Try again.' };
     default:
@@ -169,7 +172,17 @@ function LiveDot() {
   );
 }
 
-/** The one line of prose in the strip. Pure, so its wording has a test. */
+/**
+ * The one line of prose in the strip. Pure, so its wording has a test.
+ *
+ * The blank-recording line is where the vendor disclosure has to live. "Handled
+ * by this browser" reads to most people as "on this device", and several engines
+ * send the audio to their vendor's online service instead — a fact that was only
+ * ever stated in `sr-only` text and in Settings, i.e. exactly where a sighted
+ * reader deciding whether to speak will not find it. It stays compact because
+ * this line is truncated to one row (the full text is the strip's `title`), and
+ * the `sr-only` description below still carries the complete statement.
+ */
 export function dictationStripStatus(
   stage: DictationStage,
   liveText: string,
@@ -180,7 +193,7 @@ export function dictationStripStatus(
   switch (stage) {
     case 'recording':
       if (preview) return preview;
-      return 'Speak, then press Stop. Recognition is handled by this browser and only updates your draft.';
+      return 'Speak, then press Stop. This browser may use its vendor’s online speech service; Ferretry only updates your draft.';
     case 'transcribing':
       return `Finishing in your browser and correcting once… ${
         preview ? `Last heard: ${preview}` : 'The result will be added to your draft.'

@@ -483,6 +483,14 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
   }
 
   #onEnd(): void {
+    // A terminal cycle is over for good. Engines are free to emit a second
+    // `end` after the one that settled the take (and after `abort()` during a
+    // failure or a cancel), and running the settle path again would re-emit
+    // `onTranscript` for words the controller has already inserted — into a
+    // panel it has already closed, or on top of a failure the reader is
+    // currently reading. Terminal states are checked HERE rather than inside
+    // `#settleCycle` so the restart below cannot be reached either.
+    if (this.#state === 'finished' || this.#state === 'failed' || this.#state === 'cancelled') return;
     this.#settleCycle();
     if (this.#state === 'finishing') {
       this.#settleFinish();

@@ -76,6 +76,26 @@ describe('stt schemas', () => {
     should(stt.SttEnhancementErrorCodeSchema.options).have.length(11);
   });
 
+  it('should publish the dictionary bound clients have to clamp to', () => {
+    // Exported so a client sends the first entries rather than guessing a
+    // larger cap and having the whole request refused as bad_request.
+    should(stt.MAX_STT_DICTIONARY_ENTRIES).equal(128);
+    const dictionary = (count: number) => Array.from({ length: count }, (_unused, index) => ({ term: `t-${index}` }));
+
+    should(
+      stt.SttEnhancementRequestSchema.safeParse({
+        ...minimalEnhancementRequest,
+        dictionary: dictionary(stt.MAX_STT_DICTIONARY_ENTRIES),
+      }).success,
+    ).be.true();
+    should(
+      stt.SttEnhancementRequestSchema.safeParse({
+        ...minimalEnhancementRequest,
+        dictionary: dictionary(stt.MAX_STT_DICTIONARY_ENTRIES + 1),
+      }).success,
+    ).be.false();
+  });
+
   it('should accept minimal and fully populated enhancement requests within their bounds', () => {
     // Arrange
     const maxima = {
@@ -84,7 +104,9 @@ describe('stt schemas', () => {
       model: 'm'.repeat(128),
       context: Array.from({ length: 10 }, (_unused, index) => `turn-${index}`),
       userContext: 'u'.repeat(2_000),
-      dictionary: Array.from({ length: 128 }, (_unused, index) => ({ term: `term-${index}` })),
+      dictionary: Array.from({ length: stt.MAX_STT_DICTIONARY_ENTRIES }, (_unused, index) => ({
+        term: `term-${index}`,
+      })),
     };
 
     // Act
@@ -95,7 +117,7 @@ describe('stt schemas', () => {
     // Assert
     should(parsed[0]).deepEqual(minimalEnhancementRequest);
     should(parsed[1]).deepEqual(enhancementRequest);
-    should(parsed[2]?.dictionary).have.length(128);
+    should(parsed[2]?.dictionary).have.length(stt.MAX_STT_DICTIONARY_ENTRIES);
     should(stt.SttEnhancementRequestSchema.parse({ text: 'x', provider: 'groq', model: '  kimi  ' }).model).equal(
       'kimi',
     );
@@ -151,7 +173,10 @@ describe('stt schemas', () => {
       {
         name: 'too many dictionary entries',
         schema: stt.SttEnhancementRequestSchema,
-        value: { ...minimalEnhancementRequest, dictionary: Array.from({ length: 129 }, () => ({ term: 'term' })) },
+        value: {
+          ...minimalEnhancementRequest,
+          dictionary: Array.from({ length: stt.MAX_STT_DICTIONARY_ENTRIES + 1 }, () => ({ term: 'term' })),
+        },
       },
       {
         name: 'blank dictionary term',
