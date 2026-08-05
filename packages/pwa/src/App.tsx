@@ -32,6 +32,7 @@ import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
+import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
@@ -49,6 +50,7 @@ import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
 import type { DaemonConnection, DaemonId } from './lib/daemon-connection.ts';
+import { daemonSessionScope } from './lib/daemon-scope.ts';
 import type {
   NotificationPermissionState,
   NotificationRegistrationLike,
@@ -880,11 +882,19 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
+  const [sessionSearchFocusSignal, setSessionSearchFocusSignal] = useState(0);
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
   );
   const closePalette = useCallback(() => setPalette(current => ({ ...current, open: false })), []);
+  const currentSessionScope = useMemo(
+    () =>
+      connection !== undefined && pageRoute.kind === 'session'
+        ? daemonSessionScope(connection, pageRoute.sessionId)
+        : null,
+    [connection, pageRoute],
+  );
 
   /**
    * ROUTE CHANGES ARE ANNOUNCED AND TAKE FOCUS.
@@ -920,11 +930,12 @@ export function AppShell() {
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
       if (isTextEntryTarget(event.target)) return;
       event.preventDefault();
-      openPalette();
+      if (currentSessionScope !== null) setSessionSearchFocusSignal(current => current + 1);
+      else openPalette();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [openPalette]);
+  }, [currentSessionScope, openPalette]);
 
   let content: ReactNode;
   if (effectiveRoute.kind === 'setup') {
@@ -954,32 +965,35 @@ export function AppShell() {
   } else {
     const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? [];
     content = (
-      <div className="kt-shell flex flex-col overflow-hidden">
-        <AppBar
-          crumbs={pageCrumbs(pageRoute)}
-          daemon={connection.daemonId}
-          onOpenPalette={openPalette}
-          sessionCount={sessions.length}
-          updateReady={updateReady}
-          onApplyUpdate={applyUpdate}
-          active={appBarDestinationForRoute(pageRoute)}
-          onNavigate={navigate}
-          themeToggle={<ThemeToggle />}
-        />
-        <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
-          <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-            <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
-          </ChunkErrorBoundary>
+      <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
+        <div className="kt-shell flex flex-col overflow-hidden">
+          <AppBar
+            crumbs={pageCrumbs(pageRoute)}
+            daemon={connection.daemonId}
+            onOpenPalette={openPalette}
+            sessionCount={sessions.length}
+            updateReady={updateReady}
+            onApplyUpdate={applyUpdate}
+            active={appBarDestinationForRoute(pageRoute)}
+            onNavigate={navigate}
+            themeToggle={<ThemeToggle />}
+            {...(currentSessionScope === null ? {} : { currentSessionSearch: <SessionSearchControl /> })}
+          />
+          <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+            <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+              <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+            </ChunkErrorBoundary>
+          </div>
+          <CommandPalette
+            open={palette.open}
+            focusSignal={palette.focusSignal}
+            onClose={closePalette}
+            daemon={connection.daemonId}
+            sessions={paletteSessionEntries(sessions)}
+            onNavigate={navigate}
+          />
         </div>
-        <CommandPalette
-          open={palette.open}
-          focusSignal={palette.focusSignal}
-          onClose={closePalette}
-          daemon={connection.daemonId}
-          sessions={paletteSessionEntries(sessions)}
-          onNavigate={navigate}
-        />
-      </div>
+      </SessionSearchProvider>
     );
   }
 

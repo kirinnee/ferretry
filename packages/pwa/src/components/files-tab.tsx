@@ -17,37 +17,38 @@
 
 import { ArrowLeft, Code2, GitCompareArrows, ListTree, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SessionSearchControl } from '../features/session-search/session-search.tsx';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { formatCodeReference } from '../lib/references.ts';
 import { FileTree } from './file-tree.tsx';
-import { fsApi, useFsProbe, type FsFile, type FsListing } from './files-api.ts';
+import { type FsFile, type FsListing, fsApi, useFsProbe } from './files-api.ts';
 import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
 import { useFsResource } from './files-resource.ts';
 import {
-  filesTreeOpenByDefault,
-  readFilesTabState,
-  scrollFileLineIntoView,
-  selectionFromReference,
-  writeFilesTabState,
   type CodeReferenceOpenRequest,
   type ColumnCodeReference,
   type FileLineSelection,
   type FileView,
+  filesTreeOpenByDefault,
   type OpenFileTab,
+  readFilesTabState,
+  scrollFileLineIntoView,
+  selectionFromReference,
+  writeFilesTabState,
 } from './files-tab-model.ts';
 import {
   BrowseList,
   DiffBody,
   Failed,
   FileBody,
+  type FilesMarkdownContext,
   Loading,
   Note,
   OpenFileTabs,
   Unavailable,
-  type FilesMarkdownContext,
 } from './files-views.tsx';
 
 export interface FilesTabProps {
@@ -387,6 +388,13 @@ export const FilesTab = ({
             <RefreshCw size={16} className={probe.refreshing ? 'animate-spin' : undefined} aria-hidden="true" />
           </button>
         </span>
+      </div>
+
+      {/* Handover #6's one shared control has a Files mount too.  It keeps its
+          query and current-session results with the top bar and Tasks rather
+          than becoming a second, path-only filter. */}
+      <div className="border-b border-border-soft p-2">
+        <SessionSearchControl />
       </div>
 
       {/* The host's strip is the ONE strip when it owns the opens (#35). */}

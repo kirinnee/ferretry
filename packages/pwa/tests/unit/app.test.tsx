@@ -868,6 +868,21 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
+  it('reserves Cmd/Ctrl+K for current-session file and task search on a session route', async () => {
+    const { view } = await renderShell('/d/alpha/session/s1', [alpha.daemonId]);
+    await settle();
+    const search = must(
+      view.container.querySelector<HTMLInputElement>('#current-session-search'),
+      'the current-session search input',
+    );
+
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+
+    expect(document.activeElement).toBe(search);
+    expect(paletteOpen(view.container)).toBe(false);
+    await view.unmount();
+  });
+
   it('opens from a keystroke that belongs to no field', async () => {
     const { view } = await renderShell('/d/alpha', [alpha.daemonId]);
     await settle();
