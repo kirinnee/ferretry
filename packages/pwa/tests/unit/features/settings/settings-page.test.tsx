@@ -389,7 +389,12 @@ describe('daemon settings', () => {
       ).click(),
     );
     const alphaHostChecks = hostChecks(view.container, 'daemon-alpha');
-    const details = must(alphaHostChecks.querySelector<HTMLDetailsElement>('details'), 'daemon management disclosure');
+    const details = must(
+      [...alphaHostChecks.querySelectorAll<HTMLDetailsElement>('details')].find(
+        candidate => candidate.querySelector('summary')?.textContent === 'Manage daemon',
+      ),
+      'daemon management disclosure',
+    );
 
     expect(details.open).toBe(false);
     expect(callbacks.removed).toEqual([]);

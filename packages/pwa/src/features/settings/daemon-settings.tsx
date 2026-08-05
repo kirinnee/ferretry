@@ -274,7 +274,9 @@ function DaemonSubtabChoices({
             >
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-ui font-semibold">{name}</span>
-                <span className="mt-0.5 block truncate text-meta leading-tight text-faint">{connection.baseUrl}</span>
+                {name === connection.baseUrl ? null : (
+                  <span className="mt-0.5 block truncate text-meta leading-tight text-faint">{connection.baseUrl}</span>
+                )}
               </span>
               {selected ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}
             </button>
