@@ -70,6 +70,10 @@ const buttonNamed = (root: ReactTestInstance, label: string): ReactTestInstance 
 
 const client = (calls: string[], next: SessionView): SessionChatClient =>
   ({
+    answer: async (_id: string, toolUseId: string) => {
+      calls.push(`answer:${toolUseId}`);
+      return next;
+    },
     send: async () => ({ accepted: true }),
     interrupt: async (id: string) => {
       calls.push(`interrupt:${id}`);
@@ -523,7 +527,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('never offers to answer a structured question, because /answer is not mounted', async () => {
+  test('mounts the daemon-bound structured form, but keeps damaged question state unavailable', async () => {
     const pending = sessionView('shared', {
       state: {
         status: 'awaiting_question',
@@ -546,12 +550,11 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      // No form, because no form here could submit. A control that looks live,
-      // takes a choice and then throws is worse than a sentence that says so.
-      expect(page.root.findAllByType(QuestionForm)).toHaveLength(0);
+      // This is the real form, not a facade: the client contract includes the
+      // mounted answer route and the daemon binds the exact tool-use id again.
+      expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
       expect(page.root.findAllByProps({ className: 'fy-composer' })).toHaveLength(0);
-      expect(page.root.findByProps({ 'data-question-unavailable': '' })).toBeDefined();
-      expect(JSON.stringify(page.toJSON())).toContain('cannot answer one');
+      expect(page.root.findAllByProps({ 'data-question-unavailable': '' })).toHaveLength(0);
 
       // Interrupt is the one action that CAN clear the turn, so it stays live.
       await runAsync(async () => {
@@ -560,8 +563,8 @@ describe('SessionChatPage', () => {
       });
       expect(calls).toEqual(['interrupt:shared']);
 
-      // The same truthful state covers a status with no payload yet: both mean
-      // "waiting on an answer this build cannot give".
+      // A status with no validated payload is damaged evidence, not a reason to
+      // invent a form or send an unbound answer.
       run(() =>
         page.update(
           withSessionSearch(

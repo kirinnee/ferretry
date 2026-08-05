@@ -145,6 +145,11 @@ const sessionCases: SchemaCase[] = [
   },
   { name: 'send request', schema: session.SendRequestSchema, value: { message: 'Continue' } },
   {
+    name: 'structured question answer',
+    schema: session.StructuredQuestionAnswerSchema,
+    value: { kind: 'selection', labels: ['Yes', 'Also yes'] },
+  },
+  {
     name: 'answer request',
     schema: session.AnswerSessionRequestSchema,
     value: {

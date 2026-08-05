@@ -55,16 +55,24 @@ export function structuredQuestionStatePatch(
   current: SessionState,
   projection: StructuredQuestionProjection,
 ): Partial<SessionState> {
+  if (projection.kind === 'pending' && current.lastAnsweredQuestionToolUseId === projection.question.toolUseId)
+    return {};
   if (projection.kind === 'pending')
     return {
       pendingQuestion: projection.question,
-      status: current.status === 'completed' || current.status === 'stopped' || current.status === 'failed' ? current.status : 'awaiting_question',
+      status:
+        current.status === 'completed' || current.status === 'stopped' || current.status === 'failed'
+          ? current.status
+          : 'awaiting_question',
       ...(current.needsHumanKind === 'structured-question-unrecognized' ? { needsHumanKind: undefined } : {}),
     };
   if (projection.kind === 'needs-human')
     return {
       pendingQuestion: undefined,
-      status: current.status === 'completed' || current.status === 'stopped' || current.status === 'failed' ? current.status : 'awaiting_user',
+      status:
+        current.status === 'completed' || current.status === 'stopped' || current.status === 'failed'
+          ? current.status
+          : 'awaiting_user',
       needsHumanKind: 'structured-question-unrecognized',
       reason: projection.reason,
     };

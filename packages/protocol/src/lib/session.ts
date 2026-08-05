@@ -337,6 +337,9 @@ export const SessionStateSchema = z.object({
   remoteControlUrl: z.url().optional(),
   openTools: z.array(z.string()).optional(),
   pendingQuestion: PendingQuestionSchema.nullable().optional(),
+  /** The exact structured form the daemon confirmed as advanced; prevents a
+   * transcript tail from resurrecting that already-answered tool call. */
+  lastAnsweredQuestionToolUseId: z.string().min(1).optional(),
   lastTranscriptAt: InstantSchema.optional(),
   lastPaneAt: InstantSchema.optional(),
   lastCounterAdvanceAt: InstantSchema.optional(),

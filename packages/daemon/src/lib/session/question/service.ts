@@ -36,9 +36,12 @@ function legacyAnswers(
 ): StructuredQuestionAnswer[] {
   if (responses !== undefined) {
     if (responses.length !== question.questions.length)
-      throw new StructuredQuestionRefused(`expected ${question.questions.length} answers, received ${responses.length}`);
+      throw new StructuredQuestionRefused(
+        `expected ${question.questions.length} answers, received ${responses.length}`,
+      );
     return responses.map((response, index) => {
-      const item = question.questions[index]!;
+      const item = question.questions[index];
+      if (item === undefined) throw new StructuredQuestionRefused(`question ${index + 1} is not present`);
       return item.options?.some(option => option.label === response)
         ? { kind: 'selection' as const, labels: [response] }
         : { kind: 'other' as const, text: response.trim() };
@@ -53,14 +56,17 @@ function validate(question: PendingQuestion, answers: readonly StructuredQuestio
   if (answers.length !== question.questions.length)
     throw new StructuredQuestionRefused(`expected ${question.questions.length} answers, received ${answers.length}`);
   return answers.map((answer, index) => {
-    const item = question.questions[index]!;
+    const item = question.questions[index];
+    if (item === undefined) throw new StructuredQuestionRefused(`question ${index + 1} is not present`);
     if (answer.kind === 'other') {
-      if (answer.text.trim() === '') throw new StructuredQuestionRefused(`question ${index + 1} has an empty free-form answer`);
+      if (answer.text.trim() === '')
+        throw new StructuredQuestionRefused(`question ${index + 1} has an empty free-form answer`);
       return { kind: 'other', text: answer.text.trim() };
     }
     const labels = [...answer.labels];
     if (labels.length === 0) throw new StructuredQuestionRefused(`question ${index + 1} has no selected option`);
-    if (new Set(labels).size !== labels.length) throw new StructuredQuestionRefused(`question ${index + 1} repeats an option`);
+    if (new Set(labels).size !== labels.length)
+      throw new StructuredQuestionRefused(`question ${index + 1} repeats an option`);
     if (item.multiSelect !== true && labels.length !== 1)
       throw new StructuredQuestionRefused(`question ${index + 1} accepts exactly one option`);
     const options = item.options ?? [];
@@ -89,7 +95,8 @@ export class StructuredQuestionService {
     readonly answers?: readonly StructuredQuestionAnswer[] | undefined;
   }): Promise<void> {
     const pending = await this.repository.pending(input.id);
-    if (pending === undefined) throw new StructuredQuestionRefused(`session ${input.id} has no pending structured question`);
+    if (pending === undefined)
+      throw new StructuredQuestionRefused(`session ${input.id} has no pending structured question`);
     if (pending.toolUseId !== input.toolUseId)
       throw new StructuredQuestionRefused(
         `the displayed question changed before this answer arrived (expected ${input.toolUseId}, current ${pending.toolUseId})`,

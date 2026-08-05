@@ -19,6 +19,7 @@ export * from './secrets/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/monitor/index.ts';
+export * from './session/question/index.ts';
 export * from './session/resume/index.ts';
 export * from './session/send/index.ts';
 export * from './session/signal/index.ts';

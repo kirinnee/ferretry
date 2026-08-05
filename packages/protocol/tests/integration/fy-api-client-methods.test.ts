@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
 import { type FyApiClient, FyTransportError } from '../../src/adapters/fy-api-client.ts';
+import { FY_REQUEST_ID_HEADER } from '../../src/lib/client.ts';
 import {
   analyticsResponse,
   cgroupConfigView,
@@ -34,6 +35,8 @@ interface MethodCase {
   readonly path: string;
   /** Expected JSON request body, or undefined when the method must not send one. */
   readonly body?: unknown;
+  /** Caller-supplied idempotency key, when a mutation must preserve it. */
+  readonly requestId?: string;
   /** Fresh response per use — a Response body may only be consumed once. */
   readonly response: () => Response;
   readonly expected: unknown;
@@ -536,6 +539,8 @@ describe('FyApiClient typed method delegation', () => {
         should(jsonBodyOf(transport)).deepEqual(testCase.body);
         should(headersOf(transport).get('content-type')).equal('application/json');
       }
+      if (testCase.requestId !== undefined)
+        should(headersOf(transport).get(FY_REQUEST_ID_HEADER)).equal(testCase.requestId);
     });
   }
 

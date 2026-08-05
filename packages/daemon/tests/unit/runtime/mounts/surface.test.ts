@@ -132,6 +132,9 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
+  sessionAnswer: {
+    answer: async id => sessionView(id),
+  },
   sessionAttachments: {
     upload: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -261,6 +264,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
+      'POST /v1/sessions/:sessionId/answer',
       'POST /v1/sessions/:sessionId/attachments',
       'GET /v1/sessions/:sessionId/attachments/:attachmentId',
       'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',

@@ -28,6 +28,7 @@ import { pinRoutes } from './pins.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { type SessionAnswerSubsystem, sessionAnswerRoutes } from './session-answer.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
@@ -88,6 +89,8 @@ export interface MountedSubsystems {
    *  is on. The verb the client has always posted and the daemon has never answered — and the one a
    *  declared wait on a peer needs, because the reply that ends such a wait IS a send. */
   readonly sessionSend: SessionSendSubsystem;
+  /** Answering a live structured form, after a pane-bound confirmation. */
+  readonly sessionAnswer: SessionAnswerSubsystem;
   /** Durable encrypted attachment originals plus process-local unlock state. */
   readonly sessionAttachments: SessionAttachmentSubsystem;
   /** Reviving a stopped or dead session with its conversation intact, and typing a next turn into a
@@ -226,6 +229,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
     // shadowed, and all belong above the deeper per-session subsystems.
     ...sessionSendRoutes(subsystems.sessionSend),
+    ...sessionAnswerRoutes(subsystems.sessionAnswer),
     // Attachment routes are mounted before sends may honour attachment ids. Their
     // deeper unlock path cannot shadow this one-segment upload route.
     ...sessionAttachmentRoutes(subsystems.sessionAttachments),
