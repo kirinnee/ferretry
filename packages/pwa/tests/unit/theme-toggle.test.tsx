@@ -153,7 +153,7 @@ describe('ThemeSettings', () => {
     const view = await mount(<Harness store={new ThemePreferenceStore(memoryStorage())} />);
 
     // Assert
-    expect(familyControls().length).toBe(7);
+    expect(familyControls().length).toBe(11);
     expect(checkedFamily()).toBe('studio');
     const swatches = [...document.querySelectorAll('[data-swatch]')].map(node => node.getAttribute('data-swatch'));
     expect(swatches.slice(0, 4)).toEqual(['studio-light', 'studio-dark', 'mission-light', 'mission-dark']);
@@ -170,7 +170,7 @@ describe('ThemeSettings', () => {
     const view = await mount(<Harness store={new ThemePreferenceStore(memoryStorage())} />);
 
     // Assert
-    expect(familyControls().map(input => input.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1]);
+    expect(familyControls().map(input => input.tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1]);
     await view.unmount();
   });
 
@@ -200,13 +200,13 @@ describe('ThemeSettings', () => {
     await interact(() => pressKey(list, 'End'));
 
     // Assert
-    expect(checkedFamily()).toBe('geist');
+    expect(checkedFamily()).toBe('ma');
 
     // Act — End again cannot walk past the last card.
     await interact(() => pressKey(list, 'ArrowRight'));
 
     // Assert
-    expect(checkedFamily()).toBe('geist');
+    expect(checkedFamily()).toBe('ma');
 
     // Act
     await interact(() => pressKey(list, 'ArrowUp'));
@@ -244,7 +244,7 @@ describe('ThemeSettings', () => {
     await interact(() => pressKey(list, 'End'));
 
     // Assert — the reveal ran against the page scroller, not the list.
-    expect(checkedFamily()).toBe('geist');
+    expect(checkedFamily()).toBe('ma');
     await view.unmount();
   });
 
