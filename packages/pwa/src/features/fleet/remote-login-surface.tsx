@@ -197,6 +197,10 @@ export function RemoteLoginSurface({
               The pasted URL was discarded. Paste a callback from this sign-in attempt, or start over for a fresh link.
             </p>
             <RedirectForm busy={busy === 'submit'} value={redirectUrl} onChange={setRedirectUrl} onSubmit={submit} />
+            <Button type="button" variant="outline" onClick={start} disabled={busy !== null}>
+              <Link2 size={16} aria-hidden="true" />
+              {busy === 'start' ? 'Starting sign-in…' : 'Start a new sign-in'}
+            </Button>
           </div>
         ) : null}
 
