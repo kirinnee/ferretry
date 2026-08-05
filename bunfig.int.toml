@@ -1,7 +1,19 @@
 [test]
 root = "packages"
 pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**"]
-timeout = 120000
+# THE PER-TEST TIMEOUT IS NOT SET HERE, and it is not an omission.
+#
+# `timeout` under `[test]` is IGNORED by Bun 1.3.13: this file used to carry
+# `timeout = 120000` and every test in this tier still ran on Bun's 5-second
+# default. A tier that believes it has two minutes and has five seconds is a tier
+# whose slowest honest test fails as a timeout rather than as an assertion — which
+# is exactly what happened to the daemon boot tests, whose readiness poll budgets
+# 5000ms against a 5000ms ceiling and therefore had no headroom at all.
+#
+# So the real budget travels on the command line, as `--timeout`, from the two
+# places this tier is invoked: `tasks/Taskfile.test.yaml` and `scripts/ci/test.sh`.
+# Do not restore the key here — a value that is read by nothing is worse than no
+# value, because the next reader believes it.
 coverageReporter = ["text", "lcov"]
 coverageDir = "coverage/int"
 coverageSkipTestFiles = true

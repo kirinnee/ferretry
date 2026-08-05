@@ -28,6 +28,9 @@ includes:
     vars:
       MODE: int
       CONFIG: bunfig.int.toml
+      # An adapter test boots a real daemon, binds a loopback port and waits for it.
+      # Five seconds is not that budget, and a bunfig cannot supply this one.
+      TIMEOUT: --timeout 120000
 
 tasks:
   setup:
