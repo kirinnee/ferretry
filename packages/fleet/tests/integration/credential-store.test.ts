@@ -50,7 +50,9 @@ const member = (home: string, accountId = 'account-one'): FleetIdentityMember =>
 });
 
 const claudeBlob = (expiresAt: number): string =>
-  JSON.stringify({ claudeAiOauth: { accessToken: 'placeholder-access', refreshToken: 'placeholder-refresh', expiresAt } });
+  JSON.stringify({
+    claudeAiOauth: { accessToken: 'placeholder-access', refreshToken: 'placeholder-refresh', expiresAt },
+  });
 
 /** A `security` whose every invocation is scripted, so no real keychain is ever touched. */
 class ScriptedCommand implements CredentialCommand {
@@ -348,9 +350,7 @@ describe('PlatformFleetCredentialStore copying a file-backed credential', () => 
     await mkdir(claudeFilePath(targetHome));
 
     // Act / Assert
-    await fileStore()
-      .clone('claude', member(donorHome), member(targetHome, 'account-two'))
-      .should.be.rejected();
+    await fileStore().clone('claude', member(donorHome), member(targetHome, 'account-two')).should.be.rejected();
   });
 });
 

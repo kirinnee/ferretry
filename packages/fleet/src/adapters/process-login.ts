@@ -71,13 +71,18 @@ export class ProcessFleetLoginPort implements FleetLoginPort {
       };
     }
 
-    const environment = sanitizeHarnessEnv(this.deps.environment, script === undefined ? [] : referencedEnvNames(script));
+    const environment = sanitizeHarnessEnv(
+      this.deps.environment,
+      script === undefined ? [] : referencedEnvNames(script),
+    );
     const started = this.deps.spawn([executable, spec.argument], {
       environment,
       ...(this.deps.cwd === undefined ? {} : { cwd: this.deps.cwd }),
     });
     const code = await started.exited;
-    return code === 0 ? { status: 'logged-in' } : { status: 'failed', message: `login process exited with code ${code}` };
+    return code === 0
+      ? { status: 'logged-in' }
+      : { status: 'failed', message: `login process exited with code ${code}` };
   }
 }
 

@@ -63,11 +63,7 @@ class ScriptedCredentialStore implements FleetCredentialStore {
     return Promise.resolve(this.passes[this.pass]?.[target.accountId] ?? { state: 'missing' });
   }
 
-  clone(
-    _kind: HarnessKind,
-    donor: FleetIdentityMember,
-    target: FleetIdentityMember,
-  ): Promise<CredentialCloneOutcome> {
+  clone(_kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome> {
     this.clones.push({ donor: donor.accountId, target: target.accountId });
     return Promise.resolve(this.cloneOutcomes[target.accountId] ?? { ok: true });
   }
@@ -93,10 +89,8 @@ class RecordingLoginPort {
 const statusesOf = (results: readonly FleetLoginResult[]): Record<string, string> =>
   Object.fromEntries(results.map(result => [result.accountId, result.status]));
 
-const build = (
-  store: ScriptedCredentialStore,
-  port: RecordingLoginPort,
-): FleetLoginService => new FleetLoginService({ identities: new FleetIdentityService(store), loginPort: port });
+const build = (store: ScriptedCredentialStore, port: RecordingLoginPort): FleetLoginService =>
+  new FleetLoginService({ identities: new FleetIdentityService(store), loginPort: port });
 
 describe('FleetLoginService', () => {
   const twoLanes = identity({
@@ -335,10 +329,9 @@ describe('FleetLoginService', () => {
 
   it('should report a failed copy as a failure with the store is reason', async () => {
     // Arrange
-    const store = new ScriptedCredentialStore(
-      [{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }],
-      { [ID_TWO]: { ok: false, reason: 'the target home is read-only' } },
-    );
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }], {
+      [ID_TWO]: { ok: false, reason: 'the target home is read-only' },
+    });
 
     // Act
     const actual = await build(store, new RecordingLoginPort()).login({ identities: [twoLanes], mode: 'full' });

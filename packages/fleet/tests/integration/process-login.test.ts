@@ -205,8 +205,12 @@ describe('ProcessFleetLoginPort', () => {
     // Assert — an actionable message beats an exit code.
     should(calls).deepEqual([]);
     should(actual.status).equal('failed');
-    should(actual).have.property('message').match(/"codex" CLI is on this host/u);
-    should(actual).have.property('message').match(/fy fleet apply/u);
+    should(actual)
+      .have.property('message')
+      .match(/"codex" CLI is on this host/u);
+    should(actual)
+      .have.property('message')
+      .match(/fy fleet apply/u);
   });
 
   it('should report a non-zero exit as a failure naming the code', async () => {

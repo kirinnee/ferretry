@@ -219,11 +219,6 @@ export class FleetLoginService {
   }
 }
 
-function row(
-  identity: FleetIdentity,
-  accountId: string,
-  status: FleetLoginStatus,
-  message?: string,
-): FleetLoginResult {
+function row(identity: FleetIdentity, accountId: string, status: FleetLoginStatus, message?: string): FleetLoginResult {
   return { accountId, identity: identity.key, status, ...(message === undefined ? {} : { message }) };
 }

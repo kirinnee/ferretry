@@ -72,10 +72,10 @@ const member = (overrides: Partial<FleetIdentityMember> = {}): FleetIdentityMemb
   ...overrides,
 });
 
-const status = (
-  target: FleetIdentityMember,
-  reading: CredentialReading,
-): FleetIdentityMemberStatus => ({ member: target, reading });
+const status = (target: FleetIdentityMember, reading: CredentialReading): FleetIdentityMemberStatus => ({
+  member: target,
+  reading,
+});
 
 const identity = (overrides: Partial<FleetIdentity> = {}): FleetIdentity => ({
   key: 'claude:kirin',
@@ -481,7 +481,9 @@ describe('decideIdentity', () => {
 
     // Assert
     should(actual.verdict.kind).equal('indeterminate');
-    should(actual.verdict).have.property('reason').match(/1 of 2 could not be read/u);
+    should(actual.verdict)
+      .have.property('reason')
+      .match(/1 of 2 could not be read/u);
     should(actual.refused.map(entry => entry.member.accountId)).deepEqual([ID_TWO]);
   });
 
@@ -573,11 +575,7 @@ class FakeCredentialStore implements FleetCredentialStore {
     return Promise.resolve(this.readings[target.accountId] ?? { state: 'missing' });
   }
 
-  clone(
-    kind: HarnessKind,
-    donor: FleetIdentityMember,
-    target: FleetIdentityMember,
-  ): Promise<CredentialCloneOutcome> {
+  clone(kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome> {
     this.clones.push({ donor: donor.accountId, target: target.accountId, kind });
     const thrown = this.failures[`clone:${target.accountId}`];
     if (thrown !== undefined) return Promise.reject(new Error(thrown));
@@ -620,7 +618,10 @@ describe('FleetIdentityService', () => {
   it('should not read a home the manifest declares unavailable', async () => {
     // Arrange
     const store = new FakeCredentialStore({ [ID_ONE]: { state: 'valid', expiresAt: NOW + HOUR } });
-    const members = [member({ accountId: ID_ONE }), member({ accountId: ID_TWO, available: false, unavailableReason: 'no harness' })];
+    const members = [
+      member({ accountId: ID_ONE }),
+      member({ accountId: ID_TWO, available: false, unavailableReason: 'no harness' }),
+    ];
 
     // Act
     const actual = await new FleetIdentityService(store).surveyOne(identity({ members }));
@@ -699,9 +700,7 @@ describe('FleetIdentityService', () => {
     const actual = await subject.sync(await subject.surveyOne(identity({ members: twoMembers })));
 
     // Assert
-    should(actual).deepEqual([
-      { accountId: ID_TWO, outcome: { ok: false, reason: 'the target home is read-only' } },
-    ]);
+    should(actual).deepEqual([{ accountId: ID_TWO, outcome: { ok: false, reason: 'the target home is read-only' } }]);
   });
 });
 
