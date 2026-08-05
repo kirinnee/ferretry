@@ -1,10 +1,10 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, lstat, mkdtemp, open, readFile, readlink, rm, symlink, utimes } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rm, symlink, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
-import { FileSharedHistoryFileSystem } from '../../src/adapters/file-shared-history.ts';
-import { type SharedHistoryFileSystem, SharedHistoryMigration } from '../../src/lib/shared-history.ts';
+import { FileSharedHistoryFileSystem, sharedHistoryMoveRefusal } from '../../src/adapters/file-shared-history.ts';
+import { SharedHistoryMigration } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -20,6 +20,21 @@ afterEach(async () => {
 
 async function write(target: string, content: string): Promise<void> {
   await Bun.write(target, content);
+}
+
+/** The real filesystem with one link refused, so rollback is proved against real state. */
+class LinkFailingFileSystem extends FileSharedHistoryFileSystem {
+  constructor(
+    allowedRoots: readonly string[],
+    private readonly refusedDestination: string,
+  ) {
+    super(allowedRoots);
+  }
+
+  override async createSymbolicLink(target: string, destination: string): Promise<void> {
+    if (destination === this.refusedDestination) throw new Error('injected link failure');
+    await super.createSymbolicLink(target, destination);
+  }
 }
 
 describe('FileSharedHistoryFileSystem', () => {
@@ -144,6 +159,101 @@ describe('FileSharedHistoryFileSystem', () => {
     should(await readlink(link)).equal(file);
   });
 
+  it('should refuse every operation whose ancestor link points out of the allowed roots', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const outside = await temporaryDirectory();
+    const inside = path.join(root, 'inside');
+    const escapeLink = path.join(root, 'escape');
+    await write(path.join(outside, 'file'), 'foreign');
+    await mkdir(path.join(outside, 'directory'));
+    await symlink(path.join(outside, 'directory'), path.join(outside, 'link'));
+    await write(inside, 'local');
+    await symlink(outside, escapeLink);
+    const subject = new FileSharedHistoryFileSystem([root]);
+    const escaped = (name: string): string => path.join(escapeLink, name);
+
+    // Act
+    const actions = [
+      async () => await subject.snapshot(escaped('file')),
+      async () => await subject.ensureDirectory(escaped('created')),
+      async () => await subject.ensureFile(escaped('created')),
+      async () => await subject.move(inside, escaped('moved')),
+      async () => await subject.move(escaped('file'), path.join(root, 'stolen')),
+      async () => await subject.writeTextAtomic(escaped('file'), 'overwritten'),
+      async () => await subject.writeTextExclusive(escaped('created'), 'overwritten'),
+      async () => await subject.rewriteTextInPlace(escaped('file'), 'foreign', 'overwritten'),
+      async () => await subject.createSymbolicLink(inside, escaped('created')),
+      async () => await subject.createSymbolicLink(escaped('file'), path.join(root, 'stolen')),
+      async () => await subject.removeSymbolicLink(escaped('link'), escaped('directory')),
+      async () => await subject.removeEmptyDirectory(escaped('directory')),
+      async () => await subject.removeFile(escaped('file')),
+    ];
+
+    // Assert
+    for (const action of actions) await should(action()).be.rejectedWith(/outside configured roots/);
+    should((await readdir(outside)).toSorted()).eql(['directory', 'file', 'link']);
+    should(await readFile(path.join(outside, 'file'), 'utf8')).equal('foreign');
+    should(await readFile(inside, 'utf8')).equal('local');
+    should(await readdir(root)).not.containEql('stolen');
+  });
+
+  it('should accept a root reached through a link and still confine what is inside it', async () => {
+    // Arrange
+    const real = await temporaryDirectory();
+    const elsewhere = await temporaryDirectory();
+    const linkedRoot = path.join(elsewhere, 'root-link');
+    await symlink(real, linkedRoot);
+    const subject = new FileSharedHistoryFileSystem([linkedRoot]);
+
+    // Act
+    const created = await subject.ensureFile(path.join(linkedRoot, 'file'));
+    const throughRealPath = await subject.snapshot(path.join(real, 'file'));
+
+    // Assert
+    should(created).be.true();
+    should(throughRealPath).match({ kind: 'file' });
+    await should(subject.snapshot(path.join(elsewhere, 'sibling'))).be.rejectedWith(/outside configured roots/);
+  });
+
+  it('should refuse the filesystem root and a path directly beneath it', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const actions = [
+      async () => await subject.snapshot(path.sep),
+      async () => await subject.snapshot(path.join(path.sep, 'fy-shared-history-absent')),
+    ];
+
+    // Assert
+    for (const action of actions) await should(action()).be.rejectedWith(/outside configured roots/);
+  });
+
+  it('should fail closed when an ancestor is a file or cannot be resolved', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const file = path.join(root, 'file');
+    const unreadable = path.join(root, 'unreadable');
+    await write(file, 'evidence');
+    await write(path.join(unreadable, 'child'), 'evidence');
+    await chmod(unreadable, 0o000);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      const throughFile = async () => await subject.snapshot(path.join(file, 'a', 'b'));
+      const throughUnreadable = async () => await subject.snapshot(path.join(unreadable, 'child', 'deeper'));
+
+      // Assert
+      await should(throughFile()).be.rejectedWith(/ENOTDIR/);
+      await should(throughUnreadable()).be.rejectedWith(/EACCES/);
+    } finally {
+      await chmod(unreadable, 0o700);
+    }
+  });
+
   it('should fail closed when a directory cannot be listed', async () => {
     // Arrange
     const root = await temporaryDirectory();
@@ -162,6 +272,113 @@ describe('FileSharedHistoryFileSystem', () => {
     } finally {
       await chmod(unreadable, 0o700);
     }
+  });
+
+  it('should rewrite text in place, keeping the inode a live reader already holds', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const target = path.join(root, 'history.jsonl');
+    await write(target, 'first\nsecond\n');
+    const inodeBefore = (await lstat(target)).ino;
+    const reader = await open(target, 'r');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      const rewritten = await subject.rewriteTextInPlace(target, 'first\nsecond\n', 'only\n');
+      const stale = await subject.rewriteTextInPlace(target, 'first\nsecond\n', 'never written\n');
+
+      // Assert
+      should(rewritten).be.true();
+      should(stale).be.false();
+      should((await lstat(target)).ino).equal(inodeBefore);
+      should(await readFile(target, 'utf8')).equal('only\n');
+      should(await reader.readFile('utf8')).equal('only\n');
+    } finally {
+      await reader.close();
+    }
+  });
+
+  it('should refuse to rewrite anything that is not a regular file in place', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const file = path.join(root, 'file');
+    const link = path.join(root, 'link');
+    const directory = path.join(root, 'directory');
+    await write(file, 'evidence');
+    await symlink(file, link);
+    await mkdir(directory);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const actions = [link, directory, path.join(root, 'missing')].map(
+      target => async () => await subject.rewriteTextInPlace(target, 'evidence', 'overwritten'),
+    );
+
+    // Assert
+    for (const action of actions) await should(action()).be.rejectedWith(/in-place rewrite expected a file/);
+    should(await readFile(file, 'utf8')).equal('evidence');
+  });
+
+  it('should write a journal entry exclusively and refuse to replace one', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const target = path.join(root, 'journal', 'entry.json');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    await subject.writeTextExclusive(target, '{"step":1}\n');
+    const replaced = subject.writeTextExclusive(target, '{"step":2}\n');
+
+    // Assert
+    await should(replaced).be.rejectedWith(/exclusive write refused an existing path/);
+    should(await readFile(target, 'utf8')).equal('{"step":1}\n');
+    should((await lstat(target)).mode & 0o777).equal(0o600);
+  });
+
+  it('should surface an exclusive-write failure that is not a collision', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const readOnly = path.join(root, 'read-only');
+    await mkdir(readOnly);
+    await chmod(readOnly, 0o500);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      const promise = subject.writeTextExclusive(path.join(readOnly, 'entry.json'), '{"step":1}\n');
+
+      // Assert
+      await should(promise).be.rejectedWith(/EACCES/);
+    } finally {
+      await chmod(readOnly, 0o700);
+    }
+  });
+
+  it('should surface a rename failure that is not a cross-device move unchanged', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'directory');
+    await mkdir(directory);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const promise = subject.move(directory, path.join(directory, 'inside'));
+
+    // Assert
+    await should(promise).be.rejectedWith(/EINVAL/);
+  });
+
+  it('should refuse a cross-device move instead of copying pooled history', () => {
+    // Act
+    const refused = sharedHistoryMoveRefusal({ code: 'EXDEV' }, '/pool/source', '/other/destination');
+    const passedThrough = sharedHistoryMoveRefusal({ code: 'EINVAL' }, '/pool/source', '/other/destination');
+
+    // Assert
+    should(refused).be.instanceof(Error);
+    should((refused as Error).message).match(/refusing to copy shared history across filesystems/);
+    should((refused as Error).message).match(/\/pool\/source -> \/other\/destination/);
+    should(passedThrough).eql({ code: 'EINVAL' });
   });
 
   it('should reject an empty allowed-root declaration', () => {
@@ -262,22 +479,7 @@ describe('shared-history migration with the real filesystem', () => {
     const transcript = path.join(projects, 'session');
     const poolRoot = path.join(root, 'fleet', 'shared');
     await write(transcript, 'evidence');
-    const real = new FileSharedHistoryFileSystem([root]);
-    const failing: SharedHistoryFileSystem = {
-      snapshot: async (target, options) => await real.snapshot(target, options),
-      ensureDirectory: async target => await real.ensureDirectory(target),
-      ensureFile: async target => await real.ensureFile(target),
-      move: async (source, destination) => await real.move(source, destination),
-      writeTextAtomic: async (target, text) => await real.writeTextAtomic(target, text),
-      createSymbolicLink: async (target, destination) => {
-        if (destination === path.join(home, 'sessions')) throw new Error('injected link failure');
-        await real.createSymbolicLink(target, destination);
-      },
-      removeSymbolicLink: async (target, expected) => await real.removeSymbolicLink(target, expected),
-      removeEmptyDirectory: async target => await real.removeEmptyDirectory(target),
-      removeFile: async target => await real.removeFile(target),
-    };
-    const subject = new SharedHistoryMigration(failing);
+    const subject = new SharedHistoryMigration(new LinkFailingFileSystem([root], path.join(home, 'sessions')));
 
     // Act
     const promise = subject.materialize({
