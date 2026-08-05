@@ -19,8 +19,8 @@ coverageDir = "coverage/int"
 coverageSkipTestFiles = true
 # Int ledger = the adapters tier only; the domain is the unit ledger, the glue is not an adapter, tests/** never counts.
 #
-# The PWA's browser glue (hooks, shell, features) deliberately lives outside src/lib but is
-# claimed by the UNIT ledger at 100% — scripts/ci/test.sh names those four directories explicitly.
+# The PWA's browser glue (components, features, hooks, shell) deliberately lives outside src/lib but
+# is claimed by the UNIT ledger at 100% — scripts/ci/test.sh names those four directories explicitly.
 # A browser integration test that renders one of those components would otherwise drag it into the
 # adapters ledger, where it is neither expected nor measurable. Excluding them here is the same
 # classification the src/lib line above makes, not a relaxation: every one of these files is already
