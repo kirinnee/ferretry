@@ -52,7 +52,11 @@ import {
   type RoutingCatalogPort,
   TeamAdvisor,
 } from '../../../../src/lib/core/index.ts';
-import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import {
+  CapabilityGrantService,
+  DEFAULT_CAPABILITY_GRANTS,
+  type GrantAuditEntry,
+} from '../../../../src/lib/grants/index.ts';
 import type {
   LearningState,
   LearningStorePort,

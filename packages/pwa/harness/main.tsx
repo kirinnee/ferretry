@@ -1396,7 +1396,9 @@ const HARNESS_GRANTS_UNGATED: GrantsView = {
   // `mayGrant: true` — this fixture is the caller standing AT the machine, the only one that may widen.
   // It is what makes the "direct local" capability-list frame a real loopback view rather than a remote
   // view wearing a local badge.
-  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'ungated', 'default', true)),
+  capabilities: DAEMON_CAPABILITIES.map(capability =>
+    grantEntry(capability, on, 'granted', 'ungated', 'default', true),
+  ),
   passwordSet: false,
   unlocked: false,
 };
