@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  buildFleetUsageCollector,
   type FleetApplyPlan,
   type FleetApplyResult,
   type FleetConfig,
@@ -8,12 +9,17 @@ import {
   type FleetManifest,
   FleetManifestSchema,
   FleetPlan,
-  FleetUsageCollector,
   type FleetUsageProbe,
-  type FleetUsageProbeResult,
   type FleetUsageSnapshot,
 } from '@ferretry/fleet';
-import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
+import {
+  AnthropicUsageProbe,
+  FileFleetConfigSource,
+  FileFleetProvisioner,
+  fetchQuota,
+  PlatformFleetCredentialStore,
+  SpawnCredentialCommand,
+} from '@ferretry/fleet/adapters';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -45,6 +51,14 @@ export interface DaemonFleetOptions {
   readonly userHome: string;
   readonly clock: FleetRouteClock;
   readonly usageProbe?: FleetUsageProbe;
+  /**
+   * This host's platform, spelled the way the Node runtime spells it, and the keychain `acct` attribute the
+   * credential store falls back to on macOS. Both are supplied rather than read: the composition root
+   * is the only place allowed to touch the environment, and injecting them is what lets a test drive
+   * the macOS credential path on a host that is not macOS.
+   */
+  readonly platform: string;
+  readonly keychainAccount?: string;
 }
 
 type FleetRefusalCode =
@@ -63,17 +77,6 @@ class FleetRefusal extends Error {
   ) {
     super(message);
     this.name = 'FleetRefusal';
-  }
-}
-
-class UnprovisionedFleetUsageProbe implements FleetUsageProbe {
-  probe(): Promise<FleetUsageProbeResult> {
-    return Promise.resolve({
-      usageBased: false,
-      ok: false,
-      unavailable: true,
-      unavailableReason: 'no provider quota probe is provisioned on this daemon',
-    });
   }
 }
 
@@ -104,7 +107,6 @@ class MountedFleet implements FleetSubsystem {
   private readonly configSource: FileFleetConfigSource;
   private readonly planner = new FleetPlan();
   private readonly provisioner: FileFleetProvisioner;
-  private readonly usageCollector: FleetUsageCollector;
 
   constructor(private readonly options: DaemonFleetOptions) {
     this.layout = fleetLayout(options.paths, options.userHome);
@@ -114,10 +116,6 @@ class MountedFleet implements FleetSubsystem {
     // under the user home. Those are the only two roots this daemon declares writable; an absolute
     // account home elsewhere remains visible in GET /plan and is refused by the shared adapter.
     this.provisioner = new FileFleetProvisioner([options.paths.home, options.userHome]);
-    this.usageCollector = new FleetUsageCollector(
-      options.usageProbe ?? new UnprovisionedFleetUsageProbe(),
-      options.clock,
-    );
   }
 
   async accounts(): Promise<FleetManifest> {
@@ -153,8 +151,32 @@ class MountedFleet implements FleetSubsystem {
     }
   }
 
+  /**
+   * Quota, collected through the same factory and the same probe the CLI uses.
+   *
+   * Built per request rather than once at mount, because the thresholds, the concurrency and the
+   * per-credential grouping are all configuration: a collector assembled before the configuration was
+   * read could only ever use the defaults. Two call sites each assembling their own is how this route
+   * and `fy fleet usage` would come to disagree about whether an account has quota left.
+   */
   async usage(): Promise<FleetUsageSnapshot> {
-    return await this.usageCollector.collect(await this.loadManifest());
+    const [config, manifest] = [await this.config(), await this.loadManifest()];
+    return await buildFleetUsageCollector(config, this.options.usageProbe ?? this.probe(), this.options.clock).collect(
+      manifest,
+    );
+  }
+
+  /** This host's provider probe. Shared with the CLI so neither can drift from the other. */
+  private probe(): FleetUsageProbe {
+    return new AnthropicUsageProbe({
+      fetch: fetchQuota,
+      credentials: new PlatformFleetCredentialStore({
+        platform: this.options.platform,
+        command: new SpawnCredentialCommand(),
+        now: () => this.options.clock.now(),
+        keychainAccount: this.options.keychainAccount ?? '',
+      }),
+    });
   }
 
   async apply(): Promise<FleetApplyResult> {

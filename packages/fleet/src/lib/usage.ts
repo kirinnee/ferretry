@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import type { FleetConfig } from './config.ts';
+import { accountIdentityKeys } from './identity.ts';
 import type { FleetManifest, FleetManifestAccount } from './manifest.ts';
 
 const finiteNumber = z.number().refine(Number.isFinite, 'expected a finite number');
@@ -220,9 +222,7 @@ export class FleetUsageCollector {
       const unavailableReason = declared.get(account.id);
       if (unavailableReason !== undefined) return this.#unavailableRow(account, unavailableReason);
       const reading = readings.get(this.identityOf(account));
-      return reading === undefined
-        ? this.#failedRow(account, 'usage probe failed')
-        : this.#row(account, reading);
+      return reading === undefined ? this.#failedRow(account, 'usage probe failed') : this.#row(account, reading);
     });
 
     return FleetUsageSnapshotSchema.parse({ at: normalizeClock(this.clock.now()), accounts: rows });
@@ -416,4 +416,29 @@ async function boundedMap<Input, Output>(
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
   return output;
+}
+
+/**
+ * The one way to build a usage collector.
+ *
+ * Both `fy fleet usage` and the daemon's `GET /v1/fleet/usage` answer the same question about the same
+ * host, so they must answer it the same way. Two call sites each assembling their own collector is how
+ * they drift: one honours a declared `atLimitPercent` and the other does not, or one probes per
+ * credential and the other per account, and eventually they disagree about whether an account has
+ * quota left. Everything that shapes the answer — the thresholds, the concurrency and the grouping —
+ * is read from the configuration here, once.
+ *
+ * Built per invocation rather than once at startup because all three are configuration, and a collector
+ * assembled before the configuration was read can only ever use the defaults.
+ */
+export function buildFleetUsageCollector(
+  config: FleetConfig,
+  probe: FleetUsageProbe,
+  clock: FleetUsageClock,
+): FleetUsageCollector {
+  return new FleetUsageCollector(probe, clock, {
+    concurrency: config.usage.concurrency,
+    atLimitPercent: config.usage.atLimitPercent,
+    identityOf: accountIdentityKeys(config),
+  });
 }

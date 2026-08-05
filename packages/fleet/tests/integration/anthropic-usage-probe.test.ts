@@ -76,9 +76,10 @@ function transport(replies: Readonly<Record<string, Reply>>): {
       status,
       ok: reply.ok ?? (status >= 200 && status < 300),
       header: name => reply.headers?.[name.toLowerCase()] ?? null,
-      json: reply.unreadableJson === true
-        ? () => Promise.reject(new Error('Unexpected token < in JSON'))
-        : () => Promise.resolve(reply.body),
+      json:
+        reply.unreadableJson === true
+          ? () => Promise.reject(new Error('Unexpected token < in JSON'))
+          : () => Promise.resolve(reply.body),
     };
     return Promise.resolve(response);
   };
@@ -150,7 +151,9 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     should(actual.ok).be.false();
     should(actual.authOk).be.true();
     should(actual.unavailable).be.undefined();
-    should(actual).have.property('error').match(/HTTP 500/u);
+    should(actual)
+      .have.property('error')
+      .match(/HTTP 500/u);
   });
 
   it('should report a failure rather than a number when the body carries no measurement', async () => {
@@ -162,7 +165,9 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
 
     // Assert — never a fabricated 0%.
     should(actual.ok).be.false();
-    should(actual).have.property('error').match(/no readable quota measurement/u);
+    should(actual)
+      .have.property('error')
+      .match(/no readable quota measurement/u);
     should(actual.shortWindow).be.undefined();
   });
 
@@ -175,7 +180,9 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
 
     // Assert
     should(actual.ok).be.false();
-    should(actual).have.property('error').match(/unreadable JSON/u);
+    should(actual)
+      .have.property('error')
+      .match(/unreadable JSON/u);
   });
 
   it('should report a transport failure with its own message', async () => {
@@ -282,7 +289,9 @@ describe('AnthropicUsageProbe falling back to the inference probe', () => {
 
     // Assert
     should(actual.ok).be.false();
-    should(actual).have.property('error').match(/no quota headers/u);
+    should(actual)
+      .have.property('error')
+      .match(/no quota headers/u);
   });
 
   it('should mark a forbidden inference account unavailable without condemning its credential', async () => {
@@ -339,7 +348,9 @@ describe('AnthropicUsageProbe falling back to the inference probe', () => {
 
     // Assert
     should(actual.ok).be.false();
-    should(actual).have.property('error').match(/no readable quota measurement/u);
+    should(actual)
+      .have.property('error')
+      .match(/no readable quota measurement/u);
   });
 });
 
@@ -357,7 +368,9 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     should(requests).deepEqual([]);
     should(actual.ok).be.false();
     should(actual.authOk).be.false();
-    should(actual).have.property('error').match(/no readable access token/u);
+    should(actual)
+      .have.property('error')
+      .match(/no readable access token/u);
   });
 
   it('should refuse a credential whose bytes are not readable JSON', async () => {
@@ -418,7 +431,9 @@ describe('AnthropicUsageProbe when there is nothing to ask with', () => {
     should(requests).deepEqual([]);
     should(actual.ok).be.false();
     should(actual.usageBased).be.false();
-    should(actual).have.property('error').match(/no Anthropic quota probe applies to a codex account/u);
+    should(actual)
+      .have.property('error')
+      .match(/no Anthropic quota probe applies to a codex account/u);
   });
 
   it('should honour a supplied timeout', async () => {
@@ -479,7 +494,12 @@ describe('fetchQuota', () => {
     );
 
     // Act
-    const actual = await fetchQuota({ url, method: 'GET', headers: { Authorization: 'Bearer placeholder' }, timeoutMs: 5_000 });
+    const actual = await fetchQuota({
+      url,
+      method: 'GET',
+      headers: { Authorization: 'Bearer placeholder' },
+      timeoutMs: 5_000,
+    });
 
     // Assert
     should(actual.status).equal(200);
