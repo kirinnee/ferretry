@@ -39,8 +39,7 @@ interface CapabilityCheck {
   readonly requested: (config: FleetConfig) => boolean;
 }
 
-/** The schema defaults these checks compare against; a mismatch here would silently disarm one. */
-const USAGE_INTERVAL_DEFAULT = 60;
+/** The schema default this check compares against; a mismatch here would silently disarm it. */
 const USAGE_JITTER_DEFAULT = 0.25;
 
 /**
@@ -74,16 +73,15 @@ const CAPABILITY_CHECKS: readonly CapabilityCheck[] = [
     consequence: 'nothing verifies an account beyond that its wrapper exists, so a broken account reads as fine',
     requested: config => config.health.enabled,
   },
-  {
-    key: 'usage.interval',
-    capability: 're-probing quota on a schedule in the background',
-    consequence: 'quota is only ever as fresh as the last `fy fleet usage`, and nothing says how old it is',
-    requested: config => config.usage.interval !== USAGE_INTERVAL_DEFAULT,
-  },
+  // `usage.interval` is NOT here any more. It is implemented: the daemon's cached usage feed
+  // collects through this library and serves one snapshot for exactly that many seconds before
+  // re-collecting, which is what re-probing on a schedule means. It stays the only name for that
+  // cadence — the daemon's own configuration used to carry a second one.
   {
     key: 'usage.jitter',
     capability: 'spreading a fleet’s background probes so they do not synchronize',
-    consequence: 'there is no background probe cycle to spread',
+    consequence:
+      'the daemon re-collects when a snapshot has aged past usage.interval rather than on a timer, so there is no synchronized cycle to spread',
     requested: config => config.usage.jitter !== USAGE_JITTER_DEFAULT,
   },
 ];

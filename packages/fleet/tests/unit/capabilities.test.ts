@@ -74,12 +74,20 @@ describe('unimplementedCapabilities', () => {
     should(actual).deepEqual(['usage.cliProxy']);
   });
 
-  it('should refuse background health probing and a changed re-probe schedule', () => {
+  it('should refuse background health probing and unspreadable probes together', () => {
     // Act
-    const actual = keysOf(config({ health: { enabled: true }, usage: { interval: 300, jitter: 0.5 } }));
+    const actual = keysOf(config({ health: { enabled: true }, usage: { jitter: 0.5 } }));
 
     // Assert — reported together, so one apply tells the operator everything to fix.
-    should(actual).deepEqual(['health.enabled', 'usage.interval', 'usage.jitter']);
+    should(actual).deepEqual(['health.enabled', 'usage.jitter']);
+  });
+
+  it('should accept a declared re-probe interval, which the daemon feed now runs on', () => {
+    // Act — the one name for that cadence. The daemon's own `usage.refreshSeconds` is gone.
+    const actual = keysOf(config({ usage: { interval: 900 } }));
+
+    // Assert
+    should(actual).deepEqual([]);
   });
 
   it('should describe what is lost, not merely that a key is unsupported', () => {

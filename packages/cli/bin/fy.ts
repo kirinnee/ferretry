@@ -47,6 +47,8 @@ import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
 import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
+import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
+import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { BunAudioFileReader } from '../src/adapters/stt/audio-file';
 import { TimerDelay } from '../src/adapters/stt/delay';
@@ -91,13 +93,11 @@ import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
+import { registerScratchCommands } from '../src/lib/scratch/commands';
+import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
-import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
-import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
-import { registerScratchCommands } from '../src/lib/scratch/commands';
-import { ScratchController } from '../src/lib/scratch/controller';
 import {
   AnswerQuestionController,
   InterruptSessionController,
@@ -547,8 +547,10 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     },
     // Writes are bounded to the fleet directory: nothing outside it is ever created or pruned.
     applier: new FileFleetProvisioner([layout.fleetDirectory]),
-    // Built per invocation from the loaded configuration, so `usage.concurrency` and
-    // `usage.atLimitPercent` are honoured instead of parsed and dropped.
+    // Built per invocation from the loaded configuration, so `usage.concurrency`,
+    // `usage.atLimitPercent` and `usage.timeout` are honoured instead of parsed and dropped. The
+    // timeout goes to the probe rather than the collector because only the probe can actually cancel
+    // a provider call; the daemon's fleet mount passes the same value at its own construction.
     // The same collector the daemon builds, from the same factory, over the same probe: two call
     // sites assembling their own is how `fy fleet usage` and GET /v1/fleet/usage come to disagree about
     // whether an account has quota left. The credential store is shared with login, so the token a
@@ -557,7 +559,11 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
       forConfig: config =>
         buildFleetUsageCollector(
           config,
-          new AnthropicUsageProbe({ fetch: fetchQuota, credentials: credentialStore }),
+          new AnthropicUsageProbe({
+            fetch: fetchQuota,
+            timeoutMs: config.usage.timeout * 1_000,
+            credentials: credentialStore,
+          }),
           new SystemUsageClock(),
         ),
     },
