@@ -132,7 +132,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
 function browserAutomationUnmounted(): ApiError {
   return new ApiError(
     501,
-    'this daemon mounts the human browser-login window but no per-session automation: it has no browser worker program and no viewer host',
+    'this daemon mounts the human browser-login window but no per-session automation: the browser worker and its transport exist, but nothing composes them into the per-session runtime and viewer host this route would call',
     'browser_automation_not_mounted',
   );
 }

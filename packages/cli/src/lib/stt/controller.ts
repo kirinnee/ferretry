@@ -1,4 +1,4 @@
-import type { SttEnhancementResult } from '@ferretry/protocol';
+import { MAX_STT_DICTIONARY_ENTRIES, type SttEnhancementResult } from '@ferretry/protocol';
 import type { ISttGateway, ISttOutput } from './ports.ts';
 import { renderEnhancement } from './render.ts';
 
@@ -31,7 +31,13 @@ export class SttController {
     if (text === '') throw new Error('enhance needs the text to clean up');
     const model = trimmed(options.model);
     const userContext = trimmed(options.context);
-    const dictionary = (options.term ?? []).map(term => term.trim()).filter(term => term !== '');
+    // The wire carries at most `MAX_STT_DICTIONARY_ENTRIES` terms, and the schema refuses the WHOLE
+    // request when a dictionary is longer. Keeping the first entries is what the contract asks of a
+    // client: one term too many costs that term, never the correction.
+    const dictionary = (options.term ?? [])
+      .map(term => term.trim())
+      .filter(term => term !== '')
+      .slice(0, MAX_STT_DICTIONARY_ENTRIES);
     const result = await this.gateway.enhance({
       text,
       provider: 'groq',
