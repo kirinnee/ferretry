@@ -24,12 +24,7 @@ import {
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
-import {
-  type DaemonConnection,
-  type DaemonId,
-  type RelayCarrier,
-  sameDaemonConnection,
-} from './daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, type RelayCarrier, sameDaemonConnection } from './daemon-connection.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
