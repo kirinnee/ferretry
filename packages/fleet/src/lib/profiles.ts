@@ -5,8 +5,12 @@
  * Precedence, right overriding left:
  *
  * ```
- * base → agent.profiles → variant.profiles → variant.inline → agent.inline
+ * base → agent.profiles → variant.profiles → variant.inline → agent.inline → route.layer
  * ```
+ *
+ * `route.layer` is last because it belongs to exactly one account. Every earlier slot is shared by
+ * construction — an agent's inline fields reach all of that agent's routes — so the only place a
+ * single account's instructions, skills, settings or environment can differ is its own layer.
  *
  * Per field: `env` merges key-by-key, `flags` and `settings` **concatenate** (settings layers are
  * deep-merged later, at materialization, so ordering is the whole contract), and every other field
@@ -169,6 +173,7 @@ export function resolveAccounts(config: FleetConfig): readonly ResolvedAccount[]
         ...namedProfiles(config, variant?.profiles ?? []),
         ...(variant === undefined ? [] : [inlineOf(variant)]),
         agentInline,
+        ...(route.layer === undefined ? [] : [route.layer]),
       ];
 
       const resolved = slots.reduce(

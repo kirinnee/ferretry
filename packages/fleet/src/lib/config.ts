@@ -152,6 +152,12 @@ export const AccountRouteSchema = z.strictObject({
   models: z.array(ModelDeclarationSchema).default([]),
   available: z.boolean().default(true),
   unavailableReason: NonEmptyString.optional(),
+  /**
+   * This one account's own overlay, applied after every shared slot. Two routes on the same agent
+   * can therefore carry different instructions, skills, settings and environment without either
+   * one leaking onto the other — which an agent-wide inline field cannot express.
+   */
+  layer: ProfileSchema.optional(),
 });
 export type AccountRoute = z.infer<typeof AccountRouteSchema>;
 

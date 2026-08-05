@@ -509,3 +509,135 @@ describe('toManifestAccounts', () => {
     }
   });
 });
+
+describe('resolveAccounts route layer', () => {
+  it("should apply a route's own layer after every shared slot", () => {
+    // Arrange
+    const config = parse({
+      profiles: { base: { env: { A: 'base' }, flags: ['--base'], memory: './base.md' } },
+      variants: { default: { env: { A: 'variant' }, flags: ['--variant'] } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          env: { A: 'agent' },
+          flags: ['--agent'],
+          memory: './agent.md',
+          routes: {
+            default: route({
+              layer: { env: { A: 'route' }, flags: ['--route'], memory: './route.md' },
+            }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = resolveAccounts(config);
+
+    // Assert
+    should(actual[0]?.env).deepEqual({ A: 'route' });
+    should(actual[0]?.flags).deepEqual(['--base', '--variant', '--agent', '--route']);
+    should(actual[0]?.memory).equal('./route.md');
+  });
+
+  it('should keep two routes on one agent independent across every layer concern', () => {
+    // Arrange
+    const config = parse({
+      variants: { default: {}, auto: { mode: 'auto' } },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          env: { SHARED: 'yes' },
+          routes: {
+            default: route({
+              layer: {
+                memory: './default.md',
+                skills: './skills-default',
+                settings: { lane: 'default' },
+                env: { LANE: 'default' },
+              },
+            }),
+            auto: route({
+              id: ID_TWO,
+              wrapper: 'claude-auto-kirin',
+              home: '/homes/auto-kirin',
+              layer: {
+                memory: './auto.md',
+                skills: './skills-auto',
+                settings: { lane: 'auto' },
+                env: { LANE: 'auto' },
+              },
+            }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = resolveAccounts(config);
+
+    // Assert
+    should(actual[0]?.memory).equal('./default.md');
+    should(actual[1]?.memory).equal('./auto.md');
+    should(actual[0]?.skills).equal('./skills-default');
+    should(actual[1]?.skills).equal('./skills-auto');
+    should(actual[0]?.settings).deepEqual([{ lane: 'default' }]);
+    should(actual[1]?.settings).deepEqual([{ lane: 'auto' }]);
+    should(actual[0]?.env).deepEqual({ SHARED: 'yes', LANE: 'default' });
+    should(actual[1]?.env).deepEqual({ SHARED: 'yes', LANE: 'auto' });
+  });
+
+  it('should leave an account untouched when only its sibling declares a layer', () => {
+    // Arrange
+    const config = parse({
+      variants: { default: {}, auto: {} },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'claude',
+          routes: {
+            default: route({ layer: { memory: './only-default.md', env: { ONLY: 'default' } } }),
+            auto: route({ id: ID_TWO, wrapper: 'claude-auto-kirin', home: '/homes/auto-kirin' }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = resolveAccounts(config);
+
+    // Assert
+    should(actual[1]?.memory).equal(undefined);
+    should(actual[1]?.env).deepEqual({});
+  });
+
+  it("should flatten a route layer's harness overlay for the agent's own harness", () => {
+    // Arrange
+    const config = parse({
+      variants: { default: {} },
+      agents: [
+        {
+          name: 'kirin',
+          kind: 'codex',
+          routes: {
+            default: route({
+              layer: {
+                memory: './flat.md',
+                claude: { memory: './claude.md' },
+                codex: { memory: './codex.md' },
+              },
+            }),
+          },
+        },
+      ],
+    });
+
+    // Act
+    const actual = resolveAccounts(config);
+
+    // Assert
+    should(actual[0]?.memory).equal('./codex.md');
+  });
+});
