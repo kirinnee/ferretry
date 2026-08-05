@@ -1,9 +1,11 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
+import type { ComponentProps, ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import { FileInstanceSurface } from '../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../src/components/files-tab.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
@@ -14,15 +16,11 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
-import {
-  openSidePaneFileTab,
-  openSidePaneTab,
-  registerSidePaneTab,
-  resetSidePaneTabsStates,
-} from '../../src/shell/side-pane-tab-model.ts';
+import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
+import { taskSummary } from '../support/tasks.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -30,7 +28,36 @@ const alpha = daemonConnection({
   deviceToken: 'alpha-token',
 });
 
-afterEach(() => resetSidePaneTabsStates());
+const originalFetch = globalThis.fetch;
+
+const route = (input: string | URL | Request): Response => {
+  const url = String(input);
+  if (url.includes('/v1/sessions/') && url.endsWith('/tasks')) return Response.json({ tasks: [] });
+  return Response.json(url.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
+};
+
+/** Mirrors the session route's required search boundary around the chat page. */
+const withSessionSearch = (page: ReactElement<ComponentProps<typeof SessionChatPage>>): ReactElement => (
+  <SessionSearchProvider
+    connection={page.props.connection}
+    focusSignal={0}
+    scope={daemonSessionScope(page.props.connection, page.props.session.config.id)}
+  >
+    {page}
+  </SessionSearchProvider>
+);
+
+const renderSessionChatPage = (page: ReactElement<ComponentProps<typeof SessionChatPage>>) =>
+  render(withSessionSearch(page));
+
+beforeEach(() => {
+  globalThis.fetch = (async (input: string | URL | Request) => route(input)) as typeof fetch;
+});
+
+afterEach(() => {
+  resetSidePaneTabsStates();
+  globalThis.fetch = originalFetch;
+});
 
 const buttonNamed = (root: ReactTestInstance, label: string): ReactTestInstance => {
   const button = root.findAllByType('button').find(candidate => candidate.children.join('') === label);
@@ -57,7 +84,7 @@ const client = (calls: string[], next: SessionView): SessionChatClient =>
 
 describe('SessionChatPage', () => {
   test('renders the proved transcript, composer, controls, and honest pane launchers', () => {
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -81,7 +108,7 @@ describe('SessionChatPage', () => {
   });
 
   test('states the missing browser pane in visible text rather than a disabled control', () => {
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -110,7 +137,7 @@ describe('SessionChatPage', () => {
   });
 
   test('moves the lifecycle controls into Session Details on a phone instead of wrapping the row', () => {
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -140,7 +167,7 @@ describe('SessionChatPage', () => {
 
   test('caps transcript and composer with one measure so neither can disagree with the other', () => {
     const surface = (presentation: 'pane' | 'sheet', chatWidth: 'full' | 'readable') => {
-      const page = render(
+      const page = renderSessionChatPage(
         <SessionChatPage
           chatWidth={chatWidth}
           client={client([], sessionView('shared'))}
@@ -170,7 +197,7 @@ describe('SessionChatPage', () => {
   });
 
   test('hands the composer its presentation so the phone gets the phone growth ceiling', () => {
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -193,7 +220,7 @@ describe('SessionChatPage', () => {
     const published: SessionView[] = [];
     let refreshes = 0;
     const next = sessionView('shared', { state: { status: 'interrupted' } });
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client(calls, next)}
         connection={alpha}
@@ -248,7 +275,7 @@ describe('SessionChatPage', () => {
   test('resumes finished sessions, reports lifecycle failures, and fences a wrong-session answer', async () => {
     const calls: string[] = [];
     const finished = sessionView('shared', { state: { status: 'completed' } });
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client(calls, sessionView('shared', { state: { status: 'running' } }))}
         connection={alpha}
@@ -272,15 +299,17 @@ describe('SessionChatPage', () => {
     } as SessionChatClient;
     run(() =>
       page.update(
-        <SessionChatPage
-          client={failing}
-          connection={alpha}
-          entries={[]}
-          onBack={() => undefined}
-          onSessionChange={() => undefined}
-          presentation="pane"
-          session={sessionView('shared')}
-        />,
+        withSessionSearch(
+          <SessionChatPage
+            client={failing}
+            connection={alpha}
+            entries={[]}
+            onBack={() => undefined}
+            onSessionChange={() => undefined}
+            presentation="pane"
+            session={sessionView('shared')}
+          />,
+        ),
       ),
     );
     await runAsync(async () => {
@@ -291,13 +320,23 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
-  test('renders each supported pane surface and an honest placeholder for unwired catalogue tabs', async () => {
-    const originalFetch = globalThis.fetch;
+  test('renders each supported pane surface and current-session task search', async () => {
+    const searchTask = {
+      ...taskSummary({ id: 'F6', title: 'Needle task' }),
+      ask: { source: 'human', text: 'Find the needle' },
+      clarifications: [],
+      description: 'A task used to prove the current-session search action.',
+      sessionId: 'shared',
+    };
     globalThis.fetch = (async (input: string | URL | Request) => {
-      const url = String(input);
-      return Response.json(url.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Response.json({ activity: [], sessionId: 'shared', task: searchTask });
+      if (url.pathname.endsWith('/tasks')) return Response.json({ tasks: [searchTask] });
+      if (url.pathname.endsWith('/fs')) return Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] });
+      return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
     }) as typeof fetch;
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -320,17 +359,22 @@ describe('SessionChatPage', () => {
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
 
       run(() => openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'tasks'));
-      expect(JSON.stringify(page.toJSON())).toContain('Tasks is ported but is not connected');
+      await runAsync(async () => {
+        for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+      });
+      const input = page.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'needle' } }));
+      const results = page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
+      expect(results).toHaveLength(2);
+      run(() => results[1]?.props.onClick());
 
       // ONE TAB PER FILE (#35): a file tab renders ITS file, not the picker.
-      run(() => openSidePaneFileTab(daemonSessionScope(alpha, 'shared'), 'docs/design.md'));
       await runAsync(async () => await Promise.resolve());
       expect(page.root.findAllByType(FileInstanceSurface)).toHaveLength(1);
-      expect(page.root.findAllByType(FileInstanceSurface)[0]?.props.instance.key).toBe('docs/design.md');
+      expect(page.root.findAllByType(FileInstanceSurface)[0]?.props.instance.key).toBe('needle.ts');
       expect(page.root.findAllByType(FilesTab)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
-      globalThis.fetch = originalFetch;
     }
   });
 
@@ -344,8 +388,16 @@ describe('SessionChatPage', () => {
       order: 75,
       render: ({ scope, cwd }) => <p data-workspace-proof="">{`${scope.daemonId}:${scope.sessionId}:${cwd}`}</p>,
     });
+    const unregisterUnwired = registerSidePaneTab({
+      id: 'unwired-proof',
+      label: 'Unwired proof',
+      shortLabel: 'Unwired',
+      closeLabel: 'Close unwired proof',
+      icon: 'tasks',
+      order: 76,
+    });
     openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'workspace-proof');
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}
@@ -358,9 +410,12 @@ describe('SessionChatPage', () => {
     );
     try {
       expect(page.root.findByProps({ 'data-workspace-proof': '' }).children.join('')).toBe('alpha:shared:/work/shared');
+      run(() => openSidePaneTab(daemonSessionScope(alpha, 'shared'), 'unwired-proof'));
+      expect(JSON.stringify(page.toJSON())).toContain('Unwired proof is ported but is not connected');
     } finally {
       run(() => page.unmount());
       unregister();
+      unregisterUnwired();
     }
   });
 
@@ -375,7 +430,7 @@ describe('SessionChatPage', () => {
       },
     });
     const calls: string[] = [];
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client(calls, pending)}
         connection={alpha}
@@ -405,15 +460,17 @@ describe('SessionChatPage', () => {
       // "waiting on an answer this build cannot give".
       run(() =>
         page.update(
-          <SessionChatPage
-            client={client([], pending)}
-            connection={alpha}
-            entries={[]}
-            onBack={() => undefined}
-            onSessionChange={() => undefined}
-            presentation="pane"
-            session={sessionView('shared', { state: { status: 'awaiting_question', pendingQuestion: null } })}
-          />,
+          withSessionSearch(
+            <SessionChatPage
+              client={client([], pending)}
+              connection={alpha}
+              entries={[]}
+              onBack={() => undefined}
+              onSessionChange={() => undefined}
+              presentation="pane"
+              session={sessionView('shared', { state: { status: 'awaiting_question', pendingQuestion: null } })}
+            />,
+          ),
         ),
       );
       expect(page.root.findAllByProps({ 'data-question-unavailable': '' }).length).toBeGreaterThan(0);
@@ -424,7 +481,7 @@ describe('SessionChatPage', () => {
   });
 
   test('renders the refresh error verbatim and never as a second live region', () => {
-    const page = render(
+    const page = renderSessionChatPage(
       <SessionChatPage
         client={client([], sessionView('shared'))}
         connection={alpha}

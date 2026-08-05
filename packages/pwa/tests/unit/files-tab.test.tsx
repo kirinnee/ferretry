@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { resetFsProbes, type FsChanges, type FsFile, type FsListing } from '../../src/components/files-api.ts';
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { readFilesTabState, resetFilesTabStates } from '../../src/components/files-tab-model.ts';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { interact, mount, must, type Mounted } from '../support/dom.ts';
@@ -97,8 +98,23 @@ const settle = async (): Promise<void> => {
   });
 };
 
-const open = async (element: Parameters<typeof mount>[0]): Promise<Mounted> => {
-  const view = await mount(element);
+/** Mirrors the session-route provider boundary above every Files tab mount. */
+const withSessionSearch = (
+  element: Parameters<typeof mount>[0],
+  connection = daemon,
+  sessionScope = scope,
+): Parameters<typeof mount>[0] => (
+  <SessionSearchProvider connection={connection} focusSignal={0} scope={sessionScope}>
+    {element}
+  </SessionSearchProvider>
+);
+
+const open = async (
+  element: Parameters<typeof mount>[0],
+  connection = daemon,
+  sessionScope = scope,
+): Promise<Mounted> => {
+  const view = await mount(withSessionSearch(element, connection, sessionScope));
   await settle();
   return view;
 };
@@ -162,7 +178,7 @@ describe('the Files tab', () => {
       expect(view.container.textContent).toContain('contents of secrets.md');
 
       // Same session id, different daemon: the pane must not carry the tab over.
-      await view.render(<FilesTab daemon={second} scope={secondScope} />);
+      await view.render(withSessionSearch(<FilesTab daemon={second} scope={secondScope} />, second, secondScope));
       await settle();
       expect(view.container.textContent).not.toContain('contents of secrets.md');
       expect(view.container.querySelector('.kt-fs-tabs')).toBeNull();

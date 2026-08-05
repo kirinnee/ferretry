@@ -15,6 +15,7 @@ import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { Transcript } from '../../components/transcript.tsx';
+import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, sessionActionSpecs } from '../../shell/session-actions.ts';
@@ -106,6 +107,31 @@ function PaneLaunchers() {
   );
 }
 
+/** Gives the app-bar search real current-workspace destinations without ever
+ * retaining a callback across a daemon/session change. */
+function SessionSearchWorkspaceActions({ scope }: { readonly scope: ReturnType<typeof daemonSessionScope> }) {
+  const pane = useSidePane();
+  const search = useSessionSearch();
+  useEffect(() => {
+    if (
+      pane === null ||
+      search.scope === null ||
+      search.scope.daemonId !== scope.daemonId ||
+      search.scope.sessionId !== scope.sessionId
+    )
+      return;
+    search.setOpeners({
+      openFile: path => {
+        pane.open('files');
+        openSidePaneFileTab(scope, path);
+      },
+      openTasks: () => pane.open('tasks'),
+    });
+    return () => search.setOpeners(null);
+  }, [pane, scope, search]);
+  return null;
+}
+
 interface WorkspaceSurfaceProps extends SidePaneSurfaceProps {
   readonly connection: DaemonConnection;
   readonly session: SessionView;
@@ -132,6 +158,8 @@ function WorkspaceSurface({
     // open files are two tabs, each with its own raw/diff choice and its own
     // reading position.
     body = <FileInstanceSurface daemon={connection} scope={scope} instance={tab.instance} markdown={references} />;
+  } else if (tab.id === 'tasks') {
+    body = <SessionTasksSearchSurface />;
   } else if (tab.id === 'files') {
     // The picker: tree, listing, breadcrumbs. Every open it produces becomes a
     // file tab in the pane's own strip, so this surface holds no second strip.
@@ -364,6 +392,7 @@ export function SessionChatPage({
         />
       )}
     >
+      <SessionSearchWorkspaceActions scope={scope} />
       {/* Every Markdown reader inside the conversation — transcript prose,
           notices, and whatever a later item renders here — reads references
           through this one surface. */}

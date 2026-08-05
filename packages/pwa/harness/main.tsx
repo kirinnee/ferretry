@@ -101,6 +101,7 @@ import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
+import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -4362,6 +4363,7 @@ function SessionWorkspaceHarness() {
         sessionCount={7}
         connectionStatus="open"
         themeToggle={<Button size="sm">Theme</Button>}
+        currentSessionSearch={<SessionSearchControl />}
       />
       <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
         <SessionChatPage
@@ -4391,14 +4393,16 @@ if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
-    settingsHarness ? (
-      <StandaloneSettingsPageHarness />
-    ) : window.location.hash === '#session-workspace' ? (
-      <SessionWorkspaceHarness />
-    ) : screen === undefined ? (
-      <Shell />
-    ) : (
-      <OnboardingStageHarness screen={screen} />
-    ),
+    <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+      {settingsHarness ? (
+        <StandaloneSettingsPageHarness />
+      ) : window.location.hash === '#session-workspace' ? (
+        <SessionWorkspaceHarness />
+      ) : screen === undefined ? (
+        <Shell />
+      ) : (
+        <OnboardingStageHarness screen={screen} />
+      )}
+    </SessionSearchProvider>,
   );
 }
