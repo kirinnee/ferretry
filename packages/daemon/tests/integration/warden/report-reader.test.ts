@@ -182,17 +182,14 @@ describe('WardenReportReader', () => {
     should(verdicts.map(entry => entry.targetSession)).eql(['a']);
   });
 
-  it('should skip an empty report rather than emit a blank row', async () => {
+  it('should refuse an empty report rather than presenting an incomplete history as quiet', async () => {
     // Arrange
     const { reports, reader } = await reportsHome('warden-blank');
     await writeReport(reports, 'blank.md', '   \n');
     await writeReport(reports, 'real.md', '# Warden report — real\n\nVerdict: LEAVE');
 
-    // Act
-    const verdicts = await reader.readVerdicts();
-
-    // Assert
-    should(verdicts.map(entry => entry.targetSession)).eql(['real']);
+    // Act / Assert
+    await should(reader.readVerdicts()).be.rejectedWith('a Warden report could not be read');
   });
 
   it('should honour the requested row limit', async () => {
@@ -270,6 +267,17 @@ describe('WardenReportReader', () => {
 
     // Act / Assert
     should(await reader.readReport(path.join(reports, 'nope.md'))).be.undefined();
+  });
+
+  it('should read only a direct Markdown report inside this daemon’s evidence directory', async () => {
+    // Arrange
+    const { reports, reader } = await reportsHome('warden-read-at');
+    const report = await writeReport(reports, 'a.md', 'body');
+
+    // Act / Assert — the browser may name a row’s path, never an arbitrary file.
+    should(await reader.readReportAt(report)).eql('body');
+    should(await reader.readReportAt(path.join(reports, 'nested', 'a.md'))).be.undefined();
+    should(await reader.readReportAt(path.join(reports, 'a.txt'))).be.undefined();
   });
 
   it('should read no provenance when no sidecar was written', async () => {

@@ -24,7 +24,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { DoctorReportSchema, HealthViewSchema, type SessionStatus } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema, type SessionStatus, type WardenVerdictsView } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { StrictMode } from 'react';
 
@@ -143,6 +143,8 @@ interface ShellOptions {
   readonly sessionStatus?: () => SessionStatus;
   /** Daemon-owned normalized transcript tail returned by `logs`. */
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
+  /** The recent Warden-report index, deliberately supplied by the paired daemon. */
+  readonly wardenVerdicts?: () => Promise<WardenVerdictsView>;
 }
 
 interface HealthRead {
@@ -187,6 +189,8 @@ const appStore = async (
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
+        wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
+        wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
           return path === '/v1/doctor' ? doctorReport : {};
@@ -709,6 +713,62 @@ describe('AppShell', () => {
     }
 
     await view.unmount();
+  });
+
+  it('keeps Warden evidence daemon-bound, opens the complete report, and calls a failed refresh stale', async () => {
+    let reads = 0;
+    let poll: (() => void) | undefined;
+    const restoreInterval = patchGlobal(globalThis, 'setInterval', (callback: () => void) => {
+      poll = callback;
+      return 1;
+    });
+    const restoreClearInterval = patchGlobal(globalThis, 'clearInterval', () => {});
+    const verdicts = async (): Promise<WardenVerdictsView> => {
+      reads += 1;
+      if (reads > 1) throw new Error('report index is temporarily unavailable');
+      return [
+        {
+          at: '2026-07-31T11:58:00.000Z',
+          targetSession: 'session-a',
+          verdict: 'needs_human',
+          reportPath: '/state/warden/reports/session-a.md',
+        },
+      ];
+    };
+
+    try {
+      const { view } = await renderShell('/d/alpha/warden', [alpha.daemonId], { wardenVerdicts: verdicts });
+      await settle();
+
+      const open = must(
+        view.container.querySelector<HTMLButtonElement>('button[aria-label="Open Warden report for session-a"]'),
+        'the Warden report row',
+      );
+      await interact(() => open.click());
+      await settle();
+      expect(view.container.textContent).toContain('Evidence from /state/warden/reports/session-a.md');
+
+      await interact(() => poll?.());
+      await settle();
+      expect(view.container.textContent).toContain('The latest report check failed; showing the last verified index.');
+      await view.unmount();
+    } finally {
+      restoreClearInterval();
+      restoreInterval();
+    }
+  });
+
+  it('calls an unreadable Warden index unavailable rather than presenting a healthy empty history', async () => {
+    const { view } = await renderShell('/d/alpha/warden', [alpha.daemonId], {
+      wardenVerdicts: async () => await Promise.reject(new Error('report index is unreadable')),
+    });
+    try {
+      await settle();
+      expect(view.container.textContent).toContain('Recent verdicts unavailable');
+      expect(view.container.textContent).toContain('will not present an empty history as evidence');
+    } finally {
+      await view.unmount();
+    }
   });
 });
 

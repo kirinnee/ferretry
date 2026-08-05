@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { WardenReportDialog } from '../../../src/features/warden/warden-report-dialog.tsx';
 import type { WardenReportDialogRequest } from '../../../src/features/warden/warden-report-dialog.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { interact, mount } from '../../support/dom.ts';
 
 const connection = daemonConnection({
   daemonId: 'daemon-a',
@@ -33,13 +34,24 @@ describe('WardenReportDialog', () => {
     expect(tree).not.toContain('device-token-a');
   });
 
-  it('calls unreadable evidence unavailable rather than leaving an empty report', async () => {
-    const source = await Bun.file(
-      new URL('../../../src/features/warden/warden-report-dialog.tsx', import.meta.url),
-    ).text();
+  it('renders loaded and unreadable evidence states instead of turning either into an empty report', async () => {
+    const loaded = await mount(
+      <WardenReportDialog request={request} read={async () => '# Evidence'} onClose={() => {}} />,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(loaded.container.textContent).toContain('Evidence');
+    await loaded.unmount();
 
-    expect(source).toContain('setUnavailable(true)');
-    expect(source).toContain('Report evidence unavailable');
-    expect(source).toContain('not being treated as an empty or healthy verdict');
+    const unreadable = await mount(
+      <WardenReportDialog
+        request={request}
+        read={async () => await Promise.reject(new Error('unreadable'))}
+        onClose={() => {}}
+      />,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(unreadable.container.textContent).toContain('Report evidence unavailable');
+    expect(unreadable.container.textContent).toContain('not being treated as an empty or healthy verdict');
+    await unreadable.unmount();
   });
 });

@@ -70,6 +70,10 @@ export class WardenReportReader {
         ? undefined
         : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile);
     });
+    // A candidate that cannot be read is evidence we cannot safely summarize.
+    // The mounted route turns this into an unavailable index, rather than a
+    // deceptively quiet empty history.
+    if (loaded.some(file => file === undefined)) throw new Error('a Warden report could not be read');
     const reports = loaded.filter((file): file is WardenReportFile => file !== undefined);
 
     const provenance = new Map<string, WardenSpawnProvenance>();
