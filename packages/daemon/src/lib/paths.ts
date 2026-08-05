@@ -1,9 +1,17 @@
 import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { LAYOUT_VERSION_FILENAME } from '@ferretry/protocol';
 import type { SessionId } from './session-id.ts';
 import type { StateHome } from './state-home.ts';
 
 export interface FoundationPaths {
   readonly home: StateHome;
+  /**
+   * The layout claim.
+   *
+   * The path is derived here, but the NAME is not ours alone: the command-line client writes this
+   * same file when it creates a home, before this daemon has ever run. Both sides take the name from
+   * `@ferretry/protocol` so a daemon cannot look for one file while its client writes another.
+   */
   readonly layoutVersion: string;
   readonly daemonLock: string;
   readonly config: string;
@@ -82,7 +90,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
   const index = join(state, 'index');
   return {
     home,
-    layoutVersion: join(home, 'layout-version'),
+    layoutVersion: join(home, LAYOUT_VERSION_FILENAME),
     daemonLock: join(home, 'daemon.lock'),
     config,
     daemonConfig: join(config, 'daemon.json'),

@@ -3,6 +3,9 @@ import { Command } from 'commander';
 import should from 'should';
 import { registerDaemonCommands } from '../../../src/lib/daemon/commands';
 import { DaemonController } from '../../../src/lib/daemon/controller';
+import { StateHomeClaimService } from '../../../src/lib/state-home/claim';
+import { StateHomeController } from '../../../src/lib/state-home/controller';
+import { CapturedOutput as CapturedClaimOutput, FakeStateHomeFiles } from '../state-home/fixtures';
 import {
   absentReport,
   CapturedOutput,
@@ -27,6 +30,7 @@ function run(
   out: CapturedOutput;
   logs: FakeLogs;
   snapshots: FakeSnapshots;
+  adopted: CapturedClaimOutput;
   built: () => number;
 } {
   const service = new FakeSupervisor('systemd', stoppedReport);
@@ -34,25 +38,49 @@ function run(
   const logs = new FakeLogs();
   const snapshots = new FakeSnapshots();
   let builds = 0;
+  // A home already carrying our marker, so `adopt` in this suite exercises the routing rather than
+  // the decision — the decision has its own suite against the real service.
+  const claimOut = new CapturedClaimOutput();
+  const adoptController = (): StateHomeController =>
+    new StateHomeController(
+      new StateHomeClaimService(
+        new FakeStateHomeFiles([{ name: 'layout-version', directory: false }], '1\n'),
+        'fy daemon adopt',
+      ),
+      '/tmp/fy-home/.ferretry',
+      claimOut,
+    );
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerDaemonCommands(program, () => {
-    builds += 1;
-    return new DaemonController({
-      layout: layout(),
-      service,
-      direct: new FakeSupervisor('direct', absentReport),
-      health: new FakeHealth(probes),
-      logs,
-      nix: new FakeNixGcRoot(),
-      snapshots,
-      clock: new SteppingClock(),
-      out,
-      readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
-      shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
-    });
-  });
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), service, out, logs, snapshots, built: () => builds };
+  registerDaemonCommands(
+    program,
+    () => {
+      builds += 1;
+      return new DaemonController({
+        layout: layout(),
+        service,
+        direct: new FakeSupervisor('direct', absentReport),
+        health: new FakeHealth(probes),
+        logs,
+        nix: new FakeNixGcRoot(),
+        snapshots,
+        clock: new SteppingClock(),
+        out,
+        readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
+        shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
+      });
+    },
+    adoptController,
+  );
+  return {
+    parsed: program.parseAsync(['node', 'fy', ...argv]),
+    service,
+    out,
+    logs,
+    snapshots,
+    adopted: claimOut,
+    built: () => builds,
+  };
 }
 
 describe('daemon command surface', () => {
@@ -147,6 +175,24 @@ describe('daemon command surface', () => {
     should(logs.shown[0]?.follow).be.true();
   });
 
+  it('should route adopt to the state-home controller', async () => {
+    // Arrange + Act — the repair the daemon's own refusal names has to exist and be reachable.
+    const { parsed, adopted } = run(['daemon', 'adopt']);
+    await parsed;
+
+    // Assert
+    should(adopted.text).containEql('already a claimed Ferretry state home');
+  });
+
+  it('should pass --json through to adopt, like its siblings', async () => {
+    // Arrange + Act
+    const { parsed, adopted } = run(['daemon', 'adopt', '--json']);
+    await parsed;
+
+    // Assert
+    should(JSON.parse(adopted.text)).have.property('outcome', 'already-claimed');
+  });
+
   it('should route snapshot build, promotion and list through the mounted store', async () => {
     // Arrange + Act
     const build = run(['daemon', 'snapshot', 'build']);
@@ -195,9 +241,15 @@ describe('daemon command surface', () => {
     const service = new FakeSupervisor('systemd', runningReport);
     const program = new Command().name('fy').exitOverride();
     program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-    registerDaemonCommands(program, () => {
-      throw new Error('cannot find fyd on PATH');
-    });
+    registerDaemonCommands(
+      program,
+      () => {
+        throw new Error('cannot find fyd on PATH');
+      },
+      () => {
+        throw new Error('this test never reaches adopt');
+      },
+    );
 
     // Act + Assert
     await should(program.parseAsync(['node', 'fy', 'daemon', 'start'])).be.rejectedWith(/cannot find fyd on PATH/u);

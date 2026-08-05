@@ -7,7 +7,7 @@ import {
   SystemdSupervisor,
   UnsupportedServiceManagerError,
 } from '../../../src/lib/daemon/supervisor';
-import { type CommandScript, daemonSnapshot, FakeFiles, FakeProcesses, layout } from './fixtures';
+import { type CommandScript, daemonSnapshot, FakeFiles, FakeProcesses, FakeStateHomeClaim, layout } from './fixtures';
 
 const linux = layout();
 const mac = layout({ platform: 'darwin', userId: 501 });
@@ -18,20 +18,24 @@ function systemd(script: CommandScript = []): {
   supervisor: SystemdSupervisor;
   processes: FakeProcesses;
   files: FakeFiles;
+  claims: FakeStateHomeClaim;
 } {
   const processes = new FakeProcesses(script);
   const files = new FakeFiles();
-  return { supervisor: new SystemdSupervisor(linux, processes, files), processes, files };
+  const claims = new FakeStateHomeClaim(files.trail);
+  return { supervisor: new SystemdSupervisor(linux, processes, files, claims), processes, files, claims };
 }
 
 function launchd(script: CommandScript = []): {
   supervisor: LaunchdSupervisor;
   processes: FakeProcesses;
   files: FakeFiles;
+  claims: FakeStateHomeClaim;
 } {
   const processes = new FakeProcesses(script);
   const files = new FakeFiles();
-  return { supervisor: new LaunchdSupervisor(mac, processes, files), processes, files };
+  const claims = new FakeStateHomeClaim(files.trail);
+  return { supervisor: new LaunchdSupervisor(mac, processes, files, claims), processes, files, claims };
 }
 
 describe('systemd supervisor install', () => {
@@ -61,6 +65,32 @@ describe('systemd supervisor install', () => {
 
     // Assert
     should(files.directories).deepEqual([`${linux.systemdUnitFile.replace('/fyd.service', '')}`, linux.logDirectory]);
+  });
+
+  it('should claim the state home BEFORE creating the log directory inside it', async () => {
+    // Arrange — the ordering is the whole defect. `<state home>/logs` is the first thing this CLI
+    // puts inside the daemon's home, and creating it before the home is claimed is what left the
+    // daemon meeting a non-empty unmarked home and refusing to boot.
+    const { supervisor, files, claims } = systemd();
+
+    // Act
+    await supervisor.install(artifact.binaryPath);
+
+    // Assert
+    should(claims.claimed).deepEqual([linux.stateHome]);
+    should(files.trail.indexOf(`claim:${linux.stateHome}`)).be.below(
+      files.trail.indexOf(`mkdir:${linux.logDirectory}`),
+    );
+  });
+
+  it('should not create anything inside a state home the claim refused', async () => {
+    // Arrange — a refusal has to stop the write, not merely be reported alongside it.
+    const { supervisor, files, claims } = systemd();
+    claims.refusal = new Error('refusing to write into /tmp/fy-home/.ferretry');
+
+    // Act + Assert
+    await should(supervisor.install(artifact.binaryPath)).be.rejectedWith(/refusing to write into/u);
+    should(files.directories).not.containEql(linux.logDirectory);
   });
 
   it('should surface what systemctl said when a step fails', async () => {
@@ -199,6 +229,19 @@ describe('systemd supervisor inspection', () => {
 });
 
 describe('launchd supervisor install', () => {
+  it('should claim the state home before creating the log directory inside it', async () => {
+    // Arrange — macOS takes this path, so the claim has to be on all three supervisors rather than
+    // only the one whose platform the author happened to be running.
+    const { supervisor, files, claims } = launchd();
+
+    // Act
+    await supervisor.install(artifact.binaryPath);
+
+    // Assert
+    should(claims.claimed).deepEqual([mac.stateHome]);
+    should(files.trail.indexOf(`claim:${mac.stateHome}`)).be.below(files.trail.indexOf(`mkdir:${mac.logDirectory}`));
+  });
+
   it('should write the plist, boot out any stale job, then bootstrap the domain', async () => {
     // Arrange
     const { supervisor, processes, files } = launchd();
@@ -340,15 +383,47 @@ describe('launchd supervisor stop and inspection', () => {
 });
 
 describe('direct supervisor', () => {
-  function direct(): { supervisor: DirectSupervisor; processes: FakeProcesses; files: FakeFiles } {
+  function direct(): {
+    supervisor: DirectSupervisor;
+    processes: FakeProcesses;
+    files: FakeFiles;
+    claims: FakeStateHomeClaim;
+  } {
     const processes = new FakeProcesses();
     const files = new FakeFiles();
-    return { supervisor: new DirectSupervisor(linux, processes, files), processes, files };
+    const claims = new FakeStateHomeClaim(files.trail);
+    return { supervisor: new DirectSupervisor(linux, processes, files, claims), processes, files, claims };
   }
 
   it('should never claim a service definition is installed', async () => {
     // Act + Assert
     should(await direct().supervisor.installed()).be.false();
+  });
+
+  it('should claim the state home before spawning the daemon into it', async () => {
+    // Arrange — the direct spawn is the path a host with no service manager takes, so it is the one
+    // an operator on such a host meets first.
+    const { supervisor, files, claims } = direct();
+
+    // Act
+    await supervisor.start(artifact.binaryPath);
+
+    // Assert
+    should(claims.claimed).deepEqual([linux.stateHome]);
+    should(files.trail.indexOf(`claim:${linux.stateHome}`)).be.below(
+      files.trail.indexOf(`mkdir:${linux.logDirectory}`),
+    );
+  });
+
+  it('should not spawn the daemon at all when the claim refused the home', async () => {
+    // Arrange — launching into a home we would not write to would produce a daemon that immediately
+    // refuses the same directory, reporting the failure one layer further from its cause.
+    const { supervisor, processes, claims } = direct();
+    claims.refusal = new Error('refusing to write into /tmp/fy-home/.ferretry');
+
+    // Act + Assert
+    await should(supervisor.start(artifact.binaryPath)).be.rejectedWith(/refusing to write into/u);
+    should(processes.launched).be.empty();
   });
 
   it('should refuse install and uninstall, because there is nothing to install into', async () => {

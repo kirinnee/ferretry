@@ -17,6 +17,7 @@ import type {
   INixGcRootPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
+  IStateHomeClaimPort,
   StopRequest,
 } from '../../../src/lib/daemon/ports';
 
@@ -147,12 +148,22 @@ export class FakeFiles implements IServiceFilePort {
   readonly removed: string[] = [];
   present = new Set<string>();
 
+  /**
+   * Every filesystem and claim effect, in the order they happened.
+   *
+   * Shared with `FakeStateHomeClaim` because the defect this guards is an ORDERING one: creating
+   * `<state home>/logs` before the home is claimed is precisely what made a fresh install refuse to
+   * boot, and two separate call logs cannot show which came first.
+   */
+  readonly trail: string[] = [];
+
   exists(path: string): Promise<boolean> {
     return Promise.resolve(this.present.has(path) || this.written.has(path));
   }
 
   writePrivate(path: string, contents: string): Promise<void> {
     this.written.set(path, contents);
+    this.trail.push(`write:${path}`);
     return Promise.resolve();
   }
 
@@ -165,7 +176,23 @@ export class FakeFiles implements IServiceFilePort {
 
   ensureDirectory(path: string): Promise<void> {
     this.directories.push(path);
+    this.trail.push(`mkdir:${path}`);
     return Promise.resolve();
+  }
+}
+
+/** Records which home was claimed and when, against the same trail the filesystem writes to. */
+export class FakeStateHomeClaim implements IStateHomeClaimPort {
+  readonly claimed: string[] = [];
+  /** Set to make the claim refuse, the way a foreign directory does. */
+  refusal: Error | undefined;
+
+  constructor(private readonly trail: string[] = []) {}
+
+  claim(home: string): Promise<unknown> {
+    this.claimed.push(home);
+    this.trail.push(`claim:${home}`);
+    return this.refusal === undefined ? Promise.resolve({ kind: 'claimed', home }) : Promise.reject(this.refusal);
   }
 }
 

@@ -40,6 +40,8 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 | `workspace-package-scopes` | every non-CLI workspace package is named `@<PRODUCT>/<directory>`; the load-bearing CLI name remains equal to its `bin` key                                                                                 |
 | `name-single-source`       | the Taskfile and the compile/shim/smoke scripts derive the binary name from `bin`, and every static file that must spell a name out (GoReleaser, cask, `go.mod`, installer) agrees with its source of truth |
 | `state-home-log-directory` | the CLI and the daemon name the same `<state home>/logs` directory, and the daemon both requires it and admits it to its bootstrap shape                                                                    |
+| `state-home-layout-claim`  | the layout decision, marker filename, bytes and mode live only in `@ferretry/protocol`; every CLI path that creates state in the home claims it first, and the daemon's refusal names a repair that exists  |
+| `state-home-default`       | the daemon and the CLI's two resolvers all derive the default state home from the product name, so a `rename.sh --product` cannot point them at two different directories                                   |
 | `release-backup-order`     | the first `@semantic-release/exec` step is the changelog backup, and `@semantic-release/github` is absent                                                                                                   |
 | `changelog-asset`          | `Changelog.old.md` is committed by the release commit and `publish.sh` passes `--release-notes ./IncrementalChangelog.md`                                                                                   |
 | `release-artifacts`        | GoReleaser produces archives and a checksum file, and ships `install.sh` as a release extra file                                                                                                            |
@@ -51,10 +53,25 @@ key first, so the checks survive a rename ([Architecture](../architecture/index.
 Why these and not others: each one has a failure mode that is invisible locally and expensive
 remotely. A missing checksum verification ships a silently corruptible installer; a renamed
 binary with a stale cask produces a release that installs nothing; a reordered plugin chain
-produces release notes containing the entire changelog. `state-home-log-directory` is here for a
-fourth reason: the CLI and the daemon are separate packages with no dependency between them, so a
-path one creates and the other classifies has no compiler and no test that a single package could
-own — and when they disagreed, no fresh machine could start the daemon at all.
+produces release notes containing the entire changelog. The three `state-home-*` contracts are here
+for a fourth reason: the CLI and the daemon are separate packages with no dependency between them, so
+an artefact one creates and the other classifies has no compiler and no test that a single package
+could own — and when they disagreed, no fresh machine could start the daemon at all.
+
+That disagreement has now shipped three times, in the same shape each time. `logs/` was the first:
+the CLI created it, the daemon read its own log directory as somebody else's data, and no clean
+machine could boot. The daemon's own `start()` was the second, writing configuration into a home it
+had not yet claimed and then refusing at its own next step. `fy fleet init` was the third, and the
+worst: a provisioned fleet in an unclaimed home was refused **permanently**, so the only move the
+shipped product left an owner was to delete the installation they had just set up.
+
+Every one of them passed its own tests, because each writer owned its own fixture — which is why
+`state-home-layout-claim` pins the shared decision itself rather than only the version literal. A
+client applying its own weaker rule could adopt a genuinely foreign directory, and that would trade
+one silent failure for a worse one. `state-home-default` is the same class caught before it shipped:
+three functions derived `~/.ferretry`, two of them from a literal, agreeing only because the product
+happens to be named that — and `rename.sh` rewrites package scopes but not `.ts` literals, so the
+sanctioned rename would have split one installation in two.
 
 ## Composition-root reachability
 
@@ -119,8 +136,8 @@ data has to be keyed by `(daemonId, …)`.
 That has been carried by hand for the whole migration. Every unit brief repeats it,
 `docs/migration/surveys/pwa-shape.md` lists 56 single-daemon assumptions with `file:line`, and
 surfaces were still being found by eye afterwards. An invariant that depends on every author
-remembering it is not an invariant, which is the same reason `name-single-source` and
-`state-home-log-directory` exist.
+remembering it is not an invariant, which is the same reason `name-single-source` and the
+`state-home-*` contracts exist.
 
 Three passes, each catching a different way a surface goes unscoped:
 

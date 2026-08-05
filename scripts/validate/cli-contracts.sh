@@ -19,7 +19,7 @@ mapfile -t workspace_packages < <(find packages -mindepth 2 -maxdepth 2 -name pa
 [ "${#workspace_packages[@]}" -eq 0 ] && echo "❌ no workspace package manifests found under packages/" >&2 && exit 1
 
 if [ "${contract}" = "all" ]; then
-  for each in arch workspace-package-scopes name-single-source daemon-default-address state-home-log-directory release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
+  for each in arch workspace-package-scopes name-single-source daemon-default-address state-home-log-directory state-home-layout-claim state-home-default release-backup-order changelog-asset release-artifacts homebrew-cask installer-checksum installer-timeouts installation-parity release-daemon released-version nix-packages; do
     "$0" "${each}"
   done
   exit 0
@@ -125,6 +125,119 @@ state-home-log-directory)
   }
   rg -qF 'paths.logs' "${daemon_layout}" || {
     echo "❌ ${daemon_layout} does not admit the log directory, so a fresh home would refuse to bootstrap" >&2
+    exit 1
+  }
+  ;;
+state-home-layout-claim)
+  # THE SECOND INSTANCE OF THE `state-home-log-directory` BUG, pinned the same way its first was.
+  #
+  # Creating state in a home and CLAIMING that home have to be one operation. They were two, so
+  # `fy fleet init` wrote `<FY_HOME>/fleet/**` without a marker and manufactured exactly the
+  # arrangement the daemon must refuse — a non-empty directory that might be somebody else's. The
+  # daemon then declined to boot FOREVER, and the only move the shipped product left an owner was to
+  # delete the installation they had just provisioned. Run the two commands the other way round and
+  # everything worked.
+  #
+  # So the decision, the marker's name, its bytes and its mode are single-sourced in the protocol
+  # package — the one thing both writers already depend on, since neither may import the other. A
+  # second copy fails SILENTLY in the worst way: a daemon looking for one filename while its client
+  # writes another refuses the very home its client just claimed, and neither end explains why.
+  layout_source="packages/protocol/src/lib/state-home-layout.ts"
+  test -f "${layout_source}"
+  marker_name="$(rg -o -r '$1' "LAYOUT_VERSION_FILENAME = '([^']+)'" "${layout_source}")"
+  [ -z "${marker_name}" ] && echo "❌ ${layout_source} does not declare LAYOUT_VERSION_FILENAME" >&2 && exit 1
+  layout_version="$(rg -o -r '$1' 'CURRENT_LAYOUT_VERSION = ([0-9]+)' "${layout_source}")"
+  [ -z "${layout_version}" ] && echo "❌ ${layout_source} does not declare CURRENT_LAYOUT_VERSION" >&2 && exit 1
+
+  # Neither package may carry its own copy of either literal. Tests are excluded: an assertion has to
+  # be able to spell the value it expects, or it is asserting the implementation against itself.
+  claim_files=()
+  while IFS= read -r -d '' path; do
+    [ "${path}" = "${layout_source}" ] && continue
+    case "${path}" in
+    */src/* | */bin/*) claim_files+=("${path}") ;;
+    esac
+  done < <(git ls-files -z -co --exclude-standard -- packages/cli packages/daemon)
+  if [ "${#claim_files[@]}" -gt 0 ]; then
+    set +e
+    strays="$(rg --line-number --fixed-strings -- "'${marker_name}'" "${claim_files[@]}")"
+    stray_status=$?
+    set -e
+    if [ "${stray_status}" -eq 0 ]; then
+      echo "❌ the layout marker filename is written out instead of imported from ${layout_source}:" >&2
+      printf '%s\n' "${strays}" >&2
+      exit 1
+    fi
+    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan package source for the marker filename" >&2 && exit "${stray_status}"
+  fi
+
+  # And both writers must actually read the single source rather than each other.
+  rg -qF '@ferretry/protocol' "${daemon_pkg}/src/lib/layout.ts" || {
+    echo "❌ ${daemon_pkg}/src/lib/layout.ts does not read the layout decision from the protocol package" >&2
+    exit 1
+  }
+  rg -qF 'LAYOUT_VERSION_FILENAME' "${daemon_pkg}/src/lib/paths.ts" || {
+    echo "❌ ${daemon_pkg}/src/lib/paths.ts does not derive the marker path from the shared filename" >&2
+    exit 1
+  }
+  cli_claim="${cli_pkg}/src/lib/state-home/claim.ts"
+  [ ! -f "${cli_claim}" ] && echo "❌ the CLI has no state-home claim: ${cli_claim}" >&2 && exit 1
+  rg -qF 'decideLayout' "${cli_claim}" || {
+    echo "❌ ${cli_claim} does not apply the SHARED decision, so it could adopt a foreign directory" >&2
+    exit 1
+  }
+  # Every path that creates state inside the home must go through the claim. These are the three
+  # verified write sites; a fourth that skips the claim reintroduces the whole defect.
+  rg -qF 'claimThenCreateLogDirectory' "${cli_pkg}/src/lib/daemon/supervisor.ts" || {
+    echo "❌ the daemon supervisor creates <state home>/logs without claiming the home first" >&2
+    exit 1
+  }
+  for writer in FileFleetScaffolder 'provisioner.apply'; do
+    rg -qF "${writer}" "${cli_pkg}/bin/fy.ts" || {
+      echo "❌ ${cli_pkg}/bin/fy.ts no longer wires ${writer}; re-check that its claim still guards it" >&2
+      exit 1
+    }
+  done
+  rg -qF 'claimStateHome' "${cli_pkg}/bin/fy.ts" || {
+    echo "❌ ${cli_pkg}/bin/fy.ts does not claim the state home before the fleet writers run" >&2
+    exit 1
+  }
+  # A refusal that does not name its repair is permanent: every home provisioned before the claim
+  # existed lands there, and the only remaining move would be to delete the installation.
+  rg -qF 'adopt' "${daemon_pkg}/src/lib/layout.ts" || {
+    echo "❌ StateHomeLayoutError does not name the command that repairs an unclaimed home" >&2
+    exit 1
+  }
+  rg -qF "'adopt'" "${cli_pkg}/src/lib/daemon/commands.ts" || {
+    echo "❌ the repair command the daemon's refusal names does not exist on the CLI" >&2
+    exit 1
+  }
+  ;;
+state-home-default)
+  # Three functions derive the default state home — the daemon's own, and the client's two. Two of
+  # them used to spell `.ferretry` as a literal while the third derived it from the product name, so
+  # they agreed only because the product happens to be called that. `scripts/local/rename.sh
+  # --product` rewrites package scopes and manifests but NOT a literal inside a `.ts` file, so the
+  # sanctioned rename path would have split one installation in two: `fy fleet` writing `~/.newname`
+  # while `fy daemon` and the daemon itself used `~/.ferretry`, with nothing on either side saying
+  # so. Pinning FY_HOME masks it entirely, which is how it survived this long.
+  #
+  # Only a quoted literal counts. These files have to EXPLAIN the hazard to be maintainable, and a
+  # gate that fails on its own docblock teaches the next author to delete the explanation.
+  for source in "${daemon_pkg}/src/lib/state-home.ts" "${cli_pkg}/src/lib/daemon/layout.ts" "${cli_pkg}/src/lib/fleet/layout.ts"; do
+    set +e
+    stray="$(rg --line-number -- "['\"]\.${product}['\"]" "${source}")"
+    stray_status=$?
+    set -e
+    if [ "${stray_status}" -eq 0 ]; then
+      echo "❌ ${source} writes the default state home out instead of deriving it from the product name:" >&2
+      printf '%s\n' "${stray}" >&2
+      exit 1
+    fi
+    [ "${stray_status}" -gt 1 ] && echo "❌ failed to scan ${source}" >&2 && exit "${stray_status}"
+  done
+  rg -qF 'productName' "${daemon_pkg}/src/lib/state-home.ts" || {
+    echo "❌ ${daemon_pkg}/src/lib/state-home.ts does not derive its default from the product name" >&2
     exit 1
   }
   ;;

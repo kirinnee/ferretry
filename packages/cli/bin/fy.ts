@@ -36,6 +36,7 @@ import type { z } from 'zod';
 import root from '../../../package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
+import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
@@ -122,6 +123,8 @@ import {
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
 import { BulkStopController, registerStopCommands } from '../src/lib/stop';
+import { StateHomeClaimService } from '../src/lib/state-home/claim';
+import { StateHomeController } from '../src/lib/state-home/controller';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
@@ -134,6 +137,18 @@ import { ProtocolWorktreeGateway } from '../src/lib/worktrees/gateway';
 const BINARY_NAME = Object.keys(pkg.bin)[0] ?? pkg.name;
 const PRODUCT_NAME = root.name;
 const DESCRIPTION = 'Command-line client for the per-host agent daemon';
+
+/**
+ * The one claim service, shared by every path that creates state inside `<FY_HOME>`.
+ *
+ * Built here rather than per group because the whole defect was two writers with no agreement: the
+ * fleet wiring and the daemon-control wiring create state in the same directory, and each having its
+ * own notion of when a home becomes ours is how they came to disagree in the first place. The repair
+ * command is passed in rather than spelled inside the domain, so a renamed binary renames the advice.
+ */
+function buildStateHomeClaims(): StateHomeClaimService {
+  return new StateHomeClaimService(new FileStateHomeClaim(), `${BINARY_NAME} daemon adopt`);
+}
 
 /** Scaffold: the commander program skeleton (identity + `--help`/`--version`), domain-free. */
 export function createProgram(): Command {
@@ -234,7 +249,7 @@ export async function daemonConnection(
   version: string;
 }> {
   const explicitToken = environment.FY_TOKEN?.trim() ?? '';
-  const stateHome = resolveDaemonStateHome(homeDirectory, environment.FY_HOME);
+  const stateHome = resolveDaemonStateHome(homeDirectory, environment.FY_HOME, PRODUCT_NAME);
   const baseUrl = await daemonBaseUrl(environment, stateHome);
   if (explicitToken === '' && !isLocalDaemonUrl(baseUrl)) {
     throw new Error(
@@ -388,16 +403,19 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
   });
   const processes = new BunDaemonProcess();
   const files = new FileServiceStore();
+  // Every supervisor claims the state home before it creates the log directory inside it, so the
+  // marker exists before the first entry does whichever way round `fy` and `fyd` are run.
+  const claims = buildStateHomeClaims();
   const service: IServiceDefinitionSupervisor | undefined =
     layout.manager === 'systemd'
-      ? new SystemdSupervisor(layout, processes, files)
+      ? new SystemdSupervisor(layout, processes, files, claims)
       : layout.manager === 'launchd'
-        ? new LaunchdSupervisor(layout, processes, files)
+        ? new LaunchdSupervisor(layout, processes, files, claims)
         : undefined;
   return new DaemonController({
     layout,
     service,
-    direct: new DirectSupervisor(layout, processes, files),
+    direct: new DirectSupervisor(layout, processes, files, claims),
     health: new ProtocolDaemonHealth(lazyHealthClient(environment, layout.stateHome)),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
@@ -409,6 +427,20 @@ function buildDaemonController(environment: Record<string, string | undefined>, 
     clock: new SystemMillisecondClock(),
     out,
   });
+}
+
+/**
+ * Builds the state-home adopt controller.
+ *
+ * Lazy for the same reason the daemon controller is: resolving a state home can fail on a nonsensical
+ * `FY_HOME`, and that must surface from `fy daemon adopt` rather than stop the CLI printing `--help`.
+ */
+function buildStateHomeController(world: CliWorld): StateHomeController {
+  return new StateHomeController(
+    buildStateHomeClaims(),
+    resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME),
+    world.io,
+  );
 }
 
 /**
@@ -512,7 +544,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
-  ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
+  ({ program, world }) =>
+    registerDaemonCommands(
+      program,
+      () => buildDaemonController(world.environment, world.io),
+      () => buildStateHomeController(world),
+    ),
   // The grant verbs mount onto the group above and DO take the shared client, because unlike every
   // other daemon verb they change what the daemon serves rather than whether it is running. They are
   // registered after it for that reason: the group has to exist before verbs can be added to it.
@@ -559,6 +596,16 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     userHome: homedir(),
     product: PRODUCT_NAME,
   });
+  // THE REPORTED BUG. Both writers below create state inside the daemon's home — `init` writes
+  // `fleet/config.yaml` and the asset tree, `apply` writes `fleet/{homes,bin,manifest.json}` — and
+  // neither claimed the layout, so a home they had just provisioned reached the daemon as a
+  // non-empty directory with no marker. The daemon then refused it as foreign, permanently, and the
+  // only move an owner had was to delete the installation they had just set up. Claiming here is
+  // what makes `fy` before `fyd` work the same as `fyd` before `fy`.
+  const claims = buildStateHomeClaims();
+  const claimStateHome = async (): Promise<void> => {
+    await claims.claim(layout.stateHome);
+  };
   const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
   const configPath = configured === '' ? defaultConfigPath(layout) : configured;
   const fleetWriteRoots = [layout.fleetDirectory, layout.userHome];
@@ -571,6 +618,10 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     keychainAccount: world.environment.USER ?? '',
   });
   const identityService = new FleetIdentityService(credentialStore);
+  const provisioner = new FileFleetProvisioner(
+    fleetWriteRoots,
+    new SharedHistoryMigration(new FileSharedHistoryFileSystem(fleetWriteRoots)),
+  );
   return new FleetController({
     config: new FileFleetConfigSource(configPath),
     manifests: new FileFleetManifestSource(layout.manifestPath),
@@ -592,6 +643,9 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
             'no launchable Claude or Codex CLI was found on this host — install one, or choose explicitly with "fy fleet init --first-account=claude"',
           );
         }
+        // Before the scaffolder writes a single byte: a refusal here must leave the directory
+        // exactly as it was found, and a scaffold has no undo.
+        await claimStateHome();
         return await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
           buildFleetScaffold({
             layout,
@@ -607,10 +661,17 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     },
     // Account/default homes may live under the user's home; history still names every exact home in
     // its request, and both adapters independently reject anything outside these declared roots.
-    applier: new FileFleetProvisioner(
-      fleetWriteRoots,
-      new SharedHistoryMigration(new FileSharedHistoryFileSystem(fleetWriteRoots)),
-    ),
+    //
+    // `apply` claims first; `preview` does not, because a dry run writes nothing and must stay
+    // answerable on a home this client would refuse to provision — that report is exactly how
+    // somebody diagnoses the refusal.
+    applier: {
+      preview: plan => provisioner.preview(plan),
+      apply: async plan => {
+        await claimStateHome();
+        return await provisioner.apply(plan);
+      },
+    },
     // Built per invocation from the loaded configuration, so `usage.concurrency`,
     // `usage.atLimitPercent` and `usage.timeout` are honoured instead of parsed and dropped. The
     // timeout goes to the probe rather than the collector because only the probe can actually cancel

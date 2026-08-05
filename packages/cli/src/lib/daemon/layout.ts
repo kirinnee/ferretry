@@ -95,11 +95,23 @@ function requireDirectory(value: string, field: string): string {
  *
  * This is exported for the local credential reader too: service management and token discovery
  * must address the same installation, especially when an operator pins `FY_HOME`.
+ *
+ * THE PRODUCT NAME IS AN INPUT, not a literal, and that is a fix rather than tidiness. Three
+ * derivations of the default state home exist — this one, `resolveFleetLayout` in
+ * `../fleet/layout.ts`, and the daemon's own `resolveStateHome` — and this one used to spell
+ * `.ferretry` while the fleet one derived `.${product}` from the root manifest. They agree today only
+ * because the product happens to be named `ferretry`. `scripts/local/rename.sh --product` rewrites
+ * the manifest and a fixed list of static files; it does not rewrite this literal, so the sanctioned
+ * rename path would have split one installation in two: `fy fleet` writing `~/.newname` while
+ * `fy daemon` and the daemon itself used `~/.ferretry`. That is the same "two writers, no agreement"
+ * defect this file's neighbours exist to prevent, and the claim added on top of it would have made
+ * the split harder to see rather than easier — the CLI would claim one directory and provision into
+ * another. Pinning `FY_HOME` masks it entirely, which is why it survived.
  */
-export function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined): string {
+export function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined, product: string): string {
   const home = requireDirectory(homeDirectory, 'home directory');
   return stateHome === undefined || stateHome.trim().length === 0
-    ? join(home, '.ferretry')
+    ? join(home, `.${requireName(product, 'product name')}`)
     : requireDirectory(stateHome, 'FY_HOME');
 }
 
@@ -138,7 +150,7 @@ export function managerForPlatform(platform: string): DaemonManagerKind {
  */
 export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout {
   const homeDirectory = requireDirectory(input.homeDirectory, 'home directory');
-  const stateHome = resolveDaemonStateHome(homeDirectory, input.stateHome);
+  const stateHome = resolveDaemonStateHome(homeDirectory, input.stateHome, input.product);
   const configHome =
     input.configHome === undefined || input.configHome.trim().length === 0
       ? join(homeDirectory, '.config')

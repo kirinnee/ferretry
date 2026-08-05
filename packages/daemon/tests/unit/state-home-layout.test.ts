@@ -261,8 +261,24 @@ describe('layout decisions', () => {
     const missingError = new StateHomeLayoutError(paths, missing);
     const unsupportedError = new StateHomeLayoutError(paths, unsupported);
 
-    // Assert
-    should(missingError.message).equal('state home /tmp/fy-home is non-empty but has no layout-version marker');
+    // Assert — the missing-marker refusal must NAME THE REPAIR, because it is otherwise permanent:
+    // every home provisioned before layout claims existed lands here, and without the command an
+    // owner's only remaining move is to delete the installation they just set up.
+    should(missingError.message).equal(
+      'state home /tmp/fy-home is non-empty but has no layout-version marker; ' +
+        'if this home was created by Ferretry, run `fy daemon adopt` to inspect it and claim it',
+    );
     should(unsupportedError.message).equal('state home /tmp/fy-home has layout version "2"; expected 1');
+  });
+
+  it('should not offer to adopt a home whose version this release cannot serve', () => {
+    // Arrange — adopting is only ever the answer to "unclaimed"; claiming over a version we do not
+    // understand would silently downgrade a newer release's home rather than repair anything.
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: '/tmp/fy-home', homeDirectory: '/unused' }));
+    const unsupported = decideLayout('2', ['layout-version']);
+    if (unsupported.kind !== 'refuse') throw new Error('test decision must refuse');
+
+    // Act + Assert
+    should(new StateHomeLayoutError(paths, unsupported).message).not.containEql('adopt');
   });
 });

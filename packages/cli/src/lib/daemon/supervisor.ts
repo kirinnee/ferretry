@@ -7,6 +7,7 @@ import type {
   IDaemonSupervisor,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
+  IStateHomeClaimPort,
   StopRequest,
 } from './ports.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
@@ -31,6 +32,27 @@ export class ServiceManagerCommandError extends Error {
 /** The description both service definitions carry. */
 const description = (daemonName: string): string => `${daemonName} — per-host agent daemon`;
 
+/**
+ * Claim the state home, then create the log directory inside it.
+ *
+ * ORDER MATTERS AND IS THE POINT. `<state home>/logs` is the first thing this CLI ever puts inside
+ * the daemon's home, and it goes in before the daemon has run once — so an unclaimed home reaches
+ * the daemon already non-empty, which is the arrangement it must refuse. Claiming first means the
+ * marker is there before the directory is, and every ordering of `fy` and `fyd` works the same way.
+ *
+ * The daemon still tolerates a lone unclaimed `logs/` in its pre-bootstrap shape, and that allowance
+ * must stay: an older `fy` on this same host creates one without claiming, and refusing those hosts
+ * is the very failure this removes.
+ */
+async function claimThenCreateLogDirectory(
+  claims: IStateHomeClaimPort,
+  files: IServiceFilePort,
+  layout: DaemonLayout,
+): Promise<void> {
+  await claims.claim(layout.stateHome);
+  await files.ensureDirectory(layout.logDirectory);
+}
+
 /** Drives a systemd user unit. */
 export class SystemdSupervisor implements IServiceDefinitionSupervisor {
   readonly manager = 'systemd' as const;
@@ -39,6 +61,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
+    private readonly claims: IStateHomeClaimPort,
   ) {}
 
   /** Where systemd reads this unit from, so an installer can name the file it wrote. */
@@ -58,7 +81,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
 
   async #refresh(executable: string): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.systemdUnitFile));
-    await this.files.ensureDirectory(this.layout.logDirectory);
+    await claimThenCreateLogDirectory(this.claims, this.files, this.layout);
     await this.files.writePrivate(
       this.layout.systemdUnitFile,
       renderSystemdUnit({
@@ -126,6 +149,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
+    private readonly claims: IStateHomeClaimPort,
   ) {}
 
   /** Where launchd reads this agent from, so an installer can name the file it wrote. */
@@ -151,7 +175,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
 
   async #writeDefinition(executable: string): Promise<void> {
     await this.files.ensureDirectory(dirname(this.layout.launchAgentFile));
-    await this.files.ensureDirectory(this.layout.logDirectory);
+    await claimThenCreateLogDirectory(this.claims, this.files, this.layout);
     await this.files.writePrivate(
       this.layout.launchAgentFile,
       renderLaunchAgentPlist({
@@ -214,6 +238,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
     private readonly layout: DaemonLayout,
     private readonly processes: IDaemonProcessPort,
     private readonly files: IServiceFilePort,
+    private readonly claims: IStateHomeClaimPort,
   ) {}
 
   installed(): Promise<boolean> {
@@ -229,7 +254,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
   }
 
   async start(executable: string): Promise<DaemonStartHandle> {
-    await this.files.ensureDirectory(this.layout.logDirectory);
+    await claimThenCreateLogDirectory(this.claims, this.files, this.layout);
     return await this.processes.spawnDetached({
       argv: [executable],
       environment: { FY_HOME: this.layout.stateHome, PATH: this.layout.searchPath },

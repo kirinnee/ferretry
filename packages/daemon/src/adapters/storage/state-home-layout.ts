@@ -1,10 +1,11 @@
 import { basename } from 'node:path';
 import {
-  CURRENT_LAYOUT_VERSION,
   decideLayout,
   type FileSystemPort,
   type FoundationPaths,
+  LAYOUT_VERSION_MODE,
   type LayoutDecision,
+  layoutVersionContent,
   requiredLayoutDirectories,
   StateHomeLayoutError,
 } from '../../lib/index.ts';
@@ -134,9 +135,9 @@ export class StateHomeLayout {
 
     for (const directory of requiredLayoutDirectories(paths)) await fileSystem.ensureDirectory(directory, 0o700);
     if (decision.kind === 'initialize') {
-      await fileSystem.writeTextAtomic(paths.layoutVersion, `${CURRENT_LAYOUT_VERSION}\n`);
+      await fileSystem.writeTextAtomic(paths.layoutVersion, layoutVersionContent());
     } else {
-      await fileSystem.setMode(paths.layoutVersion, 0o600);
+      await fileSystem.setMode(paths.layoutVersion, LAYOUT_VERSION_MODE);
     }
     for (const reservedFile of [paths.daemonConfig, paths.fleetManifest]) {
       if ((await fileSystem.information(reservedFile)) !== undefined) await fileSystem.setMode(reservedFile, 0o600);
