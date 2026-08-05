@@ -94,7 +94,7 @@ describe('unimplementedCapabilities', () => {
 describe('UnimplementedFleetCapabilityError', () => {
   it('should name every offending key, what it would do, and what happens instead', () => {
     // Arrange
-    const capabilities = unimplementedCapabilities(config({ health: { enabled: true }, usage: { interval: 300 } }));
+    const capabilities = unimplementedCapabilities(config({ health: { enabled: true }, usage: { jitter: 0.5 } }));
 
     // Act
     const actual = new UnimplementedFleetCapabilityError(capabilities);
@@ -104,7 +104,7 @@ describe('UnimplementedFleetCapabilityError', () => {
     should(actual.capabilities).have.length(2);
     should(actual.message).match(/capabilities this build does not implement/);
     should(actual.message).match(/health\.enabled —/);
-    should(actual.message).match(/usage\.interval —/);
+    should(actual.message).match(/usage\.jitter —/);
     should(actual.message).match(/refused rather than ignored/);
   });
 
