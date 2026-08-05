@@ -17,7 +17,8 @@ usage() {
   exit 2
 }
 
-root_dir="$(git rev-parse --show-toplevel)"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd -- "${script_dir}/../.." && pwd)"
 cd "${root_dir}"
 
 workspace_manifests=()
