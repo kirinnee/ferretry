@@ -93,6 +93,15 @@ adding a getter would delete the feature. The threat model, the `${secret:NAME}`
 declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing what this protects
 against, because the useful property is narrower than people assume.
 
+`packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
+(`fleet`, `terminal`, `browser`, `filesystem`, `warden`) and per axis (*use* / *configure*). **A
+loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
+means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
+so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.
+Defaults are permissive and the **operator password** is the opt-in layer; a grant can only ever
+narrow what a credential could already do, and an undetermined document fails closed. The contract,
+the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security
