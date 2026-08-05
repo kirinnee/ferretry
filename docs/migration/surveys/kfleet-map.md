@@ -1,390 +1,585 @@
-# Survey — kfleet against Ferretry's fleet
+# Survey — what stands between us and deleting kfleet
 
-`~/.config/home-manager/modules/kfleet-ts/src` is **5,205 non-test lines** across 28 files. Ferretry
-carries `packages/fleet/src` (2,420) plus `packages/cli/src/lib/fleet` + `packages/cli/src/adapters/fleet`
-(615). This document is the capability-by-capability comparison behind the question "is kfleet
-absorbed?".
+The goal is not parity. Ferretry is **replacing** kfleet, so the bar is: _can a person stop using
+kfleet without losing something they rely on?_ Compatibility is explicitly not required — no config
+format to match, no command names to keep, no on-disk layout to preserve, no running kfleet to
+interoperate with.
 
-**How it was established.** Every non-test kfleet source file was read in full. The Ferretry side was
-read in full as well — `packages/fleet/src/**`, `packages/cli/src/lib/fleet/**`,
-`packages/cli/src/adapters/fleet/**` — plus the composition root (`packages/cli/bin/fy.ts`) to
-establish what is actually _called_, not merely what exists. Where a row says GAP, the capability was
-searched for under every name it plausibly travels under before the absence was recorded. Coverage
-was not consulted: **coverage cannot detect a missing feature**, and three PRs on this migration
-shipped subsystems missing their core files at 100%.
+So this document is organised by **capability** — what a person uses kfleet to accomplish — not by
+module. A module that exists only to serve kfleet's own file format needs no counterpart at all, and
+several do. `generate` becoming `provisioning`/`plan`/`wrappers` is not a gap; nor is `merge` living
+inside `profiles.ts`. Those are recorded once, in [Appendix A](#appendix-a--module-correspondence),
+and never again.
+
+**How this was established.** All 5,205 non-test lines of `~/.config/home-manager/modules/kfleet-ts/src`
+were read, plus the asset tree at `~/.config/home-manager/kfleet/`. The Ferretry side was read in
+full — `packages/fleet/src/**`, `packages/cli/src/lib/fleet/**`, `packages/cli/src/adapters/fleet/**`
+— plus the composition root, because a module that exists but is never _called_ is not a capability.
+Coverage was not consulted: **coverage cannot detect a missing feature**, and three PRs on this
+migration shipped subsystems missing their core files at 100%.
 
 Two branches that are not on `main` are named where they matter: `feat/fleet-management` (PR #231)
-and `fix/harness-preflight`. Rows about them say so explicitly.
+and `fix/harness-preflight`.
 
 ---
 
-## The headline
+## Scorecard
 
-**Provisioning is genuinely absorbed and improved. Everything that touches a live provider is not.**
+Can the owner delete kfleet today? **No — seven capabilities short.** Ordered by what actually stops
+him, not by line count.
 
-| kfleet area                                     | Lines | State                                                                                      |
-| ----------------------------------------------- | ----: | ------------------------------------------------------------------------------------------ |
-| config schema, merge, settings, generate, prune | 1,822 | **PORTED**, refactored, and in several places stricter than the source                     |
-| usage probing (all five providers)              | 1,328 | **GAP** — the aggregation half is ported, every provider call is not                       |
-| login (identity sync, donor healing)            |   581 | **PARTIAL** — a login _spawner_ exists (unmounted until this unit); the sync core does not |
-| harness liveness probing                        |   538 | **GAP**                                                                                    |
-| shared history + Codex prewarm                  |   557 | **GAP** — and the configuration for it is parsed and silently ignored                      |
-| `serve` / `service` (background loop, metrics)  |   509 | **GAP** — the renderers are ported, the server and the loop are not                        |
-| `init`, `doctor`                                |    72 | **GAP**                                                                                    |
+| #   | Capability — what a person uses kfleet for                          | Ferretry today              | Blocks deleting kfleet?                     |
+| --- | ------------------------------------------------------------------- | --------------------------- | ------------------------------------------- |
+| A   | [Declare a fleet of accounts](#a--declare-a-fleet)                  | **Carried**, and stronger   | No                                          |
+| B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**, minus PATH     | **Yes — nothing puts the wrappers on PATH** |
+| C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only      | **Yes**                                     |
+| D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger   | No                                          |
+| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _wrapper_  | **Yes**                                     |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Reports everything unknown  | **Yes**                                     |
+| G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                     | **Yes** (health is off by default upstream) |
+| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Supervision yes, probing no | **Yes**                                     |
+| I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused        | **Yes**, if he uses it                      |
+| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | Nothing                     | **Yes** — _being closed by this unit_       |
+| K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Nothing                     | **Yes**, for automation                     |
+| L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                     | No — annoying, not blocking                 |
 
-Three findings matter more than the line counts:
+Three facts that the capability rows assume and that are easy to miss:
 
-1. **`fy fleet usage` currently reports every account as `unavailable`.**
-   `packages/cli/src/adapters/fleet/usage-probe.ts:11` is `UnprovisionedUsageProbe`, wired at
-   `packages/cli/bin/fy.ts:488`. It is honest — it says so in its own doc comment and refuses to
-   report a fabricated 0% — but the command produces no quota data at all today.
-
-2. **Configuration is accepted and silently ignored.** `sharedHistory`, `health.*` and almost all of
-   `usage.*` parse successfully (`packages/fleet/src/lib/config.ts:197,223,311`) and reach nothing.
-   An operator who writes `sharedHistory: {codex: true}` gets no session pooling and no word said;
-   one who writes `usage.atLimitPercent: 90` gets 100. This is the "damaged state is not empty
-   state" failure applied to configuration. Closed by this unit — see [What this unit closed](#what-this-unit-closed).
-
-3. **The reachability gate cannot see the fleet package's dead capability.**
-   `scripts/validate/composition-reachability.ts:22` treats a package with no `bin` as rooted at its
-   `exports`. `packages/fleet` has no binary, so _everything_ under its barrel is "reachable" by
-   definition. `FleetLoginService`, `ProcessFleetLoginPort`, `groupByIdentity`,
-   `renderFleetUsageJson` and `renderFleetUsageMetrics` all passed every gate while no composition
-   root called any of them. This unit mounted the first two; `groupByIdentity` and the two renderers
-   are still uncalled and still green. Nothing is wrong with the gate — the fleet package is simply
-   outside what it can prove, and that is worth knowing before reading a green build as absorption.
+1. **`fy fleet usage` reports every account as `unavailable` today.** The only `FleetUsageProbe`
+   implementation is `UnprovisionedUsageProbe` (`packages/cli/src/adapters/fleet/usage-probe.ts:11`).
+   It is honest about it, but there is no quota data anywhere in the product.
+2. **The reachability gate cannot see this package's dead capability.**
+   `scripts/validate/composition-reachability.ts:22` roots a package with no `bin` at its `exports`,
+   so everything under `packages/fleet`'s barrel is "reachable" by definition. `FleetLoginService`
+   passed every gate for weeks while nothing called it. `groupByIdentity`, `renderFleetUsageJson` and
+   `renderFleetUsageMetrics` still do. A green build is not evidence of absorption here.
+3. **Configuration used to be accepted and silently ignored** — `sharedHistory`, `health.*`, most of
+   `usage.*` parsed cleanly and reached nothing. Closed by this unit: the plan now refuses.
 
 ---
 
-## 1. Configuration and composition — PORTED
+## A — Declare a fleet
 
-| kfleet source                                | Ferretry carrier                                                             | Notes                                                                                                                                                                                                                                                                         |
-| -------------------------------------------- | ---------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/types.ts:218` `configSchema`           | `packages/fleet/src/lib/config.ts:295` `FleetConfigSchema`                   | Ported and materially stronger: routes are **opt-in per (agent × variant)** instead of a full cross-product, every account declares a UUID `id`, and cross-references (unknown profile/variant, duplicate id/wrapper/home, incoherent availability) are checked in one parse. |
-| `core/types.ts:38,62` profile/overlay fields | `packages/fleet/src/lib/config.ts:98,113`                                    | Field-for-field identical (`env`, `flags`, `settings`, `memory`, `skills`, `hooks`, `hooksDir`, `mcp`, `claude:`/`codex:` overlays).                                                                                                                                          |
-| `core/types.ts:99` `commandSchema`           | `packages/fleet/src/lib/config.ts:174`                                       | `target` is an account **id**, not a wrapper name — a rename can no longer silently repoint a command.                                                                                                                                                                        |
-| `core/types.ts:114` `aliasesSchema`          | `packages/fleet/src/lib/config.ts:188`                                       | Ported. Requires at least one harness, which kfleet did not.                                                                                                                                                                                                                  |
-| `core/types.ts:122` `defaultHomesSchema`     | `packages/fleet/src/lib/config.ts:308`                                       | Ported, by id.                                                                                                                                                                                                                                                                |
-| `core/types.ts:210` `variantSchema`          | `packages/fleet/src/lib/config.ts:127`                                       | Ported, plus a `mode` default for its routes.                                                                                                                                                                                                                                 |
-| `core/config.ts:7` `loadConfig`              | `packages/fleet/src/adapters/config-file.ts:14` `FileFleetConfigSource`      | Ported; IO moved to the adapter tier, `Bun.YAML` instead of the `yaml` package.                                                                                                                                                                                               |
-| `core/merge.ts:49` `resolveAll`              | `packages/fleet/src/lib/profiles.ts:157` `resolveAccounts`                   | Ported exactly — same slot order (`base → agent.profiles → variant.profiles → variant.inline → agent.inline`), same per-slot harness flattening, same env-merge/flags-concat/settings-concat/scalar-replace rules.                                                            |
-| `core/settings.ts:21` `deepMerge`            | `packages/fleet/src/lib/settings.ts:28` `deepMergeSettings`                  | Ported. Arrays replace rather than concatenate in both.                                                                                                                                                                                                                       |
-| `core/settings.ts:67` `readRuntimeLayer`     | `packages/fleet/src/adapters/file-provisioner.ts:204` `readExistingSettings` | Ported, including the symlink and unparseable-file bail-outs.                                                                                                                                                                                                                 |
-| `core/kinds.ts:54` `KIND_SPECS.assets`       | `packages/fleet/src/lib/assets.ts:35,43` `HARNESS_ASSETS`                    | Ported and **stricter**: kfleet silently dropped an asset its per-harness table had no destination for; `unsupportedAssetFields` (`assets.ts:61`) makes it a declared refusal at plan time (`plan.ts:162`).                                                                   |
-| `core/kinds.ts:44` `wrapperEnv`, `:39` `bin` | `packages/fleet/src/lib/wrappers.ts:25,31`                                   | Ported.                                                                                                                                                                                                                                                                       |
-| `core/kinds.ts:42` `defaultConfigDir`        | `packages/cli/src/lib/fleet/layout.ts:38`                                    | Ported.                                                                                                                                                                                                                                                                       |
-| `deps.ts:6-23` path constants                | `packages/cli/src/lib/fleet/layout.ts:24` `resolveFleetLayout`               | Ported as a **pure function of the environment** rather than module-load-time globals. `FY_HOME` replaces `KFLEET_HOME`; the fleet lives under `<stateHome>/fleet` rather than `~/.kfleet`.                                                                                   |
-| `deps.ts:26` `resolveAsset`                  | `packages/fleet/src/lib/paths.ts:40` `expandAssetPath`                       | Ported, pure, with the home supplied by the caller.                                                                                                                                                                                                                           |
-| `util/format.ts`                             | `packages/cli/src/lib/fleet/ports.ts:9` `IFleetOutput` + `ConsoleIo`         | Ported behind a port.                                                                                                                                                                                                                                                         |
-| `cli/shared.ts:4` `loadOrDie`                | commander's error path in `packages/cli/bin/fy.ts`                           | Ported.                                                                                                                                                                                                                                                                       |
+**What a person does.** Writes one file describing the accounts they have, the lanes each runs in
+(interactive, auto, …), and the shared profiles those compose from, so that N accounts × M lanes do
+not become N×M hand-written files.
 
-### Behavioural deltas worth knowing (not gaps, but not identical)
+**Ferretry's answer: carried, and stronger.** `packages/fleet/src/lib/config.ts:295` is the schema and
+`profiles.ts:157` the composition. The merge order is identical to kfleet's
+(`base → agent.profiles → variant.profiles → variant.inline → agent.inline`, env merging, flags and
+settings concatenating, other scalars replacing), including the per-slot harness-overlay flattening
+that lets one cross-harness variant vary a per-harness asset.
 
-- **Alias command names differ.** kfleet's `expandAliases` (`core/generate.ts:374`) names a command
-  `${alias}-${agent.name}` — the alias _replaces_ the harness prefix, so `yolo` + `claude-auto-atomi`
-  → `yolo-auto-atomi`. Ferretry's (`packages/fleet/src/lib/profiles.ts:222`) names it
-  `${alias}-${account.wrapper}` → `yolo-claude-auto-atomi`. Existing muscle memory and any script
-  calling the short form will not find the executable after a migration.
-- **A lone settings _file_ layer is no longer passed through verbatim.** kfleet's
-  `core/settings.ts:50` emits a single file-path layer as a link/copy, so comments and formatting in
-  a shared `config.toml` template survive. Ferretry's plan always emits a `settings` operation when
-  the stack is non-empty (`packages/fleet/src/lib/plan.ts:167`) and the provisioner parses and
-  re-serializes it (`file-provisioner.ts:180`). Comments in a template are silently stripped. Not
-  dangerous, but it is a fidelity loss nobody has recorded until now.
-- **Shell quoting is deliberately different, and Ferretry's is safer.** kfleet quotes env values
-  with a double-quoted string leaving `$` unescaped (`core/generate.ts:108`), so _every_ value can
-  expand. Ferretry single-quotes literals and expands only a value that is _exactly_ `$NAME` /
-  `${NAME}` (`packages/fleet/src/lib/wrappers.ts:36,52`), and guards an unset reference with an
-  actionable message (`wrappers.ts:89`). A kfleet config whose literal value contains `$` will render
-  differently after migration — correctly, but differently.
-- **`prune` is no longer optional.** kfleet has `kfleet prune` and `kfleet apply --prune`
-  (`cli/fleet.ts:20,65`). Ferretry always emits a prune operation from the plan
-  (`plan.ts:136`), bounded to the bin directory and to files carrying the managed marker.
+Four things are better, and three of them are only possible because we dropped compatibility:
+
+- **Routes are opt-in.** kfleet clones every agent across every variant, so adding a variant mints
+  accounts across the whole fleet. Ferretry requires each (agent × variant) pair to be declared.
+- **Identity is declared, not parsed.** kfleet recovers the base agent from a name infix, so an
+  account literally named `auto-kirin` collides with `kirin` under the `auto` variant — kfleet has to
+  detect that collision at generate time (`core/generate.ts:398`). Ferretry declares `id`, `wrapper`,
+  `home` and `variant` separately, so account names may contain hyphens or look like an alias and
+  everything still joins.
+- **Availability is declared and checked.** An account that says a model is down cannot also offer
+  it, and an available account must name a `defaultModel` it can actually serve.
+- **One parse reports everything.** Unknown profiles and variants, duplicate ids, duplicate wrappers,
+  duplicate homes and incoherent availability all surface together rather than during provisioning.
+
+**Nothing to build.**
 
 ---
 
-## 2. Generation and provisioning — PORTED
+## B — Materialize it
 
-| kfleet source                                                | Ferretry carrier                                                                         | Notes                                                                                                                                        |
-| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/generate.ts:164` `renderWrapper`                       | `packages/fleet/src/lib/wrappers.ts:101` `renderWrapperScript`                           | Ported; see quoting delta above.                                                                                                             |
-| `core/generate.ts:346` `renderCommand`                       | `packages/fleet/src/lib/wrappers.ts:147` `renderCommandScript`                           | Ported.                                                                                                                                      |
-| `core/generate.ts:188` `materializeAgent`                    | `packages/fleet/src/lib/plan.ts:155` `assetOperations` + `file-provisioner.ts:71`        | Ported and **split**: deciding is a pure plan, writing is an adapter, so `--dry-run` is the same code path minus the last step.              |
-| `core/generate.ts:324` `resolveDefaultHomeTargets`           | `packages/fleet/src/lib/plan.ts:117` + `UnknownDefaultHomeError:56`                      | Ported.                                                                                                                                      |
-| `core/generate.ts:374` `expandAliases`                       | `packages/fleet/src/lib/profiles.ts:217`                                                 | Ported (name shape differs, above).                                                                                                          |
-| `core/generate.ts:391` `apply`                               | `packages/fleet/src/lib/provisioning.ts:108` `FleetApplyService`                         | Ported.                                                                                                                                      |
-| `core/generate.ts:398-417` collision checks                  | `packages/fleet/src/lib/profiles.ts:252` `resolveCommands` + `WrapperCollisionError:235` | Ported and generalized (account/command/alias claimants all reported together).                                                              |
-| `core/generate.ts:443` `prune`, `:360` `listManagedWrappers` | `file-provisioner.ts:156` `prune`                                                        | Ported; bounded twice (direct children only, marker required).                                                                               |
-| —                                                            | `packages/fleet/src/lib/manifest.ts` (218 lines)                                         | **New in Ferretry.** kfleet published no manifest; consumers globbed the bin directory. This is the single largest capability Ferretry adds. |
+**What a person does.** Runs one command and gets: an executable per account on `PATH`, a private
+home per account, that account's settings/memory/skills/hooks/MCP materialized inside it, the bare
+`claude`/`codex` command pointed at a nominated account, alias wrappers fanned out across the fleet,
+and anything no longer declared swept away.
 
-### GAP — `AUTOTRUST` (`core/generate.ts:128-161`, 34 lines of generated shell)
+**Ferretry's answer: carried, and better shaped.** `fy fleet apply` builds a complete, inspectable
+plan (`packages/fleet/src/lib/plan.ts:86`) and hands it to an adapter (`file-provisioner.ts:38`) that
+writes atomically and refuses to write outside the roots the composition root declared. `--dry-run`
+is the same code path minus the last step, so what a human reviews is the value the applier consumes;
+kfleet's dry run re-derived a summary and could disagree with the real thing. Pruning is bounded
+twice — direct children of the bin directory, and only files carrying the managed marker.
 
-Every kfleet Claude wrapper carries a launch-time shell block that seeds `.claude.json` so a fresh
-config dir never stops to ask: `hasTrustDialogAccepted` per project, `hasCompletedOnboarding`,
-`hasCompletedClaudeInChromeOnboarding`, `claudeInChromeDefaultEnabled`, and pre-approval of the
-wrapper's own `ANTHROPIC_API_KEY` in `customApiKeyResponses.approved`. `KIND_SPECS.claude.autotrust`
-(`core/kinds.ts:60`) is the switch; `CLAUDE_AUTOTRUST=0` disables it.
+Ferretry is also stricter in a way that matters: kfleet **silently dropped** an asset its per-harness
+table had no destination for, so a Claude profile could declare `hooks:` and get no hooks with no
+error. `unsupportedAssetFields` (`assets.ts:61`) makes that a declared refusal at plan time.
 
-**Ferretry has no equivalent.** `renderWrapperScript` emits secrets sourcing, guards, the home export,
-env exports and `exec` — nothing else.
+### The gap: nothing puts the wrappers on `PATH`
 
-**What is lost:** a freshly provisioned Ferretry Claude account, launched non-interactively (which is
-the only way an agent fleet launches anything), stops at the folder-trust prompt and never reaches a
-turn. This is the single highest-impact gap for anyone actually running the fleet.
+kfleet's bin directory is `~/.kfleet/bin`, and Home Manager put it on `PATH`. Ferretry's is
+`<FY_HOME>/fleet/bin`, and **nothing anywhere puts it on `PATH`, mentions it, or checks it.**
+`fy fleet apply` writes executables to a directory the shell has never heard of and reports success.
 
-### GAP — Codex shared-SQLite reconciliation inside `materializeAgent`
+That is the smallest, sharpest blocker on this whole list: everything else about materialization
+works, and the result is unreachable. _Being closed by this unit_ — see [J](#j--start-from-nothing).
 
-`core/generate.ts:36,63,86,96,203-258` implement a sidecar marker (`.kfleet-sqlite-home.json`) that
-records whether kfleet injected `sqlite_home` into an account's `config.toml`, what was there before,
-and whether kfleet created the file — so disabling sharing can remove **only** kfleet's own key and
-leave a user-edited one alone. `RESERVED_ENV_NAMES` (`packages/fleet/src/lib/config.ts:54`) names
-`CODEX_SQLITE_HOME`, so Ferretry knows the variable exists, but nothing writes or reconciles it.
-Part of the shared-history gap below.
+### Two behavioural deltas, recorded and deliberately not fixed
 
----
-
-## 3. Shared history and Codex prewarm — GAP (557 lines, zero carried)
-
-| kfleet source                                            | Ferretry carrier | What is lost                                                                                                                                                                              |
-| -------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/kinds.ts:80,110` `sharedState` entry tables        | **GAP**          | The list of what is poolable per harness (transcripts, sessions, file-history, plans, tasks, todos, shell-snapshots, paste-cache, prompt history).                                        |
-| `core/shared-history.ts:121` `materializeSharedHistory`  | **GAP**          | Migrating each account's session state into one per-harness pool and symlinking it back, so **any account can `--resume` any session**. Rename-based, so live sessions keep their inodes. |
-| `core/shared-history.ts:65` `mergeDirInto`               | **GAP**          | Collision resolution by mtime with the loser preserved under `.migration-conflicts/`.                                                                                                     |
-| `core/shared-history.ts:98` `mergeJsonlInto`             | **GAP**          | Timestamp-ordered dedup union of two prompt-history files.                                                                                                                                |
-| `core/shared-history.ts:47` `ensureCodexSharedSqliteDir` | **GAP**          |                                                                                                                                                                                           |
-| `core/codex-prewarm.ts:248` `prewarmCodexSharedSqlite`   | **GAP**          | Reconciling pooled Codex rollouts into the shared state DB over app-server JSON-RPC without an LLM call.                                                                                  |
-| `core/codex-prewarm.ts:91` `acquireCodexPrewarmLock`     | **GAP**          | Cross-process exclusion via a SQLite `BEGIN EXCLUSIVE`.                                                                                                                                   |
-| `cli/prewarm.ts:37` `createPrewarmCommand`               | **GAP**          | `kfleet prewarm codex`.                                                                                                                                                                   |
-
-**The dangerous part is not the absence — it is the silence.** `sharedHistory` is a parsed,
-strict-object field of `FleetConfigSchema` (`packages/fleet/src/lib/config.ts:311`). A configuration
-that turns it on applies successfully and pools nothing. Closed by this unit — see below.
+- **A lone settings _file_ layer is re-serialized rather than copied.** kfleet passes a single
+  file-path layer through as a link or copy (`core/settings.ts:50`), so comments and formatting in a
+  shared template survive. Ferretry always emits a `settings` operation when the stack is non-empty
+  (`plan.ts:167`) and the provisioner parses and re-serializes it. Comments in a template are
+  stripped. Worth knowing; not worth a special case, because a template whose comments matter can be
+  documented in the config instead — which is what kfleet's own Codex template already tells you to
+  do.
+- **Alias command names differ**, and ours is the better name. kfleet's alias _replaces_ the harness
+  prefix (`yolo` + `claude-auto-atomi` → `yolo-auto-atomi`), which is ambiguous the moment two
+  harnesses have an account of the same name. Ferretry prepends (`yolo-claude-auto-atomi`).
+  Incompatible on purpose.
 
 ---
 
-## 4. Harness liveness probing — GAP (538 lines)
+## C — Own the assets
 
-This is one of the two the owner asked about by name.
+This is the capability the reframe asked me to size, and the answer is blunter than expected.
 
-| kfleet source                                                                   | Ferretry carrier                                                                                                                                                      | Notes                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/harness-probe.ts:370` `probeHarness`                                      | **GAP**                                                                                                                                                               | Launch the wrapper with a sentinel prompt in a disposable cwd; healthy = exit 0 **and** an exact-sentinel reply.                                                                                   |
-| `core/harness-probe.ts:215` `harnessProbeCommand`                               | **GAP**                                                                                                                                                               | The exact cheap invocation per harness (`--bare` only when the auth mode preserves it; Codex keeps `config.toml` on purpose).                                                                      |
-| `core/harness-probe.ts:186-189` failure classification                          | **GAP**                                                                                                                                                               | `rate_limited` / `authentication` / `timeout` / `launch` / `process_error` / `unexpected_reply` from output patterns.                                                                              |
-| `core/harness-probe.ts:136,149` success cache                                   | **GAP**                                                                                                                                                               | 15-minute TTL, **successes only** — a failure is never cached.                                                                                                                                     |
-| `core/harness-probe.ts:80` `sanitizeHarnessEnv`, `:97` `prepareHarnessProbeEnv` | **PORTED BY THIS UNIT** — `packages/fleet/src/lib/harness-env.ts`; the wrapper read is split into `referencedEnvNames` (pure) and `readFleetWrapperScript` (adapter). |
-| `core/health.ts:75` `autoAgents`                                                | **GAP**                                                                                                                                                               | kfleet selects probe targets by the `auto-` name prefix; Ferretry declares `mode: 'auto'` on a route (`config.ts:147`), which is the better answer to the same question — but nothing consumes it. |
-| `core/health.ts:83` `resolveAgentWrapper`                                       | **GAP on `main`**                                                                                                                                                     | See `fix/harness-preflight` below.                                                                                                                                                                 |
-| `core/health.ts:98,137` `probeAgent`/`probeFleet`                               | **GAP**                                                                                                                                                               |                                                                                                                                                                                                    |
-| `core/firstrun.ts:17` `seedFirstRunFlags`                                       | **GAP**                                                                                                                                                               | The jq-free TypeScript twin of `AUTOTRUST`, used by health and login so a probe on a fresh box is not blocked by an onboarding prompt.                                                             |
-| `cli/health.ts:11`, `cli/doctor.ts:10`                                          | **GAP**                                                                                                                                                               | No `fy fleet health`, no `fy fleet doctor`.                                                                                                                                                        |
+**What a person does.** Every account runs with _content_: a `CLAUDE.md`/`AGENTS.md` memory file, a
+skills directory, a base `settings.json`/`config.toml`, hooks, an MCP server list. Some of that is
+"the fleet's defaults" and some is "mine". kfleet's own asset tree is:
 
-### Did PR #231 reimplement this, and do the two agree?
+| Asset                            | Size    | What it is                                                           |
+| -------------------------------- | ------- | -------------------------------------------------------------------- |
+| `CLAUDE.md`                      | 16K     | the operator's own global instructions                               |
+| `CLAUDE.auto.md`                 | 8K      | the same, for non-interactive lanes                                  |
+| `skills/`, `skills-codex/`       | 284K ×2 | 14 skills each, mirrored per harness (22 files apiece)               |
+| `templates/claude/settings.json` | —       | base Claude settings the fleet's profiles layer onto                 |
+| `templates/codex/chatgpt.toml`   | —       | base Codex config                                                    |
+| `templates/codex/hooks.json`     | —       | a Codex `PreToolUse` hook                                            |
+| `statusline.zsh`                 | 12K     | a Claude status line, pointed at by an **absolute path** in settings |
+| `config.yaml`                    | 12K     | the fleet declaration itself                                         |
 
-**No, and they do not conflict — but neither of them is kfleet's probe.**
+**The finding: kfleet does not own any of this, and neither does Ferretry.**
 
-- `feat/fleet-management` (PR #231, open, not merged) adds
-  `packages/pwa/src/features/fleet/fleet-model.ts:41` `defaultFleetHarness()`. It is a **policy over
-  supplied evidence**, not a detector: it picks Claude when a Claude harness has a non-empty
-  `launchable` list, else Codex, else `undefined`. Its own comment requires callers to pass only
-  harnesses with positive daemon evidence, and its `FleetReadState` (`:26`) makes "unavailable" a
-  distinct state from "empty". There is nothing here that could disagree with kfleet, because it
-  detects nothing.
-- The detection lives on the sibling branch `fix/harness-preflight` (also not on `main`):
-  `packages/daemon/src/lib/core/harness-readiness.ts:38` `accountLaunchability` and `:90`
-  `readHarnessPreflight`. That is a **PATH resolution** — "the manifest declares this account
-  available AND this host can resolve its wrapper name to an executable". Its doc comment states the
-  limit explicitly (`:27-31`): a wrapper on PATH is not signed in, in credit, or able to reach its
-  provider, and every message built from it says so.
+- kfleet's `cli/init.ts:9` copies from `path.join(import.meta.dir, '../../templates')` — a directory
+  that **does not exist in the kfleet source tree**. `kfleet init` therefore logs "no templates
+  bundled" and creates an empty `~/.kfleet`. Every asset above is supplied by Home Manager, which
+  links the repo's `kfleet/` directory into `~/.kfleet/`. kfleet only _references_ assets by relative
+  path (`deps.ts:26` `resolveAsset`).
+- Ferretry's `packages/fleet/src/lib/assets.ts` is **not the asset story**. It is the per-harness
+  destination table — "a declared `memory:` lands at `CLAUDE.md` and is symlinked; a declared
+  `settings:` lands at `settings.json` and is copied because the harness rewrites it". Sixty-nine
+  lines, entirely about _where a declared asset goes_. It answers nothing about _what assets exist_
+  or _where they come from_.
+- `expandAssetPath` (`paths.ts:40`) resolves a relative reference against `layout.assetsDirectory`,
+  which is `<FY_HOME>/fleet/assets`. So the reference mechanism is carried in full.
+- **But `fy fleet apply` never creates that directory.** `plan.ts:97` creates the fleet, bin and
+  homes directories and stops. A relative asset reference resolves into a path nothing made.
 
-So the answer to "two notions of 'is Claude installed' that can disagree" is: there is one notion of
-_installed_ (PATH resolution, on `fix/harness-preflight`) and one notion of _alive_ (a real turn,
-kfleet's, not ported). They are different questions and both branches say which one they answer. The
-risk the owner was worried about has not materialised. **What is missing is the stronger fact**: no
-Ferretry code path can tell you an account will actually complete a turn, and `renderHarnessPreflight`
-(`harness-readiness.ts:151`) prints that limitation on every run rather than hiding it.
+So of this capability Ferretry carries: _reference resolution_ and _materialization destinations_.
+It carries none of: shipping a default, letting a person override a default, upgrading a default
+without clobbering an override, or hosting an executable asset like the status line.
 
-**Coordination note:** `packages/daemon/src/lib/core/harness-readiness.ts` belongs to the daemon
-work in flight (`ferretry-wt-fleetd`). This unit did not touch it. If a real liveness probe is
-ported, it should be a `packages/fleet` port consumed by both, not a third detector.
+**Replacing kfleet means Ferretry owns both halves — the defaults and the override mechanism —
+because Home Manager will not be in the loop.** The owner's asset _content_ is his and stays his;
+what belongs in a public repo is the mechanism plus neutral defaults.
 
----
+Two shapes worth naming:
 
-## 5. Usage and quota — the aggregation is PORTED, every provider call is a GAP
+- **The status line is not an asset field in either tool.** kfleet's `settings.json` points at
+  `~/.config/claude-statusline.zsh` by absolute path, and Home Manager puts the file there. Neither
+  kfleet's nor Ferretry's asset table has a slot for "an executable the settings reference". Ferretry
+  has a better answer available and should take it rather than porting a 267-line zsh script: the
+  status line's whole job is to show model, context, account and _5-hour/weekly quota_ — which is
+  exactly [F](#f--know-whos-out-of-quota), a thing the daemon will already know. See
+  [Better because incompatible](#better-because-were-not-compatible).
+- **The per-harness skill mirroring is an artefact of the harnesses, not of kfleet.** `skills/` and
+  `skills-codex/` are two copies of the same 14 skills in two dialects. Ferretry should not inherit
+  the duplication as a fact of life without asking whether one source can generate both.
 
-This is the other one the owner asked about by name.
-
-### What is ported (and it is a good port)
-
-| kfleet source                                            | Ferretry carrier                                                                             |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `core/usage.ts:993` `windowsToUsage` at-limit rule       | `packages/fleet/src/lib/usage.ts:140` `isAtLimit`                                            |
-| `core/usage.ts:466` `corroborateAuthFailure` policy      | `packages/fleet/src/lib/usage.ts:153` `isCorroboratedAuthRejection`                          |
-| `core/usage.ts:382` z.ai "sort windows by reset horizon" | `packages/fleet/src/lib/usage.ts:112` `normalizeUsageWindows`                                |
-| `core/usage.ts:444` MiniMax `100 − remaining`            | `packages/fleet/src/lib/usage.ts:82` `usedPercentFromRemaining`                              |
-| `core/usage.ts:869` `runProbes` bounded concurrency      | `packages/fleet/src/lib/usage.ts:336` `boundedMap`                                           |
-| `core/usage.ts:912` `probeUsage` aggregation loop        | `packages/fleet/src/lib/usage.ts:172` `FleetUsageCollector.collect`                          |
-| `cli/serve.ts:73` `renderUsageMetrics`                   | `packages/fleet/src/lib/usage.ts:243` `renderFleetUsageMetrics` — **exported, never called** |
-| `cli/serve.ts:200` `/usage` JSON envelope                | `packages/fleet/src/lib/usage.ts:229` `renderFleetUsageJson` — **exported, never called**    |
-| `cli/usage.ts:49` `createUsageCommand`                   | `packages/cli/src/lib/fleet/commands.ts:52` + `controller.ts:83` + `render.ts:87`            |
-
-The Ferretry collector is also stricter in one place that matters: `collectAccount`
-(`usage.ts:211`) refuses to set `atLimit` from a _failed_ probe. Only a successful reading or a
-proven-unavailable state can exhaust an account. kfleet's `windowsToUsage` (`core/usage.ts:1018`)
-has the same rule. Both fail open, deliberately.
-
-### GAP — every provider probe (roughly 1,000 lines)
-
-`FleetUsageProbe` (`packages/fleet/src/lib/usage.ts:36`) is a one-method port. Its only implementation
-is `UnprovisionedUsageProbe` (`packages/cli/src/adapters/fleet/usage-probe.ts:11`), wired at
-`packages/cli/bin/fy.ts:488`, which answers `unavailable` for every account.
-
-| kfleet source                                                                                                                   | What is lost                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/usage.ts:306` `probeAnthropic`                                                                                            | Anthropic subscription quota via the stored OAuth credential.                                                                                                                                                                                                                                                          |
-| `core/usage.ts:154` `probeAnthropicStoredToken`, `:142` `parseAnthropicStoredUsage`                                             | The read-only `GET /api/oauth/usage` call and its `five_hour`/`seven_day` unit (percentage points).                                                                                                                                                                                                                    |
-| `core/usage.ts:245` `probeAnthropicExternalToken`, `:191,226` header parsing                                                    | The `max_tokens:1` inference probe for external tokens, and its quota headers (fractions in 0..1 — a different unit from the JSON endpoint, and mixing them is a 100× error).                                                                                                                                          |
-| `core/usage.ts:333` `probeCodex`                                                                                                | ChatGPT-plan windows from `chatgpt.com/backend-api/codex/usage`.                                                                                                                                                                                                                                                       |
-| `core/usage.ts:382` `probeZai`                                                                                                  | z.ai GLM coding-plan windows.                                                                                                                                                                                                                                                                                          |
-| `core/usage.ts:487` `probeMinimax`, `:437` `classifyMinimaxBody`                                                                | MiniMax coding-plan windows, including that the endpoint returns HTTP 200 on a bad key and signals auth in `base_resp.status_code`.                                                                                                                                                                                    |
-| `core/usage.ts:741` `classifyAgent`                                                                                             | Deciding an account's provider from its base URL / auth mode, and its **credential identity**.                                                                                                                                                                                                                         |
-| `core/usage.ts:824` `planTargets`                                                                                               | **Deduplication by credential.** Many wrappers share one credential; kfleet probes each unique credential once and fans the result back out. Ferretry's collector probes **per account** (`usage.ts:173`), so a fleet with twelve wrappers on three accounts would make twelve provider calls where kfleet made three. |
-| `core/usage.ts:624` `reloginExpiredOAuth`, `:566` `runRelogin`, `:534` `oauthNeedsRefresh`                                      | The pre-probe token-free refresh (`usage.relogin`).                                                                                                                                                                                                                                                                    |
-| `core/usage.ts:885` `scanOAuthAuth`                                                                                             | Donor selection and per-member auth override (`usage.sync`).                                                                                                                                                                                                                                                           |
-| `core/usage.ts:703` `createExternalCredentialResolver`                                                                          | Reading a declared secret from `~/.secrets` through a bounded shell without it entering argv or logs.                                                                                                                                                                                                                  |
-| `core/usage.ts:122` `oauthTokenUsable`, `creds.ts:53` `jwtExpMs`, `creds.ts:7` `keychainSuffix`, `creds.ts:38` `readClaudeCred` | Local credential reading — macOS Keychain by config-dir hash, Linux `.credentials.json`.                                                                                                                                                                                                                               |
-| `core/cliproxy-usage.ts:274` `probeCLIProxyUsage` (whole file, 308 lines)                                                       | Local CLIProxyAPI availability: runtime `available`/`unavailable` with a typed reason (`cooldown`/`spend_limit`/`auth`/`provider`/`no_credentials`) and a retry horizon. `CliProxySourceSchema` (`packages/fleet/src/lib/config.ts:208`) parses the configuration for it and nothing reads it.                         |
-
-**What is lost in one sentence:** nothing in Ferretry can tell you an account is out of quota, so
-nothing can route away from one.
-
-### PARTIAL — `fy fleet usage` presentation
-
-`packages/cli/src/lib/fleet/render.ts:87` `renderUsage` carries the per-row states (unavailable /
-probe failed / pay-as-you-go / windows / AT LIMIT). Not carried from `cli/usage.ts`: the heat bars
-(`:40`), the reset-time columns (`:14`), grouping by variant (`:96`), `--all`, `--concurrency`,
-`--timeout`, `--no-relogin`, `--no-sync`, and `usageLimitSummary` (`:152`).
-
-`usageLimitSummary` is the one worth calling out: it distinguishes three states — `at-limit`,
-`unknown` ("no account was reported at limit; N verdicts are unknown"), and `confirmed-headroom`
-("all tracked accounts have confirmed usage left"). Ferretry's controller warns only when _every_
-account is at limit (`controller.ts:86`) and otherwise says nothing, so "no evidence of a limit"
-and "proven headroom" render identically in the summary line. The per-row rendering does not hide
-it, so this is a summary-level regression rather than a false green — but it is the same shape of
-bug this migration has hit three times.
+_Partly closed by this unit (in progress at this commit)_ — see [J](#j--start-from-nothing) for the mechanism and the directory;
+the default _content_ beyond a starting point is left, with the reasons in
+[What was left](#what-was-left).
 
 ---
 
-## 6. Login — PARTIAL, and the part that exists is unmounted
+## D — See the fleet
 
-kfleet's login is not "run `claude /login`". It is: group every variant dir into an **identity**
-(harness × base agent), read each dir's credential state, pick the freshest as **donor**, clone it to
-the siblings, and only ask for an interactive OAuth round-trip for an identity with no usable
-credential anywhere — and even then, only after proving the CLI is actually broken.
+**What a person does.** Asks what accounts exist, where each lives, what it can serve.
 
-| kfleet source                              | Ferretry carrier                                                          | State                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `core/login.ts:331` `interactiveLogin`     | `packages/fleet/src/adapters/process-login.ts:18` `ProcessFleetLoginPort` | **PORTED**, and **mounted by this unit**. It was exported-but-uncalled until `fy fleet login` landed; it now also sanitizes the caller’s environment before spawning.                                                                                                                                                             |
-| `core/login.ts:59` `isOAuth`               | `AuthModeSchema` (`config.ts:157`) + the `requiresLogin` predicate        | **PORTED, better** — declared rather than inferred from a base URL.                                                                                                                                                                                                                                                               |
-| `core/login.ts:108` `scanIdentities`       | `packages/fleet/src/lib/profiles.ts:302` `groupByIdentity`                | **PARTIAL** — the grouping exists and is exported; **nothing calls it**, and it carries no credential state.                                                                                                                                                                                                                      |
-| `core/login.ts:73` `credStatus`            | **GAP**                                                                   | Reading a dir's credential and classifying `valid`/`refreshable`/`missing`.                                                                                                                                                                                                                                                       |
-| `core/login.ts:147` `pickDonor`            | **GAP**                                                                   |                                                                                                                                                                                                                                                                                                                                   |
-| `core/login.ts:243` `syncIdentity`         | **GAP**                                                                   | **The whole point of `kfleet login`**: cloning one OAuth credential across an identity's dirs (macOS Keychain item per dir, Linux `.credentials.json`, Codex `auth.json`), plus `syncOauthAccount` (`:226`) so `/status` shows the right email. Without it, an operator logs in **once per wrapper** instead of once per account. |
-| `core/login.ts:163` `filterLiveIdentities` | **GAP**                                                                   | Proving a credential-less CLI is actually broken before asking a human to click. Depends on the harness probe.                                                                                                                                                                                                                    |
-| `core/login.ts:307` `resolveLoginTarget`   | **PARTIAL**                                                               | `ProcessFleetLoginPort:31` always spawns `account.wrapper`. kfleet falls back to the raw CLI on a fresh box where `apply` has not run, with a named error when the CLI is absent.                                                                                                                                                 |
-| `cli/login.ts:214` `createLoginCommand`    | **PORTED BY THIS UNIT**                                                   | `--status`, `--sync-only`, `--no-probe` remain GAPs (they depend on the rows above).                                                                                                                                                                                                                                              |
-| `cli/login.ts:28` `nonLoginStatus`         | **PORTED BY THIS UNIT** (as the `not-required` outcome)                   |                                                                                                                                                                                                                                                                                                                                   |
+**Ferretry's answer: carried, and stronger.** `fy fleet ls` reads the published manifest
+(`packages/fleet/src/lib/manifest.ts`) — a record kfleet did not have at all; its consumers globbed
+the bin directory, so a stale executable produced a row for an account that no longer existed. PR
+#231 adds a read-only PWA surface on top of the same data, which kfleet had no equivalent of.
 
-**Environment contamination — the concrete defect.** `ProcessFleetLoginPort` passed the caller's
-environment straight to the spawn. A wrapper exports its own `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, so the
-_home_ was always right, but an `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_BASE_URL`
-inherited from whichever agent session ran `fy fleet login` was **not** overridden — so the login
-would validate against the wrong credential. kfleet has `sanitizeHarnessEnv` (`core/harness-probe.ts:80`)
-for exactly this. Closed by this unit.
+**Nothing to build.**
 
 ---
 
-## 7. The background service — GAP (509 lines)
+## E — Get logged in
 
-| kfleet source                                       | Ferretry carrier | What is lost                                                                                                                                                 |
-| --------------------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cli/serve.ts:171` `createServeCommand`             | **GAP**          | The always-on HTTP server on `/metrics`, `/usage`, `/healthz`.                                                                                               |
-| `cli/serve.ts:33` `scheduleJittered`                | **GAP**          | Self-rescheduling jittered re-probe: `usage.interval ± usage.jitter`, floored at 1s, next cycle scheduled only after the previous settles.                   |
-| `cli/serve.ts:132` `refreshUsage`, `:156` `refresh` | **GAP**          | The cached probe cycles behind `/metrics`, so a scrape never triggers a real LLM call.                                                                       |
-| `cli/serve.ts:43` `renderMetrics`                   | **GAP**          | The _health_ metrics (`kfleet_agents_up`, per-agent up/duration). The _usage_ metrics are ported (§5).                                                       |
-| `cli/service.ts:227` `createServiceCommand`         | **GAP**          | `install`/`uninstall`/`status`/`restart` as a launchd user agent or systemd `--user` unit, sourcing `~/.secrets` without baking a secret into the unit file. |
+**What a person does.** Gets the whole fleet authenticated with the least clicking. This is the
+capability kfleet is _most_ about, and its shape is worth stating exactly:
 
-**Answering the owner's second named question directly:** `usage.interval: 300` configures nothing.
-There is no background re-probe loop in Ferretry, and — because there is no provider probe either
-(§5) — there is no data for one to refresh. Before this unit nothing said so. A configuration naming
-`usage.interval`, `usage.jitter`, `usage.relogin`, `usage.sync` or `usage.cliProxy` parsed cleanly
-and applied cleanly.
+every lane of one account (`kirin`, `auto-kirin`, `f5-kirin`, …) is the **same provider account**, but
+each home keeps its own credential copy — a per-directory macOS Keychain item for Claude, a per-home
+`auth.json` for Codex. So kfleet groups homes into identities, reads each one's credential state,
+picks the freshest as **donor**, and _clones_ it to the siblings. Only an identity with no usable
+credential anywhere needs a browser approval — and even then, only after a cheap live call proves the
+CLI is actually broken (`cli/login.ts:158`).
 
-**Coordination note:** a background loop in Ferretry belongs in the daemon as a mounted subsystem,
-not in `fy`. `ferretry-wt-fleetd` is mounting fleet routes in the daemon; the `/usage` and `/metrics`
-surfaces, and the loop behind them, are that unit's area. This unit did not build them. The two
-renderers they would need are already in `packages/fleet/src/lib/usage.ts:229,243` and are called by
-nothing today.
+**Ferretry's answer: partial, and the missing part is the whole point.**
+
+`fy fleet login` now exists and is mounted (this unit). It also sanitizes the caller's environment
+first, which kfleet does for its probes and Ferretry did not do at all — running a login from inside
+an agent session used to hand that session's `ANTHROPIC_API_KEY` to a _different_ account's wrapper.
+
+What is missing:
+
+| kfleet                                     | What it does                                                          | Ferretry                                                                                |
+| ------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `core/login.ts:73` `credStatus`            | reads a home's credential, classifies `valid`/`refreshable`/`missing` | **GAP**                                                                                 |
+| `core/login.ts:108` `scanIdentities`       | groups homes into provider identities with that state                 | `profiles.ts:302` `groupByIdentity` — grouping only, no state, **and nothing calls it** |
+| `core/login.ts:147` `pickDonor`            | the freshest credential in an identity                                | **GAP**                                                                                 |
+| `core/login.ts:243` `syncIdentity`         | **clones it to the siblings**                                         | **GAP**                                                                                 |
+| `core/login.ts:163` `filterLiveIdentities` | prove the CLI is broken before asking a human                         | **GAP** (depends on [G](#g--know-what-actually-works))                                  |
+| `core/login.ts:307` `resolveLoginTarget`   | raw-CLI fallback on a machine where apply has not run                 | **GAP**                                                                                 |
+| `cli/login.ts` `--status`                  | report state, change nothing                                          | **GAP**                                                                                 |
+
+**Why this blocks deletion:** the owner's declaration produces on the order of thirty wrappers across
+roughly six provider accounts. kfleet asks for ~6 browser approvals. Ferretry asks for ~30. That is
+not a replacement.
+
+**What to build.** A credential-store port in `packages/fleet/src/adapters` (Keychain on macOS via
+`security`, `.credentials.json` on Linux, `auth.json` for Codex) behind a pure identity/donor policy
+in `src/lib`. `identity` is already declared in the config, so the grouping half is free — kfleet had
+to infer it from a name infix.
 
 ---
 
-## 8. Scaffolding and diagnostics — GAP
+## F — Know who's out of quota
 
-| kfleet source                            | Ferretry carrier | What is lost                                                                                                                                                                                                                                                                                                            |
-| ---------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cli/init.ts:11` `createInitCommand`     | **GAP**          | `kfleet init` scaffolds `~/.kfleet` from bundled templates, never clobbering. Ferretry knows where the config _should_ be (`packages/cli/src/lib/fleet/layout.ts:43` `defaultConfigPath`) and nothing creates it, so a fresh host's first `fy fleet apply` fails with `invalid fleet config at …: file does not exist`. |
-| `cli/doctor.ts:10` `createDoctorCommand` | **GAP**          | PATH check for the bin directory, config validity, and whether each harness binary is on PATH. The nearest thing is `renderHarnessPreflight` on `fix/harness-preflight`, which is daemon-scoped and answers a different question.                                                                                       |
+**What a person does.** Asks which accounts still have capacity, so a human can pick one and
+automation can route around an exhausted one. This is why kfleet's `serve` exposes `/usage` as JSON.
+
+**Ferretry's answer: the decision half is ported well; the transport half does not exist.**
+
+Ported, and pure, and tested:
+
+| kfleet                                               | Ferretry                                                        |
+| ---------------------------------------------------- | --------------------------------------------------------------- |
+| `core/usage.ts:993` at-limit rule                    | `lib/usage.ts:140` `isAtLimit`                                  |
+| `core/usage.ts:466` corroborate-before-condemning    | `lib/usage.ts:153` `isCorroboratedAuthRejection`                |
+| `core/usage.ts:382` "sort windows by reset horizon"  | `lib/usage.ts:112` `normalizeUsageWindows`                      |
+| `core/usage.ts:444` `100 − remaining`                | `lib/usage.ts:82` `usedPercentFromRemaining`                    |
+| `core/usage.ts:912` aggregation, bounded concurrency | `lib/usage.ts:172` `FleetUsageCollector`                        |
+| `cli/serve.ts:73` Prometheus rendering               | `lib/usage.ts:243` `renderFleetUsageMetrics` — **never called** |
+| `cli/serve.ts:200` `/usage` envelope                 | `lib/usage.ts:229` `renderFleetUsageJson` — **never called**    |
+
+Ferretry's collector is also stricter in the right place: a _failed_ probe can never set `atLimit`
+(`usage.ts:211`). Only a successful reading or a proven-unavailable state can exhaust an account.
+
+Missing: **every call that would produce a number.** Anthropic stored-OAuth (`core/usage.ts:306`),
+Anthropic external-token via `max_tokens:1` quota headers (`:245` — note the headers are fractions in
+0..1 while the JSON endpoint is 0..100, and mixing them is a 100× error), Codex/ChatGPT (`:333`),
+z.ai (`:382`), MiniMax (`:487`), plus classification (`:741`), **deduplication by credential**
+(`:824` — many wrappers share one credential; kfleet probes each unique credential once), pre-probe
+token refresh (`:624`), donor healing (`:885`), secrets-file resolution (`:703`), local credential
+reading (`core/creds.ts`), and the entire CLIProxyAPI availability source (`core/cliproxy-usage.ts`,
+308 lines) whose configuration Ferretry parses and never reads.
+
+Note the dedup difference is not cosmetic: Ferretry's collector probes **per account**
+(`usage.ts:173`), so thirty wrappers on six credentials would make thirty provider calls where kfleet
+made six.
+
+**Presentation is partial too.** `fy fleet usage` renders per-row states honestly, but `cli/usage.ts`
+also has heat bars, reset-time columns, variant grouping, `--all`, `--concurrency`, `--timeout`, and
+— the one that matters — `usageLimitSummary` (`:152`), which distinguishes _at-limit_, _unknown_
+("no account was reported at limit; N verdicts are unknown") and _confirmed headroom_. Ferretry's
+summary line collapses the last two, which is the same shape of "empty read as healthy" bug this
+migration has hit three times. The per-row rendering does not hide it, so it is a summary regression
+rather than a false green.
+
+---
+
+## G — Know what actually works
+
+**What a person does.** Asks which accounts can complete a turn — catching bad auth, a dead proxy, a
+misconfigured model. kfleet launches each wrapper with a sentinel prompt and requires exit 0 **and**
+an exact-sentinel reply, so a silent failure that exits 0 still counts as down
+(`core/harness-probe.ts:370`). Failures are classified (`rate_limited`, `authentication`, `timeout`,
+`launch`, `process_error`, `unexpected_reply`) and successes cached for 15 minutes; failures are
+never cached.
+
+**Ferretry's answer: nothing on `main`.**
+
+**Did PR #231 reimplement this?** No, and there is no conflict — this was worth checking, because two
+notions of "is Claude installed" that disagree would be worse than one.
+
+- `feat/fleet-management` adds `defaultFleetHarness()` (`packages/pwa/src/features/fleet/fleet-model.ts:41`).
+  It is a **policy over supplied evidence**, not a detector: Claude when a Claude harness has a
+  non-empty `launchable` list, else Codex, else nothing. Its comment requires callers to pass only
+  positively-evidenced harnesses, and `FleetReadState` makes "unavailable" distinct from "empty".
+- The detection is on the sibling branch `fix/harness-preflight`:
+  `packages/daemon/src/lib/core/harness-readiness.ts:38,90`. It is a **PATH resolution** — the
+  manifest declares the account available _and_ this host can resolve its wrapper to an executable —
+  and its comment states the limit outright: a wrapper on PATH is not signed in, in credit, or able
+  to reach its provider. `renderHarnessPreflight` prints that limitation on every run.
+
+So there is one notion of _installed_ and one notion of _alive_, they answer different questions, and
+both say which one they answer. **The second is simply missing.** If it is ported, it belongs in
+`packages/fleet` consumed by both, not as a third detector.
+
+**Coordination:** `harness-readiness.ts` is the in-flight daemon unit's file and was not touched.
+
+---
+
+## H — Keep it fresh
+
+**What a person does.** Wants quota and health answers to be current without running a command, and
+wants that to survive a reboot. kfleet's answer is `kfleet serve` (an HTTP server on 47318 with
+`/metrics`, `/usage`, `/healthz` and two cached background loops) plus `kfleet service install`,
+which writes a launchd agent or a systemd `--user` unit, sources `~/.secrets` so the API-key probes
+have their keys, and enables lingering.
+
+**Ferretry's answer: the supervision half already exists and is better. The probing half does not
+exist.**
+
+`fy daemon install|uninstall|start|stop|restart|status|logs` is already shipped
+(`packages/cli/src/lib/daemon/commands.ts`) with both launchd and systemd support
+(`packages/cli/src/lib/daemon/probe.ts`). Ferretry already runs a supervised, always-on process with
+an HTTP surface.
+
+**So `kfleet serve` and `kfleet service` — 509 lines — should not be ported at all.** What is missing
+is narrow: a probe loop mounted as a daemon subsystem, and routes serving the two renderers that
+already exist (`lib/usage.ts:229,243`). Nothing needs a second service manager, a second port, or the
+`/bin/sh -c '. ~/.secrets; …'` trick kfleet uses to get API keys into a launchd job — Ferretry's
+wrappers already declare their `$NAME` references and guard them.
+
+**Coordination:** that loop and those routes are the in-flight daemon unit's area. This unit built
+neither and says so rather than racing it.
+
+---
+
+## I — Resume anything, anywhere
+
+**What a person does.** Starts a session on one account and resumes it from another. kfleet pools
+each harness's session state under `~/.kfleet/shared/<kind>` and symlinks it back into every home —
+transcripts, per-session working directories, checkpoints, plans, tasks, todos, shell snapshots,
+paste cache and prompt history for Claude; rollouts, archives and history for Codex. Migration is
+rename-based so live sessions keep their inodes; collisions are resolved by mtime with the loser
+preserved. Codex additionally gets one shared SQLite runtime directory, an ownership sidecar so
+disabling sharing removes only kfleet's own key, and a `prewarm` command that reconciles pooled
+rollouts into that database over app-server JSON-RPC without an LLM call.
+
+**Ferretry's answer: nothing.** 557 lines with no counterpart. Until this unit the configuration for
+it parsed cleanly and did nothing, so a fleet could believe its sessions were pooled; the plan now
+refuses.
+
+**But do not port it.** Symlinking harness state directories is kfleet's answer _because kfleet has
+no process of its own_. Ferretry has a daemon that already reads transcripts, owns a session model,
+and serves them to a UI. "Resume any session from any account" in Ferretry should mean the daemon
+knows about every account's sessions — not that two accounts share a directory whose format a harness
+vendor can change under us. See [Better because incompatible](#better-because-were-not-compatible).
+
+---
+
+## J — Start from nothing
+
+**What a person does.** Has a new machine and wants a working fleet.
+
+**Ferretry's answer before this unit: nothing at all.** No `fy fleet init`. `defaultConfigPath`
+(`packages/cli/src/lib/fleet/layout.ts:43`) knows where the config _should_ be and nothing creates
+it, so the first `fy fleet apply` fails with `file does not exist`. The assets directory is never
+created ([C](#c--own-the-assets)). The bin directory is never put on `PATH` ([B](#b--materialize-it)).
+
+kfleet's own answer is thinner than it looks: `kfleet init` scaffolds `~/.kfleet` and `~/.kfleet/bin`
+and copies templates from a directory that does not exist in its source tree — the real scaffolding
+is Home Manager's.
+
+**Being closed by this unit** (in progress at this commit). `fy fleet init` creates the fleet, bin, homes and assets directories, writes
+a documented starter configuration and an assets README, never overwrites anything that already
+exists, and prints the `PATH` line the wrappers need. Because we are not compatible, it ships real
+defaults rather than copying a directory that is not there. Details in
+[What this unit closed](#what-this-unit-closed).
+
+---
+
+## K — Survive the first run
+
+**What a person does.** Launches a freshly provisioned account non-interactively and expects a turn,
+not a prompt.
+
+kfleet bakes a 34-line shell block into every Claude wrapper (`core/generate.ts:128`) that seeds
+`.claude.json` before the harness starts: `hasTrustDialogAccepted` for the working directory,
+`hasCompletedOnboarding`, `hasCompletedClaudeInChromeOnboarding`, `claudeInChromeDefaultEnabled`
+(seeded to `false` only when unset, so a directory where you already chose otherwise is untouched),
+and pre-approval of the wrapper's own API key in `customApiKeyResponses.approved` — because Claude
+Code's "detected a custom API key, use it?" dialog defaults to **No** and stalls a headless session
+until somebody answers. `KIND_SPECS.claude.autotrust` is the switch; `CLAUDE_AUTOTRUST=0` disables
+it. `core/firstrun.ts:17` is the jq-free TypeScript twin used by health and login on a fresh box.
+
+**Ferretry's answer: nothing.** `renderWrapperScript` emits secrets sourcing, reference guards, the
+home export, the env exports and `exec`.
+
+**Why this blocks deletion:** a freshly provisioned Ferretry Claude account, launched the only way an
+agent fleet launches anything, stops at the folder-trust prompt and never reaches a turn. This is the
+highest impact-per-line item on the list and the cheapest of the blockers after [J](#j--start-from-nothing).
+
+**Not built here on purpose.** It writes into an account home, and where it belongs — baked into the
+wrapper, a plan operation, or an apply step — is a decision worth making rather than guessing. All
+three are defensible; the plan-operation shape is probably right, because then `--dry-run` shows it.
+
+---
+
+## L — Diagnose it
+
+**What a person does.** Runs one command when something is wrong. `kfleet doctor` (45 lines) checks
+that `~/.kfleet` exists, that its bin directory is on `PATH`, that the config parses, and that each
+declared harness binary is on `PATH`.
+
+**Ferretry's answer: nothing**, and after [J](#j--start-from-nothing) the most useful half — is the
+bin directory on `PATH`? — is at least _printed_ at init.
+
+A Ferretry `fy fleet doctor` should deliberately **not** re-check harness presence: that is
+`fix/harness-preflight`'s question, answered daemon-side, and a second detector is exactly what this
+migration keeps being warned about. What only the CLI knows is worth checking: the fleet directory,
+the `PATH` entry, whether the config parses, whether a manifest exists, and whether the manifest
+still matches the configuration.
+
+Not a blocker: everything it reports can be discovered another way.
+
+---
+
+## Better because we're not compatible
+
+Seven places where dropping compatibility makes the answer better, not merely different. The first
+three are taken in this unit's work; the rest are recommendations with the reasoning attached.
+
+1. **Ship real defaults instead of copying a directory that does not exist.** _(taken)_ kfleet's
+   `init` was written to copy bundled templates and no templates were ever bundled; the defaults came
+   from outside the tool. `fy fleet init` ships its own, writes them only when absent, and therefore
+   has an upgrade story kfleet never had: a newer product can add a default without touching a file
+   the person has edited.
+
+2. **Say where `PATH` must point, at the moment it matters.** _(taken)_ kfleet never had to, because
+   Home Manager set `PATH`. Ferretry must, and the honest place is the command that creates the
+   directory.
+
+3. **Refuse configuration we do not implement.** _(taken)_ Compatibility would have forced us to keep
+   accepting `sharedHistory` and the `usage` scheduling knobs as no-ops so a kfleet file still
+   parsed. We are not compatible, so a fleet is never told it has something it does not.
+
+4. **Do not port `kfleet serve` or `kfleet service` — 509 lines.** Ferretry already installs and
+   supervises a per-user daemon on both launchd and systemd, and already serves HTTP. The missing
+   piece is a probe loop inside it, not a second always-on process on a second port with its own
+   `~/.secrets` sourcing.
+
+5. **Do not port the status line as a 267-line zsh script.** Its content is model, context, account
+   and 5-hour/weekly quota — data the daemon will hold once [F](#f--know-whos-out-of-quota) exists.
+   A status line that asks the local daemon is shorter, testable, and consistent with what the PWA
+   shows; a jq-and-ANSI script is neither. Ferretry does need _some_ home for an executable asset
+   (the asset table has no slot for one), but that is a smaller question than porting this file.
+
+6. **Do not pool session state by symlink.** [I](#i--resume-anything-anywhere) explains it: kfleet
+   symlinks harness-owned directories because it has no process of its own. Ferretry has a daemon
+   that already reads transcripts. Making the daemon aware of every account's sessions gets the same
+   capability without depending on a layout a harness vendor can change, and without a migration that
+   moves live files.
+
+7. **Group logins by declared identity.** kfleet infers the base agent from a wrapper-name infix and
+   has to detect the collisions that causes. `identity` is already a declared field here, so the
+   grouping half of [E](#e--get-logged-in) is free — only the credential-store adapter is real work.
+
+And one where dropping compatibility **costs** us something, flagged rather than decided:
+
+> **There is no import path, so the owner recreates his accounts by hand.** His `config.yaml` is 12K
+> describing on the order of thirty wrappers, and Ferretry's format differs in every way that
+> matters — declared UUIDs, opt-in routes, explicit availability and models, no `credential:` block.
+> An importer is buildable (the two schemas are close enough that a mechanical translation would
+> work, minus the UUIDs and the model declarations, which have no source). Compatibility was
+> explicitly waived, so none was built. The decision is his; this note exists so it is a decision
+> rather than a surprise.
 
 ---
 
 ## What this unit closed
 
-Three gaps, chosen for value per line and for staying inside this unit's files. All three are landed
-and gated; §§1–8 above are the state of `main` **before** them, except where a row says otherwise.
+> **Items 2–4 are landed and gated. Item 1 is in progress at the time of this commit** and moves to
+> the same footing in the commit that lands it; if it is still marked this way at the end of the
+> unit, it was not built.
 
-### A. `fy fleet login`, with the environment sanitized
+### 1. `fy fleet init` — [J](#j--start-from-nothing) and half of [C](#c--own-the-assets)
 
-- `packages/fleet/src/lib/harness-env.ts` — `sanitizeHarnessEnv`, a pure port of
-  `core/harness-probe.ts:80`: strip provider/session state inherited from whichever agent launched
-  the command, preserving any variable a wrapper explicitly references.
-- `packages/fleet/src/adapters/process-login.ts` — the login spawn now sanitizes before spawning, and
-  preserves the references the account's own wrapper depends on.
-- `packages/cli/src/lib/fleet/commands.ts` + `controller.ts` — `fy fleet login [accountId…]` mounted,
-  which turns `FleetLoginService` from exported-but-uncalled into a capability.
+`packages/fleet/src/lib/scaffold.ts` builds a scaffold as a value: the directories the fleet owns
+(including the assets directory `apply` never created), a documented starter `config.yaml`, and an
+assets `README.md` stating the override mechanism. `packages/fleet/src/adapters/file-scaffolder.ts`
+writes it, **creating only what is absent** and reporting what it left alone, bounded to the fleet
+directory. `fy fleet init` reports both lists and prints the `PATH` line.
 
-Still GAP after this: identity grouping with credential state, donor selection, credential cloning,
-liveness-before-login, the raw-CLI fallback, `--status`. Rows in §6 are unchanged for those.
+Nothing personal is shipped: the starter config declares no accounts and carries a commented example
+with freshly generated ids, so a person can uncomment and edit rather than invent a UUID.
 
-### B. A configuration that asks for an unimplemented capability is refused, not ignored
+### 2. `fy fleet login`, with the caller's credentials stripped — part of [E](#e--get-logged-in)
 
-`packages/fleet/src/lib/capabilities.ts` — `unimplementedCapabilities(config)`, and
-`FleetPlan.build` throws `UnimplementedFleetCapabilityError` naming each one. It fires only on a
-value the operator had to _write_ (sharing turned on, a CLIProxy source declared, background health
-probing enabled, a re-probe interval or jitter set) — never on a schema default — so an existing
-working configuration still applies.
+`FleetLoginService` and `ProcessFleetLoginPort` were built, tested, exported, and called by nothing.
+Mounting them made the capability exist. `packages/fleet/src/lib/harness-env.ts` then fixed a real
+defect: the spawn used to inherit the caller's provider environment, and since a wrapper only
+overrides its _home_, a login run from inside an agent session could authenticate against that
+session's account. A wrapper that deliberately reads a secret from the environment still gets it —
+the names it references are parsed back out of the wrapper — and an unreadable wrapper preserves
+nothing rather than everything.
 
-This is the "damaged state is not empty state" invariant applied to configuration: a fleet that
-believes its sessions are pooled, or its quota is being watched, when neither is true, is worse than
-one that is told plainly which key is not implemented.
+### 3. Configuration we do not implement is refused — the honest half of [F](#f--know-whos-out-of-quota), [H](#h--keep-it-fresh) and [I](#i--resume-anything-anywhere)
 
-### C. `usage.concurrency` and `usage.atLimitPercent` are honoured
+`packages/fleet/src/lib/capabilities.ts` lists what the schema can express and this build cannot
+perform; `FleetPlan.build` throws naming every offending key, what it would have done, and what
+happens instead. It fires only on a value somebody had to write, never on a schema default, so an
+existing working configuration still applies — and `--dry-run` refuses too, because a clean plan for
+a configuration `apply` could not honour is the misleading half of the same bug.
 
-They were parsed and dropped: `packages/cli/bin/fy.ts` constructed `FleetUsageCollector` with no
-options, so a configured `atLimitPercent: 90` silently behaved as 100. The controller now builds the
-collector from the loaded configuration.
+### 4. `usage.concurrency` and `usage.atLimitPercent` are honoured
+
+The collector was constructed before the configuration was read, so a declared `atLimitPercent: 90`
+behaved as 100.
 
 ---
 
-## What was deliberately left
+## What was left
 
-- **The provider probes (§5).** The largest gap by far and the one that would make `fy fleet usage`
-  real. It is five providers, two credential stores, a keychain shell-out and a refresh dance — a
-  unit of its own, and it needs the credential-identity model (§6) to dedupe correctly.
-- **`AUTOTRUST` / `seedFirstRunFlags` (§2, §4).** High impact, and small. It was left because it
-  writes `.claude.json` inside an account home and the right shape (wrapper-baked shell, a plan
-  operation, or a `fy fleet apply` step) deserves a decision rather than a guess.
-- **Shared history (§3).** Refused rather than ported: it is rename-based migration of live session
-  state, and getting it wrong loses transcripts.
-- **`serve` / the background loop (§7).** Belongs to the daemon unit in flight.
-- **The alias naming delta and the settings-comment delta (§1).** Recorded, not changed: both are
-  behaviour a migrating operator should be told about, and neither is a defect in Ferretry.
+- **The provider probes ([F](#f--know-whos-out-of-quota)).** The largest remaining blocker: five
+  providers, two credential stores, a keychain shell-out, a refresh dance, and a credential-identity
+  model to dedupe against. A unit of its own, and it shares that identity model with
+  [E](#e--get-logged-in), so the two should be sequenced together.
+- **Credential sync ([E](#e--get-logged-in)).** Same reason.
+- **First-run seeding ([K](#k--survive-the-first-run)).** Cheap and high-impact; left because _where_
+  it belongs is a decision, not a guess.
+- **Shared history ([I](#i--resume-anything-anywhere)).** Should be redesigned, not ported.
+- **The probe loop and its routes ([H](#h--keep-it-fresh)).** The in-flight daemon unit's area.
+- **Default asset _content_ beyond a starting point ([C](#c--own-the-assets)).** The owner's
+  `CLAUDE.md`, skills and templates are his and carry personal paths and work tooling. What Ferretry
+  needs is a curated neutral default set, which is a content decision rather than an engineering one.
+- **`fy fleet doctor` ([L](#l--diagnose-it)).** Not a blocker, and it should be scoped to what only
+  the CLI knows so it never becomes a second harness detector.
+
+---
+
+## Appendix A — module correspondence
+
+Recorded once so nobody re-derives it. **A renamed module is not a gap**; this table exists to stop
+the next reader concluding otherwise from a name search.
+
+| kfleet module                                                       | Ferretry                                                                                         |                                                   |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `core/types.ts`, `core/config.ts`                                   | `lib/config.ts`, `adapters/config-file.ts`                                                       | renamed                                           |
+| `core/merge.ts`                                                     | `lib/profiles.ts`                                                                                | renamed                                           |
+| `core/generate.ts`                                                  | `lib/plan.ts` + `lib/wrappers.ts` + `lib/provisioning.ts` + `adapters/file-provisioner.ts`       | split, deliberately                               |
+| `core/kinds.ts`                                                     | `lib/assets.ts` + `lib/wrappers.ts` + `lib/fleet/layout.ts`                                      | split by subject                                  |
+| `core/settings.ts`                                                  | `lib/settings.ts` + the provisioner's existing-file read                                         | split pure/IO                                     |
+| `deps.ts`                                                           | `lib/fleet/layout.ts` + `lib/paths.ts`                                                           | globals became a pure function                    |
+| `util/format.ts`, `cli/shared.ts`                                   | `IFleetOutput` + commander                                                                       | replaced                                          |
+| `cli/fleet.ts` (`apply`/`list`/`prune`)                             | `fy fleet apply` / `ls`; prune folded into apply                                                 | renamed                                           |
+| `core/harness-probe.ts:80` `sanitizeHarnessEnv`                     | `lib/harness-env.ts`                                                                             | ported by this unit                               |
+| `core/harness-probe.ts:97` `prepareHarnessProbeEnv`                 | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                     |
+| `core/login.ts:331` `interactiveLogin`                              | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                      |
+| `cli/init.ts`                                                       | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                           |
+| `core/health.ts`, `core/harness-probe.ts` (rest)                    | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)    |
+| `core/usage.ts` (probes), `core/cliproxy-usage.ts`, `core/creds.ts` | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
+| `core/login.ts` (rest), `cli/login.ts` (flags)                      | —                                                                                                | **GAP**, see [E](#e--get-logged-in)               |
+| `core/shared-history.ts`, `core/codex-prewarm.ts`, `cli/prewarm.ts` | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)    |
+| `core/firstrun.ts`, `core/generate.ts` `AUTOTRUST`                  | —                                                                                                | **GAP**, see [K](#k--survive-the-first-run)       |
+| `cli/serve.ts`, `cli/service.ts`                                    | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)  |
+| `cli/doctor.ts`                                                     | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                 |
+| —                                                                   | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest |
+| —                                                                   | `lib/capabilities.ts`                                                                            | **new in this unit**                              |
