@@ -26,6 +26,7 @@ import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
+import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
@@ -138,6 +139,11 @@ export interface MountedSubsystems {
   readonly sessionFilesystem: SessionFilesystem;
   /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
   readonly scratchGc: ScratchGcSubsystem;
+  /** The daemon's secret store, and the use-without-read primitive that is the point of it: an agent
+   *  names a secret, the daemon spawns a child holding the value, and only that child's scrubbed
+   *  output comes back. NOTHING here can project a value — see `mounts/secrets.ts` for why that is a
+   *  property of the types rather than a rule, and for the boundary it does and does not draw. */
+  readonly secrets: SecretSubsystem;
   /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
    *  session, and the operator configuration that decides whether it may spend a session at all. The
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
@@ -177,6 +183,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),
     ...scratchGcRoutes(subsystems.scratchGc),
+    // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
+    // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
+    // surfaces above rather than among the per-session ones because a secret belongs to the MACHINE:
+    // it is not addressed by a session, and no session owns one.
+    ...secretRoutes(subsystems.secrets),
     // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
     // deeper per-session routes that follow.

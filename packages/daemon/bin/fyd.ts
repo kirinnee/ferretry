@@ -53,6 +53,8 @@ import {
   FileQuotaFailoverStateStore,
   FileRoutingCatalog,
   FileScratchCollector,
+  FileSecretDocumentStore,
+  FileSecretKey,
   HttpUsageSource,
   KeyedSerialExecutor,
   ExplicitDaemonConfig,
@@ -65,6 +67,9 @@ import {
   PaneProcessInventory,
   PerformanceStopwatch,
   ProcessSecretReader,
+  BunSecretChildRunner,
+  ConfigSecretRecipes,
+  WebCryptoSecretCipher,
   quotaFailoverRoot,
   RuntimeEnvironment,
   SocketViewerDownstream,
@@ -266,6 +271,11 @@ import {
   overriddenBy,
   type OpenedAnalyticsIndexStore,
   OperatorReadService,
+  SecretDirectory,
+  SecretRedactor,
+  type SecretSubsystem,
+  SecretUseService,
+  SecretVault,
   PairingDeviceRegistry,
   PairingService,
   PinService,
@@ -2810,6 +2820,40 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   };
   const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const stateFiles = new StateFileSystem(paths);
+  // An operator's own document when they named one, and the state home's otherwise. The confined
+  // filesystem port refuses every path outside the home, which is right for the daemon's own state
+  // and wrong for a file a person named, so the two are different adapters.
+  //
+  // Hoisted out of the world literal because the secret subsystem reads the same document for its
+  // `secretEnvironment` recipes. Two stores over one file would be two opinions about what the
+  // operator wrote — and the one the UI showed would not be the one a spawned child got.
+  const daemonConfigStore =
+    overrides.configFile === undefined
+      ? new FileDaemonConfig(paths, stateFiles)
+      : new ExplicitDaemonConfig(overrides.configFile);
+  // Read per call, not captured: an operator editing `config/daemon.json` sees the effect on the
+  // next use rather than after a restart, and a document that has become unreadable answers no
+  // recipes rather than the last good ones — a stale recipe is a reference resolved against a rule
+  // that is no longer written down.
+  const secretRecipes = new ConfigSecretRecipes(async () => {
+    const peeked = await daemonConfigStore.peek().catch(() => undefined);
+    return peeked?.config.secretEnvironment ?? {};
+  });
+  // The vault, and the two things allowed to open it. `directory` is management only — it is what a
+  // route is handed, and it has no method that returns a value. See `lib/secrets/vault.ts`.
+  const secretDocuments = new FileSecretDocumentStore(paths, stateFiles);
+  const secretCipher = new WebCryptoSecretCipher(new FileSecretKey(secretDocuments.keyFile, stateFiles));
+  const secretVault = new SecretVault(secretDocuments, secretCipher);
+  const secrets: SecretSubsystem = {
+    directory: new SecretDirectory(secretDocuments, secretCipher, clock),
+    references: secretRecipes,
+    uses: new SecretUseService(secretVault, new BunSecretChildRunner(), secretRecipes),
+  };
+  // Everything an operator reads back is scrubbed of every value this daemon holds, so a secret a
+  // child printed is a mask by the time anybody sees it. Read `lib/secrets/redaction.ts` for what
+  // that does and does not promise — in particular that a value an agent deliberately transformed is
+  // not recognisable, and this is not a defence against one that is trying.
+  const secretRedactor = new SecretRedactor(secretVault);
   const sttModels = new SttModelStore({
     paths: createSttPaths(paths),
     fetch: async url => await fetch(url),
@@ -3134,10 +3178,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
     // and wrong for a file a person named, so the two are different adapters.
-    config:
-      overrides.configFile === undefined
-        ? new FileDaemonConfig(paths, stateFiles)
-        : new ExplicitDaemonConfig(overrides.configFile),
+    config: daemonConfigStore,
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
     notices: bootJournal(overrides.logLevel),
@@ -3568,6 +3609,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // stateless, so one instance serves every session.
         sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
         scratchGc,
+        secrets,
         warden: createWardenSubsystem({
           sessions,
           control: sessionControl,
@@ -3623,6 +3665,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           },
           createSessionTranscriptTail(storage),
           lastSnapshots,
+          // The screen, the transcript and the journal are the three places a secret would surface if
+          // a child ever printed one, so all three are scrubbed here rather than at whichever caller
+          // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
+          secretRedactor,
         ),
         // A host attach is authorized by the durable pane registration, never by the session name.
         // The observer reads the same private tmux server the launch registered, and the service

@@ -202,6 +202,19 @@ export const DaemonConfigDocumentSchema = z
      */
     analyticsPricing: AnalyticsPricingCatalogSchema.default([]),
     projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
+    /**
+     * Reusable environment recipes for the use-without-read primitive, holding REFERENCES only.
+     *
+     * A value here is a spelling an operator writes once — `AUTH_HEADER: "Bearer ${secret:TOKEN}"` —
+     * instead of every caller re-deriving it. THE VALUE OF THE SECRET IS NEVER HERE: this file is
+     * copied into backups, dotfile repositories and screen shares, which is precisely why the store
+     * exists, so the document carries the name and the daemon resolves it when it spawns a child.
+     *
+     * A recipe is injected ONLY when every secret it names is one the caller explicitly asked for.
+     * Without that rule an operator's convenience would silently widen a request: a child that asked
+     * for a staging key would be handed a header built from the production one.
+     */
+    secretEnvironment: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u), z.string()).default({}),
   })
   .strict();
 

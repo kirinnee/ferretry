@@ -39,6 +39,7 @@ import {
   nameSubsystem,
   pinService,
   recommendSubsystem,
+  secretSubsystem,
   sessionDirectory,
   sessionView,
   taskSubsystem,
@@ -136,6 +137,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   stt: new FakeStt(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
+  secrets: secretSubsystem(),
   warden: new FakeWarden(),
   sessionReads: new OperatorReadService(
     {
@@ -173,6 +175,12 @@ describe('the mounted daemon surface', () => {
       'POST /v1/fleet/apply',
       'GET /v1/gc',
       'POST /v1/gc',
+      // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
+      // the proof of it — no route returns a secret value. `use` is how a value is spent instead.
+      'GET /v1/secrets',
+      'POST /v1/secrets/use',
+      'POST /v1/secrets',
+      'DELETE /v1/secrets/:name',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',

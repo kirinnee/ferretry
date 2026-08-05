@@ -115,6 +115,21 @@ import {
   normalizeTerminalSize,
   normalizeTerminalTitle,
 } from '../../../../src/lib/terminal/policy.ts';
+import {
+  configuredReferences,
+  SecretDirectory,
+  SecretStoreError,
+  SecretUseService,
+  SecretVault,
+  type SecretChildOutcome,
+  type SecretChildRunner,
+  type SecretChildSpec,
+  type SecretCipherPort,
+  type SecretDocumentStore,
+  type SecretVaultDocument,
+} from '../../../../src/lib/secrets/index.ts';
+import type { SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
+import type { SecretName } from '@ferretry/protocol';
 import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
 import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
 import {
@@ -1438,3 +1453,79 @@ const FAKE_FAILOVER: WardenStatusView['failover'] = {
   cooldownMinutes: 30,
   accounts: [],
 };
+
+/**
+ * An in-memory vault the test owns, with a REVERSIBLE stand-in for the cipher.
+ *
+ * The cipher is faked and nothing else is: the directory, the vault, the use service and the whole
+ * refusal path are production code, so a case that passes here asserts what the daemon would really
+ * answer. What the fake removes is only the key file and the AES call — both of which have their own
+ * integration coverage against the real filesystem, which is where they belong.
+ *
+ * It is still a TRANSFORM rather than an identity, so a test that accidentally serves ciphertext as
+ * plaintext fails instead of quietly passing.
+ */
+export class FakeSecretCipher implements SecretCipherPort {
+  readonly algorithm = 'FAKE-REVERSED';
+
+  async seal(name: SecretName, plaintext: string): Promise<{ readonly iv: string; readonly ciphertext: string }> {
+    return { iv: name, ciphertext: [...plaintext].reverse().join('') };
+  }
+
+  async open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string> {
+    if (sealed.iv !== name) throw new SecretStoreError('undecipherable', `${name} was filed under ${sealed.iv}`);
+    return [...sealed.ciphertext].reverse().join('');
+  }
+}
+
+/** A vault document held in memory. `undefined` until something writes, exactly like a fresh home. */
+export class MemorySecretDocuments implements SecretDocumentStore {
+  private document: SecretVaultDocument | undefined;
+
+  constructor(private readonly failure?: SecretStoreError) {}
+
+  async read(): Promise<SecretVaultDocument | undefined> {
+    if (this.failure !== undefined) throw this.failure;
+    return this.document;
+  }
+
+  async write(document: SecretVaultDocument): Promise<void> {
+    this.document = document;
+  }
+}
+
+/** A child runner that never spawns anything, echoing back what it was given so a test can assert
+ *  WHICH values reached the child's environment without a real program in the loop. */
+export class EchoSecretChildRunner implements SecretChildRunner {
+  spec: SecretChildSpec | undefined;
+
+  constructor(private readonly stdout: (spec: SecretChildSpec) => string = spec => JSON.stringify(spec.env)) {}
+
+  async run(spec: SecretChildSpec): Promise<SecretChildOutcome> {
+    this.spec = spec;
+    return { outcome: 'exited', exitCode: 0, stdout: this.stdout(spec), stderr: '', truncated: false };
+  }
+}
+
+export interface SecretWorld {
+  readonly documents?: SecretDocumentStore;
+  readonly recipes?: Readonly<Record<string, string>>;
+  readonly runner?: SecretChildRunner;
+}
+
+/** A clock the vault fixtures stamp with, so every summary in a test is the same instant. */
+const SECRET_CLOCK = { now: () => '2026-01-01T00:00:00.000Z' };
+
+/** The REAL secret subsystem over an in-memory vault. */
+export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
+  const documents = world.documents ?? new MemorySecretDocuments();
+  const cipher = new FakeSecretCipher();
+  const recipes = world.recipes ?? {};
+  return {
+    directory: new SecretDirectory(documents, cipher, SECRET_CLOCK),
+    references: { references: async () => configuredReferences(recipes) },
+    uses: new SecretUseService(new SecretVault(documents, cipher), world.runner ?? new EchoSecretChildRunner(), {
+      read: async () => recipes,
+    }),
+  };
+}

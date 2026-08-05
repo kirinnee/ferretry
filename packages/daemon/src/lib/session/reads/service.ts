@@ -20,11 +20,36 @@
  *   module reports resolution separately, and an unresolved session is refused.
  * - An event page is the one read that is honestly empty: the journal is authoritative, it is keyed by
  *   session id, and "no events after sequence N" is a fact rather than an absence of evidence.
+ *
+ * EVERYTHING THAT LEAVES HERE IS SCRUBBED. All three reads pass through a redactor before they are
+ * answered, because these are the surfaces a person actually reads a session on — the screen, the
+ * transcript, the journal — and "a secret never appears in your transcripts" is a promise about
+ * exactly this code path. The redactor is a one-method port rather than the secret subsystem itself,
+ * so this module knows nothing about vaults, and a daemon wired without one gets `NO_REDACTION`,
+ * which is honest about having nothing to hide rather than pretending to hide something.
  */
 
 import type { FyEvent } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
+
+/**
+ * Scrubbing, as this surface needs it.
+ *
+ * Structurally identical to `lib/secrets`'s `TextRedactor` and deliberately declared here: the read
+ * surface must not depend on the secret subsystem to serve a transcript, and a daemon that has no
+ * secret store still has all three reads.
+ */
+export interface OperatorReadRedactor {
+  redact(text: string): Promise<string>;
+  redactData(value: unknown): Promise<unknown>;
+}
+
+/** A daemon with nothing to scrub. Its input is its output — a fact, not a fallback. */
+export const UNREDACTED: OperatorReadRedactor = {
+  redact: async text => text,
+  redactData: async value => value,
+};
 
 /** Why a read could not be answered. */
 export type OperatorReadFailure =
@@ -216,6 +241,7 @@ export class OperatorReadService {
     private readonly pane: SessionPaneReader,
     private readonly transcript: SessionTranscriptTail,
     private readonly lastSnapshot: LastSnapshotReader = { read: async () => ({ kind: 'absent' }) },
+    private readonly redactor: OperatorReadRedactor = UNREDACTED,
   ) {}
 
   /**
@@ -230,7 +256,7 @@ export class OperatorReadService {
     const page = boundedLimit(limit, MAX_EVENT_PAGE, MAX_EVENT_PAGE, 'limit');
     const stored = await this.journal.replay(sessionId, afterSequence, page);
     let cursor = afterSequence;
-    return stored.map(event => {
+    const page_ = stored.map(event => {
       if (event.sessionId !== sessionId)
         throw new OperatorReadError(
           'event_evidence_mismatch',
@@ -244,6 +270,12 @@ export class OperatorReadService {
       cursor = event.sequence;
       return journalEventToFyEvent(event);
     });
+    // Only `data` is scrubbed. The envelope is this daemon's own — a sequence, an instant, a session
+    // id and a type it minted — so nothing in it can hold a value, and passing it through redaction
+    // would be spending the work on fields that cannot carry the risk.
+    return await Promise.all(
+      page_.map(async event => ({ ...event, data: await this.redactor.redactData(event.data) })),
+    );
   }
 
   /**
@@ -255,13 +287,13 @@ export class OperatorReadService {
    * the exact false-success shape this migration keeps finding.
    */
   async snapshot(sessionId: string, live = true): Promise<string> {
-    if (!live) return await this.storedSnapshot(sessionId);
+    if (!live) return await this.redactor.redact(await this.storedSnapshot(sessionId));
     const capture = await this.pane.capture(sessionId);
     if (capture === undefined)
       throw new OperatorReadError('no_terminal', `session ${sessionId} records no terminal this daemon could capture`);
     if (!capture.alive || capture.dead)
       throw new OperatorReadError('pane_dead', `session ${sessionId} has no live pane, so there is no screen to read`);
-    return capture.text;
+    return await this.redactor.redact(capture.text);
   }
 
   /** The durable final frame, only when the daemon actually captured one before terminalization. */
@@ -299,7 +331,7 @@ export class OperatorReadService {
         'transcript_unreadable',
         `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
-    if (turn === undefined) return renderTranscript(result.events);
+    if (turn === undefined) return await this.redactor.redact(renderTranscript(result.events));
     if (!Number.isSafeInteger(turn) || turn < 0)
       throw new OperatorReadError('invalid_query', 'turn must be a non-negative integer');
     const starts = result.events.flatMap((event, index) =>
@@ -312,6 +344,6 @@ export class OperatorReadService {
         `session ${sessionId}'s transcript has no discernible boundary for turn ${turn}`,
       );
     const end = starts[turn + 1] ?? result.events.length;
-    return renderTranscript(result.events.slice(start, end).slice(-tail));
+    return await this.redactor.redact(renderTranscript(result.events.slice(start, end).slice(-tail)));
   }
 }
