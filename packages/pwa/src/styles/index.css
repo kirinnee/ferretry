@@ -241,23 +241,47 @@ pre,
   height: 30px;
   overflow: hidden;
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-panel);
   background-color: var(--bg);
   background-image: var(--body-wash);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-panel);
 }
-.kt-swatch-face {
+.kt-swatch-mini {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--pad-row-y) var(--pad-cell-x);
+  background: var(--panel-bg);
+  background-image: var(--panel-texture);
+  background-size: var(--panel-texture-size);
+}
+.kt-swatch-header {
+  display: flex;
+  min-height: 0;
   flex: 1 1 auto;
   align-items: center;
   justify-content: center;
   min-width: 0;
-  background: var(--surface);
   color: var(--fg);
-  font-family: var(--font-display);
-  font-size: 11px;
-  font-weight: 650;
+  font-family: var(--font-ui);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
   letter-spacing: var(--tracking-display);
+  text-transform: var(--label-transform);
+  font-variant: var(--label-variant);
+}
+.kt-swatch-row {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr .65fr;
+  gap: var(--gap-xs);
+  min-height: 2px;
+}
+.kt-swatch-row i {
+  display: block;
+  min-width: 0;
+  border-top: var(--divider-width) solid var(--divider-color);
 }
 .kt-swatch-accent {
   flex: 0 0 22%;
