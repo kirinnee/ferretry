@@ -1,4 +1,6 @@
 import type {
+  FleetApplyCommittedState,
+  FleetApplyFailure,
   FleetApplyPlan,
   FleetApplyPreview,
   FleetApplyResult,
@@ -15,6 +17,7 @@ import type {
   FleetUsage,
   FleetUsageSnapshot,
 } from '@ferretry/fleet';
+import { FleetApplyFailureError } from '@ferretry/fleet';
 import type { FleetApprovalMint } from '@ferretry/protocol';
 import type {
   IFleetApplier,
@@ -389,3 +392,81 @@ export class RecordingAuthorizationGateway implements IFleetAuthorizationGateway
     return this.value instanceof Error ? Promise.reject(this.value) : Promise.resolve(this.value);
   }
 }
+
+export function committedState(overrides: Partial<FleetApplyCommittedState> = {}): FleetApplyCommittedState {
+  return {
+    accountCount: 1,
+    operationCount: 2,
+    manifestPath: '/state/fleet/manifest.json',
+    manifest: manifest(),
+    prunedWrappers: [],
+    sharedHistory: [],
+    ...overrides,
+  };
+}
+
+/**
+ * An applier that fails the way the provisioner does: with the exact post-state, not a message.
+ *
+ * `lockResidue` is a separate constructor argument because that is how the error carries it — a
+ * sibling of the failure, not a member of it — so a fixture that folded it in would let a bug in the
+ * lifting hide behind the fixture's own convenience.
+ */
+export class FailingApplier implements IFleetApplier {
+  readonly applied: FleetApplyPlan[] = [];
+
+  constructor(
+    private readonly failure: FleetApplyFailure,
+    private readonly lockResidue?: string,
+  ) {}
+
+  preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
+    return Promise.resolve({ ...plan, sharedHistory: [] });
+  }
+
+  apply(plan: FleetApplyPlan): Promise<FleetApplyResult> {
+    this.applied.push(plan);
+    return Promise.reject(new FleetApplyFailureError(this.failure, this.lockResidue));
+  }
+}
+
+export const LOCK_RESIDUE = '/state/fleet/.apply-lock';
+
+/** Rollback that also left somebody else's file renamed — displaced is not the same as unrestored. */
+export const ROLLBACK_WITH_DISPLACED: FleetApplyFailure = {
+  kind: 'rollback-incomplete',
+  failedOperation: 'copy /state/fleet/homes/work/CLAUDE.md',
+  reason: 'read-only file system',
+  unrestored: [{ path: '/state/fleet/homes/work/CLAUDE.md', reason: 'rename refused' }],
+  displaced: [
+    { path: '/state/fleet/homes/work/AGENTS.md', movedTo: '/state/fleet/.bak/AGENTS.md' },
+    { path: '/state/fleet/homes/work/skills', movedTo: '/state/fleet/.bak/skills' },
+  ],
+};
+
+export const ROLLED_BACK: FleetApplyFailure = {
+  kind: 'rolled-back',
+  failedOperation: 'file /state/fleet/bin/fy-claude-work',
+  reason: 'permission denied',
+};
+
+export const ROLLBACK_INCOMPLETE: FleetApplyFailure = {
+  kind: 'rollback-incomplete',
+  failedOperation: 'settings /state/fleet/homes/work/settings.json',
+  reason: 'disk full',
+  unrestored: [
+    {
+      path: '/state/fleet/homes/work/settings.json',
+      reason: 'rename refused',
+      backup: '/state/fleet/.bak/settings.json',
+    },
+    { path: '/state/fleet/bin/fy-claude-work', reason: 'still held open' },
+  ],
+};
+
+export const HISTORY_FAILED: FleetApplyFailure = {
+  kind: 'history-failed-after-commit',
+  failedHarness: 'claude',
+  reason: 'pool directory vanished mid-migration',
+  committed: committedState({ prunedWrappers: ['fy-claude-old'], backupResidue: ['/state/fleet/.bak/CLAUDE.md'] }),
+};

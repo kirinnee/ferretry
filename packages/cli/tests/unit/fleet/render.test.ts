@@ -5,6 +5,7 @@ import {
   renderAccount,
   renderApplyPlan,
   renderApplyResult,
+  renderFleetApplyFailure,
   renderFleetApproval,
   renderHealth,
   renderIdentityStatus,
@@ -21,9 +22,14 @@ import {
   account,
   applyResult,
   approvalMint,
+  committedState,
+  LOCK_RESIDUE,
   manifest,
   PROPOSAL_ID,
   plan,
+  ROLLBACK_INCOMPLETE,
+  ROLLBACK_WITH_DISPLACED,
+  ROLLED_BACK,
   recommendation,
   scaffoldResult,
   usageRow,
@@ -1004,5 +1010,213 @@ describe('rendering a fleet approval', () => {
     should(actual.toLowerCase()).not.containEql('token');
     should(actual.toLowerCase()).not.containEql('bearer');
     should(actual.toLowerCase()).not.containEql('authorization:');
+  });
+});
+
+describe('rendering how an apply ended badly', () => {
+  it('should lead with the verdict, not the error, for a clean rollback', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLED_BACK);
+
+    // Assert — "what is my host now" is the question that decides what happens next
+    should(actual.split('\n')[1]).containEql('the host is exactly as it was');
+    should(actual).containEql('nothing was committed');
+  });
+
+  it('should print an unrestored path with no surviving backup without inventing one', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE);
+
+    // Assert
+    should(actual).containEql('/state/fleet/bin/fy-claude-work — still held open');
+    should(actual).containEql('2 paths whose previous state could not be put back');
+    // The entry without a backup must not claim one exists
+    should(actual.split('\n').filter(line => line.includes('the original is still at'))).have.length(1);
+  });
+
+  it('should count a single unrestored path in the singular', () => {
+    // Act
+    const actual = renderFleetApplyFailure({
+      kind: 'rollback-incomplete',
+      failedOperation: 'file /a',
+      reason: 'nope',
+      unrestored: [{ path: '/a', reason: 'busy' }],
+    });
+
+    // Assert
+    should(actual).containEql('1 path whose previous state could not be put back');
+  });
+
+  it('should report the history migrations that DID complete before the failure', () => {
+    // Act — the committed state is the point; a partial migration is part of it
+    const actual = renderFleetApplyFailure({
+      kind: 'history-failed-after-commit',
+      failedHarness: 'codex',
+      reason: 'pool vanished',
+      committed: committedState({
+        sharedHistory: [
+          { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 3, conflicts: 1, links: 2, changes: [] },
+        ],
+      }),
+    });
+
+    // Assert
+    should(actual).containEql(
+      'shared claude: 3 migrated entries, 1 collisions preserved, 2 links → /state/fleet/shared/claude',
+    );
+    should(actual).containEql('THE FLEET DID LAND');
+  });
+
+  it('should say nothing about residue when an apply left none', () => {
+    // Act
+    const actual = renderFleetApplyFailure({
+      kind: 'history-failed-after-commit',
+      failedHarness: 'claude',
+      reason: 'nope',
+      committed: committedState(),
+    });
+
+    // Assert
+    should(actual).not.containEql('moved-aside');
+  });
+
+  it('should keep a successful apply unchanged when there is no residue', () => {
+    // Act — the success surface must not grow noise for the ordinary case
+    const actual = renderApplyResult(applyResult());
+
+    // Assert
+    should(actual).not.containEql('moved-aside');
+    should(actual).containEql('applied 1 account in 2 operations');
+  });
+
+  it('should count one moved-aside original in the singular', () => {
+    // Act
+    const actual = renderApplyResult(applyResult({ backupResidue: ['/state/fleet/.bak/one'] }));
+
+    // Assert
+    should(actual).containEql('1 moved-aside original');
+  });
+});
+
+describe('rendering residue and displacement a failed apply left behind', () => {
+  it('should keep displaced content in its own block, never folded into unrestored', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLBACK_WITH_DISPLACED);
+
+    // Assert — unrestored is OUR state we could not put back; displaced is SOMEBODY ELSE'S file now
+    // living under another name. A reader acts differently on each, so they must not be one list.
+    should(actual).containEql('1 path whose previous state could not be put back');
+    // Plural agreement matters here: this block is usually printed with more than one entry.
+    should(actual).containEql('2 paths not belonging to this apply, moved aside and left there');
+    should(actual).containEql('/state/fleet/homes/work/AGENTS.md → /state/fleet/.bak/AGENTS.md');
+    should(actual).containEql('/state/fleet/homes/work/skills → /state/fleet/.bak/skills');
+  });
+
+  it('should say nothing about displacement when nothing of anyone else was moved', () => {
+    // Act — the ordinary rollback-incomplete carries no displaced entries
+    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE);
+
+    // Assert
+    should(actual).not.containEql('moved aside');
+  });
+
+  it('should name a stuck apply claim and say it blocks the next apply', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLED_BACK, LOCK_RESIDUE);
+
+    // Assert — residue, never a failure, but it is not cosmetic either
+    should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
+    should(actual).containEql('the next apply will refuse until it is removed');
+  });
+
+  it('should stop calling a re-run safe when a claim is still blocking it', () => {
+    // Act — "the host is exactly as it was" is true; "safe to run again" would not be
+    const actual = renderFleetApplyFailure(ROLLED_BACK, LOCK_RESIDUE);
+
+    // Assert
+    should(actual).not.containEql('safe to fix the cause');
+    should(actual).containEql('fix the cause AND clear the claim above');
+  });
+
+  it('should still call a clean rollback safe to re-run', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLED_BACK);
+
+    // Assert
+    should(actual).containEql('safe to fix the cause and run "fy fleet apply" again');
+    should(actual).not.containEql('exclusive apply claim');
+  });
+
+  it('should carry a stuck claim through the unverified-state outcome too', () => {
+    // Act
+    const actual = renderFleetApplyFailure(ROLLBACK_INCOMPLETE, LOCK_RESIDUE);
+
+    // Assert
+    should(actual).containEql('UNVERIFIED STATE');
+    should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
+  });
+
+  it('should report a claim the committed state itself carries', () => {
+    // Act
+    const actual = renderFleetApplyFailure({
+      kind: 'history-failed-after-commit',
+      failedHarness: 'claude',
+      reason: 'pool vanished',
+      committed: committedState({ lockResidue: LOCK_RESIDUE }),
+    });
+
+    // Assert
+    should(actual).containEql('THE FLEET DID LAND');
+    should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
+  });
+
+  it('should not print the same stuck claim twice when both sides carry it', () => {
+    // Act — the committed block and the error both know about one claim; it is still one claim
+    const actual = renderFleetApplyFailure(
+      {
+        kind: 'history-failed-after-commit',
+        failedHarness: 'claude',
+        reason: 'pool vanished',
+        committed: committedState({ lockResidue: LOCK_RESIDUE }),
+      },
+      LOCK_RESIDUE,
+    );
+
+    // Assert
+    should(actual.split('\n').filter(line => line.includes('exclusive apply claim'))).have.length(1);
+  });
+
+  it('should report a claim the error knows about that the committed state does not', () => {
+    // Act
+    const actual = renderFleetApplyFailure(
+      {
+        kind: 'history-failed-after-commit',
+        failedHarness: 'claude',
+        reason: 'pool vanished',
+        committed: committedState(),
+      },
+      LOCK_RESIDUE,
+    );
+
+    // Assert
+    should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
+  });
+
+  it('should report a stuck claim on a SUCCESSFUL apply, without calling it a failure', () => {
+    // Act
+    const actual = renderApplyResult(applyResult({ lockResidue: LOCK_RESIDUE }));
+
+    // Assert — the fleet landed; the claim is residue that blocks the next run
+    should(actual).containEql('applied 1 account in 2 operations');
+    should(actual).containEql(`the exclusive apply claim at ${LOCK_RESIDUE} could not be cleared`);
+    should(actual).not.containEql('failed');
+  });
+
+  it('should stay quiet on a successful apply that left no claim', () => {
+    // Act
+    const actual = renderApplyResult(applyResult());
+
+    // Assert
+    should(actual).not.containEql('exclusive apply claim');
   });
 });

@@ -1,5 +1,8 @@
 import type {
   CredentialState,
+  DisplacedState,
+  FleetApplyCommittedState,
+  FleetApplyFailure,
   FleetApplyPreview,
   FleetApplyResult,
   FleetHealth,
@@ -225,7 +228,134 @@ export function renderApplyResult(result: FleetApplyResult): string {
     );
   }
   if (sharesCodexHistory(result.sharedHistory)) lines.push(...CODEX_HISTORY_CAVEAT);
+  lines.push(...residueLines(result.backupResidue), ...lockResidueLines(result.lockResidue));
   return lines.join('\n');
+}
+
+/**
+ * Moved-aside originals still on disk.
+ *
+ * Residue, never a failure — the apply committed and the manifest describes what is there now. It is
+ * reported anyway because it is the only remaining copy of what was displaced, so a person tidying up
+ * needs to be told it exists rather than discovering it later and guessing what it was.
+ */
+function residueLines(backupResidue: readonly string[] | undefined): readonly string[] {
+  const residue = backupResidue ?? [];
+  if (residue.length === 0) return [];
+  return [
+    `  left ${plural(residue.length, 'moved-aside original')} on disk — the only copy of what was displaced:`,
+    ...residue.map(path => `${INDENT}${path}`),
+  ];
+}
+
+/**
+ * The exclusive apply claim this run could not verify releasing.
+ *
+ * Residue, never a failure — reporting it as one would turn a fleet that fully landed into a fleet
+ * the reader believes was refused. But it is not cosmetic either: it BLOCKS THE NEXT APPLY until it
+ * is removed, so a reader who is told nothing discovers it as an inexplicable refusal later. Named,
+ * with what to do about it, on every surface that can carry one.
+ */
+function lockResidueLines(lockResidue: string | undefined): readonly string[] {
+  if (lockResidue === undefined) return [];
+  return [
+    `  the exclusive apply claim at ${lockResidue} could not be cleared`,
+    `${INDENT}the next apply will refuse until it is removed`,
+  ];
+}
+
+/** What a host carries after ordinary provisioning committed, printed as fact rather than as loss. */
+function committedLines(committed: FleetApplyCommittedState): readonly string[] {
+  const lines = [
+    `  committed ${plural(committed.accountCount, 'account')} in ${plural(committed.operationCount, 'operation')}`,
+    `  manifest: ${committed.manifestPath}`,
+  ];
+  if (committed.prunedWrappers.length > 0) {
+    lines.push(
+      `  pruned ${plural(committed.prunedWrappers.length, 'wrapper')}: ${committed.prunedWrappers.join(', ')}`,
+    );
+  }
+  for (const shared of committed.sharedHistory) {
+    lines.push(
+      `  shared ${shared.kind}: ${shared.migrated} migrated entries, ${shared.conflicts} collisions preserved, ${shared.links} links → ${shared.pool}`,
+    );
+  }
+  lines.push(...residueLines(committed.backupResidue), ...lockResidueLines(committed.lockResidue));
+  return lines;
+}
+
+/**
+ * Content that was NOT this apply's, moved out of the way and not put back.
+ *
+ * Deliberately its own block rather than more rows in the unrestored list, because they are not the
+ * same thing and a reader acts differently on each. Unrestored is OUR state we could not restore;
+ * displaced is SOMEBODY ELSE'S file now living under a different name. Merging them would quietly
+ * recreate the flattening this whole rendering exists to remove.
+ */
+function displacedLines(displaced: readonly DisplacedState[] | undefined): readonly string[] {
+  const moved = displaced ?? [];
+  if (moved.length === 0) return [];
+  return [
+    `  ${plural(moved.length, 'path')} not belonging to this apply, moved aside and left there:`,
+    ...moved.map(entry => `${INDENT}${entry.path} → ${entry.movedTo}`),
+  ];
+}
+
+/**
+ * A failed apply, in the shape the reader actually has to act on.
+ *
+ * THE QUESTION THIS ANSWERS IS "WHAT IS MY HOST NOW", not "which write threw". Those are different
+ * questions with the same cause, and only the first one decides what a person does next: re-run,
+ * repair by hand, or stop and look. Flattening all three into "apply failed" is how a fleet that
+ * genuinely landed gets applied again blindly, and how a host left half-restored gets re-run on the
+ * assumption it is clean.
+ *
+ * So each outcome leads with its verdict rather than with the error, and the two that changed the
+ * host name the exact paths — an unverified restoration is only actionable if you know which entries
+ * it could not confirm, and a committed fleet is only safe to leave alone if you can see what it
+ * committed.
+ */
+export function renderFleetApplyFailure(failure: FleetApplyFailure, lockResidue?: string): string {
+  // The committed block prints the claim it carries, so printing the error's copy of the same path
+  // again underneath it would read as two separate stuck claims.
+  const alreadyNamed = failure.kind === 'history-failed-after-commit' ? failure.committed.lockResidue : undefined;
+  const lock = lockResidueLines(lockResidue === alreadyNamed ? undefined : lockResidue);
+
+  if (failure.kind === 'rolled-back') {
+    return [
+      `apply failed at ${failure.failedOperation}: ${failure.reason}`,
+      '  the host is exactly as it was — every change was put back and nothing was committed',
+      ...lock,
+      // A stuck claim makes "just run it again" false: the next apply refuses until it is gone. The
+      // advice has to bend to the residue rather than the residue being a footnote under the advice.
+      lockResidue === undefined
+        ? '  safe to fix the cause and run "fy fleet apply" again'
+        : '  fix the cause AND clear the claim above, then run "fy fleet apply" again',
+    ].join('\n');
+  }
+  if (failure.kind === 'rollback-incomplete') {
+    return [
+      `apply failed at ${failure.failedOperation}: ${failure.reason}`,
+      '  THE HOST IS IN AN UNVERIFIED STATE — restoration was attempted and could not be confirmed',
+      `  ${plural(failure.unrestored.length, 'path')} whose previous state could not be put back:`,
+      ...failure.unrestored.flatMap(entry => [
+        `${INDENT}${entry.path} — ${entry.reason}`,
+        ...(entry.backup === undefined ? [] : [`${INDENT}  the original is still at ${entry.backup}`]),
+      ]),
+      ...displacedLines(failure.displaced),
+      ...lock,
+      '  do NOT re-run until these are resolved by hand; a second apply would build on a state nobody verified',
+    ].join('\n');
+  }
+  return [
+    `${failure.failedHarness} shared history failed after the fleet was applied: ${failure.reason}`,
+    '  THE FLEET DID LAND. Shared history has its own boundary and did not roll it back, so this is',
+    '  what the host now carries:',
+    ...committedLines(failure.committed),
+    ...lock,
+    '  do NOT treat this as a failed apply — the manifest above is live. Only the history step needs',
+    '  another attempt.',
+  ].join('\n');
 }
 
 /** One account row: what it is, and whether it can be used. */

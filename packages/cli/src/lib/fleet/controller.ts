@@ -1,4 +1,4 @@
-import { type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
+import { FleetApplyFailureError, type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
 import type {
   IFleetApplier,
   IFleetAuthorizationGateway,
@@ -17,6 +17,7 @@ import type {
 import {
   renderApplyPlan,
   renderApplyResult,
+  renderFleetApplyFailure,
   renderFleetApproval,
   renderHealth,
   renderIdentityStatus,
@@ -72,6 +73,32 @@ export interface FleetControllerDeps {
 }
 
 /**
+ * The machine-readable form of a failed apply.
+ *
+ * `outcome` is lifted to the top rather than left inside `failure`, so a caller can branch on one
+ * well-known key without first learning the union's shape — and `rolled-back` versus
+ * `history-failed-after-commit` is exactly the branch a script must not get wrong. `error` repeats
+ * the provisioner's own sentence so a caller that only logs the payload still says something true.
+ *
+ * `failure` is included whole and unsummarized on purpose: it IS the exact post-state, and a
+ * flattened version here would be a second contract to keep in step with the first, which is the
+ * failure mode this whole change exists to remove.
+ *
+ * `lockResidue` has to be lifted explicitly because it is a sibling of `failure` on the error rather
+ * than a member of it. Left out, a machine caller would be told which post-state it is in but not
+ * that the NEXT apply is already blocked — which is the one thing an automated retry needs to know
+ * before it tries.
+ */
+function applyFailurePayload(error: FleetApplyFailureError): Record<string, unknown> {
+  return {
+    outcome: error.failure.kind,
+    error: error.message,
+    failure: error.failure,
+    ...(error.lockResidue === undefined ? {} : { lockResidue: error.lockResidue }),
+  };
+}
+
+/**
  * Drives `fy fleet …`.
  *
  * Provisioning is a local operation: the fleet is directories, wrappers and settings on this host,
@@ -101,6 +128,22 @@ export class FleetController {
    * The plan is built first and always, so `--dry-run` and a real apply share one decision. A plan
    * that cannot be built — an asset the harness has no destination for, a duplicate wrapper — throws
    * before a single byte is written.
+   *
+   * A FAILED APPLY IS NOT FLATTENED. The provisioner distinguishes three post-states — the host put
+   * back, the host left unverified, and the fleet genuinely committed with a later step failing — and
+   * which one it is decides what a person does next. Collapsing them into "apply failed" is how a
+   * fleet that did land gets applied again blindly. Both surfaces preserve the distinction, and both
+   * remain backward compatible:
+   *
+   * - Human: the failure is thrown carrying its full typed rendering, so the composition root prints
+   *   that to stderr and exits non-zero. stderr already carried a one-line message here; it now
+   *   carries a fuller one, and it is not also echoed to stdout, because saying it twice in two
+   *   different amounts of detail is how a reader learns to trust neither.
+   * - `--json`: the structured payload goes to stdout, which on a failed apply was previously empty —
+   *   so a machine caller that reads it is reading something new rather than something changed. The
+   *   original error is then rethrown for the exit code, so `outcome` and the exit status agree.
+   *
+   * A SUCCESSFUL apply is untouched on both surfaces.
    */
   async apply(options: FleetApplyOptions): Promise<void> {
     const config = await this.deps.config.load();
@@ -110,8 +153,19 @@ export class FleetController {
       this.#report(preview, options, () => renderApplyPlan(preview));
       return;
     }
-    const result = await this.deps.applier.apply(plan);
-    this.#report(result, options, () => renderApplyResult(result));
+    try {
+      const result = await this.deps.applier.apply(plan);
+      this.#report(result, options, () => renderApplyResult(result));
+    } catch (error) {
+      if (!(error instanceof FleetApplyFailureError)) throw error;
+      if (options.json === true) {
+        this.deps.out.success(JSON.stringify(applyFailurePayload(error), null, 2));
+        throw error;
+      }
+      // `cause` keeps the typed failure reachable for any embedder that wants it; the message is
+      // replaced because the root prints exactly one thing and it should be the useful one.
+      throw new Error(renderFleetApplyFailure(error.failure, error.lockResidue), { cause: error });
+    }
   }
 
   async list(options: FleetCommandOptions): Promise<void> {
