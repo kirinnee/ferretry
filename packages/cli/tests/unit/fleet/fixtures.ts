@@ -341,6 +341,7 @@ export function scaffoldResult(overrides: Partial<FleetScaffoldResult> = {}): Fl
   return {
     created: ['/state/fleet/config.yaml'],
     kept: [],
+    updated: [],
     directories: ['/state/fleet', '/state/fleet/bin', '/state/fleet/homes', '/state/fleet/assets'],
     pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
     ...overrides,

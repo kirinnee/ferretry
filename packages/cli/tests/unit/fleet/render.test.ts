@@ -947,6 +947,22 @@ describe('renderScaffoldResult', () => {
     should(actual).containEql('export PATH=');
   });
 
+  it('should say directly when this run declared the requested first account', () => {
+    // Act
+    const actual = renderScaffoldResult(
+      scaffoldResult({
+        created: [],
+        updated: ['/state/fleet/config.yaml'],
+        declaredFirstAccount: 'codex',
+      }),
+      'codex',
+    );
+
+    // Assert
+    should(actual).containEql('Declared one codex account');
+    should(actual).not.containEql('If this command');
+  });
+
   it('should not claim a directory it does not know', () => {
     // Act
     const actual = renderScaffoldResult(scaffoldResult({ directories: [] }));

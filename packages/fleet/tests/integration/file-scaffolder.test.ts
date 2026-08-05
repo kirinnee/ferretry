@@ -79,6 +79,35 @@ describe('FileFleetScaffolder', () => {
     });
   });
 
+  it('should update only an existing file whose scaffold explicitly permits it', async () => {
+    await withTemporaryFleet(async root => {
+      // Arrange
+      const subject = new FileFleetScaffolder([root]);
+      const initial = scaffoldFor(root);
+      await subject.scaffold(initial);
+      const config = path.join(root, 'config.yaml');
+      await Bun.write(config, '# kept comment\nagents: []\n');
+
+      // Act
+      const actual = await subject.scaffold({
+        ...initial,
+        files: [
+          {
+            ...initial.files[0]!,
+            updateIfPresent: existing => existing.replace('agents: []', 'agents:\n  - name: primary'),
+          },
+          initial.files[1]!,
+        ],
+      });
+
+      // Assert — unrelated assets remain create-only, and the explicit update reports itself.
+      should(actual.created).be.empty();
+      should(actual.kept).deepEqual([path.join(root, 'assets', 'README.md')]);
+      should(actual.updated).deepEqual([config]);
+      should(await readFile(config, 'utf8')).equal('# kept comment\nagents:\n  - name: primary\n');
+    });
+  });
+
   it('should fill in only what a newer release added', async () => {
     await withTemporaryFleet(async root => {
       // Arrange — the earlier release seeded the configuration but not the README.
