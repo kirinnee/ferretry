@@ -9,33 +9,34 @@ const redirects = readFileSync(join(packageDir, 'public/_redirects'), 'utf8');
 const headers = readFileSync(join(packageDir, 'public/_headers'), 'utf8');
 
 describe('the static landing document', () => {
-  it('does not boot the PWA bundle and offers the app as an explicit next step', () => {
+  it('does not boot the PWA bundle and offers only the app as the next step', () => {
     expect(landing).not.toContain('/src/main.tsx');
     expect(landing).not.toContain('type="module"');
-    expect(landing).toContain('href="/setup"');
-    expect(landing).toContain('href="/?stay"');
+    expect(landing).toContain('href="/app"');
+    expect(landing).not.toContain('href="/setup"');
   });
 
-  it('positions Ferretry as the self-hosted guide for developers running agents', () => {
-    expect(landing).toContain('Your agents keep working.');
-    expect(landing).toContain('Ferretry is an agent operating system for Claude and Codex:');
-    expect(landing).toContain('It does not replace either harness.');
-    expect(landing).toContain('No Ferretry server.');
+  it('leads with the owner-supplied line and an honest fleet inventory', () => {
+    expect(landing).toContain('Bring your Claude and Codex');
+    expect(landing).toContain('to the next level');
+    expect(landing).toContain('Run as many Claude and Codex accounts as you want.');
+    expect(landing).toContain('end-to-end encrypted relay');
+    expect(landing).toContain('No Ferretry server ever holds your work.');
+    expect(landing).toContain('fy doctor');
+    expect(landing).toContain('Your agents talk to each other.');
+    expect(landing).toContain('server-derived sender');
   });
 
   it('does not market known unmounted or unenforced surfaces as complete', () => {
-    expect(landing).not.toContain('Agent-to-agent messages');
-    expect(landing).not.toContain('Peer messages carry their sender');
+    // Peer sending now ships through the mounted session-send route; its sender
+    // is derived by the server, not claimed in the request body.
     expect(landing).not.toContain('same-kind accounts');
-    expect(landing).not.toContain('automatic failover');
     expect(landing).not.toContain('remote browser');
     expect(landing).not.toContain('structured question');
     expect(landing).not.toContain('spend and tokens');
-    expect(landing).not.toContain('from anywhere');
-    expect(landing).not.toContain('phone');
     expect(landing).not.toContain('tunnel');
     expect(landing).not.toContain('tailnet');
-    expect(landing).not.toContain('remote');
+    expect(landing).not.toContain('runtime model switching');
   });
 
   it('keeps a tab favicon without presenting itself as the installable app', () => {
@@ -49,7 +50,7 @@ describe('the static landing document', () => {
     const scripts = [...landing.matchAll(/<script>([\s\S]*?)<\/script>/g)].flatMap(match =>
       match[1] === undefined ? [] : [match[1]],
     );
-    expect(scripts).toHaveLength(2);
+    expect(scripts).toHaveLength(1);
     const redirectScript = scripts[0] ?? '';
     expect(redirectScript).toContain("localStorage.getItem('fy-has-pairings-v1') === '1'");
     expect(redirectScript).toContain("has('stay')");
