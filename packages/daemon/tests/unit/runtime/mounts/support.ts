@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { CapabilityGrants, SecretName } from '@ferretry/protocol';
-import {
-  type CreateTerminalRequest,
+import { type CapabilityGrants, 
+  type CreateTerminalRequest,DAEMON_CAPABILITIES, 
   type LearningConfig,
   PIN_SCHEMA_VERSION,
   type Pin,
-  type PinSnapshot,
+  type PinSnapshot,type SecretName, 
   type SendResult,
   SessionConfigSchema,
   SessionStateSchema,
@@ -23,8 +22,7 @@ import {
   type WardenConfigView,
   type WardenRunView,
   type WardenStatusView,
-  type WardenVerdictsView,
-} from '@ferretry/protocol';
+  type WardenVerdictsView,} from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
   type FinishedAnalyticsSession,
@@ -1580,6 +1578,7 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
         if (world.broken === true) throw new Error('the grant document could not be read');
         return recorded;
       },
+      written: async () => (world.grants === undefined ? [] : DAEMON_CAPABILITIES),
       write: async next => {
         recorded = next;
       },

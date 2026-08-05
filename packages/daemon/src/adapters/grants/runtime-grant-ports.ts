@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { CapabilityGrants } from '@ferretry/protocol';
+import type { CapabilityGrants, DaemonCapability } from '@ferretry/protocol';
 import type {
   FileSystemPort,
   GrantAuditEntry,
@@ -12,6 +12,7 @@ import type {
 /** The daemon configuration document, seen as the one thing the grant subsystem needs from it. */
 export interface GrantConfigStore {
   readGrants(): Promise<CapabilityGrants>;
+  writtenGrants(): Promise<readonly DaemonCapability[]>;
   writeGrants(grants: CapabilityGrants): Promise<void>;
 }
 
@@ -29,6 +30,10 @@ export class ConfigGrantDocument implements GrantDocumentPort {
 
   async read(): Promise<CapabilityGrants> {
     return await this.config.readGrants();
+  }
+
+  async written(): Promise<readonly DaemonCapability[]> {
+    return await this.config.writtenGrants();
   }
 
   async write(grants: CapabilityGrants): Promise<void> {

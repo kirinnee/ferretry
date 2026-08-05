@@ -37,6 +37,7 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
         if (options.broken === true) throw new Error('the grant document is not readable');
         return recorded;
       },
+      written: async () => (options.grants === undefined ? [] : DAEMON_CAPABILITIES),
       write: async next => {
         written = next;
         recorded = next;
@@ -137,6 +138,9 @@ describe('the grant view a UI reads', () => {
       granted: { use: false, configure: false },
       useRefusal: 'not-granted',
       configureRefusal: 'not-granted',
+      // The operator wrote this one down; `--print-config` draws the same distinction for every other
+      // value, and a report that could not tell a choice from a default answers the wrong question.
+      origin: 'config file',
     });
     // No password on this machine, so the configure axis passes and says nothing was standing behind
     // it — which is the honest disclosure, not a refusal.

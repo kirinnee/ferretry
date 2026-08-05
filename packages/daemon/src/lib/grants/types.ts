@@ -1,4 +1,4 @@
-import type { CapabilityGrants } from '@ferretry/protocol';
+import type { CapabilityGrants, DaemonCapability } from '@ferretry/protocol';
 
 /**
  * The ports the grant subsystem is built from.
@@ -39,6 +39,15 @@ export interface OperatorPasswordPort {
 /** Where the operator's decision is recorded, so a change outlives the daemon that made it. */
 export interface GrantDocumentPort {
   read(): Promise<CapabilityGrants>;
+  /**
+   * Which capabilities the operator actually WROTE DOWN, as distinct from the ones the product
+   * answered for them.
+   *
+   * A separate question from `read`, because a parsed decision has already lost it — an operator may
+   * write a value identical to the default, so provenance cannot be recovered by comparison. It is
+   * the same distinction `--print-config` exists to draw for every other value.
+   */
+  written(): Promise<readonly DaemonCapability[]>;
   write(grants: CapabilityGrants): Promise<void>;
 }
 

@@ -96,6 +96,8 @@ interface HeldUnlock {
 export class CapabilityGrantService implements CapabilityGuard {
   /** `undefined` until the first successful refresh, and again after a failed one. */
   private grants: EnforcedGrants;
+  /** Which capabilities the document actually names, for the provenance column. */
+  private writtenDown: readonly DaemonCapability[] = [];
   private passwordSet = false;
   private attempts: UnlockAttemptState = INITIAL_UNLOCK_ATTEMPTS;
   private unlocks: readonly HeldUnlock[] = [];
@@ -111,8 +113,13 @@ export class CapabilityGrantService implements CapabilityGuard {
    */
   async refresh(): Promise<void> {
     try {
-      const [grants, passwordSet] = await Promise.all([this.deps.document.read(), this.deps.passwords.isSet()]);
+      const [grants, written, passwordSet] = await Promise.all([
+        this.deps.document.read(),
+        this.deps.document.written(),
+        this.deps.passwords.isSet(),
+      ]);
       this.grants = grants;
+      this.writtenDown = written;
       this.passwordSet = passwordSet;
     } catch (error) {
       this.grants = undefined;
@@ -314,6 +321,7 @@ export class CapabilityGrantService implements CapabilityGuard {
       granted,
       useRefusal: use.refusal,
       configureRefusal: configure.refusal,
+      origin: this.writtenDown.includes(capability) ? 'config file' : 'default',
     };
   }
 

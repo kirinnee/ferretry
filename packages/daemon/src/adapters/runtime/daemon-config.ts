@@ -1,4 +1,4 @@
-import type { CapabilityGrants } from '@ferretry/protocol';
+import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
@@ -89,6 +89,22 @@ export class FileDaemonConfig {
   async readGrants(): Promise<CapabilityGrants> {
     const text = await this.files.readText(this.paths.daemonConfig);
     return DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text)).grants;
+  }
+
+  /**
+   * Which capabilities the operator actually NAMED in the document.
+   *
+   * Read from the RAW document rather than the parsed one, because parsing has already replaced every
+   * omission with a default — and an operator may legitimately write a value identical to one. So
+   * provenance cannot be recovered by comparison; it has to be read from what is on disk. It is the
+   * same distinction `--print-config` exists to draw for every other value.
+   */
+  async writtenGrants(): Promise<readonly DaemonCapability[]> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    if (text === undefined) return [];
+    const written = (JSON.parse(text) as { readonly grants?: Record<string, unknown> | null }).grants;
+    if (written === undefined || written === null) return [];
+    return DAEMON_CAPABILITIES.filter(capability => written[capability] !== undefined);
   }
 
   /**

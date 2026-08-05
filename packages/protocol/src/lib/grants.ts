@@ -199,6 +199,16 @@ export const CapabilityGrantViewSchema = z.strictObject({
   useRefusal: GrantRefusalSchema,
   /** Why `configure` reads the way it does. */
   configureRefusal: GrantRefusalSchema,
+  /**
+   * Whether the operator wrote this capability down, or the product answered for them.
+   *
+   * THE SAME PROVENANCE TREATMENT `--print-config` GIVES EVERY OTHER VALUE, and for the same reason:
+   * a person reading a permission report is usually asking why something is refused, and "which of
+   * these did I choose and which did something choose for me" is the question. An operator may write
+   * a value identical to the default, so this cannot be derived by comparison — it is what the
+   * document actually holds.
+   */
+  origin: z.enum(['default', 'config file']),
 });
 export type CapabilityGrantView = z.infer<typeof CapabilityGrantViewSchema>;
 
