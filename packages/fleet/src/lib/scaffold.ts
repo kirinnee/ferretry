@@ -91,14 +91,13 @@ variants:
   default: {}
   auto:
     mode: auto
-    # Ferretry's daemon launches only auto wrappers. These harness flags keep an
-    # unattended session from stopping for permission input; Claude's remaining
-    # first-run prompts are seeded safely by the generated wrapper itself.
+    # The auto lane is Ferretry's unattended path. These harness flags keep a
+    # session from stopping for permission input; Claude's remaining first-run
+    # prompts are seeded safely by the generated wrapper itself.
     claude:
       flags:
         - --dangerously-skip-permissions
-        - --disallowed-tools
-        - AskUserQuestion
+        - --disallowed-tools=AskUserQuestion
       settings:
         - skipDangerousModePermissionPrompt: true
     codex:

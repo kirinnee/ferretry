@@ -202,10 +202,11 @@ what belongs in a public repo is the mechanism plus neutral defaults. Both halve
 | Auto-lane harness flags    | the `auto` variant in `config.yaml`     | `fy fleet apply` bakes them into the generated wrapper                                                                |
 
 The auto-lane flags are not invented here. They are what an unattended launcher actually passes:
-`--dangerously-skip-permissions` plus `--disallowed-tools AskUserQuestion` for Claude and
+`--dangerously-skip-permissions` plus `--disallowed-tools=AskUserQuestion` for Claude and
 `--dangerously-bypass-approvals-and-sandbox --no-alt-screen` for Codex, exactly as
 `~/.config/home-manager/modules/kteam-ts/src/core.ts:1272,1281,1290` launches one (`--disallowed-tools`
-is the documented alias of the `--disallowedTools` spelling used there). The one settings key that
+is the documented alias of the `--disallowedTools` spelling used there, and the `=` keeps its
+variadic value from consuming a caller's positional prompt). The one settings key that
 goes with them, `skipDangerousModePermissionPrompt: true`, is set **fleet-wide** in the owner's own
 `~/.config/home-manager/kfleet/templates/claude/settings.json`; here it is scoped to the `auto` lane,
 because an interactive account has a human who can answer.

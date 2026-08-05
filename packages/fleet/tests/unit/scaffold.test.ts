@@ -127,7 +127,7 @@ describe('the starter configuration', () => {
     should(parsed.variants.default?.claude?.flags).be.undefined();
     should(parsed.variants.default?.codex?.flags).be.undefined();
     should(parsed.variants.auto?.claude).match({
-      flags: ['--dangerously-skip-permissions', '--disallowed-tools', 'AskUserQuestion'],
+      flags: ['--dangerously-skip-permissions', '--disallowed-tools=AskUserQuestion'],
       settings: [{ skipDangerousModePermissionPrompt: true }],
     });
     should(parsed.variants.auto?.codex?.flags).deepEqual([

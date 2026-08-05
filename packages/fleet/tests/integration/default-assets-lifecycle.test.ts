@@ -44,8 +44,9 @@ async function runWrapper(
   wrapper: string,
   cwd: string,
   harnessBin: string,
+  args: readonly string[] = [],
 ): Promise<{ readonly code: number; readonly out: string; readonly err: string }> {
-  const spawned = Bun.spawn([wrapper], {
+  const spawned = Bun.spawn([wrapper, ...args], {
     cwd,
     env: { ...process.env, PATH: `${harnessBin}:${process.env.PATH ?? ''}` },
     stdout: 'pipe',
@@ -132,12 +133,14 @@ describe('built-in fleet assets from init through launch', () => {
       // The launch happens from somewhere unrelated to either home. Before this unit the wrapper
       // exported only "claude-fresh"/"codex-fresh", so both harnesses opened a new empty directory
       // beneath this cwd instead of the account home provisioning had just filled.
-      const claude = await runWrapper(path.join(layout.binDirectory, 'claude-auto-fresh'), unrelatedCwd, harnessBin);
+      const claude = await runWrapper(path.join(layout.binDirectory, 'claude-auto-fresh'), unrelatedCwd, harnessBin, [
+        'caller-prompt',
+      ]);
       const codex = await runWrapper(path.join(layout.binDirectory, 'codex-auto-fresh'), unrelatedCwd, harnessBin);
       should(claude.code).equal(0, claude.err);
       should(claude.out).containEql(`home=${path.join(layout.homesDirectory, 'claude-fresh')}`);
       should(claude.out).containEql('<--dangerously-skip-permissions>');
-      should(claude.out).containEql('<--disallowed-tools><AskUserQuestion>');
+      should(claude.out).containEql('<--disallowed-tools=AskUserQuestion><caller-prompt>');
       should(codex.code).equal(0, codex.err);
       should(codex.out).containEql(`home=${path.join(layout.homesDirectory, 'codex-fresh')}`);
       should(codex.out).containEql('<--dangerously-bypass-approvals-and-sandbox><--no-alt-screen>');
