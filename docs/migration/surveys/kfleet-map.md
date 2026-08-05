@@ -36,7 +36,7 @@ him, not by line count.
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
 | E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers for Anthropic       | **Was yes**; Anthropic closed, other providers still GAP              |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI only           | **Yes — the daemon still shells out to kfleet for quota**             |
 | G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
@@ -44,19 +44,24 @@ him, not by line count.
 | K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper            | **Was yes**, for automation; _closed by this unit_                    |
 | L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                          | No — annoying, not blocking                                           |
 
-Three facts that the capability rows assume and that are easy to miss:
+Four facts that the capability rows assume and that are easy to miss:
 
+1. **The daemon still gets its quota from kfleet, so F is not closed.** `/usage`, `/v1/usage` and
+   `/metrics` — read by the advisor, quota-failover and the PWA — are served from a cached feed whose
+   only two sources are an HTTP call to kfleet's `serve` and a shell-out to its CLI. The native
+   collector below is reachable only from `fy fleet usage`. Closing this is one `UsageSourcePort`, with
+   one join that silently breaks routing if got wrong: [quota-two-paths.md](quota-two-paths.md).
 1. **`fy fleet usage` now reports real Anthropic numbers.** `AnthropicUsageProbe`
    (`packages/fleet/src/adapters/anthropic-usage-probe.ts`) serves both `fy fleet usage` and
    `GET /v1/fleet/usage` from one implementation. Both placeholder probes are deleted. A non-Anthropic
    account still reports an honest failure rather than a number — see [F](#f--know-whos-out-of-quota).
-2. **The reachability gate cannot see this package's dead capability.**
+1. **The reachability gate cannot see this package's dead capability.**
    `scripts/validate/composition-reachability.ts:22` roots a package with no `bin` at its `exports`,
    so everything under `packages/fleet`'s barrel is "reachable" by definition. `FleetLoginService`
    passed every gate for weeks while nothing called it. `groupByIdentity` was the same, and is
    now reached through `buildFleetIdentities`; `renderFleetUsageJson` and
    `renderFleetUsageMetrics` still are not called. A green build is not evidence of absorption here.
-3. **Configuration used to be accepted and silently ignored** — `sharedHistory`, `health.*`, most of
+1. **Configuration used to be accepted and silently ignored** — `sharedHistory`, `health.*`, most of
    `usage.*` parsed cleanly and reached nothing. Closed by this unit: the plan now refuses.
 
 ---

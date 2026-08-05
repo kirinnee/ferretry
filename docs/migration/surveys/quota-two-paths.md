@@ -71,9 +71,50 @@ The rest of the mapping is mechanical:
 An absent window must map to **absent or `null`**, never `0`: the whole point of the fleet collector's
 fail-closed rule is that unknown is not zero, and flattening it here would undo that at the boundary.
 
+### The port contract: `undefined` and `[]` are different answers
+
+`UsageSourcePort.read` resolves to `undefined` when the source **could not be read at all**, and to an
+array when it could. A native source must honour that exactly:
+
+- the collector threw, or there is no manifest → **`undefined`**
+- the manifest is genuinely empty → **`[]`**
+
+Returning `[]` for a failure is the same mistake as reporting `0%` for an unknown window: emptiness is a
+claim about the fleet, and a failed read is not evidence for it. `CachedUsageFeed` only ever replaces its
+snapshot with a successful reading, so getting this right is what preserves the last good numbers across
+a blip.
+
+### Ordering is safe, and here is why — so nobody has to re-derive it
+
+Wiring the native source **first** looks risky (would an empty manifest shadow a working kfleet?) and is
+not, because the feed's loop is careful (`adapters/usage/cached-usage-feed.ts`):
+
+- `undefined` → skip to the next source;
+- a **non-empty** array → wins immediately and stops;
+- an **empty** array → remembered only as a fallback, and the loop **keeps going**.
+
+So a native source that legitimately has nothing to say does not suppress a later source that does. That
+is what makes "native first, kfleet behind it" a safe intermediate state rather than a cutover.
+
+### Fields with no equivalent must be omitted, not defaulted
+
+`AccountUsage` carries `availability` and `retryAt`, which `FleetUsage` has no counterpart for. Leave them
+absent. Filling them with a plausible default invents a reading, which is the failure mode this whole
+section is about.
+
 ## Also still open
 
-- `usage.interval` and `usage.jitter` configure nothing in the fleet path and are refused at plan time
+- **`usage.interval` and `usage.jitter`** configure nothing in the fleet path and are refused at plan time
   (`capabilities.ts`). Path A has its own `usage.refreshSeconds`, which is a **second** way to say the
-  same thing — worth collapsing when the paths merge.
-- `renderFleetUsageJson` is uncalled; `/v1/fleet/usage` returns the snapshot directly.
+  same thing. Collapse them to one name when the paths merge; do **not** implement the refused pair
+  separately, or the fleet grows two schedules that can disagree.
+- **`usage.timeout` reaches nothing, and is not refused.** Neither composition root passes it to
+  `AnthropicUsageProbe`, so every probe uses the adapter default. That is precisely the "configuration
+  parsed and silently dropped" class the capability refusals exist to prevent, and this one slipped
+  through because the probe landed after the refusal list. Either thread it through or add it to
+  `CAPABILITY_CHECKS`; leaving it as-is is the one option that is wrong.
+- **`usage.enabled: false` is silently ignored.** It defaults to `true`, so the capability list treats it
+  as "not a request" — but somebody who writes `false` has made a request, and nothing honours it.
+- `renderFleetUsageJson` is uncalled; `/v1/fleet/usage` returns the snapshot directly. If the paths merge
+  as described, both fleet renderers become **unnecessary** rather than uncalled, which is the better
+  outcome — delete them then rather than finding a caller for them now.
