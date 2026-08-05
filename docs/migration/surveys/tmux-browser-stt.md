@@ -131,6 +131,7 @@ close everything for the human login window.
 | human input bounding (`boundHumanInput`)                       | `lib/browser/transport/input.ts`                    |
 | viewer socket lifecycle                                        | `lib/browser/transport/viewer-stream.ts`            |
 | worker request/response protocol                               | `lib/browser/transport/worker-protocol.ts`          |
+| `browser-playwright-worker.mjs` persistent CDP worker          | `packages/daemon/bin/browser-worker.ts`             |
 | profile lease + Chrome version checks                          | `lib/browser/control/profile.ts`                    |
 | Chrome argv, viewport normalisation, VNC login window          | `lib/browser/control/policy.ts`, `control/login.ts` |
 | `start`/`stop`/`status`/`act`/`attachViewer`/`sweepIdle`       | **GAP** — no per-session browser service            |
@@ -145,8 +146,17 @@ confirms that line and sharpens it — the missing piece is not only the worker 
 itself, which is what would hold a `BrowserViewerHost` and decide when a browser starts, who may
 drive it, and when it is swept.
 
-`/v1/sessions/:id/browser` already answers `501 browser_automation_not_mounted` rather than 404,
-which is the honest state.
+`packages/daemon/bin/browser-worker.ts` now carries the source worker's cross-platform CDP
+connection, page model, JPEG screencast and human mouse/key/text dispatch. It connects only to the
+parent-launched Chrome endpoint, so it never attaches to an operator's own Chrome profile. The
+per-session `BrowserService` / `BrowserViewerHost` remains the mount gap: until it owns a profile
+lease and starts this executable, `/v1/sessions/:id/browser` must continue to answer
+`501 browser_automation_not_mounted` rather than pretending a partner browser exists.
+
+The Linux VNC login window must stay in place until that mount gap closes. Removing it immediately
+would leave no reachable browser-drive surface despite the worker executable existing. Once the
+host is mounted, remove the VNC route and update the doctor verdict that currently describes the
+macOS login window as unavailable by design.
 
 ---
 
