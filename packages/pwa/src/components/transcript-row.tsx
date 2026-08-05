@@ -7,6 +7,8 @@ import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
   readonly entry: TranscriptEntry;
+  /** The preceding visible entry controls the transcript's asymmetric rhythm. */
+  readonly previous?: TranscriptEntry;
   /** The session is actively working — only a live session can have a tool
    *  still running. */
   readonly live?: boolean;
@@ -25,25 +27,32 @@ export interface TranscriptRowProps {
  * renders as the collapsed tool group; attachments remain owned by a later
  * port.
  */
-export function TranscriptRow({ entry, live = false, isLast = false, asOf, onResend }: TranscriptRowProps) {
+export function TranscriptRow({ entry, previous, live = false, isLast = false, asOf, onResend }: TranscriptRowProps) {
+  const rhythm = transcriptRhythm(entry, previous);
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
-      <div className="fy-message fy-message-ledger" data-transcript-kind="ledger">
+      <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
         <LedgerMessage asOf={asOf} onResend={onResend} placement={entry.placement} record={entry.ledger} />
       </div>
     );
   }
   if (entry.kind === 'tool' && entry.tools !== undefined && entry.tools.length > 0) {
     return (
-      <div className="fy-message fy-message-tool fy-message-tools" data-transcript-kind="tool">
+      <div className="fy-message fy-message-tool fy-message-tools" data-transcript-kind="tool" {...rhythm}>
         <ToolGroup calls={entry.tools} isLast={isLast} live={live} />
       </div>
     );
   }
-  return <TranscriptTextRow entry={entry} />;
+  return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
 }
 
-function TranscriptTextRow({ entry }: { readonly entry: TranscriptEntry }) {
+function TranscriptTextRow({
+  entry,
+  rhythm,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly rhythm: Record<string, string | undefined>;
+}) {
   const label = entry.label ?? defaultLabel(entry.kind);
   const timestamp = entry.at === undefined ? undefined : new Date(entry.at);
   const validTimestamp = timestamp !== undefined && Number.isFinite(timestamp.getTime());
@@ -53,6 +62,7 @@ function TranscriptTextRow({ entry }: { readonly entry: TranscriptEntry }) {
     <article
       className={`fy-message fy-message-${entry.kind}${chrome ? ' fy-message-chrome' : ''}`}
       data-transcript-kind={entry.kind}
+      {...rhythm}
     >
       <header>
         <span>{label}</span>
@@ -61,6 +71,34 @@ function TranscriptTextRow({ entry }: { readonly entry: TranscriptEntry }) {
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
     </article>
   );
+}
+
+function transcriptRhythm(
+  entry: TranscriptEntry,
+  previous: TranscriptEntry | undefined,
+): Record<string, string | undefined> {
+  const density = densityOf(entry);
+  const priorDensity = previous === undefined ? undefined : densityOf(previous);
+  const previousSpeaker = previous === undefined ? undefined : speakerOf(previous);
+  const speakerChanged =
+    density === 'message' &&
+    priorDensity === 'message' &&
+    speakerOf(entry) !== undefined &&
+    speakerOf(entry) !== previousSpeaker;
+  return {
+    'data-transcript-after': priorDensity,
+    'data-transcript-density': density,
+    'data-transcript-turn': speakerChanged ? 'true' : undefined,
+  };
+}
+
+function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
+  return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
+}
+
+function speakerOf(entry: TranscriptEntry): 'user' | 'assistant' | undefined {
+  if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';
+  return entry.kind === 'assistant' ? 'assistant' : undefined;
 }
 
 /**

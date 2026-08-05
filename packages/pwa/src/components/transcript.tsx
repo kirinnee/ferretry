@@ -93,22 +93,31 @@ export function Transcript({
         role="log"
         aria-live="polite"
       >
-        {entries.map((entry, index) => (
-          <TranscriptRow
-            asOf={asOf}
-            entry={entry}
-            isLast={index === entries.length - 1}
-            key={entry.id}
-            live={busy}
-            onResend={onResend}
-          />
-        ))}
-        {busy ? <p className="fy-thinking">Working…</p> : null}
+        <div className="fy-transcript-content">
+          {entries.map((entry, index) => (
+            <TranscriptRow
+              asOf={asOf}
+              entry={entry}
+              isLast={index === entries.length - 1}
+              key={entry.id}
+              live={busy}
+              onResend={onResend}
+              previous={entries[index - 1]}
+            />
+          ))}
+          {busy ? (
+            <p className="fy-thinking" data-transcript-density="chrome">
+              Working…
+            </p>
+          ) : null}
+        </div>
       </div>
       {newCount > 0 ? (
-        <button className="fy-jump-latest" onClick={jumpToLatest} type="button">
-          {newCount} new {newCount === 1 ? 'message' : 'messages'} · Jump to latest
-        </button>
+        <div className="fy-jump-latest-shell">
+          <button className="fy-jump-latest" onClick={jumpToLatest} type="button">
+            {newCount} new {newCount === 1 ? 'message' : 'messages'} · Jump to latest
+          </button>
+        </div>
       ) : null}
     </section>
   );
