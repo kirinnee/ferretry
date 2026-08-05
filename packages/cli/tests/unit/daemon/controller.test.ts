@@ -169,16 +169,16 @@ describe('daemon start', () => {
   it('should leave a supervised incumbent alone while its API is temporarily unavailable', async () => {
     // Arrange
     const { controller, out, service, snapshots, nix } = harness({
-      probes: [undefined],
+      probes: [undefined, health()],
       serviceFallback: runningReport,
     });
 
     // Act
     await controller.start();
 
-    // Assert — rewriting the unit and its sole GC root while the old process remains active can
-    // leave that incumbent running from snapshot A while only snapshot B's closure is protected.
-    should(out.text).equal('ok: fyd is already running (pid 4242); its API is not ready');
+    // Assert — wait for the incumbent rather than rewriting its unit and sole GC root underneath it.
+    // Such a rewrite could leave snapshot A running while only snapshot B's closure is protected.
+    should(out.text).equal('ok: fyd ready (pid 4242)');
     should(service.calls).not.containEql('start');
     should(snapshots.calls).be.empty();
     should(nix.realPaths).be.empty();

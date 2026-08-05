@@ -121,8 +121,10 @@ export class DaemonController {
     const owner = await this.#owner();
     const incumbent = await owner.inspect();
     if (incumbent.state === 'running') {
-      const pid = incumbent.pid === undefined ? '' : ` (pid ${String(incumbent.pid)})`;
-      this.deps.out.success(`${this.#name} is already running${pid}; its API is not ready`);
+      // A service manager reports `activating` as running. Leave that incumbent's executable and
+      // sole GC root untouched, but still honor `start`'s contract to wait until its API serves.
+      const ready = await this.#awaitReady(owner, {});
+      this.deps.out.success(`${this.#name} ready (pid ${String(ready.pid)})`);
       return;
     }
     const snapshot = await this.#ensurePromotedSnapshot();
