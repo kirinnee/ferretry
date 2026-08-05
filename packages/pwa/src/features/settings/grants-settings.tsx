@@ -423,10 +423,12 @@ export function GrantsCard({
           does each one hand over"; the switches below answer "change it". Somebody arriving from a
           refused control needs the first question answered before the second is even relevant.
 
-          `governed` is PASSED, not inferred. It is the daemon's own account of the carrier, and letting
-          the list fall back to `mayGrant` unanimity here would be the second derivation of one fact that
-          the field exists to remove — harmless while `mayGrant` is `!governed`, wrong the moment it is
-          not. Never inferred from this page's address, which would invert the answer over a relay. */}
+          `governed` is PASSED rather than inferred. It is the DAEMON's account of the connection —
+          `isGovernedCaller(request.loopback)` — and letting the list fall back to `mayGrant` unanimity here
+          would be the second derivation of one fact, harmless while `mayGrant` is `!governed` and wrong the
+          moment it is not. It is never inferred from this page's address, which would invert the answer
+          over a relay. The fallback stays for a browser meeting an OLDER daemon that does not send the
+          field. */}
       <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
