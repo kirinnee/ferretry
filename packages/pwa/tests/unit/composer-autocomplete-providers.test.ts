@@ -291,6 +291,66 @@ describe('composer files provider', () => {
     expect(resultA.candidates[0]?.replacement).toBe('@same.ts');
     expect(resultB.candidates[0]?.replacement).toBe('@same.ts');
   });
+
+  it('shows unrepresentable paths without injecting ambiguous reference tokens', async () => {
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () =>
+        json({
+          entries: [
+            { name: 'app.ts', type: 'file' },
+            { name: 'report 2026.md', type: 'file' },
+            { name: 'a:12', type: 'file' },
+          ],
+        }),
+    });
+
+    const result = await provider.candidates(context('@', ''));
+
+    expect(result.candidates[0]).toMatchObject({
+      label: 'app.ts',
+      replacement: '@app.ts',
+      append: 'space',
+      disabled: false,
+    });
+    expect(result.candidates.slice(1)).toMatchObject([
+      {
+        label: 'report 2026.md',
+        replacement: '@report 2026.md',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+      {
+        label: 'a:12',
+        replacement: '@a:12',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+    ]);
+  });
+
+  it('bounds enormous path queries before parsing, caching, or fetching', async () => {
+    let requests = 0;
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => {
+        requests += 1;
+        return json({ entries: [] });
+      },
+    });
+
+    const result = await provider.candidates(context('@', 'a'.repeat(4_097)));
+
+    expect(requests).toBe(0);
+    expect(result).toEqual({
+      candidates: [],
+      filterQuery: '',
+      contextLabel: '@ file path',
+      notice: 'File reference queries are limited to 4,096 characters; shorten the path before searching.',
+    });
+  });
 });
 
 describe('composer reference families', () => {

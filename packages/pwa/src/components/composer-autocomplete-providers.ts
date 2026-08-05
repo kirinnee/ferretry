@@ -17,7 +17,7 @@ import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.t
 import { daemonRequest } from '../lib/daemon-transport.ts';
 import { pinReferenceMarkdown } from '../lib/pin-links.ts';
 import { resolvedPinReference } from '../lib/pin-reference-context.ts';
-import { formatReference } from '../lib/references.ts';
+import { formatReference, parseReferenceToken } from '../lib/references.ts';
 import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
@@ -384,6 +384,12 @@ export interface ComposerFileReferenceQuery {
 const EMPTY_FILE_SELECTOR: ComposerFileSelector = { suffix: '', complete: true, valid: true };
 const COLON_FILE_SELECTOR = /^(.*?):([0-9]*)(?:(:)([0-9]*)|(-)([0-9]*))?$/u;
 const HASH_FILE_SELECTOR = /^(.*?)#L([0-9]*)(?:-L?([0-9]*))?$/iu;
+const MAX_FILE_REFERENCE_QUERY_LENGTH = 4_096;
+const UNREPRESENTABLE_FILE_REFERENCE_REASON =
+  'cannot be inserted as @file — this path has no unambiguous reference token';
+const FILE_REFERENCE_QUERY_TOO_LONG_NOTICE =
+  'File reference queries are limited to 4,096 characters; shorten the path before searching.';
+const DIRECTORY_REFERENCE_PROBE = 'ferretry-reference-probe';
 
 const selectorNumber = (value: string): number | null => {
   if (!/^[1-9][0-9]*$/u.test(value)) return null;
@@ -420,6 +426,24 @@ export function splitFileReferenceQuery(query: string): ComposerFileReferenceQue
   };
 }
 
+/** Prove that authored bytes preserve the exact filesystem path and selector. */
+const isCanonicalFileToken = (token: string, path: string): boolean => {
+  const reference = parseReferenceToken(token);
+  return reference?.kind === 'file' && reference.path === path && formatReference(reference) === token;
+};
+
+const hasUnambiguousFileToken = (path: string, selector: ComposerFileSelector): boolean =>
+  // An incomplete selector is intentional composer state. Prove its base path;
+  // once complete, prove the exact location suffix too.
+  isCanonicalFileToken(`@${path}${selector.complete ? selector.suffix : ''}`, path);
+
+const hasUnambiguousDirectoryToken = (path: string): boolean => {
+  // A directory replacement deliberately ends in `/`, which is not a complete
+  // reference. Probe a valid child token without claiming that child exists.
+  const probePath = `${path}/${DIRECTORY_REFERENCE_PROBE}`;
+  return isCanonicalFileToken(`@${probePath}`, probePath);
+};
+
 export function createFilesProvider({
   daemon,
   scope,
@@ -436,6 +460,13 @@ export function createFilesProvider({
     reset: () => cache.clear(),
     async candidates({ query, signal }): Promise<ComposerProviderResult> {
       if (signal.aborted) throw abortReason(signal);
+      if (query.length > MAX_FILE_REFERENCE_QUERY_LENGTH)
+        return {
+          candidates: [],
+          filterQuery: '',
+          contextLabel: '@ file path',
+          notice: FILE_REFERENCE_QUERY_TOO_LONG_NOTICE,
+        };
       const { directory, leaf, selector } = splitFileReferenceQuery(query);
       const key = scopedCacheKey(scope, directory);
       let listing = cache.get(key);
@@ -453,7 +484,12 @@ export function createFilesProvider({
           : directoryEntry && selector.suffix
             ? 'line selection applies to files, not folders'
             : undefined;
-        const disabledReason = refusal ?? selectorRefusal;
+        const referenceRefusal = (
+          directoryEntry ? hasUnambiguousDirectoryToken(path) : hasUnambiguousFileToken(path, selector)
+        )
+          ? undefined
+          : UNREPRESENTABLE_FILE_REFERENCE_REASON;
+        const disabledReason = refusal ?? selectorRefusal ?? referenceRefusal;
         return {
           id: scopedId(directoryEntry ? 'directory' : 'file', scope, `${path}${directoryEntry ? '' : selector.suffix}`),
           kind: directoryEntry ? 'directory' : 'file',
