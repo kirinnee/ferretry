@@ -39,10 +39,9 @@ scope="src/lib/"
 [[ ${mode} == "int" ]] && scope="src/adapters/"
 mapfile -t scope_dirs < <(find packages -mindepth 3 -maxdepth 3 -type d -path "packages/*/${scope%/}" | sort)
 if [[ ${mode} == "unit" ]]; then
-  # The PWA is browser glue, so its hooks, shell chrome and AudioWorklets
-  # deliberately live outside the domain-tier src/lib directory. They are
-  # production code just as much as lib modules are, and must remain in the
-  # 100% unit ledger.
+  # The PWA is browser glue, so its hooks and shell chrome deliberately live
+  # outside the domain-tier src/lib directory. They are production code just
+  # as much as lib modules are, and must remain in the 100% unit ledger.
   #
   # Feature screens use mounted React tests, so they belong in the same 100%
   # ledger as browser glue rather than being a source-text-tested exception.
@@ -50,7 +49,7 @@ if [[ ${mode} == "unit" ]]; then
   # src/features (the surfaces ported from kteam) is in it for the same reason:
   # every module under it is proved by an executed render or projection test, so
   # new feature code cannot ship untested behind a green build.
-  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name features -o -name hooks -o -name worklets -o -name shell \) | sort)
+  mapfile -t pwa_dirs < <(find packages/pwa/src -mindepth 1 -maxdepth 1 -type d \( -name components -o -name features -o -name hooks -o -name shell \) | sort)
   scope_dirs+=("${pwa_dirs[@]}")
   # The composition root is a package-root FILE, so no directory glob reaches
   # it, yet it is the most consequential production module in the package: it
@@ -91,7 +90,7 @@ awk -v scope="${scope}" -v mode="${mode}" '
     gsub(/\\\\/, "/", path)
     files++
     allowed = path ~ "(^|/)" scope
-    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|features|hooks|worklets|shell)/") allowed = 1
+    if (mode == "unit" && path ~ "(^|/)packages/pwa/src/(components|features|hooks|shell)/") allowed = 1
     if (mode == "unit" && path ~ "(^|/)packages/pwa/src/App\\.tsx$") allowed = 1
     if (!allowed) {
       printf "❌ coverage path outside %s: %s\n", scope, path > "/dev/stderr"
