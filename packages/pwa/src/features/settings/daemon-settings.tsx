@@ -7,6 +7,7 @@
  * already live.
  */
 
+import type { ConnectionChoice } from '@ferretry/relay';
 import { Check, ChevronDown, LoaderCircle, Plus, RefreshCw, Server, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 
@@ -23,6 +24,21 @@ export interface DaemonSettingsProps {
   readonly activeDaemonId: DaemonId;
   readonly connections: readonly DaemonConnectionRecord[];
   readonly probeDaemon: DaemonReachabilityProbe;
+  /**
+   * WHAT THE CARRIER ROUTER LAST MEASURED FOR THE ACTIVE DAEMON.
+   *
+   * Supplied so the two things on this screen that answer "can this browser reach that
+   * daemon" cannot answer it differently. They have: a green `Reachable` pill sat
+   * beside a Carrier panel reading `No configured connection worked`, and both were
+   * being honest — the probe took the typed client's own direct transport and the
+   * carrier took the router. One path fixed the mechanism; this fixes the freshness.
+   *
+   * A refusal here OUTRANKS a probe that answered, because a carrier decision is made
+   * by a real request and this badge is a poll that may be most of a minute old. It
+   * only ever makes the badge worse, never better: a carrier that has not measured
+   * anything yet is `undefined`, and an absence is not evidence of health.
+   */
+  readonly activeCarrier?: ConnectionChoice | undefined;
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
   readonly onRemoveDaemon: (daemonId: DaemonId) => void;
@@ -83,46 +99,55 @@ function useDaemonReachability(connection: DaemonConnection, probe: DaemonReacha
     : { value: 'checking' as const, refreshing: true, refresh: () => refresh.current() };
 }
 
+/**
+ * The badge cannot be greener than the carrier.
+ *
+ * A poll and a live measurement disagreeing is not a tie to be broken by whichever
+ * rendered last. `chooseConnection` said `ok: false` because a real request tried
+ * every carrier this daemon has and none of them carried it, which is strictly more
+ * evidence than a health response from up to thirty seconds ago. So a carrier
+ * refusal demotes the badge, and nothing here can ever promote it: `undefined` — the
+ * state before anything has been carried — leaves the probe's answer alone, because
+ * an absence of measurement is not a measurement of health.
+ */
+const withCarrierEvidence = (probed: Reachability, carrier: ConnectionChoice | undefined): Reachability =>
+  carrier?.ok === false ? 'unreachable' : probed;
+
 function ReachabilityBadge({
   connection,
   name,
   probe,
+  carrier,
 }: {
   connection: DaemonConnection;
   name: string;
   probe: DaemonReachabilityProbe;
+  carrier?: ConnectionChoice | undefined;
 }) {
   const reachability = useDaemonReachability(connection, probe);
-  const label =
-    reachability.value === 'reachable'
-      ? 'Reachable'
-      : reachability.value === 'unreachable'
-        ? 'Unreachable'
-        : 'Checking';
-  const Icon =
-    reachability.value === 'reachable' ? Wifi : reachability.value === 'unreachable' ? WifiOff : LoaderCircle;
+  const value = withCarrierEvidence(reachability.value, carrier);
+  const label = value === 'reachable' ? 'Reachable' : value === 'unreachable' ? 'Unreachable' : 'Checking';
+  const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span
         role="status"
-        data-daemon-reachability={reachability.value}
+        data-daemon-reachability={value}
         className={cn(
           'inline-flex min-h-[28px] items-center gap-1.5 rounded-full border px-2 text-meta font-semibold',
-          reachability.value === 'reachable' && 'border-ok-border bg-ok-bg text-ok',
-          reachability.value === 'unreachable' && 'border-err-border bg-err-bg text-err',
-          reachability.value === 'checking' && 'border-warn-border bg-warn-bg text-warn',
+          value === 'reachable' && 'border-ok-border bg-ok-bg text-ok',
+          value === 'unreachable' && 'border-err-border bg-err-bg text-err',
+          value === 'checking' && 'border-warn-border bg-warn-bg text-warn',
         )}
       >
         <Icon
           size={13}
           aria-hidden="true"
-          className={reachability.value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
+          className={value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
         />
         {label}
-        {reachability.refreshing && reachability.value !== 'checking' ? (
-          <span className="sr-only">, checking again</span>
-        ) : null}
+        {reachability.refreshing && value !== 'checking' ? <span className="sr-only">, checking again</span> : null}
       </span>
       <button
         type="button"
@@ -235,6 +260,7 @@ function DaemonRow({
   connection,
   active,
   probeDaemon,
+  carrier,
   onSelect,
   onRename,
   onRemove,
@@ -242,6 +268,7 @@ function DaemonRow({
   readonly connection: DaemonConnectionRecord;
   readonly active: boolean;
   readonly probeDaemon: DaemonReachabilityProbe;
+  readonly carrier?: ConnectionChoice | undefined;
   readonly onSelect: () => void;
   readonly onRename: (label?: string) => void;
   readonly onRemove: () => void;
@@ -278,7 +305,7 @@ function DaemonRow({
           </span>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <ReachabilityBadge connection={connection} name={name} probe={probeDaemon} />
+          <ReachabilityBadge connection={connection} name={name} probe={probeDaemon} carrier={carrier} />
           {!active ? (
             <button type="button" className="kt-btn min-h-[44px]" onClick={onSelect} aria-label={`Use ${name}`}>
               Use this daemon
@@ -297,6 +324,7 @@ export function DaemonSettings({
   activeDaemonId,
   connections,
   probeDaemon,
+  activeCarrier,
   onSelectDaemon,
   onRenameDaemon,
   onRemoveDaemon,
@@ -309,9 +337,13 @@ export function DaemonSettings({
           <h3 id="settings-daemon-list-heading" className="m-0 text-title font-semibold text-fg">
             Connected daemons
           </h3>
+          {/* The old sentence claimed the probe went "directly" to the daemon. It did,
+              which was the bug: everything else went through the carrier, so this badge
+              could sit green while nothing worked. It now asks the same question the
+              same way, and the sentence says which question that is. */}
           <p className="mb-0 mt-1 text-ui leading-base text-muted">
-            Each pairing keeps its own sessions, files, and live state. Reachability is checked directly against that
-            daemon.
+            Each pairing keeps its own sessions, files, and live state. Reachability is one health request over whatever
+            carrier that daemon is on, rechecked every 30 seconds — Carrier, below, names the one that answered and why.
           </p>
         </div>
         <button type="button" className="kt-btn min-h-[44px] shrink-0" onClick={onAddDaemon} data-add-daemon="">
@@ -327,6 +359,9 @@ export function DaemonSettings({
             connection={connection}
             active={connection.daemonId === activeDaemonId}
             probeDaemon={probeDaemon}
+            // Only the active daemon has a measured carrier on this screen, and a row with
+            // no measurement is left to its probe rather than given somebody else's answer.
+            carrier={connection.daemonId === activeDaemonId ? activeCarrier : undefined}
             onSelect={() => onSelectDaemon(connection.daemonId)}
             onRename={nextLabel => onRenameDaemon(connection.daemonId, nextLabel)}
             onRemove={() => onRemoveDaemon(connection.daemonId)}

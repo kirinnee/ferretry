@@ -1,3 +1,4 @@
+import type { ConnectionChoice } from '@ferretry/relay';
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
@@ -48,6 +49,7 @@ interface PageOptions {
   readonly connections?: readonly DaemonConnectionRecord[];
   readonly controls?: DaemonControlsStore;
   readonly probe?: DaemonReachabilityProbe;
+  readonly carrier?: ConnectionChoice;
   readonly calls?: Callbacks;
 }
 
@@ -67,6 +69,7 @@ const page = (options: PageOptions = {}) => {
         fetchImpl: offlineFetch,
       }}
       probeDaemon={options.probe ?? pendingProbe}
+      {...(options.carrier === undefined ? {} : { carrier: options.carrier })}
       createWardenClient={unavailableWardenClient}
       onSelectDaemon={id => callbacks.selected.push(id)}
       onRenameDaemon={(id, label) => callbacks.renamed.push({ id, label })}
@@ -412,6 +415,59 @@ describe('daemon settings', () => {
     // daemon health, not network reachability.
     expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
     expect(reachability(view.container, 'daemon-beta')).toBe('unreachable');
+    await view.unmount();
+  });
+
+  /**
+   * The screenshot that started this: a green `Reachable` pill beside a Carrier
+   * panel saying no configured connection worked. Both were reporting honestly,
+   * which is what made it so bad — the probe took the typed client's own direct
+   * transport and the carrier took the router, so the two things on one screen that
+   * answer "can this browser reach that daemon" answered it over different code.
+   *
+   * The mechanism is fixed in the composition root. This is the freshness half: a
+   * live carrier refusal outranks a poll that may be most of a minute old.
+   */
+  it('never shows a daemon as reachable while its carrier says nothing worked', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const health = deferred<unknown>();
+    const view = await mount(page({ connections: [alpha, beta], probe: () => health.promise }));
+
+    health.resolve({});
+    await settle();
+    expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
+
+    const refused: ConnectionChoice = {
+      ok: false,
+      reason: 'No configured connection worked: direct was not reachable (Failed to fetch).',
+      passedOver: [{ method: { kind: 'direct', daemonUrl: 'https://alpha.example.test' }, detail: 'Failed to fetch' }],
+    };
+    await view.render(page({ connections: [alpha, beta], probe: () => health.promise, carrier: refused }));
+
+    expect(reachability(view.container, 'daemon-alpha')).toBe('unreachable');
+    // Only the active daemon has a measured carrier here. A row with no measurement
+    // keeps its own probe's answer rather than borrowing somebody else's.
+    expect(reachability(view.container, 'daemon-beta')).toBe('reachable');
+    await view.unmount();
+  });
+
+  it('lets a carrier that has carried something leave the probe alone', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const health = deferred<unknown>();
+    const carried: ConnectionChoice = {
+      ok: true,
+      method: { kind: 'direct', daemonUrl: 'https://alpha.example.test' },
+      reason: 'Connected over direct.',
+      passedOver: [],
+    };
+    const view = await mount(page({ connections: [alpha], probe: () => health.promise, carrier: carried }));
+
+    // A carrier that worked is not permission to skip the probe: this badge is about
+    // the daemon answering, and it says `checking` until one does.
+    expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
+    health.resolve({});
+    await settle();
+    expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
     await view.unmount();
   });
 

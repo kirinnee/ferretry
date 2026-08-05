@@ -17,7 +17,7 @@ import {
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
-import { daemonApiClient } from './api-client.ts';
+import { daemonApiClient, DaemonHttpTransport } from './api-client.ts';
 import {
   type DaemonConnectionRepository,
   DaemonConnectionStore,
@@ -257,7 +257,25 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
   });
   const carried = carrier.fetch;
-  const clients = new DaemonApiPool(options.connectClient);
+  /**
+   * THE TYPED CLIENT TRAVELS THE CARRIER TOO, and it did not used to.
+   *
+   * `daemonApiClient`'s default transport dials the daemon's own address directly,
+   * so everything built on the typed client — the fleet list, a session read, and the
+   * Settings REACHABILITY PROBE — took a path the carrier router knew nothing about.
+   * The result was a screen showing a green "Reachable" pill beside a Carrier panel
+   * saying no connection worked, and both were reporting honestly: they were asking
+   * different questions over different code.
+   *
+   * Two answers to "can this browser reach that daemon" is one answer too many. There
+   * is now one path, so a probe cannot pass on a carrier the product cannot use, and
+   * a daemon that is only reachable through the relay is reported reachable rather
+   * than reported down by a probe that never tried the relay.
+   */
+  const clients = new DaemonApiPool(
+    options.connectClient ??
+      (async daemon => await daemonApiClient(daemon, { transport: new DaemonHttpTransport(daemon, carried) })),
+  );
   const fleetPort: DaemonFleetPort = {
     list: async daemon => await (await clients.client(daemon)).list(),
     get: async (daemon, sessionId) => await (await clients.client(daemon)).get(sessionId),

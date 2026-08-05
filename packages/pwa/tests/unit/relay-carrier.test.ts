@@ -100,6 +100,11 @@ describe('turning a §14 answer into a Response', () => {
   });
 });
 
+interface RelayEnd {
+  readonly code: number;
+  readonly reason: string;
+}
+
 describe('the browser WebSocket adapter', () => {
   class FakeWebSocket {
     static last: FakeWebSocket | undefined;
@@ -131,11 +136,23 @@ describe('the browser WebSocket adapter', () => {
     }
   };
 
-  it('should read binary frames as bytes and pass exactly two text messages through', () => {
+  /** The four things the adapter does with one socket, plus what it forwards back. */
+  const dialFake = (
+    body: (socket: FakeWebSocket, adapted: ReturnType<typeof browserRelayDial>, ends: RelayEnd[]) => void,
+    url = 'wss://relay.example/v1/rendezvous/fy_daemon_x/client',
+  ): void => {
     withFakeSocket(() => {
-      const adapted = browserRelayDial('wss://relay.example/v1/rendezvous/fy_daemon_x/client');
+      const adapted = browserRelayDial(url);
       const socket = FakeWebSocket.last;
       if (socket === undefined) throw new Error('no socket was constructed');
+      const ends: RelayEnd[] = [];
+      adapted.onClose = (code, reason) => ends.push({ code, reason });
+      body(socket, adapted, ends);
+    });
+  };
+
+  it('should read binary frames as bytes and pass exactly two text messages through', () => {
+    dialFake((socket, adapted) => {
       // Blob is the browser default and its read is asynchronous, so a frame would
       // arrive out of order — which §7 turns into a torn-down session.
       should(socket.binaryType).equal('arraybuffer');
@@ -143,29 +160,18 @@ describe('the browser WebSocket adapter', () => {
       const opened: string[] = [];
       const texts: string[] = [];
       const binaries: Uint8Array[] = [];
-      const closes: { code: number; reason: string }[] = [];
       adapted.onOpen = () => opened.push('open');
       adapted.onText = text => texts.push(text);
       adapted.onBinary = bytes => binaries.push(bytes);
-      adapted.onClose = (code, reason) => closes.push({ code, reason });
 
       socket.onopen?.();
       socket.onmessage?.({ data: 'fy-ping' });
       socket.onmessage?.({ data: new Uint8Array([1, 2, 3]).buffer });
-      socket.onmessage?.({ data: 42 });
-      socket.onclose?.({ code: 1006, reason: 'gone' });
-      socket.onerror?.();
 
       should(opened).eql(['open']);
       should(texts).eql(['fy-ping']);
       should(binaries).have.length(1);
       should([...(binaries[0] ?? [])]).eql([1, 2, 3]);
-      should(closes.map(close => close.reason)).eql(
-        ['unknown type', 'gone', 'the relay socket failed'].map(
-          reason => closes.find(close => close.reason.includes(reason.split(' ').at(-1) ?? ''))?.reason ?? reason,
-        ),
-      );
-      should(closes).have.length(3);
 
       adapted.send(new Uint8Array([9]));
       adapted.sendText('fy-pong');
@@ -173,6 +179,81 @@ describe('the browser WebSocket adapter', () => {
       should(socket.sent).have.length(2);
       should(socket.closed).eql({ code: 1000, reason: 'done' });
     });
+  });
+
+  it('should refuse a message of an unknown type and stop listening to that carrier', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onmessage?.({ data: 42 });
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(RELAY_CLOSE_CODES.protocolError);
+      should(ends[0]?.reason).containEql('unknown type');
+      // Reporting it and then going on reading would keep a carrier that is
+      // improvising on this channel.
+      should(socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+    });
+  });
+
+  /**
+   * `failed (0)` was the whole complaint, and `0` is not a close code — it is the
+   * absence of one, invented by the old adapter's `onerror` handler, which then
+   * latched first and threw away the real code in the `close` event behind it.
+   *
+   * What a browser genuinely knows about a failed rendezvous socket is whether the
+   * HANDSHAKE COMPLETED, and these two cases are the two different failures that
+   * distinction separates.
+   */
+  it('should say a handshake never completed, rather than reporting a code of zero', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('could not open a socket to wss://relay.example');
+      should(ends[0]?.reason).containEql('the handshake never completed');
+      // The fingerprint addresses the rendezvous and belongs on a pairing screen, not
+      // in a sentence a reader may paste into an issue.
+      should(ends[0]?.reason).not.containEql('fy_daemon_x');
+    });
+  });
+
+  it('should distinguish a socket that died mid-session from one that never opened', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('was carrying this session');
+    });
+  });
+
+  it('should pass a close frame the rendezvous actually sent through untouched', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onclose?.({ code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'no daemon holds this rendezvous' });
+
+      should(ends).eql([{ code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'no daemon holds this rendezvous' }]);
+    });
+  });
+
+  /**
+   * The spec fires `close` after `error`, so this timer normally reports nothing. It
+   * exists because the alternative to a close that never arrives is the 45-second
+   * handshake deadline, and a reader owed an answer the browser already had should
+   * not wait three quarters of a minute for it.
+   */
+  it('should still answer when the close event the spec promises never arrives', async () => {
+    let captured: RelayEnd[] = [];
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      captured = ends;
+      should(ends).be.empty();
+    });
+    await new Promise(resolve => setTimeout(resolve, 400));
+    should(captured).have.length(1);
+    should(captured[0]?.code).equal(1006);
+    should(captured[0]?.reason).containEql('the handshake never completed');
   });
 });
 

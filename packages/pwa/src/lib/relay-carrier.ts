@@ -81,15 +81,84 @@ const browserHeartbeat: RelayHeartbeatSchedule = (tick, interval) => {
 };
 
 /**
+ * The code a browser uses for a socket that ended without a close frame.
+ *
+ * Named rather than written as a literal because this module must never report `0`:
+ * `0` is not a WebSocket close code, it is the absence of one, and a surface that
+ * printed `failed (0)` told its reader nothing they could act on. `1006` is the real
+ * answer to "how did this end" — abnormally, with no frame — and it is the code the
+ * browser itself supplies.
+ */
+const ABNORMAL_CLOSURE = 1006;
+
+/**
+ * How long to wait for the close event the spec says always follows an error.
+ *
+ * "Fail the WebSocket connection" fires `error` and then `close`, so this timer
+ * normally never reports anything — the close arrives first and the latch discards
+ * it. It exists because the alternative to an unfired close is the 45-second
+ * handshake deadline in `openRelaySession`, and a reader staring at a spinner for
+ * three quarters of a minute over a failure the browser already knew about is the
+ * "absent evidence presented as a pending result" shape this package keeps paying
+ * for.
+ */
+const CLOSE_EVENT_GRACE_MS = 250;
+
+/**
+ * WHY A RENDEZVOUS SOCKET DID NOT WORK, SAID IN TERMS A READER CAN ACT ON.
+ *
+ * The browser withholds the cause of a WebSocket failure on purpose — a page that
+ * could tell a refused TLS handshake from a 404 could port-scan the reader's
+ * network. But it does not withhold everything, and the two facts it does give are
+ * the two that matter: WHETHER THE HANDSHAKE EVER COMPLETED, and the close code.
+ *
+ * A socket that never opened did not reach this protocol at all: no frame was sent,
+ * no rendezvous logic ran, and the failure is DNS, TLS, routing, or an upgrade the
+ * far end answered with an ordinary HTTP response. `packages/relay`'s own worker is
+ * built around that asymmetry — it ACCEPTS an upgrade it intends to refuse so it can
+ * state a reason in a close frame — which means a socket that failed before opening
+ * is, specifically, one that did not reach a conforming rendezvous.
+ *
+ * A socket that opened and then died without a close frame is the opposite: it was
+ * carrying a session, and something on the path took it away.
+ *
+ * The rendezvous ORIGIN is named; the path is not. The path carries the daemon
+ * fingerprint, and a fingerprint belongs on a pairing screen rather than in an error
+ * a reader may paste into an issue.
+ */
+const socketFailureReason = (url: string, opened: boolean): string => {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    origin = 'the configured rendezvous';
+  }
+  return opened
+    ? `the relay socket to ${origin} was carrying this session and ended without a close frame`
+    : `the browser could not open a socket to ${origin}: the handshake never completed, so nothing reached the relay ` +
+        'protocol. The address may not resolve, may refuse TLS, may be blocked on this network, or may not be a ' +
+        'rendezvous serving this daemon — a relay that does not carry a fingerprint answers the upgrade with a plain 404';
+};
+
+/**
  * A browser WebSocket, adapted.
  *
  * `binaryType = 'arraybuffer'` is load-bearing: the default in browsers is `Blob`,
  * whose read is asynchronous, and a frame read out of order is a torn-down session
  * under §7's sequence rule rather than a latency problem.
+ *
+ * A SESSION ENDS EXACTLY ONCE. `error` and `close` both fire for a failed
+ * connection, and the old adapter reported each of them separately — so the first
+ * report was `error`'s invented `(0)` and the real code in the close event that
+ * followed was thrown away. The latch here means the informative event wins:
+ * `error` never reports a code of its own, it only starts the grace period in case
+ * no close arrives.
  */
 export const browserRelayDial: RelayDial = url => {
   const socket = new WebSocket(url);
   socket.binaryType = 'arraybuffer';
+  let opened = false;
+  let ended = false;
   const adapted: RelayCarrierSocket = {
     onOpen: null,
     onText: null,
@@ -102,12 +171,26 @@ export const browserRelayDial: RelayDial = url => {
     sendText: text => socket.send(text),
     close: (code, reason) => socket.close(code, reason),
   };
-  socket.onopen = () => adapted.onOpen?.();
-  socket.onclose = event => adapted.onClose?.(event.code, event.reason);
-  // A socket error is never followed by more traffic, and the browser deliberately
-  // withholds the cause. Reporting it as a close with no code is the honest shape:
-  // the session ends and says the carrier failed, rather than waiting forever.
-  socket.onerror = () => adapted.onClose?.(0, 'the relay socket failed');
+  const end = (code: number, reason: string): void => {
+    if (ended) return;
+    ended = true;
+    adapted.onClose?.(code, reason);
+  };
+  socket.onopen = () => {
+    opened = true;
+    adapted.onOpen?.();
+  };
+  socket.onclose = event => {
+    // A close frame the far end actually sent is the best answer there is, so it is
+    // passed through untouched. Everything else is described rather than numbered at.
+    const abnormal = event.code === ABNORMAL_CLOSURE || event.code === 0;
+    end(abnormal ? ABNORMAL_CLOSURE : event.code, abnormal ? socketFailureReason(url, opened) : event.reason);
+  };
+  socket.onerror = () => {
+    // Deliberately no report: the close event that follows carries the code, and a
+    // report here would be the uninformative half of the pair winning the race.
+    setTimeout(() => end(ABNORMAL_CLOSURE, socketFailureReason(url, opened)), CLOSE_EVENT_GRACE_MS);
+  };
   socket.onmessage = event => {
     const data: unknown = event.data;
     if (typeof data === 'string') {
@@ -119,8 +202,11 @@ export const browserRelayDial: RelayDial = url => {
       return;
     }
     // Neither text nor a binary frame is not a message this protocol defines, and
-    // guessing at it would mean feeding the session something it did not send.
-    adapted.onClose?.(0, 'the relay socket delivered a message of an unknown type');
+    // guessing at it would mean feeding the session something it did not send. The
+    // socket is closed as well as reported: a carrier improvising on this channel is
+    // not one to keep listening to.
+    socket.close(RELAY_CLOSE_CODES.protocolError, 'unknown message type');
+    end(RELAY_CLOSE_CODES.protocolError, 'the relay socket delivered a message of an unknown type');
   };
   return adapted;
 };

@@ -353,6 +353,38 @@ describe('StoreProvider', () => {
     for (const receiver of receivers) expect(receiver).toBe(globalThis);
   });
 
+  /**
+   * TWO ANSWERS TO ONE QUESTION IS ONE ANSWER TOO MANY.
+   *
+   * The typed client used to build its own transport, which dialled the daemon's own
+   * address directly and knew nothing about the carrier router. So Settings could
+   * show a green "Reachable" pill — a typed-client health request — beside a Carrier
+   * panel saying no connection worked, and both were telling the truth about
+   * different code. The probe also could not see a daemon that was only reachable
+   * through the relay, and reported it down.
+   *
+   * There is one path now, so the request the typed client makes is a request the
+   * carrier router carried.
+   */
+  it('sends the typed client over the carrier rather than its own direct transport', async () => {
+    const requests: string[] = [];
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      fetcher: async input => {
+        requests.push(String(input));
+        return Response.json([]);
+      },
+    });
+    store.connections.add(alpha);
+
+    await (await store.clients.client(alpha)).list();
+
+    expect(requests).toEqual(['https://alpha.example.test/v1/sessions']);
+    // And the router recorded it as a measurement, which is the whole point: the
+    // probe and the Carrier panel are now reading one answer.
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
+  });
+
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
     const store = await memoryStore();
     const view = await mount(
