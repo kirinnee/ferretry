@@ -31,6 +31,7 @@ import { OnboardingProgressStore, resetOnboardingProgress } from './features/onb
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
+import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
@@ -71,7 +72,6 @@ import {
   setupPath,
 } from './lib/pages/routes.ts';
 import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
-import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
@@ -585,6 +585,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       {session !== undefined && client !== null ? (
         <SessionChatPage
           chatWidth={controls.chatWidth}
+          composerEnterKey={controls.composerEnterKey}
           client={client}
           connection={connection}
           // Only THIS daemon's slice, and only once it has actually been read:
@@ -637,6 +638,10 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     },
     [store.clients],
   );
+  const readWardenStatus = useCallback(
+    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
+    [store.clients],
+  );
   return (
     <SettingsPage
       daemonId={connection.daemonId}
@@ -644,6 +649,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       controls={store.controls}
       dictation={{ daemon: connection, ...dictation }}
       probeDaemon={probeDaemon}
+      readWardenStatus={readWardenStatus}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);
         navigate(`${daemonSettingsPath(daemonId)}#daemons`);

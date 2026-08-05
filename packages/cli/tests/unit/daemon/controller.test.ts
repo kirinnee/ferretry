@@ -12,9 +12,11 @@ import { UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervis
 import {
   absentReport,
   CapturedOutput,
+  daemonSnapshot,
   FakeHealth,
   FakeLogs,
   FakeNixGcRoot,
+  FakeSnapshots,
   FakeSupervisor,
   failedReport,
   health,
@@ -30,6 +32,7 @@ interface Harness {
   readonly service: FakeSupervisor;
   readonly direct: FakeSupervisor;
   readonly logs: FakeLogs;
+  readonly snapshots: FakeSnapshots;
   readonly clock: SteppingClock;
   readonly nix: FakeNixGcRoot;
 }
@@ -43,6 +46,7 @@ function harness(options: {
   directFallback?: DaemonSupervisorReport;
   withoutService?: boolean;
   logs?: FakeLogs;
+  snapshots?: FakeSnapshots;
   step?: number;
   nix?: FakeNixGcRoot;
   overrides?: Partial<DaemonControllerDeps>;
@@ -55,6 +59,7 @@ function harness(options: {
   direct.reports = options.directReports ?? [];
   const out = new CapturedOutput();
   const logs = options.logs ?? new FakeLogs();
+  const snapshots = options.snapshots ?? new FakeSnapshots();
   const clock = new SteppingClock(options.step ?? 100);
   const nix = options.nix ?? new FakeNixGcRoot();
   const controller = new DaemonController({
@@ -64,13 +69,14 @@ function harness(options: {
     health: new FakeHealth(options.probes ?? [health()]),
     logs,
     nix,
+    snapshots,
     clock,
     out,
     readiness: { deadlineMs: 1_000, cadenceMs: 10, progressAfterMs: 300 },
     shutdown: { deadlineMs: 1_000, cadenceMs: 10, escalateAfterMs: 300 },
     ...options.overrides,
   });
-  return { controller, out, service, direct, logs, clock, nix };
+  return { controller, out, service, direct, logs, snapshots, clock, nix };
 }
 
 describe('daemon install', () => {
@@ -83,6 +89,7 @@ describe('daemon install', () => {
 
     // Assert
     should(service.calls).containEql('install');
+    should(service.installedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).containEql('fyd user service installed from');
     should(out.text).containEql('and started (pid 4242)');
   });
@@ -145,14 +152,49 @@ describe('daemon start', () => {
 
   it('should start through the installed service manager and wait until it serves', async () => {
     // Arrange
-    const { controller, out, service } = harness({ probes: [undefined, undefined, health()] });
+    const { controller, out, service } = harness({
+      probes: [undefined, undefined, health()],
+      serviceReports: [stoppedReport],
+    });
 
     // Act
     await controller.start();
 
     // Assert
     should(service.calls).containEql('start');
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).equal('ok: fyd ready (pid 4242)');
+  });
+
+  it('should leave a supervised incumbent alone while its API is temporarily unavailable', async () => {
+    // Arrange
+    const { controller, out, service, snapshots, nix } = harness({
+      probes: [undefined, health()],
+      serviceFallback: runningReport,
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert — wait for the incumbent rather than rewriting its unit and sole GC root underneath it.
+    // Such a rewrite could leave snapshot A running while only snapshot B's closure is protected.
+    should(out.text).equal('ok: fyd ready (pid 4242)');
+    should(service.calls).not.containEql('start');
+    should(snapshots.calls).be.empty();
+    should(nix.realPaths).be.empty();
+  });
+
+  it('should report when a supervised incumbent exits before its API becomes ready', async () => {
+    // Arrange
+    const { controller, clock } = harness({
+      probes: [undefined],
+      serviceReports: [runningReport, failedReport],
+      serviceFallback: failedReport,
+    });
+
+    // Act + Assert
+    await should(controller.start()).be.rejectedWith(/exited during startup/u);
+    should(clock.slept).be.empty();
   });
 
   it('should fall back to a direct launch when no service definition is installed', async () => {
@@ -167,6 +209,7 @@ describe('daemon start', () => {
 
     // Assert
     should(direct.calls).containEql('start');
+    should(direct.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(service.calls).not.containEql('start');
   });
 
@@ -174,6 +217,7 @@ describe('daemon start', () => {
     // Arrange — the clock advances 100ms per read, so the 300ms threshold arrives mid-wait.
     const { controller, out } = harness({
       probes: [undefined, undefined, undefined, undefined, health()],
+      serviceReports: [stoppedReport],
       serviceFallback: runningReport,
     });
 
@@ -294,6 +338,7 @@ describe('daemon restart', () => {
 
     // Assert
     should(service.calls.indexOf('stop')).be.below(service.calls.indexOf('start'));
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.text).endWith('ok: fyd restarted (pid 4242)');
   });
 
@@ -309,6 +354,7 @@ describe('daemon restart', () => {
 
     // Assert
     should(service.stops).be.empty();
+    should(service.startedExecutables).deepEqual([daemonSnapshot().binaryPath]);
     should(out.lines[0]).equal('warn: fyd was not running; starting it');
     should(out.text).containEql('ok: fyd restarted (pid 4242)');
   });
@@ -450,14 +496,22 @@ describe('nix garbage-collection root', () => {
 
   /** A harness whose daemon executable resolves into the Nix store, as `nix shell` leaves it. */
   function fromTheStore(options: Parameters<typeof harness>[0] = {}): ReturnType<typeof harness> {
+    const snapshots = options.snapshots ?? new FakeSnapshots();
+    const snapshot = daemonSnapshot({ sourceBinary: STORE_BINARY });
+    snapshots.currentAnswer = snapshot;
+    snapshots.buildAnswer = { ...snapshot, created: true };
+    snapshots.listAnswer = [snapshot];
     const nix = new FakeNixGcRoot();
-    nix.links.set(layout().daemonBinary, STORE_BINARY);
-    return harness({ ...options, nix });
+    nix.links.set(STORE_BINARY, STORE_BINARY);
+    return harness({ ...options, nix, snapshots });
   }
 
   it.each([
     { verb: 'install' as const, options: { serviceInstalled: false } },
-    { verb: 'start' as const, options: { probes: [undefined, health()] } },
+    {
+      verb: 'start' as const,
+      options: { probes: [undefined, health()], serviceReports: [stoppedReport] as DaemonSupervisorReport[] },
+    },
     {
       verb: 'restart' as const,
       options: {
@@ -474,7 +528,9 @@ describe('nix garbage-collection root', () => {
     await subject.controller[verb]();
 
     // Assert — the ROOT of the store output, not the executable inside it: `nix-store --realise`
-    // takes a store path, and rooting the output is what keeps the whole install alive.
+    // takes a store path. The copied current binary is outside the store, so its verified manifest
+    // source — not the runtime symlink or today's configured build input — must drive classification.
+    should(subject.nix.realPaths).deepEqual([STORE_BINARY]);
     should(subject.nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
     should(subject.out.text).not.containEql('could not be pinned');
   });
@@ -483,7 +539,7 @@ describe('nix garbage-collection root', () => {
     // Arrange — a CLI-created path inside the state home is the defect that stopped every fresh
     // machine from starting the daemon, and this root is a symbolic link besides, which the daemon's
     // filesystem port refuses anywhere under its home.
-    const subject = fromTheStore({ probes: [undefined, health()] });
+    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
     await subject.controller.start();
@@ -495,7 +551,7 @@ describe('nix garbage-collection root', () => {
 
   it('should leave a binary that does not come from the store untouched', async () => {
     // Arrange — the fixture's daemon is a plain /opt install, as brew or GoReleaser would leave it.
-    const subject = harness({ probes: [undefined, health()] });
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport] });
 
     // Act
     await subject.controller.start();
@@ -505,12 +561,60 @@ describe('nix garbage-collection root', () => {
     should(subject.out.text).containEql('fyd ready');
   });
 
+  it('should pin the snapshot returned by first-run bootstrap', async () => {
+    // Arrange — promotion returns the just-built manifest. The live source configured in the layout
+    // is deliberately /opt, proving that the promoted manifest is the authority for what will run.
+    const snapshots = new FakeSnapshots();
+    const built = daemonSnapshot({ id: `sha256-${'c'.repeat(64)}`, sourceBinary: STORE_BINARY });
+    snapshots.currentAnswer = undefined;
+    snapshots.buildAnswer = { ...built, created: true };
+    snapshots.listAnswer = [built];
+    const nix = new FakeNixGcRoot();
+    const subject = harness({ serviceInstalled: false, probes: [undefined, health()], snapshots, nix });
+
+    // Act
+    await subject.controller.install();
+
+    // Assert
+    should(snapshots.calls).deepEqual(['current', 'build', `promote:${built.id}`]);
+    should(nix.realPaths).deepEqual([STORE_BINARY]);
+    should(nix.pinned).deepEqual([{ storePath: STORE_PATH, rootPath: layout().nixGcRoot }]);
+  });
+
+  it('should launch the exact snapshot it verified and pinned even when promotion moves concurrently', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    const selected = daemonSnapshot({
+      id: `sha256-${'c'.repeat(64)}`,
+      sourceBinary: STORE_BINARY,
+      binaryPath: '/immutable/snapshots/selected/fyd',
+    });
+    const later = daemonSnapshot({
+      id: `sha256-${'d'.repeat(64)}`,
+      sourceBinary: '/opt/fy/bin/later-fyd',
+      binaryPath: '/immutable/snapshots/later/fyd',
+    });
+    snapshots.currentAnswer = selected;
+    const nix = new FakeNixGcRoot();
+    nix.links.set(STORE_BINARY, STORE_BINARY);
+    nix.afterRealPath = () => {
+      snapshots.currentAnswer = later;
+    };
+    const subject = harness({ probes: [undefined, health()], serviceReports: [stoppedReport], snapshots, nix });
+
+    // Act
+    await subject.controller.start();
+
+    // Assert — promotion changed after capture, but pinning and execution stay bound to snapshot A.
+    should(nix.realPaths).deepEqual([selected.sourceBinary]);
+    should(subject.service.startedExecutables).deepEqual([selected.binaryPath]);
+    should(subject.service.startedExecutables).not.containEql(later.binaryPath);
+  });
+
   it('should start the daemon anyway when the pin fails, and say so', async () => {
     // Arrange — no `nix-store` on PATH is the ordinary case here, and it must not fail the start.
-    const nix = new FakeNixGcRoot();
-    nix.links.set(layout().daemonBinary, STORE_BINARY);
-    nix.failure = 'nix-store is not on PATH';
-    const subject = harness({ probes: [undefined, health()], nix });
+    const subject = fromTheStore({ probes: [undefined, health()], serviceReports: [stoppedReport] });
+    subject.nix.failure = 'nix-store is not on PATH';
 
     // Act
     await subject.controller.start();
@@ -536,6 +640,106 @@ describe('nix garbage-collection root', () => {
   });
 });
 
+describe('daemon snapshots', () => {
+  it('should bootstrap only a genuinely absent promoted snapshot before install', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    snapshots.currentAnswer = undefined;
+    const { controller, out, service } = harness({ probes: [undefined, health()], snapshots });
+
+    // Act
+    await controller.install();
+
+    // Assert
+    should(snapshots.calls).deepEqual(['current', 'build', `promote:${snapshots.buildAnswer.id}`]);
+    should(service.calls).containEql('install');
+    should(out.text).containEql(`built and promoted ${snapshots.buildAnswer.id}`);
+  });
+
+  it('should fail closed before stopping a daemon when the promoted snapshot is damaged', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    snapshots.currentError = new Error('current snapshot digest mismatch');
+    const { controller, service, nix } = harness({ snapshots });
+
+    // Act + Assert
+    await should(controller.restart()).be.rejectedWith(/digest mismatch/u);
+    should(service.calls).be.empty();
+    should(nix.realPaths).be.empty();
+  });
+
+  it('should build without promotion and say whether the content was new', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    const first = harness({ snapshots });
+
+    // Act
+    await first.controller.buildSnapshot();
+    snapshots.buildAnswer = { ...snapshots.buildAnswer, created: false };
+    const second = harness({ snapshots });
+    await second.controller.buildSnapshot();
+
+    // Assert
+    should(first.out.text).containEql(`${snapshots.buildAnswer.id} built from /opt/fy/bin/fyd`);
+    should(second.out.text).containEql(`${snapshots.buildAnswer.id} already complete from /opt/fy/bin/fyd`);
+  });
+
+  it('should promote an exact older id through the same path used for rollout', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}` });
+    snapshots.listAnswer = [older];
+    const { controller, out } = harness({ snapshots });
+
+    // Act
+    await controller.promoteSnapshot(older.id);
+
+    // Assert
+    should(snapshots.calls).deepEqual([`promote:${older.id}`]);
+    should(out.text).equal(
+      `ok: fyd snapshot ${older.id} promoted; the running daemon is unchanged until the next managed launch`,
+    );
+  });
+
+  it('should render the promoted marker and a machine-readable snapshot list', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    const older = daemonSnapshot({ id: `sha256-${'b'.repeat(64)}`, createdAt: '2026-08-03T12:00:00.000Z' });
+    const current = daemonSnapshot();
+    snapshots.listAnswer = [current, older];
+    snapshots.currentAnswer = current;
+    const human = harness({ snapshots });
+
+    // Act
+    await human.controller.listSnapshots({});
+    const machine = harness({ snapshots });
+    await machine.controller.listSnapshots({ json: true });
+
+    // Assert
+    should(human.out.text).containEql(`* ${current.id}`);
+    should(human.out.text).containEql(`  ${older.id}`);
+    const payload = JSON.parse(machine.out.lines[0]?.replace('ok: ', '') ?? '') as {
+      snapshots?: Array<{ id?: string; current?: boolean }>;
+    };
+    should(payload.snapshots?.[0]).containEql({ id: current.id, current: true });
+    should(payload.snapshots?.[1]).containEql({ id: older.id, current: false });
+  });
+
+  it('should report a clean empty snapshot store without pretending it is damaged', async () => {
+    // Arrange
+    const snapshots = new FakeSnapshots();
+    snapshots.listAnswer = [];
+    snapshots.currentAnswer = undefined;
+    const { controller, out } = harness({ snapshots });
+
+    // Act
+    await controller.listSnapshots({});
+
+    // Assert
+    should(out.text).equal('warn: no fyd snapshots have been built');
+  });
+});
+
 describe('daemon controller defaults', () => {
   it('should fall back to the shipped policies when none are injected', async () => {
     // Arrange
@@ -547,6 +751,7 @@ describe('daemon controller defaults', () => {
       health: new FakeHealth([health()]),
       logs: new FakeLogs(),
       nix: new FakeNixGcRoot(),
+      snapshots: new FakeSnapshots(),
       clock: new SteppingClock(),
       out: new CapturedOutput(),
     });

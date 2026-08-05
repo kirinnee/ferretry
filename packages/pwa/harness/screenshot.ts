@@ -220,6 +220,8 @@ try {
     for (const viewport of VIEWPORTS) {
       const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.name === 'mobile',
+        hasTouch: viewport.name === 'mobile',
         colorScheme: 'dark',
         reducedMotion: 'reduce',
       });
@@ -411,6 +413,10 @@ try {
           await page.screenshot({ path: behaviourTarget });
           process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
 
+          const composerEnterTarget = join(outDir, `settings-composer-enter-key-${viewport.name}.png`);
+          await settingsPage.locator('#settings-composer-enter-key').screenshot({ path: composerEnterTarget });
+          process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
+
           await selectSettingsSection('daemons');
           for (const state of ['reachable', 'unreachable', 'checking'] as const)
             await settingsPage.locator(`[data-daemon-reachability="${state}"]`).waitFor({ state: 'visible' });
@@ -419,6 +425,22 @@ try {
           const daemonsTarget = join(outDir, `settings-daemons-${viewport.name}.png`);
           await page.screenshot({ path: daemonsTarget });
           process.stdout.write(`📸 Settings Daemons (many) ${viewport.name} -> ${daemonsTarget}\n`);
+
+          const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
+          const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+          await wardenFrame.scrollIntoViewIfNeeded();
+          await page.screenshot({ path: wardenFrameTarget });
+          process.stdout.write(`📸 Settings daemon Warden ${viewport.name} -> ${wardenFrameTarget}\n`);
+
+          await settingsPage.getByRole('button', { name: 'Use Travel laptop' }).click();
+          const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
+          await unavailableWardenFrame.scrollIntoViewIfNeeded();
+          await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
+          const unavailableWardenTarget = join(outDir, `settings-daemon-warden-unavailable-${viewport.name}.png`);
+          await page.screenshot({ path: unavailableWardenTarget });
+          process.stdout.write(
+            `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
+          );
 
           const currentDaemon = settingsPage.locator('[data-daemon-id="harness-daemon"]');
           await currentDaemon.getByText('Manage daemon', { exact: true }).click();

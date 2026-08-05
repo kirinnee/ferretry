@@ -3,6 +3,8 @@ import type { DaemonEnvironmentInput, DaemonLayout } from '../../../src/lib/daem
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout';
 import type {
   CommandOutcome,
+  DaemonSnapshot,
+  DaemonSnapshotBuild,
   DaemonStartHandle,
   DaemonSupervisorReport,
   DetachedLaunch,
@@ -11,6 +13,7 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonProcessPort,
+  IDaemonSnapshotPort,
   INixGcRootPort,
   IServiceDefinitionSupervisor,
   IServiceFilePort,
@@ -25,7 +28,6 @@ export function environment(overrides: Partial<DaemonEnvironmentInput> = {}): Da
     platform: 'linux',
     homeDirectory: HOME,
     userId: 1000,
-    daemonBinary: '/opt/fy/bin/fyd',
     daemonName: 'fyd',
     product: 'ferretry',
     searchPath: '/usr/bin:/bin',
@@ -62,6 +64,19 @@ export function health(overrides: Partial<HealthView> = {}): HealthView {
     time: '2026-07-31T00:00:01.000Z',
     ...overrides,
   });
+}
+
+export function daemonSnapshot(overrides: Partial<DaemonSnapshot> = {}): DaemonSnapshot {
+  const id = `sha256-${'a'.repeat(64)}`;
+  return {
+    id,
+    daemon: { product: 'ferretry', name: 'fyd' },
+    sourceBinary: '/opt/fy/bin/fyd',
+    binaryPath: `${HOME}/.local/state/ferretry/daemon-snapshots/fyd/snapshots/${id}/fyd`,
+    bytes: 1024,
+    createdAt: '2026-08-04T12:00:00.000Z',
+    ...overrides,
+  };
 }
 
 /** Captured terminal output, in the order it was written. */
@@ -158,11 +173,15 @@ export class FakeFiles implements IServiceFilePort {
 export class FakeNixGcRoot implements INixGcRootPort {
   /** Maps a path to what it really resolves to; anything absent resolves to itself. */
   readonly links = new Map<string, string>();
+  readonly realPaths: string[] = [];
   readonly pinned: Array<{ storePath: string; rootPath: string }> = [];
   readonly released: string[] = [];
   failure: string | undefined;
+  afterRealPath: (() => void) | undefined;
 
   realPath(path: string): Promise<string> {
+    this.realPaths.push(path);
+    this.afterRealPath?.();
     return Promise.resolve(this.links.get(path) ?? path);
   }
 
@@ -208,6 +227,36 @@ export class FakeLogs implements IDaemonLogPort {
   }
 }
 
+export class FakeSnapshots implements IDaemonSnapshotPort {
+  readonly calls: string[] = [];
+  currentAnswer: DaemonSnapshot | undefined = daemonSnapshot();
+  buildAnswer: DaemonSnapshotBuild = { ...daemonSnapshot(), created: true };
+  listAnswer: readonly DaemonSnapshot[] = [daemonSnapshot()];
+  currentError: Error | undefined;
+
+  build(): Promise<DaemonSnapshotBuild> {
+    this.calls.push('build');
+    return Promise.resolve(this.buildAnswer);
+  }
+
+  promote(id: string): Promise<DaemonSnapshot> {
+    this.calls.push(`promote:${id}`);
+    const snapshot = this.listAnswer.find(candidate => candidate.id === id) ?? { ...this.buildAnswer, id };
+    this.currentAnswer = snapshot;
+    return Promise.resolve(snapshot);
+  }
+
+  current(): Promise<DaemonSnapshot | undefined> {
+    this.calls.push('current');
+    return this.currentError === undefined ? Promise.resolve(this.currentAnswer) : Promise.reject(this.currentError);
+  }
+
+  list(): Promise<readonly DaemonSnapshot[]> {
+    this.calls.push('list');
+    return Promise.resolve(this.listAnswer);
+  }
+}
+
 /** A clock that advances by a fixed step every time it is read, so waits terminate. */
 export class SteppingClock implements IClockPort {
   readonly slept: number[] = [];
@@ -231,6 +280,8 @@ export class SteppingClock implements IClockPort {
 export class FakeSupervisor implements IServiceDefinitionSupervisor {
   readonly calls: string[] = [];
   readonly stops: StopRequest[] = [];
+  readonly installedExecutables: string[] = [];
+  readonly startedExecutables: string[] = [];
   startHandle: DaemonStartHandle = { pid: 777 };
   installedAnswer = true;
   reports: DaemonSupervisorReport[] = [];
@@ -247,8 +298,9 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
     return Promise.resolve(this.installedAnswer);
   }
 
-  install(): Promise<void> {
+  install(executable: string): Promise<void> {
     this.calls.push('install');
+    this.installedExecutables.push(executable);
     return this.installError === undefined ? Promise.resolve() : Promise.reject(this.installError);
   }
 
@@ -257,8 +309,9 @@ export class FakeSupervisor implements IServiceDefinitionSupervisor {
     return Promise.resolve();
   }
 
-  start(): Promise<DaemonStartHandle> {
+  start(executable: string): Promise<DaemonStartHandle> {
     this.calls.push('start');
+    this.startedExecutables.push(executable);
     return Promise.resolve(this.startHandle);
   }
 

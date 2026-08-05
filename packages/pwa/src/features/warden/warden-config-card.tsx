@@ -7,8 +7,6 @@
  * render or save the previous daemon's account order.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, ShieldCheck, X } from 'lucide-react';
 import type {
   IFyApiClient,
   WardenAccount,
@@ -17,6 +15,8 @@ import type {
   WardenFailoverPolicy,
   WardenFailoverStatus,
 } from '@ferretry/protocol';
+import { ArrowDown, ArrowUp, Plus, ShieldCheck, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
@@ -337,9 +337,14 @@ export type WardenClientFactory = (connection: DaemonConnection) => Promise<Ward
 export function WardenConfigSurface({
   connection,
   createClient = daemonApiClient,
+  unavailable = 'hide',
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: WardenClientFactory;
+  /** Dedicated Warden routes may stay quiet on older daemons; the Settings
+   * frame instead needs an explicit unavailable state to avoid a false empty
+   * configuration. */
+  readonly unavailable?: 'hide' | 'message';
 }) {
   const [client, setClient] = useState<WardenClient | null>(null);
   const [loaded, setLoaded] = useState<{
@@ -350,6 +355,10 @@ export function WardenConfigSurface({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<{
+    readonly daemonId: DaemonConnection['daemonId'];
+    readonly reason: string;
+  } | null>(null);
 
   useEffect(() => {
     let current = true;
@@ -357,6 +366,7 @@ export function WardenConfigSurface({
     setLoaded(null);
     setError(null);
     setSaved(false);
+    setLoadFailure(null);
     void createClient(connection)
       .then(async nextClient => {
         const [view, status] = await Promise.all([
@@ -367,9 +377,13 @@ export function WardenConfigSurface({
         setClient(nextClient);
         setLoaded({ daemonId: connection.daemonId, view, ...(status?.failover ? { failover: status.failover } : {}) });
       })
-      .catch(() => {
+      .catch(cause => {
         // The legacy component hid on old daemons rather than rendering a dead editor.
-        if (current) setLoaded(null);
+        if (current)
+          setLoadFailure({
+            daemonId: connection.daemonId,
+            reason: cause instanceof Error ? cause.message : String(cause),
+          });
       });
     return () => {
       current = false;
@@ -395,7 +409,19 @@ export function WardenConfigSurface({
     [client, connection.daemonId, loaded?.daemonId],
   );
 
-  if (loaded === null || loaded.daemonId !== connection.daemonId) return null;
+  if (loaded === null || loaded.daemonId !== connection.daemonId) {
+    if (unavailable === 'message' && loadFailure?.daemonId === connection.daemonId)
+      return (
+        <section className="kt-panel p-panel" role="status" aria-label="Warden policy unavailable">
+          <h3 className="m-0 text-title font-semibold text-fg">Warden policy unavailable</h3>
+          <p className="mb-0 mt-1 text-ui leading-base text-muted">
+            This daemon did not provide an editable Warden policy. No controls are shown because a change cannot be
+            confirmed here.
+          </p>
+        </section>
+      );
+    return null;
+  }
   return (
     <WardenConfigCard
       connection={connection}

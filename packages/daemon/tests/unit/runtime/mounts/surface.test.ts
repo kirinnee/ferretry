@@ -64,6 +64,21 @@ const pairingSubsystem = (): PairingSubsystem => ({
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
   pairing: pairingSubsystem(),
+  fleet: {
+    accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),
+    config: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    plan: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    usage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    apply: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -151,6 +166,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
       'GET /v1/health',
+      'GET /v1/fleet/accounts',
+      'GET /v1/fleet/config',
+      'GET /v1/fleet/plan',
+      'GET /v1/fleet/usage',
+      'POST /v1/fleet/apply',
       'GET /v1/gc',
       'POST /v1/gc',
       'GET /v1/sessions',
@@ -260,6 +280,7 @@ describe('the mounted daemon surface', () => {
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
     const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
+    const fleetAccounts = await dispatcher.dispatch(request({ path: '/v1/fleet/accounts', headers: human }));
     const gc = await dispatcher.dispatch(request({ path: '/v1/gc', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
     const session = await dispatcher.dispatch(request({ path: '/v1/sessions/s1', headers: human }));
@@ -316,6 +337,7 @@ describe('the mounted daemon surface', () => {
     // The liveness probe and the scoped report are two different answers under one subject, and both
     // are reached: the daemon's own health is a mounted subsystem now, not a hardcoded literal.
     should(report.status).equal(200);
+    should(fleetAccounts.status).equal(200);
     should(gc.status).equal(200);
     should(sessions.status).equal(200);
     // The id pattern is reached rather than shadowed by the deeper per-session routes below it.

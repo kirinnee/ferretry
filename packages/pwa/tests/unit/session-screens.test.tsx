@@ -430,12 +430,18 @@ describe('session screen components', () => {
     expect(composer.root.findAllByProps({ className: ' fy-quota-error' })).toHaveLength(2);
   });
 
-  test('keeps Enter inert on touch hardware and disables its rendered submit action when disabled', () => {
+  test('honours the configured Enter action and disables its rendered submit action when disabled', () => {
     const savedMatchMedia = globalThis.matchMedia;
     Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: () => ({ matches: false }) });
     try {
       const composer = render(
-        <Composer api={{ send: async () => ({}) as never }} daemon={daemonA} disabled sessionId="disabled-id" />,
+        <Composer
+          api={{ send: async () => ({}) as never }}
+          daemon={daemonA}
+          disabled
+          enterKeyPreference="newline"
+          sessionId="disabled-id"
+        />,
       );
       const textarea = composer.root.findByType('textarea');
       let prevented = false;
@@ -456,7 +462,13 @@ describe('session screen components', () => {
 
       Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: () => ({ matches: true }) });
       const desktop = render(
-        <Composer api={{ send: async () => ({}) as never }} daemon={daemonA} disabled sessionId="desktop-id" />,
+        <Composer
+          api={{ send: async () => ({}) as never }}
+          daemon={daemonA}
+          disabled
+          enterKeyPreference="send"
+          sessionId="desktop-id"
+        />,
       );
       let desktopPrevented = false;
       run(() =>
@@ -473,6 +485,45 @@ describe('session screen components', () => {
     } finally {
       Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: savedMatchMedia });
     }
+  });
+
+  test('sends on exactly the configured Enter chord', async () => {
+    const press = async (
+      preference: 'send' | 'newline',
+      shiftKey: boolean,
+    ): Promise<{ prevented: boolean; sent: string[] }> => {
+      const drafts = new DaemonDraftStore(new MemoryStorage());
+      const sessionId = `${preference}-${shiftKey ? 'shift' : 'bare'}`;
+      drafts.save(daemonSessionScope(daemonA, sessionId), 'A complete message', 1);
+      const sent: string[] = [];
+      const composer = render(
+        <Composer
+          api={{ send: async (_sessionId, payload) => sent.push(payload.message) as never }}
+          daemon={daemonA}
+          draftStore={drafts}
+          enterKeyPreference={preference}
+          sessionId={sessionId}
+        />,
+      );
+      let prevented = false;
+      await runAsync(async () => {
+        composer.root.findByType('textarea').props.onKeyDown({
+          key: 'Enter',
+          shiftKey,
+          nativeEvent: { isComposing: false },
+          preventDefault: () => {
+            prevented = true;
+          },
+        });
+        await Promise.resolve();
+      });
+      return { prevented, sent };
+    };
+
+    expect(await press('send', false)).toEqual({ prevented: true, sent: ['A complete message'] });
+    expect(await press('send', true)).toEqual({ prevented: false, sent: [] });
+    expect(await press('newline', false)).toEqual({ prevented: false, sent: [] });
+    expect(await press('newline', true)).toEqual({ prevented: true, sent: ['A complete message'] });
   });
 
   test('renders compact context controls for an idle daemon-scoped session and reports completion', async () => {

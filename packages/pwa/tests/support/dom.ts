@@ -11,13 +11,51 @@
  */
 
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
-import { act } from 'react';
 import type { ReactElement } from 'react';
+import { act } from 'react';
 
-const registered = globalThis as typeof globalThis & { __ferretryDomRegistered?: boolean };
+const registered = globalThis as typeof globalThis & {
+  __ferretryDomRegistered?: boolean;
+  __ferretryMutationObserverPatched?: boolean;
+};
 if (!registered.__ferretryDomRegistered) {
   GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
   registered.__ferretryDomRegistered = true;
+}
+
+/**
+ * happy-dom 20.11.1 keeps its internal MutationObserver delivery closure only
+ * through a WeakRef, so an ordinary GC pass can permanently silence a still
+ * connected observer. Pin just that orphaned closure while `observe()` builds
+ * it; every other WeakRef in the test environment retains its real semantics.
+ *
+ * TODO: remove after https://github.com/capricorn86/happy-dom/issues/2264 is
+ * fixed and the dependency is updated.
+ */
+if (!registered.__ferretryMutationObserverPatched) {
+  class StrongWeakRef<T extends WeakKey> {
+    readonly #target: T;
+
+    constructor(target: T) {
+      this.#target = target;
+    }
+
+    deref(): T {
+      return this.#target;
+    }
+  }
+
+  const originalObserve = MutationObserver.prototype.observe;
+  MutationObserver.prototype.observe = function (target: Node, options: MutationObserverInit): void {
+    const originalWeakRef = globalThis.WeakRef;
+    try {
+      globalThis.WeakRef = StrongWeakRef as unknown as typeof WeakRef;
+      originalObserve.call(this, target, options);
+    } finally {
+      globalThis.WeakRef = originalWeakRef;
+    }
+  };
+  registered.__ferretryMutationObserverPatched = true;
 }
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

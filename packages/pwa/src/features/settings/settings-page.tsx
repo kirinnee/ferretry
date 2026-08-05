@@ -8,11 +8,12 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
+import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
@@ -22,13 +23,15 @@ import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-con
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
+import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
+import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
+import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import {
   isSettingId,
   isSettingsSectionId,
-  SETTINGS_LINKS,
   SETTINGS_SECTIONS,
   type SettingDefinition,
   type SettingId,
@@ -243,6 +246,12 @@ export interface SettingsPageProps {
   readonly notifications?: ReactNode;
   /** A live, credential-scoped read of the typed daemon health endpoint. */
   readonly probeDaemon: DaemonReachabilityProbe;
+  /** A daemon-bound Warden status read; no ambient or browser-global client. */
+  readonly readWardenStatus?: WardenStatusReader;
+  /** Test and harness seam; production uses the selected daemon client. */
+  readonly createWardenClient?: WardenClientFactory;
+  /** Future daemon-owned tabs, appended after Warden in the shared frame. */
+  readonly daemonSettingsTabs?: readonly DaemonSettingsTabDefinition[];
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
   readonly onRemoveDaemon: (daemonId: DaemonId) => void;
@@ -276,6 +285,9 @@ export function SettingsPage({
   dictation,
   notifications,
   probeDaemon,
+  readWardenStatus,
+  createWardenClient,
+  daemonSettingsTabs,
   onSelectDaemon,
   onRenameDaemon,
   onRemoveDaemon,
@@ -391,6 +403,12 @@ export function SettingsPage({
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
       'composer-markdown': <MarkdownComposerSettings />,
+      'composer-enter-key': (
+        <ComposerEnterKeySettings
+          preference={device.composerEnterKey}
+          onChange={composerEnterKey => controls.setDeviceControls({ composerEnterKey })}
+        />
+      ),
       theme: <ThemeSettings theme={theme} />,
       dictation: <DictationSettings {...dictation} />,
       notifications: notifications ?? (
@@ -406,6 +424,7 @@ export function SettingsPage({
       densityState.explicit,
       densityState.setDensity,
       device.chatWidth,
+      device.composerEnterKey,
       dictation,
       notifications,
       theme,
@@ -494,32 +513,14 @@ export function SettingsPage({
                       onAddDaemon={onAddDaemon}
                     />
                     <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />
-                    {SETTINGS_LINKS.map(link => (
-                      <section
-                        key={link.id}
-                        id={`settings-${link.id}`}
-                        className="kt-panel p-panel"
-                        aria-label={link.label}
-                      >
-                        <RouteLink
-                          to={link.href(daemonId)}
-                          onNavigate={onNavigate}
-                          className="group flex min-h-[44px] w-full items-center justify-between gap-2 text-left"
-                        >
-                          <span className="min-w-0">
-                            <span className="block text-title font-semibold text-fg group-hover:text-accent">
-                              {link.label}
-                            </span>
-                            <span className="mt-1 block text-ui leading-base text-muted">{link.description}</span>
-                          </span>
-                          <ChevronRight
-                            size={16}
-                            aria-hidden="true"
-                            className="shrink-0 text-muted group-hover:text-accent"
-                          />
-                        </RouteLink>
-                      </section>
-                    ))}
+                    <DaemonSettingsFrame
+                      key={String(daemonId)}
+                      connection={connections.find(candidate => candidate.daemonId === daemonId) ?? dictation.daemon}
+                      name={connections.find(candidate => candidate.daemonId === daemonId)?.label ?? String(daemonId)}
+                      readWardenStatus={readWardenStatus}
+                      createWardenClient={createWardenClient}
+                      additionalTabs={daemonSettingsTabs}
+                    />
                   </>
                 ) : null}
               </div>

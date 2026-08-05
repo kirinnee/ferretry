@@ -1,4 +1,16 @@
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { createServer, type Server } from 'node:net';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -102,6 +114,19 @@ async function canonicalizeWithMissingTail(input: string): Promise<string> {
       cursor = parent;
     }
   }
+}
+
+/** Restore only owner permissions so the already-validated isolated root can be removed. */
+async function makeOwnerWritable(path: string): Promise<void> {
+  const state = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (state === undefined || state.isSymbolicLink()) return;
+  const directory = state.isDirectory();
+  await chmod(path, (state.mode & 0o777) | (directory ? 0o700 : 0o600));
+  if (!directory) return;
+  for (const entry of await readdir(path)) await makeOwnerWritable(join(path, entry));
 }
 
 /** Rejects paths resolving into either live state home before the caller performs any IO there. */
@@ -740,6 +765,7 @@ export class E2eEnvironment {
       child !== '..' &&
       basename(safeRoot).startsWith('fy-e2e-')
     ) {
+      await makeOwnerWritable(safeRoot).catch(error => errors.push(error));
       await rm(safeRoot, { recursive: true, force: true }).catch(error => errors.push(error));
     } else if (safeRoot !== undefined) {
       errors.push(new Error('refused to remove an unowned E2E path'));

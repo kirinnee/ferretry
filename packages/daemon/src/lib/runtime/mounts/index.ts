@@ -1,3 +1,4 @@
+import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import { ApiRawDispatcher, type RawRoute } from '../../api/raw.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -5,7 +6,6 @@ import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
-import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
 import type { PinService } from '../../pins/index.ts';
@@ -17,6 +17,7 @@ import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
+import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
@@ -64,6 +65,8 @@ export interface MountedSubsystems {
   readonly health: DaemonHealthSubsystem;
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
+  /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
+  readonly fleet: FleetSubsystem;
   readonly attention: AttentionService;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
@@ -170,6 +173,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
     ...daemonHealthRoutes(subsystems.health),
+    // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
+    // so their mount owns the admin scope and cannot shadow any session route below.
+    ...fleetRoutes(subsystems.fleet),
     ...scratchGcRoutes(subsystems.scratchGc),
     // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
     // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
