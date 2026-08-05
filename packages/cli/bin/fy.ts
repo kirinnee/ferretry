@@ -71,6 +71,11 @@ import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
+import { registerSecretCommands } from '../src/lib/secrets/commands';
+import { SecretController } from '../src/lib/secrets/controller';
+import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
+import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
+import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import {
@@ -383,6 +388,16 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
+  ({ program, world, client }) =>
+    registerSecretCommands(
+      program,
+      new SecretController(
+        new ProtocolSecretGateway(client),
+        new SecretConsoleOutput(world.io),
+        new StdinSecretValue(),
+        process.cwd(),
+      ),
+    ),
   ({ program, world, client }) =>
     registerFilesystemCommands(program, new FilesystemController(new ProtocolFilesystemGateway(client), world.io)),
   ({ program, world, client }) =>
