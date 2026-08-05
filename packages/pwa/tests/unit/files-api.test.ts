@@ -73,7 +73,7 @@ describe('files API', () => {
       if (url.includes('/file'))
         return new Response(JSON.stringify({ path: 'a.ts' }), { headers: { 'content-type': 'application/json' } });
       if (url.includes('/changes'))
-        return new Response(JSON.stringify({ repo: true, changes: [] }), {
+        return new Response(JSON.stringify({ repo: true, changes: [{ path: 'fresh.ts', status: '??' }] }), {
           headers: { 'content-type': 'application/json' },
         });
       return new Response(JSON.stringify({ entries: [] }), { headers: { 'content-type': 'application/json' } });
@@ -82,7 +82,12 @@ describe('files API', () => {
     expect(changesUrl(scopeA)).toContain('/changes');
     expect(diffUrl(scopeA, 'a.ts')).toContain('/diff?path=a.ts');
     expect(await fsApi.file(daemonA, scopeA, 'a.ts', 'head', undefined, fetcher)).toMatchObject({ path: 'a.ts' });
-    expect(await fsApi.changes(daemonA, scopeA, undefined, fetcher)).toMatchObject({ repo: true });
+    // An untracked row is the daemon's authoritative status. The PWA must pass
+    // it through unchanged so a new file is visible in the Changes view.
+    expect(await fsApi.changes(daemonA, scopeA, undefined, fetcher)).toEqual({
+      repo: true,
+      changes: [{ path: 'fresh.ts', status: '??' }],
+    });
     expect(await fsApi.diff(daemonA, scopeA, 'a.ts', undefined, fetcher)).toBe('diff text');
     await expect(
       fsApi.list(daemonA, scopeA, '', undefined, async () => new Response('nope', { status: 500 })),
