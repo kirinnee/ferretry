@@ -1,4 +1,4 @@
-# Capability grants — what a caller who is not on this host may do
+| the change record | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |# Capability grants — what a caller who is not on this host may do
 
 Read this before describing what grants protect against, because the useful property is narrower
 than the name suggests.
@@ -55,22 +55,21 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 attention, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
-## Permissive by default; the password is the layer
+## Permissive by default; LOCALITY is the layer
 
-Both axes default to **enabled** for all five. The product should let a person do as much as possible
-from the UI, and the security model is something a cautious operator turns **on** rather than a wall
-everyone starts behind.
+Both axes default to **enabled** for every capability. The dangerous act is structurally
+unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
+closed would make a fresh remote session useless until somebody walked to the machine.
 
-That layer is the **operator password**:
+**The primary security layer is locality, not the password.** A remote caller can never turn a
+capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
+operator who wants one.
 
-- with one set, every `configure` demand needs a short-lived unlock;
-- with none set, `configure` passes and the answer comes back as `ungated` rather than `granted`, so
-  a UI can say once — beside the control, never as nagging — that nothing is standing behind it.
-
-**The honest cost:** with permissive defaults and no password, anyone holding a pairing can change
-this machine's fleet and settings. That is stated in one plain sentence wherever remote access is
-inspected (`fy daemon config`, the daemon's boot log, the PWA's grant surface), and never as a
-question somebody has to answer to use their own machine.
+**What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
+_grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is
+arbitrary code on the host; `fleet.use` composes changes that write executables. A paired device is
+trusted with those by default — so **pairing**, not this layer, is where that decision is actually
+made.
 
 ## The operator password
 
@@ -89,13 +88,23 @@ question somebody has to answer to use their own machine.
 - Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
   one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
 
-## Widening and narrowing are not the same act
+## Widening is a local act. There is no remote path to it.
 
-| change                              | what it needs                                                   |
-| ----------------------------------- | --------------------------------------------------------------- |
-| turning an axis **off**             | the `configure` grant on that capability; never the password    |
-| turning an axis **on**              | a valid unlock, on every path including the host's command line |
-| turning one **on**, no password set | a host act — a remote caller cannot prove operator intent       |
+| act                                | local (loopback) | remote (governed)                              |
+| ---------------------------------- | ---------------- | ---------------------------------------------- |
+| turn **on** (off→on)               | allowed          | **never — password or no password**            |
+| turn **off** (on→off)              | allowed          | allowed                                        |
+| configure a capability that is on  | allowed          | allowed; the password gates it when one is set |
+| configure a capability that is off | allowed          | refused — it is off                            |
+
+A patch that widens one capability and narrows another is refused **entirely**. A half-applied widen
+leaves the operator with a machine in a state they did not ask for and were not told about, and the
+refusal they saw is indistinguishable from a total one.
+
+**This is a one-way door, and that is the trade.** An operator who switches something off from a phone
+cannot switch it back on from that phone. It is what makes the rule safe, and it is also a way to lock
+yourself out of your own machine — so the refusal names the remedy exactly, and `mayGrant` on every
+capability view lets a UI say so _before_ somebody walks through, rather than after.
 
 Revoking must never be harder than granting: in an incident the fastest possible path to _"the UI can
 no longer do that"_ matters more than a confirmation, and a password prompt between a person and
@@ -135,6 +144,40 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 same provenance treatment every other value gets, because a person reading a permission report is
 usually asking which of these they chose and which something chose for them.
 
+## Finding out without reading this document
+
+Every refusal names a command that fixes it. That is the point of the layer, not a nicety — a person
+meeting a denial should not have to know this file exists:
+
+| refusal        | what the sentence says to do                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------- |
+| `not-granted`  | `fy daemon config set <capability> --use` / `--configure`, on the host                         |
+| `locked`       | enter the password — or, if you do not have it, `fy daemon password set` / `clear` at the host |
+| `rate-limited` | wait for the lockout, or `fy daemon password set` at the host                                  |
+| `undetermined` | `fy daemon config` on the host, to see and repair the document                                 |
+
+`locked` is the one worth explaining. Its reader may not be the operator: the axis is granted, nothing
+is broken, and "unlock first" is a complete instruction for whoever holds the password and **no
+instruction at all** for whoever does not. It names both remedies and says which is whose.
+
+`fyd --check` states the posture in one line, and states it **after** answering whether anything off
+the host can reach this daemon at all:
+
+```
+grants       nothing off this host can reach this daemon (host 127.0.0.1, no relay), so no grant applies today
+```
+
+```
+grants       reachable off this host (the relay at wss://…) — a remote caller may use everything, and change settings for everything
+             ! no operator password is set, so any paired device can change this machine's fleet and settings without one; set one with `fy daemon password set`
+```
+
+Reachability counts the **relay**, not just the bind address. The daemon dials _out_ to a rendezvous,
+so a loopback bind is reachable from anywhere the moment a relay is enabled — a check that read `host`
+alone would tell somebody running the hosted relay that nothing could reach them. And on a daemon
+nothing can reach, the capabilities are not recited at all: that would be noise implying a boundary
+which is not doing anything.
+
 ## Changes take effect immediately
 
 `fy daemon config set …` writes the document and moves the daemon's in-memory answer in the same
@@ -151,9 +194,11 @@ command says so at the moment somebody might be tempted to do that instead.
   coarse switch's own lock — but it is narrower than `fleet` and `warden`, whose configure axis gates
   real host-changing routes (`PUT /v1/fleet/environment`, `POST /v1/fleet/apply`,
   `PATCH /v1/warden/config`).
-- **The audit journal has no read surface.** `state/grant-audit.jsonl` is written and never served;
-  there is no `fy daemon config history`. The record exists so the question is answerable, but
-  answering it means reading the file.
+- ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
+  `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
+  `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a
+  64 KiB window of the file and the newest 50 records; and a line it cannot parse is **counted and
+  reported**, never dropped — a truncated or tampered journal must not read as a clean history.
 - **The daemon's fleet event stream (`GET /v1/events`) is not governed.** It carries session events
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet

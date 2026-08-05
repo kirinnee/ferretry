@@ -3,6 +3,7 @@ import {
   DAEMON_CAPABILITIES,
   type DaemonCapability,
   GRANT_UNLOCK_TTL_SECONDS,
+  type GrantAuditView,
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
@@ -216,16 +217,27 @@ export class CapabilityGrantService implements CapabilityGuard {
    * so revoking is never harder than granting, and a patch that only narrows is never gated by the
    * password or by the lockout.
    *
-   * ## WIDENING
+   * ## WIDENING IS A LOCAL ACT. THERE IS NO REMOTE PATH TO IT AT ALL.
    *
-   * With an operator password set, widening needs a valid unlock on EVERY path, the host's own command
-   * line included: proving the password is what says an operator meant this, and that is the one claim
-   * a grant change actually rests on.
+   * A governed caller may never turn a capability ON — not with the operator password, not with a
+   * valid unlock, not ever. Locality is the boundary, and this is the whole of it: a stolen phone
+   * cannot grant itself anything, so the worst it can do is narrow the machine's own permissions.
    *
-   * With NO password set, widening is a host act. A machine with no password has no way for a remote
-   * caller to prove operator intent, so a browser that could turn a capability back on would defeat
-   * the coarse switch entirely — the refusal names both remedies, doing it at the host or setting a
-   * password so it can be done from anywhere.
+   * THIS REPLACED A PASSWORD GATE, and it is strictly stronger. The password used to be what stood
+   * between a remote caller and widening, which meant the security of the model rested on a secret a
+   * person chose. Now it rests on where the socket came from, which nothing a caller sends can move.
+   *
+   * IT IS A ONE-WAY DOOR AND THAT IS SAID OUT LOUD. An operator who switches something off from a
+   * phone cannot switch it back on from that phone — the refusal names the remedy exactly, and the
+   * grant view carries `mayGrant` so a UI can say so BEFORE somebody walks through the door rather
+   * than after.
+   *
+   * ## THE PATCH IS ALL OR NOTHING
+   *
+   * A patch that widens one capability and narrows another is refused ENTIRELY. Applying the safe half
+   * would leave the operator with a machine in a state they did not ask for and did not get told
+   * about, which is worse than either outcome — and the refusal would be indistinguishable from a
+   * total one. `next` is computed before anything is written, so this holds by construction.
    *
    * ## NARROWING
    *
@@ -244,25 +256,13 @@ export class CapabilityGrantService implements CapabilityGuard {
     const evaluation = this.evaluate(presentation);
     const next = applyGrantPatch(current, patch);
     const widened = widenedBy(current, next);
-    if (widened.length > 0) {
-      if (this.passwordSet) {
-        if (evaluation.rateLimited)
-          throw new GrantError(
-            'forbidden',
-            `too many wrong operator passwords have been tried, so this daemon is not checking any more of them for now; ${widened.join(', ')} cannot be granted until the lockout passes`,
-          );
-        if (!evaluation.unlockHeld)
-          throw new GrantError(
-            'forbidden',
-            `granting ${widened.join(', ')} needs the operator password on this machine; revoking never does`,
-          );
-      } else if (evaluation.governed) {
-        throw new GrantError(
-          'forbidden',
-          `granting ${widened.join(', ')} is done on the host, because this machine has no operator password for a remote caller to prove; run \`${this.deps.clientName} daemon config\` there, or set a password with \`${this.deps.clientName} daemon password set\` so it can be granted from anywhere`,
-        );
-      }
-    }
+    // Computed over the WHOLE patch and refused before anything is written, so a mixed patch takes
+    // neither half. The password is deliberately not consulted: it cannot buy this.
+    if (widened.length > 0 && evaluation.governed)
+      throw new GrantError(
+        'forbidden',
+        `${widened.join(', ')} can only be turned on from the machine itself — no remote caller may, with or without the operator password. Run \`${this.deps.clientName} daemon config set ${widened[0]?.split('.')[0] ?? 'fleet'} --${widened[0]?.split('.')[1] ?? 'use'}\` on the host.`,
+      );
     if (evaluation.governed && !evaluation.unlockHeld) {
       for (const capability of patchedCapabilities(patch)) {
         // The grant alone, deliberately NOT `decideCapability(configure)`: that would demand an unlock
@@ -309,6 +309,23 @@ export class CapabilityGrantService implements CapabilityGuard {
     return this.passwordSet;
   }
 
+  /**
+   * Who changed what, most recent first.
+   *
+   * IT IS NOT GATED ON THE GRANTS IT REPORTS. A caller refused a capability is exactly the caller who
+   * needs to know when and by whom it was refused — gating the history behind the decision would make
+   * the answer unreachable to the only person asking the question. It discloses actors and axes; no
+   * credential and nothing about the password has ever been written to that file.
+   */
+  async history(limit: number): Promise<GrantAuditView> {
+    const reading = await this.deps.audit.recent(limit);
+    return {
+      entries: reading.entries.map(entry => ({ at: entry.at, actor: entry.actor, changes: entry.changes })),
+      unreadable: reading.unreadable,
+      truncated: reading.truncated,
+    };
+  }
+
   /** What the daemon's own reports may say about this subsystem. Never the password itself. */
   enforced(): EnforcedGrants {
     return this.grants;
@@ -328,6 +345,8 @@ export class CapabilityGrantService implements CapabilityGuard {
       granted,
       useRefusal: use.refusal,
       configureRefusal: configure.refusal,
+      // Locality decides it, and nothing else can: a governed caller never widens.
+      mayGrant: !evaluation.governed,
       origin: this.writtenDown.includes(capability) ? 'config file' : 'default',
     };
   }

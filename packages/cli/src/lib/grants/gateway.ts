@@ -1,4 +1,6 @@
 import {
+  type GrantAuditView,
+  GrantAuditViewSchema,
   GrantPasswordRequestSchema,
   type GrantsPatch,
   GrantsPatchSchema,
@@ -29,6 +31,10 @@ export class ProtocolGrantGateway implements IGrantGateway {
 
   async read(): Promise<GrantsView> {
     return await this.client.request(GRANTS_PATH, GrantsViewSchema);
+  }
+
+  async history(): Promise<GrantAuditView> {
+    return await this.client.request(`${GRANTS_PATH}/audit`, GrantAuditViewSchema);
   }
 
   async change(patch: GrantsPatch, unlock?: string): Promise<GrantsView> {

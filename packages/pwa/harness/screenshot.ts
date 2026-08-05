@@ -851,14 +851,21 @@ try {
             [`grants-rate-limited`, `[data-harness="grants-rate-limited"]`],
             [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
             [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
+            // The capability list in all three postures. The remote one is the frame that matters: the
+            // harness daemon's address is loopback, so a capture reading "Direct" there would be the
+            // URL-derived inversion, visible in a PNG.
+            [`capability-list-local`, `[data-harness="capability-list-local"]`],
+            [`capability-list-remote`, `[data-harness="capability-list-remote"]`],
+            [`capability-list-unknown`, `[data-harness="capability-list-unknown"]`],
           ] as const) {
             const frame = page.locator(selector);
             await frame.scrollIntoViewIfNeeded();
             // Settled content, not a spinner: every one of these frames is rendered from a fixture, so
             // a capture still showing "Reading…" would be a regression to review rather than a state.
-            await frame.locator('[data-grant-surface], [aria-label="Capability grants unavailable"]').first().waitFor({
-              state: 'visible',
-            });
+            await frame
+              .locator('[data-grant-surface], [aria-label="Capability grants unavailable"], [data-capability-list]')
+              .first()
+              .waitFor({ state: 'visible' });
             const target = join(outDir, `${name}-${viewport.name}.png`);
             await frame.screenshot({ path: target });
             process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);

@@ -19,6 +19,7 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
   useRefusal: 'granted',
   configureRefusal: 'granted',
   origin: 'default',
+  mayGrant: false,
   ...overrides,
 });
 
@@ -47,6 +48,134 @@ describe('GrantsCard', () => {
     );
     expect(rendered).toContain('not on this machine');
     expect(rendered).toContain('already has the machine');
+  });
+
+  /**
+   * The capability list sits above the switches, and its "direct local" mark must come from the
+   * daemon. These three cases pin that the surface passes through what the daemon said — including
+   * saying nothing — rather than deriving it from the page it is rendered on.
+   */
+  /**
+   * THE ONE-WAY DOOR. A remote caller may never widen a grant — no password, no unlock — so an off
+   * capability must not render a switch that fails on press, and an on capability must warn before it
+   * is closed, because only the machine can reopen it.
+   */
+  it('renders no widening switch for a caller that may never turn a capability on', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'terminal',
+              use: false,
+              configure: false,
+              granted: { use: false, configure: false },
+              useRefusal: 'not-granted',
+              configureRefusal: 'not-granted',
+              mayGrant: false,
+            }),
+          ],
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    // The switch is inert, and the reason names the machine rather than a password that cannot help.
+    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(true);
+    const rendered = text(renderer);
+    expect(rendered).toContain('only be switched on at the machine');
+    expect(rendered).toContain('fy daemon config set terminal --use');
+  });
+
+  it('warns a one-way caller before they close a door only the machine can reopen', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [entry({ capability: 'fleet', mayGrant: false })] })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(marked(renderer, 'data-grant-one-way')[0]?.props['data-grant-one-way']).toBe('fleet');
+    expect(text(renderer)).toContain('cannot be undone from here');
+  });
+
+  it('says nothing about one-way doors to a caller standing at the machine', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [entry({ capability: 'fleet', mayGrant: true })] })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(marked(renderer, 'data-grant-one-way')).toHaveLength(0);
+    // And its switches stay live in both directions.
+    expect(axisSwitch(renderer, 'fleet.use')?.props.disabled).toBe(false);
+  });
+
+  it('offers a live widening switch at the machine, where turning one on is allowed', () => {
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({
+          capabilities: [
+            entry({
+              capability: 'terminal',
+              use: false,
+              configure: true,
+              granted: { use: false, configure: true },
+              useRefusal: 'not-granted',
+              mayGrant: true,
+            }),
+          ],
+          unlocked: true,
+        })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(axisSwitch(renderer, 'terminal.use')?.props.disabled).toBe(false);
+    expect(text(renderer)).not.toContain('only be switched on at the machine');
+  });
+
+  /**
+   * The capability list sits above the switches and takes its posture from `mayGrant` on the
+   * capabilities — the daemon's own `!governed`. This pins that the surface passes the daemon's answer
+   * through rather than deriving it from the page it happens to be rendered on.
+   */
+  it('shows the capability list the posture the daemon’s own answer implies', () => {
+    const posture = (renderer: ReactTestRenderer): unknown =>
+      renderer.root.findAll(
+        node => typeof node.type === 'string' && node.props['data-capability-posture'] !== undefined,
+      )[0]?.props['data-capability-posture'];
+
+    const remote = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: false })) })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(posture(remote)).toBe('governed-remote');
+
+    const local = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: true })) })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+    expect(posture(local)).toBe('direct-local');
   });
 
   it('says once, beside the configure controls, that nothing is standing behind them', () => {

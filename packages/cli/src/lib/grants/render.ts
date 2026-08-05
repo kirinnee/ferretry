@@ -1,4 +1,4 @@
-import { CAPABILITY_AXES, type GrantsView } from '@ferretry/protocol';
+import { CAPABILITY_AXES, type GrantAuditView, type GrantsView } from '@ferretry/protocol';
 
 /**
  * What a person is told, once, when this machine has no operator password.
@@ -76,4 +76,29 @@ export function grantDifference(before: GrantsView, after: GrantsView): readonly
     }
   }
   return changed;
+}
+
+/**
+ * Who changed what, most recent first.
+ *
+ * IT REPORTS DAMAGE RATHER THAN A SHORTER HISTORY. A journal line the daemon could not read is
+ * counted and said out loud: silently omitting it would let a truncated or tampered record read as a
+ * clean one, and a permission history that quietly loses entries is worse than none, because people
+ * trust it.
+ */
+export function renderGrantHistory(view: GrantAuditView): string {
+  const lines: string[] = [];
+  if (view.entries.length === 0) lines.push('no grant has been changed on this machine');
+  else {
+    const actorWidth = Math.max(...view.entries.map(entry => entry.actor.length));
+    for (const entry of view.entries)
+      lines.push(`${entry.at}  ${entry.actor.padEnd(actorWidth)}  ${entry.changes.join(', ')}`);
+  }
+  if (view.truncated) lines.push('', 'older records exist; this is the tail of the journal');
+  if (view.unreadable > 0)
+    lines.push(
+      '',
+      `! ${String(view.unreadable)} line${view.unreadable === 1 ? '' : 's'} in this window could not be read as a record — this history is incomplete`,
+    );
+  return lines.join('\n');
 }

@@ -110,11 +110,218 @@ export const axisQuestion = (axis: CapabilityAxis): string => AXIS_QUESTIONS[axi
  * the product says, which costs more than the warning is worth.
  */
 export const NO_PASSWORD_DISCLOSURE =
-  'No operator password is set, so any paired device can change this machine’s fleet and settings.';
+  'No operator password is set, so any paired device can change the settings of whatever is already turned on here — it still cannot turn anything on, which only this machine can do.';
 
 /** The counterpart, so a machine WITH the layer on says so rather than staying silent about it. */
 export const PASSWORD_SET_DISCLOSURE =
-  'An operator password is set, so turning any of these on from off this host needs it. Turning one off never does.';
+  'An operator password is set, so a paired device needs it to change the settings of whatever is already turned on here. Turning something on is only ever done at the machine.';
+
+/**
+ * THE ONE-WAY DOOR, stated wherever a remote browser can see a switch.
+ *
+ * ## LOCALITY GATES WIDENING NOW, NOT THE PASSWORD
+ *
+ * This supersedes the #289 design, and the difference is not cosmetic: a remote caller can never turn a
+ * capability ON — **not even holding the operator password**. The password still gates changing the
+ * settings of something already on. Any copy claiming the password lets a remote device widen a grant
+ * is now false, and false in the dangerous direction, because it invites somebody to believe a
+ * credential buys authority it does not buy.
+ *
+ * Turning something OFF from a remote browser is therefore a door that closes behind you: the only way
+ * back is at the machine. That is worth saying BEFORE the click rather than in a document afterwards.
+ */
+export const REMOTE_ONE_WAY_NOTE =
+  'A device that is not on this machine can switch these off but never back on. Turning one on is done at the machine itself.';
+
+export const LOCAL_TWO_WAY_NOTE =
+  'This browser is on the machine, so it can switch these both ways. A paired device elsewhere could only switch them off.';
+
+/** The sentence a remote reader is shown before they close a door only the machine can reopen. */
+export function remoteRevokeWarning(capability: DaemonCapability, clientName = 'fy'): string {
+  return `Switching off ${capabilityNoun(capability)} from this device cannot be undone from here — turning it back on has to be done at the machine, with \`${clientName} daemon config set ${capability} --use\`.`;
+}
+
+/** What an off capability says to a caller that may not turn it on: a statement with a remedy. */
+export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'fy'): string {
+  return `${capabilityLabel(capability)} is switched off, and can only be switched on at the machine — an operator password does not let a paired device turn it on. Run \`${clientName} daemon config set ${capability} --use\` there.`;
+}
+
+// ─── how this browser reached this daemon ───────────────────────────────────────────────────────
+
+/**
+ * WHY a capability is open, which is a different question from WHETHER it is.
+ *
+ * ## THIS MUST COME FROM THE DAEMON, AND THAT IS THE WHOLE CORRECTNESS RULE
+ *
+ * A browser sitting on `http://127.0.0.1` can be reaching the daemon **through the relay**, and a
+ * relayed hop is never loopback — `tunnelApiRequest` sets `loopback: false` unconditionally, whatever
+ * address the request appears to carry. So a mark derived from `location.hostname`, the daemon's
+ * `baseUrl`, or anything else the page can see would tell a remote user they were local: the exact
+ * inversion the grant layer exists to prevent, re-introduced in the UI where nobody would look for it.
+ * Nothing in this module reads the page's address, and nothing may.
+ *
+ * ## `unknown` IS A REAL STATE, NOT A MISSING ONE
+ *
+ * The daemon does not report this yet (`GrantsView` carries no `governed` field), and the friendly
+ * assumption — "no answer means loopback" — is precisely the wrong one: it would paint a remote phone
+ * as standing at the machine. So absence is its own posture and the screen says it cannot tell, in
+ * keeping with the rest of this feature, where damaged state is never read as empty state.
+ *
+ * It also cannot be INFERRED from the refusals already on the view. A loopback caller reads `granted`
+ * on every axis — and so does a remote caller holding a valid unlock on a fully-granted machine. The
+ * two are indistinguishable in the current wire shape, so any inference here would be a guess that is
+ * wrong for a real configuration.
+ */
+export type ConnectionPosture = 'direct-local' | 'governed-remote' | 'unknown';
+
+/**
+ * The posture, from the daemon's own account of the request.
+ *
+ * `governed` is the value `isGovernedCaller(request.loopback)` produces inside the daemon — false for a
+ * caller standing on the host. `undefined` means the daemon did not say, which is its own posture.
+ */
+export function connectionPosture(governed: boolean | undefined): ConnectionPosture {
+  if (governed === undefined) return 'unknown';
+  return governed ? 'governed-remote' : 'direct-local';
+}
+
+/**
+ * The posture as the CAPABILITY VIEW reveals it, which is where it actually arrives today.
+ *
+ * `GrantsView` carries no `governed` flag, but every capability carries `mayGrant`, and the daemon
+ * computes that as exactly `!governed` (`grants/service.ts`). So the fact is already on the wire, once
+ * per capability, and asking for a second field spelling the same thing would give the two a chance to
+ * disagree. This reads it back rather than requesting a duplicate.
+ *
+ * IT REQUIRES UNANIMITY. Every capability on one connection must agree, because they are all derived
+ * from one request's carrier; a view where some say yes and some say no is not a posture this can name,
+ * and it fails to `unknown` rather than picking a side. An empty list is `unknown` for the same reason —
+ * there is no evidence, and absence is never read as loopback.
+ */
+export function postureFromCapabilities(capabilities: readonly CapabilityGrantView[]): ConnectionPosture {
+  if (capabilities.length === 0) return 'unknown';
+  const first = capabilities[0]?.mayGrant;
+  if (first === undefined || capabilities.some(entry => entry.mayGrant !== first)) return 'unknown';
+  return connectionPosture(!first);
+}
+
+/** What each posture means for the whole screen, in the words a person would use about themselves. */
+export interface PostureCopy {
+  readonly badge: string;
+  readonly headline: string;
+  readonly detail: string;
+  readonly tone: 'ok' | 'disclosure' | 'limit' | 'fault';
+}
+
+const POSTURE_COPY = {
+  'direct-local': {
+    badge: 'Direct — on this machine',
+    headline: 'This browser is talking straight to the machine, so none of these limits apply to it.',
+    detail:
+      'Everything below is open because you are standing at the machine, not because it was granted. Somebody at the machine already has the machine, so gating them would be friction with no safety. The same browser on your phone, over the network or the relay, would be governed by every limit on this page.',
+    tone: 'ok',
+  },
+  'governed-remote': {
+    badge: 'Remote — governed',
+    headline: 'This browser reached the machine from somewhere else, so the operator’s limits apply to it.',
+    detail:
+      'Every capability below is open only because the operator allowed it, and can be closed on the host. This is the case the limits exist for: possession of the machine is exactly what this connection does not have.',
+    tone: 'disclosure',
+  },
+  unknown: {
+    badge: 'Cannot tell',
+    headline: 'This daemon did not say how it saw this connection, so Ferretry will not claim either way.',
+    detail:
+      'A page on 127.0.0.1 can still be reaching the machine through the relay, so the address in the address bar does not answer this and is deliberately not used. Until the daemon reports it, treat the limits below as the ones that would apply to a remote device — the safe reading, not the flattering one.',
+    tone: 'fault',
+  },
+} satisfies Record<ConnectionPosture, PostureCopy>;
+
+export const postureCopy = (posture: ConnectionPosture): PostureCopy => POSTURE_COPY[posture];
+
+/**
+ * Why THIS capability is open right now — the per-row version of the posture.
+ *
+ * `ungoverned` is the answer for every row on a loopback connection and is the distinction the owner
+ * asked for: open because of where you are, rather than open because somebody decided. The other three
+ * are the governed answers, and they are the reasons the daemon already gives.
+ */
+export type OpenReason = 'ungoverned' | 'granted' | 'ungated' | 'closed' | 'unknown';
+
+export function openReason(entry: CapabilityGrantView, axis: CapabilityAxis, posture: ConnectionPosture): OpenReason {
+  if (!axisAllowed(entry, axis)) return 'closed';
+  if (posture === 'direct-local') return 'ungoverned';
+  if (posture === 'unknown') return 'unknown';
+  return axisRefusal(entry, axis) === 'ungated' ? 'ungated' : 'granted';
+}
+
+/** The short mark a row carries, so five rows do not all read "allowed". */
+const OPEN_REASON_LABELS = {
+  ungoverned: 'Open — you are at the machine',
+  granted: 'Open — granted',
+  ungated: 'Open — nothing behind it',
+  closed: 'Closed',
+  unknown: 'Open — reason unknown',
+} satisfies Record<OpenReason, string>;
+
+export const openReasonLabel = (reason: OpenReason): string => OPEN_REASON_LABELS[reason];
+
+// ─── how much a capability hands over ──────────────────────────────────────────────────────────
+
+/**
+ * HOW MUCH ACCESS THIS CAPABILITY IS, so the dangerous ones do not look like the mild ones.
+ *
+ * Five rows that read alike make a person weigh `filesystem` and `fleet` the same, and they are not the
+ * same: one reads files in a working tree, the other writes executables into accounts. The weight is a
+ * property of what the capability REACHES — the reasoning already written down in `CAPABILITY_REACH` —
+ * so it is declared per capability rather than derived from whether it happens to be on.
+ *
+ * ENCODED IN FORM AS WELL AS COLOUR. Three filled pips out of three is legible to somebody who cannot
+ * distinguish the tones, on a monochrome print, and in a screenshot pasted into an issue. Colour alone
+ * would make this an accessibility failure in the one place the product is telling somebody how much of
+ * their machine they are handing over.
+ */
+export type AccessWeight = 'broad' | 'moderate' | 'narrow';
+
+const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
+  // Writes executables into accounts and materialises wrappers: the widest thing here.
+  fleet: 'broad',
+  // Spawns a shell on the host. Anything the account can do, this can do.
+  terminal: 'broad',
+  // Drives a browser somebody is already signed into, so it inherits every session in it.
+  browser: 'moderate',
+  // Reads a working tree. Real exposure, no write and no execution.
+  filesystem: 'narrow',
+  // Decides how much of somebody's quota the machine may spend unattended, but reaches no further.
+  warden: 'moderate',
+};
+
+export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];
+
+/** Filled pips out of three, so the mark has a shape and not only a hue. */
+const WEIGHT_PIPS: Readonly<Record<AccessWeight, number>> = { broad: 3, moderate: 2, narrow: 1 };
+export const weightPips = (weight: AccessWeight): number => WEIGHT_PIPS[weight];
+
+export const ACCESS_WEIGHT_ORDER: readonly AccessWeight[] = ['broad', 'moderate', 'narrow'];
+
+/** The legend, because a mark nobody can decode is decoration. */
+const WEIGHT_COPY = {
+  broad: { label: 'Widens access most', detail: 'Runs or writes programs on the machine.' },
+  moderate: { label: 'Widens access', detail: 'Reaches a signed-in session or spends quota unattended.' },
+  narrow: { label: 'Reads only', detail: 'Reads state without changing the machine.' },
+} satisfies Record<AccessWeight, { label: string; detail: string }>;
+
+export const weightCopy = (weight: AccessWeight): { label: string; detail: string } => WEIGHT_COPY[weight];
+
+/**
+ * What the whole screen is about, stated once and prominently.
+ *
+ * THIS BROWSER, ON THIS DAEMON — not the machine, and not every device that has ever paired with it.
+ * A person reading a permission screen will otherwise take it for the machine's policy and conclude
+ * their other devices are covered by what they see here.
+ */
+export const CAPABILITY_LIST_SCOPE_NOTE =
+  'This is what THIS browser may do on THIS machine. Another device paired to the same machine can have different answers, and nothing here describes them.';
 
 /**
  * The sentence a reader is shown for a state that is not a plain yes.
@@ -144,16 +351,26 @@ export interface GrantGuidance {
  * feature exists to remove.
  */
 const GUIDANCE = {
-  granted: {
-    tone: 'ok',
-    badge: 'Allowed',
-    explanation: 'The operator allowed this, and the operator password stood behind it.',
-    offersUnlock: false,
-  },
+  /**
+   * Allowed. It deliberately does NOT claim the password stood behind it.
+   *
+   * `granted` is what a `use` axis reads on every machine, password or not, so wording it as "the
+   * password stood behind this" states something false on the common setup — and beside a header that
+   * already says no password is set, a reader is entitled to believe one of the two is lying.
+   */
+  granted: { tone: 'ok', badge: 'Allowed', explanation: 'The operator allows this.', offersUnlock: false },
+  /**
+   * Allowed with nothing behind it — a disclosure, not a refusal.
+   *
+   * IT DOES NOT REPEAT THE WHOLE DISCLOSURE. That sentence is owed once, and the card states it in the
+   * header; restating it under five capabilities × the configure axis prints it five times on one
+   * screen, which is exactly the nagging `docs/grants.md` rules out. The row says the short fact and
+   * lets the header carry the consequence.
+   */
   ungated: {
     tone: 'disclosure',
     badge: 'Allowed',
-    explanation: `Allowed, and nothing is standing behind it. ${NO_PASSWORD_DISCLOSURE}`,
+    explanation: 'Allowed, and no operator password is standing behind it.',
     offersUnlock: false,
   },
   'not-granted': {
@@ -162,10 +379,19 @@ const GUIDANCE = {
     explanation: 'The operator of this machine switched this off. It is turned back on on the host.',
     offersUnlock: false,
   },
+  /**
+   * The password gates CHANGING THE SETTINGS of something already on — never turning one on.
+   *
+   * The old wording ("this needs the operator password") was true of every refusal in #289 and is now
+   * false for the one that matters most: a remote caller holding the password still cannot widen a
+   * grant. A sentence that implies otherwise invites somebody to type a password expecting authority it
+   * does not buy, which is worse than saying nothing.
+   */
   locked: {
     tone: 'limit',
     badge: 'Needs the password',
-    explanation: 'This needs the operator password for this machine. Unlock below, then try again.',
+    explanation:
+      'Changing this needs the operator password for this machine. Unlock below, then try again. (Switching a capability on is a separate matter and is only ever done at the machine.)',
     offersUnlock: true,
   },
   'rate-limited': {
@@ -224,7 +450,7 @@ export function axisGuidance(entry: CapabilityGrantView, axis: CapabilityAxis, c
   return {
     tone: 'limit',
     badge: 'Fixed on the host',
-    explanation: `This browser may use ${capabilityNoun(entry.capability)} and may not change this. The operator did not grant it permission to change ${capabilityNoun(entry.capability)}, which is also what stops it re-granting itself the capability — so this is changed on the host, or by unlocking with the operator password.`,
+    explanation: `This browser may use ${capabilityNoun(entry.capability)} and may not change this. The operator did not grant it permission to change ${capabilityNoun(entry.capability)}, which is also what stops it re-granting itself the capability — so this is changed at the machine.`,
     offersUnlock: false,
   };
 }
@@ -255,13 +481,32 @@ export const grantPatch = (capability: DaemonCapability, axis: CapabilityAxis, n
   ({ [capability]: { [axis]: next } }) as GrantsPatch;
 
 /**
- * Whether this exact change needs an unlock before it will be accepted.
+ * Whether this caller may turn this capability ON at all.
  *
- * ONLY WIDENING, and only with a password set. Turning an axis off is what somebody does during an
- * incident, so a prompt between them and shutting a door would be a liability; turning one on is the
- * single change that gives a remote browser more than it had. With no password there is nothing to
- * unlock — such a change is a host act and the daemon says so — so this is false there too, and the
- * refusal that comes back is rendered rather than pre-empted with a prompt that could not help.
+ * ## LOCALITY DECIDES THIS, AND NOTHING ELSE CAN
+ *
+ * A remote caller may never widen a grant — no operator password, no unlock, no credential changes it.
+ * So this is not a question about what to prompt for; it is a question about whether to render a
+ * control at all. A switch that always fails is worse than no switch: it teaches somebody the product
+ * is broken rather than that the machine decided.
+ *
+ * READ STRAIGHT OFF THE WIRE, deliberately, rather than inferred from the posture. The daemon is
+ * enforcing this rule and now states it per capability, so a second copy of the rule in the browser is
+ * a second thing that can disagree with it — and the disagreement would show up as a control that
+ * either fails on press or is missing when it should work.
+ */
+export function mayGrantCapability(entry: CapabilityGrantView): boolean {
+  return entry.mayGrant;
+}
+
+/**
+ * Whether this exact change still needs an unlock.
+ *
+ * NARROWED BY THE RULE CHANGE. Widening is now decided by locality rather than by the password, so the
+ * only change an unlock is ever needed for is altering the settings of a capability that is already on
+ * — which is `configure` on a machine with a password set. Turning an axis OFF is never gated: it is
+ * what somebody does during an incident, and a prompt between a person and shutting a door is a
+ * liability.
  */
 export function grantChangeNeedsUnlock(view: GrantsView, capability: DaemonCapability, next: boolean): boolean {
   if (!next || !view.passwordSet) return false;

@@ -1,6 +1,6 @@
 import { DAEMON_CAPABILITIES, type DaemonCapability, type GrantsPatch } from '@ferretry/protocol';
 import type { IGrantGateway, IGrantOutput, IOperatorPasswordSource } from './ports.ts';
-import { grantDifference, renderGrantChange, renderGrants } from './render.ts';
+import { grantDifference, renderGrantChange, renderGrantHistory, renderGrants } from './render.ts';
 
 /** Flags the grant commands accept. */
 export interface GrantCommandOptions {
@@ -46,6 +46,18 @@ export class GrantController {
       return;
     }
     this.deps.out.success(renderGrants(view, this.deps.clientName));
+  }
+
+  /**
+   * Who changed what, most recent first.
+   *
+   * A READ, so it takes no unlock and no password: the caller who was refused a capability is exactly
+   * the caller asking when it was refused, and gating the history behind the decision would put the
+   * answer out of reach of the only person with the question.
+   */
+  async history(options: GrantCommandOptions): Promise<void> {
+    const view = await this.deps.gateway.history();
+    this.deps.out.success(options.json === true ? JSON.stringify(view) : renderGrantHistory(view));
   }
 
   /**

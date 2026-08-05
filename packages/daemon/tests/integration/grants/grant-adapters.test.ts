@@ -280,3 +280,97 @@ describe('the remaining grant ports', () => {
     should(Object.keys(saved.grants).sort()).deepEqual([...DAEMON_CAPABILITIES].sort());
   });
 });
+
+describe('reading the grant journal back', () => {
+  /** A tree whose slice reads behave like a real file's, so the tail logic is actually exercised. */
+  function journal(text: string) {
+    const bytes = new TextEncoder().encode(text);
+    const port = {
+      information: async () => (text === '' ? undefined : { size: bytes.byteLength }),
+      readSlice: async (_path: string, offset: number, length: number) => bytes.slice(offset, offset + length),
+      appendLineDurable: async () => ({ offset: 0, fingerprint: { device: 0, inode: 0 } }),
+    } as unknown as FileSystemPort;
+    return new JournalGrantAudit(paths.grantAudit, port);
+  }
+
+  const line = (at: string, actor: string, changes: readonly string[]) =>
+    `${JSON.stringify({ kind: 'grant.changed', at, actor, changes })}\n`;
+
+  it('should answer an absent journal as an empty history, not as a failure', async () => {
+    // Nothing has ever been changed on a fresh machine. That is a real answer.
+    // Act
+    const read = await journal('').recent(10);
+
+    // Assert
+    should(read).deepEqual({ entries: [], unreadable: 0, truncated: false });
+  });
+
+  it('should return the most recent first and stop at the limit', async () => {
+    // Arrange
+    const text = [
+      line('2026-08-05T09:00:00.000Z', 'admin-cli', ['fleet.use=off']),
+      line('2026-08-05T10:00:00.000Z', 'device:phone-1', ['fleet.use=on']),
+      line('2026-08-05T11:00:00.000Z', 'admin-ui', ['warden.configure=off']),
+    ].join('');
+
+    // Act
+    const read = await journal(text).recent(2);
+
+    // Assert
+    should(read.entries.map(entry => entry.actor)).deepEqual(['admin-ui', 'device:phone-1']);
+    should(read.truncated).be.false();
+  });
+
+  it('should COUNT a line it cannot read rather than dropping it', async () => {
+    // Silently skipping damage would let a truncated or tampered journal read as a clean history —
+    // the absent-evidence-as-benign-result defect this product has been bitten by repeatedly.
+    // Arrange — a torn line, a foreign record, and one whose fields are the wrong shape.
+    const text = [
+      line('2026-08-05T09:00:00.000Z', 'admin-cli', ['fleet.use=off']),
+      '{"kind":"grant.changed","at":"2026\n',
+      '{"kind":"session.started","at":"2026-08-05T09:30:00.000Z"}\n',
+      '{"kind":"grant.changed","at":"2026-08-05T09:40:00.000Z","actor":"","changes":[]}\n',
+      '{"kind":"grant.changed","at":"2026-08-05T09:45:00.000Z","actor":"a","changes":[7]}\n',
+    ].join('');
+
+    // Act
+    const read = await journal(text).recent(10);
+
+    // Assert — one good record survives and every bad line is reported.
+    should(read.entries).have.length(1);
+    should(read.unreadable).equal(4);
+  });
+
+  it('should never fabricate a record out of a half line at the window edge', async () => {
+    // A window that opens mid-record must drop that fragment. Parsing half a record into a whole one
+    // would invent history, which is worse than losing it — and it is not damage, so it is not
+    // counted as damage either.
+    // Arrange — a journal far larger than the 64 KiB window, so the window certainly opens mid-line.
+    const filler = Array.from({ length: 2_000 }, (_unused, index) =>
+      line(`2026-08-05T09:00:00.000Z`, `device:filler-${String(index).padStart(40, '0')}`, ['fleet.use=off']),
+    ).join('');
+    const text = `${filler}${line('2026-08-05T12:00:00.000Z', 'admin-cli', ['warden.use=off'])}`;
+
+    // Act
+    const read = await journal(text).recent(3);
+
+    // Assert — the newest record is intact, and the truncation is declared rather than hidden.
+    should(read.entries[0]).containDeep({ actor: 'admin-cli', changes: ['warden.use=off'] });
+    should(read.truncated).be.true();
+    should(read.unreadable).equal(0);
+  });
+
+  it('should report a slice it could not read as an empty window rather than as history', async () => {
+    // Arrange — a file whose size is known but whose bytes will not come back.
+    const port = {
+      information: async () => ({ size: 100 }),
+      readSlice: async () => undefined,
+    } as unknown as FileSystemPort;
+
+    // Act
+    const read = await new JournalGrantAudit(paths.grantAudit, port).recent(10);
+
+    // Assert
+    should(read).deepEqual({ entries: [], unreadable: 0, truncated: false });
+  });
+});

@@ -69,6 +69,22 @@ export interface GrantAuditEntry {
  */
 export interface GrantAuditPort {
   record(entry: GrantAuditEntry): Promise<void>;
+  /**
+   * The most recent records, newest first, over a BOUNDED window of the journal.
+   *
+   * A read verb on the same port as the write, because the two must agree about the format and a
+   * reader that parsed what a different writer wrote is how a history quietly stops being one.
+   */
+  recent(limit: number): Promise<GrantAuditReading>;
+}
+
+/** What one bounded read of the journal found, damage included rather than dropped. */
+export interface GrantAuditReading {
+  readonly entries: readonly GrantAuditEntry[];
+  /** Lines in the window that could not be read as a record. Reported, never silently skipped. */
+  readonly unreadable: number;
+  /** Whether the window started after the beginning of the file. */
+  readonly truncated: boolean;
 }
 
 /** Opaque unlock identifiers, minted with real entropy by an adapter. */

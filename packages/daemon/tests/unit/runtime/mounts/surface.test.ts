@@ -273,6 +273,7 @@ describe('the mounted daemon surface', () => {
       // The grant surface. NOTE WHAT IS ABSENT: no route returns the operator password, its hash or
       // its length — `GET /v1/grants` answers with booleans and reasons, and this list is the proof.
       'GET /v1/grants',
+      'GET /v1/grants/audit',
       'POST /v1/grants/unlock',
       'PATCH /v1/grants',
       'PUT /v1/grants/password',

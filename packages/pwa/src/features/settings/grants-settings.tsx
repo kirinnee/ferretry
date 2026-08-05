@@ -57,6 +57,7 @@ import {
   type GrantGuidance,
   grantAlreadyReads,
   grantChangeNeedsUnlock,
+  grantOnlyAtMachine,
   grantPatch,
   type HeldUnlock,
   NO_PASSWORD_DISCLOSURE,
@@ -64,10 +65,12 @@ import {
   operatorUnlockFailure,
   originNote,
   PASSWORD_SET_DISCLOSURE,
+  remoteRevokeWarning,
   UNLOCK_LIMIT_NOTE,
   unlockSecondsRemaining,
   usableUnlock,
 } from '../../lib/grants.ts';
+import { CapabilityList } from './capability-list.tsx';
 import { changeGrants, type GrantClient, readGrants, unlockGrants } from './grants-api.ts';
 
 /** The tone each guidance level paints with, kept in one place so five rows cannot disagree. */
@@ -89,6 +92,7 @@ function AxisControl({
   entry,
   axis,
   changeable,
+  oneWay,
   busy,
   onChange,
 }: {
@@ -96,11 +100,21 @@ function AxisControl({
   readonly axis: CapabilityAxis;
   /** Whether the daemon would accept this browser changing this axis at all. */
   readonly changeable: boolean;
+  /** True when this caller may switch the capability off but never back on. */
+  readonly oneWay: boolean;
   readonly busy: boolean;
   readonly onChange: (next: boolean) => void;
 }) {
   const recorded = entry.granted[axis];
-  const disabled = busy || !changeable;
+  /**
+   * An off axis a one-way caller may never turn on is NOT A CONTROL.
+   *
+   * Rendering a switch that fails on press teaches somebody the product is broken; the truth is that
+   * the machine decided, and a sentence naming the machine is the useful thing in its place. This is
+   * the owner's rule made structural: "do not render a control that always fails."
+   */
+  const deadWideningSwitch = oneWay && !recorded;
+  const disabled = busy || !changeable || deadWideningSwitch;
   const describedBy = useId();
   /**
    * The one sentence that keeps this from being a greyed switch.
@@ -109,7 +123,14 @@ function AxisControl({
    * own wording and getting it wrong is silent: reusing the `configure` refusal on an allowed `use`
    * row tells a person their access is switched off when it is on.
    */
-  const reason = axisGuidance(entry, axis, changeable);
+  const reason = deadWideningSwitch
+    ? {
+        tone: 'limit' as const,
+        badge: 'Only at the machine',
+        explanation: grantOnlyAtMachine(entry.capability),
+        offersUnlock: false,
+      }
+    : axisGuidance(entry, axis, changeable);
 
   return (
     <div className="min-w-0">
@@ -182,6 +203,14 @@ function CapabilityCard({
    * makes the caller the operator, so the per-capability gate has nothing left to add.
    */
   const changeable = view.unlocked || (entry.granted.use && entry.granted.configure);
+  /**
+   * Whether a switch here can travel back.
+   *
+   * `mayGrant` is false for every remote caller, unconditionally — no password and no unlock buys
+   * widening. So for such a caller an OFF axis is not a control at all, and an ON axis is a door that
+   * only closes. Both facts are stated rather than discovered by pressing something.
+   */
+  const oneWay = !entry.mayGrant;
 
   return (
     <section
@@ -209,11 +238,24 @@ function CapabilityCard({
             entry={entry}
             axis={axis}
             changeable={changeable}
+            oneWay={oneWay}
             busy={busy}
             onChange={next => onChange(axis, next)}
           />
         ))}
       </div>
+      {/* THE ONE-WAY DOOR, said before anybody walks through it. A remote caller may switch this off
+          and can never switch it back on, so the consequence belongs beside the switch rather than in
+          a document read afterwards. It is shown while the capability is still ON, because that is the
+          only moment the warning can change what somebody does. */}
+      {oneWay && entry.granted.use ? (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-2 py-1 text-meta leading-base text-warn"
+          data-grant-one-way={entry.capability}
+        >
+          {remoteRevokeWarning(entry.capability)}
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -377,6 +419,15 @@ export function GrantsCard({
       aria-labelledby={headingId}
       data-grant-surface={String(connection.daemonId)}
     >
+      {/* READING BEFORE CHANGING. The list answers "what may this browser do here, why, and how much
+          does each one hand over"; the switches below answer "change it". Somebody arriving from a
+          refused control needs the first question answered before the second is even relevant.
+          `governed` is the DAEMON's account of the connection and is undefined until the wire carries
+          it — never inferred from this page's address, which would invert the answer over a relay. */}
+      {/* No posture prop: the list reads it from `mayGrant` on the capabilities, which is the daemon's
+          own `!governed`. Passing a second copy of the same fact would give the two a chance to
+          disagree, and neither is ever derived from this page's address. */}
+      <CapabilityList connection={connection} capabilities={view.capabilities} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
@@ -593,7 +644,12 @@ export function GrantsSurface({
         <h3 className="m-0 text-title font-semibold text-fg">Capability limits unavailable</h3>
         <p className="mb-0 mt-1 text-ui leading-base text-muted">
           This daemon did not say what a paired device may do on it, so Ferretry will not show a limit or claim there is
-          none. Nothing here is evidence that this machine is unrestricted. {loadFailure.reason}
+          none. Nothing here is evidence that this machine is unrestricted.
+        </p>
+        {/* The daemon's own words, on their own line rather than run into the sentence above: they are
+            a message from somewhere else, and appending one mid-paragraph reads as a typo. */}
+        <p className="mb-0 mt-2 text-meta leading-base text-faint" data-grant-load-failure="">
+          {loadFailure.reason}
         </p>
       </section>
     );

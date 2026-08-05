@@ -41,6 +41,7 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
   useRefusal: 'granted',
   configureRefusal: 'granted',
   origin: 'default',
+  mayGrant: false,
   ...overrides,
 });
 
@@ -87,10 +88,19 @@ describe('grant vocabulary', () => {
       expect(grantGuidance(refusal).offersUnlock).toBe(false);
   });
 
-  it('states the honest cost on `ungated` rather than reporting a plain success', () => {
+  it('marks `ungated` as a disclosure rather than reporting a plain success', () => {
     const guidance = grantGuidance('ungated');
     expect(guidance.tone).toBe('disclosure');
-    expect(guidance.explanation).toContain(NO_PASSWORD_DISCLOSURE);
+    expect(guidance.explanation).toContain('no operator password');
+    // It does NOT restate the full disclosure: that sentence is owed once, and five capabilities ×
+    // the configure axis would print it five times on one screen.
+    expect(guidance.explanation).not.toContain(NO_PASSWORD_DISCLOSURE);
+  });
+
+  it('never claims the operator password stood behind an answer that did not need one', () => {
+    // `granted` is what a `use` axis reads on every machine, password or not, so a sentence naming the
+    // password would be false on the common setup — beside a header saying none is set, at that.
+    expect(grantGuidance('granted').explanation).not.toContain('password');
   });
 
   it('names the capability in the two refusals a person acts on per capability', () => {

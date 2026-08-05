@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { GRANT_UNLOCK_MAX_ATTEMPTS, GrantsViewSchema, GrantUnlockViewSchema } from '@ferretry/protocol';
+import {
+  DAEMON_CAPABILITIES,
+  GRANT_UNLOCK_MAX_ATTEMPTS,
+  GrantAuditViewSchema,
+  GrantsViewSchema,
+  GrantUnlockViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -268,6 +274,7 @@ describe('a failure that is not a grant refusal', () => {
       ...subsystem,
       refresh: async () => undefined,
       hasPassword: () => false,
+      history: async (limit: number) => await subsystem.history(limit),
       view: (presentation: Parameters<typeof subsystem.view>[0]) => subsystem.view(presentation),
       unlock: async () => {
         throw new Error('the verifier file vanished mid-request');
@@ -294,5 +301,47 @@ describe('a failure that is not a grant refusal', () => {
     // Assert
     should(unlocked.status).equal(500);
     should(patched.status).equal(500);
+  });
+});
+
+describe('the audit read', () => {
+  it('should report who changed what, and not be gated on the grants it reports', async () => {
+    // A caller refused a capability is exactly the caller who needs to know when and by whom it was
+    // refused. Gating the history behind the decision would put the answer out of reach of the only
+    // person asking the question.
+    // Arrange — every capability switched off for a remote caller.
+    const subsystem = grantSubsystem({
+      grants: Object.fromEntries(
+        DAEMON_CAPABILITIES.map(capability => [capability, { use: false, configure: false }]),
+      ) as typeof DEFAULT_CAPABILITY_GRANTS,
+    });
+    await subsystem.refresh();
+    await subsystem.patch({ fleet: { use: true } }, { loopback: true, actor: 'admin-cli' });
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+
+    // Act
+    const answered = await dispatcher.dispatch(remote('/v1/grants/audit'));
+
+    // Assert
+    should(answered.status).equal(200);
+    const view = GrantAuditViewSchema.parse(jsonBody(answered));
+    should(view.entries[0]).containDeep({ actor: 'admin-cli', changes: ['fleet.use=on'] });
+    should(view.unreadable).equal(0);
+  });
+
+  it('should refuse a warden, which has no business learning which devices exist', async () => {
+    // The grant READ is warden-scoped because a subject of a decision may read the decision. The
+    // audit names DEVICES, which is a different disclosure.
+    // Arrange
+    const { subsystem } = await mount();
+    const dispatcher = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), CREDENTIALS);
+
+    // Act
+    const answered = await dispatcher.dispatch(
+      request({ path: '/v1/grants/audit', headers: { authorization: 'Bearer warden-secret' }, loopback: false }),
+    );
+
+    // Assert
+    should(answered.status).equal(403);
   });
 });

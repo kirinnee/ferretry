@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   type CapabilityGrantView,
   DAEMON_CAPABILITIES,
+  type GrantAuditView,
   type GrantsPatch,
   type GrantsView,
   OPERATOR_UNLOCK_HEADER,
@@ -11,7 +12,13 @@ import { registerGrantCommands } from '../../../src/lib/grants/commands';
 import { GrantController } from '../../../src/lib/grants/controller';
 import { GRANTS_PATH, ProtocolGrantGateway } from '../../../src/lib/grants/gateway';
 import type { IGrantGateway, IGrantOutput, IOperatorPasswordSource } from '../../../src/lib/grants/ports';
-import { grantDifference, NO_PASSWORD_NOTE, renderGrantChange, renderGrants } from '../../../src/lib/grants/render';
+import {
+  grantDifference,
+  NO_PASSWORD_NOTE,
+  renderGrantChange,
+  renderGrantHistory,
+  renderGrants,
+} from '../../../src/lib/grants/render';
 
 const capability = (
   name: (typeof DAEMON_CAPABILITIES)[number],
@@ -24,6 +31,8 @@ const capability = (
   granted,
   useRefusal: granted.use ? 'granted' : 'not-granted',
   configureRefusal: granted.configure ? 'ungated' : 'not-granted',
+  // A remote caller never widens, so the CLI's fixtures speak for the caller the grants govern.
+  mayGrant: false,
   origin: 'default',
   ...overrides,
 });
@@ -61,10 +70,15 @@ class FakeGateway implements IGrantGateway {
   constructor(
     private current: GrantsView = view(),
     private readonly next: GrantsView = view(),
+    private readonly audit: GrantAuditView = { entries: [], unreadable: 0, truncated: false },
   ) {}
 
   async read(): Promise<GrantsView> {
     return this.current;
+  }
+
+  async history(): Promise<GrantAuditView> {
+    return this.audit;
   }
 
   async change(patch: GrantsPatch, unlock?: string): Promise<GrantsView> {
@@ -518,5 +532,110 @@ describe('the command surface', () => {
 
     // Assert
     expect(out.messages[0]).toContain('NOT on this host');
+  });
+});
+
+describe('reading who changed what', () => {
+  const audit = (overrides: Partial<GrantAuditView> = {}): GrantAuditView => ({
+    entries: [
+      { at: '2026-08-05T11:00:00.000Z', actor: 'device:phone-1', changes: ['fleet.configure=off'] },
+      { at: '2026-08-05T10:00:00.000Z', actor: 'admin-cli', changes: ['warden.use=on', 'warden.configure=on'] },
+    ],
+    unreadable: 0,
+    truncated: false,
+    ...overrides,
+  });
+
+  it('should say who, when and what — never a credential', () => {
+    // A permission model whose changes leave no trace can only be understood by its effects, so
+    // "when did this machine start letting a phone apply the fleet, and who said so" is the question.
+    // Act
+    const rendered = renderGrantHistory(audit());
+
+    // Assert
+    expect(rendered).toContain('device:phone-1');
+    expect(rendered).toContain('fleet.configure=off');
+    expect(rendered).toContain('warden.use=on, warden.configure=on');
+    expect(rendered).not.toMatch(/Bearer|token|password/iu);
+  });
+
+  it('should report damage rather than quietly showing a shorter history', () => {
+    // Silently omitting an unreadable line would let a truncated or tampered record read as a clean
+    // one — and a permission history that loses entries quietly is worse than none, because people
+    // trust it.
+    // Act
+    const rendered = renderGrantHistory(audit({ unreadable: 2 }));
+
+    // Assert
+    expect(rendered).toContain('2 lines in this window could not be read');
+    expect(rendered).toContain('this history is incomplete');
+  });
+
+  it('should say when it is only showing the tail', () => {
+    // Act + Assert
+    expect(renderGrantHistory(audit({ truncated: true }))).toContain('older records exist');
+    expect(renderGrantHistory(audit({ unreadable: 1 }))).toContain('1 line in this window');
+  });
+
+  it('should say plainly when nothing has ever been changed', () => {
+    // An empty history is a real answer, not a failure, and must not read as one.
+    // Act + Assert
+    expect(renderGrantHistory(audit({ entries: [] }))).toBe('no grant has been changed on this machine');
+  });
+
+  it('should take no password and no unlock, because it is a read', () => {
+    // The caller who was refused a capability is exactly the caller asking when it was refused.
+    // Arrange
+    const gateway = new FakeGateway(view(), view(), audit());
+    const { instance, out } = controller(gateway);
+
+    // Act
+    return instance.history({}).then(() => {
+      // Assert
+      expect(gateway.unlocked).toBeUndefined();
+      expect(out.messages[0]).toContain('device:phone-1');
+    });
+  });
+
+  it('should print the protocol document when asked', async () => {
+    // Arrange
+    const { instance, out } = controller(new FakeGateway(view(), view(), audit()));
+
+    // Act
+    await instance.history({ json: true });
+
+    // Assert
+    expect(JSON.parse(out.messages[0] ?? '{}')).toHaveProperty('unreadable', 0);
+  });
+
+  it('should be reachable as `history` and as `log`', async () => {
+    // Arrange
+    const program = new Command();
+    program.command('daemon').description('manage the daemon');
+    const { instance, out } = controller(new FakeGateway(view(), view(), audit()));
+    registerGrantCommands(program, () => instance);
+
+    // Act
+    await program.parseAsync(['daemon', 'config', 'log'], { from: 'user' });
+
+    // Assert
+    expect(out.messages[0]).toContain('admin-cli');
+  });
+
+  it('should read the audit path rather than the grant path', async () => {
+    // Arrange
+    const seen: string[] = [];
+    const client = {
+      request: async (path: string) => {
+        seen.push(path);
+        return audit();
+      },
+    };
+
+    // Act
+    await new ProtocolGrantGateway(client as never).history();
+
+    // Assert
+    expect(seen).toEqual([`${GRANTS_PATH}/audit`]);
   });
 });

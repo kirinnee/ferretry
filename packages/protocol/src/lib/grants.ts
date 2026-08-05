@@ -193,6 +193,18 @@ export const CapabilityGrantViewSchema = z.strictObject({
   /** Why `configure` reads the way it does. */
   configureRefusal: GrantRefusalSchema,
   /**
+   * May THIS caller turn this capability on?
+   *
+   * `false` for every remote caller, always — widening is a local act and no password buys it. It is
+   * on the wire so a UI is TOLD rather than left to infer it from a rule it would have to encode a
+   * second time, and so an off capability can render as "only from the machine" instead of a dead
+   * toggle that fails when somebody presses it.
+   *
+   * It is also the warning a remote caller needs BEFORE switching something off: this is a one-way
+   * door, and the moment to say so is before it closes.
+   */
+  mayGrant: z.boolean(),
+  /**
    * Whether the operator wrote this capability down, or the product answered for them.
    *
    * THE SAME PROVENANCE TREATMENT `--print-config` GIVES EVERY OTHER VALUE, and for the same reason:
@@ -226,6 +238,47 @@ export const GrantsViewSchema = z.strictObject({
   lockedUntil: InstantSchema.optional(),
 });
 export type GrantsView = z.infer<typeof GrantsViewSchema>;
+
+/**
+ * How many recorded changes one read returns, newest first.
+ *
+ * BOUNDED, because the journal is append-only and a machine that has been reconfigured for a year
+ * would otherwise be asked to materialise its whole history to answer "what changed recently". The
+ * question people actually have is the last few, and a person who needs more can read the file.
+ */
+export const GRANT_AUDIT_MAX_ENTRIES = 50 as const;
+
+/** One recorded grant change, as a reader is told about it. */
+export const GrantAuditEntryViewSchema = z.strictObject({
+  at: InstantSchema,
+  /**
+   * WHO, as the resolved actor — `admin-cli`, `admin-ui`, `device:<id>`. Never a token: a durable
+   * record of who did something must not become a durable record of the credential they did it with.
+   */
+  actor: z.string().min(1).max(256),
+  /** Each axis that moved, as `capability.axis=on|off`. Empty is impossible — a patch that changed
+   *  nothing is not recorded. */
+  changes: z.array(z.string().min(1).max(64)).readonly(),
+});
+export type GrantAuditEntryView = z.infer<typeof GrantAuditEntryViewSchema>;
+
+/**
+ * The recent history of who changed what.
+ *
+ * `unreadable` IS NOT DECORATION. A journal line this daemon cannot parse is damage, and silently
+ * dropping it would let a tampered or truncated history read as a clean one — the exact
+ * absent-evidence-as-benign-result defect the rest of this contract is built to refuse. The count
+ * travels with the entries so a reader is told their history is incomplete rather than shown a
+ * shorter one.
+ */
+export const GrantAuditViewSchema = z.strictObject({
+  entries: z.array(GrantAuditEntryViewSchema).readonly(),
+  /** Lines in the window that could not be read as a record. Non-zero means the history is damaged. */
+  unreadable: z.number().int().nonnegative(),
+  /** Whether older records exist outside the window this read covered. */
+  truncated: z.boolean(),
+});
+export type GrantAuditView = z.infer<typeof GrantAuditViewSchema>;
 
 /**
  * Setting or clearing the operator password from the host.

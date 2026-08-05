@@ -1,4 +1,4 @@
-import type { GrantsPatch, GrantsView, IFyApiClient } from '@ferretry/protocol';
+import type { GrantAuditView, GrantsPatch, GrantsView, IFyApiClient } from '@ferretry/protocol';
 
 /** Presentation for the grant commands. */
 export interface IGrantOutput {
@@ -28,6 +28,8 @@ export interface IOperatorPasswordSource {
  */
 export interface IGrantGateway {
   read(): Promise<GrantsView>;
+  /** Who changed what, newest first. */
+  history(): Promise<GrantAuditView>;
   change(patch: GrantsPatch, unlock?: string): Promise<GrantsView>;
   /** Trades the operator password for a short-lived unlock. */
   unlock(password: string): Promise<string>;

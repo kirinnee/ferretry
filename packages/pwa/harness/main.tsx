@@ -130,6 +130,7 @@ import { DictationSettings } from '../src/features/settings/dictation-settings.t
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
+import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
@@ -1357,11 +1358,15 @@ const grantEntry = (
   useRefusal: GrantRefusal,
   configureRefusal: GrantRefusal,
   origin: 'default' | 'config file' = 'default',
+  /** Whether this fixture's caller may turn the capability ON. False models a remote browser, which
+   *  is the interesting case: widening is a local act and no password buys it. */
+  mayGrant = false,
 ): CapabilityGrantView => ({
   capability,
   use: useRefusal === 'granted' || useRefusal === 'ungated',
   configure: configureRefusal === 'granted' || configureRefusal === 'ungated',
   granted,
+  mayGrant,
   useRefusal,
   configureRefusal,
   origin,
@@ -1388,7 +1393,12 @@ const HARNESS_GRANTS_LOCKED: GrantsView = {
 
 /** The permissive default: nothing is standing behind the configure controls, and the screen says so. */
 const HARNESS_GRANTS_UNGATED: GrantsView = {
-  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'ungated')),
+  // `mayGrant: true` — this fixture is the caller standing AT the machine, the only one that may widen.
+  // It is what makes the "direct local" capability-list frame a real loopback view rather than a remote
+  // view wearing a local badge.
+  capabilities: DAEMON_CAPABILITIES.map(capability =>
+    grantEntry(capability, on, 'granted', 'ungated', 'default', true),
+  ),
   passwordSet: false,
   unlocked: false,
 };
@@ -4905,6 +4915,48 @@ function Shell() {
               throw new Error('this daemon did not answer');
             }}
           />
+        </div>
+      ),
+    },
+    {
+      // The capability list on a laptop talking straight to the machine: everything open, and open for
+      // a REASON a person can act on — "you have this because you are standing here", not "granted".
+      // The harness daemon's address is loopback in all three of these frames on purpose: the mark must
+      // come from the daemon's account of the carrier, so the address must be unable to move it.
+      label: 'Capability list — direct local',
+      render: () => (
+        <div data-harness="capability-list-local">
+          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_UNGATED.capabilities} governed={false} />
+        </div>
+      ),
+    },
+    {
+      // THE FRAME THAT MATTERS. Same loopback-looking address, and the daemon said the connection is
+      // governed — so this must read "Remote — governed". A screenshot showing "Direct" here would be
+      // the inversion #289 exists to prevent, visible.
+      label: 'Capability list — governed remote',
+      render: () => (
+        <div data-harness="capability-list-remote">
+          <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCKED.capabilities} governed />
+        </div>
+      ),
+    },
+    {
+      /**
+       * No answer from the daemon. It says so rather than assuming the friendly reading: absence of
+       * evidence is not evidence of loopback.
+       *
+       * THE FIXTURE HAS TO CARRY NO CAPABILITIES TO REACH THIS. The posture is derived from `mayGrant`,
+       * so a list of capabilities always determines one — passing the locked fixture here rendered
+       * "Remote — governed" under a frame labelled "cannot tell", which is a screenshot that quietly
+       * documents the wrong thing. An empty list is the honest way to model a daemon that said nothing,
+       * and it is also the real case: `unknown` is what a caller sees when the read produced no
+       * capabilities to infer from.
+       */
+      label: 'Capability list — cannot tell',
+      render: () => (
+        <div data-harness="capability-list-unknown">
+          <CapabilityList connection={daemon} capabilities={[]} />
         </div>
       ),
     },
