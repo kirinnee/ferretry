@@ -61,11 +61,9 @@ export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
 /** What the component asks a daemon to do. The host adapter turns this into the
  *  protocol request; keeping it structural is what lets the same body drive both
  *  the details sheet and the composer bar without either owning a transport. */
-export interface RuntimeControlCommand {
-  readonly action: 'model' | 'effort';
-  readonly model?: string;
-  readonly effort?: string;
-}
+export type RuntimeControlCommand =
+  | { readonly action: 'model'; readonly model?: string; readonly effort?: string }
+  | { readonly action: 'effort'; readonly effort: string };
 
 export interface RuntimeControlApi {
   /** The host must send this to the exact paired daemon it is handed. The request
@@ -146,7 +144,7 @@ export const codexPickerFallbackNeeded = (
  * — is the whole wiring, and the two cannot drift. The details sheet supplies
  * only `onClose`, which is why the rest are optional here.
  */
-export interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose'>> {
+export interface RuntimeSwitchCallbacks extends Partial<Omit<RuntimeSwitchLifecycle, 'onClose' | 'open'>> {
   readonly onClose: RuntimeSwitchLifecycle['onClose'];
 }
 

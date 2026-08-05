@@ -2,6 +2,7 @@ import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import { Composer } from '../../components/composer.tsx';
+import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
@@ -10,6 +11,11 @@ import {
   ReferenceSurfaceProvider,
   sessionReferenceSurface,
 } from '../../components/reference-surface.tsx';
+import {
+  type RuntimeControlApi,
+  RuntimeEffortControls,
+  RuntimeModelControls,
+} from '../../components/runtime-controls.tsx';
 import { SessionDetails } from '../../components/session-details.tsx';
 import { SessionHeader } from '../../components/session-header.tsx';
 import { SessionTerminalSurface } from '../../components/session-terminal-surface.tsx';
@@ -32,10 +38,17 @@ import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
+import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
-export type SessionChatClient = Pick<IFyApiClient, 'interrupt' | 'resume' | 'send' | 'stop'>;
+export type SessionChatClient = Pick<IFyApiClient, 'interrupt' | 'resume' | 'send' | 'stop'> &
+  Partial<Pick<IFyApiClient, 'runtime'>>;
+
+/** One scoped cache is safe because every key carries its daemon id. Keeping it
+ * outside the page also avoids re-reading a live account catalog whenever the
+ * transcript refreshes. */
+const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
 
 export interface SessionChatPageProps {
   readonly connection: DaemonConnection;
@@ -339,6 +352,21 @@ export function SessionChatPage({
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (session.state.pendingQuestion ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
   const compact = presentation === 'sheet';
+  const runtimeApi = useMemo<RuntimeControlApi | null>(() => {
+    const runtime = client.runtime;
+    if (runtime === undefined) return null;
+    return {
+      runtime: async (daemon, sessionId, command, requestId) => {
+        // The controls were rendered for this exact pairing. Retain the guard
+        // here too: a stale React continuation must not use a control from one
+        // daemon to mutate an identically named session on another.
+        if (!sameDaemonConnection(daemon, live.current.connection) || sessionId !== live.current.sessionId)
+          throw new Error('runtime control belongs to a session that is no longer active');
+        const next = await runtime(sessionId, command, requestId);
+        publish(next);
+      },
+    };
+  }, [client.runtime, publish]);
 
   // `<fieldset>`, not `role="toolbar"`: these are plain wrapping buttons with no
   // roving tabindex and no arrow handling, and a toolbar role promises both.
@@ -457,17 +485,47 @@ export function SessionChatPage({
                   </p>
                 </section>
               ) : (
-                <Composer
-                  api={client}
-                  busy={busy}
-                  compact={compact}
-                  enterKeyPreference={composerEnterKey}
-                  daemon={connection}
-                  disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-                  onSent={onRefresh}
-                  quota={session.state.quota}
-                  sessionId={session.config.id}
-                />
+                <>
+                  {runtimeApi === null ? null : (
+                    <ComposerRuntime
+                      busy={busy}
+                      canControl={canControl}
+                      renderEffortControls={lifecycle => (
+                        <RuntimeEffortControls
+                          api={runtimeApi}
+                          canControl={canControl}
+                          catalogs={runtimeModelCatalogs}
+                          daemon={connection}
+                          view={session}
+                          {...lifecycle}
+                        />
+                      )}
+                      renderModelControls={lifecycle => (
+                        <RuntimeModelControls
+                          api={runtimeApi}
+                          canControl={canControl}
+                          catalogs={runtimeModelCatalogs}
+                          daemon={connection}
+                          view={session}
+                          {...lifecycle}
+                          open={lifecycle.open}
+                        />
+                      )}
+                      view={session}
+                    />
+                  )}
+                  <Composer
+                    api={client}
+                    busy={busy}
+                    compact={compact}
+                    enterKeyPreference={composerEnterKey}
+                    daemon={connection}
+                    disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
+                    onSent={onRefresh}
+                    quota={session.state.quota}
+                    sessionId={session.config.id}
+                  />
+                </>
               )}
             </div>
           </div>

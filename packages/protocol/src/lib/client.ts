@@ -19,6 +19,7 @@ import type {
 import type {
   FyEvent,
   FyEventStreamIdle,
+  RuntimeControlRequest,
   SendRequest,
   SendResult,
   SessionAttachTarget,
@@ -84,6 +85,12 @@ export interface IFyApiClient {
   interrupt(id: string): Promise<SessionView>;
   stop(id: string, reason?: string): Promise<SessionView>;
   resume(id: string, message?: string): Promise<SessionView>;
+  /**
+   * Change a running harness's native runtime settings. The daemon returns the
+   * fresh session view so callers can replace stale launch preferences with
+   * whatever the harness has actually reported.
+   */
+  runtime(id: string, request: RuntimeControlRequest, requestId?: string): Promise<SessionView>;
   /**
    * `requestId` is the LOGICAL identity of one migration, and it is what makes this route safe to
    * retry. A migration is destructive — the pane is killed and relaunched — and `request()` retries

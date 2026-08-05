@@ -123,15 +123,15 @@ describe('runtimeModelChipLabel', () => {
     should(runtimeModelChipLabel(session({ observedModel: ' gpt-5.6 ', model: 'requested' }))).equal('gpt-5.6');
   });
 
-  test('should fall back to the launch request, then the hint', () => {
+  test('should not present a launch request or hint as the running model', () => {
     // Assert
-    should(runtimeModelChipLabel(session({ model: 'requested' }))).equal('requested');
-    should(runtimeModelChipLabel(session({ modelHint: 'hinted' }))).equal('hinted');
+    should(runtimeModelChipLabel(session({ model: 'requested' }))).equal('model unavailable');
+    should(runtimeModelChipLabel(session({ modelHint: 'hinted' }))).equal('model unavailable');
   });
 
-  test('should ask the reader to set one when nothing is known', () => {
+  test('should show unavailable when no model observation exists', () => {
     // Assert
-    should(runtimeModelChipLabel(session({ modelHint: '   ' }))).equal('set model');
+    should(runtimeModelChipLabel(session({ modelHint: '   ' }))).equal('model unavailable');
   });
 });
 

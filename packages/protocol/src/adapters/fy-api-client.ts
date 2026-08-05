@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
-import { ProjectListSchema, type ProjectList, SessionSkillsSchema, type SessionSkills } from '../lib/catalog.ts';
+import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
 import {
   FY_BOARD_CAPABILITY_HEADER,
   FY_REQUEST_ID_HEADER,
@@ -47,20 +47,22 @@ import {
   AnswerSessionRequestSchema,
   type FyEvent,
   FyEventListSchema,
-  type FyEventStreamIdle,
   FyEventStreamFrameSchema,
+  type FyEventStreamIdle,
   InterruptSessionRequestSchema,
   MigrateSessionRequestSchema,
   NameSuggestionsSchema,
   RenameSessionRequestSchema,
   ResumeSessionRequestSchema,
+  type RuntimeControlRequest,
+  RuntimeControlRequestSchema,
   type SendRequest,
   SendRequestSchema,
   type SendResult,
   SendResultSchema,
-  SessionListSchema,
   type SessionAttachTarget,
   SessionAttachTargetSchema,
+  SessionListSchema,
   type SessionView,
   SessionViewSchema,
   type SignalKind,
@@ -481,6 +483,17 @@ export class FyApiClient implements IFyApiClient {
 
   resume(id: string, message?: string): Promise<SessionView> {
     return this.#post(id, 'resume', ResumeSessionRequestSchema, { message }, SessionViewSchema);
+  }
+
+  runtime(id: string, request: RuntimeControlRequest, requestId?: string): Promise<SessionView> {
+    return this.#post(
+      id,
+      'runtime',
+      RuntimeControlRequestSchema,
+      request,
+      SessionViewSchema,
+      NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
+    );
   }
 
   migrate(
