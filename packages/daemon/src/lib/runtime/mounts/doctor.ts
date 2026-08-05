@@ -1,6 +1,6 @@
 import { DoctorReportSchema, type DoctorReport } from '@ferretry/protocol';
 import type { ApiRoute } from '../../api/route.ts';
-import { jsonResponse } from '../../api/response.ts';
+import { jsonResponse } from '../../api/responses.ts';
 
 /** A fresh host diagnosis; PATH can change after the daemon starts. */
 export interface DoctorSubsystem {

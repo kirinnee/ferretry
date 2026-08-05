@@ -64,6 +64,14 @@ const pairingSubsystem = (): PairingSubsystem => ({
 
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
+  doctor: {
+    report: async () => ({
+      checks: [],
+      harnesses: [],
+      ready: true,
+      limitation: 'not exercised by the surface inventory',
+    }),
+  },
   pairing: pairingSubsystem(),
   fleet: {
     accounts: async () => ({ version: 1, generatedAt: '2026-01-01T00:00:00.000Z', accounts: [] }),

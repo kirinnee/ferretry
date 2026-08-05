@@ -48,14 +48,6 @@ const unavailable = (name: string, summary: string): DoctorCheck => ({
   impact: 'This service manager is not used on this operating system.',
 });
 
-const unavailableByDesign = (name: string, summary: string, impact: string): DoctorCheck => ({
-  name,
-  requirement: 'capability',
-  status: 'unavailable_by_design',
-  summary,
-  impact,
-});
-
 function binary(
   input: DoctorReportInput,
   name: string,
@@ -67,19 +59,6 @@ function binary(
     : present(name, requirement, 'found on PATH', impact);
 }
 
-function oneOf(
-  input: DoctorReportInput,
-  name: string,
-  choices: readonly string[],
-  requirement: DoctorCheck['requirement'],
-  impact: string,
-): DoctorCheck {
-  const found = choices.find(candidate => input.executables.resolve(candidate) !== undefined);
-  return found === undefined
-    ? missing(name, requirement, `none of ${choices.join(', ')} found on PATH`, impact)
-    : present(name, requirement, `${found} found on PATH`, impact);
-}
-
 /**
  * The complete dependency inventory, derived from the direct process call sites and generated
  * Claude wrapper. This performs PATH checks only; it deliberately never claims a harness is signed
@@ -88,8 +67,8 @@ function oneOf(
 export function readDoctorReport(input: DoctorReportInput): DoctorReport {
   const harnesses = input.harnesses.harnesses.map(({ kind, launchable, blocked }) => ({
     kind,
-    launchable,
-    blocked,
+    launchable: [...launchable],
+    blocked: [...blocked],
   }));
   const checks: DoctorCheck[] = [
     input.harnesses.ready
@@ -147,31 +126,6 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
       'optional',
       'Generated Claude wrappers skip their first-run JSON seeding step; they continue with a warning.',
     ),
-    ...(input.platform === 'linux'
-      ? [
-          oneOf(
-            input,
-            'Google Chrome or Chromium',
-            ['google-chrome', 'chromium'],
-            'capability',
-            'The human browser login window cannot open.',
-          ),
-          binary(input, 'Xvfb', 'capability', 'The human browser login window cannot create its private display.'),
-          binary(
-            input,
-            'x11vnc',
-            'capability',
-            'The human browser login window cannot expose its private display over loopback VNC.',
-          ),
-          binary(input, 'timeout', 'capability', 'The human browser login window cannot enforce its bounded lifetime.'),
-        ]
-      : [
-          unavailableByDesign(
-            'human browser login window',
-            'available only on Linux by design',
-            'This is not a fault, but browser sign-in must be completed through another supported path on this platform.',
-          ),
-        ]),
   ];
   return {
     checks,
@@ -187,7 +141,6 @@ export function renderDoctorReport(report: DoctorReport): readonly string[] {
   const label = (check: DoctorCheck): string => {
     if (check.status === 'present') return 'ok';
     if (check.status === 'not_applicable') return 'n/a';
-    if (check.status === 'unavailable_by_design') return 'design';
     return check.requirement === 'optional' ? 'note' : 'missing';
   };
   return [

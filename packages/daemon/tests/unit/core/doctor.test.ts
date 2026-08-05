@@ -26,19 +26,14 @@ describe('doctor report', () => {
 
     should(result.checks.find(check => check.name === 'launchctl')?.status).equal('missing');
     should(result.checks.find(check => check.name === 'systemctl')?.status).equal('not_applicable');
-    should(result.checks.find(check => check.name === 'human browser login window')?.status).equal(
-      'unavailable_by_design',
-    );
+    should(result.checks.some(check => check.status === 'unavailable_by_design')).be.false();
   });
 
-  it('should check Linux browser-login programs and make absence actionable', () => {
-    const result = report('linux', ['tmux', 'bash', 'Xvfb']);
+  it('should report the Linux service manager and omit macOS-only launchd', () => {
+    const result = report('linux', ['tmux', 'bash']);
 
     should(result.checks.find(check => check.name === 'launchctl')?.status).equal('not_applicable');
     should(result.checks.find(check => check.name === 'systemctl')?.status).equal('missing');
-    should(result.checks.find(check => check.name === 'Xvfb')?.status).equal('present');
-    should(result.checks.find(check => check.name === 'x11vnc')?.status).equal('missing');
-    should(result.checks.some(check => check.status === 'unavailable_by_design')).be.false();
   });
 
   it('should fail the report only for a missing required dependency or no launchable harness', () => {

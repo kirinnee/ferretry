@@ -151,7 +151,9 @@ function registerDoctorCommand(program: Command, environment: Record<string, str
       const daemon = `${BINARY_NAME}d`;
       const executable = Bun.which(daemon, { PATH: environment.PATH ?? '' });
       if (executable === null)
-        throw new Error(`cannot find ${daemon} on PATH — install the daemon package before running ${BINARY_NAME} doctor`);
+        throw new Error(
+          `cannot find ${daemon} on PATH — install the daemon package before running ${BINARY_NAME} doctor`,
+        );
       const child = Bun.spawn([executable, '--check'], { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' });
       process.exitCode = await child.exited;
     });

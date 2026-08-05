@@ -97,6 +97,7 @@ export * from '../features/secrets/secrets-card.tsx';
 export * from '../features/secrets/secrets-surface.tsx';
 export * from '../features/settings/composer-enter-key-settings.tsx';
 export * from '../features/settings/daemon-settings-frame.tsx';
+export * from '../features/settings/doctor-settings.tsx';
 export * from '../features/settings/markdown-composer-settings.tsx';
 export * from '../features/settings/notification-settings.tsx';
 export * from '../features/settings/settings-catalog.ts';

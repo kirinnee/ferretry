@@ -4201,8 +4201,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
    * here would also contradict the boot, which warns and starts.
    */
   const harnesses = readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables);
-  for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME))
-    say(line);
+  for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME)) say(line);
   const directorySyscalls = (() => {
     try {
       loadDirectorySyscalls();
