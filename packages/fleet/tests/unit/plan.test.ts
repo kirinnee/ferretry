@@ -109,8 +109,9 @@ describe('FleetPlan', () => {
     const actual = subject.build(config(), LAYOUT, GENERATED_AT);
     const [wrapper] = operationsOf(actual, 'file');
 
-    // Assert
+    // Assert — a relative export would resolve under the session cwd, not under Ferretry's homes.
     should(wrapper?.kind === 'file' && wrapper.content).containEql("'/state/fleet/homes/claude-work'");
+    should(wrapper?.kind === 'file' && wrapper.content).not.containEql("export CLAUDE_CONFIG_DIR='claude-work'");
     should(actual.manifest.accounts[0]?.home).equal('/state/fleet/homes/claude-work');
   });
 

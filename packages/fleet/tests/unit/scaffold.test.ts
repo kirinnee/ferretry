@@ -3,6 +3,7 @@ import should from 'should';
 import { FleetConfigSchema } from '../../src/lib/config.ts';
 import type { FleetLayout } from '../../src/lib/provisioning.ts';
 import { buildFleetScaffold } from '../../src/lib/scaffold.ts';
+import { parseSettings } from '../../src/lib/settings.ts';
 
 const LAYOUT: FleetLayout = {
   stateHome: '/state',
@@ -33,6 +34,9 @@ describe('buildFleetScaffold', () => {
       '/state/fleet/bin',
       '/state/fleet/homes',
       '/state/fleet/assets',
+      '/state/fleet/assets/templates',
+      '/state/fleet/assets/templates/claude',
+      '/state/fleet/assets/templates/codex',
     ]);
     should(subject.directoryMode).equal(0o700);
   });
@@ -45,9 +49,15 @@ describe('buildFleetScaffold', () => {
     should(elsewhere.files.map(file => file.path)).containEql('/somewhere/else.yaml');
   });
 
-  it('should seed an assets README beside the assets it explains', () => {
+  it('should seed every built-in asset beside the README that explains it', () => {
     // Assert
-    should(fileAt('/state/fleet/assets/README.md')).not.be.undefined();
+    should(subject.files.map(file => file.path)).deepEqual([
+      '/state/fleet/config.yaml',
+      '/state/fleet/assets/README.md',
+      '/state/fleet/assets/CLAUDE.md',
+      '/state/fleet/assets/templates/claude/settings.json',
+      '/state/fleet/assets/templates/codex/config.toml',
+    ]);
   });
 
   it('should write private files, because a fleet directory holds credentials', () => {
@@ -70,6 +80,7 @@ describe('buildFleetScaffold', () => {
 
     // Assert
     should(trailing.files.map(file => file.path)).containEql('/state/fleet/assets/README.md');
+    should(trailing.files.map(file => file.path)).containEql('/state/fleet/assets/templates/codex/config.toml');
   });
 });
 
@@ -92,6 +103,39 @@ describe('the starter configuration', () => {
     should(parsed.agents).be.empty();
   });
 
+  it('should mount every starter through the harness-scoped base profile', () => {
+    // Act
+    const parsed = FleetConfigSchema.parse(Bun.YAML.parse(config()));
+
+    // Assert — every path here names a file in this same scaffold, so a standalone build cannot
+    // produce a configuration whose supposedly bundled source is absent.
+    should(parsed.profiles.base).match({
+      memory: './CLAUDE.md',
+      claude: { settings: './templates/claude/settings.json' },
+      codex: { settings: './templates/codex/config.toml' },
+    });
+    for (const path of ['CLAUDE.md', 'templates/claude/settings.json', 'templates/codex/config.toml']) {
+      should(fileAt(`/state/fleet/assets/${path}`)).not.be.undefined();
+    }
+  });
+
+  it('should give only the auto lane the flags that keep an unattended launch moving', () => {
+    // Act
+    const parsed = FleetConfigSchema.parse(Bun.YAML.parse(config()));
+
+    // Assert — the interactive lane retains each harness's own permission policy.
+    should(parsed.variants.default?.claude?.flags).be.undefined();
+    should(parsed.variants.default?.codex?.flags).be.undefined();
+    should(parsed.variants.auto?.claude).match({
+      flags: ['--dangerously-skip-permissions', '--disallowed-tools', 'AskUserQuestion'],
+      settings: [{ skipDangerousModePermissionPrompt: true }],
+    });
+    should(parsed.variants.auto?.codex?.flags).deepEqual([
+      '--dangerously-bypass-approvals-and-sandbox',
+      '--no-alt-screen',
+    ]);
+  });
+
   it('should carry the generated ids in its example, so nobody has to invent a UUID', () => {
     // Assert
     should(config()).containEql(IDS.claude);
@@ -109,7 +153,49 @@ describe('the starter configuration', () => {
 
   it('should not carry anybody’s personal paths or tooling', () => {
     // Assert — the tool this replaces kept its owner's machine paths in its templates.
-    should(config()).not.match(/\/Users\//);
-    should(config()).not.match(/loctl/);
+    for (const file of subject.files) {
+      should(file.content).not.match(/\/Users\//);
+      should(file.content).not.match(/\/home\/[A-Za-z0-9_-]+\//);
+      should(file.content).not.match(/loctl/);
+      should(file.content).not.match(/Workspace\/atomi/);
+    }
+  });
+});
+
+describe('the starter asset content', () => {
+  it('should keep Claude settings valid and limited to neutral editing/attribution defaults', () => {
+    // Act
+    const parsed = parseSettings(fileAt('/state/fleet/assets/templates/claude/settings.json')?.content ?? '', 'json');
+
+    // Assert
+    should(parsed).deepEqual({
+      $schema: 'https://json.schemastore.org/claude-code-settings.json',
+      includeCoAuthoredBy: false,
+    });
+  });
+
+  it('should make Codex policy an obvious blank instead of guessing for the operator', () => {
+    // Act
+    const source = fileAt('/state/fleet/assets/templates/codex/config.toml')?.content ?? '';
+
+    // Assert
+    should(parseSettings(source, 'toml')).deepEqual({});
+    should(source).containEql('Model, approval, sandbox and tool policy are deliberately left');
+  });
+
+  it('should explain what the shared instructions are and how to replace them', () => {
+    // Assert
+    const source = fileAt('/state/fleet/assets/CLAUDE.md')?.content ?? '';
+    should(source).containEql('Claude receives');
+    should(source).containEql('Codex receives');
+    should(source).containEql('Replace this file');
+    should(source).containEql('will not overwrite it');
+  });
+
+  it('should state the copy-on-apply and deliberately empty capability boundaries', () => {
+    // Assert
+    const source = fileAt('/state/fleet/assets/README.md')?.content ?? '';
+    should(source).containEql('Account-home assets are copies, not symlinks');
+    should(source).containEql('No hooks, MCP servers or skills are installed by default');
   });
 });
