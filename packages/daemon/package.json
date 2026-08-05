@@ -11,12 +11,14 @@
   },
   "types": "./src/lib/index.ts",
   "bin": {
-    "fyd": "bin/fyd.ts"
+    "fyd": "bin/fyd.ts",
+    "fyd-browser-worker": "bin/browser-worker.ts"
   },
   "dependencies": {
     "@ferretry/fleet": "workspace:*",
     "@ferretry/protocol": "workspace:*",
     "@ferretry/relay": "workspace:*",
+    "playwright-core": "1.62.1",
     "zod": "4.4.3"
   }
 }

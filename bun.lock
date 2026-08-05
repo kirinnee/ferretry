@@ -20,7 +20,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.128.0",
+      "version": "0.132.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -40,7 +40,7 @@
     },
     "packages/daemon": {
       "name": "@ferretry/daemon",
-      "version": "0.128.0",
+      "version": "0.132.0",
       "bin": {
         "fyd": "bin/fyd.ts",
       },
@@ -48,6 +48,7 @@
         "@ferretry/fleet": "workspace:*",
         "@ferretry/protocol": "workspace:*",
         "@ferretry/relay": "workspace:*",
+        "playwright-core": "1.62.1",
         "zod": "4.4.3",
       },
     },
