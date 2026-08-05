@@ -1202,29 +1202,49 @@ describe('the settings route composition', () => {
     await view.unmount();
   });
 
-  it('probes each pairing through the typed health endpoint, then routes switch and add through existing flows', async () => {
+  it('probes each selected sub-tab through the carrier-aware typed health endpoint, then routes switch and add', async () => {
     const { healthReads, store, view } = await renderShell('/d/alpha/settings#daemons', [
       alpha.daemonId,
       beta.daemonId,
     ]);
     await settle();
 
-    expect(healthReads.map(read => String(read.daemonId)).sort()).toEqual(['alpha', 'beta']);
+    // A daemon tab does not read another daemon merely by being visible. Opening
+    // Host checks is the explicit request, and it travels through the same typed
+    // client (and therefore carrier router) as every other daemon read.
+    expect(healthReads).toEqual([]);
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'alpha host checks tab',
+      ).click(),
+    );
+    await settle();
+    expect(healthReads.map(read => String(read.daemonId))).toEqual(['alpha']);
     for (const read of healthReads) {
       expect(read.path).toBe('/v1/health');
       expect(read.schema).toBe(HealthViewSchema);
       expect(read.timeout).toBe(5_000);
     }
     expect(
-      must(view.container.querySelector('[data-daemon-id="alpha"]'), 'alpha row').getAttribute('aria-current'),
+      must(view.container.querySelector('[data-daemon-subtab="alpha"]'), 'alpha sub-tab').getAttribute('aria-selected'),
     ).toBe('true');
 
     await interact(() =>
-      must(view.container.querySelector<HTMLButtonElement>('[aria-label="Use beta"]'), 'use beta').click(),
+      must(view.container.querySelector<HTMLButtonElement>('[data-daemon-subtab="beta"]'), 'beta tab').click(),
     );
     expect(store.connections.getSnapshot().selectedDaemonId).toBe(beta.daemonId);
     expect(window.location.pathname).toBe('/d/beta/settings');
     expect(window.location.hash).toBe('#daemons');
+    await settle();
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'beta host checks tab',
+      ).click(),
+    );
+    await settle();
+    expect(healthReads.map(read => String(read.daemonId)).sort()).toEqual(['alpha', 'beta']);
 
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
@@ -1238,8 +1258,22 @@ describe('the settings route composition', () => {
   it('persists a routed daemon rename and sends active removal to the selected fallback settings', async () => {
     const { store, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId, beta.daemonId]);
     await settle();
-    const alphaRow = must(view.container.querySelector<HTMLElement>('[data-daemon-id="alpha"]'), 'alpha row');
-    const details = must(alphaRow.querySelector<HTMLDetailsElement>('details'), 'alpha management disclosure');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'alpha host checks tab',
+      ).click(),
+    );
+    const alphaHostChecks = must(
+      view.container.querySelector<HTMLElement>('[data-daemon-host-checks="alpha"]'),
+      'alpha host checks',
+    );
+    const details = must(
+      [...alphaHostChecks.querySelectorAll<HTMLDetailsElement>('details')].find(
+        candidate => candidate.querySelector('summary')?.textContent === 'Manage daemon',
+      ),
+      'alpha management disclosure',
+    );
     await interact(() => must(details.querySelector<HTMLElement>('summary'), 'manage daemon').click());
 
     const input = must(details.querySelector<HTMLInputElement>('input'), 'display name');
@@ -1256,7 +1290,7 @@ describe('the settings route composition', () => {
     expect(store.connections.get(alpha.daemonId)?.label).toBe('Primary workstation');
 
     await interact(() =>
-      must(alphaRow.querySelector<HTMLButtonElement>('[data-remove-daemon="alpha"]'), 'remove alpha').click(),
+      must(view.container.querySelector<HTMLButtonElement>('[data-remove-daemon="alpha"]'), 'remove alpha').click(),
     );
     expect(store.connections.get(alpha.daemonId)).toBeUndefined();
     expect(window.location.pathname).toBe('/d/beta/settings');

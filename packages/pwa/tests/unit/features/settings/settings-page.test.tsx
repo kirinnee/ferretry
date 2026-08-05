@@ -492,7 +492,14 @@ describe('daemon settings', () => {
   it('never shows a daemon as reachable while its carrier says nothing worked', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const health = deferred<unknown>();
-    const view = await mount(page({ connections: [alpha, beta], probe: () => health.promise }));
+    const controls = new DaemonControlsStore(memoryStorage());
+    const view = await mount(page({ connections: [alpha, beta], controls, probe: () => health.promise }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     health.resolve({});
     await settle();
@@ -503,12 +510,26 @@ describe('daemon settings', () => {
       reason: 'No configured connection worked: direct was not reachable (Failed to fetch).',
       passedOver: [{ method: { kind: 'direct', daemonUrl: 'https://alpha.example.test' }, detail: 'Failed to fetch' }],
     };
-    await view.render(page({ connections: [alpha, beta], probe: () => health.promise, carrier: refused }));
+    await view.render(page({ connections: [alpha, beta], controls, probe: () => health.promise, carrier: refused }));
+    await settle();
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
+        'carrier tab',
+      ).click(),
+    );
+    expect(view.container.textContent).toContain('No configured connection worked');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     expect(reachability(view.container, 'daemon-alpha')).toBe('unreachable');
-    // Only the active daemon has a measured carrier here. A row with no measurement
-    // keeps its own probe's answer rather than borrowing somebody else's.
-    expect(reachability(view.container, 'daemon-beta')).toBe('reachable');
+    // A machine's status is mounted only inside its own selected sub-tab. There
+    // is no second daemon row here that could borrow alpha's carrier result.
+    expect(view.container.querySelector('[data-daemon-host-checks="daemon-beta"]')).toBeNull();
     await view.unmount();
   });
 
@@ -522,6 +543,12 @@ describe('daemon settings', () => {
       passedOver: [],
     };
     const view = await mount(page({ connections: [alpha], probe: () => health.promise, carrier: carried }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     // A carrier that worked is not permission to skip the probe: this badge is about
     // the daemon answering, and it says `checking` until one does.

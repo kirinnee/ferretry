@@ -104,20 +104,14 @@ function ReachabilityBadge({
   // typed client uses. It may demote an older successful poll, but missing or
   // successful carrier evidence never turns an uncertain probe green.
   const value: Reachability = carrier?.ok === false ? 'unreachable' : reachability.value;
-  const label =
-    value === 'reachable'
-      ? 'Reachable'
-      : value === 'unreachable'
-        ? 'Unreachable'
-        : 'Checking';
-  const Icon =
-    value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
+  const label = value === 'reachable' ? 'Reachable' : value === 'unreachable' ? 'Unreachable' : 'Checking';
+  const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
 
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <span
         role="status"
-        data-daemon-reachability={reachability.value}
+        data-daemon-reachability={value}
         className={cn(
           'inline-flex min-h-[28px] items-center gap-1.5 rounded-full border px-2 text-meta font-semibold',
           value === 'reachable' && 'border-ok-border bg-ok-bg text-ok',
@@ -131,9 +125,7 @@ function ReachabilityBadge({
           className={value === 'checking' ? 'animate-spin motion-reduce:animate-none' : undefined}
         />
         {label}
-        {reachability.refreshing && value !== 'checking' ? (
-          <span className="sr-only">, checking again</span>
-        ) : null}
+        {reachability.refreshing && value !== 'checking' ? <span className="sr-only">, checking again</span> : null}
       </span>
       <button
         type="button"
