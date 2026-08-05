@@ -209,3 +209,11 @@ status reader independently passes `--untracked-files=all` in
 `packages/daemon/src/adapters/worktrees/git-gateway.ts`, and the daemon-scoped PWA changes request
 in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` transport without
 filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
+**#5 measurement (2026-08-05).** The aggregate Tasks route ran through the real dispatcher/router
+over 96 independent daemon-scoped board reads, each delayed by 12 ms; three sequential samples gave
+a 1,183.1 ms median before the change (1,182.4–1,184.8 ms) and a 26.1 ms median after it
+(25.2–29.3 ms): a 45.3× reduction. The old access pattern was one `await
+board(sessionId).list()` per session in `GET /v1/tasks`; a damaged board still makes the whole
+aggregate unavailable rather than looking like an empty or shortened fleet.
+
+> > > > > > > 06759636 (fix(tasks): parallelize fleet board reads)

@@ -345,6 +345,30 @@ function scopedSummary(
  */
 const NO_DISCARDED_RECORDS = 0;
 
+/**
+ * Enough simultaneous board reads to collapse a fleet walk into a handful of event-loop turns,
+ * while keeping a daemon with thousands of boards below its file-descriptor limit.
+ *
+ * Ported from kteam `src/tasks.ts`'s `FLEET_READ_CONCURRENCY` / `mapPooled` pair.
+ */
+const FLEET_READ_CONCURRENCY = 64;
+
+/** Order-preserving bounded fan-out for independent board reads. */
+async function mapPooled<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (true) {
+        const index = next++;
+        if (index >= items.length) return;
+        results[index] = await fn(items[index] as T);
+      }
+    }),
+  );
+  return results;
+}
+
 /** One session's board, filtered and summarised. */
 async function listSession(subsystem: TaskSubsystem, sessionId: string, context: RouteContext): Promise<ApiResponse> {
   const filters = taskFilters(context.request);
@@ -397,18 +421,20 @@ async function listFleet(subsystem: TaskSubsystem, context: RouteContext): Promi
   const filters = taskFilters(context.request);
   // Gathered before any assignee is resolved, so ONE batch answers for the whole fleet: resolving
   // inside the loop would fan out over every session once per session's board.
-  const gathered: { readonly sessionId: string; readonly task: Task; readonly board: readonly Task[] }[] = [];
-  for (const sessionId of await subsystem.sessionIds()) {
+  // Each board is an atomic, daemon-scoped snapshot. The reads are independent, so the kteam
+  // bounded parallel walk is safe here; a refusal still rejects the entire fleet answer rather
+  // than dropping that session's rows.
+  const boards = await mapPooled(await subsystem.sessionIds(), FLEET_READ_CONCURRENCY, async sessionId => {
     // Acquisition is inside the guard for the same reason the read is: an id the index holds but the
     // layout refuses is a damaged session, and a fleet answer that skipped it would be short.
     const read = await Promise.resolve()
       .then(async () => await subsystem.board(sessionId).list())
       .catch((error: unknown) => unreadableFleetBoard(sessionId, error));
-    const board = read.entries.map(entry => entry.task);
-    for (const task of board.filter(candidate => matchesFilters(candidate, filters))) {
-      gathered.push({ sessionId, task, board });
-    }
-  }
+    return { sessionId, board: read.entries.map(entry => entry.task) };
+  });
+  const gathered = boards.flatMap(({ sessionId, board }) =>
+    board.filter(candidate => matchesFilters(candidate, filters)).map(task => ({ sessionId, task, board })),
+  );
   const observations = await observeAssignees(
     subsystem,
     gathered.map(row => row.task),
