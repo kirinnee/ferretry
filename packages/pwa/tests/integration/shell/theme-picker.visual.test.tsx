@@ -90,7 +90,11 @@ function OriginalSwatch({ theme: swatch, current }: { theme: string; current: bo
       <span className="kt-swatch" data-swatch={swatch} aria-hidden="true">
         <span className="kt-swatch-mini">
           <span className="kt-swatch-header">Aa</span>
-          <span className="kt-swatch-row"><i /><i /><i /></span>
+          <span className="kt-swatch-row">
+            <i />
+            <i />
+            <i />
+          </span>
         </span>
         <i className="kt-swatch-accent" />
         <i className="kt-swatch-signal" />

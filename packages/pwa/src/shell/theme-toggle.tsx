@@ -84,7 +84,11 @@ function Swatch({ theme, current }: { readonly theme: string; readonly current: 
       <span className="kt-swatch" data-swatch={theme} aria-hidden="true">
         <span className="kt-swatch-mini">
           <span className="kt-swatch-header">Aa</span>
-          <span className="kt-swatch-row"><i /><i /><i /></span>
+          <span className="kt-swatch-row">
+            <i />
+            <i />
+            <i />
+          </span>
         </span>
         <i className="kt-swatch-accent" />
         <i className="kt-swatch-signal" />

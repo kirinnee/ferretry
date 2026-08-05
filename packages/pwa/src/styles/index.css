@@ -274,7 +274,7 @@ pre,
 }
 .kt-swatch-row {
   display: grid;
-  grid-template-columns: 1fr 1.5fr .65fr;
+  grid-template-columns: 1fr 1.5fr 0.65fr;
   gap: var(--gap-xs);
   min-height: 2px;
 }
