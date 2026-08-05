@@ -53,7 +53,19 @@ describe('theme catalogue', () => {
     const ids = THEME_FAMILIES.map(family => family.id);
 
     // Assert
-    expect(ids).toEqual(['studio', 'mission', 'neo', 'ember', 'contrast', 'notebook', 'geist']);
+    expect(ids).toEqual([
+      'studio',
+      'mission',
+      'neo',
+      'contrast',
+      'geist',
+      'phosphor',
+      'blueprint',
+      'broadsheet',
+      'wayfinding',
+      'ledger',
+      'ma',
+    ]);
     expect(THEME_FAMILIES.every(family => family.label.length > 0 && family.blurb.length > 0)).toBe(true);
   });
 
@@ -81,10 +93,10 @@ describe('parseThemePreference', () => {
 
   it('reads the current shape whole', () => {
     // Act
-    const actual = parseThemePreference('{"family":"ember","mode":"dark","textScale":"large"}');
+    const actual = parseThemePreference('{"family":"phosphor","mode":"dark","textScale":"large"}');
 
     // Assert
-    expect(actual).toEqual({ family: 'ember', mode: 'dark', textScale: 'large' });
+    expect(actual).toEqual({ family: 'phosphor', mode: 'dark', textScale: 'large' });
   });
 
   it('falls back per field, so one corrupt value never resets the others', () => {
@@ -101,8 +113,8 @@ describe('parseThemePreference', () => {
 
   it('accepts a bare resolved attribute, the value <html data-theme> itself carries', () => {
     expect(parseThemePreference('mission-dark')).toEqual({ family: 'mission', mode: 'dark', textScale: 'default' });
-    expect(parseThemePreference('notebook-light')).toEqual({
-      family: 'notebook',
+    expect(parseThemePreference('ledger-light')).toEqual({
+      family: 'ledger',
       mode: 'light',
       textScale: 'default',
     });
@@ -110,7 +122,7 @@ describe('parseThemePreference', () => {
 
   it('refuses an attribute whose family or mode is not one we declare tokens for', () => {
     expect(parseThemePreference('vaporwave-dark')).toEqual(DEFAULT_THEME_PREFERENCE);
-    expect(parseThemePreference('ember-sepia')).toEqual(DEFAULT_THEME_PREFERENCE);
+    expect(parseThemePreference('phosphor-sepia')).toEqual(DEFAULT_THEME_PREFERENCE);
     expect(parseThemePreference('-dark')).toEqual(DEFAULT_THEME_PREFERENCE);
   });
 });
@@ -195,8 +207,8 @@ describe('supportsTextScale', () => {
 
 describe('manifestHrefFor', () => {
   it('swaps only the family+mode segment, preserving the release fingerprint', () => {
-    expect(manifestHrefFor('/manifest-studio-light.a1b2c3d4e5f6.webmanifest', 'ember', 'dark')).toBe(
-      '/manifest-ember-dark.a1b2c3d4e5f6.webmanifest',
+    expect(manifestHrefFor('/manifest-studio-light.a1b2c3d4e5f6.webmanifest', 'phosphor', 'dark')).toBe(
+      '/manifest-phosphor-dark.a1b2c3d4e5f6.webmanifest',
     );
   });
 
@@ -254,12 +266,12 @@ describe('ThemePreferenceStore', () => {
     });
 
     // Act
-    store.setFamily('ember');
+    store.setFamily('phosphor');
     store.setMode('dark');
     const actual = store.setTextScale('larger');
 
     // Assert
-    expect(actual).toEqual({ family: 'ember', mode: 'dark', textScale: 'larger' });
+    expect(actual).toEqual({ family: 'phosphor', mode: 'dark', textScale: 'larger' });
     expect(JSON.parse(storage.items[THEME_PREFERENCES_KEY] ?? '{}')).toEqual(actual);
     expect(notifications).toBe(3);
 
@@ -358,7 +370,7 @@ describe('ThemePreferenceStore', () => {
 
   it('adopts the ambient localStorage when one is not injected', () => {
     // Arrange
-    const items: Record<string, string> = { [THEME_PREFERENCES_KEY]: '{"family":"ember","mode":"light"}' };
+    const items: Record<string, string> = { [THEME_PREFERENCES_KEY]: '{"family":"phosphor","mode":"light"}' };
 
     // Act
     const store = withGlobalStorage(
@@ -367,6 +379,6 @@ describe('ThemePreferenceStore', () => {
     );
 
     // Assert
-    expect(store.snapshot()).toEqual({ family: 'ember', mode: 'light', textScale: 'default' });
+    expect(store.snapshot()).toEqual({ family: 'phosphor', mode: 'light', textScale: 'default' });
   });
 });

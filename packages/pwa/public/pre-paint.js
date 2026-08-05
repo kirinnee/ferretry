@@ -25,7 +25,23 @@
 
 (function () {
   var KEY = 'fy-theme-v1';
-  var FAMILIES = ['studio', 'mission', 'neo', 'ember', 'contrast', 'notebook', 'geist'];
+  // Kept in this order and spelling by `tests/unit/pre-paint.test.ts`, which reads
+  // the catalogue out of `theme-preferences.ts` and fails if the two drift. A
+  // family missing from this list is not a broken theme — it is a value this
+  // script rejects, so a stored `ember` boots on studio rather than on no tokens.
+  var FAMILIES = [
+    'studio',
+    'mission',
+    'neo',
+    'geist',
+    'contrast',
+    'phosphor',
+    'blueprint',
+    'broadsheet',
+    'wayfinding',
+    'ledger',
+    'ma',
+  ];
   var MODES = ['system', 'light', 'dark'];
   var TEXT_SCALES = { default: 1, large: 1.125, larger: 1.25 };
 

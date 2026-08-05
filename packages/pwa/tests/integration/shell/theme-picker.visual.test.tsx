@@ -56,7 +56,7 @@ import type { ThemeState } from '../../../src/hooks/use-theme.ts';
 const packageDir = resolve(import.meta.dir, '../../..');
 
 /** The state a reader on Ember, pinned to dark, with default type would have. */
-const FAMILY: ThemeFamilyId = 'ember';
+const FAMILY: ThemeFamilyId = 'phosphor';
 const MODE: ThemeMode = 'dark';
 const RESOLVED: ResolvedMode = 'dark';
 

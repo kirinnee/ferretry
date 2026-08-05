@@ -107,12 +107,12 @@ describe('useTheme', () => {
 
     // Act
     await interact(() => theme().setMode('light'));
-    await interact(() => theme().setFamily('ember'));
+    await interact(() => theme().setFamily('phosphor'));
 
     // Assert
-    expect(attrOf(view.container)).toBe('ember-light');
+    expect(attrOf(view.container)).toBe('phosphor-light');
     expect(JSON.parse(items[THEME_PREFERENCES_KEY] ?? '{}')).toEqual({
-      family: 'ember',
+      family: 'phosphor',
       mode: 'light',
       textScale: 'default',
     });

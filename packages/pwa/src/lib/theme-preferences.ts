@@ -7,7 +7,7 @@
  *
  *     <html data-theme="<family>-<mode>">     // mode already resolved
  *
- * `styles/themes.css` declares the tokens for every one of those 14 values and
+ * `styles/themes.css` declares the tokens for every one of those 22 values and
  * mirrors each on `[data-swatch='<family>-<mode>']`, so a preview element can
  * render in the theme it advertises while the rest of the page stays in the
  * current one. Nothing here may hardcode a colour.
@@ -43,7 +43,18 @@ export const THEME_PREFERENCES_KEY = 'fy-theme-v1';
 export type ThemeMode = 'system' | 'light' | 'dark';
 /** The mode actually in force — never `system`. */
 export type ResolvedMode = 'light' | 'dark';
-export type ThemeFamilyId = 'studio' | 'mission' | 'neo' | 'ember' | 'contrast' | 'notebook' | 'geist';
+export type ThemeFamilyId =
+  | 'studio'
+  | 'mission'
+  | 'neo'
+  | 'geist'
+  | 'contrast'
+  | 'phosphor'
+  | 'blueprint'
+  | 'broadsheet'
+  | 'wayfinding'
+  | 'ledger'
+  | 'ma';
 export type TextScale = 'default' | 'large' | 'larger';
 
 /**
@@ -65,15 +76,36 @@ export interface ThemeFamily {
   readonly blurb: string;
 }
 
-/** Metadata for the picker. Order is the order shown. */
+/**
+ * Metadata for the picker. Order is the order shown: the four house looks, the
+ * accessibility mode, then the six characterful families.
+ *
+ * A family EARNS a row here by differing structurally — typeface pairing,
+ * density, shape language, texture, emphasis mechanism — not by recolouring the
+ * one before it. Two families that are the same layout in different hex values
+ * are one family and a wasted choice, so `ember` (warm Studio) and `notebook`
+ * (paper Studio) were withdrawn rather than retuned.
+ */
 export const THEME_FAMILIES: readonly ThemeFamily[] = Object.freeze([
   { id: 'studio', label: 'Studio', blurb: 'The house look — indigo on cool zinc.' },
   { id: 'mission', label: 'Mission Control', blurb: 'A ruled instrument grid, square mono controls, cyan hairlines.' },
   { id: 'neo', label: 'Neo-Brutalism', blurb: 'Hard rules, flat offset shadows, AA-checked.' },
-  { id: 'ember', label: 'Ember', blurb: 'Warm low-blue-light paper for long evenings.' },
-  { id: 'contrast', label: 'High Contrast', blurb: 'Maximum legibility, AAA-targeted, no effects.' },
-  { id: 'notebook', label: 'Notebook', blurb: 'Warm cream paper, terracotta ink, a serif hand for headings.' },
   { id: 'geist', label: 'Geist', blurb: 'Hairline rules, small precise type, airy engineered minimalism.' },
+  { id: 'contrast', label: 'High Contrast', blurb: 'Maximum legibility, AAA-targeted, no effects.' },
+  { id: 'phosphor', label: 'Phosphor', blurb: 'A CRT terminal: mono everywhere, square, scanlines, wide caps.' },
+  {
+    id: 'blueprint',
+    label: 'Blueprint',
+    blurb: 'Technical drawing — drafting caps on a hairline grid, plates not cards.',
+  },
+  {
+    id: 'broadsheet',
+    label: 'Broadsheet',
+    blurb: 'Newsprint: serif at column density, hairline rules, no cards at all.',
+  },
+  { id: 'wayfinding', label: 'Wayfinding', blurb: 'Transit signage — heavy grotesque, colour bars, huge targets.' },
+  { id: 'ledger', label: 'Ledger', blurb: 'Green-bar accounting paper: banded rows, tabular figures, restrained ink.' },
+  { id: 'ma', label: 'Ma', blurb: 'Extreme restraint — enormous whitespace, one accent per screen.' },
 ] as const);
 
 export const THEME_MODES: readonly ThemeMode[] = Object.freeze(['system', 'light', 'dark'] as const);
@@ -106,6 +138,14 @@ const isTextScale = (value: unknown): value is TextScale =>
  * (`'mission-dark'`) in case one was written by the pre-paint bootstrap or by
  * hand. Anything unrecognised — including a bad field inside otherwise valid
  * JSON — falls back per field, so one corrupt value never resets the others.
+ *
+ * A WITHDRAWN FAMILY IS AN UNRECOGNISED VALUE, and that is the whole migration
+ * story for one. `ember` and `notebook` were retired; a reader still holding
+ * `{"family":"ember","mode":"dark","textScale":"large"}` keeps their mode and
+ * text scale and lands on Studio, because `isFamily` answers against the CURRENT
+ * catalogue and each field falls back on its own. Nothing anywhere maps a dead
+ * id to a live one: the alternative — leaving the id to reach the root attribute
+ * and matching no block in `themes.css` — is the unstyled render this guards.
  */
 export const parseThemePreference = (raw: string | null | undefined): ThemePreference => {
   if (!raw) return { ...DEFAULT_THEME_PREFERENCE };
