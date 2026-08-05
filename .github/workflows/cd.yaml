@@ -17,6 +17,26 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: cachix/install-nix-action@v31
+      # The daemon dials a rendezvous so a browser that is not on this machine's network can reach
+      # it at all, and it has nothing to dial until a directory tells it where. What is compiled in
+      # is that DIRECTORY — a service origin, never a carrier and never a user address — resolved by
+      # the same script, from the same inputs, that the PWA's Pages build uses. Two halves of one
+      # carrier pointed at different directories would carry nothing.
+      #
+      # `--require` because a released daemon with no directory is exactly the defect this exists to
+      # fix: it would bind loopback, dial nowhere, and be reachable from no device but its own host.
+      - name: Resolve the relay discovery origin
+        env:
+          HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # `tail -n 1` because the devshell hook writes to stdout as a side effect; the script emits
+          # exactly one line of its own and sends every diagnostic to stderr.
+          origin="$(nix develop .#ci -c ./scripts/ci/relay-directory-origin.sh --require | tail -n 1)"
+          printf 'FY_RELAY_DIRECTORY_ORIGIN=%s\n' "${origin}" >>"${GITHUB_ENV}"
+          echo "relay discovery origin for this build: ${origin:-<none>}"
       - name: Compile, package, and publish all channels
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

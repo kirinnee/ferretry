@@ -103,7 +103,10 @@ pre-commit-lib.run {
       enable = true;
       name = "Hosted relay configuration";
       entry = validator "scripts/validate/relay-config.sh";
-      files = "^(packages/relay/wrangler\\.(hosted\\.json|jsonc)|packages/relay/src/adapters/(worker|hosted-control)\\.ts|\\.github/workflows/relay-hosted\\.yaml|scripts/validate/relay-config\\.sh)$";
+      # The daemon and the PWA are in this list because a session crosses a relay only if BOTH ends
+      # are on it: the gate now also pins the discovery path both halves read and the release chain
+      # that gives the daemon a directory to ask at all.
+      files = "^(packages/relay/wrangler\\.(hosted\\.json|jsonc)|packages/relay/src/adapters/(worker|hosted-control)\\.ts|packages/daemon/src/lib/relay/discovery\\.ts|packages/daemon/src/adapters/system/runtime-environment\\.ts|packages/pwa/src/features/onboarding/hosted-relay\\.ts|scripts/release/compile\\.sh|\\.github/workflows/(relay-hosted|cd)\\.yaml|scripts/validate/relay-config\\.sh)$";
       pass_filenames = false;
       language = "system";
     };

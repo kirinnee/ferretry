@@ -7,6 +7,20 @@ import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
 
 const HostSchema = z.string().trim().min(1).max(255);
+
+/**
+ * Exactly the spellings that name this machine to itself.
+ *
+ * ONE COPY, because two surfaces answer the same question from it and used to answer it separately:
+ * whether anything off this host can reach the daemon, and what to tell somebody who cannot pair.
+ * Anything not in this set — a LAN address, a public one, or the `0.0.0.0` wildcard — accepts
+ * connections from off the host.
+ */
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
+
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(host);
+}
 const PortSchema = z.number().int().min(1).max(65_535);
 const CorsOriginSchema = z
   .url()

@@ -5,6 +5,14 @@ import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } fr
 
 export interface EnvironmentPort {
   stateHomeInput(): StateHomeInput;
+  /**
+   * The origin of the relay directory this daemon asks which carrier is advertised, or nothing.
+   *
+   * An ORIGIN, never a carrier: it identifies a service, and the relay address plus the operator's
+   * kill switch both live behind it at runtime. `undefined` is a real answer — a build with no
+   * directory asks nobody anything and stays direct-only, saying so.
+   */
+  relayDirectoryOrigin(): string | undefined;
 }
 
 export interface ClockPort {

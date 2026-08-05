@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import { DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import should from 'should';
+import { chooseRelayCarrierSource } from '../../../src/lib/relay/discovery.ts';
 import { parseDaemonConfig } from '../../../src/lib/runtime/config.ts';
 import {
   describeConfiguration,
@@ -228,5 +229,32 @@ describe('the grant posture a `--check` reports', () => {
     // A LAN address, a public one and the wildcard all accept connections from off this host.
     // Act + Assert
     should(reachableOffHost(parseDaemonConfig({ host })).reachable).be.true();
+  });
+
+  it('should count a DISCOVERED relay as a way in, not only a configured one', () => {
+    // Arrange: the state every fresh install is in — loopback bind, no `relay` block, and a carrier
+    // that came from the advertisement rather than from the document.
+    const config = parseDaemonConfig({ host: '127.0.0.1' });
+    const discovered = chooseRelayCarrierSource(undefined, { kind: 'available', relayUrl: 'https://relay.example' });
+
+    // Act
+    const reach = reachableOffHost(config, discovered);
+
+    // Assert — reading the document alone would tell somebody carried by the hosted relay that
+    // nothing on earth could reach them, and would suppress every grant line on that basis.
+    should(reach).deepEqual({ reachable: true, how: 'the relay at https://relay.example' });
+    should(describeGrantPosture({ config, passwordSet: true, clientName: 'fy', carrier: discovered }).join('\n')).match(
+      /reachable off this host \(the relay at https:\/\/relay\.example\)/u,
+    );
+  });
+
+  it('should still say nothing can reach it when the resolved carrier dials nowhere', () => {
+    // Arrange: a resolved answer of "direct-only" is evidence, not silence — so it is honoured
+    // rather than falling back to re-reading the document.
+    const config = parseDaemonConfig({ host: '127.0.0.1' });
+    const none = chooseRelayCarrierSource(undefined, { kind: 'disabled' });
+
+    // Act + Assert
+    should(reachableOffHost(config, none).reachable).be.false();
   });
 });
