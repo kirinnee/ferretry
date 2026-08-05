@@ -110,7 +110,10 @@ doctrine rather than a quirk of this feature:
    rather than after**.
 2. **`pairing`** — switching it off in response to a stolen phone also refuses
    `DELETE /v1/pair/devices/:deviceId`, so the coarse switch disables the revoke that was the actual
-   remedy. Hence the ordering in the section above, stated where somebody reaches for the switch.
+   remedy. Hence the ordering in the section above **and on the control itself**: the remote turn-off
+   warning for `pairing` carries "revoke that device FIRST", from
+   `COARSE_SWITCH_ALSO_STOPS` in `packages/pwa/src/lib/grants.ts`. The doc records the reasoning; the
+   switch carries the order, because that is where somebody is standing.
 3. **The state-home refusal** — outside grants entirely, with no capability involved: a daemon that
    cannot claim its state home **names `fy daemon adopt`** rather than reporting that it failed.
 
@@ -139,8 +142,6 @@ evidence for a rule. A doc arguing from a command nobody can run is worse than n
 Both axes default to **enabled** for all six. The product should let a person do as much as possible
 from the UI, and the security model is something a cautious operator turns **on** rather than a wall
 everyone starts behind.
-
-> > > > > > > 141154ed (feat(pwa): add a device to one daemon from the browser)
 
 **The primary security layer is locality, not the password.** A remote caller can never turn a
 capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
