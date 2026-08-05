@@ -1,21 +1,22 @@
 import { createHash } from 'node:crypto';
+import type { SecretName } from '@ferretry/protocol';
 import {
-  PIN_SCHEMA_VERSION,
-  SessionConfigSchema,
-  SessionStateSchema,
-  TERMINAL_MAX_GLOBAL,
-  TERMINAL_MAX_PER_SESSION,
   type CreateTerminalRequest,
   type LearningConfig,
+  PIN_SCHEMA_VERSION,
   type Pin,
   type PinSnapshot,
   type SendResult,
+  SessionConfigSchema,
+  SessionStateSchema,
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
   type SurfaceOpener,
   type TaskActionRequest,
   type TaskCreateRequestInput,
+  TERMINAL_MAX_GLOBAL,
+  TERMINAL_MAX_PER_SESSION,
   type TerminalListView,
   type TerminalView,
   type WardenConfigView,
@@ -24,21 +25,28 @@ import {
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
-  BrowserControlError,
-  type BrowserLoginLifecycle,
-  type BrowserLoginStatus,
-} from '../../../../src/lib/browser/control/index.ts';
-import {
-  rebuildAnalyticsSessionIndex,
   type FinishedAnalyticsSession,
+  rebuildAnalyticsSessionIndex,
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
+import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
-  AttentionService,
   type AttentionLedger,
   type AttentionLedgerRepository,
   type AttentionMutation,
+  AttentionService,
 } from '../../../../src/lib/attention/index.ts';
+import type {
+  BrowserControlError,
+  BrowserLoginLifecycle,
+  BrowserLoginStatus,
+} from '../../../../src/lib/browser/control/index.ts';
+import {
+  type AccountInventoryPort,
+  type CoreAccount,
+  type RoutingCatalogPort,
+  TeamAdvisor,
+} from '../../../../src/lib/core/index.ts';
 import type {
   LearningState,
   LearningStorePort,
@@ -48,24 +56,13 @@ import type {
   Tombstone,
 } from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
+import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
+import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
-import { WardenError, type WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
-import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
-import { PinService, type PinRepository, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
-import type { TaskBoardSubsystem } from '../../../../src/lib/runtime/mounts/task-boards.ts';
-import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
-import {
-  EMPTY_TASK_BOARD_REPOSITORY_STATE,
-  type TaskBoardCredentialIssuer,
-  type TaskBoardRepository,
-  type TaskBoardRepositoryState,
-  type TaskBoardSession,
-  type TaskBoardSessionDirectory,
-} from '../../../../src/lib/task-boards/types.ts';
 import { RecommendError, type RecommendSubsystem } from '../../../../src/lib/runtime/mounts/recommend.ts';
-import { SessionReadError, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import type { SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import {
   SessionControlError,
   type SessionControlSubsystem,
@@ -76,71 +73,77 @@ import {
 } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { SessionResumeError, type SessionResumeSubsystem } from '../../../../src/lib/runtime/mounts/session-resume.ts';
 import {
-  SessionSendError,
   type SendInput,
+  SessionSendError,
   type SessionSendSubsystem,
 } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
+import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { SttSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
-import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
-import {
-  TeamAdvisor,
-  type AccountInventoryPort,
-  type CoreAccount,
-  type RoutingCatalogPort,
-} from '../../../../src/lib/core/index.ts';
-import { catalog, inventory } from '../../core/fixtures.ts';
+import type {
+  TaskBoardSubsystem,
+  TaskBoardTaskActionAuthorizer,
+} from '../../../../src/lib/runtime/mounts/task-boards.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
+import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
+import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
+import {
+  configuredReferences,
+  type SecretChildOutcome,
+  type SecretChildRunner,
+  type SecretChildSpec,
+  type SecretCipherPort,
+  SecretDirectory,
+  type SecretDocumentStore,
+  SecretStoreError,
+  SecretUseService,
+  SecretVault,
+  type SecretVaultDocument,
+} from '../../../../src/lib/secrets/index.ts';
+import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
+import { FleetEventStreamService } from '../../../../src/lib/session/events/index.ts';
+import {
+  defaultSessionHealthSettings,
+  type IncoherencePass,
+  SelfRestartCoordinator,
+  type SelfRestartStamp,
+  type SessionHealthEvent,
+  type SessionHealthObservation,
+  SessionHealthService,
+} from '../../../../src/lib/session/health/index.ts';
+import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
+import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
+import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
+import type { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
+import {
+  EMPTY_TASK_BOARD_REPOSITORY_STATE,
+  type TaskBoardCredentialIssuer,
+  type TaskBoardRepository,
+  type TaskBoardRepositoryState,
+  type TaskBoardSession,
+  type TaskBoardSessionDirectory,
+} from '../../../../src/lib/task-boards/types.ts';
 import {
   applyTaskAction,
   createTask,
   emptyTaskSnapshot,
   requireTaskEntry,
-  TaskError,
-  TaskStateUnavailableError,
   type TaskActor,
   type TaskEntry,
+  TaskError,
   type TaskParseIssue,
   type TaskSnapshot,
+  TaskStateUnavailableError,
 } from '../../../../src/lib/tasks/index.ts';
-import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
-import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
-import { FleetEventStreamService } from '../../../../src/lib/session/events/index.ts';
-import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
-import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
-import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
   nextTerminalTitle,
   normalizeTerminalSize,
   normalizeTerminalTitle,
 } from '../../../../src/lib/terminal/policy.ts';
-import {
-  configuredReferences,
-  SecretDirectory,
-  SecretStoreError,
-  SecretUseService,
-  SecretVault,
-  type SecretChildOutcome,
-  type SecretChildRunner,
-  type SecretChildSpec,
-  type SecretCipherPort,
-  type SecretDocumentStore,
-  type SecretVaultDocument,
-} from '../../../../src/lib/secrets/index.ts';
-import type { SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
-import type { SecretName } from '@ferretry/protocol';
 import type { UsageFeedPort } from '../../../../src/lib/usage/index.ts';
-import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
-import {
-  defaultSessionHealthSettings,
-  SelfRestartCoordinator,
-  SessionHealthService,
-  type IncoherencePass,
-  type SelfRestartStamp,
-  type SessionHealthEvent,
-  type SessionHealthObservation,
-} from '../../../../src/lib/session/health/index.ts';
+import { defaultWardenConfig } from '../../../../src/lib/warden/index.ts';
+import { catalog, inventory } from '../../core/fixtures.ts';
 
 /** Shared fakes for the mounted-surface tests: real domain services over storage the test owns. */
 
@@ -291,6 +294,7 @@ export interface TaskWorld {
   readonly observed?: string[][];
   /** Session ids the layout refuses, so the mount's bad-request path can be driven. */
   readonly unusable?: readonly string[];
+  readonly boardActions?: TaskBoardTaskActionAuthorizer;
 }
 
 /** A task subsystem over in-memory boards, with a fixed instant so a body can be asserted exactly. */
@@ -319,6 +323,7 @@ export function taskSubsystem(world: TaskWorld = {}): TaskSubsystem {
       );
     },
     now: () => AT,
+    boardActions: world.boardActions,
   };
 }
 

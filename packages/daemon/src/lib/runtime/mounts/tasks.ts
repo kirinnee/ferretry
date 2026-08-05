@@ -1,33 +1,34 @@
 import {
-  TASK_SCHEMA_VERSION,
-  TaskActionRequestSchema,
-  TaskCreateRequestSchema,
   type FleetTaskListResponse,
   type ScopedTaskDetailResponse,
   type ScopedTaskSummary,
   type ScopedTaskView,
   type SessionStatus,
   type SessionTaskListResponse,
+  TASK_SCHEMA_VERSION,
   type Task,
   type TaskActionRequest,
+  TaskActionRequestSchema,
   type TaskActivity,
   type TaskCreateRequestInput,
+  TaskCreateRequestSchema,
   type TaskErrorCode,
   type TaskLive,
 } from '@ferretry/protocol';
-import { parseActor, type ApiActor } from '../../api/actor.ts';
+import { type ApiActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiRequest, type ApiResponse } from '../../api/http.ts';
+import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  type TaskActor,
+  type TaskEntry,
   TaskError,
   TaskStateUnavailableError,
   taskBlockedBy,
-  type TaskActor,
-  type TaskEntry,
 } from '../../tasks/index.ts';
+import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError, type TaskBoardTaskActionAuthorizer } from './task-boards.ts';
 
 /**
  * The task record board's HTTP surface: one session's tasks, the fleet's tasks, and one task's whole
@@ -94,6 +95,8 @@ export interface TaskSubsystem {
   observe(assignees: readonly string[]): Promise<ReadonlyMap<string, AssigneeObservation>>;
   /** The instant a list response is stamped with, so an empty board still reports a real time. */
   now(): string;
+  /** Absent only in isolated task tests; peer done attempts then fail closed. */
+  readonly boardActions?: TaskBoardTaskActionAuthorizer;
 }
 
 /**
@@ -501,7 +504,32 @@ async function act(subsystem: TaskSubsystem, context: RouteContext): Promise<Api
   const taskId = pathTaskId(context);
   const request = await parseBody(context.request, TaskActionRequestSchema);
   const board = boardFor(subsystem, sessionId);
-  const entry = await board.act(taskId, request, taskActor(context.actor)).catch(reraise);
+  let actor = taskActor(context.actor);
+  const requestedDone =
+    request.action === 'phase' ? request.phase === 'done' : request.action === 'status' && request.status === 'done';
+  if (actor.kind === 'agent' && requestedDone) {
+    const current = await board.detail(taskId).catch(reraise);
+    if (current.task.phase === 'live') {
+      const capability = headerValue(context.request, BOARD_CAPABILITY_HEADER)?.trim();
+      if (capability === undefined || capability === '')
+        throw new ApiError(
+          401,
+          'marking a shared-board task done needs the calling session’s board capability',
+          'missing_capability',
+        );
+      if (subsystem.boardActions === undefined)
+        throw new ApiError(
+          503,
+          'task-board authorization is unavailable; refusing to mark the task done',
+          'unavailable',
+        );
+      await subsystem.boardActions
+        .authorize({ targetSessionId: sessionId, capability, action: 'mark_done' })
+        .catch(reraiseTaskBoardError);
+      actor = { ...actor, boardAuthorizedForSession: sessionId, mayMarkDone: true };
+    }
+  }
+  const entry = await board.act(taskId, request, actor).catch(reraise);
   const read = await board.list().catch(reraise);
   return jsonResponse(
     scopedView(

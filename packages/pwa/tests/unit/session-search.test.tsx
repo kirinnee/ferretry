@@ -157,4 +157,80 @@ describe('current-session search model', () => {
       run(() => unavailable.unmount());
     }
   });
+
+  test('keeps the optimistic completion while the daemon confirms it, including from Kanban', async () => {
+    let answer: ((response: Response) => void) | undefined;
+    const live = task({ phase: 'live', status: 'live' });
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'POST')
+        return new Promise<Response>(resolve => {
+          answer = resolve;
+        });
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Promise.resolve(Response.json({ activity: [], sessionId: 'session-a', task: live }));
+      if (url.pathname.endsWith('/tasks')) return Promise.resolve(Response.json({ tasks: [live] }));
+      if (url.pathname.endsWith('/fs')) return Promise.resolve(Response.json({ entries: [] }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const kanban = surface.root.findAllByType('button').find(button => button.children.join('') === 'Kanban');
+      run(() => kanban?.props.onClick());
+      const done = surface.root.findByProps({ 'aria-label': 'Mark &F6 done' });
+      await runAsync(async () => {
+        done.props.onClick();
+        await Promise.resolve();
+      });
+      expect(JSON.stringify(surface.toJSON())).toContain('Marked done from Tasks.');
+      expect(JSON.stringify(surface.toJSON())).not.toContain('Mark done');
+      expect(answer).toBeDefined();
+
+      await runAsync(async () => {
+        answer?.(Response.json({ ...live, phase: 'done', status: 'done', statusReason: 'Confirmed by daemon.' }));
+        await settle();
+      });
+
+      expect(JSON.stringify(surface.toJSON())).toContain('Confirmed by daemon.');
+      expect(JSON.stringify(surface.toJSON())).not.toContain('The daemon refused');
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
+
+  test('restores live work and visibly explains when the daemon refuses Mark Done', async () => {
+    const live = task({ phase: 'live', status: 'live' });
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'POST') return Promise.resolve(new Response('forbidden', { status: 403 }));
+      if (url.pathname.endsWith('/tasks/F6'))
+        return Promise.resolve(Response.json({ activity: [], sessionId: 'session-a', task: live }));
+      if (url.pathname.endsWith('/tasks')) return Promise.resolve(Response.json({ tasks: [live] }));
+      if (url.pathname.endsWith('/fs')) return Promise.resolve(Response.json({ entries: [] }));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const surface = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const done = surface.root.findByProps({ 'aria-label': 'Mark &F6 done' });
+      await runAsync(async () => {
+        done.props.onClick();
+        await settle();
+      });
+
+      expect(JSON.stringify(surface.toJSON())).toContain('The daemon refused to mark this task done (HTTP 403).');
+      expect(surface.root.findByProps({ 'aria-label': 'Mark &F6 done' })).toBeDefined();
+    } finally {
+      run(() => surface.unmount());
+    }
+  });
 });

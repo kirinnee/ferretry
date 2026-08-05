@@ -42,9 +42,18 @@ export interface SessionTaskListProps {
   readonly tasks: readonly TaskSummary[];
   readonly conflicts?: SessionTaskConflicts;
   readonly onOpen: (taskId: string) => void;
+  readonly onMarkDone?: (task: TaskSummary) => void;
+  readonly markingDoneId?: string | null;
 }
 
-export function SessionTaskList({ daemonId, tasks, conflicts = EMPTY_CONFLICTS, onOpen }: SessionTaskListProps) {
+export function SessionTaskList({
+  daemonId,
+  tasks,
+  conflicts = EMPTY_CONFLICTS,
+  onOpen,
+  onMarkDone,
+  markingDoneId = null,
+}: SessionTaskListProps) {
   const visibleTasks = sortSessionTasks(tasks);
   return (
     <section
@@ -53,7 +62,15 @@ export function SessionTaskList({ daemonId, tasks, conflicts = EMPTY_CONFLICTS, 
       data-task-view="list"
     >
       {visibleTasks.map(task => (
-        <TaskRow daemonId={daemonId} key={task.id} task={task} conflicts={conflicts.get(task.id)} onOpen={onOpen} />
+        <TaskRow
+          daemonId={daemonId}
+          key={task.id}
+          task={task}
+          conflicts={conflicts.get(task.id)}
+          markingDone={markingDoneId === task.id}
+          onMarkDone={onMarkDone}
+          onOpen={onOpen}
+        />
       ))}
       {visibleTasks.length === 0 ? (
         <p className="px-3 py-4 text-center text-xs text-muted">No matching tasks.</p>
@@ -73,6 +90,8 @@ export function SessionTaskKanban({
   conflicts = EMPTY_CONFLICTS,
   onOpen,
   compact = false,
+  onMarkDone,
+  markingDoneId = null,
 }: SessionTaskKanbanProps) {
   return (
     <section
@@ -107,6 +126,8 @@ export function SessionTaskKanban({
                   task={task}
                   conflicts={conflicts.get(task.id)}
                   impliedLane={lane}
+                  markingDone={markingDoneId === task.id}
+                  onMarkDone={onMarkDone}
                   onOpen={onOpen}
                 />
               ))}

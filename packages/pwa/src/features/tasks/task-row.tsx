@@ -56,6 +56,9 @@ export interface TaskRowProps {
   readonly showAssignee?: boolean;
   /** Ask provenance distinguishes only when the visible set mixes origins. */
   readonly showAskOriginMarker?: boolean;
+  /** Human-facing completion is offered only for work awaiting live verification. */
+  readonly onMarkDone?: (task: TaskSummary) => void;
+  readonly markingDone?: boolean;
 }
 
 export function TaskRow({
@@ -68,6 +71,8 @@ export function TaskRow({
   showStatusBadge = true,
   showAssignee = true,
   showAskOriginMarker = true,
+  onMarkDone,
+  markingDone = false,
 }: TaskRowProps) {
   const lane = taskBoardLane(task.phase);
   const boardState = taskBoardState(task);
@@ -147,6 +152,20 @@ export function TaskRow({
           )}
         </span>
       </button>
+      {onMarkDone !== undefined && task.phase === 'live' ? (
+        <div className="mt-1 flex justify-end">
+          <button
+            aria-label={`Mark ${taskReference(task.id)} done`}
+            className="kt-btn kt-btn--sm"
+            data-variant="primary"
+            disabled={markingDone}
+            onClick={() => onMarkDone(task)}
+            type="button"
+          >
+            {markingDone ? 'Marking done…' : 'Mark done'}
+          </button>
+        </div>
+      ) : null}
       {(showAssignee || pr !== null) && (
         // Without an assignee the strip carries only the PR chip, which is
         // desktop-only — so the whole strip stays out of the phone layout too.
