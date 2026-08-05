@@ -250,6 +250,7 @@ import {
   type ExecutableResolverPort,
   exactWorkerAssignee,
   FleetEventStreamService,
+  FleetRefreshService,
   type FoundationPaths,
   foreignAdvertisementNotice,
   HarnessQuirkService,
@@ -3595,6 +3596,10 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
+        // This owns no cache and no provider policy: the mounted fleet health reader and the daemon
+        // usage feed already own those. One service per opened state home serializes only this
+        // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.
+        fleetRefresh: new FleetRefreshService({ usage, fleet }),
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory
@@ -4076,6 +4081,32 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     }, failoverIntervalMs);
     cleanups.push(() => clearInterval(failoverTicks));
   }
+  /**
+   * The unattended fleet evidence pass.
+   *
+   * It is mounted rather than folded into a route because the point is that `/usage` and
+   * `/v1/fleet/health` are already current before a browser or a person requests them. The tick
+   * drives the established feeds only: `CachedUsageFeed` owns quota caching, shared in-flight work
+   * and last-good retention; the mounted fleet health reader owns the equivalent health evidence.
+   * This loop invents neither a cache nor an error result, so a failed probe cannot replace good
+   * data with an empty fleet.
+   *
+   * ONE CONFIGURATION NAME chooses the cadence. `usage.interval` is the fleet declaration that
+   * builds the usage feed's freshness policy too. A daemon without a fleet configuration has made
+   * no cadence choice, so `usageRefreshMs(undefined)` supplies the conservative shared default.
+   * The interval is read once per boot: re-arming it inside a tick can cancel a timer while it is
+   * running, and retrying immediately after a failure would spend the quota the loop measures.
+   */
+  const fleetRefreshIntervalMs = await subsystems.fleet
+    .config()
+    .then(declared => usageRefreshMs(declared.usage.interval), () => usageRefreshMs(undefined));
+  // Start a collection after binding but do not make a slow provider probe delay daemon readiness.
+  // The loop serializes it with the fixed timer below, and all failures remain in the existing feeds.
+  void subsystems.fleetRefresh.run();
+  const fleetRefreshTicks = setInterval(() => {
+    void subsystems.fleetRefresh.run();
+  }, fleetRefreshIntervalMs);
+  cleanups.push(() => clearInterval(fleetRefreshTicks));
   /**
    * The analytics ingestion sweep.
    *

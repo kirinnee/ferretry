@@ -8,6 +8,7 @@ import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
 import type { SocketTicketRedeemer } from '../../api/socket-ticket.ts';
 import type { AttentionService } from '../../attention/index.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
+import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
@@ -68,6 +69,10 @@ export interface MountedSubsystems {
   readonly pairing: PairingSubsystem;
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
   readonly fleet: FleetSubsystem;
+  /** The daemon-scoped timer target that refreshes the mounted fleet's quota and health evidence.
+   *  It serves no route: an unattended pass exists to make the existing routes current before anyone
+   *  asks them. Keeping it here proves production constructs it rather than leaving a dead timer. */
+  readonly fleetRefresh: FleetRefreshLoop;
   readonly attention: AttentionService;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */

@@ -82,10 +82,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     usage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    health: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     apply: async () => {
       throw new Error('not exercised by the surface inventory');
     },
   },
+  // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
+  // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
+  fleetRefresh: { run: async () => undefined },
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -180,6 +186,7 @@ describe('the mounted daemon surface', () => {
       'PUT /v1/fleet/environment',
       'GET /v1/fleet/plan',
       'GET /v1/fleet/usage',
+      'GET /v1/fleet/health',
       'POST /v1/fleet/apply',
       'GET /v1/gc',
       'POST /v1/gc',
