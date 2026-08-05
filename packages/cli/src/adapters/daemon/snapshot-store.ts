@@ -71,6 +71,8 @@ export interface FileDaemonSnapshotStoreOptions {
   readonly uniqueId?: (() => string) | undefined;
   /** Observation seams used by deterministic race tests; production leaves them absent. */
   readonly afterCopy?: (() => Promise<void>) | undefined;
+  readonly afterHierarchyCreate?: ((path: string) => Promise<void>) | undefined;
+  readonly afterDirectorySync?: ((path: string) => Promise<void>) | undefined;
   readonly afterTargetClaim?: (() => Promise<void>) | undefined;
   readonly afterPromotionPublish?: (() => Promise<void>) | undefined;
 }
@@ -124,13 +126,14 @@ async function durableWrite(path: string, contents: string, mode: number): Promi
   }
 }
 
-async function syncDirectory(path: string): Promise<void> {
+async function syncDirectory(path: string, afterSync?: ((path: string) => Promise<void>) | undefined): Promise<void> {
   const handle = await open(path, 'r');
   try {
     await handle.sync();
   } finally {
     await handle.close();
   }
+  await afterSync?.(path);
 }
 
 /**
@@ -142,7 +145,10 @@ async function syncDirectory(path: string): Promise<void> {
  * `stat` deliberately follows them, while the managed root and its children are validated with
  * `lstat` separately.
  */
-async function ensureDirectoryHierarchy(path: string): Promise<void> {
+async function ensureDirectoryHierarchy(
+  path: string,
+  hooks: Pick<FileDaemonSnapshotStoreOptions, 'afterHierarchyCreate' | 'afterDirectorySync'>,
+): Promise<void> {
   const missing: string[] = [];
   let cursor = path;
   while (true) {
@@ -161,9 +167,16 @@ async function ensureDirectoryHierarchy(path: string): Promise<void> {
     }
   }
 
+  // The existing anchor may itself have been published by a competing creator that has not yet
+  // persisted its directory entry. Persist it before extending the hierarchy beneath it. When the
+  // requested path already exists, this is the fsync that makes that observed entry durable.
+  await syncDirectory(dirname(cursor), hooks.afterDirectorySync);
+
   for (const directory of missing.reverse()) {
+    let created = false;
     try {
       await mkdir(directory, { mode: 0o700 });
+      created = true;
     } catch (error) {
       if (errorCode(error) !== 'EEXIST') throw error;
       const state = await stat(directory);
@@ -171,9 +184,10 @@ async function ensureDirectoryHierarchy(path: string): Promise<void> {
         throw new DaemonSnapshotStoreError('damaged', `${directory} is not a directory`);
       }
     }
+    if (created) await hooks.afterHierarchyCreate?.(directory);
     // Sync even after EEXIST: a competing creator may have published the entry without persisting
     // its parent yet, and this invocation must not return relying on that unstated guarantee.
-    await syncDirectory(dirname(directory));
+    await syncDirectory(dirname(directory), hooks.afterDirectorySync);
   }
 }
 
@@ -244,7 +258,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       }
       await chmod(stagedBinary, 0o555);
       await chmod(stagedManifest, 0o444);
-      await syncDirectory(stage);
+      await this.#syncDirectory(stage);
 
       const target = this.#snapshotDirectory(id);
       try {
@@ -262,10 +276,10 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       }
       await rename(stagedBinary, join(target, this.options.daemon.name));
       await rename(stagedManifest, join(target, MANIFEST));
-      await syncDirectory(target);
+      await this.#syncDirectory(target);
       await chmod(target, 0o555);
-      await syncDirectory(target);
-      await syncDirectory(join(this.root, SNAPSHOTS));
+      await this.#syncDirectory(target);
+      await this.#syncDirectory(join(this.root, SNAPSHOTS));
       const snapshot = await this.#readSnapshot(id);
       return { ...snapshot, created: true };
     } finally {
@@ -290,7 +304,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       await this.#ensurePromotionMarker();
       await rename(temporary, join(this.root, CURRENT));
       ownsTemporary = false;
-      await syncDirectory(this.root);
+      await this.#syncDirectory(this.root);
       await this.options.afterPromotionPublish?.();
     } finally {
       if (ownsTemporary) await rm(temporary, { force: true }).catch(() => undefined);
@@ -373,7 +387,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
 
   async #ensureStore(): Promise<void> {
     const parent = dirname(this.root);
-    await ensureDirectoryHierarchy(parent);
+    await ensureDirectoryHierarchy(parent, this.options);
     let created = false;
     try {
       await mkdir(this.root, { mode: 0o700 });
@@ -386,14 +400,18 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       // observable, missing structure is damage and must not be filled in by a later operation.
       await mkdir(join(this.root, SNAPSHOTS), { mode: 0o700 });
       await mkdir(join(this.root, STAGING), { mode: 0o700 });
-      await syncDirectory(this.root);
-      // Publish the fully initialized root only after its own children are durable. Without this
-      // parent sync, a crash can lose the directory entry and erase the evidence that promotion ever
-      // happened, allowing a later launch to bootstrap damaged state as though it were fresh.
-      await syncDirectory(parent);
     }
     const rootState = await lstat(this.root);
     await this.#validateStore(rootState);
+    // Every observer establishes durability for the structure it accepted. A competing creator may
+    // have made the children or root visible without yet syncing either directory; persist children
+    // before the root entry so a successful return never relies on the creator reaching its fsyncs.
+    await this.#syncDirectory(this.root);
+    await this.#syncDirectory(parent);
+  }
+
+  async #syncDirectory(path: string): Promise<void> {
+    await syncDirectory(path, this.options.afterDirectorySync);
   }
 
   async #validateStore(rootState: Stats): Promise<void> {
@@ -424,7 +442,7 @@ export class FileDaemonSnapshotStore implements IDaemonSnapshotPort {
       } catch (error) {
         if (errorCode(error) !== 'EEXIST') throw error;
       }
-      if (created) await syncDirectory(this.root);
+      if (created) await this.#syncDirectory(this.root);
       if (!(await this.#hasPromotionMarker())) {
         throw new DaemonSnapshotStoreError('damaged', `${marker} was not published`);
       }

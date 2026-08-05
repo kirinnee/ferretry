@@ -15,7 +15,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import should from 'should';
 import {
   DaemonSnapshotStoreError,
@@ -109,6 +109,109 @@ describe('file daemon snapshot store', () => {
     should(second.id).equal(first.id);
     should(second.created).be.false();
     should(await readFile(join(second.binaryPath, '..', 'manifest.json'), 'utf8')).equal(firstManifest);
+  });
+
+  it('should persist an observed hierarchy entry before extending it', async () => {
+    // Arrange
+    const storeParent = dirname(root);
+    const observedAncestor = dirname(storeParent);
+    const expectedFirstSync = dirname(observedAncestor);
+    let reportCreated!: () => void;
+    let releaseCreator!: () => void;
+    let reportFirstSync!: (path: string) => void;
+    const ancestorCreated = new Promise<void>(resolve => {
+      reportCreated = resolve;
+    });
+    const creatorReleased = new Promise<void>(resolve => {
+      releaseCreator = resolve;
+    });
+    const firstObserverSync = new Promise<string>(resolve => {
+      reportFirstSync = resolve;
+    });
+    const creator = store({
+      uniqueId: () => 'hierarchy-creator',
+      afterHierarchyCreate: async path => {
+        if (path !== observedAncestor) return;
+        reportCreated();
+        await creatorReleased;
+      },
+    });
+    const observer = store({
+      uniqueId: () => 'hierarchy-observer',
+      afterDirectorySync: async path => {
+        reportFirstSync(path);
+      },
+    });
+
+    // Act
+    const creating = creator.build();
+    await ancestorCreated;
+    const observing = observer.build();
+    const actualFirstSync = await firstObserverSync;
+    const observerOutcome = await observing.then(
+      value => ({ ok: true as const, value }),
+      error => ({ ok: false as const, error }),
+    );
+    releaseCreator();
+    const created = await creating;
+    if (!observerOutcome.ok) throw observerOutcome.error;
+
+    // Assert
+    should(actualFirstSync).equal(expectedFirstSync);
+    should(observerOutcome.value.id).equal(created.id);
+  });
+
+  it('should persist an observed initialized root before reusing it', async () => {
+    // Arrange
+    const storeParent = dirname(root);
+    const expectedObserverSyncs = [dirname(storeParent), root, storeParent];
+    let reportRootSynced!: () => void;
+    let releaseCreator!: () => void;
+    let reportObserverSyncs!: () => void;
+    const rootSynced = new Promise<void>(resolve => {
+      reportRootSynced = resolve;
+    });
+    const creatorReleased = new Promise<void>(resolve => {
+      releaseCreator = resolve;
+    });
+    const firstThreeObserverSyncs = new Promise<void>(resolve => {
+      reportObserverSyncs = resolve;
+    });
+    let creatorPaused = false;
+    const creator = store({
+      uniqueId: () => 'root-creator',
+      afterDirectorySync: async path => {
+        if (path !== root || creatorPaused) return;
+        creatorPaused = true;
+        reportRootSynced();
+        await creatorReleased;
+      },
+    });
+    const observerSyncs: string[] = [];
+    const observer = store({
+      uniqueId: () => 'root-observer',
+      afterDirectorySync: async path => {
+        observerSyncs.push(path);
+        if (observerSyncs.length === expectedObserverSyncs.length) reportObserverSyncs();
+      },
+    });
+
+    // Act
+    const creating = creator.build();
+    await rootSynced;
+    const observing = observer.build();
+    await firstThreeObserverSyncs;
+    const observerOutcome = await observing.then(
+      value => ({ ok: true as const, value }),
+      error => ({ ok: false as const, error }),
+    );
+    releaseCreator();
+    const created = await creating;
+    if (!observerOutcome.ok) throw observerOutcome.error;
+
+    // Assert
+    should(observerSyncs.slice(0, expectedObserverSyncs.length)).deepEqual(expectedObserverSyncs);
+    should(observerOutcome.value.id).equal(created.id);
   });
 
   it('should never replace a content address another builder is still publishing', async () => {
