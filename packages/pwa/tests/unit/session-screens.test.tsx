@@ -345,6 +345,12 @@ describe('session screen components', () => {
     );
     expect(rows.root.findAllByProps({ className: 'fy-message fy-message-tool fy-message-chrome' })).toHaveLength(1);
     expect(rows.root.findAllByProps({ className: 'fy-message fy-message-notice fy-message-chrome' })).toHaveLength(1);
+    expect(rows.root.findByProps({ 'data-transcript-kind': 'user' }).props['data-transcript-density']).toBe('message');
+    expect(rows.root.findByProps({ 'data-transcript-kind': 'assistant' }).props['data-transcript-density']).toBe(
+      'message',
+    );
+    expect(rows.root.findByProps({ 'data-transcript-kind': 'tool' }).props['data-transcript-density']).toBe('chrome');
+    expect(rows.root.findByProps({ 'data-transcript-kind': 'notice' }).props['data-transcript-density']).toBe('chrome');
     expect(findText(rows.root, 'You')).toHaveLength(1);
     expect(findText(rows.root, 'Assistant')).toHaveLength(1);
     expect(findText(rows.root, 'Tool')).toHaveLength(1);
