@@ -210,6 +210,13 @@ export function parseAttentionLedger(value: unknown, sessionId: string): Attenti
 }
 
 function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): AttentionMutation {
+  // The board is part of the authorization decision, not just a storage key.
+  // An agent's provenance proves authority only for that exact session. Keep
+  // this check in the pure daemon-owned layer so a transport or future
+  // in-process caller cannot bypass it by constructing a command directly.
+  if (command.actor.kind === 'agent' && command.actor.sessionId !== ledger.sessionId) {
+    return failure('forbidden', 'an agent may change attention only in its own session');
+  }
   switch (command.action) {
     case 'raise':
       return raise(ledger, command);

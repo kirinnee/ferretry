@@ -32,7 +32,10 @@ function createService(repository = new MemoryRepository()): {
   readonly repository: MemoryRepository;
   readonly service: AttentionService;
 } {
-  return { repository, service: new AttentionService(repository, { now: () => NOW }) };
+  return {
+    repository,
+    service: new AttentionService(repository, { now: () => NOW }, { has: async sessionId => sessionId === SESSION }),
+  };
 }
 
 const request = {
@@ -72,6 +75,40 @@ describe('Attention service', () => {
     // Assert
     should(listed).containDeep({ ok: true, value: { sessionId: SESSION, count: 0, items: [], resolved: [] } });
     should(counted).deepEqual({ ok: true, value: 0 });
+    should(repository.ledgers.size).equal(0);
+  });
+
+  it('should refuse an unknown session instead of treating its missing ledger as empty', async () => {
+    // Arrange
+    const { repository, service } = createService();
+
+    // Act
+    const listed = await service.list('missing-session');
+    const raised = await service.raise('missing-session', request, {
+      kind: 'agent',
+      sessionId: 'missing-session',
+      name: 'Ada',
+    });
+
+    // Assert
+    should(listed).containDeep({ ok: false, error: { code: 'not-found' } });
+    should(raised).containDeep({ ok: false, error: { code: 'not-found' } });
+    should(repository.ledgers.size).equal(0);
+  });
+
+  it('should refuse a cross-session agent before storage is read or mutated', async () => {
+    // Arrange
+    const { repository, service } = createService();
+
+    // Act
+    const raised = await service.raise(SESSION, request, {
+      kind: 'agent',
+      sessionId: 'another-session',
+      name: 'Mallory',
+    });
+
+    // Assert
+    should(raised).containDeep({ ok: false, error: { code: 'forbidden' } });
     should(repository.ledgers.size).equal(0);
   });
 

@@ -25,6 +25,17 @@ export interface AttentionLedgerRepository {
   ): Promise<AttentionMutation>;
 }
 
+/**
+ * Proof that a board owner exists in this daemon's session registry.
+ *
+ * A missing attention ledger is a legitimate empty board only when the session
+ * itself is known. Keeping this separate from the ledger repository prevents a
+ * typo or forged path from creating a phantom session directory.
+ */
+export interface AttentionSessionDirectory {
+  has(sessionId: string): Promise<boolean>;
+}
+
 export type AttentionQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AttentionFailure };
@@ -37,11 +48,12 @@ export class AttentionService {
   constructor(
     private readonly repository: AttentionLedgerRepository,
     private readonly clock: AttentionClock,
+    private readonly sessions: AttentionSessionDirectory,
   ) {}
 
   async list(sessionId: string): Promise<AttentionQueryResult<AttentionSnapshot>> {
-    const invalid = invalidSession(sessionId);
-    if (invalid !== null) return { ok: false, error: invalid };
+    const unauthorized = await this.authorize(sessionId);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
     const current = await this.repository.read(sessionId);
     return {
       ok: true,
@@ -108,9 +120,18 @@ export class AttentionService {
     sessionId: string,
     command: Parameters<typeof applyAttentionCommandToSession>[2],
   ): Promise<AttentionMutation> {
-    const invalid = invalidSession(sessionId);
-    if (invalid !== null) return { ok: false, error: invalid };
+    const unauthorized = await this.authorize(sessionId, command.actor);
+    if (unauthorized !== null) return { ok: false, error: unauthorized };
     return this.repository.transact(sessionId, current => applyAttentionCommandToSession(current, sessionId, command));
+  }
+
+  private async authorize(sessionId: string, actor?: AttentionActor): Promise<AttentionFailure | null> {
+    const invalid = invalidSession(sessionId);
+    if (invalid !== null) return invalid;
+    if (actor?.kind === 'agent' && actor.sessionId !== sessionId) {
+      return { code: 'forbidden', message: 'an agent may change attention only in its own session' };
+    }
+    return (await this.sessions.has(sessionId)) ? null : { code: 'not-found', message: `no such session ${sessionId}` };
   }
 }
 

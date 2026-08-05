@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AttentionAsk, AttentionId, AttentionResponse } from '@ferretry/protocol';
+import type { AttentionAsk, AttentionId, AttentionItem, AttentionResponse } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -173,14 +173,14 @@ describe('Attention state machine', () => {
     should(daemonItem.waitingSince).equal(backdated);
   });
 
-  it('should deduplicate identical free-form requests only for the same exact actor', () => {
+  it('should deduplicate identical requests only for the same authorized actor', () => {
     // Arrange
     const first = raised();
     const daemonFirst = raised(DAEMON);
 
     // Act
     const duplicate = succeeded(applyAttentionCommand(first.ledger, raiseCommand(AGENT, {}, SECOND)));
-    const otherActor = succeeded(applyAttentionCommand(duplicate.ledger, raiseCommand(OTHER_AGENT, {}, THIRD)));
+    const otherActor = failed(applyAttentionCommand(duplicate.ledger, raiseCommand(OTHER_AGENT, {}, THIRD)));
     const daemonDuplicate = succeeded(applyAttentionCommand(daemonFirst.ledger, raiseCommand(DAEMON, {}, SECOND)));
     const otherDaemonCause = succeeded(applyAttentionCommand(daemonDuplicate.ledger, raiseCommand(WARDEN, {}, THIRD)));
 
@@ -188,8 +188,7 @@ describe('Attention state machine', () => {
     should(duplicate.changed).be.false();
     should(duplicate.change).equal('unchanged');
     should(duplicate.snapshot.count).equal(1);
-    should(otherActor.snapshot.count).equal(2);
-    should(otherActor.snapshot.items.map(item => item.id)).deepEqual(['A1', 'A2']);
+    should(otherActor.error.code).equal('forbidden');
     should(daemonDuplicate.changed).be.false();
     should(otherDaemonCause.snapshot.count).equal(2);
   });
@@ -401,16 +400,32 @@ describe('Attention state machine', () => {
   it('should allow human dismissal of any item and agent dismissal only of its own item', () => {
     // Arrange
     const own = raised(AGENT);
-    const other = raised(OTHER_AGENT);
+    // A current caller cannot create this state (cross-session writes are
+    // refused below), but imported/older durable evidence may still name a
+    // different raiser. Dismissal must fail closed for that evidence too.
+    const otherItem: AttentionItem = {
+      ...activeEntry(own.ledger).item,
+      raisedBy: 'agent',
+      raisedBySession: OTHER_AGENT.sessionId,
+      raisedByName: OTHER_AGENT.name,
+    };
+    const other: AttentionLedger = {
+      ...own.ledger,
+      entries: [
+        {
+          lifecycle: 'active',
+          origin: OTHER_AGENT,
+          item: otherItem,
+        },
+      ],
+    };
     const daemon = raised(DAEMON, { source: 'question', sourceRef: 'q1', ask: undefined });
 
     // Act
     const ownDismissal = succeeded(
       applyAttentionCommand(own.ledger, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND }),
     );
-    const crossAgent = failed(
-      applyAttentionCommand(other.ledger, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND }),
-    );
+    const crossAgent = failed(applyAttentionCommand(other, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND }));
     const daemonByAgent = failed(
       applyAttentionCommand(daemon.ledger, { action: 'dismiss', actor: AGENT, id: 'A1', at: SECOND }),
     );
@@ -433,6 +448,38 @@ describe('Attention state machine', () => {
       resolvedBy: 'human',
       resolutionNote: 'No longer relevant.',
     });
+  });
+
+  it('should refuse every cross-session agent command before it reaches an item', () => {
+    // Arrange
+    const board = raised(AGENT);
+    const commands: readonly AttentionCommand[] = [
+      raiseCommand(OTHER_AGENT, { subject: 'Forged cross-session ask' }, SECOND),
+      {
+        action: 'answer',
+        actor: OTHER_AGENT,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        at: SECOND,
+      },
+      { action: 'resolve', actor: OTHER_AGENT, id: 'A1', at: SECOND },
+      { action: 'dismiss', actor: OTHER_AGENT, id: 'A1', at: SECOND },
+      {
+        action: 'resolve-source',
+        actor: OTHER_AGENT,
+        source: 'agent-raised',
+        sourceRef: 'source-1',
+        at: SECOND,
+      },
+    ];
+
+    // Act + Assert
+    for (const command of commands) {
+      const actual = failed(applyAttentionCommand(board.ledger, command));
+      should(actual.error).containDeep({ code: 'forbidden' });
+      should(actual.error.message).match(/own session/u);
+    }
+    should(board.snapshot.count).equal(1);
   });
 
   it('should express dismissal authorization as an actor-and-entry predicate', () => {

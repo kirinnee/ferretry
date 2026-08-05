@@ -1,11 +1,16 @@
 import { type AttentionErrorCode, AttentionActionRequestSchema } from '@ferretry/protocol';
-import { parseActor, type ApiActor } from '../../api/actor.ts';
+import { isHumanAdminActor, parseActor, type ApiActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { AttentionActor, AttentionFailure, AttentionService } from '../../attention/index.ts';
+import {
+  isAttentionSessionId,
+  type AttentionActor,
+  type AttentionFailure,
+  type AttentionService,
+} from '../../attention/index.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -41,18 +46,24 @@ const ATTENTION_ERROR_STATUS: Readonly<Record<AttentionErrorCode, number>> = {
 /**
  * Who the board thinks is acting, derived from the actor the authorization boundary resolved.
  *
- * An in-pane peer is the agent whose board this is; everything else reaching an admin-scoped route is
- * the human. The session id comes from the server-derived actor, so an agent cannot raise attention
+ * An in-pane peer is an agent; host-admin and registry-resolved device actors are the human. Any
+ * other value is refused: unavailable provenance must never inherit the human's ability to dismiss
+ * every item. The session id comes from the server-derived actor, so an agent cannot raise attention
  * in another session's name by sending a different body. A display name is not carried by the API
  * actor, so it is honestly `null` rather than guessed from a header a client controls.
  */
 export function attentionActor(actor: ApiActor | undefined): AttentionActor {
   const { kind, id } = parseActor(actor ?? '');
-  // An empty id is not an agent: `peer:` names no session, and treating it as one would let the
-  // board record provenance nothing can be traced back to.
-  return kind === 'peer' && id !== undefined && id !== ''
-    ? { kind: 'agent', sessionId: id, name: null }
-    : { kind: 'human' };
+  if (kind === 'peer' && id !== undefined && isAttentionSessionId(id)) {
+    return { kind: 'agent', sessionId: id, name: null };
+  }
+  // Host admin actors and a registry-resolved paired device are the two human
+  // forms this route can receive. Everything else is unavailable provenance,
+  // never a benign default to human authority.
+  if (isHumanAdminActor(actor) || (kind === 'device' && id !== undefined && id.trim() !== '')) {
+    return { kind: 'human' };
+  }
+  throw new ApiError(403, 'attention mutations require established human or session provenance', 'forbidden');
 }
 
 /** Turns a domain refusal into its HTTP answer, keeping the domain's own code for the client. */
