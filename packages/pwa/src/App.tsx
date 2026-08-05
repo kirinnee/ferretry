@@ -1,4 +1,4 @@
-import { DoctorReportSchema, HealthViewSchema } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema, type WardenVerdictsView } from '@ferretry/protocol';
 import {
   createContext,
   type ReactNode,
@@ -38,7 +38,9 @@ import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
+import { WardenReportDialog, type WardenReportDialogRequest } from './features/warden/warden-report-dialog.tsx';
 import { WardenStrip } from './features/warden/warden-strip.tsx';
+import { WardenVerdicts } from './features/warden/warden-verdicts.tsx';
 import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
@@ -50,7 +52,7 @@ import {
 import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
-import type { DaemonConnection, DaemonId } from './lib/daemon-connection.ts';
+import { sameDaemonConnection, type DaemonConnection, type DaemonId } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import type {
   NotificationPermissionState,
@@ -728,14 +730,97 @@ function WardenConfigurationRoute({ connection }: DaemonPageProps) {
   return <WardenConfigSurface connection={connection} />;
 }
 
-function WardenVerdictsRoute() {
+type WardenVerdictReadState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly verdicts: WardenVerdictsView }
+  | { readonly status: 'stale'; readonly verdicts: WardenVerdictsView }
+  | { readonly status: 'unavailable' };
+
+/** Read one daemon's concise report index. This intentionally lives beside the
+ * route that mounts it: the state is not a reusable global cache, and a failed
+ * read must remain visibly unavailable rather than quietly becoming []. */
+function useWardenVerdicts(
+  daemon: DaemonConnection,
+  read: (daemon: DaemonConnection) => Promise<WardenVerdictsView>,
+): WardenVerdictReadState {
+  const [held, setHeld] = useState<{ readonly daemon: DaemonConnection; readonly state: WardenVerdictReadState }>({
+    daemon,
+    state: { status: 'loading' },
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    setHeld({ daemon, state: { status: 'loading' } });
+    const poll = async (): Promise<void> => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        const verdicts = await read(daemon);
+        if (!cancelled) setHeld({ daemon, state: { status: 'ready', verdicts } });
+      } catch {
+        if (cancelled) return;
+        setHeld(current => {
+          if (!sameDaemonConnection(current.daemon, daemon)) return current;
+          return current.state.status === 'ready' || current.state.status === 'stale'
+            ? { daemon, state: { status: 'stale', verdicts: current.state.verdicts } }
+            : { daemon, state: { status: 'unavailable' } };
+        });
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [daemon, read]);
+
+  return sameDaemonConnection(held.daemon, daemon) ? held.state : { status: 'loading' };
+}
+
+function WardenVerdictsRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  const readVerdicts = useCallback(
+    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenVerdicts(),
+    [store.clients],
+  );
+  const readReport = useCallback(
+    async (daemon: DaemonConnection, reportPath: string) =>
+      await (await store.clients.client(daemon)).wardenReport(reportPath),
+    [store.clients],
+  );
+  const state = useWardenVerdicts(connection, readVerdicts);
+  const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
+
+  if (state.status === 'loading')
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Loading Warden reports">
+        <p className="m-0 text-ui text-muted">Checking recent Warden reports…</p>
+      </section>
+    );
+  if (state.status === 'unavailable')
+    return (
+      <section className="kt-panel p-panel" role="alert" aria-label="Warden reports unavailable">
+        <h2 className="m-0 text-title font-semibold">Recent verdicts unavailable</h2>
+        <p className="mb-0 mt-1 text-ui text-muted">
+          This daemon could not provide the report index. Ferretry will not present an empty history as evidence that
+          the fleet is healthy.
+        </p>
+      </section>
+    );
+
   return (
-    <section className="kt-panel p-panel" aria-labelledby="warden-verdicts-heading">
-      <h2 id="warden-verdicts-heading" className="m-0 text-title font-semibold">
-        Recent verdicts
-      </h2>
-      <p className="mb-0 text-ui text-muted">No daemon verdict feed is available in this build.</p>
-    </section>
+    <>
+      {state.status === 'stale' && (
+        <p
+          className="m-0 rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-cell text-warn"
+          role="status"
+        >
+          The latest report check failed; showing the last verified index.
+        </p>
+      )}
+      <WardenVerdicts connection={connection} verdicts={state.verdicts} onOpenReport={request => setReport(request)} />
+      <WardenReportDialog request={report} read={readReport} onClose={() => setReport(null)} />
+    </>
   );
 }
 
