@@ -1,4 +1,27 @@
+import type { FleetConfig } from './config.ts';
 import type { FleetManifest, FleetManifestAccount } from './manifest.ts';
+import { resolveAccounts } from './profiles.ts';
+
+/**
+ * Whether a published account has a provider login to run at all.
+ *
+ * The manifest does not publish an account's auth mode, so the answer comes from the configuration,
+ * where it is **declared** (`auth: api-key`) rather than guessed from a base URL — the tool this
+ * replaces inferred it, and misclassified anything served from an unexpected host.
+ *
+ * **An account the configuration does not mention still requires a login.** A manifest can outlive
+ * the configuration that produced it, and the two failures are not symmetric: attempting a login an
+ * account did not need costs a human one refusal, while skipping one it did need leaves the fleet
+ * signed out with nothing said. So the unknown case attempts.
+ */
+export function requiresProviderLogin(config: FleetConfig): (account: FleetManifestAccount) => boolean {
+  const keyAuthenticated = new Set(
+    resolveAccounts(config)
+      .filter(account => account.auth === 'api-key')
+      .map(account => account.id),
+  );
+  return account => !keyAuthenticated.has(account.id);
+}
 
 export type FleetLoginOutcome =
   | { readonly status: 'logged-in' }
