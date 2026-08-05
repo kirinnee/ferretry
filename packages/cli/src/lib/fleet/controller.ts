@@ -1,9 +1,10 @@
-import type { FleetManifest } from '@ferretry/fleet';
+import { type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
 import type {
   IFleetApplier,
   IFleetClock,
   IFleetConfigSource,
-  IFleetLoginServiceFactory,
+  IFleetIdentitySource,
+  IFleetLoginService,
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
@@ -14,6 +15,7 @@ import type {
 import {
   renderApplyPlan,
   renderApplyResult,
+  renderIdentityStatus,
   renderLoginResults,
   renderManifest,
   renderRecommendation,
@@ -38,6 +40,14 @@ export interface FleetRecommendOptions extends FleetCommandOptions {
   readonly usage?: boolean;
 }
 
+/** Flags that shape a login. Both narrow what it may do; neither widens it. */
+export interface FleetLoginOptions extends FleetCommandOptions {
+  /** Report what each home holds and change nothing — no copy, no browser. */
+  readonly status?: boolean;
+  /** Copy credentials across identities, but never ask a human to approve one. */
+  readonly syncOnly?: boolean;
+}
+
 /** The collaborators the fleet group is wired with. */
 export interface FleetControllerDeps {
   readonly config: IFleetConfigSource;
@@ -46,7 +56,8 @@ export interface FleetControllerDeps {
   readonly planner: IFleetPlanner;
   readonly applier: IFleetApplier;
   readonly usage: IFleetUsageCollectorFactory;
-  readonly logins: IFleetLoginServiceFactory;
+  readonly identities: IFleetIdentitySource;
+  readonly logins: IFleetLoginService;
   readonly clock: IFleetClock;
   readonly recommendations: IRecommendationGateway;
   readonly out: IFleetOutput;
@@ -115,20 +126,31 @@ export class FleetController {
   }
 
   /**
-   * Logs the named accounts in, or every account when none are named.
+   * Logs the fleet in, by identity rather than by account.
    *
-   * One account at a time and in the foreground, because a provider login is a browser approval a
-   * human performs — parallelising it would open several at once and race for the same terminal.
-   * An account the manifest declares unavailable is reported as such rather than launched.
+   * Naming an account selects its whole identity, because the credential is shared: every lane of one
+   * provider account keeps its own copy, so "log this one in" and "log its siblings in" are the same
+   * request. Most of the work is copying — only an identity with no usable credential anywhere costs a
+   * human an approval, which is what turns thirty browser approvals into one per provider account.
    *
-   * This is *not* kteam's fleet login: it does not group an account's wrappers by the provider
-   * account behind them, nor clone one credential across them, so an operator with four wrappers on
-   * one account still approves four times. The fleet survey under `docs/migration/surveys/` carries the row.
+   * Sequential and in the foreground, because an approval is something a human does in this terminal
+   * and two at once race for both.
    */
-  async login(accountIds: readonly string[], options: FleetCommandOptions): Promise<void> {
-    const manifest = await this.#manifest();
-    const logins = this.deps.logins.forConfig(await this.deps.config.load());
-    const results = await logins.login(manifest, accountIds.length === 0 ? undefined : accountIds);
+  async login(accountIds: readonly string[], options: FleetLoginOptions): Promise<void> {
+    const identities = await this.#identities();
+    if (options.status === true) {
+      const surveyed = await this.deps.identities.survey(
+        accountIds.length === 0 ? identities : selectIdentities(identities, accountIds),
+      );
+      this.#report(surveyed, options, () => renderIdentityStatus(surveyed));
+      return;
+    }
+
+    const results = await this.deps.logins.login({
+      identities,
+      ...(accountIds.length === 0 ? {} : { accountIds }),
+      mode: options.syncOnly === true ? 'sync-only' : 'full',
+    });
     this.#report(results, options, () => renderLoginResults(results));
   }
 
@@ -137,6 +159,11 @@ export class FleetController {
     if (task === '') throw new Error('describe the task: fy fleet recommend "<what needs doing>"');
     const recommendation = await this.deps.recommendations.recommend({ task, usage: options.usage !== false });
     this.#report(recommendation, options, () => renderRecommendation(recommendation));
+  }
+
+  /** The provider logins this host has, joined from the declared configuration and the manifest. */
+  async #identities(): Promise<readonly FleetIdentity[]> {
+    return this.deps.identities.identities(await this.deps.config.load(), await this.#manifest());
   }
 
   /** The provisioned manifest, or a message naming the command that would create one. */

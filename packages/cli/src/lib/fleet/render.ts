@@ -1,6 +1,8 @@
 import type {
+  CredentialState,
   FleetApplyPlan,
   FleetApplyResult,
+  FleetIdentityStatus,
   FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
@@ -115,14 +117,29 @@ export function renderScaffoldResult(result: FleetScaffoldResult): string {
   return lines.join('\n');
 }
 
-/** One login outcome. Every status is named, so "nothing happened" is never how a failure reads. */
+/**
+ * One login outcome.
+ *
+ * Every status is named. `usable`, `login-needed` and `indeterminate` are three different reasons
+ * nothing happened, and the last one is not a milder version of the other two: it means this home was
+ * never read successfully, so nothing can be concluded about it. Collapsing them is how a report ends
+ * up implying a fleet is signed in when part of it was never checked.
+ */
 export function renderLoginRow(result: FleetLoginResult): string {
   const detail = result.message === undefined ? '' : ` — ${result.message}`;
   switch (result.status) {
     case 'logged-in':
       return `  ${result.accountId}  logged in`;
+    case 'synced':
+      return `  ${result.accountId}  credential copied from this identity`;
+    case 'usable':
+      return `  ${result.accountId}  already had a usable credential`;
     case 'not-required':
       return `  ${result.accountId}  no login needed (this account authenticates with a key)`;
+    case 'login-needed':
+      return `  ${result.accountId}  needs a login, not attempted${detail}`;
+    case 'indeterminate':
+      return `  ${result.accountId}  UNKNOWN, left untouched${detail}`;
     case 'unavailable':
       return `  ${result.accountId}  skipped, the manifest declares it unavailable${detail}`;
     default:
@@ -133,15 +150,68 @@ export function renderLoginRow(result: FleetLoginResult): string {
 /**
  * The whole login pass.
  *
- * The header counts failures explicitly rather than only successes: a run where three of four
+ * The header counts what went wrong explicitly rather than only successes: a run where three of four
  * accounts failed and the summary said "4 accounts" is the shape of report this product keeps
- * getting wrong.
+ * getting wrong. Unknowns are counted separately from failures, because "I could not read it" and "it
+ * did not work" call for different next steps.
  */
 export function renderLoginResults(results: readonly FleetLoginResult[]): string {
   if (results.length === 0) return 'No accounts to log in.';
   const failed = results.filter(result => result.status === 'failed').length;
-  const header = `${plural(results.length, 'account')}${failed === 0 ? '' : `, ${failed} failed`}`;
+  const unknown = results.filter(result => result.status === 'indeterminate').length;
+  const notes = [
+    ...(failed === 0 ? [] : [`${failed} failed`]),
+    ...(unknown === 0 ? [] : [`${unknown} could not be read`]),
+  ];
+  const header = `${plural(results.length, 'account')}${notes.length === 0 ? '' : `, ${notes.join(', ')}`}`;
   return [header, ...results.map(renderLoginRow)].join('\n');
+}
+
+const CREDENTIAL_MARK: Readonly<Record<CredentialState, string>> = {
+  valid: 'valid',
+  refreshable: 'expired, renewable',
+  missing: 'none',
+  unreadable: 'UNREADABLE',
+};
+
+/** What one identity's verdict means for a human about to be asked for something. */
+function verdictLine(status: FleetIdentityStatus): string {
+  switch (status.verdict.kind) {
+    case 'no-login':
+      return `no provider login — ${status.verdict.reason}`;
+    case 'complete':
+      return 'every home has a usable credential';
+    case 'sync':
+      return `${plural(status.targets.length, 'home')} would be copied from ${status.verdict.donor.accountId}`;
+    case 'indeterminate':
+      return `UNKNOWN — ${status.verdict.reason}`;
+    default:
+      return 'needs one browser approval, which would then cover every home here';
+  }
+}
+
+/**
+ * What `--status` prints: what each home holds, and what would happen, with nothing done.
+ *
+ * Grouped by identity rather than listed by account, because the credential belongs to the identity —
+ * a flat per-account list is what made the old report look like thirty separate logins.
+ */
+export function renderIdentityStatus(statuses: readonly FleetIdentityStatus[]): string {
+  if (statuses.length === 0) return 'No identities on this host.';
+  const lines: string[] = [plural(statuses.length, 'identity').replace('identitys', 'identities')];
+  for (const status of statuses) {
+    lines.push(`  ${status.identity.key}  ${verdictLine(status)}`);
+    if (!status.identity.declared) {
+      lines.push(`${INDENT}(the configuration no longer declares this account, so it shares with nothing)`);
+    }
+    for (const member of status.members) {
+      lines.push(`${INDENT}${member.member.accountId}  ${CREDENTIAL_MARK[member.reading.state]}`);
+    }
+    for (const member of status.unavailable) {
+      lines.push(`${INDENT}${member.accountId}  unavailable, not read`);
+    }
+  }
+  return lines.join('\n');
 }
 
 function optionLine(option: RoleOption, prefix: string): string {

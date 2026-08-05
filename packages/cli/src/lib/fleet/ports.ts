@@ -2,6 +2,9 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetIdentity,
+  FleetIdentityStatus,
+  FleetLoginRequest,
   FleetLoginResult,
   FleetManifest,
   FleetScaffoldResult,
@@ -57,18 +60,27 @@ export interface IFleetUsageCollector {
 }
 
 /**
- * Logging every selected account in. Satisfied by `@ferretry/fleet`'s login service.
+ * Grouping the fleet into provider logins and reading what each home holds.
  *
- * Also built per invocation: which accounts even *have* a provider login is declared in the
- * configuration (`auth`), not published in the manifest, so the service cannot be assembled before
- * the configuration has been read.
+ * Both halves come from a different place and neither is guessed: the configuration declares which
+ * accounts share a login (`identity`) and how they authenticate (`auth`), while the manifest publishes
+ * where each account's home actually is. Joining them is what turns thirty browser approvals into one
+ * per provider account.
  */
-export interface IFleetLoginServiceFactory {
-  forConfig(config: FleetConfig): IFleetLoginService;
+export interface IFleetIdentitySource {
+  identities(config: FleetConfig, manifest: FleetManifest): readonly FleetIdentity[];
+  survey(identities: readonly FleetIdentity[]): Promise<readonly FleetIdentityStatus[]>;
 }
 
+/**
+ * Logging the fleet in. Satisfied by `@ferretry/fleet`'s login service.
+ *
+ * Takes identities rather than a manifest because a credential belongs to an identity, not to an
+ * account: syncing is what makes the login cheap, and syncing is only definable across the accounts
+ * that share one.
+ */
 export interface IFleetLoginService {
-  login(manifest: FleetManifest, accountIds?: readonly string[]): Promise<readonly FleetLoginResult[]>;
+  login(request: FleetLoginRequest): Promise<readonly FleetLoginResult[]>;
 }
 
 /**
