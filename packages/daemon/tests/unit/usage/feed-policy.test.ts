@@ -1,13 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  USAGE_REFRESH_MS,
   cachedAccounts,
   decideUsageRead,
   emptyUsageCache,
   parseUsageAccounts,
   recordUsageRefresh,
+  USAGE_REFRESH_MS,
   type UsageCacheState,
+  usageRefreshMs,
 } from '../../../src/lib/usage/index.ts';
 
 const cached = (at: number, retryAfter = 0): UsageCacheState => ({
@@ -182,5 +183,17 @@ describe('parseUsageAccounts', () => {
   it('should read an empty fleet as an empty list, not as a failure', () => {
     // Arrange / Act / Assert
     should(parseUsageAccounts({ accounts: [] })).deepEqual([]);
+  });
+});
+
+describe('usageRefreshMs', () => {
+  it('should serve a snapshot for the interval the fleet declared', () => {
+    // Arrange / Act / Assert — one name for one cadence; the daemon no longer carries a second.
+    should(usageRefreshMs(900)).equal(900_000);
+  });
+
+  it('should keep the default when no fleet configuration declares one', () => {
+    // Arrange / Act / Assert — an unprovisioned host has not asked for a cadence.
+    should(usageRefreshMs(undefined)).equal(USAGE_REFRESH_MS);
   });
 });
