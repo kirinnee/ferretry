@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { FleetManifestAccount } from '../lib/manifest.ts';
 import type { FleetHealthFailureKind, FleetHealthProbe, FleetHealthProbeResult } from '../lib/health.ts';
+import type { FleetManifestAccount } from '../lib/manifest.ts';
 
 export const FLEET_HEALTH_SENTINEL = 'FERRETRY_HEALTH_OK';
 export const FLEET_HEALTH_SUCCESS_TTL_MS = 15 * 60 * 1_000;
@@ -46,11 +46,10 @@ export interface ProcessFleetHealthProbeOptions {
 }
 
 type Cache = { readonly version: 1; readonly successes: Record<string, number> };
-const diagnostic = (value: string) =>
-  value
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-    .trim()
-    .slice(-300) || 'no diagnostic output';
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ESC starts the ANSI control sequence a harness may emit.
+const ANSI_ESCAPE = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+
+const diagnostic = (value: string) => value.replace(ANSI_ESCAPE, '').trim().slice(-300) || 'no diagnostic output';
 const classify = (output: string): FleetHealthFailureKind => {
   if (/(?:\b429\b|rate[ -]?limit|quota|insufficient[_ ]quota)/i.test(output)) return 'rate_limited';
   if (/(?:\b401\b|\b403\b|not logged in|auth(?:entication)?|unauthori[sz]ed|invalid.*(?:key|token))/i.test(output))

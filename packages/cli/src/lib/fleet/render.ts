@@ -2,6 +2,8 @@ import type {
   CredentialState,
   FleetApplyPlan,
   FleetApplyResult,
+  FleetHealth,
+  FleetHealthSnapshot,
   FleetIdentityStatus,
   FleetLoginResult,
   FleetManifest,
@@ -9,8 +11,6 @@ import type {
   FleetScaffoldResult,
   FleetUsage,
   FleetUsageSnapshot,
-  FleetHealth,
-  FleetHealthSnapshot,
   FleetWriteOperation,
 } from '@ferretry/fleet';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
@@ -97,7 +97,7 @@ export function renderUsage(snapshot: FleetUsageSnapshot): string {
   return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
 }
 
-export function renderHealthRow(health: FleetHealth): string {
+function renderHealthRow(health: FleetHealth): string {
   const reason = health.error === undefined ? '' : ` — ${health.error}`;
   return `  ${health.accountId}  ${health.state.toUpperCase()}${health.cached ? ' (cached)' : ''}${reason}`;
 }

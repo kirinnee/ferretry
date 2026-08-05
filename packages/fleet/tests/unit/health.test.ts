@@ -64,7 +64,8 @@ describe('FleetHealthCollector', () => {
     );
     should(calls).equal(1);
     should(actual.accounts.map(row => row.state)).deepEqual(['unknown', 'unknown']);
-    should(actual.accounts[0]?.error).equal('maintenance');
-    should(actual.accounts[1]?.error).equal('unreachable');
+    // The collector has one deterministic account order, so a broken wrapper sorts before `declared`.
+    should(actual.accounts[0]?.error).equal('unreachable');
+    should(actual.accounts[1]?.error).equal('maintenance');
   });
 });

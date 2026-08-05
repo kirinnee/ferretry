@@ -2,6 +2,7 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetHealthSnapshot,
   FleetIdentity,
   FleetIdentityStatus,
   FleetLoginRequest,
@@ -9,7 +10,6 @@ import type {
   FleetManifest,
   FleetScaffoldResult,
   FleetUsageSnapshot,
-  FleetHealthSnapshot,
 } from '@ferretry/fleet';
 import type { IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
@@ -63,7 +63,7 @@ export interface IFleetUsageCollector {
 export interface IFleetHealthCollectorFactory {
   forConfig(config: FleetConfig): IFleetHealthCollector;
 }
-export interface IFleetHealthCollector {
+interface IFleetHealthCollector {
   collect(manifest: FleetManifest): Promise<FleetHealthSnapshot>;
 }
 

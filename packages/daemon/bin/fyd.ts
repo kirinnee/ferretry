@@ -4097,9 +4097,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * The interval is read once per boot: re-arming it inside a tick can cancel a timer while it is
    * running, and retrying immediately after a failure would spend the quota the loop measures.
    */
-  const fleetRefreshIntervalMs = await subsystems.fleet
-    .config()
-    .then(declared => usageRefreshMs(declared.usage.interval), () => usageRefreshMs(undefined));
+  const fleetRefreshIntervalMs = await subsystems.fleet.config().then(
+    declared => usageRefreshMs(declared.usage.interval),
+    () => usageRefreshMs(undefined),
+  );
   // Start a collection after binding but do not make a slow provider probe delay daemon readiness.
   // The loop serializes it with the fixed timer below, and all failures remain in the existing feeds.
   void subsystems.fleetRefresh.run();
