@@ -113,9 +113,101 @@ export interface FleetPlanBuilder {
   build(config: FleetConfig, layout: FleetLayout, generatedAt: string): FleetApplyPlan;
 }
 
+/**
+ * A text document written inside the same rollback boundary as the plan's own operations.
+ *
+ * A configuration edit and the assets it references are only meaningfully atomic *together* with
+ * the fleet they describe: a host left declaring an account whose home was never materialized is
+ * exactly the half-state an all-or-nothing apply exists to prevent.
+ */
+export interface FleetDocumentWrite {
+  readonly path: string;
+  readonly content: string;
+  readonly mode: number;
+}
+
 export interface FleetProvisioner {
   preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
-  apply(plan: FleetApplyPlan): Promise<FleetApplyResult>;
+  apply(plan: FleetApplyPlan, documents?: readonly FleetDocumentWrite[]): Promise<FleetApplyResult>;
+}
+
+/** A path whose prior state could not be put back, and the reason it could not. */
+export interface UnrestoredPath {
+  readonly path: string;
+  readonly reason: string;
+  /**
+   * Where the original still is, when it was moved aside and could not be moved back. Reported
+   * because it is the only remaining copy: a caller that cleaned it up would destroy the evidence
+   * a person needs to finish the restoration by hand.
+   */
+  readonly backup?: string;
+}
+
+/** What a host actually carries once ordinary provisioning has committed its manifest. */
+export interface FleetApplyCommittedState {
+  readonly accountCount: number;
+  readonly operationCount: number;
+  readonly manifestPath: string;
+  readonly manifest: FleetManifest;
+  readonly prunedWrappers: readonly string[];
+  /** Migrations that completed before the failure. */
+  readonly sharedHistory: readonly SharedHistoryPreview[];
+  /** Moved-aside evidence left on disk by the committed apply. */
+  readonly backupResidue?: readonly string[];
+}
+
+/**
+ * Why an apply did not succeed, in the only three shapes that differ for the person reading it.
+ *
+ * The distinction that matters is not which write threw but **what the host is now**: back where it
+ * started, somewhere that could not be verified, or genuinely changed with a later step failing.
+ * Collapsing these into one "apply failed" is how a fleet that did land gets re-applied blindly.
+ */
+export type FleetApplyFailure =
+  | {
+      /** Nothing was committed. Every captured entry was verified back to its prior state. */
+      readonly kind: 'rolled-back';
+      readonly failedOperation: string;
+      readonly reason: string;
+    }
+  | {
+      /** Restoration was attempted and could not be verified for the named paths. */
+      readonly kind: 'rollback-incomplete';
+      readonly failedOperation: string;
+      readonly reason: string;
+      readonly unrestored: readonly UnrestoredPath[];
+    }
+  | {
+      /**
+       * Ordinary provisioning committed, including the manifest. History migration has its own
+       * boundary and did not roll the fleet back — so the committed state is reported exactly.
+       */
+      readonly kind: 'history-failed-after-commit';
+      readonly failedHarness: HarnessKind;
+      readonly reason: string;
+      readonly committed: FleetApplyCommittedState;
+    };
+
+function describeFailure(failure: FleetApplyFailure): string {
+  if (failure.kind === 'rolled-back') {
+    return `apply failed at ${failure.failedOperation}: ${failure.reason} — the host was restored to its previous state and nothing was committed`;
+  }
+  if (failure.kind === 'rollback-incomplete') {
+    const paths = failure.unrestored.map(entry => `${entry.path} (${entry.reason})`).join('; ');
+    return `apply failed at ${failure.failedOperation}: ${failure.reason} — restoration could not be verified for: ${paths}`;
+  }
+  return `the fleet was applied and its manifest published at ${failure.committed.manifestPath}, but ${failure.failedHarness} shared history failed afterwards: ${failure.reason}`;
+}
+
+/**
+ * A failed apply, carrying the exact post-state rather than only a message. The message repeats the
+ * structured evidence so a caller that only logs it still says something true.
+ */
+export class FleetApplyFailureError extends Error {
+  constructor(readonly failure: FleetApplyFailure) {
+    super(describeFailure(failure));
+    this.name = 'FleetApplyFailureError';
+  }
 }
 
 export interface FleetApplyResult {
@@ -126,6 +218,11 @@ export interface FleetApplyResult {
   readonly prunedWrappers: readonly string[];
   /** Exact moves, links, merges and preserved collisions completed for each enabled harness. */
   readonly sharedHistory: readonly SharedHistoryPreview[];
+  /**
+   * Moved-aside evidence left on disk after a successful apply. Residue, never a failure: undoing a
+   * committed apply to tidy up would delete the very state the manifest now describes.
+   */
+  readonly backupResidue?: readonly string[];
 }
 
 export class FleetApplyService {

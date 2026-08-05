@@ -16,13 +16,18 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
-import type {
-  FleetApplyPlan,
-  FleetApplyPreview,
-  FleetApplyResult,
-  FleetProvisioner,
-  FleetWriteOperation,
-  SettingsLayerSource,
+import { FleetApplyLock, type FleetApplyLockOptions } from './apply-lock.ts';
+import { FileMutationJournal, isMutationBackupName } from './mutation-journal.ts';
+import {
+  type FleetApplyCommittedState,
+  FleetApplyFailureError,
+  type FleetApplyPlan,
+  type FleetApplyPreview,
+  type FleetApplyResult,
+  type FleetDocumentWrite,
+  type FleetProvisioner,
+  type FleetWriteOperation,
+  type SettingsLayerSource,
 } from '../lib/provisioning.ts';
 import {
   mergeSettingsLayers,
@@ -46,6 +51,9 @@ const CodexSqliteMarkerSchema = z.strictObject({
 });
 
 type CodexSqliteMarker = z.output<typeof CodexSqliteMarkerSchema>;
+
+/** Reserved basename prefix for a replacement being built beside the entry it will become. */
+const STAGE_PREFIX = '.fy-fleet-staged-';
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
@@ -93,15 +101,32 @@ function isInside(root: string, candidate: string): boolean {
  */
 export class FileFleetProvisioner implements FleetProvisioner {
   private readonly allowedRoots: readonly string[];
-
+  /** Tail of the serialized apply chain. Reads and previews are unaffected. */
+  private queue: Promise<void> = Promise.resolve();
   constructor(
     allowedRoots: readonly string[],
     private readonly sharedHistory?: SharedHistoryMigration,
+    private readonly lockOptions: FleetApplyLockOptions = {},
   ) {
     if (allowedRoots.length === 0) {
       throw new Error('at least one allowed fleet root is required');
     }
     this.allowedRoots = allowedRoots.map(root => path.resolve(root));
+  }
+
+  /**
+   * Where the exclusive claim for this plan's fleet lives.
+   *
+   * Derived from the manifest, not from the allowed roots: the roots differ by caller — one
+   * composition root declares the state home, another the fleet directory inside it — so a claim
+   * keyed on them would give each caller its own lock and serialize nothing. Every caller plans
+   * against the same `manifestPath`, so its directory is the one name they all agree on.
+   */
+  private lockFor(plan: FleetApplyPlan): FleetApplyLock {
+    return new FleetApplyLock(
+      path.join(path.dirname(path.resolve(plan.manifestPath)), '.fy-fleet-apply.lock'),
+      this.lockOptions,
+    );
   }
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -114,28 +139,100 @@ export class FileFleetProvisioner implements FleetProvisioner {
     };
   }
 
-  async apply(plan: FleetApplyPlan): Promise<FleetApplyResult> {
-    await this.preflightApply(plan);
+  /**
+   * Materialize a plan, all of it or none of it.
+   *
+   * `documents` are written first and inside the same boundary, because a configuration edit and
+   * the fleet it describes are only atomic together: a host left declaring an account whose home
+   * was never created is precisely the half-state this method exists to rule out.
+   *
+   * The commit point is the manifest. Everything before it is undone on failure; the history
+   * migration that follows has its own boundary and never rolls the fleet back, so a failure there
+   * is reported as the different thing it is — a fleet that landed with a later step outstanding.
+   */
+  async apply(plan: FleetApplyPlan, documents: readonly FleetDocumentWrite[] = []): Promise<FleetApplyResult> {
+    // One apply at a time per state home. Two overlapping applies capture each other's writes as
+    // "the state before", so their rollbacks undo one another and neither report is true. The queue
+    // orders callers inside this one object; the lock file orders this object against a separate
+    // command-line invocation, which the queue alone cannot see.
+    const lock = this.lockFor(plan);
+    const run = this.queue.then(
+      () => lock.run(() => this.applyExclusively(plan, documents)),
+      () => lock.run(() => this.applyExclusively(plan, documents)),
+    );
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await run;
+  }
 
+  private async applyExclusively(
+    plan: FleetApplyPlan,
+    documents: readonly FleetDocumentWrite[],
+  ): Promise<FleetApplyResult> {
+    await this.preflightApply(plan, documents);
+
+    const journal = new FileMutationJournal(target => this.assertWritablePath(target));
     const prunedWrappers: string[] = [];
     let operationCount = 0;
-    for (const operation of plan.operations) {
-      // Recheck at the mutation boundary as well: an earlier operation must not be able to replace
-      // an ancestor with a link after the all-or-nothing preflight has approved this destination.
-      await this.assertOperationWritable(operation);
-      const pruned = await this.applyOperation(operation);
-      if (pruned === undefined) continue;
-      operationCount += 1;
-      prunedWrappers.push(...pruned);
+    let stage = 'the configuration and asset documents';
+
+    try {
+      for (const document of documents) {
+        const mark = journal.beginOperation();
+        await this.writeDocument(document, journal);
+        await journal.sealOperation(mark);
+      }
+
+      for (const operation of plan.operations) {
+        stage = `${operation.kind} ${operation.path}`;
+        // Recheck at the mutation boundary as well: an earlier operation must not be able to
+        // replace an ancestor with a link after the all-or-nothing preflight approved this
+        // destination.
+        await this.assertOperationWritable(operation);
+        const mark = journal.beginOperation();
+        const pruned = await this.applyOperation(operation, journal);
+        await journal.sealOperation(mark);
+        if (pruned === undefined) continue;
+        operationCount += 1;
+        prunedWrappers.push(...pruned);
+      }
+
+      stage = `the fleet manifest ${plan.manifestPath}`;
+      const mark = journal.beginOperation();
+      await this.writeManifest(plan, journal);
+      await journal.sealOperation(mark);
+    } catch (error) {
+      throw await this.rollback(journal, stage, error);
     }
 
-    // History migration has its own transactional boundary. Publish the ordinary fleet first so a
-    // migration failure still leaves an honest record of the wrappers and homes that already landed.
-    await this.writeManifest(plan);
+    // Committed. Cleanup from here is best-effort and never reclassifies a successful apply.
+    const backupResidue = await journal.discard();
+    const residue = backupResidue.length === 0 ? {} : { backupResidue };
+
+    const committed = (sharedHistory: FleetApplyPreview['sharedHistory']): FleetApplyCommittedState => ({
+      accountCount: plan.manifest.accounts.length,
+      operationCount,
+      manifestPath: plan.manifestPath,
+      manifest: plan.manifest,
+      prunedWrappers,
+      sharedHistory,
+      ...residue,
+    });
 
     const sharedHistory = [];
     for (const request of plan.sharedHistoryRequests ?? []) {
-      sharedHistory.push(await this.sharedHistoryMigration().materialize(request));
+      try {
+        sharedHistory.push(await this.sharedHistoryMigration().materialize(request));
+      } catch (error) {
+        throw new FleetApplyFailureError({
+          kind: 'history-failed-after-commit',
+          failedHarness: request.kind,
+          reason: error instanceof Error ? error.message : String(error),
+          committed: committed(sharedHistory),
+        });
+      }
     }
 
     return {
@@ -144,7 +241,31 @@ export class FileFleetProvisioner implements FleetProvisioner {
       manifestPath: plan.manifestPath,
       prunedWrappers,
       sharedHistory,
+      ...residue,
     };
+  }
+
+  /** Undo the batch and classify what the host is now, which is the only thing a caller can act on. */
+  private async rollback(journal: FileMutationJournal, stage: string, error: unknown): Promise<Error> {
+    const unrestored = await journal.rollback();
+    const reason = error instanceof Error ? error.message : String(error);
+    if (unrestored.length === 0) {
+      return new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: stage, reason });
+    }
+    return new FleetApplyFailureError({
+      kind: 'rollback-incomplete',
+      failedOperation: stage,
+      reason,
+      unrestored,
+    });
+  }
+
+  private async writeDocument(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
+    await this.assertWritablePath(document.path);
+    await journal.captureDirectory(path.dirname(document.path));
+    await journal.capture(document.path);
+    await mkdir(path.dirname(document.path), { recursive: true });
+    await this.writeFileAtomically(document.path, document.content, document.mode);
   }
 
   /** Validate the published record before preview returns or apply performs its first write. */
@@ -154,10 +275,36 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /** Validate every write before apply performs its first one. */
-  private async preflightApply(plan: FleetApplyPlan): Promise<void> {
+  private async preflightApply(plan: FleetApplyPlan, documents: readonly FleetDocumentWrite[]): Promise<void> {
     await this.preflightPlan(plan);
-    this.assertNoSharedHistoryRefusals(await this.previewSharedHistory(plan));
+    const sharedHistory = await this.previewSharedHistory(plan);
+    this.assertNoSharedHistoryRefusals(sharedHistory);
+    for (const document of documents) await this.assertWritablePath(document.path);
     for (const operation of plan.operations) await this.assertOperationWritable(operation);
+    // Reading every input here — not at the operation that consumes it — is what turns a whole
+    // class of mid-apply failures into a refusal that never touched the host. It also closes a
+    // data-loss hole: a copy used to clear its destination and only then discover its source.
+    await this.previewOperations(plan.operations, sharedHistory);
+    await this.validateOperationInputs(plan.operations);
+  }
+
+  /**
+   * Prove every source an operation will read is present and usable. Nothing is written and nothing
+   * is destroyed, so a configuration naming a missing asset or an unparseable settings layer is
+   * refused with the host exactly as it was.
+   */
+  private async validateOperationInputs(operations: readonly FleetWriteOperation[]): Promise<void> {
+    for (const operation of operations) {
+      if (operation.kind === 'copy') {
+        await stat(operation.source);
+        continue;
+      }
+      if (operation.kind !== 'settings') continue;
+      for (const layer of operation.layers) {
+        if (layer.from === 'inline') continue;
+        parseSettings(await readFile(layer.path, 'utf8'), operation.format);
+      }
+    }
   }
 
   /** A partly observed history request must refuse before any ordinary or history mutation lands. */
@@ -278,8 +425,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   /** Returns pruned names, or `undefined` when filesystem evidence proves the operation a no-op. */
-  private async applyOperation(operation: FleetWriteOperation): Promise<readonly string[] | undefined> {
+  private async applyOperation(
+    operation: FleetWriteOperation,
+    journal: FileMutationJournal,
+  ): Promise<readonly string[] | undefined> {
     if (operation.kind === 'directory') {
+      await journal.captureDirectory(operation.path, operation.mode);
       await mkdir(operation.path, { recursive: true, mode: operation.mode });
       if (operation.mode !== undefined) {
         await chmod(operation.path, operation.mode);
@@ -288,41 +439,61 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'prune') {
-      return await this.prune(operation.path, operation.marker, new Set(operation.keep));
+      return await this.prune(operation.path, operation.marker, new Set(operation.keep), journal);
     }
 
     if (operation.kind === 'codex-sqlite-ownership') {
-      return (await this.reconcileCodexSqliteOwnership(operation)) ? [] : undefined;
+      return (await this.reconcileCodexSqliteOwnership(operation, journal)) ? [] : undefined;
     }
 
     if (operation.kind === 'settings') {
+      // Resolved before anything is moved aside: `preserveExisting` folds the file currently at the
+      // destination in as the base layer, and capturing it first would read it as absent.
       const content = await this.resolveSettings(operation.path, operation.format, operation.layers, {
         preserveExisting: operation.preserveExisting,
       });
+      await journal.captureDirectory(path.dirname(operation.path));
+      await journal.capture(operation.path);
       await mkdir(path.dirname(operation.path), { recursive: true });
       await rm(operation.path, { recursive: true, force: true });
       await this.writeFileAtomically(operation.path, content, operation.mode);
       return [];
     }
 
+    await journal.captureDirectory(path.dirname(operation.path));
     await mkdir(path.dirname(operation.path), { recursive: true });
-    await rm(operation.path, { recursive: true, force: true });
 
     if (operation.kind === 'symlink') {
+      await journal.capture(operation.path);
+      await rm(operation.path, { recursive: true, force: true });
       await symlink(operation.source, operation.path);
       return [];
     }
+
     if (operation.kind === 'copy') {
       // Profile assets may be files or directories. Dereference every source link: a copied account
       // home must not reintroduce a symlink beneath FY_HOME, where StateFileSystem deliberately
       // rejects symlink components to prevent an operation escaping its state-home boundary.
       const source = await stat(operation.source);
-      await cp(operation.source, operation.path, { recursive: source.isDirectory(), dereference: true });
-      // A template linked out of a read-only store copies as 0444; force the copied root writable so
-      // a harness can rewrite a file it owns. Directories remain private to the account.
-      await chmod(operation.path, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
+      // Built beside the destination, so the commit is a rename on the same device. A directory copy
+      // is not atomic: staging it is what keeps a half-copied skills tree from ever being the live
+      // one, and it means the destination survives untouched when the copy fails.
+      const staged = path.join(path.dirname(operation.path), `${STAGE_PREFIX}${randomUUID()}`);
+      try {
+        await cp(operation.source, staged, { recursive: source.isDirectory(), dereference: true });
+        // A template linked out of a read-only store copies as 0444; force the copied root writable
+        // so a harness can rewrite a file it owns. Directories remain private to the account.
+        await chmod(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
+        await journal.capture(operation.path);
+        await rm(operation.path, { recursive: true, force: true });
+        await rename(staged, operation.path);
+      } finally {
+        await rm(staged, { recursive: true, force: true });
+      }
       return [];
     }
+
+    await journal.capture(operation.path);
     await this.writeFileAtomically(operation.path, operation.content, operation.mode);
     return [];
   }
@@ -335,6 +506,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
    */
   private async reconcileCodexSqliteOwnership(
     operation: Extract<FleetWriteOperation, { readonly kind: 'codex-sqlite-ownership' }>,
+    journal: FileMutationJournal,
   ): Promise<boolean> {
     await this.assertWritablePath(operation.markerPath);
     const markerDocument = await this.readRegularText(operation.markerPath, 'Codex SQLite ownership sidecar');
@@ -351,6 +523,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
         createdConfig: marker?.createdConfig ?? configDocument === undefined,
         original: marker?.original ?? this.sqliteHomeState(current, operation.path),
       };
+      await journal.captureDirectory(path.dirname(operation.markerPath), 0o700);
+      await journal.capture(operation.markerPath);
       await mkdir(path.dirname(operation.markerPath), { recursive: true, mode: 0o700 });
       await this.writeFileAtomically(operation.markerPath, `${JSON.stringify(next)}\n`, 0o600);
       return true;
@@ -363,14 +537,13 @@ export class FileFleetProvisioner implements FleetProvisioner {
       if (current.sqlite_home === marker.sqliteHome) {
         if (marker.original.present) current.sqlite_home = marker.original.value;
         else delete current.sqlite_home;
-        if (marker.createdConfig && Object.keys(current).length === 0) {
-          await rm(operation.path, { force: true });
-        } else {
+        await journal.capture(operation.path);
+        if (!(marker.createdConfig && Object.keys(current).length === 0)) {
           await this.writeFileAtomically(operation.path, serializeSettings(current, 'toml'), 0o600);
         }
       }
     }
-    await rm(operation.markerPath, { force: true });
+    await journal.capture(operation.markerPath);
     return true;
   }
 
@@ -422,7 +595,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * user wrote by hand is never touched, so an unrelated executable on the same `PATH` directory
    * survives.
    */
-  private async prune(directory: string, marker: string, keep: ReadonlySet<string>): Promise<readonly string[]> {
+  private async prune(
+    directory: string,
+    marker: string,
+    keep: ReadonlySet<string>,
+    journal: FileMutationJournal,
+  ): Promise<readonly string[]> {
     let entries: readonly string[];
     try {
       entries = await readdir(directory);
@@ -433,6 +611,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const pruned: string[] = [];
     for (const entry of entries.toSorted()) {
       if (keep.has(entry)) continue;
+      // A backup of a managed wrapper still carries the managed marker. Sweeping it away would
+      // destroy the only copy of what this very batch may still need to put back.
+      if (isMutationBackupName(entry)) continue;
       const target = path.join(directory, entry);
       const stats = await lstat(target);
       if (!stats.isFile()) continue;
@@ -440,7 +621,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // swallowing it would leave a stale wrapper on PATH with nothing said about it.
       const content = await readFile(target, 'utf8');
       if (!content.includes(marker)) continue;
-      await rm(target, { force: true });
+      await journal.capture(target);
       pruned.push(entry);
     }
     return pruned;
@@ -480,9 +661,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
   }
 
-  private async writeManifest(plan: FleetApplyPlan): Promise<void> {
+  private async writeManifest(plan: FleetApplyPlan, journal: FileMutationJournal): Promise<void> {
     await this.assertWritablePath(plan.manifestPath);
     const content = `${JSON.stringify(plan.manifest, null, 2)}\n`;
+    await journal.captureDirectory(path.dirname(plan.manifestPath));
+    await journal.capture(plan.manifestPath);
     await mkdir(path.dirname(plan.manifestPath), { recursive: true });
     await this.writeFileAtomically(plan.manifestPath, content, 0o600);
   }

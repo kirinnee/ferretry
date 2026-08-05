@@ -21,6 +21,21 @@ describe('resolving the fleet layout', () => {
     });
   });
 
+  it('should put the manifest directly in the fleet directory, which is where the apply lock lives', () => {
+    // Arrange — the exclusive apply claim is derived from the manifest's directory, because the
+    // roots each caller declares differ: this one declares the fleet directory, the daemon declares
+    // the state home. The daemon's own `fleetManifest` is pinned to `<state home>/fleet/manifest.json`
+    // by its layout test, so both invocations resolve the same claim only while this holds.
+    const layout = resolveFleetLayout({ ...INPUTS, stateHome: '/state' });
+
+    // Act
+    const manifestDirectory = layout.manifestPath.slice(0, layout.manifestPath.lastIndexOf('/'));
+
+    // Assert
+    should(manifestDirectory).equal(layout.fleetDirectory);
+    should(layout.manifestPath).equal('/state/fleet/manifest.json');
+  });
+
   it('should default the state home from the product name, not a hardcoded directory', () => {
     // Act
     const layout = resolveFleetLayout(INPUTS);

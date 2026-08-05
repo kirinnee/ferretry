@@ -1,0 +1,259 @@
+/**
+ * A reverse-order undo log for one batch of filesystem mutations.
+ *
+ * Provisioning writes each file atomically, so no reader ever observes half a wrapper — but a batch
+ * that threw on its tenth write used to leave the first nine landed with nothing said about them.
+ * This journal closes that gap: a caller records what it is about to destroy immediately before
+ * destroying it, and can then put every entry back in the opposite order.
+ *
+ * Evidence is captured by **moving the existing entry aside**, never by copying it. A rename is
+ * atomic, costs nothing for a large skills directory, and preserves a symlink as a symlink; the
+ * backup is a sibling of the entry it replaces, so it is always on the same filesystem and a
+ * restore can never fail for want of space. Undoing is therefore a rename back.
+ *
+ * Two honest limits, stated because the alternative is an unearned transactional claim:
+ *
+ * - The boundary covers a thrown error, not a killed task. Nothing here survives a host losing
+ *   power mid-apply; the backups would simply be left on disk under their reserved prefix.
+ * - A restore is refused when the destination has stopped being writable — an entry whose ancestor
+ *   became a link out of the allowed roots is reported as unrestored rather than followed.
+ */
+import { randomUUID } from 'node:crypto';
+import { chmod, lstat, rename, rm, rmdir } from 'node:fs/promises';
+import path from 'node:path';
+import type { UnrestoredPath } from '../lib/provisioning.ts';
+
+/** What a destination looked like immediately after this batch wrote it, or that it was left absent. */
+type Seal = { readonly present: false } | { readonly present: true; readonly ino: number; readonly mtimeMs: number };
+
+interface JournalEntryBase {
+  readonly path: string;
+  /** Set once the operation that claimed this path has finished writing it. */
+  seal?: Seal;
+}
+
+type JournalEntry = JournalEntryBase &
+  (
+    | { readonly kind: 'restore'; readonly backup: string }
+    | { readonly kind: 'remove' }
+    | { readonly kind: 'mode'; readonly mode: number }
+    | { readonly kind: 'rmdir' }
+  );
+
+/**
+ * Reserved basename prefix for moved-aside evidence. A sweep that removes managed files has to skip
+ * these: a backup of a managed wrapper still carries the managed marker, and deleting it would
+ * destroy the only copy of what the sweep is meant to be able to undo.
+ */
+const BACKUP_PREFIX = '.fy-fleet-backup-';
+
+/** Whether a directory entry is this journal's own moved-aside evidence. */
+export function isMutationBackupName(name: string): boolean {
+  return name.startsWith(BACKUP_PREFIX);
+}
+
+const PERMISSION_BITS = 0o7777;
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export class FileMutationJournal {
+  readonly #entries: JournalEntry[] = [];
+  readonly #captured = new Set<string>();
+
+  /**
+   * @param assertWritable Containment check re-run at restore time. It must not follow the final
+   *   component, so an entry replaced by a link is judged on where it sits, not on where it points.
+   */
+  constructor(private readonly assertWritable: (target: string) => Promise<void>) {}
+
+  /** Mark where the next operation's captures begin, so they can be sealed together. */
+  beginOperation(): number {
+    return this.#entries.length;
+  }
+
+  /**
+   * Record what each destination this operation claimed now looks like. Rollback compares against
+   * these seals and refuses to touch anything that has changed since — a destination that someone
+   * else has rewritten holds their evidence, not ours, and undoing over it would be a second loss
+   * on top of the failure being recovered from.
+   */
+  async sealOperation(from: number): Promise<void> {
+    for (const entry of this.#entries.slice(from)) {
+      if (entry.kind !== 'restore' && entry.kind !== 'remove') continue;
+      entry.seal = await this.identify(entry.path);
+    }
+  }
+
+  private async identify(target: string): Promise<Seal> {
+    try {
+      const information = await lstat(target);
+      return { present: true, ino: information.ino, mtimeMs: information.mtimeMs };
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      return { present: false };
+    }
+  }
+
+  /** Whether a destination still holds exactly what this batch left there. */
+  private async isUnchanged(entry: JournalEntry): Promise<boolean> {
+    const current = await this.identify(entry.path);
+    const seal = entry.seal;
+    // Unsealed means the operation that claimed this path threw part-way through, so this batch
+    // never learned what it left behind. An absent path is unambiguously safe to reclaim; anything
+    // present might have been put there by someone else in the meantime, and guessing wrong
+    // destroys their evidence. Refuse, and let it be reported.
+    if (seal === undefined) return !current.present;
+    if (!seal.present || !current.present) return seal.present === current.present;
+    return current.ino === seal.ino && current.mtimeMs === seal.mtimeMs;
+  }
+
+  /**
+   * Record what currently occupies `target`, then clear it out of the way. The first capture of a
+   * path wins: a later operation in the same batch overwrites something this batch already wrote,
+   * and rollback has to reach the state the batch started from, not an intermediate one.
+   */
+  async capture(target: string): Promise<void> {
+    const resolved = path.resolve(target);
+    if (this.#captured.has(resolved)) return;
+    this.#captured.add(resolved);
+
+    try {
+      await lstat(resolved);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      this.#entries.push({ kind: 'remove', path: resolved });
+      return;
+    }
+
+    const backup = path.join(path.dirname(resolved), `${BACKUP_PREFIX}${randomUUID()}`);
+    await rename(resolved, backup);
+    this.#entries.push({ kind: 'restore', path: resolved, backup });
+  }
+
+  /**
+   * Record the directories a recursive create is about to bring into existence, and the mode an
+   * already-present directory is about to lose. Ancestors are recorded outermost-first so the
+   * reverse-order undo removes the deepest one first.
+   */
+  async captureDirectory(target: string, mode?: number): Promise<void> {
+    const resolved = path.resolve(target);
+    const created: string[] = [];
+    let cursor = resolved;
+
+    for (;;) {
+      try {
+        const information = await lstat(cursor);
+        if (cursor === resolved && mode !== undefined && information.isDirectory()) {
+          this.#entries.push({ kind: 'mode', path: resolved, mode: information.mode & PERMISSION_BITS });
+        }
+        break;
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+        created.push(cursor);
+        const parent = path.dirname(cursor);
+        if (parent === cursor) break;
+        cursor = parent;
+      }
+    }
+
+    for (const directory of created.toReversed()) this.#entries.push({ kind: 'rmdir', path: directory });
+  }
+
+  /**
+   * Put every captured entry back, newest first, and report the ones that could not be verified.
+   * A failure on one entry never stops the rest: partial restoration of a host is strictly better
+   * than abandoning it, and the paths left behind are named rather than summarised.
+   *
+   * Nothing is cleaned up here. A successful restore consumes its own backup — the rename moves it
+   * back — so the only backups still on disk afterwards are the ones belonging to paths that could
+   * not be restored, and those are the sole surviving copy of the original. Deleting them to tidy
+   * up would turn "unknown state, here is where your data is" into plain data loss.
+   */
+  async rollback(): Promise<readonly UnrestoredPath[]> {
+    const unrestored: UnrestoredPath[] = [];
+    for (const entry of this.#entries.toReversed()) {
+      try {
+        await this.assertWritable(entry.path);
+        await this.undo(entry);
+      } catch (error) {
+        unrestored.push({
+          path: entry.path,
+          reason: reasonOf(error),
+          ...(entry.kind === 'restore' ? { backup: entry.backup } : {}),
+        });
+      }
+    }
+    return unrestored;
+  }
+
+  /**
+   * Drop the moved-aside evidence, once the batch it protects has committed.
+   *
+   * Best-effort by construction: the batch has already succeeded, so a backup that resists removal
+   * is an inert file under a reserved prefix, not a reason to report the commit as a failure.
+   */
+  async discard(): Promise<readonly string[]> {
+    const remaining: string[] = [];
+    for (const entry of this.#entries) {
+      if (entry.kind !== 'restore') continue;
+      try {
+        await rm(entry.backup, { recursive: true, force: true });
+      } catch {
+        remaining.push(entry.backup);
+      }
+    }
+    return remaining;
+  }
+
+  private async undo(entry: JournalEntry): Promise<void> {
+    if (entry.kind === 'restore') {
+      if (!(await this.isUnchanged(entry))) {
+        throw new Error(
+          `refusing to overwrite ${entry.path}: it changed after this apply wrote it, so the original was left at ${entry.backup}`,
+        );
+      }
+      await rm(entry.path, { recursive: true, force: true });
+      await rename(entry.backup, entry.path);
+      return;
+    }
+    if (entry.kind === 'remove') {
+      if (!(await this.isUnchanged(entry))) {
+        throw new Error(`refusing to remove ${entry.path}: it changed after this apply created it`);
+      }
+      await rm(entry.path, { recursive: true, force: true });
+      return;
+    }
+    if (entry.kind === 'mode') {
+      // `chmod` follows a link. If the directory whose mode was captured is now a symlink, applying
+      // the old mode would land on whatever it points at — possibly outside the allowed roots — so
+      // the entry is reported unverified instead.
+      const information = await lstat(entry.path);
+      if (!information.isDirectory()) {
+        throw new Error(`refusing to restore the mode of an entry that is no longer a directory: ${entry.path}`);
+      }
+      await chmod(entry.path, entry.mode);
+      return;
+    }
+    await this.removeCreatedDirectory(entry.path);
+  }
+
+  /**
+   * Remove a directory this batch created, but only while it is still empty. Anything that arrived
+   * inside it since is someone else's, and reverting a fleet write is never a licence to delete it.
+   */
+  private async removeCreatedDirectory(target: string): Promise<void> {
+    try {
+      await rmdir(target);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTEMPTY' || code === 'EEXIST' || code === 'ENOTDIR') return;
+      throw error;
+    }
+  }
+}
