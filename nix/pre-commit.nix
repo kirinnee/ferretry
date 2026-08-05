@@ -36,6 +36,10 @@ let
 in
 pre-commit-lib.run {
   src = ./..;
+  # `run` otherwise defaults to pre-commit-hooks.nix's own nixpkgs package.
+  # Keep its upstream suite intact except for the runner-dependent isatty test
+  # disabled on packages.pre-commit in flake.nix.
+  package = packages.pre-commit;
 
   hooks = {
     treefmt = {
