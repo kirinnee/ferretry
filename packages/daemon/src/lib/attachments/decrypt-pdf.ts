@@ -1,4 +1,4 @@
-import type { PdfDecryptWorkerRequest, PdfDecryptWorkerResponse } from './decrypt-pdf-worker.ts';
+import type { PdfDecryptWorkerRequest, PdfDecryptWorkerResponse } from './pdf-decrypt-protocol.ts';
 
 export type PdfDecryptFailure = 'wrong_password' | 'unreadable_document' | 'decryption_timeout' | 'too_large';
 
@@ -40,7 +40,7 @@ export async function decryptPdfInMemory(
   password: string,
   { timeoutMs = 20_000, maxBytes = 40 * 1024 * 1024 }: { readonly timeoutMs?: number; readonly maxBytes?: number } = {},
 ): Promise<Uint8Array> {
-  const worker = new Worker(new URL('./decrypt-pdf-worker.ts', import.meta.url), { type: 'module' });
+  const worker = new Worker(new URL('../../../bin/pdf-decrypt-worker.ts', import.meta.url), { type: 'module' });
   const input = encrypted.slice();
   try {
     return await new Promise<Uint8Array>((resolve, reject) => {

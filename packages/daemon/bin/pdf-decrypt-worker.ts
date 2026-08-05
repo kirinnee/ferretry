@@ -1,5 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
+import type { PdfDecryptWorkerRequest, PdfDecryptWorkerResponse } from '../src/lib/attachments/pdf-decrypt-protocol.ts';
+
 interface QpdfRuntime {
   callMain(args: string[]): number;
   FS: {
@@ -10,16 +12,6 @@ interface QpdfRuntime {
 }
 
 type QpdfFactory = (options: { locateFile(): string; noInitialRun: boolean }) => Promise<QpdfRuntime>;
-
-export interface PdfDecryptWorkerRequest {
-  readonly input: ArrayBuffer;
-  readonly password: string;
-  readonly maxBytes: number;
-}
-
-export type PdfDecryptWorkerResponse =
-  | { readonly ok: true; readonly output: ArrayBuffer }
-  | { readonly ok: false; readonly failure: 'wrong_password' | 'unreadable_document' | 'too_large' };
 
 const QPDF_WASM_PATH = fileURLToPath(new URL('./qpdf.wasm', import.meta.resolve('@neslinesli93/qpdf-wasm')));
 const INPUT = '/input.pdf';
