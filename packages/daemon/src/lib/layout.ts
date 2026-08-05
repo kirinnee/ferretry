@@ -1,44 +1,35 @@
+import { LAYOUT_VERSION_FILENAME, type LayoutDecision } from '@ferretry/protocol';
 import type { FoundationPaths } from './paths.ts';
 
-export const CURRENT_LAYOUT_VERSION = 1 as const;
+/**
+ * The layout decision is NOT defined here.
+ *
+ * It moved to `@ferretry/protocol` because the command-line client has to apply the identical rule:
+ * it creates state inside a home before this daemon has ever run, so a home it created and did not
+ * claim arrives here as a non-empty directory with no marker — indistinguishable from a stranger's
+ * data, and refused forever. See `packages/protocol/src/lib/state-home-layout.ts` for the full
+ * argument. These names are re-exported so every call site in this package is unchanged and there is
+ * exactly one definition to read.
+ */
+export {
+  CURRENT_LAYOUT_VERSION,
+  type LayoutDecision,
+  LAYOUT_VERSION_FILENAME,
+  LAYOUT_VERSION_MODE,
+  type LayoutRefusalReason,
+  decideLayout,
+  layoutVersionContent,
+} from '@ferretry/protocol';
+
 /**
  * Version 2 creates `events.jsonl`, empty, as part of creating the session directory, before the
  * marker is written. The marker is therefore durable, non-disposable proof that a journal exists,
  * which the SQLite index — dropped and rebuilt by design — can never be.
+ *
+ * A SESSION's marker, not the home's: it is owned here because only this package creates or reads a
+ * session directory, so there is no second writer to agree with.
  */
 export const CURRENT_SESSION_VERSION = 2 as const;
-
-export type LayoutRefusalReason = 'missing-marker' | 'invalid-version' | 'unsupported-version';
-
-export type LayoutDecision =
-  | { readonly kind: 'initialize'; readonly version: typeof CURRENT_LAYOUT_VERSION }
-  | { readonly kind: 'proceed'; readonly version: typeof CURRENT_LAYOUT_VERSION }
-  | {
-      readonly kind: 'refuse';
-      readonly reason: LayoutRefusalReason;
-      readonly found: string | undefined;
-      readonly expected: typeof CURRENT_LAYOUT_VERSION;
-    };
-
-export function decideLayout(
-  marker: string | undefined,
-  rootEntries: readonly string[],
-  recoverableBootstrap = false,
-): LayoutDecision {
-  if (marker === undefined) {
-    return rootEntries.length === 0 || recoverableBootstrap
-      ? { kind: 'initialize', version: CURRENT_LAYOUT_VERSION }
-      : { kind: 'refuse', reason: 'missing-marker', found: undefined, expected: CURRENT_LAYOUT_VERSION };
-  }
-  const value = marker.trim();
-  if (!/^[1-9]\d*$/.test(value)) {
-    return { kind: 'refuse', reason: 'invalid-version', found: value, expected: CURRENT_LAYOUT_VERSION };
-  }
-  const version = Number(value);
-  return version === CURRENT_LAYOUT_VERSION
-    ? { kind: 'proceed', version: CURRENT_LAYOUT_VERSION }
-    : { kind: 'refuse', reason: 'unsupported-version', found: value, expected: CURRENT_LAYOUT_VERSION };
-}
 
 export type SessionMarkerDecision = 'proceed' | 'refuse';
 
@@ -69,6 +60,18 @@ export function sessionMarkerNeedsUpgrade(marker: string | undefined): boolean {
   return marker?.trim() === LEGACY_SESSION_VERSION;
 }
 
+/**
+ * The command that repairs an unmarked home this daemon will not adopt on its own.
+ *
+ * NAMED HERE, in the refusal, because the refusal is permanent without it: every release before the
+ * claim landed left provisioned homes with no marker, so an owner who ran the client first meets this
+ * message on a home they populated correctly and has no way to learn that the fix is one command
+ * rather than `rm -rf`. Precedent for this package naming a client command is `authFailureRemedy` in
+ * `./usage/quota.ts`; the client name is written out for the same reason it is there — this package
+ * cannot read the client package's `bin` key without depending on it.
+ */
+const ADOPT_COMMAND = 'fy daemon adopt';
+
 export class StateHomeLayoutError extends Error {
   constructor(
     readonly paths: FoundationPaths,
@@ -76,7 +79,8 @@ export class StateHomeLayoutError extends Error {
   ) {
     super(
       decision.reason === 'missing-marker'
-        ? `state home ${paths.home} is non-empty but has no layout-version marker`
+        ? `state home ${paths.home} is non-empty but has no ${LAYOUT_VERSION_FILENAME} marker; ` +
+            `if this home was created by Ferretry, run \`${ADOPT_COMMAND}\` to inspect it and claim it`
         : `state home ${paths.home} has layout version ${JSON.stringify(decision.found)}; expected ${decision.expected}`,
     );
     this.name = 'StateHomeLayoutError';

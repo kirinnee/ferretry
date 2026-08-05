@@ -46,6 +46,17 @@ export interface IDaemonLogPort {
 }
 
 /**
+ * Claiming the state home before this CLI creates anything inside it.
+ *
+ * The supervisor holds one because `<state home>/logs` is state INSIDE the daemon's home, and
+ * creating state there without claiming the layout is what made a fresh install refuse to boot. The
+ * port is the narrowest possible statement of that: "make this home ours, or refuse".
+ */
+export interface IStateHomeClaimPort {
+  claim(home: string): Promise<unknown>;
+}
+
+/**
  * Filesystem access, restricted to the artifacts this CLI itself creates: the service definition and
  * the log directory it points the service manager at. It never reads anything the daemon owns.
  */

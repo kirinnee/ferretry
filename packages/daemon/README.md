@@ -5,9 +5,11 @@ the API and runtime subsystems on top of it.
 
 ## State-home layout
 
-`FY_HOME` selects the root. If it is unset, the daemon resolves `.ferretry` below the injected user
-home. Overrides must be non-empty absolute paths; filesystem roots and `~`-prefixed literals are
-refused.
+`FY_HOME` selects the root. If it is unset, the daemon resolves `.<product>` below the injected user
+home — derived from this package's own scope, not written out, because the client derives the same
+default and a literal in a `.ts` file does not survive `scripts/local/rename.sh --product` while a
+package scope does. Overrides must be non-empty absolute paths; filesystem roots and `~`-prefixed
+literals are refused.
 
 ```text
 $FY_HOME/
@@ -33,6 +35,43 @@ $FY_HOME/
 
 Only the paths shown above belong to this foundation. Later subsystems derive their own paths from
 the parsed root instead of extending a shared path hub.
+
+### Creating a state home and claiming it are ONE operation
+
+`layout-version` is not the daemon's private bookkeeping — it is the claim that says the directory
+belongs to Ferretry, and **whichever side creates the home writes it**. The command-line client
+creates state here too (`logs/` before it launches the daemon, `fleet/**` when it provisions a
+fleet), and it does so before this daemon has ever run.
+
+The two are held to one rule by `decideLayout` in `@ferretry/protocol`, which both packages import —
+they cannot import each other, and neither may apply a rule of its own. The rule is
+**never adopt a directory Ferretry did not create**, and it is applied at the moment either side is
+about to create state. A client that wrote the marker under its own weaker rule would be free to
+provision into a stranger's directory, so moving the decision rather than only the constant is the
+point. `scripts/validate/cli-contracts.sh state-home-layout-claim` pins it.
+
+This has shipped wrong three times, each time as "one artefact, two writers, no agreement":
+
+1. the client created `logs/` unclaimed, and the daemon refused its own log directory on every clean
+   machine — the reason `logs` is a declared part of the layout above;
+2. the daemon's own `start()` loaded configuration before claiming, writing `config/daemon.json`
+   into an unmarked home and refusing at its own next step — fixed by claiming first, which is the
+   remedy generalised here;
+3. `fy fleet init` wrote `fleet/**` unclaimed, so a home the client had just provisioned was refused
+   **permanently** and the only move the product left an owner was `rm -rf`.
+
+Because instance 3 shipped, every home provisioned by an earlier release carries no marker.
+**`fy daemon adopt`** is the upgrade path: it reports what the home holds, then claims it — and
+refuses, naming them, if it finds any entry Ferretry does not write. It is deliberately broader than
+the daemon's automatic `bootstrapShape` (which admits only an _empty_ `fleet/`), because `fyd` adopts
+silently on boot and must stay conservative, whereas this is a person claiming a home after being
+shown what is in it. The daemon's automatic shape is **not** widened to swallow a provisioned fleet,
+and the `missing-marker` refusal names this command so the refusal is never a dead end.
+
+One tolerance is shared by both sides rather than being a relaxation: a home holding **only** an
+unclaimed `logs/` is adopted automatically. An older client on the same host creates exactly that
+before launching the daemon, so every upgrading installation arrives in that state, and the daemon's
+`preBootstrapShape` already treats it as legitimate.
 
 ## Invariants
 

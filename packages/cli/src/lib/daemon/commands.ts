@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import type { StateHomeAdoptOptions, StateHomeController } from '../state-home/controller.ts';
 import type { DaemonCommandOptions, DaemonController } from './controller.ts';
 
 /**
@@ -6,8 +7,17 @@ import type { DaemonCommandOptions, DaemonController } from './controller.ts';
  *
  * Every verb is idempotent and says what it found: `start` on a serving daemon reports that rather
  * than disturbing it, `stop` on a stopped one says so instead of failing.
+ *
+ * `adopt` belongs to this group rather than a group of its own because the state home is the
+ * daemon's: it is the directory `fyd` serves from, and adopting one is something a person does in
+ * order to get the daemon running. Its controller is separate because it shares no collaborator with
+ * the process-control verbs — it touches one file and never asks whether anything is running.
  */
-export function registerDaemonCommands(program: Command, controller: () => DaemonController): void {
+export function registerDaemonCommands(
+  program: Command,
+  controller: () => DaemonController,
+  stateHome: () => StateHomeController,
+): void {
   const daemon = program.command('daemon').description('manage the daemon process on this host');
 
   daemon
@@ -59,6 +69,14 @@ export function registerDaemonCommands(program: Command, controller: () => Daemo
     .option('-f, --follow', 'keep streaming as the log grows')
     .action(async (flags: DaemonCommandOptions) => {
       await controller().logs(flags);
+    });
+
+  daemon
+    .command('adopt')
+    .description('claim a state home Ferretry created before layout claims existed, after showing what it holds')
+    .option('--json', 'print the machine-readable outcome instead of the human summary')
+    .action(async (flags: StateHomeAdoptOptions) => {
+      await stateHome().adopt(flags);
     });
 
   const snapshots = daemon

@@ -18,8 +18,10 @@ import { StateHomeLayoutError } from '../../../../daemon/src/lib/index.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { FileDaemonSnapshotStore } from '../../../src/adapters/daemon/snapshot-store.ts';
+import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
+import { StateHomeClaimRefusedError, StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 
 /**
  * The first-run seam, in the tier CI actually runs.
@@ -84,7 +86,12 @@ async function startThroughTheCli(root: string): Promise<string> {
   });
   const built = await snapshots.build();
   await snapshots.promote(built.id);
-  const supervisor = new DirectSupervisor(layout, new BunDaemonProcess(), new FileServiceStore());
+  const supervisor = new DirectSupervisor(
+    layout,
+    new BunDaemonProcess(),
+    new FileServiceStore(),
+    new StateHomeClaimService(new FileStateHomeClaim(), 'fy daemon adopt'),
+  );
   const handle = await supervisor.start(built.binaryPath);
   if (handle.pid !== undefined) {
     // Reap the child immediately: this test is about the directory it was launched into.
@@ -150,11 +157,15 @@ describe('first-run daemon bootstrap across the package seam', () => {
     const afterTheCli = await entriesOf(stateHome);
     const layout = await bootTheDaemon(stateHome);
 
-    // Assert — before the fix this threw StateHomeLayoutError('… is non-empty but has no
-    // layout-version marker'), because `logs` was not a declared part of the layout.
-    should(afterTheCli).deepEqual(['logs']);
+    // Assert — before the log-directory fix this threw StateHomeLayoutError('… is non-empty but has
+    // no layout-version marker'), because `logs` was not a declared part of the layout.
+    //
+    // The CLI now CLAIMS the home before creating anything inside it, so the marker is already there
+    // when the daemon arrives and the daemon adopts rather than initializes. That is the ordering
+    // fix: the home stops depending on which of the two ran first.
+    should(afterTheCli).deepEqual(['layout-version', 'logs']);
     should(await entriesOf(join(stateHome, 'logs'))).deepEqual(['fyd.log']);
-    should(layout.created).be.true();
+    should(layout.created).be.false();
     should(await readFile(join(stateHome, 'layout-version'), 'utf8')).equal('1\n');
   });
 
@@ -174,8 +185,11 @@ describe('first-run daemon bootstrap across the package seam', () => {
     await startThroughTheCli(root);
     const layout = await bootTheDaemon(stateHome);
 
-    // Assert
-    should(layout.created).be.true();
+    // Assert — the CLI adopts this shape rather than refusing it, and that tolerance is required
+    // rather than merely convenient: an OLDER `fy` on this same host creates `logs/` without a claim,
+    // so every upgrading installation arrives in exactly this state. It mirrors the daemon's own
+    // `preBootstrapShape`, so the two writers still agree about what a lone `logs/` means.
+    should(layout.created).be.false();
     should(await entriesOf(stateHome)).deepEqual(['config', 'daemon.lock', 'fleet', 'layout-version', 'logs', 'state']);
   });
 
@@ -191,26 +205,39 @@ describe('first-run daemon bootstrap across the package seam', () => {
     await startThroughTheCli(root);
     const second = await bootTheDaemon(stateHome);
 
-    // Assert
-    should(first.created).be.true();
+    // Assert — neither boot initializes, because the CLI's claim got there before the first one.
+    should(first.created).be.false();
     should(second.created).be.false();
     should((await stat(join(stateHome, 'logs'))).mode & 0o777).equal(0o700);
   });
 
   it('should still refuse a state home holding somebody else s data', async () => {
-    // Arrange — the guard the log directory must not have loosened.
+    // Arrange — the guard neither the log directory nor the claim may have loosened. The foreign
+    // data is arranged BEFORE anything of ours runs, which is what the scenario actually is: a
+    // person points FY_HOME at a directory that was never Ferretry's.
+    //
+    // Deliberately not "claim the home, then add a stray directory": a home carrying our marker is
+    // one we created, and `decideLayout` proceeds on it whatever else has since appeared inside —
+    // that was true before this change too. Asserting the guard through an already-claimed home
+    // would be asserting the wrong thing and would pass for the wrong reason.
     const root = await createTemporaryRoot();
-    const stateHome = await startThroughTheCli(root);
+    const stateHome = join(root, 'state');
     await mkdir(join(stateHome, 'workspaces'), { recursive: true });
+    await writeFile(join(stateHome, 'notes.txt'), 'not a state home\n', 'utf8');
 
-    // Act
-    const failure = await bootTheDaemon(stateHome).then(
+    // Act — both writers refuse it now. Before this change the CLI would have provisioned into it.
+    const cliFailure = await startThroughTheCli(root).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const daemonFailure = await bootTheDaemon(stateHome).then(
       () => undefined,
       (error: unknown) => error,
     );
 
-    // Assert
-    should(failure).be.instanceOf(StateHomeLayoutError);
-    should(await entriesOf(stateHome)).deepEqual(['logs', 'workspaces']);
+    // Assert — refused by both, and nothing of ours written into it.
+    should(cliFailure).be.instanceOf(StateHomeClaimRefusedError);
+    should(daemonFailure).be.instanceOf(StateHomeLayoutError);
+    should(await entriesOf(stateHome)).deepEqual(['notes.txt', 'workspaces']);
   });
 });
