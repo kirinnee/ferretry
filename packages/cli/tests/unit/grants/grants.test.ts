@@ -356,7 +356,8 @@ describe('the daemon grant routes as the client speaks them', () => {
 
     // Assert
     expect(seen[0]?.path).toBe(GRANTS_PATH);
-    expect((seen[0]?.init?.headers as Record<string, string>)[OPERATOR_UNLOCK_HEADER]).toBe('fy_unlock_token');
+    const headers = (seen[0]?.init?.headers ?? {}) as Record<string, string>;
+    expect(headers[OPERATOR_UNLOCK_HEADER]).toBe('fy_unlock_token');
     expect(seen[0]?.path).not.toContain('unlock=');
   });
 
