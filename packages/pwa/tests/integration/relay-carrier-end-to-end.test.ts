@@ -23,6 +23,7 @@
  */
 
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import should from 'should';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
 import { RelayLink } from '../../../daemon/src/lib/relay/link.ts';
@@ -218,6 +219,13 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     // second relay identity would carry a fingerprint no paired browser has, and
     // every handshake would be refused — correctly, and unfixably from outside.
     should(await daemonIdFromPublicKey(crypto, identity.publicKeySpki)).equal(identity.daemonId);
+    // And it agrees with the fingerprint PAIRING prints in the QR, which is computed
+    // by Node rather than by WebCrypto (`node-pairing-cryptography.ts`). Two spellings
+    // of one fingerprint are two identities, and they would never meet: the browser
+    // would pin the QR's and refuse the key the daemon actually presented.
+    should(`fy_daemon_${createHash('sha256').update(identity.publicKeySpki).digest('base64url')}`).equal(
+      identity.daemonId,
+    );
 
     const bridge = new RelayBridge();
     let served: ApiRequest | undefined;
