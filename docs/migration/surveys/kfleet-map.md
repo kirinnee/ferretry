@@ -26,24 +26,24 @@ written, and [H](#h--keep-it-fresh) is written against them rather than against 
 
 ## Scorecard
 
-Can the owner delete kfleet today? **No — one capability short: C**, counted off the
-table below rather than carried forward, because the running total had drifted from the rows twice.
-Ordered by what actually stops him, not by line count.
+Can the owner delete kfleet today? **Yes — no blocking capabilities remain**, counted off the table
+below rather than carried forward, because the running total had drifted from the rows twice. Every
+former blocker is named where it closed; deliberate content and convenience GAPs remain explicit.
 
-| #   | Capability — what a person uses kfleet for                          | Ferretry today                   | Blocks deleting kfleet?                                               |
-| --- | ------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
-| A   | [Declare a fleet of accounts](#a--declare-a-fleet)                  | **Carried**, and stronger        | No                                                                    |
-| B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**; init now names PATH | **Was yes** — nothing put the wrappers on PATH; _closed by this unit_ |
-| C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
-| D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
-| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes**; native Anthropic closed, other providers still GAP       |
-| G   | [Know which accounts actually work](#g--know-what-actually-works)   | **Carried**                      | No                                                                    |
-| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | **Carried**                      | No                                                                    |
-| I   | [Resume any session from any account](#i--resume-anything-anywhere) | Independent pools + migration    | No; Codex prewarm remains a declared GAP                              |
-| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                  | **Was yes**; _closed by this unit_                                    |
-| K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper            | **Was yes**, for automation; _closed by this unit_                    |
-| L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                          | No — annoying, not blocking                                           |
+| #   | Capability — what a person uses kfleet for                          | Ferretry today                     | Blocks deleting kfleet?                                                            |
+| --- | ------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
+| A   | [Declare a fleet of accounts](#a--declare-a-fleet)                  | **Carried**, and stronger          | No                                                                                 |
+| B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**; init now names PATH   | **Was yes** — nothing put the wrappers on PATH; _closed by this unit_              |
+| C   | [Own the assets those accounts run with](#c--own-the-assets)        | **Carried**; neutral starters ship | **Was yes**; _closed by the default-assets unit_ (content, not machinery, is left) |
+| D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger          | No                                                                                 |
+| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_        | **Was yes**; _closed by the identity unit_                                         |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon   | **Was yes**; native Anthropic closed, other providers still GAP                    |
+| G   | [Know which accounts actually work](#g--know-what-actually-works)   | **Carried**                        | No                                                                                 |
+| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | **Carried**                        | No                                                                                 |
+| I   | [Resume any session from any account](#i--resume-anything-anywhere) | Independent pools + migration      | No; Codex prewarm remains a declared GAP                                           |
+| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                    | **Was yes**; _closed by this unit_                                                 |
+| K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper              | **Was yes**, for automation; _closed by this unit_                                 |
+| L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                            | No — annoying, not blocking                                                        |
 
 Five facts that the capability rows assume and that are easy to miss:
 
@@ -165,7 +165,8 @@ skills directory, a base `settings.json`/`config.toml`, hooks, an MCP server lis
 | `statusline.zsh`                 | 12K     | a Claude status line, pointed at by an **absolute path** in settings |
 | `config.yaml`                    | 12K     | the fleet declaration itself                                         |
 
-**The finding: kfleet does not own any of this, and neither does Ferretry.**
+**The finding: kfleet never owned any of this. Ferretry now owns the mechanism _and_ a neutral
+default set — but none of the content that executes code.**
 
 - kfleet's `cli/init.ts:9` copies from `path.join(import.meta.dir, '../../templates')` — a directory
   that **does not exist in the kfleet source tree**. `kfleet init` therefore logs "no templates
@@ -173,22 +174,77 @@ skills directory, a base `settings.json`/`config.toml`, hooks, an MCP server lis
   links the repo's `kfleet/` directory into `~/.kfleet/`. kfleet only _references_ assets by relative
   path (`deps.ts:26` `resolveAsset`).
 - Ferretry's `packages/fleet/src/lib/assets.ts` is **not the asset story**. It is the per-harness
-  destination table — "a declared `memory:` lands at `CLAUDE.md` and is symlinked; a declared
-  `settings:` lands at `settings.json` and is copied because the harness rewrites it". Sixty-nine
-  lines, entirely about _where a declared asset goes_. It answers nothing about _what assets exist_
-  or _where they come from_.
+  destination table — "a declared `memory:` lands at `CLAUDE.md`, a declared `settings:` lands at
+  `settings.json`". Entirely about _where a declared asset goes_; it answers nothing about _what
+  assets exist_ or _where they come from_.
+- **Everything landing in a generated home is a copy, not a symlink** (`assets.ts:22,37-49`) — the
+  state home's filesystem invariant rejects symlink components, so `link` survives only for plans
+  outside an account home. Earlier drafts of this survey said `memory:` was symlinked and live; it is
+  not. A source edit reaches the home on the next `fy fleet apply` and not before.
 - `expandAssetPath` (`paths.ts:40`) resolves a relative reference against `layout.assetsDirectory`,
   which is `<FY_HOME>/fleet/assets`. So the reference mechanism is carried in full.
-- **But `fy fleet apply` never creates that directory.** `plan.ts:97` creates the fleet, bin and
-  homes directories and stops. A relative asset reference resolves into a path nothing made.
-
-So of this capability Ferretry carries: _reference resolution_ and _materialization destinations_.
-It carries none of: shipping a default, letting a person override a default, upgrading a default
-without clobbering an override, or hosting an executable asset like the status line.
+- **`fy fleet init` creates that directory and its `templates/` tree; `fy fleet apply` still does
+  not.** `scaffold.ts:246-252` owns the directories, `plan.ts:104-106` still creates only fleet, bin
+  and homes — so on a box where init never ran, a relative asset reference still resolves into a path
+  nothing made.
 
 **Replacing kfleet means Ferretry owns both halves — the defaults and the override mechanism —
 because Home Manager will not be in the loop.** The owner's asset _content_ is his and stays his;
-what belongs in a public repo is the mechanism plus neutral defaults.
+what belongs in a public repo is the mechanism plus neutral defaults. Both halves now ship.
+
+### What `fy fleet init` ships
+
+| Starter                    | Where it lands                          | What reads it                                                                                                         |
+| -------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Neutral shared instruction | `assets/CLAUDE.md` (`scaffold.ts:151`)  | one source, both harnesses — Claude's `CLAUDE.md` and Codex's `AGENTS.md` (`assets.ts:38,46`)                         |
+| Neutral Claude settings    | `assets/templates/claude/settings.json` | the base `settings` layer: `$schema` and `includeCoAuthoredBy: false`, nothing else (`scaffold.ts:166`)               |
+| Policy-free Codex settings | `assets/templates/codex/config.toml`    | the base `settings` layer: comments only — model, approval, sandbox and tool policy are left open (`scaffold.ts:172`) |
+| Auto-lane harness flags    | the `auto` variant in `config.yaml`     | `fy fleet apply` bakes them into the generated wrapper                                                                |
+
+The auto-lane flags are not invented here. They are what an unattended launcher actually passes:
+`--dangerously-skip-permissions` plus `--disallowed-tools=AskUserQuestion` for Claude and
+`--dangerously-bypass-approvals-and-sandbox --no-alt-screen` for Codex, exactly as
+`~/.config/home-manager/modules/kteam-ts/src/core.ts:1272,1281,1290` launches one (`--disallowed-tools`
+is the documented alias of the `--disallowedTools` spelling used there, and the `=` keeps its
+variadic value from consuming a caller's positional prompt). The one settings key that
+goes with them, `skipDangerousModePermissionPrompt: true`, is set **fleet-wide** in the owner's own
+`~/.config/home-manager/kfleet/templates/claude/settings.json`; here it is scoped to the `auto` lane,
+because an interactive account has a human who can answer.
+
+**Three override rules, each of them proven rather than asserted:**
+
+- **A pre-existing file always wins.** The scaffolder creates only what is absent and reports what it
+  left alone; `fy fleet init` prints `created … (Ferretry starter)` against
+  `kept … (pre-existing file wins; Ferretry did not replace it)` (`render.ts:116,119`).
+- **The source in the assets directory is the authority.** Path assets are copied on every apply, so
+  an edited `assets/CLAUDE.md` reaches both homes on the next apply and a starter never comes back.
+- **Settings layer into a real file and keep what the harness wrote.** Layers accumulate left to
+  right, an account's own layer beats the shipped base file, and `preserveExisting` (`plan.ts:189`)
+  keeps keys the harness persisted at runtime. The cost is the re-serialization delta recorded in
+  [B](#b--materialize-it): comments in a merged template are stripped.
+
+That is the upgrade story kfleet never had: a newer Ferretry can add a starter without touching a file
+a person has edited, and refreshing a default is a deliberate delete-then-init.
+
+`packages/fleet/tests/integration/default-assets-lifecycle.test.ts` runs the whole journey — init,
+apply, launch both wrappers from an unrelated cwd, edit a starter, re-init, re-apply — and
+`packages/cli/tests/sit/fleet-assets.sit.test.ts` runs init against the compiled binary, which is the
+boundary kfleet's own init missed when it looked for a source-tree directory it never shipped.
+
+**Still GAP, deliberately, and named so nobody reads silence as coverage:**
+
+- **No skills, hooks or MCP server list is shipped.** Each one either executes code or encodes
+  somebody's workflow, so shipping a default silently is worse than shipping none. The _mechanism_ is
+  there — `skills` and `mcp` for Claude, `skills`, `hooks` and `hooksDir` for Codex — only content is
+  missing. Two destinations genuinely do not exist: Claude has no `hooks` field and Codex no `mcp`
+  one, and a declaration of either is a refusal at plan time rather than a silent drop
+  (`assets.ts:61`).
+- **Nothing personal ships.** The owner's 16K `CLAUDE.md`, its `CLAUDE.auto.md` lane twin, and the 14
+  skills mirrored per harness carry his paths and work tooling. They stay his; he places them in the
+  assets directory and declares them.
+- **There is still no slot for an executable asset** (the status line). Not blocking: a script can
+  live in the assets directory and be named by absolute path from `settings`, which is what kfleet
+  effectively does — see the shape below.
 
 Two shapes worth naming:
 
@@ -203,9 +259,10 @@ Two shapes worth naming:
   `skills-codex/` are two copies of the same 14 skills in two dialects. Ferretry should not inherit
   the duplication as a fact of life without asking whether one source can generate both.
 
-_Partly closed by this unit_ — see [J](#j--start-from-nothing) for the mechanism and the directory;
-the default _content_ beyond a starting point is left, with the reasons in
-[What was left](#what-was-left).
+_Closed as a capability._ The mechanism and the directory came with `fy fleet init`
+([J](#j--start-from-nothing)); the neutral defaults, the auto-lane flags and the override rules came
+with the default-assets unit above. What is left is curated _content_ — skills, hooks, MCP — which is
+a content decision rather than machinery, and is recorded in [What was left](#what-was-left).
 
 ---
 
@@ -693,9 +750,13 @@ behaved as 100.
   read-only inspection primitive exist; the confirmed operator command that replays a guarded rollback
   remains a declared GAP.
 - **The probe loop ([H](#h--keep-it-fresh)).** Its routes landed on `main` as #237 while this unit was writing; the loop behind them, and a real probe to feed it, are that unit's area.
-- **Default asset _content_ beyond a starting point ([C](#c--own-the-assets)).** The owner's
-  `CLAUDE.md`, skills and templates are his and carry personal paths and work tooling. What Ferretry
-  needs is a curated neutral default set, which is a content decision rather than an engineering one.
+- **Curated skills, hooks and MCP defaults ([C](#c--own-the-assets)).** Neutral instructions, neutral
+  per-harness settings, the auto-lane flags and the whole override/upgrade mechanism now ship. What
+  does not is any asset that executes code or encodes a workflow: no skills, no hook set, no MCP
+  server list. That is a content decision rather than an engineering one, and the owner's own
+  `CLAUDE.md`, skills and templates stay his because they carry personal paths and work tooling.
+  Two field-level gaps go with it: Claude has no `hooks` destination and Codex no `mcp` one, and
+  nothing has a slot for an executable asset such as the status line.
 - **`fy fleet doctor` ([L](#l--diagnose-it)).** Not a blocker, and it should be scoped to what only
   the CLI knows so it never becomes a second harness detector.
 
@@ -720,6 +781,7 @@ the next reader concluding otherwise from a name search.
 | `core/harness-probe.ts:97` `prepareHarnessProbeEnv`        | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                                                 |
 | `core/login.ts:331` `interactiveLogin`                     | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                                                  |
 | `cli/init.ts`                                              | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                                                       |
+| `~/.kfleet/` asset tree (Home Manager's, not kfleet's)     | `lib/scaffold.ts` starters — instructions, per-harness settings, auto-lane flags                 | **neutral halves shipped**; skills/hooks/MCP GAP                              |
 | `core/health.ts`, `core/harness-probe.ts` (rest)           | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)                                |
 | `core/usage.ts:245,306` Anthropic probes                   | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                                                      |
 | `core/usage.ts:824` dedup by credential                    | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                                            |

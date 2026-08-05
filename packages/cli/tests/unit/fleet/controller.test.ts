@@ -463,7 +463,7 @@ describe('preparing a fresh host', () => {
 
     // Assert
     should(scaffolder.calls).equal(1);
-    should(out.text).containEql('created  /state/fleet/config.yaml');
+    should(out.text).containEql('created  /state/fleet/config.yaml (Ferretry starter)');
   });
 
   it('should not need a configuration to run — there is none yet', async () => {

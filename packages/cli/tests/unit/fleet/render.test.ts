@@ -90,6 +90,34 @@ describe('apply plan rendering', () => {
     should(rendered).containEql('/state/fleet/homes/a/skills ← /assets/skills');
   });
 
+  it('should name settings files and inline layers without printing their values', () => {
+    // Arrange
+    const withSettings = plan({
+      operations: [
+        {
+          kind: 'settings',
+          path: '/state/fleet/homes/a/settings.json',
+          format: 'json',
+          layers: [
+            { from: 'file', path: '/state/fleet/assets/templates/claude/settings.json' },
+            { from: 'inline', settings: { secretLookingValue: 'must-not-render' } },
+          ],
+          mode: 0o600,
+          preserveExisting: true,
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(withSettings);
+
+    // Assert
+    should(rendered).containEql(
+      '/state/fleet/homes/a/settings.json ← /state/fleet/assets/templates/claude/settings.json + [inline settings]',
+    );
+    should(rendered).not.containEql('must-not-render');
+  });
+
   it('should say how much a prune would keep, because prune is the destructive one', () => {
     // Arrange
     const sweeping = plan({
@@ -884,7 +912,7 @@ describe('renderScaffoldResult', () => {
 
     // Assert
     should(actual).containEql('prepared the fleet in /state/fleet');
-    should(actual).containEql('created  /state/fleet/config.yaml');
+    should(actual).containEql('created  /state/fleet/config.yaml (Ferretry starter)');
     should(actual).containEql('export PATH="/state/fleet/bin:$PATH"');
   });
 
@@ -894,7 +922,9 @@ describe('renderScaffoldResult', () => {
 
     // Assert
     should(actual).containEql('already set up');
-    should(actual).containEql('kept     /state/fleet/config.yaml');
+    should(actual).containEql(
+      'kept     /state/fleet/config.yaml (pre-existing file wins; Ferretry did not replace it)',
+    );
     should(actual).containEql('export PATH=');
   });
 

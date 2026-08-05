@@ -149,6 +149,8 @@ export class FleetPlan implements FleetPlanBuilder {
       operations.push({
         kind: 'file',
         path: joinPath(layout.binDirectory, account.wrapper),
+        // Preserve explicit portable aliases, but bind a bare relative declaration to the same
+        // resolved home this plan provisions. The Codex shared-history environment stays attached.
         content: renderWrapperScript(wrapperAccount, { secretsFile: config.secretsFile }),
         mode: EXECUTABLE_MODE,
       });

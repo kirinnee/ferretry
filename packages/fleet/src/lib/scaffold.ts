@@ -75,11 +75,14 @@ const configTemplate = (ids: FleetScaffoldIds): string => `# The fleet: every ag
 # before its own, which is the usual place for anything fleet-wide.
 profiles:
   base:
-    # A settings layer is either a path to a file (relative paths resolve inside
-    # this fleet's assets directory) or an object of overrides merged on top.
-    # Layers accumulate left to right; the last one wins.
-    settings:
-      - includeCoAuthoredBy: false
+    # These neutral Ferretry starters make a newly declared account usable.
+    # Each path is relative to this fleet's assets directory. Edit those files,
+    # or layer inline settings later in the composition chain to override them.
+    memory: ./CLAUDE.md
+    claude:
+      settings: ./templates/claude/settings.json
+    codex:
+      settings: ./templates/codex/config.toml
 
 # Lanes every account can be cloned into. "default" is the interactive lane;
 # "auto" is for non-interactive work, and an account opts into it by declaring a
@@ -88,6 +91,19 @@ variants:
   default: {}
   auto:
     mode: auto
+    # The auto lane is Ferretry's unattended path. These harness flags keep a
+    # session from stopping for permission input; Claude's remaining first-run
+    # prompts are seeded safely by the generated wrapper itself.
+    claude:
+      flags:
+        - --dangerously-skip-permissions
+        - --disallowed-tools=AskUserQuestion
+      settings:
+        - skipDangerousModePermissionPrompt: true
+    codex:
+      flags:
+        - --dangerously-bypass-approvals-and-sandbox
+        - --no-alt-screen
 
 agents: []
 
@@ -105,8 +121,8 @@ agents: []
 #     routes:
 #       default:
 #         id: ${ids.claude}
-#         wrapper: fy-claude-work
-#         home: ~/.claude-work
+#         wrapper: claude-work
+#         home: claude-work
 #         displayName: Claude (work)
 #         defaultModel: claude-opus-4-5
 #         models:
@@ -114,8 +130,8 @@ agents: []
 #           - claude-sonnet-4-5
 #       auto:
 #         id: ${ids.codex}
-#         wrapper: fy-claude-work-auto
-#         home: ~/.claude-work-auto
+#         wrapper: claude-auto-work
+#         home: claude-auto-work
 #         displayName: Claude (work, automation)
 #         defaultModel: claude-opus-4-5
 #         models:
@@ -131,6 +147,32 @@ agents: []
 # defaultHomes: {}
 `;
 
+const STARTER_INSTRUCTIONS = `# Ferretry starter instructions
+
+This is the neutral shared guidance installed by \`fy fleet init\`. Claude receives
+it as \`CLAUDE.md\`; Codex receives the same source as \`AGENTS.md\`.
+
+Replace this file with your own global instructions when you are ready. Ferretry
+will not overwrite it on a later init or upgrade. Repository-local instructions
+may add to or refine this starting point.
+
+- Follow the repository's contributor and agent instructions.
+- Keep changes scoped to the requested task and preserve unrelated work.
+- Run the repository's relevant checks before reporting that work is complete.
+`;
+
+/** Claude accepts JSON only, so `$schema` is its in-file editing guidance. */
+const CLAUDE_SETTINGS = `{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "includeCoAuthoredBy": false
+}
+`;
+
+const CODEX_SETTINGS = `# Ferretry's neutral Codex base settings.
+# Add shared settings here or replace this file; fy fleet init never overwrites it.
+# Model, approval, sandbox and tool policy are deliberately left to each account/lane.
+`;
+
 const ASSETS_README = `# Fleet assets
 
 Anything a fleet account runs *with* lives here: memory files, skills directories,
@@ -140,6 +182,16 @@ A configuration references an asset by path. A relative path resolves inside thi
 directory, so \`memory: ./memory/CLAUDE.md\` means the file beside this README. A
 path beginning \`~/\` or \`$HOME/\` resolves against your home directory, and an
 absolute path is used as written.
+
+## Included starters
+
+- \`CLAUDE.md\` is concise shared guidance. The base profile materializes it as
+  Claude's \`CLAUDE.md\` and Codex's \`AGENTS.md\`.
+- \`templates/claude/settings.json\` is the neutral Claude settings layer.
+- \`templates/codex/config.toml\` is an intentionally policy-free Codex layer.
+
+No hooks, MCP servers or skills are installed by default. Those execute code or
+encode workflow preferences, so add only the ones you have chosen and reviewed.
 
 ## How overriding works
 
@@ -160,8 +212,9 @@ overwritten by re-running it or by upgrading — including this file. If you wan
 newer default, delete your copy and run \`fy fleet init\` again.
 
 Files are materialized into each account's home when you run \`fy fleet apply\`.
-Most are symlinked, so editing the file here is live. Settings are copied instead,
-because the harness rewrites that file itself at runtime.
+Account-home assets are copies, not symlinks: editing a source here takes effect on
+the next apply. Settings are merged into a real file because each harness may also
+rewrite its settings at runtime.
 `;
 
 export interface FleetScaffoldInput {
@@ -185,12 +238,24 @@ export interface FleetScaffoldInput {
 export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
   const { layout, ids, configPath } = input;
   const separator = layout.assetsDirectory.endsWith('/') ? '' : '/';
+  const assetPath = (name: string): string => `${layout.assetsDirectory}${separator}${name}`;
   return {
-    directories: [layout.fleetDirectory, layout.binDirectory, layout.homesDirectory, layout.assetsDirectory],
+    directories: [
+      layout.fleetDirectory,
+      layout.binDirectory,
+      layout.homesDirectory,
+      layout.assetsDirectory,
+      assetPath('templates'),
+      assetPath('templates/claude'),
+      assetPath('templates/codex'),
+    ],
     directoryMode: DIRECTORY_MODE,
     files: [
       { path: configPath, content: configTemplate(ids), mode: FILE_MODE },
-      { path: `${layout.assetsDirectory}${separator}README.md`, content: ASSETS_README, mode: FILE_MODE },
+      { path: assetPath('README.md'), content: ASSETS_README, mode: FILE_MODE },
+      { path: assetPath('CLAUDE.md'), content: STARTER_INSTRUCTIONS, mode: FILE_MODE },
+      { path: assetPath('templates/claude/settings.json'), content: CLAUDE_SETTINGS, mode: FILE_MODE },
+      { path: assetPath('templates/codex/config.toml'), content: CODEX_SETTINGS, mode: FILE_MODE },
     ],
     pathEntry: `export PATH="${layout.binDirectory}:$PATH"`,
   };

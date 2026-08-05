@@ -27,6 +27,10 @@ function operationTarget(operation: FleetWriteOperation): string {
     case 'copy':
     case 'symlink':
       return `${operation.path} ← ${operation.source}`;
+    case 'settings': {
+      const sources = operation.layers.map(layer => (layer.from === 'file' ? layer.path : '[inline settings]'));
+      return sources.length === 0 ? operation.path : `${operation.path} ← ${sources.join(' + ')}`;
+    }
     case 'prune':
       return `${operation.path} (keeping ${operation.keep.length})`;
     case 'codex-sqlite-ownership':
@@ -296,9 +300,10 @@ export function renderScaffoldResult(result: FleetScaffoldResult): string {
       ? ['The fleet is already set up; nothing was changed.']
       : [
           `prepared the fleet in ${result.directories[0] ?? 'its directory'}`,
-          ...result.created.map(path => `  created  ${path}`),
+          ...result.created.map(path => `  created  ${path} (Ferretry starter)`),
         ];
-  for (const path of result.kept) lines.push(`  kept     ${path} (already there, left as it is)`);
+  for (const path of result.kept)
+    lines.push(`  kept     ${path} (pre-existing file wins; Ferretry did not replace it)`);
   lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
   lines.push('', 'Then declare an account in the configuration and run "fy fleet apply".');
   return lines.join('\n');
