@@ -472,7 +472,8 @@ Notes that change the backlog:
 - **Item 31** ("run the daemon from stable snapshots") now has a daemon-keyed, content-addressed
   store, strict verification, atomic promotion and explicit rollout/rollback commands. It remains
   open because the single per-daemon Nix GC root does not retain every older snapshot's runtime
-  closure, so rollback after garbage collection is not yet guaranteed for Nix-built binaries.
+  closure, so rollback after garbage collection is not yet guaranteed for Nix-built binaries, and
+  independent lifecycle CLIs do not yet serialize the root update with service activation.
 - **Items 3 and 4** (gitlint in worktrees, untracked files hidden) are repo-tooling fixes that
   the worktree-heavy execution model in §6 will hit immediately. They are pulled **forward** —
   landing them early pays for itself across every subsequent unit.

@@ -69,11 +69,17 @@ releases it. This is a per-user operation and needs no `sudo`. If `nix-store` is
 daemon still starts and `fy` warns that garbage collection may remove runtime dependencies; a
 Homebrew or release-archive source is outside the store and is left alone.
 
-Ferretry currently holds one Nix root per daemon, not one per retained snapshot. Promotion alone
-leaves that root unchanged; the next actual `install`, `start`, or `restart` repoints it to the exact
-snapshot that launch uses. An older Nix-backed snapshot therefore keeps its copied executable but not
-necessarily its interpreter and runtime closure after a later garbage collection. Reliable post-GC
-rollback of those older snapshots remains a gap until roots are retained per snapshot.
+Ferretry currently holds one Nix root per daemon, not one per retained snapshot. That root can
+protect at most one Nix-backed snapshot source closure. Promotion alone leaves it unchanged; a
+managed `install`, `start`, or `restart` that actually launches a Nix-backed snapshot repoints it,
+while a non-Nix launch leaves any older root in place until uninstall. An older Nix-backed snapshot
+therefore keeps its copied executable but not necessarily its interpreter and runtime closure after a
+later garbage collection. Reliable post-GC rollback of those older snapshots remains a gap until
+roots are retained per snapshot.
+
+Independent lifecycle commands are not yet guarded by a daemon-keyed interprocess lock. Do not run
+`install`, `start`, or `restart` concurrently: their service-definition update and the single GC-root
+update can otherwise interleave. Serializing those commands remains part of handover item #31.
 
 ## Daemon snapshots
 

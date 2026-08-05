@@ -54,10 +54,12 @@ its exact canonical artifact path. kteam has no daemon artifact snapshot to port
 `modules/kteam-ts/src/index.ts` resolves `kteamd` and passes that wrapper to `DaemonService`;
 `DaemonService.install/start` execute it, and the Home Manager `modules/default.nix` wrapper then runs
 live `daemon-entry.ts`. Its `kteam snapshot` command captures a session pane and is unrelated. The
-remaining GAP is Nix rollback retention: the single per-daemon GC root protects only one snapshot
-source closure at a time, so older retained snapshots can lose runtime dependencies after garbage
-collection. Keep this row open until roots follow snapshot lifetime (or snapshots materialize their
-complete runtime closure).
+remaining GAPs are Nix rollback retention and cross-process lifecycle serialization. The single
+per-daemon GC root can protect only one Nix-backed snapshot source closure at a time, so older
+retained snapshots can lose runtime dependencies after garbage collection; simultaneous independent
+install/start/restart commands can also interleave that root update with a service-definition update.
+Keep this row open until roots follow snapshot lifetime (or snapshots materialize their complete
+runtime closure) and daemon-keyed lifecycle operations are serialized.
 
 ## 🔎 Search, navigation & surfaces
 
