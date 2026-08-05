@@ -31,6 +31,15 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
+/** A real phone context: a 390px desktop is not the mobile journey this UI serves. */
+const PHONE_CONTEXT = {
+  viewport: { width: 390, height: 844 },
+  isMobile: true,
+  hasTouch: true,
+  userAgent:
+    'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+} as const;
+
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 
@@ -221,9 +230,9 @@ try {
   try {
     for (const viewport of VIEWPORTS) {
       const context = await browser.newContext({
-        viewport: { width: viewport.width, height: viewport.height },
-        isMobile: viewport.name === 'mobile',
-        hasTouch: viewport.name === 'mobile',
+        ...(viewport.name === 'mobile'
+          ? PHONE_CONTEXT
+          : { viewport: { width: viewport.width, height: viewport.height } }),
         colorScheme: 'dark',
         reducedMotion: 'reduce',
       });
@@ -308,6 +317,47 @@ try {
             await page.keyboard.press('Escape');
             await unifiedRealCard.getByRole('dialog', { name: 'Browser controls' }).waitFor({ state: 'hidden' });
             process.stdout.write(`📸 Unified browser controls menu -> ${unifiedMenuTarget}\n`);
+
+            // The remote login is deliberately reviewed as its whole journey:
+            // start, link-out, a rejected callback with nothing echoed, then a
+            // verified identity. The phone capture uses PHONE_CONTEXT above so
+            // its touch layout and user agent are the real mobile branch.
+            const remoteLogin = page.locator('[data-harness="remote-login"]');
+            for (const [state, settle] of [
+              ['start', async () => {}],
+              [
+                'url',
+                async () => {
+                  await remoteLogin.getByRole('button', { name: 'Log in to Claude Code' }).click();
+                  await remoteLogin.getByText('Open this URL anywhere').waitFor({ state: 'visible' });
+                },
+              ],
+              [
+                'rejected',
+                async () => {
+                  await remoteLogin
+                    .locator('textarea[name="remote-login-callback"]')
+                    .fill('http://127.0.0.1:43123/oauth/callback?rejected=fixture');
+                  await remoteLogin.getByRole('button', { name: 'Finish sign-in' }).click();
+                  await remoteLogin.getByRole('alert').waitFor({ state: 'visible' });
+                },
+              ],
+              [
+                'success',
+                async () => {
+                  await remoteLogin
+                    .locator('textarea[name="remote-login-callback"]')
+                    .fill('http://127.0.0.1:43123/oauth/callback?accepted=fixture');
+                  await remoteLogin.getByRole('button', { name: 'Finish sign-in' }).click();
+                  await remoteLogin.getByRole('status').waitFor({ state: 'visible' });
+                },
+              ],
+            ] as const) {
+              await settle();
+              const target = join(outDir, `remote-login-${state}-${viewport.name}.png`);
+              await remoteLogin.screenshot({ path: target });
+              process.stdout.write(`📸 remote login ${state} -> ${target}\n`);
+            }
             const learningTarget = join(outDir, `learning-${viewport.name}.png`);
             await page.getByLabel('Learning proposals').screenshot({ path: learningTarget });
             process.stdout.write(`📸 learning -> ${learningTarget}\n`);

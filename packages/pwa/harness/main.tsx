@@ -83,6 +83,7 @@ import {
 } from '../src/features/browser/unified-browser-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
+import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
 import { LearningHeader } from '../src/features/learning/learning-header.tsx';
 import { LearningReview } from '../src/features/learning/learning-page.tsx';
 import { LineageSurfaceContent } from '../src/features/lineage/lineage-surface.tsx';
@@ -272,6 +273,42 @@ const HARNESS_FLEET: FleetReadState = {
     },
   ],
 };
+
+const HARNESS_REMOTE_LOGIN_URL = 'https://accounts.example.test/authorize?state=harness-state';
+
+/**
+ * A safe, local-only journey for visual review. The callbacks are obvious
+ * fixtures, never provider credentials, and the component still clears them
+ * before either terminal state is painted.
+ */
+function RemoteLoginHarness() {
+  const start = async (): Promise<RemoteLoginStep> => ({
+    kind: 'awaiting-callback',
+    authorizationUrl: HARNESS_REMOTE_LOGIN_URL,
+  });
+  const submit = async (redirectUrl: string): Promise<RemoteLoginStep> =>
+    redirectUrl.includes('rejected')
+      ? { kind: 'rejected', reason: 'This callback does not match the sign-in started on Studio workstation.' }
+      : { kind: 'complete', copiedToSiblings: 2 };
+
+  return (
+    <div data-harness="remote-login">
+      <RemoteLoginSurface
+        daemonId={daemon.daemonId}
+        identity={{
+          identity: 'claude:studio',
+          provider: 'claude',
+          accountLabel: 'Studio Claude',
+          memberCount: 3,
+        }}
+        initialStep={{ kind: 'ready' }}
+        onStart={start}
+        onSubmitRedirect={submit}
+        copy={async () => {}}
+      />
+    </div>
+  );
+}
 
 /**
  * A skills catalog covering both scopes and every origin chip, so the row
@@ -3273,6 +3310,10 @@ function Shell() {
           </PanelBody>
         </Card>
       ),
+    },
+    {
+      label: 'Remote provider login',
+      render: () => <RemoteLoginHarness />,
     },
     {
       label: 'Attention ledger',
