@@ -26,7 +26,7 @@ and the second:
 >
 > also i WANT to support multiple relay type! please ensure that works.
 
-Six teammates contributed verified findings while halted: hadi, mika, cinthia, temperance, frederick.
+Five teammates contributed verified findings while halted: hadi, mika, cinthia, temperance, frederick.
 Their evidence is folded in and attributed. Every claim below was re-checked against `00b733d0` by
 content, including my own from the previous revision — one of which had already been fixed. See §11.
 
@@ -96,10 +96,10 @@ code** — and most were silent under-matches, which read as compliance. §11.1 
 is deliberately kept in exactly one place, since a number restated in three sections is this document's
 own subject matter.
 
-The point is not that the people involved were careless. It is that **five careful people, working
-specifically on this failure mode, with the doctrine in front of them, still produced it** — in the
-artefact arguing against it. That is the argument for §4's gates, and it is the one the owner can check
-without reading any of the code.
+The point is not that the people involved were careless. It is that **six people worked on this document,
+three of them re-verifying its numbers specifically, and the contradiction sat in its opening verdict for
+three commits anyway** — in the artefact arguing against exactly that. That is the argument for §4's
+gates, and it is the one the owner can check without reading any of the code.
 
 ### 1.1 The survey — sixteen instances, twelve of them live
 
@@ -312,7 +312,8 @@ Concretely, on `PairingCodeMintResponseSchema`:
 - The `superRefine` becomes: `pairUrl` present **iff** `daemonUrl` present, and when present the
   fragment must match. **frederick's invariant is kept** — a link cannot disagree with the daemon it
   names — and the missing one is added.
-- The fix sentence is the same in all three surfaces: _"set `publicUrl` to the address other devices
+- The fix sentence is composed once and rendered identically by both surfaces in the table above —
+  `fy pair` and the Add-a-device panel: _"set `publicUrl` to the address other devices
   reach this machine at, e.g. `http://192.168.1.10:7431`"_. frederick confirms the browser already has
   what it needs (`pairingSeedFromUrl` parses `url=`, `pairingDaemonHost` extracts the host), so this is
   a few lines in one place.
@@ -423,7 +424,7 @@ Not a schema, not a reader, not a scope. This:
 | who may change it   | ⚠️ nobody, via any API | ✅               | ✅ the reader          |
 | unreadable ⇒ what   | ✅ boot refuses        | ✅ deny loudly   | ❌ silent default      |
 
-The framework the owner asked for is this table with no ✗ in it. Finite, checkable, independently
+The framework the owner asked for is this table with no ❌ in it. Finite, checkable, independently
 shippable.
 
 ---
@@ -932,12 +933,12 @@ Every step ships alone, reverts alone, and deletes something. No big-bang rewrit
 
 ### Wave 0 — the blocker (first, before anything else)
 
-| step   | does                                                                                                                                                                                                                                                                          | deletes                                        |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| **0a** | `decideAdvertisement` in `@ferretry/protocol` + `isLoopbackHost`/`isLoopbackPeer`/`isWildcardHost` moved there from `#301`'s `config.ts`                                                                                                                                      | the four loopback copies                       |
-| **0b** | the three `config.ts` derivation sites and `recordedDaemonAddress` read the one decision                                                                                                                                                                                      | `publicUrl ?? bindUrl` ×3                      |
-| **0c** | the mint response carries `reach: 'any-device' \| 'local-only'` or a `refusal`; `superRefine` becomes present-iff-present; the three surfaces draw a QR, a said-so local link, or the fix — never a silent dead QR. **Do not condition on the requester's carrier (§2.5.1).** | the undialable QR                              |
-| **0d** | `docs/pairing.md` states the constraint: **never mint a link without saying who can redeem it**                                                                                                                                                                               | frederick's asserted-but-undeliverable journey |
+| step   | does                                                                                                                                                                                                                                                                                            | deletes                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **0a** | `decideAdvertisement` in `@ferretry/protocol` + `isLoopbackHost`/`isLoopbackPeer`/`isWildcardHost` moved there from `#301`'s `config.ts`                                                                                                                                                        | the four loopback copies                       |
+| **0b** | the three `config.ts` derivation sites and `recordedDaemonAddress` read the one decision                                                                                                                                                                                                        | `publicUrl ?? bindUrl` ×3                      |
+| **0c** | the mint response carries `reach: 'any-device' \| 'local-only'` or a `refusal`; `superRefine` becomes present-iff-present; `fy pair` and the Add-a-device panel draw a QR, a said-so local link, or the fix — never a silent dead QR. **Do not condition on the requester's carrier (§2.5.1).** | the undialable QR                              |
+| **0d** | `docs/pairing.md` states the constraint: **never mint a link without saying who can redeem it**                                                                                                                                                                                                 | frederick's asserted-but-undeliverable journey |
 
 ### Wave 1 — detection (no behaviour change)
 
@@ -1110,8 +1111,8 @@ came from my pattern, the corpus numbers from their narrower one. The complaint 
 was unstated was fair _and_ was the same thing happening.
 
 > **State the probe, or two runs of "the same" measurement are not the same measurement.** This is a
-> distinct mechanism from the four above: the instrument changed between runs, so both numbers were
-> faithful to what they measured and neither was comparable to the other.
+> distinct mechanism from the under-matches — rows i–v of the table below: the instrument changed between
+> runs, so both numbers were faithful to what they measured and neither was comparable to the other.
 
 **What this round did not do is change the conclusion.** No measurement error touched the load-bearing
 claim, because that claim is about what the eight doctrine articles _contain_ — checkable by reading them,
