@@ -96,7 +96,7 @@ describe('CLI shared-history apply', () => {
     });
     const pool = path.join(layout.fleetDirectory, 'shared', 'claude');
     const pooledFile = path.join(pool, 'projects', 'project', 'conversation.jsonl');
-    const preserved = path.join(pool, '.migration-conflicts', ACCOUNT_B, 'projects', 'project', 'conversation.jsonl');
+    const preserved = path.join(pool, '.migration-conflicts', ACCOUNT_A, 'projects', 'project', 'conversation.jsonl');
 
     // Act — preview first, then explicitly apply the same configuration.
     await controller.apply({ dryRun: true });

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileSharedHistoryFileSystem, sharedHistoryMoveRefusal } from '../../src/adapters/file-shared-history.ts';
-import { SharedHistoryMigration } from '../../src/lib/shared-history.ts';
+import { SharedHistoryMigration, type SharedHistoryRequest } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -69,18 +69,15 @@ describe('FileSharedHistoryFileSystem', () => {
     const subject = new FileSharedHistoryFileSystem([root]);
 
     // Act
-    const createdDirectory = await subject.ensureDirectory(directory);
-    const keptDirectory = await subject.ensureDirectory(directory);
-    const createdFile = await subject.ensureFile(file);
-    const keptFile = await subject.ensureFile(file);
+    await subject.ensureDirectory(directory);
+    await subject.ensureFile(file);
+    await write(file, 'kept');
+    await subject.ensureDirectory(directory);
+    await subject.ensureFile(file);
 
-    // Assert
-    should(createdDirectory).be.true();
-    should(keptDirectory).be.false();
-    should(createdFile).be.true();
-    should(keptFile).be.false();
+    // Assert — a second call keeps what is there rather than replacing it.
     should((await lstat(directory)).isDirectory()).be.true();
-    should((await lstat(file)).isFile()).be.true();
+    should(await readFile(file, 'utf8')).equal('kept');
   });
 
   it('should move without replacing, atomically write text, and remove only the expected link', async () => {
@@ -182,7 +179,7 @@ describe('FileSharedHistoryFileSystem', () => {
       async () => await subject.move(escaped('file'), path.join(root, 'stolen')),
       async () => await subject.writeTextAtomic(escaped('file'), 'overwritten'),
       async () => await subject.writeTextExclusive(escaped('created'), 'overwritten'),
-      async () => await subject.rewriteTextInPlace(escaped('file'), 'foreign', 'overwritten'),
+      async () => await subject.appendTextIfPrefix(escaped('file'), 'foreign', 'overwritten'),
       async () => await subject.createSymbolicLink(inside, escaped('created')),
       async () => await subject.createSymbolicLink(escaped('file'), path.join(root, 'stolen')),
       async () => await subject.removeSymbolicLink(escaped('link'), escaped('directory')),
@@ -207,11 +204,10 @@ describe('FileSharedHistoryFileSystem', () => {
     const subject = new FileSharedHistoryFileSystem([linkedRoot]);
 
     // Act
-    const created = await subject.ensureFile(path.join(linkedRoot, 'file'));
+    await subject.ensureFile(path.join(linkedRoot, 'file'));
     const throughRealPath = await subject.snapshot(path.join(real, 'file'));
 
     // Assert
-    should(created).be.true();
     should(throughRealPath).match({ kind: 'file' });
     await should(subject.snapshot(path.join(elsewhere, 'sibling'))).be.rejectedWith(/outside configured roots/);
   });
@@ -274,32 +270,62 @@ describe('FileSharedHistoryFileSystem', () => {
     }
   });
 
-  it('should rewrite text in place, keeping the inode a live reader already holds', async () => {
+  it('should append in place, keeping the inode a live reader already holds', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const target = path.join(root, 'history.jsonl');
-    await write(target, 'first\nsecond\n');
+    await write(target, 'first\n');
     const inodeBefore = (await lstat(target)).ino;
     const reader = await open(target, 'r');
     const subject = new FileSharedHistoryFileSystem([root]);
 
     try {
       // Act
-      const rewritten = await subject.rewriteTextInPlace(target, 'first\nsecond\n', 'only\n');
-      const stale = await subject.rewriteTextInPlace(target, 'first\nsecond\n', 'never written\n');
+      const appended = await subject.appendTextIfPrefix(target, 'first\n', 'second\n');
+      const empty = await subject.appendTextIfPrefix(target, 'first\nsecond\n', '');
+      const stale = await subject.appendTextIfPrefix(target, 'a different beginning\n', 'never written\n');
 
       // Assert
-      should(rewritten).be.true();
+      should(appended).be.true();
+      should(empty).be.true();
       should(stale).be.false();
       should((await lstat(target)).ino).equal(inodeBefore);
-      should(await readFile(target, 'utf8')).equal('only\n');
-      should(await reader.readFile('utf8')).equal('only\n');
+      should(await readFile(target, 'utf8')).equal('first\nsecond\n');
+      should(await reader.readFile('utf8')).equal('first\nsecond\n');
     } finally {
       await reader.close();
     }
   });
 
-  it('should refuse to rewrite anything that is not a regular file in place', async () => {
+  it('should never erase what a concurrent writer appended between the check and the write', async () => {
+    // Arrange — the pooled history is live, so the only safe write is one that cannot truncate.
+    const root = await temporaryDirectory();
+    const target = path.join(root, 'history.jsonl');
+    await write(target, '{"display":"pooled","timestamp":1}\n');
+    const harness = await open(target, 'a');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act — a foreign appender grows the file after the plan observed it.
+      await harness.write('{"display":"live","timestamp":2}\n');
+      await harness.sync();
+      const appended = await subject.appendTextIfPrefix(
+        target,
+        '{"display":"pooled","timestamp":1}\n',
+        '{"display":"migrated","timestamp":3}\n',
+      );
+
+      // Assert — growth past the observed prefix is tolerated and the live line is still there.
+      should(appended).be.true();
+      should(await readFile(target, 'utf8')).equal(
+        '{"display":"pooled","timestamp":1}\n{"display":"live","timestamp":2}\n{"display":"migrated","timestamp":3}\n',
+      );
+    } finally {
+      await harness.close();
+    }
+  });
+
+  it('should refuse to append to anything that is not a regular file', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const file = path.join(root, 'file');
@@ -312,11 +338,11 @@ describe('FileSharedHistoryFileSystem', () => {
 
     // Act
     const actions = [link, directory, path.join(root, 'missing')].map(
-      target => async () => await subject.rewriteTextInPlace(target, 'evidence', 'overwritten'),
+      target => async () => await subject.appendTextIfPrefix(target, 'evidence', 'appended'),
     );
 
     // Assert
-    for (const action of actions) await should(action()).be.rejectedWith(/in-place rewrite expected a file/);
+    for (const action of actions) await should(action()).be.rejectedWith(/append expected a file/);
     should(await readFile(file, 'utf8')).equal('evidence');
   });
 
@@ -379,6 +405,24 @@ describe('FileSharedHistoryFileSystem', () => {
     should((refused as Error).message).match(/refusing to copy shared history across filesystems/);
     should((refused as Error).message).match(/\/pool\/source -> \/other\/destination/);
     should(passedThrough).eql({ code: 'EINVAL' });
+  });
+
+  it('should report the device a rename would land on, existing or not yet created', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const outside = path.join(path.dirname(root), `${path.basename(root)}-outside`);
+    const file = path.join(root, 'file');
+    await write(file, 'evidence');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const existing = await subject.deviceIdOf(file);
+    const missingPool = await subject.deviceIdOf(path.join(root, 'fleet', 'shared', 'claude'));
+
+    // Assert — an absent pool answers with the device of the ancestor that will hold it.
+    should(existing).equal((await lstat(file)).dev);
+    should(missingPool).equal((await lstat(root)).dev);
+    await should(subject.deviceIdOf(outside)).be.rejectedWith(/outside configured roots/);
   });
 
   it('should reject an empty allowed-root declaration', () => {
@@ -462,13 +506,20 @@ describe('shared-history migration with the real filesystem', () => {
 
     // Assert
     should(preview.conflicts).equal(1);
+    should(preview.emptiedSourceDirectories).deepEqual([
+      path.join(homeB, 'projects', 'project'),
+      path.join(homeB, 'projects'),
+    ]);
     should(await readFile(path.join(poolRoot, 'claude', 'projects', 'project', 'same'), 'utf8')).equal('newer');
+    // The pooled loser is account a's file, so it is quarantined under a, not under the incoming b.
     should(
-      await readFile(path.join(poolRoot, 'claude', '.migration-conflicts', 'b', 'projects', 'project', 'same'), 'utf8'),
+      await readFile(path.join(poolRoot, 'claude', '.migration-conflicts', 'a', 'projects', 'project', 'same'), 'utf8'),
     ).equal('older');
     should(await readFile(path.join(poolRoot, 'claude', 'history.jsonl'), 'utf8')).equal(
       '{"display":"one","timestamp":1}\n{"display":"two","timestamp":2}\n',
     );
+    // Every emptied source directory named by the dry run is gone, replaced by the pool link.
+    should((await lstat(path.join(homeB, 'projects'))).isSymbolicLink()).be.true();
   });
 
   it('should roll renamed history back when a later filesystem operation refuses', async () => {
@@ -492,5 +543,98 @@ describe('shared-history migration with the real filesystem', () => {
     await should(promise).be.rejectedWith(/injected link failure/);
     should((await lstat(projects)).isDirectory()).be.true();
     should(await readFile(transcript, 'utf8')).equal('evidence');
+  });
+
+  it('should migrate an account home that is a link to a directory inside the allowed roots', async () => {
+    // Arrange — operators do park a home on a bigger volume and link it into the fleet layout.
+    const root = await temporaryDirectory();
+    const real = path.join(root, 'volume', 'claude-a');
+    const home = path.join(root, 'fleet', 'homes', 'claude-a');
+    const poolRoot = path.join(root, 'fleet', 'shared');
+    await write(path.join(real, 'projects', 'project', 'session.jsonl'), 'evidence\n');
+    await mkdir(path.dirname(home), { recursive: true });
+    await symlink(real, home);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([root]));
+
+    // Act
+    const actual = await subject.materialize({ kind: 'claude', poolRoot, homes: [{ account: 'a', path: home }] });
+
+    // Assert — the entry link lands inside the linked home and the root link is left alone.
+    should(actual.migrated).equal(1);
+    should((await lstat(home)).isSymbolicLink()).be.true();
+    should(await readlink(home)).equal(real);
+    should((await lstat(path.join(real, 'projects'))).isSymbolicLink()).be.true();
+    should(await readFile(path.join(poolRoot, 'claude', 'projects', 'project', 'session.jsonl'), 'utf8')).equal(
+      'evidence\n',
+    );
+  });
+
+  it('should refuse a home whose link leaves the allowed roots, in the plan and again on apply', async () => {
+    // Arrange — the configured roots are the writable surface, and a link cannot widen them.
+    const root = await temporaryDirectory();
+    const elsewhere = await temporaryDirectory();
+    const home = path.join(root, 'fleet', 'homes', 'claude-a');
+    const inside = path.join(root, 'fleet', 'homes', 'claude-b');
+    const poolRoot = path.join(root, 'fleet', 'shared');
+    await write(path.join(elsewhere, 'projects', 'project', 'session.jsonl'), 'foreign\n');
+    await write(path.join(inside, 'projects', 'project', 'session.jsonl'), 'local\n');
+    await symlink(elsewhere, home);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([root]));
+    const migration: SharedHistoryRequest = {
+      kind: 'claude',
+      poolRoot,
+      homes: [
+        { account: 'a', path: home },
+        { account: 'b', path: inside },
+      ],
+    };
+
+    // Act
+    const preview = await subject.preview(migration);
+    const promise = subject.materialize(migration);
+
+    // Assert — the plan stays readable and truthful; nothing outside the roots is read or written.
+    should(preview.refusals).match([{ account: 'a', home, path: elsewhere, reason: /outside configured roots/ }]);
+    should(preview.changes).matchAny({ kind: 'move', source: path.join(inside, 'projects') });
+    await should(promise).be.rejectedWith(
+      /refusing to migrate claude history while 1 account home\(s\) cannot be read/,
+    );
+    should((await lstat(path.join(inside, 'projects'))).isDirectory()).be.true();
+    should(await readFile(path.join(elsewhere, 'projects', 'project', 'session.jsonl'), 'utf8')).equal('foreign\n');
+  });
+
+  it('should preserve, but not pool, prompt lines a live writer appends after the migration', async () => {
+    // Arrange — the honest limit of a rename-based merge: an fd opened before the migration keeps
+    // writing to the same inode, which is now the quarantined copy rather than the pooled file.
+    const root = await temporaryDirectory();
+    const home = path.join(root, 'fleet', 'homes', 'claude-a');
+    const poolRoot = path.join(root, 'fleet', 'shared');
+    const pooled = path.join(poolRoot, 'claude', 'history.jsonl');
+    const source = path.join(home, 'history.jsonl');
+    await write(pooled, '{"display":"pooled","timestamp":1}\n');
+    await write(source, '{"display":"account","timestamp":2}\n');
+    const writer = await open(source, 'a');
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([root]));
+
+    try {
+      // Act
+      const actual = await subject.materialize({ kind: 'claude', poolRoot, homes: [{ account: 'a', path: home }] });
+      await writer.write('{"display":"late","timestamp":3}\n');
+      await writer.sync();
+      const merge = actual.changes.find(change => change.kind === 'merge-jsonl');
+      const preserved = merge?.kind === 'merge-jsonl' ? merge.sourcePreservedAt : '';
+
+      // Assert — the pooled file has both observed histories and none of the late line.
+      should(await readFile(pooled, 'utf8')).equal(
+        '{"display":"pooled","timestamp":1}\n{"display":"account","timestamp":2}\n',
+      );
+      // The late line is not lost: it is in the quarantined copy the plan already named.
+      should(preserved).equal(path.join(poolRoot, 'claude', '.migration-conflicts', 'a', 'history.jsonl'));
+      should(await readFile(preserved, 'utf8')).equal(
+        '{"display":"account","timestamp":2}\n{"display":"late","timestamp":3}\n',
+      );
+    } finally {
+      await writer.close();
+    }
   });
 });

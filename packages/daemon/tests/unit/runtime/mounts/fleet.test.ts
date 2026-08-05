@@ -321,14 +321,8 @@ agents:
     await utimes(fileB, 20, 20);
     const pool = join(subject.paths.fleet, 'shared', 'claude');
     const pooledFile = join(pool, 'projects', 'project', 'conversation.jsonl');
-    const preserved = join(
-      pool,
-      '.migration-conflicts',
-      SECOND_ACCOUNT_ID,
-      'projects',
-      'project',
-      'conversation.jsonl',
-    );
+    // The pooled loser belongs to the first account, so that is the identity it is quarantined under.
+    const preserved = join(pool, '.migration-conflicts', ACCOUNT_ID, 'projects', 'project', 'conversation.jsonl');
 
     // Act
     const previewResponse = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: human }));
