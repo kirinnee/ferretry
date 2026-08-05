@@ -19,29 +19,30 @@ Coverage was not consulted: **coverage cannot detect a missing feature**, and th
 migration shipped subsystems missing their core files at 100%.
 
 Two branches that are not on `main` are named where they matter: `feat/fleet-management` (PR #231)
-and `fix/harness-preflight`.
+and `fix/harness-preflight`. The daemon's fleet routes (#237) **did** land while this was being
+written, and [H](#h--keep-it-fresh) is written against them rather than against the state before.
 
 ---
 
 ## Scorecard
 
-Can the owner delete kfleet today? **No — seven capabilities short.** Ordered by what actually stops
+Can the owner delete kfleet today? **No — six capabilities short**, down from nine before this unit. Ordered by what actually stops
 him, not by line count.
 
-| #   | Capability — what a person uses kfleet for                          | Ferretry today              | Blocks deleting kfleet?                     |
-| --- | ------------------------------------------------------------------- | --------------------------- | ------------------------------------------- |
-| A   | [Declare a fleet of accounts](#a--declare-a-fleet)                  | **Carried**, and stronger   | No                                          |
-| B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**, minus PATH     | **Yes — nothing puts the wrappers on PATH** |
-| C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only      | **Yes**                                     |
-| D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger   | No                                          |
-| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _wrapper_  | **Yes**                                     |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Reports everything unknown  | **Yes**                                     |
-| G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                     | **Yes** (health is off by default upstream) |
-| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Supervision yes, probing no | **Yes**                                     |
-| I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused        | **Yes**, if he uses it                      |
-| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | Nothing                     | **Yes** — _closed by this unit_             |
-| K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Nothing                     | **Yes**, for automation                     |
-| L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                     | No — annoying, not blocking                 |
+| #   | Capability — what a person uses kfleet for                          | Ferretry today                   | Blocks deleting kfleet?                                               |
+| --- | ------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
+| A   | [Declare a fleet of accounts](#a--declare-a-fleet)                  | **Carried**, and stronger        | No                                                                    |
+| B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**; init now names PATH | **Was yes** — nothing put the wrappers on PATH; _closed by this unit_ |
+| C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
+| D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
+| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _wrapper_       | **Yes**                                                               |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Reports everything unknown       | **Yes**                                                               |
+| G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
+| H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
+| I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
+| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                  | **Was yes**; _closed by this unit_                                    |
+| K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper            | **Was yes**, for automation; _closed by this unit_                    |
+| L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                          | No — annoying, not blocking                                           |
 
 Three facts that the capability rows assume and that are easy to miss:
 
@@ -321,7 +322,7 @@ So there is one notion of _installed_ and one notion of _alive_, they answer dif
 both say which one they answer. **The second is simply missing.** If it is ported, it belongs in
 `packages/fleet` consumed by both, not as a third detector.
 
-**Coordination:** `harness-readiness.ts` is the in-flight daemon unit's file and was not touched.
+**Coordination:** `harness-readiness.ts` is the daemon unit's file and was not touched.
 
 ---
 
@@ -341,14 +342,31 @@ exist.**
 (`packages/cli/src/lib/daemon/probe.ts`). Ferretry already runs a supervised, always-on process with
 an HTTP surface.
 
-**So `kfleet serve` and `kfleet service` — 509 lines — should not be ported at all.** What is missing
-is narrow: a probe loop mounted as a daemon subsystem, and routes serving the two renderers that
-already exist (`lib/usage.ts:229,243`). Nothing needs a second service manager, a second port, or the
-`/bin/sh -c '. ~/.secrets; …'` trick kfleet uses to get API keys into a launchd job — Ferretry's
-wrappers already declare their `$NAME` references and guard them.
+**So `kfleet serve` and `kfleet service` — 509 lines — should not be ported at all.** Nothing needs a
+second service manager, a second port, or the `/bin/sh -c '. ~/.secrets; …'` trick kfleet uses to get
+API keys into a launchd job; Ferretry's wrappers already declare their `$NAME` references and guard
+them.
 
-**Coordination:** that loop and those routes are the in-flight daemon unit's area. This unit built
-neither and says so rather than racing it.
+**The routes landed while this unit was writing.** `feat(daemon): mount fleet routes (#237)` merged
+to `main` and serves `GET /v1/fleet/{accounts,config,plan,usage}` and `POST /v1/fleet/apply`
+(`packages/daemon/src/lib/runtime/mounts/fleet.ts`). So the endpoint half of `serve` now exists, in
+the right place, without a second process.
+
+Two things it does **not** yet do, and both are the same two gaps as before:
+
+- **There is no loop.** `/v1/fleet/usage` collects when asked. `usage.interval` still configures
+  nothing, so an answer is only as fresh as the request — which is fine while the answer is empty,
+  and becomes the stale-quota problem the moment it is not.
+- **There is still no probe.** The daemon constructs its own `UnprovisionedFleetUsageProbe`, the
+  counterpart of the CLI's. Two honest placeholders, not a duplication problem — but it does mean the
+  provider probes of [F](#f--know-whos-out-of-quota) belong in `packages/fleet` where both consume
+  one implementation, rather than in either caller.
+
+`renderFleetUsageMetrics` and `renderFleetUsageJson` (`lib/usage.ts:229,243`) remain uncalled: the
+daemon's route returns the snapshot rather than either rendering, so a Prometheus scrape has nothing
+to read yet.
+
+**Coordination:** the daemon-side work is that unit's; this one built none of it.
 
 ---
 
@@ -410,16 +428,42 @@ Code's "detected a custom API key, use it?" dialog defaults to **No** and stalls
 until somebody answers. `KIND_SPECS.claude.autotrust` is the switch; `CLAUDE_AUTOTRUST=0` disables
 it. `core/firstrun.ts:17` is the jq-free TypeScript twin used by health and login on a fresh box.
 
-**Ferretry's answer: nothing.** `renderWrapperScript` emits secrets sourcing, reference guards, the
-home export, the env exports and `exec`.
+**Why it blocked deletion:** a freshly provisioned Ferretry Claude account, launched the only way an
+agent fleet launches anything, stopped at the folder-trust prompt and never reached a turn.
 
-**Why this blocks deletion:** a freshly provisioned Ferretry Claude account, launched the only way an
-agent fleet launches anything, stops at the folder-trust prompt and never reaches a turn. This is the
-highest impact-per-line item on the list and the cheapest of the blockers after [J](#j--start-from-nothing).
+**Closed by this unit — baked into the wrapper, not written at apply time.** `renderWrapperScript`
+now emits the seeding block after the exports and before `exec`
+(`packages/fleet/src/lib/wrappers.ts`).
 
-**Not built here on purpose.** It writes into an account home, and where it belongs — baked into the
-wrapper, a plan operation, or an apply step — is a decision worth making rather than guessing. All
-three are defensible; the plan-operation shape is probably right, because then `--dry-run` shows it.
+The placement is the decision, and it was made deliberately: **the state must hold at every launch,
+not once at the moment a fleet was applied.** A home rebuilt, a preference reset, a harness upgrade
+that reintroduces a prompt — each silently undoes an apply-time write, and the resulting failure is
+total and invisible, because a session nobody is watching simply hangs at a question nobody can see.
+A line in the wrapper re-asserts on every invocation and cannot drift. An apply-time write would have
+had the nicer property of showing up in `--dry-run`; it would also have been a thing that was true
+once. Prefer the thing that keeps being true.
+
+Four departures from kfleet's version, all because the shape allowed it:
+
+- **The value reaches `jq` through the environment (`$ENV`), never `--arg`**, so a fragment of a
+  provider key cannot appear in a process listing.
+- **The temporary file is created beside its destination**, so the rename is atomic and arrives at
+  `0600` from `mktemp` itself. kfleet's shell path used `mktemp` in `TMPDIR` and moved across
+  filesystems, which is a copy, not a rename.
+- **A missing `jq` says so on stderr** instead of skipping in silence. A launch that may stall for a
+  reason nobody was told about is the exact failure this exists to prevent.
+- **The toggle is `FY_SEED_FIRST_RUN`**, not `CLAUDE_AUTOTRUST`. We are not compatible, and the name
+  should say which product owns the behaviour.
+
+There is no counterpart to `core/firstrun.ts` — kfleet needed a jq-free TypeScript twin because its
+health probe and login spawn harnesses _outside_ a wrapper. Ferretry's login goes through the
+wrapper, so the wrapper's own block covers it. If a liveness probe ([G](#g--know-what-actually-works))
+ever spawns a harness directly, it will need one too.
+
+Every branch is proven by execution rather than by inspection:
+`packages/fleet/tests/integration/wrapper-first-run.test.ts` runs the generated script with a real
+`sh`, a real `jq`, a disposable home and a stand-in harness — a quoting mistake in a generated
+launcher is the kind of defect that otherwise only appears on somebody else's machine.
 
 ---
 
@@ -496,7 +540,7 @@ And one where dropping compatibility **costs** us something, flagged rather than
 
 ## What this unit closed
 
-> All four are landed and gated.
+> All five are landed and gated.
 
 ### 1. `fy fleet init` — [J](#j--start-from-nothing) and half of [C](#c--own-the-assets)
 
@@ -509,7 +553,15 @@ directory. `fy fleet init` reports both lists and prints the `PATH` line.
 Nothing personal is shipped: the starter config declares no accounts and carries a commented example
 with freshly generated ids, so a person can uncomment and edit rather than invent a UUID.
 
-### 2. `fy fleet login`, with the caller's credentials stripped — part of [E](#e--get-logged-in)
+### 2. First-run seeding, baked into the wrapper — [K](#k--survive-the-first-run)
+
+The one that decides whether a non-interactive launch reaches a turn at all. Placed in the wrapper
+rather than written at apply time so it re-asserts on every invocation and cannot drift; the
+reasoning, and the four ways it departs from kfleet's version, are in
+[K](#k--survive-the-first-run). Proven by executing the generated script against a real `sh`, a real
+`jq` and a disposable home rather than by asserting on its text.
+
+### 3. `fy fleet login`, with the caller's credentials stripped — part of [E](#e--get-logged-in)
 
 `FleetLoginService` and `ProcessFleetLoginPort` were built, tested, exported, and called by nothing.
 Mounting them made the capability exist. `packages/fleet/src/lib/harness-env.ts` then fixed a real
@@ -519,7 +571,7 @@ session's account. A wrapper that deliberately reads a secret from the environme
 the names it references are parsed back out of the wrapper — and an unreadable wrapper preserves
 nothing rather than everything.
 
-### 3. Configuration we do not implement is refused — the honest half of [F](#f--know-whos-out-of-quota), [H](#h--keep-it-fresh) and [I](#i--resume-anything-anywhere)
+### 4. Configuration we do not implement is refused — the honest half of [F](#f--know-whos-out-of-quota), [H](#h--keep-it-fresh) and [I](#i--resume-anything-anywhere)
 
 `packages/fleet/src/lib/capabilities.ts` lists what the schema can express and this build cannot
 perform; `FleetPlan.build` throws naming every offending key, what it would have done, and what
@@ -527,7 +579,7 @@ happens instead. It fires only on a value somebody had to write, never on a sche
 existing working configuration still applies — and `--dry-run` refuses too, because a clean plan for
 a configuration `apply` could not honour is the misleading half of the same bug.
 
-### 4. `usage.concurrency` and `usage.atLimitPercent` are honoured
+### 5. `usage.concurrency` and `usage.atLimitPercent` are honoured
 
 The collector was constructed before the configuration was read, so a declared `atLimitPercent: 90`
 behaved as 100.
@@ -541,10 +593,8 @@ behaved as 100.
   model to dedupe against. A unit of its own, and it shares that identity model with
   [E](#e--get-logged-in), so the two should be sequenced together.
 - **Credential sync ([E](#e--get-logged-in)).** Same reason.
-- **First-run seeding ([K](#k--survive-the-first-run)).** Cheap and high-impact; left because _where_
-  it belongs is a decision, not a guess.
 - **Shared history ([I](#i--resume-anything-anywhere)).** Should be redesigned, not ported.
-- **The probe loop and its routes ([H](#h--keep-it-fresh)).** The in-flight daemon unit's area.
+- **The probe loop ([H](#h--keep-it-fresh)).** Its routes landed on `main` as #237 while this unit was writing; the loop behind them, and a real probe to feed it, are that unit's area.
 - **Default asset _content_ beyond a starting point ([C](#c--own-the-assets)).** The owner's
   `CLAUDE.md`, skills and templates are his and carry personal paths and work tooling. What Ferretry
   needs is a curated neutral default set, which is a content decision rather than an engineering one.
@@ -576,7 +626,8 @@ the next reader concluding otherwise from a name search.
 | `core/usage.ts` (probes), `core/cliproxy-usage.ts`, `core/creds.ts` | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
 | `core/login.ts` (rest), `cli/login.ts` (flags)                      | —                                                                                                | **GAP**, see [E](#e--get-logged-in)               |
 | `core/shared-history.ts`, `core/codex-prewarm.ts`, `cli/prewarm.ts` | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)    |
-| `core/firstrun.ts`, `core/generate.ts` `AUTOTRUST`                  | —                                                                                                | **GAP**, see [K](#k--survive-the-first-run)       |
+| `core/generate.ts` `AUTOTRUST`                                      | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                       |
+| `core/firstrun.ts`                                                  | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                |
 | `cli/serve.ts`, `cli/service.ts`                                    | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)  |
 | `cli/doctor.ts`                                                     | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                 |
 | —                                                                   | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest |
