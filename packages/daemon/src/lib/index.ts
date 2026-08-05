@@ -55,6 +55,7 @@ export * from './session/harness/index.ts';
 export * from './session/health/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/monitor/index.ts';
+export * from './session/question/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/reads/index.ts';
 export * from './session/reap.ts';
