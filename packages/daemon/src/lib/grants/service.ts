@@ -237,7 +237,10 @@ export class CapabilityGrantService implements CapabilityGuard {
   async patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView> {
     const current = this.grants;
     if (current === undefined)
-      throw new GrantError('unavailable', 'this daemon could not read its capability grants, so it will not change them');
+      throw new GrantError(
+        'unavailable',
+        'this daemon could not read its capability grants, so it will not change them',
+      );
     const evaluation = this.evaluate(presentation);
     const next = applyGrantPatch(current, patch);
     const widened = widenedBy(current, next);
@@ -277,7 +280,11 @@ export class CapabilityGrantService implements CapabilityGuard {
     this.grants = next;
     // AFTER the write, so a record can never claim a change that did not reach the document. A failing
     // audit is not swallowed: a change nobody can see afterwards is the state this exists to prevent.
-    await this.deps.audit.record({ actor: presentation.actor, changes, at: new Date(this.deps.clock.nowMs()).toISOString() });
+    await this.deps.audit.record({
+      actor: presentation.actor,
+      changes,
+      at: new Date(this.deps.clock.nowMs()).toISOString(),
+    });
     return this.view(presentation);
   }
 

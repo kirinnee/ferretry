@@ -62,7 +62,12 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     ...CREDENTIALS,
     devices: { identify: (token: string) => (token === 'paired-device' ? 'device-1' : undefined) },
   };
-  return { root, userHome, paths, dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, GRANTED) };
+  return {
+    root,
+    userHome,
+    paths,
+    dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, GRANTED),
+  };
 }
 
 afterEach(async () => {

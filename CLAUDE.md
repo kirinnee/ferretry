@@ -94,7 +94,7 @@ declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing 
 against, because the useful property is narrower than people assume.
 
 `packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
-(`fleet`, `terminal`, `browser`, `filesystem`, `warden`) and per axis (*use* / *configure*). **A
+(`fleet`, `terminal`, `browser`, `filesystem`, `warden`) and per axis (_use_ / _configure_). **A
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
 means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
 so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.

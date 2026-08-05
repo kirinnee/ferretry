@@ -31,7 +31,9 @@ const post = (path: string, body: unknown, headers: Record<string, string> = hum
 describe('the grant read', () => {
   it('should tell a governed caller what it may do and why, without a guard on itself', async () => {
     // Arrange
-    const { dispatcher } = await mount({ grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } } });
+    const { dispatcher } = await mount({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, browser: { use: false, configure: false } },
+    });
 
     // Act
     const answered = await dispatcher.dispatch(remote('/v1/grants'));
@@ -135,13 +137,20 @@ describe('changing the grants over the API', () => {
 
     // Act
     const answered = await dispatcher.dispatch(
-      request({ method: 'PATCH', path: '/v1/grants', headers: human, loopback: false, body: JSON.stringify({ terminal: { use: false } }) }),
+      request({
+        method: 'PATCH',
+        path: '/v1/grants',
+        headers: human,
+        loopback: false,
+        body: JSON.stringify({ terminal: { use: false } }),
+      }),
     );
 
     // Assert
     should(answered.status).equal(200);
-    should(GrantsViewSchema.parse(jsonBody(answered)).capabilities.find(entry => entry.capability === 'terminal'))
-      .have.property('use', false);
+    should(
+      GrantsViewSchema.parse(jsonBody(answered)).capabilities.find(entry => entry.capability === 'terminal'),
+    ).have.property('use', false);
   });
 
   it('should refuse a patch that changes nothing rather than reporting success for it', async () => {
@@ -166,7 +175,13 @@ describe('changing the grants over the API', () => {
 
     // Act
     const answered = await dispatcher.dispatch(
-      request({ method: 'PATCH', path: '/v1/grants', headers: human, loopback: false, body: JSON.stringify({ fleet: { use: false } }) }),
+      request({
+        method: 'PATCH',
+        path: '/v1/grants',
+        headers: human,
+        loopback: false,
+        body: JSON.stringify({ fleet: { use: false } }),
+      }),
     );
 
     // Assert
@@ -181,12 +196,21 @@ describe('the operator password route', () => {
     // layer advisory. `host` scope is the host's own admin token and nothing else.
     // Arrange
     const { dispatcher, subsystem } = await mount();
-    const credentials = { ...CREDENTIALS, devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) } };
+    const credentials = {
+      ...CREDENTIALS,
+      devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+    };
     const withDevices = new ApiDispatcher(new ApiRouter(grantRoutes(subsystem)), credentials);
 
     // Act
     const set = await dispatcher.dispatch(
-      request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: false, body: JSON.stringify({ password: 'operator-secret' }) }),
+      request({
+        method: 'PUT',
+        path: '/v1/grants/password',
+        headers: human,
+        loopback: false,
+        body: JSON.stringify({ password: 'operator-secret' }),
+      }),
     );
     const byDevice = await withDevices.dispatch(
       request({
@@ -213,7 +237,13 @@ describe('the operator password route', () => {
 
     // Act
     const blank = await dispatcher.dispatch(
-      request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: false, body: JSON.stringify({ password: '' }) }),
+      request({
+        method: 'PUT',
+        path: '/v1/grants/password',
+        headers: human,
+        loopback: false,
+        body: JSON.stringify({ password: '' }),
+      }),
     );
     const cleared = await dispatcher.dispatch(
       request({ method: 'PUT', path: '/v1/grants/password', headers: human, loopback: false, body: '{}' }),

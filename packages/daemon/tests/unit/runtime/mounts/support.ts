@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
-import { type CapabilityGrants, 
-  type CreateTerminalRequest,DAEMON_CAPABILITIES, 
+import {
+  type CapabilityGrants,
+  type CreateTerminalRequest,
+  DAEMON_CAPABILITIES,
   type LearningConfig,
   PIN_SCHEMA_VERSION,
   type Pin,
-  type PinSnapshot,type SecretName, 
+  type PinSnapshot,
+  type SecretName,
   type SendResult,
   SessionConfigSchema,
   SessionStateSchema,
@@ -22,7 +25,8 @@ import { type CapabilityGrants,
   type WardenConfigView,
   type WardenRunView,
   type WardenStatusView,
-  type WardenVerdictsView,} from '@ferretry/protocol';
+  type WardenVerdictsView,
+} from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
   type FinishedAnalyticsSession,
@@ -48,10 +52,7 @@ import {
   type RoutingCatalogPort,
   TeamAdvisor,
 } from '../../../../src/lib/core/index.ts';
-import {
-  CapabilityGrantService,
-  DEFAULT_CAPABILITY_GRANTS,
-} from '../../../../src/lib/grants/index.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import type {
   LearningState,
   LearningStorePort,

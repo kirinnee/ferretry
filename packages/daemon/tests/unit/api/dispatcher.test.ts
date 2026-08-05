@@ -381,7 +381,9 @@ describe('the operator grant layer', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials);
 
     // Act
-    const answered = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
+    const answered = await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
+    );
 
     // Assert
     should(answered.status).equal(403);
@@ -418,7 +420,9 @@ describe('the operator grant layer', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, guard(false));
 
     // Act
-    const answered = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
+    const answered = await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
+    );
 
     // Assert
     should(answered.status).equal(403);
@@ -440,7 +444,9 @@ describe('the operator grant layer', () => {
     const dispatcher = new ApiDispatcher(new ApiRouter([ungoverned]), credentials, guard(false));
 
     // Act
-    const answered = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: { authorization: 'Bearer admin-secret' } }));
+    const answered = await dispatcher.dispatch(
+      request({ path: '/v1/sessions', headers: { authorization: 'Bearer admin-secret' } }),
+    );
 
     // Assert
     should(answered.status).equal(200);

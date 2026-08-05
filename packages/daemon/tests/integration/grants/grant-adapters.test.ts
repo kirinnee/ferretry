@@ -99,7 +99,9 @@ describe('the grants in the operator configuration document', () => {
     // from a parsed configuration, because that persists derived values which then stop tracking
     // what they were derived from.
     // Arrange
-    const world = tree({ [paths.daemonConfig]: JSON.stringify({ host: '0.0.0.0', port: 9_000, projectRoots: ['~/w'] }) });
+    const world = tree({
+      [paths.daemonConfig]: JSON.stringify({ host: '0.0.0.0', port: 9_000, projectRoots: ['~/w'] }),
+    });
     const document = new ConfigGrantDocument(new FileDaemonConfig(paths, world.port));
 
     // Act

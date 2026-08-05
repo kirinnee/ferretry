@@ -144,10 +144,7 @@ describe('the grant view a UI reads', () => {
     });
     // No password on this machine, so the configure axis passes and says nothing was standing behind
     // it — which is the honest disclosure, not a refusal.
-    should(view.capabilities.find(entry => entry.capability === 'fleet')).have.property(
-      'configureRefusal',
-      'ungated',
-    );
+    should(view.capabilities.find(entry => entry.capability === 'fleet')).have.property('configureRefusal', 'ungated');
     should(view.passwordSet).be.false();
     should(view.attemptsRemaining).be.undefined();
   });
@@ -198,8 +195,9 @@ describe('unlocking', () => {
     context.advance(GRANT_UNLOCK_TTL_SECONDS * 1_000 + 1);
 
     // Assert
-    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal)
-      .equal('locked');
+    should(
+      context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal,
+    ).equal('locked');
   });
 
   it('should refuse a blank or unknown unlock rather than matching anything', async () => {
@@ -208,10 +206,12 @@ describe('unlocking', () => {
     await service.refresh();
 
     // Act + Assert
-    should(service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: '  ' }).refusal)
-      .equal('locked');
-    should(service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: 'fy_unlock_forged' }).refusal)
-      .equal('locked');
+    should(service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: '  ' }).refusal).equal(
+      'locked',
+    );
+    should(
+      service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: 'fy_unlock_forged' }).refusal,
+    ).equal('locked');
   });
 
   it('should refuse to mint anything on a machine with no operator password', async () => {
@@ -433,8 +433,9 @@ describe('the operator password itself', () => {
     await context.service.setPassword('second-secret');
 
     // Assert
-    should(context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal)
-      .equal('locked');
+    should(
+      context.service.decide({ capability: 'fleet', axis: 'configure' }, { ...remote, unlock: held }).refusal,
+    ).equal('locked');
     should(context.service.hasPassword()).be.true();
   });
 

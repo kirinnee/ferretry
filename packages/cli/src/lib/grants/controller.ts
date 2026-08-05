@@ -94,9 +94,7 @@ export class GrantController {
   async setPassword(): Promise<void> {
     const set = await this.deps.gateway.setPassword(await this.deps.passwords.read());
     this.deps.out.success(
-      set
-        ? 'operator password set — changing any grant from off this host now needs it'
-        : 'operator password cleared',
+      set ? 'operator password set — changing any grant from off this host now needs it' : 'operator password cleared',
     );
   }
 
@@ -123,9 +121,7 @@ export class GrantController {
     if (!passwordSet) return false;
     const current = (await this.deps.gateway.read()).capabilities.find(entry => entry.capability === capability);
     if (current === undefined) return true;
-    return (
-      (options.use === true && !current.granted.use) || (options.configure === true && !current.granted.configure)
-    );
+    return (options.use === true && !current.granted.use) || (options.configure === true && !current.granted.configure);
   }
 }
 

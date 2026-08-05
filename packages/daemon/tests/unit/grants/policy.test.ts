@@ -69,8 +69,9 @@ describe('who the grants govern', () => {
     // Assert — the address it claims changes nothing.
     should(relayed.loopback).be.false();
     should(governed).be.true();
-    should(decideCapability({ capability: 'fleet', axis: 'configure' }, evaluation({ passwordSet: true })))
-      .have.property('refusal', 'locked');
+    should(
+      decideCapability({ capability: 'fleet', axis: 'configure' }, evaluation({ passwordSet: true })),
+    ).have.property('refusal', 'locked');
   });
 });
 
@@ -105,7 +106,10 @@ describe('the per-capability decision', () => {
     // never permitted — a daemon that cannot say what it may do must stop doing it.
     // Act
     const use = decideCapability({ capability: 'terminal', axis: 'use' }, evaluation({ grants: undefined }));
-    const configure = decideCapability({ capability: 'terminal', axis: 'configure' }, evaluation({ grants: undefined }));
+    const configure = decideCapability(
+      { capability: 'terminal', axis: 'configure' },
+      evaluation({ grants: undefined }),
+    );
 
     // Assert
     should(use).deepEqual({ allowed: false, refusal: 'undetermined' });

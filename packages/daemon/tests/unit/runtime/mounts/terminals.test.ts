@@ -119,10 +119,14 @@ describe('the terminal mount', () => {
 
     it('should record a paired device as the human holding it', async () => {
       // Arrange — the device credential is the one a phone or a browser presents.
-      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(new FakeTerminals())), {
-        ...CREDENTIALS,
-        devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-      }, GRANTED);
+      const dispatch = new ApiDispatcher(
+        new ApiRouter(terminalRoutes(new FakeTerminals())),
+        {
+          ...CREDENTIALS,
+          devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+        },
+        GRANTED,
+      );
 
       // Act
       const created = await dispatch.dispatch(
@@ -140,10 +144,14 @@ describe('the terminal mount', () => {
       // a human anyway would hide that the caller asked for something else.
       // Arrange
       const terminals = new FakeTerminals();
-      const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), {
-        ...CREDENTIALS,
-        devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-      }, GRANTED);
+      const dispatch = new ApiDispatcher(
+        new ApiRouter(terminalRoutes(terminals)),
+        {
+          ...CREDENTIALS,
+          devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
+        },
+        GRANTED,
+      );
 
       // Act
       const refused = await dispatch.dispatch(

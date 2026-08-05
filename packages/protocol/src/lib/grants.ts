@@ -174,14 +174,7 @@ export const OperatorPasswordSchema = z
  *   Permissive DEFAULTS are a choice about what an operator who said nothing meant; they are not a
  *   choice about damaged state, and unknown is never permitted.
  */
-export const GRANT_REFUSALS = [
-  'granted',
-  'ungated',
-  'not-granted',
-  'locked',
-  'rate-limited',
-  'undetermined',
-] as const;
+export const GRANT_REFUSALS = ['granted', 'ungated', 'not-granted', 'locked', 'rate-limited', 'undetermined'] as const;
 export type GrantRefusal = (typeof GRANT_REFUSALS)[number];
 
 export const GrantRefusalSchema = z.enum(GRANT_REFUSALS);
