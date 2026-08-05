@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { createHash, randomInt } from 'node:crypto';
-import { writeSync } from 'node:fs';
+import { accessSync, constants as fsConstants, writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -248,10 +248,13 @@ import {
   FleetEventStreamService,
   FleetRefreshService,
   type FoundationPaths,
+  fleetManifestRefusal,
+  FleetManifestUnreadableError,
   foreignAdvertisementNotice,
   HarnessQuirkService,
   harnessAbsentWarning,
   harnessMigrationRefusal,
+  type HarnessPreflight,
   harnessPreflightSummary,
   InitialAttachmentError,
   InvalidDeadlineRefused,
@@ -308,6 +311,7 @@ import {
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
+  unreadableManifestPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
   type ScratchReclamation,
@@ -1080,6 +1084,26 @@ function composeOpeningMessage(
 }
 
 /**
+ * The harness preflight, for every surface that reports one: the boot trail, `fyd --check` and the
+ * doctor route.
+ *
+ * ONE reader, because a manifest this daemon cannot read must not become "no accounts published" on
+ * any of the three. Read through {@link unreadableManifestPreflight}, the refusal travels as itself
+ * and each surface says the weaker, true thing.
+ */
+async function readHarnesses(
+  accounts: AccountInventoryPort,
+  executables: ExecutableResolverPort,
+): Promise<HarnessPreflight> {
+  try {
+    return readHarnessPreflight(await accounts.accounts(), executables);
+  } catch (error) {
+    if (!(error instanceof FleetManifestUnreadableError)) throw error;
+    return unreadableManifestPreflight(fleetManifestRefusal(error, CLIENT_NAME), executables);
+  }
+}
+
+/**
  * The account this start names, or a refusal that says which half of the resolution failed.
  *
  * THE LAUNCHABILITY RULE IS THE DOMAIN'S, not a second copy written here. `fyd --check` and the boot
@@ -1092,7 +1116,14 @@ async function resolveStartAccount(
   requested: string,
   executables: ExecutableResolverPort,
 ): Promise<{ readonly account: CoreAccount; readonly executable: string }> {
-  const published = await accounts.accounts();
+  // A manifest this daemon cannot read refuses the START, rather than answering it with an empty
+  // fleet and the unknown-agent message that empty fleet would earn. The caller asked for an account
+  // that may well be published; what this daemon has is no way to tell.
+  const published = await accounts.accounts().catch((error: unknown) => {
+    if (error instanceof FleetManifestUnreadableError)
+      throw new SessionControlError('unavailable', fleetManifestRefusal(error, CLIENT_NAME));
+    throw error;
+  });
   // The wrapper NAME first, then the opaque id: `fy start claude-auto-loge` names the wrapper a human
   // types, and the recommender answers with account ids, so both must resolve.
   const account = published.find(row => row.agent === requested) ?? published.find(row => row.id === requested);
@@ -3062,14 +3093,24 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     remoteControlPrefix: DAEMON_NAME,
   });
   /**
-   * This host's PATH, which is the only thing that can turn a published wrapper into a program.
+   * What this host can actually run: a published wrapper by its path, a harness command by name.
    *
    * `PATH` is read at the point of the lookup rather than left to the default, which is resolved once
-   * per process: a daemon whose environment gains the fleet's bin directory after it booted must find
-   * the wrapper the fleet publishes, not the one its startup environment happened to hold.
+   * per process: a daemon whose environment gains a harness after it booted must see the harness this
+   * host has now, not the one its startup environment happened to hold. The wrapper half never
+   * consults `PATH` at all — a daemon under a service manager inherits no shell profile, so the
+   * fleet's bin directory is routinely absent from it while the wrappers are perfectly present.
    */
   const executables: ExecutableResolverPort = {
     resolve: name => Bun.which(name, { PATH: process.env.PATH }) ?? undefined,
+    runnable: path => {
+      try {
+        accessSync(path, fsConstants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
   /** SHA-256 hex, matching the digest the protocol client computes over the very same body text. */
   const payloadDigests: PayloadDigestPort = {
@@ -3779,7 +3820,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
             return readDoctorReport({
               platform: process.platform,
               executables,
-              harnesses: readHarnessPreflight(await accounts.accounts(), executables),
+              harnesses: await readHarnesses(accounts, executables),
               directorySyscalls,
             });
           },
@@ -4061,7 +4102,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * It is a `state` rather than a `step` when nothing is ready, so no log level can filter away the
    * one line that explains why launching a session will fail.
    */
-  const harnesses = readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables);
+  const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables);
   world.notices.step('harnesses checked', harnessPreflightSummary(harnesses));
   if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
 
@@ -4398,7 +4439,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
    * it cannot do is launch a session, which is a different sentence and is printed as one. Refusing
    * here would also contradict the boot, which warns and starts.
    */
-  const harnesses = readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables);
+  const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables);
   for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME)) say(line);
   const directorySyscalls = (() => {
     try {

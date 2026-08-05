@@ -94,12 +94,15 @@ describe('the recommender mount', () => {
       {
         id: 'account-ghost',
         agent: 'agent-ghost',
+        wrapper: '/state/fleet/bin/agent-ghost',
+        home: '/state/fleet/homes/ghost',
         kind: 'claude',
         mode: 'auto',
         displayName: 'Ghost',
         defaultModel: null,
         models: [],
         available: true,
+        unavailableReason: null,
       },
     ] as const;
     // Act

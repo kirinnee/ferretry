@@ -8,75 +8,101 @@
  * configuration that declared an account's model unavailable still had that model offered, and
  * recommended first.
  *
- * So the daemon declares the shape it needs and an adapter supplies it from the published fleet
- * manifest. The opaque {@link CoreAccount.id} is the only join key; `agent`, `displayName` and the
- * rest are attributes that can be renamed without breaking a single join.
+ * So an adapter supplies this inventory from the published fleet manifest — and it does so through
+ * `@ferretry/fleet`'s OWN schema, the one the provisioner writes with, rather than a second
+ * declaration of the same file. The second declaration is not hypothetical: this module used to
+ * carry one, it required an `agent` field the provisioner has never written, and the daemon
+ * therefore read every real manifest as an empty fleet while `fy fleet ls` listed the accounts from
+ * the very same bytes. Two halves that each passed their own tests and disagreed with each other.
+ *
+ * The opaque {@link CoreAccount.id} is the only join key; `agent`, `displayName` and the rest are
+ * attributes that can be renamed without breaking a single join.
  */
 
+import {
+  type FleetManifestAccount,
+  type FleetManifestModel,
+  FleetManifestSchema,
+  HarnessKindSchema,
+  wrapperName,
+} from '@ferretry/fleet';
 import { z } from 'zod';
 
-const NonEmptyString = z.string().min(1);
-
-/** The agent harness an account drives. */
-export const HarnessKindSchema = z.enum(['claude', 'codex']);
+/** The agent harness an account drives. The fleet's own enum, never a second copy of it. */
+export { HarnessKindSchema };
 export type HarnessKind = z.infer<typeof HarnessKindSchema>;
 
-/** The lane an account runs in — declared, so a name can never imply it. */
-export const AccountModeSchema = z.enum(['interactive', 'auto']);
-export type AccountMode = z.infer<typeof AccountModeSchema>;
-
 /** One model an account may be asked to serve. An unavailable model must say why. */
-export const CoreAccountModelSchema = z.object({
-  id: NonEmptyString,
-  displayName: NonEmptyString.optional(),
-  available: z.boolean(),
-  unavailableReason: NonEmptyString.optional(),
-});
-export type CoreAccountModel = z.infer<typeof CoreAccountModelSchema>;
+export type CoreAccountModel = FleetManifestModel;
 
 /**
- * Deliberately not `strictObject`: the published manifest is written by the fleet provisioner and
- * carries provisioning attributes the daemon has no business knowing about. Refusing a manifest for
- * containing a field the daemon does not read would couple every fleet change to a daemon release.
+ * One published account, as the daemon reads it: the manifest row itself, plus the executable NAME
+ * derived from the path it publishes.
+ *
+ * `agent` is not a second field on disk — {@link wrapperName} derives it from `wrapper`, so there is
+ * nothing here a manifest could contradict. It exists because a name is what an operator types
+ * (`fy start claude-auto-loge`), what a session record carries and what a usage row is keyed by,
+ * while `wrapper` is what a start actually runs.
  */
-export const CoreAccountSchema = z.object({
-  /** Opaque, stable identity. The only value any consumer may join on. */
-  id: NonEmptyString,
-  /** Executable name this account is launched through. An attribute, never parsed for meaning. */
-  agent: NonEmptyString,
-  kind: HarnessKindSchema,
-  mode: AccountModeSchema,
-  displayName: NonEmptyString,
-  /** The model served when a caller names none; `null` when the account names none. */
-  defaultModel: NonEmptyString.nullable(),
-  models: z.array(CoreAccountModelSchema).readonly(),
-  available: z.boolean(),
-  unavailableReason: NonEmptyString.optional(),
-});
-export type CoreAccount = z.infer<typeof CoreAccountSchema>;
+export interface CoreAccount extends FleetManifestAccount {
+  readonly agent: string;
+}
+
+/**
+ * A manifest that is present and cannot be read. NOT an empty fleet.
+ *
+ * The distinction is the whole point: an ABSENT manifest is a legitimate state — the daemon runs
+ * before a fleet is ever provisioned — while a PRESENT one the daemon cannot parse is damaged state,
+ * and reading damaged state as the benign empty case is what let a schema disagreement masquerade as
+ * "no accounts are published" for an entire release. It names the file and the failure so the first
+ * person to hit it is told what is wrong with which file, rather than a confident falsehood.
+ */
+export class FleetManifestUnreadableError extends Error {
+  constructor(
+    readonly source: string,
+    readonly reason: string,
+  ) {
+    super(`the fleet manifest at ${source} is present but cannot be read: ${reason}`);
+    this.name = 'FleetManifestUnreadableError';
+  }
+}
 
 /**
  * The published fleet manifest, as the daemon reads it.
  *
- * A row that does not parse is dropped rather than failing the whole manifest: one malformed account
- * must not blind the daemon to every other account in the fleet.
+ * ALL OR NOTHING, through the provisioner's own schema. A row this refuses is a row the provisioner
+ * could not have written, so it is evidence the file is damaged rather than evidence about one
+ * account — and a fleet that silently shrinks by one account is the same fail-open as a fleet that
+ * silently empties, just harder to notice.
  */
-export function parseAccountManifest(payload: unknown): readonly CoreAccount[] {
-  const rows = Array.isArray(payload)
-    ? payload
-    : typeof payload === 'object' && payload !== null && Array.isArray((payload as { accounts?: unknown }).accounts)
-      ? (payload as { accounts: readonly unknown[] }).accounts
-      : undefined;
-  if (rows === undefined) return [];
-  return rows
-    .map(row => CoreAccountSchema.safeParse(row))
-    .filter(result => result.success)
-    .map(result => result.data);
+export function parseAccountManifest(payload: unknown, source: string): readonly CoreAccount[] {
+  const parsed = FleetManifestSchema.safeParse(payload);
+  if (!parsed.success) throw new FleetManifestUnreadableError(source, z.prettifyError(parsed.error));
+  return parsed.data.accounts.map(account => ({ ...account, agent: wrapperName(account) }));
 }
 
-/** Supplied by an adapter over the published fleet manifest. */
+/**
+ * Supplied by an adapter over the published fleet manifest.
+ *
+ * Answers an empty fleet for a manifest that is not there, and THROWS
+ * {@link FleetManifestUnreadableError} for one that is there and unreadable. Every caller therefore
+ * fails closed by default: forgetting the damaged case surfaces it loudly instead of quietly
+ * reporting a fleet nobody provisioned.
+ */
 export interface AccountInventoryPort {
   accounts(): Promise<readonly CoreAccount[]>;
+}
+
+/**
+ * What a boot or a `--check` says about a manifest it could not read.
+ *
+ * It states the consequence as well as the cause, because the two readings of the same file are
+ * exactly what made the original defect so confusing: `fy fleet ls` will list these accounts happily
+ * while this daemon refuses every start, and a reader who is not told that will trust the half that
+ * agrees with them.
+ */
+export function fleetManifestRefusal(error: FleetManifestUnreadableError, clientName: string): string {
+  return `${error.message}. Every session start will be refused until it is repaired — run \`${clientName} fleet apply\` to republish it, or remove the file if this host has no fleet.`;
 }
 
 /** The accounts that may take unattended work: the auto lane, minus anything declared down. */

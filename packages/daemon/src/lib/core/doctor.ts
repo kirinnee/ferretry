@@ -71,6 +71,18 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     blocked: [...blocked],
   }));
   const checks: DoctorCheck[] = [
+    // FIRST, when it applies. Every harness line below it is empty for the same reason, and a reader
+    // who is not told that the manifest would not parse reads those blanks as "nothing is published".
+    ...(input.harnesses.manifestRefusal === undefined
+      ? []
+      : [
+          missing(
+            'fleet manifest',
+            'required',
+            'published, but this daemon could not read it',
+            `${input.harnesses.manifestRefusal} Until then this report can say nothing about which accounts exist.`,
+          ),
+        ]),
     input.harnesses.ready
       ? present(
           'claude or codex',
@@ -78,12 +90,20 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
           'at least one published wrapper is launchable',
           'Sessions can use the preferred ready harness (Claude when both are ready).',
         )
-      : missing(
-          'claude or codex',
-          'alternative',
-          'no published Claude or Codex wrapper is launchable',
-          'No agent session can start. Install a harness, publish an account wrapper, and apply the fleet.',
-        ),
+      : input.harnesses.manifestRefusal === undefined
+        ? missing(
+            'claude or codex',
+            'alternative',
+            'no published Claude or Codex wrapper is launchable',
+            'No agent session can start. Install a harness, publish an account wrapper, and apply the fleet.',
+          )
+        : // The weaker, true sentence: nothing was found because nothing could be read.
+          missing(
+            'claude or codex',
+            'alternative',
+            'no wrapper could be resolved, because the fleet manifest could not be read',
+            'No agent session can start. Repair the fleet manifest reported above; this line is not evidence about any account.',
+          ),
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),

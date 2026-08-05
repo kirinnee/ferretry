@@ -11,12 +11,15 @@ const manifest = (...accounts: readonly CoreAccount[]): AccountInventoryPort => 
 const account: CoreAccount = {
   id: ACCOUNT_ID,
   agent: 'claude-writer',
+  wrapper: '/state/fleet/bin/claude-writer',
+  home: '/state/fleet/homes/writer',
   kind: 'claude',
   mode: 'auto',
   displayName: 'Writer',
   defaultModel: 'sonnet',
   models: [{ id: 'sonnet', available: true }],
   available: true,
+  unavailableReason: null,
 };
 
 const collector = (answer: FleetUsageSnapshot | Error, enabled = true): FleetUsageReader => ({
