@@ -2,7 +2,7 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
 
 export type FsEntryType = 'file' | 'dir' | 'symlink';
@@ -72,7 +72,7 @@ const failure = async (response: Response): Promise<DaemonResponseError> => {
 const request = async <T>(
   daemon: DaemonConnection,
   path: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
   signal?: AbortSignal,
 ): Promise<T> => {
   const target = daemonRequest(daemon, path, { signal });

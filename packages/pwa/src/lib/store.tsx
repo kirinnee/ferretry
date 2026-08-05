@@ -32,7 +32,7 @@ import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './
 import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { type DaemonPushService, DaemonPushDevices, daemonPushService } from './push-enrolment.ts';
-import type { DaemonFetch } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 
@@ -163,7 +163,10 @@ const pairingFailure = async (response: Response): Promise<string> => {
 };
 
 /** Exchanges one reader-supplied, single-use fragment code with its own daemon. */
-export async function exchangePairing(seed: PairingSeed, fetcher: DaemonFetch = fetch): Promise<DaemonConnection> {
+export async function exchangePairing(
+  seed: PairingSeed,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<DaemonConnection> {
   const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
   const response = await fetcher(endpoint, {
     method: 'POST',
@@ -241,7 +244,7 @@ const daemonOrigin = (daemon: DaemonConnection): string => daemon.baseUrl;
 
 /** Builds the document-lifetime stores and registers every daemon cache together. */
 export async function createAppStore(options: CreateAppStoreOptions = {}): Promise<AppStore> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? browserFetch;
   // Every DAEMON-BOUND call goes through the carrier router; the two that are not
   // bound to a paired daemon — the pairing exchange and the relay advertisement —
   // keep the raw fetcher on purpose. Pairing especially: a relayed session is opened

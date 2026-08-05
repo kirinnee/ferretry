@@ -44,7 +44,7 @@ import {
   RELAY_CLOSE_CODES,
 } from '@ferretry/relay';
 import { type DaemonConnection, type DaemonId, daemonCarriers, sameDaemonConnection } from './daemon-connection.ts';
-import type { DaemonFetch } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import {
   type RelayClientSessionDependencies,
   type RelayClientSocket,
@@ -322,8 +322,28 @@ export class DaemonCarrierRouter {
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
   #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
 
+  /**
+   * THE INJECTED NETWORK IS DETACHED FROM ITS RECEIVER EXACTLY ONCE, HERE.
+   *
+   * `this.#network(url, init)` is a member call, and a member call passes the holder
+   * as `this`. Handed a WebIDL builtin that is a refusal —
+   * `Failed to execute 'fetch' on 'Window': Illegal invocation` — thrown before a
+   * byte leaves the tab, so every paired daemon reads as unreachable at once. It has
+   * shipped twice: PR #223 through a transport, and this router through
+   * `network: fetch` handed in by the composition root, which is why the arrow
+   * DEFAULT below never helped — the default is not what ran.
+   *
+   * So the field holds a closure rather than the caller's value. An arrow has no
+   * receiver of its own and calls the injected function as a plain call, which means
+   * the shape of what a caller passes stops mattering to this class. That is the
+   * "not harmful" half; `scripts/validate/fetch-binding.sh` and the single
+   * `browserFetch` spelling are the "not possible" half, and both are deliberate —
+   * one contract cannot be the only thing standing between a browser and a product
+   * that does not connect.
+   */
   constructor(options: DaemonCarrierRouterOptions) {
-    this.#network = options.network ?? ((input, init) => globalThis.fetch(input, init));
+    const injected = options.network;
+    this.#network = injected === undefined ? browserFetch : (input, init) => injected(input, init);
     this.#dial = options.dial ?? browserRelayDial;
     this.#crypto = options.crypto;
     this.#heartbeat = options.heartbeat;

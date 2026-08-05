@@ -15,15 +15,16 @@ invariant fits in one file, a type or a test is the better home for it.
 
 ## Validators
 
-| Script                        | Runs as                                  | Enforces                                                |
-| ----------------------------- | ---------------------------------------- | ------------------------------------------------------- |
-| `cli-contracts.sh`            | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below           |
-| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                            |
-| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                            |
-| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                      |
-| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths |
-| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root   |
-| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's  |
+| Script                        | Runs as                                  | Enforces                                                 |
+| ----------------------------- | ---------------------------------------- | -------------------------------------------------------- |
+| `cli-contracts.sh`            | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below            |
+| `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                             |
+| `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                             |
+| `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                       |
+| `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths  |
+| `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root    |
+| `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's   |
+| `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is used as a value in the PWA |
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
 
@@ -168,6 +169,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/composition-reachability.sh    # production code is actually mounted
 ./scripts/validate/composition-invocation.sh      # every world field has a caller
 ./scripts/validate/daemon-scope.sh                # no PWA surface reads another daemon's data
+./scripts/validate/fetch-binding.sh               # no stored fetch builtin can throw "Illegal invocation"
 ./scripts/validate/action-pins.sh trusted
 pre-commit run a-cli-contracts --all-files       # exactly as the gate runs it
 ```

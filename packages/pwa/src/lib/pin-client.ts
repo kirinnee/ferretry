@@ -11,7 +11,7 @@ import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
 import { type DaemonPinEcho, DaemonPinStore } from './pin-store.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('pin scope must belong to the requested daemon');
@@ -52,7 +52,7 @@ const fetchPins = async (
 export const fetchPinSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<PinSnapshot> => parseSnapshot(scope, await fetchPins(daemon, scope, {}, fetcher));
 
 /** Sends one validated pin action and returns the daemon's authoritative board. */
@@ -60,7 +60,7 @@ export const applyPinAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: PinActionRequest,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<PinSnapshot> => {
   const body = PinActionRequestSchema.parse(action);
   return parseSnapshot(
@@ -112,7 +112,7 @@ export class DaemonPinClient {
 
   constructor(
     readonly store: DaemonPinStore = new DaemonPinStore(),
-    private readonly fetcher: DaemonFetch = fetch,
+    private readonly fetcher: DaemonFetch = browserFetch,
   ) {}
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {

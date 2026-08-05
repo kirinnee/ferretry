@@ -12,7 +12,7 @@ import {
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 /**
  * The daemon's browser frame envelope, v1: magic, version, page-id byte length,
@@ -85,7 +85,7 @@ const parseBrowserActionResult = (scope: DaemonSessionScope, body: unknown): Bro
 export const fetchRemoteBrowserStatus = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<BrowserStatus> => {
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, browserPath(scope));
@@ -99,7 +99,7 @@ export const runRemoteBrowserAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: BrowserAction,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<BrowserActionResult> => {
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, browserPath(scope), {

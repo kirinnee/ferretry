@@ -23,7 +23,7 @@ import { SessionSkillsSchema } from '@ferretry/protocol';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from '../../lib/runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../../lib/runtime-models.ts';
 import type { SkillsCatalog } from './skills-catalog.ts';
 
 const skillsPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/skills`;
@@ -47,7 +47,7 @@ const responseError = async (response: Response): Promise<DaemonResponseError> =
 export const fetchSessionSkills = async (
   connection: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
   signal?: AbortSignal,
 ): Promise<SkillsCatalog> => {
   if (connection.daemonId !== scope.daemonId) throw new Error('the connection does not own this session scope');
@@ -68,6 +68,6 @@ export type SkillsCatalogLoader = (scope: DaemonSessionScope, signal: AbortSigna
 
 /** Binds a live connection into the loader the surface expects. */
 export const skillsCatalogLoader =
-  (connection: DaemonConnection, fetcher: DaemonFetch = fetch): SkillsCatalogLoader =>
+  (connection: DaemonConnection, fetcher: DaemonFetch = browserFetch): SkillsCatalogLoader =>
   (scope, signal) =>
     fetchSessionSkills(connection, scope, fetcher, signal);

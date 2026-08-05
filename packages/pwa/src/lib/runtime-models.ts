@@ -35,6 +35,28 @@ export class DaemonResponseError extends Error {
 
 export type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+/**
+ * THE ONLY WAY THIS PACKAGE IS ALLOWED TO SPELL "the real network".
+ *
+ * `fetch` is a WebIDL operation on the global, and WebIDL rejects a call whose
+ * receiver is neither the global nor absent. A bare builtin written as a parameter
+ * default is therefore a value that works only until somebody stores it and calls
+ * it as a member: `this.#network(url, init)` makes the
+ * holder the receiver and the browser answers
+ * `Failed to execute 'fetch' on 'Window': Illegal invocation`.
+ *
+ * That is not hypothetical. It shipped twice — once through a transport (PR #223)
+ * and once through the carrier router — and both times it presented as every paired
+ * daemon being unreachable, because the throw happens before a single byte leaves
+ * the tab. An arrow wrapper keeps the builtin in its own realm no matter how the
+ * value is stored or invoked afterwards.
+ *
+ * `scripts/validate/fetch-binding.sh` fails the commit that writes a bare builtin
+ * anywhere in this package, so this is the one spelling rather than the preferred
+ * one.
+ */
+export const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+
 const asObject = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
@@ -106,7 +128,7 @@ const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope):
 export const fetchRuntimeModelCatalog = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<RuntimeModelCatalog> => {
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, `/v1/sessions/${encodeURIComponent(scope.sessionId)}/runtime-models`);
@@ -157,7 +179,7 @@ export class DaemonRuntimeModelCatalogStore {
   async load(
     daemon: DaemonConnection,
     scope: DaemonSessionScope,
-    fetcher: DaemonFetch = fetch,
+    fetcher: DaemonFetch = browserFetch,
   ): Promise<RuntimeModelCatalog> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);

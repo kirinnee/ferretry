@@ -122,6 +122,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # An unbound `fetch` stored on an object throws "Illegal invocation" the first time it is
+    # invoked as a member, and no suite that injects a fetcher can see it — an injected plain
+    # function does not care what its receiver is. It has shipped twice, both times as every paired
+    # daemon reading unreachable at once, so the shape is refused at the point it is written rather
+    # than defended against at each call site.
+    a-fetch-binding = {
+      enable = true;
+      name = "PWA fetch binding";
+      entry = validator "scripts/validate/fetch-binding.sh";
+      files = "^(packages/pwa/src/.*\\.tsx?|scripts/validate/fetch-binding\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-legacy-state = {
       enable = true;
       name = "No legacy package state";

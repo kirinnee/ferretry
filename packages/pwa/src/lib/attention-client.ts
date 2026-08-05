@@ -11,7 +11,7 @@ import { DaemonAttentionStore } from './attention-store.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attention scope must belong to the requested daemon');
@@ -53,7 +53,7 @@ const fetchAttention = async (
 export const fetchAttentionSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionSnapshot> =>
   parseSnapshot(scope, await fetchAttention(daemon, scope, attentionPath(scope), {}, fetcher));
 
@@ -64,7 +64,7 @@ export const fetchAttentionSnapshot = async (
 export const fetchAttentionCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionCountResponse> => {
   const snapshot = await fetchAttentionSnapshot(daemon, scope, fetcher);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
@@ -75,7 +75,7 @@ export const applyAttentionAction = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   action: AttentionActionRequest,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionSnapshot> => {
   const body = AttentionActionRequestSchema.parse(action);
   const value = await fetchAttention(
@@ -118,7 +118,7 @@ export class DaemonAttentionClient {
 
   constructor(
     readonly store: DaemonAttentionStore = new DaemonAttentionStore(),
-    private readonly fetcher: DaemonFetch = fetch,
+    private readonly fetcher: DaemonFetch = browserFetch,
   ) {}
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {

@@ -11,7 +11,7 @@ import { attachmentApiPath } from './attachments.ts';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
 
 const failure = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -28,7 +28,7 @@ export const loadAttachmentBlob = async (
   scope: DaemonSessionScope,
   attachmentId: string,
   signal?: AbortSignal,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<Blob> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attachment scope must belong to the requested daemon');
   const target = daemonRequest(daemon, attachmentApiPath(scope.sessionId, attachmentId), { signal });

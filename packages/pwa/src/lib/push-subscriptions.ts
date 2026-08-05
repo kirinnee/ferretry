@@ -10,7 +10,7 @@ import {
 } from '@ferretry/protocol';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from './runtime-models.ts';
 import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 
 /** VAPID P-256 public keys are uncompressed EC points: one tag byte plus X and Y. */
@@ -99,13 +99,16 @@ export const pushSubscriptionJson = (subscription: PushSubscriptionLike): Browse
 };
 
 /** Reads the VAPID public key of the daemon this browser would enrol with. */
-export const fetchDaemonVapidKey = async (daemon: DaemonConnection, fetcher: DaemonFetch = fetch): Promise<string> =>
+export const fetchDaemonVapidKey = async (
+  daemon: DaemonConnection,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<string> =>
   VapidPublicKeyResponseSchema.parse(await pushJson(daemon, '/v1/push/vapid', {}, fetcher)).publicKey;
 
 /** Lists the devices enrolled with this daemon, and no other. */
 export const listDaemonPushDevices = async (
   daemon: DaemonConnection,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<readonly PushDeviceView[]> =>
   PushDeviceListResponseSchema.parse(await pushJson(daemon, '/v1/push/subscriptions', {}, fetcher)).devices;
 
@@ -115,7 +118,7 @@ export const registerDaemonPushDevice = async (
   subscription: PushSubscriptionLike,
   deviceName: string,
   prefs: PushPreferences,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<PushDeviceView> => {
   const body = RegisterPushDeviceRequestSchema.parse({
     deviceName,
@@ -135,7 +138,7 @@ export const registerDaemonPushDevice = async (
 export const revokeDaemonPushDevice = async (
   daemon: DaemonConnection,
   deviceId: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<PushDeviceView> => {
   const id = PushDeviceViewSchema.shape.id.parse(deviceId);
   return PushDeviceViewSchema.parse(
