@@ -220,6 +220,53 @@ function AccountHealthMark({ health }: { readonly health: PickerAccountHealth | 
 }
 
 /**
+ * The row layout, and why it changes shape at `sm`.
+ *
+ * A row says two things: WHICH thing this is, and what is currently true about
+ * it. On a desktop those sit side by side, identity left and evidence in a
+ * right-hand rail, which is the densest readable arrangement and the one that
+ * was reviewed.
+ *
+ * At 390px they cannot both have the width. The rail is `shrink-0` — quota and
+ * health must never be squeezed into ellipses, because a half-printed percentage
+ * is worse than none — so the identity column gets whatever is left, and the
+ * harness capture showed exactly what that costs: `claude-auto-atelie…` and
+ * `/home/pilot/.config/home-…`. Both of those are the SUBMITTED VALUE. Truncating
+ * the display name would be a cosmetic loss; truncating the wrapper or the path
+ * means two rows can look identical at the moment somebody is choosing between
+ * them, which is the one thing a picker must never do.
+ *
+ * So below `sm` the row stacks: identity on its own full-width line, evidence
+ * wrapped beneath it. Nothing is hidden at either width and the desktop rail is
+ * untouched — `sm:` restores it exactly.
+ */
+/**
+ * `items-start` is load-bearing at BOTH widths and for different reasons. Stacked,
+ * it stops a bordered child — the provenance badge — from stretching to the full
+ * row width and reading as a bar rather than a pill. Side by side, it keeps the
+ * rail aligned to the top of a row whose identity has wrapped to two lines.
+ */
+const ROW_CLASS = 'flex min-w-0 flex-1 flex-col items-start gap-0.5 sm:flex-row sm:justify-between sm:gap-sm';
+
+/**
+ * The evidence rail: a wrapping row beneath the identity on a phone, a right-hand
+ * column from `sm` up. `shrink-0` at both widths, so it is never the thing that
+ * gets clipped.
+ */
+const EVIDENCE_CLASS =
+  'flex shrink-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs sm:flex-col sm:items-end sm:gap-0.5';
+
+/**
+ * A line that must stay whole on a phone.
+ *
+ * No bare `truncate`: below `sm` it wraps to as many lines as the value needs,
+ * because the row is `min-h-[44px]` rather than a fixed height and growing is
+ * free. From `sm` up it truncates again, where the rail has returned and there is
+ * enough width that it effectively never does.
+ */
+const IDENTITY_LINE_CLASS = 'mono text-meta text-muted';
+
+/**
  * One account as compact runtime telemetry: who it is, what it runs as, and the
  * two pieces of evidence about it — kept visually apart because they are
  * different facts from different reads with different costs.
@@ -231,20 +278,24 @@ function AccountHealthMark({ health }: { readonly health: PickerAccountHealth | 
 export function AccountPickerRow(option: AccountFieldOption, state: { readonly selected: boolean }): ReactNode {
   const { account } = option;
   return (
-    <span className="flex min-w-0 flex-1 items-start justify-between gap-sm">
+    <span className={ROW_CLASS} data-picker-row="account">
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-1">
           {state.selected ? <Check aria-label="current choice" className="shrink-0 text-accent" size={12} /> : null}
           <span className="truncate font-medium text-current">{account.displayName}</span>
         </span>
-        <span className="mono truncate text-meta text-muted">
+        {/* The wrapper is what gets submitted, so it wraps rather than truncating
+            on a phone. `break-words` and not `break-all`: this line has spaces
+            around its separators, so it breaks between fields instead of through
+            the middle of an identifier. */}
+        <span className={cn(IDENTITY_LINE_CLASS, 'break-words sm:truncate')} data-picker-identity="wrapper">
           {account.wrapper} · {fleetHarnessLabel(account.kind)} · {account.mode}
         </span>
         {option.disabledReason === undefined ? null : (
-          <span className="truncate text-meta text-warn">{option.disabledReason}</span>
+          <span className="text-meta text-warn">{option.disabledReason}</span>
         )}
       </span>
-      <span className="flex shrink-0 flex-col items-end gap-0.5 text-2xs">
+      <span className={EVIDENCE_CLASS}>
         <QuotaReadout className="text-2xs" quota={account.quota} showUnknown={true} />
         <AccountHealthMark health={account.health} />
       </span>
@@ -257,10 +308,16 @@ export function ProjectPickerRow(option: ProjectFieldOption): ReactNode {
   const { project } = option;
   const registered = project.kind === 'registered';
   return (
-    <span className="flex min-w-0 flex-1 items-start justify-between gap-sm">
+    <span className={ROW_CLASS} data-picker-row="project">
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="truncate font-medium text-current">{project.name}</span>
-        <span className="mono truncate text-meta text-muted">{project.path}</span>
+        {/* The absolute path IS the submitted value, and two folders can share
+            every visible character of a truncated one. `break-all` because a path
+            has no spaces to break at, so wrapping anywhere is the only way to
+            show all of it on a phone. */}
+        <span className={cn(IDENTITY_LINE_CLASS, 'break-all sm:break-normal sm:truncate')} data-picker-identity="path">
+          {project.path}
+        </span>
       </span>
       <span
         className={cn(

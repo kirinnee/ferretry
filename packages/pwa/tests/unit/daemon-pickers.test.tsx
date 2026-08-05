@@ -453,6 +453,47 @@ describe('the account row', () => {
     );
   });
 
+  /**
+   * THE RESPONSIVE CONTRACT, asserted as classes rather than as pixels.
+   *
+   * happy-dom loads no stylesheet, so no test here can measure a wrapped line —
+   * that evidence comes from the harness capture at a real 390px. What a test CAN
+   * pin is the contract the capture depends on, and pin it against the exact
+   * regression that produced the defect: a bare `truncate` on a line carrying a
+   * submitted value. If somebody re-adds one, this fails before anybody has to
+   * look at a screenshot again.
+   */
+  it('stacks the evidence beneath the identity on a phone and restores the rail at sm', async () => {
+    await accountField([account()]);
+    const row = must(rows()[0], 'row 0');
+
+    const layout = must(row.querySelector('[data-picker-row="account"]'), 'the row layout')?.className;
+    // Stacked by default, side by side only from `sm` up.
+    expect(layout).toContain('flex-col');
+    expect(layout).toContain('sm:flex-row');
+    expect(layout).toContain('sm:justify-between');
+    // Stacked children size to their content: without this a bordered child
+    // stretches the full row width and reads as a bar rather than a pill.
+    expect(layout).toContain('items-start');
+
+    // The rail never shrinks, and it is a wrapping row on a phone.
+    const rail = must(row.querySelector('.flex-wrap'), 'the evidence rail').className;
+    expect(rail).toContain('shrink-0');
+    expect(rail).toContain('sm:flex-col');
+    expect(rail).toContain('sm:items-end');
+  });
+
+  it('never truncates the submitted wrapper on a phone', async () => {
+    await accountField([account({ wrapper: 'claude-auto-a-deliberately-long-wrapper-name' })]);
+    const line = must(find('[data-picker-identity="wrapper"]'), 'the wrapper line');
+
+    // The whole value is in the DOM, and nothing clips it below `sm`.
+    expect(line.textContent).toContain('claude-auto-a-deliberately-long-wrapper-name');
+    expect(line.className).toContain('break-words');
+    expect(line.className).toContain('sm:truncate');
+    expect(line.className.split(/\s+/u)).not.toContain('truncate');
+  });
+
   it('shows an unavailable account with its reason, and refuses to let it be chosen', async () => {
     await accountField([archived]);
 
@@ -488,6 +529,42 @@ describe('the project row', () => {
     expect(rowText(1)).toContain('Recent');
     expect(rowText(1)).not.toContain('Registered');
     expect(must(rows()[1], 'row 1').querySelector('[title*="registers nothing"]')).not.toBeNull();
+  });
+
+  /** The same contract as the account row, for the value a folder row submits. */
+  it('lets a long absolute path wrap whole on a phone while the badge keeps its width', async () => {
+    const deep: FleetProject = {
+      name: 'home-manager',
+      path: '/home/pilot/.config/home-manager/modules/agent-config',
+      id: 'p-deep',
+      source: 'existing-folder',
+    };
+    await show(
+      <DaemonProjectPicker
+        catalog={projectPickerOptions([deep], [])}
+        fleet={fleetSlice()}
+        id="fy-test-cwd"
+        label="Project"
+        onValueChange={() => undefined}
+        projects={projectsSlice({ projects: [deep] })}
+        value=""
+      />,
+    );
+    await openList();
+
+    const layout = must(find('[data-picker-row="project"]'), 'the row layout').className;
+    expect(layout).toContain('flex-col');
+    expect(layout).toContain('sm:flex-row');
+
+    const path = must(find('[data-picker-identity="path"]'), 'the path line');
+    expect(path.textContent).toBe('/home/pilot/.config/home-manager/modules/agent-config');
+    // A path has no spaces, so anywhere is the only place it can break.
+    expect(path.className).toContain('break-all');
+    expect(path.className).toContain('sm:truncate');
+    expect(path.className.split(/\s+/u)).not.toContain('truncate');
+
+    // The provenance badge is still the thing that refuses to shrink.
+    expect(must(find('.rounded-badge'), 'the provenance badge').className).toContain('shrink-0');
   });
 });
 
