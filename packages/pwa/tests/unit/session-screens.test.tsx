@@ -540,6 +540,7 @@ describe('session screen components', () => {
       />,
     );
     expect(controls.root.findByProps({ 'data-daemon-id': 'daemon-a' }).props['aria-label']).toBe('Session context');
+    expect(JSON.stringify(controls.toJSON())).not.toContain('Clear context');
     const action = controls.root.findByType('button');
     expect(action.props.disabled).toBe(false);
     await runAsync(async () => {
