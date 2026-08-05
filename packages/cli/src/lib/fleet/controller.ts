@@ -3,6 +3,7 @@ import type {
   IFleetApplier,
   IFleetClock,
   IFleetConfigSource,
+  IFleetHealthCollectorFactory,
   IFleetIdentitySource,
   IFleetLoginService,
   IFleetManifestSource,
@@ -10,19 +11,18 @@ import type {
   IFleetPlanner,
   IFleetScaffolder,
   IFleetUsageCollectorFactory,
-  IFleetHealthCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
 import {
   renderApplyPlan,
   renderApplyResult,
+  renderHealth,
   renderIdentityStatus,
   renderLoginResults,
   renderManifest,
   renderRecommendation,
   renderScaffoldResult,
   renderUsage,
-  renderHealth,
 } from './render.ts';
 
 /** Options every fleet command accepts. */
