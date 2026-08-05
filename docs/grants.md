@@ -45,7 +45,7 @@ presents every loopback-looking signal it can.
 | `browser`    | the human login window and per-session browser control                 |
 | `filesystem` | the read-only session working-tree surface                             |
 | `warden`     | supervision status, sweeps and the warden configuration                |
-| `pairing`    | minting and revoking pairing codes, and the paired-device list         |
+| `pairing`    | pairing codes, the paired-device list, and Web Push enrolment          |
 
 Each has two axes, and they are different questions:
 
@@ -293,3 +293,16 @@ command says so at the moment somebody might be tempted to do that instead.
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet
   configuration, it needs its own decision.
+- **Web Push enrolment is governed by `pairing`, not by a capability of its own.** The four
+  `/v1/push/*` routes each demand `pairing.use`, because what they do is device management: only a
+  paired device may enrol, the enrolment is filed against that device's grant, and revoking the grant
+  destroys it. Pairing is _who may reach this daemon_; push is _who this daemon may reach_; one
+  operator decision about devices governs both, and the list above stays closed.
+
+  **The honest cost, stated rather than discovered:** an operator who switches `pairing` off for
+  remote callers also loses remote enrolment **and** remote un-enrolment. That is coherent — both are
+  device management, and revoking a device still takes its notifications with it from anywhere — but it
+  is not the same thing as a switch labelled "notifications". If a separately nameable notification
+  decision is wanted, it is one constant in `packages/daemon/src/lib/runtime/mounts/push.ts` plus
+  wherever a capability is declared; that second half is what the unified configuration model owns, and
+  adding a seventh member here before it lands would be the duplication that model exists to remove.

@@ -164,6 +164,22 @@ interface ActivePairing {
   attempts: number;
 }
 
+/**
+ * State this daemon holds ABOUT one device, which must not outlive the device's grant.
+ *
+ * A device grant is not only a credential — other subsystems file durable rows against it, and a row
+ * that survived its device would keep working after the access it belongs to was taken away. Web Push
+ * enrolment is the first: a revoked phone that keeps receiving this machine's notifications is a
+ * security defect rather than a cosmetic one.
+ *
+ * IT IS A SEAM, NOT A REGISTRY. Each owner satisfies it structurally, so revocation stays one act
+ * instead of a list of cleanups every future subsystem has to remember to join.
+ */
+export interface DeviceScopedState {
+  /** Forgets everything held for one device. Named ids that were never here are not an error. */
+  forgetDevice(deviceId: string): Promise<unknown>;
+}
+
 interface PairingServiceOptions {
   readonly daemonId: string;
   readonly daemonName: string;
@@ -179,6 +195,14 @@ interface PairingServiceOptions {
   readonly cryptography: PairingCryptography;
   readonly devices: PairingDeviceStore;
   readonly credentials: PairingDeviceRegistry;
+  /**
+   * Everything else that is keyed by a device, purged when its grant is revoked.
+   *
+   * OPTIONAL, and the reason it can safely be is worth stating: each owner ALSO refuses to act on a
+   * device it cannot find a live grant for, so a daemon built without this purge leaks stale rows and
+   * never leaks access. See `PushService` for both halves of that argument.
+   */
+  readonly deviceState?: readonly DeviceScopedState[];
   readonly rateLimiter?: PairingRateLimiter;
   readonly compare?: (left: string, right: string) => boolean;
   readonly pairingAppUrl?: string;
@@ -329,8 +353,16 @@ export class PairingService {
    *
    * There is no await between the write and the in-memory removal, so no request can be authenticated
    * against a credential this daemon has already promised to forget.
+   *
+   * DEVICE-SCOPED STATE GOES FIRST, before the grant it belongs to. That is the opposite of the order
+   * above and for the same reason: whichever step fails, the world it leaves has to be coherent. Purging
+   * first means a failure leaves the device fully paired with its state intact — retryable, nothing
+   * half-done — whereas revoking first would leave a phone that is unpaired and still receiving this
+   * machine's notifications, which is the outcome the purge exists to prevent. The cost of this order is
+   * a moment in which a still-paired device has lost its notifications; it is strictly the safer half.
    */
   async revokeDevice(id: string): Promise<boolean> {
+    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
     const removed = await this.options.devices.remove(id);
     if (!removed) return false;
     this.options.credentials.remove(id);

@@ -89,12 +89,32 @@ class RecordingDevices implements PairingDeviceStore {
   }
 }
 
+/**
+ * Something else that is keyed by a device, recording what it was asked to forget.
+ *
+ * A push enrolment is the first real one. What matters here is only the seam: revocation has to reach
+ * every owner of per-device state, in the right order, and a fake that records is the only way to prove
+ * the order rather than the intention.
+ */
+class RecordingDeviceState {
+  readonly forgotten: string[] = [];
+
+  constructor(private readonly failure?: Error) {}
+
+  async forgetDevice(deviceId: string): Promise<number> {
+    this.forgotten.push(deviceId);
+    if (this.failure !== undefined) throw this.failure;
+    return 1;
+  }
+}
+
 function fixture(
   options: {
     readonly limiter?: PairingRateLimiter;
     readonly compare?: (left: string, right: string) => boolean;
     /** The decision this daemon was built with. Dialable unless a case is about the other two. */
     readonly advertisement?: Advertisement;
+    readonly deviceState?: readonly RecordingDeviceState[];
   } = {},
 ) {
   const clock = new FakeClock();
@@ -115,6 +135,7 @@ function fixture(
     credentials,
     rateLimiter: options.limiter,
     compare: options.compare,
+    deviceState: options.deviceState,
   });
   return { clock, cryptography, devices, credentials, service };
 }
@@ -506,6 +527,51 @@ describe('PairingService revocation', () => {
     const { service } = fixture();
 
     should(await service.revokeDevice(FIRST_DEVICE_ID)).be.false();
+  });
+
+  it('should take the device’s other state away in the same act', async () => {
+    // A revoked phone that keeps receiving this machine's notifications is a security defect, not a
+    // cosmetic one, so revocation is one act across every owner of per-device state.
+    // Arrange
+    const push = new RecordingDeviceState();
+    const { devices, service } = fixture({ deviceState: [push] });
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.true();
+
+    // Assert
+    should(push.forgotten).deepEqual([FIRST_DEVICE_ID]);
+    should(devices.records).be.empty();
+  });
+
+  it('should leave the device fully paired when its other state cannot be purged', async () => {
+    // THE ORDER IS THE OPPOSITE OF THE DOCUMENT'S, and deliberately: purging first means a failure
+    // leaves a device that is still paired with its state intact — retryable, nothing half-done —
+    // where revoking first would leave a phone that is unpaired and still being notified.
+    // Arrange
+    const push = new RecordingDeviceState(new Error('the enrolment document could not be written'));
+    const { credentials, devices, service } = fixture({ deviceState: [push] });
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID).should.be.rejectedWith(/enrolment document/u);
+
+    // Assert
+    should(devices.records.map(record => record.id)).deepEqual([FIRST_DEVICE_ID]);
+    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
+  });
+
+  it('should purge a device’s other state even when there was no grant left to remove', async () => {
+    // Two people revoking the same lost phone is the expected way this is used, and the second pass
+    // must still be able to clean up whatever the first one left behind.
+    const push = new RecordingDeviceState();
+    const { service } = fixture({ deviceState: [push] });
+
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.false();
+    should(push.forgotten).deepEqual([FIRST_DEVICE_ID]);
   });
 
   it('should leave the live credential alone when the document cannot be written', async () => {

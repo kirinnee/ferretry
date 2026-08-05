@@ -28,6 +28,7 @@ import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
 import { pinRoutes } from './pins.ts';
+import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
@@ -74,6 +75,12 @@ export interface MountedSubsystems {
   readonly doctor: DoctorSubsystem;
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
+  /** The other direction of that relationship: which browsers this daemon may WAKE. It serves the
+   *  application-server key a browser subscribes with, the enrolments filed against paired devices,
+   *  and the revocation of one. An enrolment cannot outlive the device grant that made it — see
+   *  `src/lib/push` for the two independent reasons that holds, and for the declared GAPs: nothing in
+   *  production raises a notification yet, and the browser has no service worker to receive one. */
+  readonly push: PushSubscriptionSubsystem;
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
   readonly fleet: FleetSubsystem;
   /** The daemon-scoped timer target that refreshes the mounted fleet's quota and health evidence.
@@ -206,6 +213,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `host` scope, because a browser is always a paired device and could otherwise never add a second
     // one. See the mount's header for why that is the correct layer.
     ...pairingRoutes(subsystems.pairing),
+    // Push enrolment registers beside pairing because it is the same subject: only a paired device may
+    // enrol, and its enrolment dies with its grant. Every path is under `/v1/push`, which no other
+    // subsystem uses, and its one pattern is registered after its two fixed literals — so it can
+    // neither shadow nor be shadowed by anything here.
+    ...pushRoutes(subsystems.push),
     // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
     // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
     // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is
