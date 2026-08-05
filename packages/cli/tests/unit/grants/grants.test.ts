@@ -31,6 +31,8 @@ const capability = (
   granted,
   useRefusal: granted.use ? 'granted' : 'not-granted',
   configureRefusal: granted.configure ? 'ungated' : 'not-granted',
+  // A remote caller never widens, so the CLI's fixtures speak for the caller the grants govern.
+  mayGrant: false,
   origin: 'default',
   ...overrides,
 });

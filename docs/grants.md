@@ -55,22 +55,21 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 attention, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
-## Permissive by default; the password is the layer
+## Permissive by default; LOCALITY is the layer
 
-Both axes default to **enabled** for all five. The product should let a person do as much as possible
-from the UI, and the security model is something a cautious operator turns **on** rather than a wall
-everyone starts behind.
+Both axes default to **enabled** for every capability. The dangerous act is structurally
+unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
+closed would make a fresh remote session useless until somebody walked to the machine.
 
-That layer is the **operator password**:
+**The primary security layer is locality, not the password.** A remote caller can never turn a
+capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
+operator who wants one.
 
-- with one set, every `configure` demand needs a short-lived unlock;
-- with none set, `configure` passes and the answer comes back as `ungated` rather than `granted`, so
-  a UI can say once — beside the control, never as nagging — that nothing is standing behind it.
-
-**The honest cost:** with permissive defaults and no password, anyone holding a pairing can change
-this machine's fleet and settings. That is stated in one plain sentence wherever remote access is
-inspected (`fy daemon config`, the daemon's boot log, the PWA's grant surface), and never as a
-question somebody has to answer to use their own machine.
+**What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
+_grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is
+arbitrary code on the host; `fleet.use` composes changes that write executables. A paired device is
+trusted with those by default — so **pairing**, not this layer, is where that decision is actually
+made.
 
 ## The operator password
 
@@ -89,13 +88,23 @@ question somebody has to answer to use their own machine.
 - Set it with `fy daemon password set`, reading the value from **stdin**. There is no flag that takes
   one: an argument is in shell history and in `/proc/<pid>/cmdline` for every account on the box.
 
-## Widening and narrowing are not the same act
+## Widening is a local act. There is no remote path to it.
 
-| change                              | what it needs                                                   |
-| ----------------------------------- | --------------------------------------------------------------- |
-| turning an axis **off**             | the `configure` grant on that capability; never the password    |
-| turning an axis **on**              | a valid unlock, on every path including the host's command line |
-| turning one **on**, no password set | a host act — a remote caller cannot prove operator intent       |
+| act                                | local (loopback) | remote (governed)                              |
+| ---------------------------------- | ---------------- | ---------------------------------------------- |
+| turn **on** (off→on)               | allowed          | **never — password or no password**            |
+| turn **off** (on→off)              | allowed          | allowed                                        |
+| configure a capability that is on  | allowed          | allowed; the password gates it when one is set |
+| configure a capability that is off | allowed          | refused — it is off                            |
+
+A patch that widens one capability and narrows another is refused **entirely**. A half-applied widen
+leaves the operator with a machine in a state they did not ask for and were not told about, and the
+refusal they saw is indistinguishable from a total one.
+
+**This is a one-way door, and that is the trade.** An operator who switches something off from a phone
+cannot switch it back on from that phone. It is what makes the rule safe, and it is also a way to lock
+yourself out of your own machine — so the refusal names the remedy exactly, and `mayGrant` on every
+capability view lets a UI say so _before_ somebody walks through, rather than after.
 
 Revoking must never be harder than granting: in an incident the fastest possible path to _"the UI can
 no longer do that"_ matters more than a confirmation, and a password prompt between a person and

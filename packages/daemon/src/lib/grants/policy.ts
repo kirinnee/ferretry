@@ -21,18 +21,22 @@ import type { EnforcedGrants } from './types.ts';
  * on rather than a wall they start behind. Both axes are therefore enabled for all five
  * capabilities.
  *
- * THE SECURITY LAYER IS THE PASSWORD, NOT THE GRANT. A cautious operator sets an operator password;
- * every `configure` demand then needs an unlock, and the dangerous capabilities — `fleet`, which
- * materialises executables into accounts, and `warden`, which decides whether the daemon may spend
- * somebody's quota unattended — are gated behind it. An operator who wants no password is not
- * obstructed. The grant stays as the coarse switch for somebody who wants a capability gone
- * entirely.
+ * THE PRIMARY SECURITY LAYER IS LOCALITY, NOT THE PASSWORD. A remote caller can never turn a
+ * capability ON — not with the operator password, not with a valid unlock, not ever. Widening is a
+ * local act, so the dangerous half of this model is structurally unavailable to a stolen phone and
+ * the worst it can do is narrow the machine own permissions. Starting open therefore costs far less
+ * than it would if a remote caller could grant itself things.
  *
- * THE COST IS REAL AND IT IS NAMED. With these defaults and no password, anyone holding a pairing can
- * change this machine's fleet from off the host. Nobody is interrogated about it at setup — five
- * questions to use your own machine is exactly the friction this design removed — but the fact is
- * stated in one plain sentence wherever remote access is actually being arranged: see
- * `NO_PASSWORD_DISCLOSURE`.
+ * THE OPERATOR PASSWORD IS A SECOND, OPTIONAL LOCK, and only over remote CONFIGURE. A cautious
+ * operator sets one and every configure demand from off the host then needs an unlock; an operator
+ * who wants none is not obstructed. It is no longer what stands between a remote caller and widening
+ * — nothing needs to, because there is no remote path to widening at all.
+ *
+ * WHAT THIS DOES NOT REDUCE, and the honest thing to say about these defaults: locality bounds what a
+ * remote caller may GRANT, and says nothing about what an already-granted capability may DO.
+ * `terminal.use` is arbitrary code on the host, and `fleet.use` composes changes that write
+ * executables. A paired device is trusted with those by default, so pairing — not this layer — is
+ * where that decision is actually made.
  */
 export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   fleet: { use: true, configure: true },
@@ -53,7 +57,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
  * the daemon's output, which costs more than the warning is worth.
  */
 export const NO_PASSWORD_DISCLOSURE =
-  'no operator password is set, so any paired device can change this machine’s fleet and settings without one';
+  'no operator password is set, so any paired device can change the settings of whatever is already turned on here — it still cannot turn anything on, which only this machine can do';
 
 /**
  * Whether the operator's grants govern THIS caller.

@@ -139,6 +139,8 @@ describe('the grant view a UI reads', () => {
       granted: { use: false, configure: false },
       useRefusal: 'not-granted',
       configureRefusal: 'not-granted',
+      // No remote caller may widen anything, so this is false for every capability on this view.
+      mayGrant: false,
       // The operator wrote this one down; `--print-config` draws the same distinction for every other
       // value, and a report that could not tell a choice from a default answers the wrong question.
       origin: 'config file',
@@ -273,46 +275,6 @@ describe('changing the grants', () => {
     should(context.audit[0]).containDeep({ actor: 'device:phone-1', changes: ['fleet.configure=off'] });
   });
 
-  it('should demand the password before a governed caller may widen anything', async () => {
-    // Turning an axis ON is the one change that hands a remote browser more than it had.
-    // Arrange
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: true, configure: false } },
-      password: 'operator-secret',
-    });
-    await context.service.refresh();
-
-    // Act
-    const refused = await context.service
-      .patch({ fleet: { configure: true } }, remote)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should(refused).be.instanceof(GrantError);
-    should((refused as GrantError).failure).equal('forbidden');
-    should((refused as GrantError).message).match(/needs the operator password/u);
-    should(context.written()).be.undefined();
-  });
-
-  it('should accept a widening change once an unlock is held', async () => {
-    // Arrange
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: true, configure: false } },
-      password: 'operator-secret',
-    });
-    await context.service.refresh();
-    const outcome = await context.service.unlock('operator-secret');
-    const unlock = outcome.kind === 'unlocked' ? outcome.token : '';
-
-    // Act
-    await context.service.patch({ fleet: { configure: true } }, { ...remote, unlock });
-
-    // Assert
-    should(context.written()?.fleet).deepEqual({ use: true, configure: true });
-    should(context.audit[0]).containDeep({ changes: ['fleet.configure=on'] });
-  });
-
   it('should refuse a governed caller the grant it was not given permission to change', async () => {
     // Changing capability X's grant is a configure act ON X, which is what stops the layer being
     // self-defeating: a UI the operator excluded from warden configuration cannot quietly rewrite
@@ -330,26 +292,6 @@ describe('changing the grants', () => {
     // Assert
     should(refused).be.instanceof(GrantError);
     should((refused as GrantError).message).match(/has not granted the UI permission to change the warden grant/u);
-    should(context.written()).be.undefined();
-  });
-
-  it('should make widening a host act on a machine with no operator password', async () => {
-    // A machine with no password has no way for a remote caller to prove operator intent, so a
-    // browser that could turn a capability back on would defeat the coarse switch entirely. The
-    // refusal names BOTH remedies rather than leaving the person at a dead end.
-    // Arrange
-    const context = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } } });
-    await context.service.refresh();
-
-    // Act
-    const refused = await context.service
-      .patch({ warden: { configure: true } }, remote)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should((refused as GrantError).message).match(/fy daemon config/u);
-    should((refused as GrantError).message).match(/fy daemon password set/u);
     should(context.written()).be.undefined();
   });
 
@@ -380,28 +322,6 @@ describe('changing the grants', () => {
 
     // Assert
     should((refused as GrantError).failure).equal('unavailable');
-  });
-
-  it('should refuse to widen while the daemon is refusing to check passwords', async () => {
-    // Arrange — `terminal` is off, and `fleet` is fully granted so the narrowing half is reachable.
-    const context = world({
-      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
-      password: 'operator-secret',
-    });
-    await context.service.refresh();
-    for (let attempt = 0; attempt < GRANT_UNLOCK_MAX_ATTEMPTS; attempt += 1) await context.service.unlock('wrong');
-
-    // Act
-    const refused = await context.service
-      .patch({ terminal: { use: true } }, remote)
-      .then(() => undefined)
-      .catch((error: unknown) => error);
-
-    // Assert
-    should((refused as GrantError).message).match(/lockout/u);
-    // Narrowing is still available: an incident must never be made harder by a lockout.
-    await context.service.patch({ fleet: { use: false } }, remote);
-    should(context.written()?.fleet).have.property('use', false);
   });
 
   it('should take effect immediately, with no restart', async () => {
@@ -469,5 +389,101 @@ describe('the sentence a refusal carries', () => {
     // Assert
     should(said).match(/fy daemon config set warden --configure/u);
     should(nothing).be.undefined();
+  });
+});
+
+describe('widening is a local act and there is no remote path to it', () => {
+  it('should refuse a remote widen even with a valid unlock, because no password buys it', async () => {
+    // THE RULE. Locality is the boundary, not the password: the security of the model rests on where
+    // the socket came from, which nothing a caller sends can move, rather than on a secret a person
+    // chose. A stolen phone cannot grant itself anything.
+    // Arrange — the caller holds a genuine, unexpired unlock.
+    const context = world({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
+      password: 'operator-secret',
+    });
+    await context.service.refresh();
+    const outcome = await context.service.unlock('operator-secret');
+    const unlock = outcome.kind === 'unlocked' ? outcome.token : '';
+
+    // Act
+    const refused = await context.service
+      .patch({ terminal: { use: true } }, { ...remote, unlock })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(GrantError);
+    should((refused as GrantError).message).match(/only be turned on from the machine itself/u);
+    should((refused as GrantError).message).match(/with or without the operator password/u);
+    should(context.written()).be.undefined();
+  });
+
+  it('should refuse the WHOLE patch when it both widens and narrows', async () => {
+    // A half-applied widen is worse than either outcome: the operator is left with a machine in a
+    // state they did not ask for and were not told about, and the refusal they saw is
+    // indistinguishable from a total one.
+    // Arrange
+    const context = world({
+      grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } },
+    });
+    await context.service.refresh();
+
+    // Act — one on, one off, in a single patch.
+    const refused = await context.service
+      .patch({ terminal: { use: true }, fleet: { use: false } }, remote)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert — NEITHER half reached the document, and the enforced answer did not move either.
+    should(refused).be.instanceof(GrantError);
+    should(context.written()).be.undefined();
+    should(context.service.decide({ capability: 'fleet', axis: 'use' }, remote).allowed).be.true();
+    should(context.service.decide({ capability: 'terminal', axis: 'use' }, remote).refusal).equal('not-granted');
+    should(context.audit).be.empty();
+  });
+
+  it('should still let a remote caller turn something off', async () => {
+    // Revoking stays easier than granting — that was already the principle, and this rule is its
+    // conclusion rather than a departure from it.
+    // Arrange
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    await context.service.patch({ warden: { configure: false } }, remote);
+
+    // Assert
+    should(context.written()?.warden).deepEqual({ use: true, configure: false });
+  });
+
+  it('should let the machine itself turn something on with no password at all', async () => {
+    // The other half of the rule: local may do both, unconditionally. This is the only path back
+    // after a remote caller has switched something off.
+    // Arrange
+    const context = world({ grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } } });
+    await context.service.refresh();
+
+    // Act
+    await context.service.patch({ terminal: { use: true, configure: true } }, local);
+
+    // Assert
+    should(context.written()?.terminal).deepEqual({ use: true, configure: true });
+  });
+
+  it('should tell a UI which callers may widen, so it never offers a control that always fails', async () => {
+    // `mayGrant` is on the wire so the browser is TOLD rather than encoding the rule a second time —
+    // and so a remote caller can be warned BEFORE switching something off that this door is one-way.
+    // Arrange
+    const context = world();
+    await context.service.refresh();
+
+    // Act
+    const fromAway = context.service.view(remote);
+    const fromHere = context.service.view(local);
+
+    // Assert
+    should(fromAway.capabilities.every(entry => !entry.mayGrant)).be.true();
+    should(fromHere.capabilities.every(entry => entry.mayGrant)).be.true();
   });
 });

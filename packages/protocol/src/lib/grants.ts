@@ -193,6 +193,18 @@ export const CapabilityGrantViewSchema = z.strictObject({
   /** Why `configure` reads the way it does. */
   configureRefusal: GrantRefusalSchema,
   /**
+   * May THIS caller turn this capability on?
+   *
+   * `false` for every remote caller, always — widening is a local act and no password buys it. It is
+   * on the wire so a UI is TOLD rather than left to infer it from a rule it would have to encode a
+   * second time, and so an off capability can render as "only from the machine" instead of a dead
+   * toggle that fails when somebody presses it.
+   *
+   * It is also the warning a remote caller needs BEFORE switching something off: this is a one-way
+   * door, and the moment to say so is before it closes.
+   */
+  mayGrant: z.boolean(),
+  /**
    * Whether the operator wrote this capability down, or the product answered for them.
    *
    * THE SAME PROVENANCE TREATMENT `--print-config` GIVES EVERY OTHER VALUE, and for the same reason:
