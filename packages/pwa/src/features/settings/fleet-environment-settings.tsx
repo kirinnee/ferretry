@@ -1,12 +1,13 @@
 /**
- * Portable profile environment settings.
+ * Read-only fleet profile environment inspection.
  *
- * This deliberately edits only the fleet profile `env` blocks. They are the
- * existing configuration that generated daemon wrappers actually consume.
- * Credentials and machine-bound values are refused by the daemon; the UI
- * repeats that boundary before an operator attempts a transfer.
+ * A paired-device token may inspect a daemon's fleet profile environment and
+ * compare it with another daemon's, but device authority is intentionally not
+ * enough to mutate Fleet configuration. This panel never writes: it shows what
+ * each daemon publishes and how two daemons differ, and points the operator at
+ * the Fleet tab's proposal review + host-approval flow to make any change.
  */
-import { ArrowRightLeft, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 
@@ -14,14 +15,20 @@ interface EnvironmentView {
   readonly profiles: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 
-type CopyMode = 'merge' | 'replace';
+type DifferenceKind = 'target-only' | 'source-only' | 'differs';
 
-interface EnvironmentChange {
+interface EnvironmentDifference {
   readonly key: string;
-  readonly kind: 'added' | 'changed' | 'removed';
-  readonly before?: string;
-  readonly after?: string;
+  readonly kind: DifferenceKind;
+  readonly target?: string;
+  readonly source?: string;
 }
+
+const DIFFERENCE_LABEL: Readonly<Record<DifferenceKind, string>> = {
+  'target-only': 'target only',
+  'source-only': 'source only',
+  differs: 'differs',
+};
 
 async function environmentAt(connection: DaemonConnection): Promise<EnvironmentView> {
   const response = await fetch(new URL('/v1/fleet/environment', connection.baseUrl), {
@@ -33,15 +40,18 @@ async function environmentAt(connection: DaemonConnection): Promise<EnvironmentV
   return (await response.json()) as EnvironmentView;
 }
 
-function changes(
-  before: Readonly<Record<string, string>>,
-  after: Readonly<Record<string, string>>,
-): EnvironmentChange[] {
-  const result: EnvironmentChange[] = [];
-  for (const key of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
-    if (!(key in before)) result.push({ key, kind: 'added', after: after[key] });
-    else if (!(key in after)) result.push({ key, kind: 'removed', before: before[key] });
-    else if (before[key] !== after[key]) result.push({ key, kind: 'changed', before: before[key], after: after[key] });
+function differences(
+  target: Readonly<Record<string, string>>,
+  source: Readonly<Record<string, string>>,
+): EnvironmentDifference[] {
+  const result: EnvironmentDifference[] = [];
+  for (const key of [...new Set([...Object.keys(target), ...Object.keys(source)])].sort()) {
+    const inTarget = key in target;
+    const inSource = key in source;
+    if (inTarget && !inSource) result.push({ key, kind: 'target-only', target: target[key] });
+    else if (inSource && !inTarget) result.push({ key, kind: 'source-only', source: source[key] });
+    else if (target[key] !== source[key])
+      result.push({ key, kind: 'differs', target: target[key], source: source[key] });
   }
   return result;
 }
@@ -56,8 +66,6 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
   const [source, setSource] = useState<EnvironmentView>();
   const [sourceId, setSourceId] = useState(String(connection.daemonId));
   const [profile, setProfile] = useState('');
-  const [mode, setMode] = useState<CopyMode>('merge');
-  const [draftText, setDraftText] = useState('{}');
   const [issue, setIssue] = useState<string>();
   const [loading, setLoading] = useState(false);
 
@@ -69,11 +77,9 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
       const [nextTarget, nextSource] = await Promise.all([environmentAt(connection), environmentAt(sourceConnection)]);
       setTarget(nextTarget);
       setSource(nextSource);
-      const firstProfile = profile || Object.keys(nextTarget.profiles)[0] || '';
-      setProfile(firstProfile);
-      setDraftText(JSON.stringify(nextSource.profiles[firstProfile] ?? {}, undefined, 2));
+      setProfile(profile || Object.keys(nextTarget.profiles)[0] || '');
     } catch (error) {
-      setIssue(error instanceof Error ? error.message : 'Configuration could not be read. No copy can be prepared.');
+      setIssue(error instanceof Error ? error.message : 'Fleet environment could not be read.');
       setTarget(undefined);
       setSource(undefined);
     } finally {
@@ -86,62 +92,35 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
   }, [reload]);
 
   const targetEnvironment = target?.profiles[profile] ?? {};
-  const drafted = useMemo(() => {
-    try {
-      const value: unknown = JSON.parse(draftText);
-      if (value === null || Array.isArray(value) || typeof value !== 'object') return undefined;
-      return Object.entries(value).reduce<Record<string, string>>((environment, [name, value]) => {
-        if (typeof value === 'string') environment[name] = value;
-        return environment;
-      }, {});
-    } catch {
-      return undefined;
-    }
-  }, [draftText]);
-  const proposed = drafted === undefined ? {} : mode === 'merge' ? { ...targetEnvironment, ...drafted } : drafted;
-  const diff = useMemo(() => changes(targetEnvironment, proposed), [targetEnvironment, proposed]);
-
-  const apply = async () => {
-    setLoading(true);
-    setIssue(undefined);
-    try {
-      const response = await fetch(new URL('/v1/fleet/environment', connection.baseUrl), {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${connection.deviceToken}`,
-          'Content-Type': 'application/json',
-          'x-ferretry-client': 'ui',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ profile, mode, environment: drafted }),
-      });
-      if (!response.ok)
-        throw new Error((await response.json().catch(() => ({}))).error ?? `Copy refused (${response.status})`);
-      await reload();
-    } catch (error) {
-      setIssue(error instanceof Error ? error.message : 'Copy was refused; target configuration was left unchanged.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const sourceEnvironment = source?.profiles[profile] ?? {};
+  const targetEntries = useMemo(
+    () => Object.entries(targetEnvironment).sort(([left], [right]) => left.localeCompare(right)),
+    [targetEnvironment],
+  );
+  const diff = useMemo(() => differences(targetEnvironment, sourceEnvironment), [targetEnvironment, sourceEnvironment]);
 
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" aria-labelledby="fleet-environment-heading">
       <div className="flex flex-wrap items-center gap-2">
         <h2 id="fleet-environment-heading" className="m-0 text-title font-semibold text-fg">
-          Portable environment
+          Environment inspection
         </h2>
         <button type="button" className="kt-btn kt-btn--sm ml-auto" onClick={() => void reload()} disabled={loading}>
           <RefreshCw size={14} aria-hidden="true" /> Refresh
         </button>
       </div>
       <p className="m-0 text-ui leading-base text-muted">
-        Copy one profile’s safe environment entries. Merge overwrites matching target keys and keeps target-only keys;
-        replace removes target-only keys. Credentials, paths, ports, and addresses are never copied.
+        Inspect this daemon’s fleet profile environment and compare it with another daemon’s. Entries are shown exactly
+        as each daemon publishes them; nothing here changes the target.
+      </p>
+      <p className="m-0 rounded-control border border-border-soft bg-surface-2 p-3 text-ui text-muted">
+        This view is read-only. A paired device may inspect fleet environment but cannot change it — device authority
+        never covers Fleet mutation. To change environment, open the Fleet tab, review the daemon’s proposal, and
+        approve it on the host.
       </p>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="text-ui text-muted">
-          Source daemon
+          Compare with daemon
           <select
             className="kt-input mt-1 min-h-[44px] w-full"
             value={sourceId}
@@ -159,11 +138,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           <select
             className="kt-input mt-1 min-h-[44px] w-full"
             value={profile}
-            onChange={event => {
-              const nextProfile = event.target.value;
-              setProfile(nextProfile);
-              setDraftText(JSON.stringify(source?.profiles[nextProfile] ?? {}, undefined, 2));
-            }}
+            onChange={event => setProfile(event.target.value)}
           >
             {Object.keys(target?.profiles ?? {}).map(name => (
               <option key={name}>{name}</option>
@@ -171,63 +146,67 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           </select>
         </label>
       </div>
-      <fieldset className="flex flex-wrap gap-2" aria-label="Copy semantics">
-        {(['merge', 'replace'] as const).map(candidate => (
-          <button
-            key={candidate}
-            type="button"
-            aria-pressed={mode === candidate}
-            onClick={() => setMode(candidate)}
-            className="kt-btn kt-btn--sm"
-          >
-            {candidate === 'merge' ? 'Merge safely' : 'Replace target'}
-          </button>
-        ))}
-      </fieldset>
-      <label className="text-ui text-muted">
-        Environment entries
-        <textarea
-          className="kt-input mono mt-1 min-h-36 w-full resize-y"
-          value={draftText}
-          onChange={event => setDraftText(event.target.value)}
-          spellCheck={false}
-          aria-describedby="fleet-environment-help"
-        />
-      </label>
-      <p id="fleet-environment-help" className="m-0 text-meta text-faint">
-        Edit the source-derived JSON before applying. Values must be strings; unsafe names and values are refused by the
-        daemon and leave the target unchanged.
-      </p>
       {issue ? (
         <p role="alert" className="m-0 rounded-control bg-warn/15 p-2 text-ui text-warn">
           {issue}
         </p>
       ) : null}
-      {target && source ? (
-        <section className="rounded-control border border-border-soft bg-surface-2 p-3" aria-label="Configuration diff">
-          <p className="m-0 text-ui font-semibold text-fg">Target diff ({diff.length} changes)</p>
+      {target ? (
+        <section
+          className="rounded-control border border-border-soft bg-surface-2 p-3"
+          aria-label="Target environment entries"
+        >
+          {profile === '' ? (
+            <p className="m-0 text-ui text-muted">This daemon publishes no fleet profiles.</p>
+          ) : (
+            <>
+              <p className="m-0 text-ui font-semibold text-fg">
+                {profile} on this daemon ({targetEntries.length})
+              </p>
+              {targetEntries.length === 0 ? (
+                <p className="mb-0 mt-1 text-ui text-muted">This profile publishes no environment entries.</p>
+              ) : (
+                <ul className="mb-0 mt-2 list-none space-y-1 p-0 mono text-meta text-muted">
+                  {targetEntries.map(([key, value]) => (
+                    <li key={key}>
+                      <span className="text-accent">{key}</span> {value}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </section>
+      ) : null}
+      {target ? (
+        <section
+          className="rounded-control border border-border-soft bg-surface-2 p-3"
+          aria-label="Environment comparison"
+        >
+          <p className="m-0 text-ui font-semibold text-fg">
+            Differences vs {sourceId} ({diff.length})
+          </p>
           {diff.length === 0 ? (
-            <p className="mb-0 mt-1 text-ui text-muted">No configuration change to apply.</p>
+            <p className="mb-0 mt-1 text-ui text-muted">No differences — the two daemons publish the same entries.</p>
           ) : (
             <ul className="mb-0 mt-2 list-none space-y-1 p-0 mono text-meta text-muted">
-              {diff.map(change => (
-                <li key={change.key}>
-                  <span className="text-accent">{change.kind}</span> {change.key}: {change.before ?? '—'} →{' '}
-                  {change.after ?? '—'}
-                </li>
-              ))}
+              {diff.map(difference => {
+                const detail =
+                  difference.kind === 'differs'
+                    ? `${difference.target ?? '—'} → ${difference.source ?? '—'}`
+                    : difference.kind === 'target-only'
+                      ? `${difference.target ?? '—'}`
+                      : `${difference.source ?? '—'}`;
+                return (
+                  <li key={difference.key}>
+                    <span className="text-accent">{DIFFERENCE_LABEL[difference.kind]}</span> {difference.key}: {detail}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
       ) : null}
-      <button
-        type="button"
-        className="kt-btn kt-btn--primary self-start"
-        disabled={loading || !profile || drafted === undefined || diff.length === 0}
-        onClick={() => void apply()}
-      >
-        <ArrowRightLeft size={16} aria-hidden="true" /> Apply {mode} after review
-      </button>
     </section>
   );
 }
