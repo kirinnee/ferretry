@@ -17,7 +17,7 @@ import {
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
-import { daemonApiClient } from './api-client.ts';
+import { daemonApiClient, DaemonHttpTransport } from './api-client.ts';
 import {
   type DaemonConnectionRepository,
   DaemonConnectionStore,
@@ -32,7 +32,7 @@ import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './
 import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { type DaemonPushService, DaemonPushDevices, daemonPushService } from './push-enrolment.ts';
-import type { DaemonFetch } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 
@@ -163,7 +163,10 @@ const pairingFailure = async (response: Response): Promise<string> => {
 };
 
 /** Exchanges one reader-supplied, single-use fragment code with its own daemon. */
-export async function exchangePairing(seed: PairingSeed, fetcher: DaemonFetch = fetch): Promise<DaemonConnection> {
+export async function exchangePairing(
+  seed: PairingSeed,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<DaemonConnection> {
   const endpoint = new URL('/v1/pair', `${seed.daemonUrl}/`);
   const response = await fetcher(endpoint, {
     method: 'POST',
@@ -241,7 +244,7 @@ const daemonOrigin = (daemon: DaemonConnection): string => daemon.baseUrl;
 
 /** Builds the document-lifetime stores and registers every daemon cache together. */
 export async function createAppStore(options: CreateAppStoreOptions = {}): Promise<AppStore> {
-  const fetcher = options.fetcher ?? fetch;
+  const fetcher = options.fetcher ?? browserFetch;
   // Every DAEMON-BOUND call goes through the carrier router; the two that are not
   // bound to a paired daemon — the pairing exchange and the relay advertisement —
   // keep the raw fetcher on purpose. Pairing especially: a relayed session is opened
@@ -254,7 +257,25 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
   });
   const carried = carrier.fetch;
-  const clients = new DaemonApiPool(options.connectClient);
+  /**
+   * THE TYPED CLIENT TRAVELS THE CARRIER TOO, and it did not used to.
+   *
+   * `daemonApiClient`'s default transport dials the daemon's own address directly,
+   * so everything built on the typed client — the fleet list, a session read, and the
+   * Settings REACHABILITY PROBE — took a path the carrier router knew nothing about.
+   * The result was a screen showing a green "Reachable" pill beside a Carrier panel
+   * saying no connection worked, and both were reporting honestly: they were asking
+   * different questions over different code.
+   *
+   * Two answers to "can this browser reach that daemon" is one answer too many. There
+   * is now one path, so a probe cannot pass on a carrier the product cannot use, and
+   * a daemon that is only reachable through the relay is reported reachable rather
+   * than reported down by a probe that never tried the relay.
+   */
+  const clients = new DaemonApiPool(
+    options.connectClient ??
+      (async daemon => await daemonApiClient(daemon, { transport: new DaemonHttpTransport(daemon, carried) })),
+  );
   const fleetPort: DaemonFleetPort = {
     list: async daemon => await (await clients.client(daemon)).list(),
     get: async (daemon, sessionId) => await (await clients.client(daemon)).get(sessionId),

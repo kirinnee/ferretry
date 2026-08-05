@@ -41,7 +41,7 @@
 import type { SessionView, UsageFeedView } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 import { DaemonUsageIndex, type ResolvedQuota } from './usage.ts';
 
 /** kteam's cadence, unchanged: the upstream feed is itself daemon-cached. */
@@ -78,7 +78,7 @@ export interface DaemonUsagePort {
  * `DaemonUsageIndex.apply` owns the schema, so there is exactly one place that
  * decides what a readable feed is and one place that can reject a partial one.
  */
-export const daemonUsagePort = (fetcher: DaemonFetch = fetch): DaemonUsagePort => ({
+export const daemonUsagePort = (fetcher: DaemonFetch = browserFetch): DaemonUsagePort => ({
   async usage(daemon: DaemonConnection): Promise<unknown> {
     const request = daemonRequest(daemon, '/v1/usage');
     const response = await fetcher(request.url, request.init);

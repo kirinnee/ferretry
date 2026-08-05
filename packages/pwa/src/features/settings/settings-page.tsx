@@ -507,6 +507,7 @@ export function SettingsPage({
                       activeDaemonId={daemonId}
                       connections={connections}
                       probeDaemon={probeDaemon}
+                      activeCarrier={carrier}
                       onSelectDaemon={onSelectDaemon}
                       onRenameDaemon={onRenameDaemon}
                       onRemoveDaemon={onRemoveDaemon}

@@ -25,10 +25,7 @@ import { ProjectListSchema } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
 import type { FleetProject } from './fleet-grouping.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
-
-/** Keep Window.fetch in its WebIDL realm when the project store invokes it later. */
-const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 export type ProjectsLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 

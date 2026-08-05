@@ -15,7 +15,7 @@ import {
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonSessionScope } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
@@ -76,7 +76,7 @@ const parseTerminal = (scope: DaemonSessionScope, body: unknown): TerminalView =
 export const listSessionTerminals = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalListView> => {
   const body = await terminalJson(daemon, scope, terminalsPath(scope), {}, fetcher);
   const list = TerminalListViewSchema.parse(body);
@@ -89,7 +89,7 @@ export const createSessionTerminal = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   request: CreateTerminalRequest = {},
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalView> => {
   const body = await terminalJson(
     daemon,
@@ -107,7 +107,7 @@ export const renameSessionTerminal = async (
   scope: DaemonSessionScope,
   terminalId: string,
   title: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<TerminalView> => {
   const body = await terminalJson(
     daemon,
@@ -124,7 +124,7 @@ export const closeSessionTerminal = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   terminalId: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<CloseTerminalResponse> => {
   const body = await terminalJson(daemon, scope, terminalPath(scope, terminalId), { method: 'DELETE' }, fetcher);
   const closed = CloseTerminalResponseSchema.parse(body);
@@ -143,7 +143,7 @@ export const daemonTerminalTicket = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   terminalId: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<string> => {
   assertScopeDaemon(daemon, scope);
   const request = daemonRequest(daemon, `${terminalPath(scope, terminalId)}/stream/ticket`, { method: 'POST' });

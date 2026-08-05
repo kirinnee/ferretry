@@ -12,7 +12,7 @@
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
 
 /**
  * `live=false` is the original's choice and the reason the header says
@@ -36,7 +36,7 @@ export const readPaneSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   signal?: AbortSignal,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<string> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
   const target = daemonRequest(daemon, snapshotUrl(scope), { signal });

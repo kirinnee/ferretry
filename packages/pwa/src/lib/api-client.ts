@@ -1,6 +1,7 @@
 import type { FyClientOptions, IFyHttpTransport } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 
 /**
  * This is the public PWA build's protocol version, not a daemon identity.
@@ -11,15 +12,6 @@ export const PWA_PROTOCOL_VERSION = '0.0.0' as const;
 export type DaemonApiClientOptions = Omit<FyClientOptions, 'baseUrl' | 'token' | 'version' | 'transport'> & {
   readonly transport?: IFyHttpTransport;
 };
-
-type DaemonFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-
-/**
- * Keep the browser builtin in its WebIDL realm. `fetch` rejects calls whose
- * receiver is not the Window/global object, so storing an unbound builtin on a
- * transport and invoking it later would make a healthy paired daemon look down.
- */
-const browserFetch: DaemonFetch = (input, init) => globalThis.fetch(input, init);
 
 /**
  * Browser transport for a paired daemon. It refuses a typed-client URL that

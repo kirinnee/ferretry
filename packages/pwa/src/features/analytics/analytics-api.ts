@@ -9,7 +9,7 @@ import { AnalyticsResponseSchema, type AnalyticsResponse } from '@ferretry/proto
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from '../../lib/runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from '../../lib/runtime-models.ts';
 
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('analytics scope must belong to the requested daemon');
@@ -39,7 +39,7 @@ const analyticsRead = async (
 export const fetchAnalytics = async (
   daemon: DaemonConnection,
   query?: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AnalyticsResponse> => {
   const search = new URLSearchParams();
   if (query?.trim()) search.set('q', query.trim());
@@ -57,7 +57,7 @@ export const fetchSessionAnalytics = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   query?: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AnalyticsResponse> => {
   assertScopeDaemon(daemon, scope);
   const search = new URLSearchParams();

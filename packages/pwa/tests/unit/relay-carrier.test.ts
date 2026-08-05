@@ -100,6 +100,11 @@ describe('turning a §14 answer into a Response', () => {
   });
 });
 
+interface RelayEnd {
+  readonly code: number;
+  readonly reason: string;
+}
+
 describe('the browser WebSocket adapter', () => {
   class FakeWebSocket {
     static last: FakeWebSocket | undefined;
@@ -131,11 +136,23 @@ describe('the browser WebSocket adapter', () => {
     }
   };
 
-  it('should read binary frames as bytes and pass exactly two text messages through', () => {
+  /** The four things the adapter does with one socket, plus what it forwards back. */
+  const dialFake = (
+    body: (socket: FakeWebSocket, adapted: ReturnType<typeof browserRelayDial>, ends: RelayEnd[]) => void,
+    url = 'wss://relay.example/v1/rendezvous/fy_daemon_x/client',
+  ): void => {
     withFakeSocket(() => {
-      const adapted = browserRelayDial('wss://relay.example/v1/rendezvous/fy_daemon_x/client');
+      const adapted = browserRelayDial(url);
       const socket = FakeWebSocket.last;
       if (socket === undefined) throw new Error('no socket was constructed');
+      const ends: RelayEnd[] = [];
+      adapted.onClose = (code, reason) => ends.push({ code, reason });
+      body(socket, adapted, ends);
+    });
+  };
+
+  it('should read binary frames as bytes and pass exactly two text messages through', () => {
+    dialFake((socket, adapted) => {
       // Blob is the browser default and its read is asynchronous, so a frame would
       // arrive out of order — which §7 turns into a torn-down session.
       should(socket.binaryType).equal('arraybuffer');
@@ -143,29 +160,18 @@ describe('the browser WebSocket adapter', () => {
       const opened: string[] = [];
       const texts: string[] = [];
       const binaries: Uint8Array[] = [];
-      const closes: { code: number; reason: string }[] = [];
       adapted.onOpen = () => opened.push('open');
       adapted.onText = text => texts.push(text);
       adapted.onBinary = bytes => binaries.push(bytes);
-      adapted.onClose = (code, reason) => closes.push({ code, reason });
 
       socket.onopen?.();
       socket.onmessage?.({ data: 'fy-ping' });
       socket.onmessage?.({ data: new Uint8Array([1, 2, 3]).buffer });
-      socket.onmessage?.({ data: 42 });
-      socket.onclose?.({ code: 1006, reason: 'gone' });
-      socket.onerror?.();
 
       should(opened).eql(['open']);
       should(texts).eql(['fy-ping']);
       should(binaries).have.length(1);
       should([...(binaries[0] ?? [])]).eql([1, 2, 3]);
-      should(closes.map(close => close.reason)).eql(
-        ['unknown type', 'gone', 'the relay socket failed'].map(
-          reason => closes.find(close => close.reason.includes(reason.split(' ').at(-1) ?? ''))?.reason ?? reason,
-        ),
-      );
-      should(closes).have.length(3);
 
       adapted.send(new Uint8Array([9]));
       adapted.sendText('fy-pong');
@@ -173,6 +179,81 @@ describe('the browser WebSocket adapter', () => {
       should(socket.sent).have.length(2);
       should(socket.closed).eql({ code: 1000, reason: 'done' });
     });
+  });
+
+  it('should refuse a message of an unknown type and stop listening to that carrier', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onmessage?.({ data: 42 });
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(RELAY_CLOSE_CODES.protocolError);
+      should(ends[0]?.reason).containEql('unknown type');
+      // Reporting it and then going on reading would keep a carrier that is
+      // improvising on this channel.
+      should(socket.closed?.code).equal(RELAY_CLOSE_CODES.protocolError);
+    });
+  });
+
+  /**
+   * `failed (0)` was the whole complaint, and `0` is not a close code — it is the
+   * absence of one, invented by the old adapter's `onerror` handler, which then
+   * latched first and threw away the real code in the `close` event behind it.
+   *
+   * What a browser genuinely knows about a failed rendezvous socket is whether the
+   * HANDSHAKE COMPLETED, and these two cases are the two different failures that
+   * distinction separates.
+   */
+  it('should say a handshake never completed, rather than reporting a code of zero', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('could not open a socket to wss://relay.example');
+      should(ends[0]?.reason).containEql('the handshake never completed');
+      // The fingerprint addresses the rendezvous and belongs on a pairing screen, not
+      // in a sentence a reader may paste into an issue.
+      should(ends[0]?.reason).not.containEql('fy_daemon_x');
+    });
+  });
+
+  it('should distinguish a socket that died mid-session from one that never opened', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('was carrying this session');
+    });
+  });
+
+  it('should pass a close frame the rendezvous actually sent through untouched', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onopen?.();
+      socket.onclose?.({ code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'no daemon holds this rendezvous' });
+
+      should(ends).eql([{ code: RELAY_CLOSE_CODES.daemonAbsent, reason: 'no daemon holds this rendezvous' }]);
+    });
+  });
+
+  /**
+   * The spec fires `close` after `error`, so this timer normally reports nothing. It
+   * exists because the alternative to a close that never arrives is the 45-second
+   * handshake deadline, and a reader owed an answer the browser already had should
+   * not wait three quarters of a minute for it.
+   */
+  it('should still answer when the close event the spec promises never arrives', async () => {
+    let captured: RelayEnd[] = [];
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      captured = ends;
+      should(ends).be.empty();
+    });
+    await new Promise(resolve => setTimeout(resolve, 400));
+    should(captured).have.length(1);
+    should(captured[0]?.code).equal(1006);
+    should(captured[0]?.reason).containEql('the handshake never completed');
   });
 });
 
@@ -352,6 +433,67 @@ describe('the carrier router', () => {
     should(router.choice(daemon.daemonId)?.ok).be.false();
   });
 
+  /**
+   * The disclosure a reader actually saw named `Direct` twice and `Hosted relay`
+   * twice for one daemon. Refused carriers were accumulated on the shared entry
+   * rather than kept to the attempt that made them, and an app load issues several
+   * daemon-bound requests at once — so each one appended its own copy.
+   */
+  it('should name each carrier once when several requests fail at the same time', async () => {
+    const { router, daemon } = await routerFor({
+      relay: RELAY,
+      answer: { rejectDevice: true },
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    const attempts = ['/v1/projects', '/v1/usage', '/v1/sessions'].map(path =>
+      router.fetch(`${DAEMON_URL}${path}`).then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    await Promise.all(attempts);
+
+    const choice = router.choice(daemon.daemonId);
+    should(choice?.ok).be.false();
+    should(choice?.passedOver.map(skip => skip.method.kind)).eql(['direct', 'relay']);
+  });
+
+  /**
+   * A round in which nothing worked used to poison the entry for the life of the
+   * pairing: every later request found both carriers already on the refused list,
+   * skipped the loop entirely and threw without trying anything. Coming back onto
+   * the network the daemon is on changed nothing, and neither did the relay coming
+   * back up — the reader had to re-pair to recover from a transient failure.
+   */
+  it('should try again after a round in which no carrier worked', async () => {
+    let reachable = false;
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: autoDial(identity, {}).dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        if (!reachable) throw new TypeError('Failed to fetch');
+        return new Response('back', { status: 200 });
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    await should(router.fetch(`${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
+    should(router.choice(daemon.daemonId)?.ok).be.false();
+
+    reachable = true;
+    should(await (await router.fetch(`${DAEMON_URL}/v1/projects`)).text()).equal('back');
+    should(router.choice(daemon.daemonId)?.ok).be.true();
+  });
+
   it('should not try another carrier once the daemon itself has answered', async () => {
     const { router } = await routerFor({
       relay: RELAY,
@@ -422,5 +564,52 @@ describe('the carrier router', () => {
     // No lookup has been supplied, so nothing is a paired daemon and this reaches the
     // default network — which is the real `fetch`, refused here by an unroutable host.
     await should(router.fetch('http://127.0.0.1:1/v1/projects')).be.rejected();
+  });
+
+  /**
+   * THE ONE PROPERTY AN INJECTED FETCHER CANNOT PROVE ABOUT ITSELF.
+   *
+   * Every other case in this file hands the router an arrow function, and an arrow
+   * has no receiver to be wrong about — so the suite stayed green while a real
+   * browser answered `Failed to execute 'fetch' on 'Window': Illegal invocation` to
+   * every daemon-bound request. `fetch` is a WebIDL operation and WebIDL refuses a
+   * call whose receiver is neither the global nor absent; `this.#network(url, init)`
+   * makes the router the receiver.
+   *
+   * So the fetcher here is deliberately NOT an arrow: it records its own `this`, and
+   * the assertion is that the router never appears there. On main this fails with the
+   * receiver set to the `DaemonCarrierRouter` instance — which is exactly the browser
+   * failure, reproduced without a browser.
+   */
+  it('should never invoke an injected network with the router as its receiver', async () => {
+    const receivers: unknown[] = [];
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: autoDial(identity, {}).dial,
+      heartbeat: () => () => undefined,
+      network: function (this: unknown): Promise<Response> {
+        receivers.push(this);
+        return Promise.resolve(new Response('ok'));
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    // Both ways in: an origin no paired daemon owns goes straight to the network, and
+    // a paired daemon's direct carrier goes through the same field.
+    await router.fetch('https://unpaired.example/v1/anything');
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+
+    should(receivers).have.length(2);
+    for (const receiver of receivers) {
+      should(receiver).not.equal(router);
+      // ES modules are strict, so a call with no receiver has `undefined`, not the global.
+      should(receiver).be.undefined();
+    }
   });
 });

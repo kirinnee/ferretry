@@ -7,7 +7,7 @@ import {
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonRequest } from '../../lib/daemon-transport.ts';
-import { DaemonResponseError, type DaemonFetch } from '../../lib/runtime-models.ts';
+import { browserFetch, DaemonResponseError, type DaemonFetch } from '../../lib/runtime-models.ts';
 
 const attentionPath = (sessionId: string): string => `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
 
@@ -24,7 +24,7 @@ const requestAttention = async (
   connection: DaemonConnection,
   sessionId: string,
   init: RequestInit = {},
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionSnapshot> => {
   const request = daemonRequest(connection, attentionPath(sessionId), init);
   const response = await fetcher(request.url, request.init);
@@ -38,7 +38,7 @@ const requestAttention = async (
 export const fetchAttention = (
   connection: DaemonConnection,
   sessionId: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionSnapshot> => requestAttention(connection, sessionId, {}, fetcher);
 
 /** Resolves or dismisses an item and returns the daemon's new authoritative ledger. */
@@ -46,7 +46,7 @@ export const actOnAttention = (
   connection: DaemonConnection,
   sessionId: string,
   action: AttentionActionRequest,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<AttentionSnapshot> =>
   requestAttention(
     connection,

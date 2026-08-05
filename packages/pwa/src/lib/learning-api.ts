@@ -14,7 +14,7 @@ import {
 
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
-import { type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 
 const errorFor = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -30,7 +30,7 @@ const requestLearning = async <Value>(
   path: string,
   schema: { parse(value: unknown): Value },
   init: RequestInit = {},
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<Value> => {
   const request = daemonRequest(daemon, path, init);
   const response = await fetcher(request.url, request.init);
@@ -39,13 +39,15 @@ const requestLearning = async <Value>(
 };
 
 /** Every learning request is bound to the explicitly paired daemon. */
-export const fetchLearningStatus = (daemon: DaemonConnection, fetcher: DaemonFetch = fetch): Promise<LearningStatus> =>
-  requestLearning(daemon, '/v1/learning/status', LearningStatusSchema, {}, fetcher);
+export const fetchLearningStatus = (
+  daemon: DaemonConnection,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<LearningStatus> => requestLearning(daemon, '/v1/learning/status', LearningStatusSchema, {}, fetcher);
 
 export const fetchLearningProposals = (
   daemon: DaemonConnection,
   state?: ProposalState,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<readonly ProposalView[]> =>
   requestLearning(
     daemon,
@@ -65,7 +67,7 @@ export const actOnLearningProposal = (
   daemon: DaemonConnection,
   id: string,
   action: LearningActionRequest,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<ProposalView> =>
   requestLearning(
     daemon,
@@ -78,7 +80,7 @@ export const actOnLearningProposal = (
 export const fetchLearningPatch = (
   daemon: DaemonConnection,
   id: string,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<LearningPatchResponse> =>
   requestLearning(
     daemon,
@@ -91,5 +93,5 @@ export const fetchLearningPatch = (
 export const runLearningScan = (
   daemon: DaemonConnection,
   spawn = false,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<RunManifest> => requestLearning(daemon, '/v1/learning/run', RunManifestSchema, mutation({ spawn }), fetcher);

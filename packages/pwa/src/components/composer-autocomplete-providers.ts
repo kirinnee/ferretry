@@ -18,7 +18,7 @@ import { daemonRequest } from '../lib/daemon-transport.ts';
 import { pinReferenceMarkdown } from '../lib/pin-links.ts';
 import { resolvedPinReference } from '../lib/pin-reference-context.ts';
 import { formatReference, parseReferenceToken } from '../lib/references.ts';
-import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
+import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
@@ -275,7 +275,7 @@ export async function loadSkillsCatalog(
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   signal: AbortSignal,
-  fetcher: DaemonFetch = fetch,
+  fetcher: DaemonFetch = browserFetch,
 ): Promise<ComposerSkillsCatalog> {
   const response = await skillsRequest(daemon, scope, signal, fetcher);
   return {
@@ -328,7 +328,7 @@ export function createSkillsProvider({
   daemon,
   scope,
   harness,
-  fetcher = fetch,
+  fetcher = browserFetch,
 }: ComposerSkillsProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const cache = new Map<string, ComposerSkillsCatalog>();
@@ -464,7 +464,7 @@ const hasUnambiguousDirectoryToken = (path: string): boolean => {
 export function createFilesProvider({
   daemon,
   scope,
-  fetcher = fetch,
+  fetcher = browserFetch,
 }: ComposerProviderScopeOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const cache = new Map<string, FsListing>();
@@ -692,7 +692,7 @@ const pinCandidates = (
 export function createReferencesProvider({
   daemon,
   scope,
-  fetcher = fetch,
+  fetcher = browserFetch,
   getSessions = noSessions,
   getTasks = noTasks,
   getAttentionItems = noAttention,
@@ -812,7 +812,7 @@ export function createReferencesProvider({
 export function createSurfacesProvider({
   daemon,
   scope,
-  fetcher = fetch,
+  fetcher = browserFetch,
   listTerminals = listSessionTerminals,
 }: ComposerSurfacesProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);

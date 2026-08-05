@@ -33,7 +33,7 @@ import {
   revokeDaemonPushDevice,
   type PushSubscriptionLike,
 } from './push-subscriptions.ts';
-import type { DaemonFetch } from './runtime-models.ts';
+import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 
 /* ---------- capability ----------------------------------------------------- */
 
@@ -155,7 +155,7 @@ export interface DaemonPushService {
   revoke(connection: DaemonConnection, deviceId: string): Promise<PushDeviceView>;
 }
 
-export const daemonPushService = (fetcher: DaemonFetch = fetch): DaemonPushService => ({
+export const daemonPushService = (fetcher: DaemonFetch = browserFetch): DaemonPushService => ({
   vapidKey: connection => fetchDaemonVapidKey(connection, fetcher),
   list: connection => listDaemonPushDevices(connection, fetcher),
   register: (connection, subscription, deviceName, preferences) =>

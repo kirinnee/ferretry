@@ -313,6 +313,78 @@ describe('StoreProvider', () => {
     expect(requests).toEqual(['https://alpha.example.test/v1/push/subscriptions']);
   });
 
+  /**
+   * THE CASE EVERY OTHER TEST IN THIS FILE IS BLIND TO, BECAUSE THEY ALL INJECT.
+   *
+   * `createAppStore` is where the shipped `Illegal invocation` came from: the root
+   * wrote `options.fetcher ?? fetch` and handed that bare builtin to the carrier
+   * router, which stores it and invokes it as a member. A suite that passes its own
+   * `fetcher` never runs that line, and an injected plain function does not care what
+   * its receiver is — so the whole product could not connect while this file was
+   * green.
+   *
+   * This test therefore injects NOTHING and makes the global itself
+   * receiver-sensitive. The router must reach it as the global's own method, never
+   * with the router as the receiver. On main the recorded receiver is the
+   * `DaemonCarrierRouter` instance, which is precisely what a real browser refuses.
+   */
+  it('reaches the real network without making the carrier router its receiver', async () => {
+    const receivers: unknown[] = [];
+    const globalFetch = globalThis.fetch;
+    // Deliberately not an arrow: an arrow has no receiver to be wrong about, which is
+    // exactly why the existing injected-fetcher cases could not see this.
+    globalThis.fetch = function (this: unknown): Promise<Response> {
+      receivers.push(this);
+      return Promise.resolve(Response.json({}));
+    } as unknown as typeof fetch;
+
+    try {
+      const store = await createAppStore({
+        repository: new MemoryRepository(),
+        connectClient: async () => client('unused'),
+      });
+      store.connections.add(alpha);
+      await store.carrier.fetch(`${alpha.baseUrl}/v1/projects`);
+    } finally {
+      globalThis.fetch = globalFetch;
+    }
+
+    expect(receivers.length).toBeGreaterThan(0);
+    for (const receiver of receivers) expect(receiver).toBe(globalThis);
+  });
+
+  /**
+   * TWO ANSWERS TO ONE QUESTION IS ONE ANSWER TOO MANY.
+   *
+   * The typed client used to build its own transport, which dialled the daemon's own
+   * address directly and knew nothing about the carrier router. So Settings could
+   * show a green "Reachable" pill — a typed-client health request — beside a Carrier
+   * panel saying no connection worked, and both were telling the truth about
+   * different code. The probe also could not see a daemon that was only reachable
+   * through the relay, and reported it down.
+   *
+   * There is one path now, so the request the typed client makes is a request the
+   * carrier router carried.
+   */
+  it('sends the typed client over the carrier rather than its own direct transport', async () => {
+    const requests: string[] = [];
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      fetcher: async input => {
+        requests.push(String(input));
+        return Response.json([]);
+      },
+    });
+    store.connections.add(alpha);
+
+    await (await store.clients.client(alpha)).list();
+
+    expect(requests).toEqual(['https://alpha.example.test/v1/sessions']);
+    // And the router recorded it as a measurement, which is the whole point: the
+    // probe and the Carrier panel are now reading one answer.
+    expect(store.carrier.choice(alpha.daemonId)?.ok).toBe(true);
+  });
+
   it('publishes a daemon-scoped store and reacts to runtime pairing changes', async () => {
     const store = await memoryStore();
     const view = await mount(
