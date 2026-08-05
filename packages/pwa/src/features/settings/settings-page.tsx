@@ -8,7 +8,7 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { Check, ChevronDown, ChevronLeft, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
@@ -20,6 +20,7 @@ import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
+import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
@@ -62,43 +63,15 @@ const sectionFromHash = (): SettingsSectionId | null => {
   return isSettingId(value) ? settingsSectionForSetting(value) : null;
 };
 
-function SettingsSectionChoices({
-  active,
-  onSelect,
-}: {
-  readonly active: SettingsSectionId;
-  readonly onSelect: (id: SettingsSectionId) => void;
-}) {
-  return (
-    <ul className="m-0 flex list-none flex-col gap-1 p-0">
-      {SETTINGS_SECTIONS.map(section => {
-        const selected = section.id === active;
-        return (
-          <li key={section.id}>
-            <button
-              type="button"
-              data-settings-section-choice={section.id}
-              aria-current={selected ? 'page' : undefined}
-              onClick={() => onSelect(section.id)}
-              className={cn(
-                'flex min-h-[52px] w-full items-center gap-2 rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus',
-                selected
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-transparent text-muted hover:border-border hover:bg-surface-2 hover:text-fg',
-              )}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block text-ui font-semibold">{section.label}</span>
-                <span className="mt-0.5 block text-meta leading-tight text-faint">{section.description}</span>
-              </span>
-              {selected ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+/**
+ * Level one of the shared rail. The section catalogue is a constant, not runtime
+ * state, so the rows are built once at module scope rather than per render.
+ */
+const SETTINGS_SECTION_ITEMS: readonly ChoiceRailItem<SettingsSectionId>[] = SETTINGS_SECTIONS.map(section => ({
+  id: section.id,
+  label: section.label,
+  detail: section.description,
+}));
 
 function MobileSettingsSectionPicker({
   active,
@@ -152,8 +125,10 @@ function MobileSettingsSectionPicker({
             Pick one area; the settings underneath stay on this page.
           </p>
           <nav aria-label="Settings sections">
-            <SettingsSectionChoices
-              active={active}
+            <ChoiceRail
+              items={SETTINGS_SECTION_ITEMS}
+              activeId={active}
+              marker="data-settings-section-choice"
               onSelect={id => {
                 onSelect(id);
                 onClose();
@@ -462,7 +437,12 @@ export function SettingsPage({
             className="sticky top-2 hidden rounded-panel border border-border bg-surface p-2 shadow-panel md:block"
             aria-label="Settings sections"
           >
-            <SettingsSectionChoices active={activeSection} onSelect={setActiveSection} />
+            <ChoiceRail
+              items={SETTINGS_SECTION_ITEMS}
+              activeId={activeSection}
+              marker="data-settings-section-choice"
+              onSelect={setActiveSection}
+            />
           </nav>
 
           <div className="min-w-0">
