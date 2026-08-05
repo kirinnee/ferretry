@@ -8,6 +8,10 @@ export const useAccountPickerSlice = (
   store: DaemonAccountPickerStore,
   daemon: DaemonConnection,
 ): DaemonAccountPickerSlice => {
+  // Re-pairing may keep the daemon id while replacing its credential. Reset
+  // that generation during render so the previous roster is never painted for
+  // even one frame under the new connection.
+  store.sliceFor(daemon);
   useEffect(() => {
     void store.hydrate(daemon).catch(() => {});
   }, [store, daemon]);

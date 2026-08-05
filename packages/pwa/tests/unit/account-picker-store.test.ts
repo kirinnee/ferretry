@@ -114,6 +114,15 @@ describe('DaemonAccountPickerStore', () => {
     expect(store.slice(laptop.daemonId).catalog?.accounts?.[0]?.wrapper).toBe('claude-auto-rotated');
   });
 
+  it('drops the previous pairing synchronously before a replacement hydrate begins', async () => {
+    const store = new DaemonAccountPickerStore({ catalog: async () => catalog('claude-auto-laptop') });
+    await store.hydrate(laptop);
+
+    const rotated = { ...laptop, deviceToken: 'rotated-token' };
+    expect(store.sliceFor(rotated)).toEqual({ catalog: null, status: 'idle', error: null });
+    expect(store.slice(laptop.daemonId).catalog).toBeNull();
+  });
+
   it('clears only the requested daemon', async () => {
     const store = new DaemonAccountPickerStore(
       portFor(

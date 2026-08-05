@@ -4,7 +4,7 @@ import type { AccountPickerCatalog } from '../../src/components/picker-catalog.t
 import { useAccountPickerSlice } from '../../src/hooks/use-account-picker.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { mount } from '../support/dom.ts';
+import { interact, mount } from '../support/dom.ts';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
@@ -57,6 +57,35 @@ describe('useAccountPickerSlice', () => {
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('error:fleet unavailable');
+    await mounted.unmount();
+  });
+
+  it('never paints a previous roster under a re-paired connection with the same daemon id', async () => {
+    let release!: (answer: AccountPickerCatalog) => void;
+    const pending = new Promise<AccountPickerCatalog>(resolve => {
+      release = resolve;
+    });
+    let reads = 0;
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => {
+        reads += 1;
+        return reads === 1 ? catalog('first pairing') : await pending;
+      },
+    });
+    const mounted = await mount(<Status store={store} daemon={laptop} />);
+    expect(mounted.container.textContent).toBe('ready:first pairing');
+
+    const rotated = { ...laptop, deviceToken: 'rotated-token' };
+    await mounted.render(<Status store={store} daemon={rotated} />);
+    expect(reads).toBe(2);
+    expect(mounted.container.textContent).toBe('loading:—');
+
+    await interact(async () => {
+      release(catalog('replacement pairing'));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mounted.container.textContent).toBe('ready:replacement pairing');
     await mounted.unmount();
   });
 });

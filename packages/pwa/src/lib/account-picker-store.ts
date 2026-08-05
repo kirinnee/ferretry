@@ -69,6 +69,16 @@ export class DaemonAccountPickerStore {
   }
 
   /**
+   * Read through the live pairing generation. Calling this while rendering a
+   * newly paired connection drops evidence read with the credential it
+   * replaced before React can paint it under the new connection.
+   */
+  sliceFor(daemon: DaemonConnection): DaemonAccountPickerSlice {
+    this.#entryFor(daemon);
+    return this.slice(daemon.daemonId);
+  }
+
+  /**
    * Refresh one daemon's roster. A burst for the same live connection shares
    * one request; another daemon or a re-paired connection never does.
    */
