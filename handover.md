@@ -133,11 +133,13 @@ separate daemon-scoped path and retain their existing validation and composer be
 
 Human intervention should be obvious, brief, and genuinely necessary.
 
-**#11 landed.** Dismissal now has the intended asymmetric authority at the daemon boundary: an
-agent may dismiss only Attention it provably raised, while a human may dismiss any item. Unknown or
-malformed provenance fails closed. Dismissal addresses the item instead of erasing it, retaining the
-disposition and resolver in the audit ledger; the CLI explains the policy and the PWA shows the
-resulting evidence.
+**#11 landed.** Dismissal now has the intended asymmetric authority at the daemon boundary: a request
+attributed to an agent may dismiss only Attention whose recorded origin carries the same session,
+while a human may dismiss any item. Malformed or unrecognised attribution is refused, cross-session
+mutations fail before storage, and a missing session is never treated as an empty board. Agent
+attribution remains an operational client-set header under the shared admin token, not a per-session
+credential. Dismissal addresses the item instead of erasing it, retaining the disposition and resolver
+in the audit ledger; the CLI explains the policy and the PWA shows the resulting evidence.
 
 |  ID | Todo | Feature                                 | Definition of done                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 🔒 Hard | ↔ Soft            |
 | --: | :--: | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- | ----------------- |

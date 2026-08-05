@@ -292,5 +292,6 @@ describe('attention command surface', () => {
     should(help).containEql('Agents may dismiss only attention items they raised themselves');
     should(help).containEql('A human may dismiss any attention item');
     should(help).containEql('Every dismissal remains in the resolution audit');
+    should(help).match(/an agent may mutate only its own\s+session/u);
   });
 });

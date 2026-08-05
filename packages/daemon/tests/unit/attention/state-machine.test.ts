@@ -583,6 +583,7 @@ describe('Attention state machine', () => {
     });
     should(retry.changed).be.false();
     should(forbidden.error.code).equal('forbidden');
+    should(forbidden.error.message).match(/only the daemon may reconcile/u);
   });
 
   it('should decode only durable ledgers whose lifecycle, provenance, and counters agree', () => {

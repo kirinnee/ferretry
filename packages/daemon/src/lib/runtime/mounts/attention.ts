@@ -46,11 +46,12 @@ const ATTENTION_ERROR_STATUS: Readonly<Record<AttentionErrorCode, number>> = {
 /**
  * Who the board thinks is acting, derived from the actor the authorization boundary resolved.
  *
- * An in-pane peer is an agent; host-admin and registry-resolved device actors are the human. Any
- * other value is refused: unavailable provenance must never inherit the human's ability to dismiss
- * every item. The session id comes from the server-derived actor, so an agent cannot raise attention
- * in another session's name by sending a different body. A display name is not carried by the API
- * actor, so it is honestly `null` rather than guessed from a header a client controls.
+ * An authenticated in-pane caller attributed as a peer is an agent; host-admin and registry-resolved
+ * device actors are the human. Any other value is refused: unrecognised provenance must never inherit
+ * the human's ability to dismiss every item. The session id comes from request-level actor attribution,
+ * not the mutation body. Because that attribution is a client-set header under the shared admin token,
+ * the service and state-machine guards below constrain it to the target session. A display name is not
+ * carried by the API actor, so it is honestly `null` rather than guessed.
  */
 export function attentionActor(actor: ApiActor | undefined): AttentionActor {
   const { kind, id } = parseActor(actor ?? '');

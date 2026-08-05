@@ -9,7 +9,8 @@ import type {
 } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
-const SESSION_HELP = 'target another session (defaults to the session this command runs inside)';
+const SESSION_HELP =
+  'target another session; an agent may mutate only its own session (defaults to the current session)';
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
