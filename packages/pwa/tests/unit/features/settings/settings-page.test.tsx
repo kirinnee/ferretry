@@ -299,6 +299,30 @@ describe('SettingsPage controls and daemon-qualified links', () => {
     run(() => view.unmount());
   });
 
+  /**
+   * The panel a refused control sends somebody to. A tab that renders nothing is a capability the
+   * product does not have, and this is the panel that explains every other panel's refusals.
+   */
+  it('mounts the same daemon’s capability-limits panel when the reader selects it', () => {
+    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
+    const view = render(page({ current, connections: [current], calls: calls() }));
+    selectDesktopSection(view, 'daemons');
+    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
+
+    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-grants' }).props.onClick());
+
+    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
+      'daemon-settings-tab-grants',
+    );
+    // With no client supplied the surface says it is reading or that it could not — never five allowed
+    // rows, which over an unread daemon is the opposite of the truth.
+    expect(
+      frame.findAllByProps({ 'aria-label': 'Loading capability grants' }).length +
+        frame.findAllByProps({ 'aria-label': 'Capability grants unavailable' }).length,
+    ).toBeGreaterThan(0);
+    run(() => view.unmount());
+  });
+
   it('leaves text-scale choices visible but disabled when percentage adjustment is unsupported', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
     Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });
@@ -677,6 +701,7 @@ describe('daemon settings', () => {
     expect(panels.map(panel => panel.getAttribute('data-daemon-panel'))).toEqual([
       'warden',
       'secrets',
+      'grants',
       'environment',
       'carrier',
       'host-checks',
@@ -770,13 +795,14 @@ describe('daemon settings', () => {
     expect(choices.map(choice => choice.getAttribute('data-daemon-panel-choice'))).toEqual([
       'warden',
       'secrets',
+      'grants',
       'environment',
       'carrier',
       'host-checks',
     ]);
     expect(sheet.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(sheet.querySelectorAll('[role="tablist"]')).toHaveLength(0);
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null]);
+    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null]);
 
     await interact(() =>
       must(

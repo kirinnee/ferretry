@@ -41,6 +41,7 @@ import {
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { z } from 'zod';
+import { type GrantRefusalNotice, grantRefusalNotice } from '../../lib/grants.ts';
 
 /** The only client capability the fleet surface uses. */
 export type FleetClient = Pick<IFyApiClient, 'request'>;
@@ -217,6 +218,16 @@ export interface FleetRefusalView {
   readonly kind: FleetRefusalKind;
   readonly detail: string;
   readonly code?: string;
+  /**
+   * The OPERATOR's refusal, when this 403 is one.
+   *
+   * A `forbidden` on its own could mean three different things a person acts on differently — this
+   * credential is not allowed to, the operator switched the capability off, or the operator password
+   * is needed — and a flat "READ ONLY" badge collapses all three into a dead end. When the daemon
+   * names one of them with a `grant_*` code, it is carried here so a surface can say WHICH and offer
+   * the next step rather than greying a control out.
+   */
+  readonly grant?: GrantRefusalNotice;
 }
 
 /**
@@ -255,5 +266,11 @@ export const fleetRefusal = (error: unknown): FleetRefusalView => {
   const detail = error instanceof Error && error.message.length > 0 ? error.message : String(error);
   const kind: FleetRefusalKind =
     http === null ? 'unreachable' : http.status === 403 ? 'forbidden' : refusalKindFor(http.code);
-  return { kind, detail, ...(http?.code === undefined ? {} : { code: http.code }) };
+  const grant = grantRefusalNotice(error);
+  return {
+    kind,
+    detail,
+    ...(http?.code === undefined ? {} : { code: http.code }),
+    ...(grant === null ? {} : { grant }),
+  };
 };

@@ -651,6 +651,10 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
     [store.clients],
   );
+  const readGrantClient = useCallback(
+    async (daemon: DaemonConnection) => await store.clients.client(daemon),
+    [store.clients],
+  );
   const daemonSettingsTabs = useMemo(
     () => [
       {
@@ -685,6 +689,11 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       dictation={dictation}
       probeDaemon={probeDaemon}
       readWardenStatus={readWardenStatus}
+      // Through the app's client pool, so a grant read travels the same carrier — direct first, relay
+      // as the automatic fallback — as every other daemon call. The surface's own default would dial
+      // the daemon address directly, which is how a screen ends up reporting a limit it could not read
+      // on a daemon that is only reachable through the rendezvous.
+      createGrantClient={readGrantClient}
       daemonSettingsTabs={daemonSettingsTabs}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);

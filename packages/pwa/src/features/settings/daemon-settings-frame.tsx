@@ -9,7 +9,7 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { ChevronDown, KeyRound, ShieldCheck } from 'lucide-react';
+import { ChevronDown, KeyRound, Lock, ShieldCheck } from 'lucide-react';
 import { type ComponentType, type ReactNode, useId, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
@@ -18,6 +18,7 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
+import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
 import { type DaemonReachabilityProbe, DaemonHostChecks } from './daemon-settings.tsx';
@@ -50,6 +51,9 @@ const PANEL_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm
 const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   warden: <ShieldCheck size={16} className="shrink-0" aria-hidden="true" />,
   secrets: <KeyRound size={16} className="shrink-0" aria-hidden="true" />,
+  // A lock, because this panel is where a refused control is explained — the one glyph that reads as
+  // "permission" rather than as an invented category.
+  grants: <Lock size={16} className="shrink-0" aria-hidden="true" />,
 };
 
 const unavailableWardenStatus: WardenStatusReader = async () => {
@@ -117,6 +121,8 @@ export interface DaemonSettingsFrameProps {
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the secret store. */
   readonly createSecretClient?: SecretClientFactory;
+  /** And for the grant surface, so no test or harness opens a socket to read a limit. */
+  readonly createGrantClient?: GrantClientFactory;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -140,6 +146,7 @@ export function DaemonSettingsFrame({
   readWardenStatus,
   createWardenClient,
   createSecretClient,
+  createGrantClient,
   additionalTabs = [],
   carrier,
   relayAdvertised = false,
@@ -169,6 +176,22 @@ export function DaemonSettingsFrame({
           <SecretsSurface
             connection={activeConnection}
             {...(createSecretClient ? { createClient: createSecretClient } : {})}
+          />
+        ),
+      },
+      {
+        /**
+         * The operator's limits, second, because it is the panel that explains why another panel's
+         * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
+         * so it must not be buried after the tabs that send them.
+         */
+        id: 'grants',
+        label: 'What devices may do',
+        description: 'Per-capability limits for callers that are not on this machine.',
+        Surface: ({ connection: activeConnection }) => (
+          <GrantsSurface
+            connection={activeConnection}
+            {...(createGrantClient ? { createClient: createGrantClient } : {})}
           />
         ),
       },
@@ -224,6 +247,7 @@ export function DaemonSettingsFrame({
       carrier,
       connectionRecord,
       connections,
+      createGrantClient,
       createSecretClient,
       createWardenClient,
       onRemoveDaemon,

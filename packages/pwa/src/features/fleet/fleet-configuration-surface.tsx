@@ -645,6 +645,18 @@ export function FleetConfigurationSurface({
                 {INVENTORY_COPY[inventory.kind].title}
               </h3>
               <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
+              {/* WHICH refusal this is, when the operator is the one refusing. "This credential may
+                  not read the fleet" is true of all three and actionable for none of them: switched
+                  off on the host, needs the operator password, and a daemon that has lost its own
+                  decision send a person three different places. */}
+              {inventory.kind === 'forbidden' && inventory.grant !== undefined ? (
+                <p
+                  className="mb-0 mt-2 text-ui font-semibold leading-base text-fg"
+                  data-fleet-state-grant={inventory.grant.refusal}
+                >
+                  {inventory.grant.guidance.explanation}
+                </p>
+              ) : null}
               <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-muted">
                 {inventory.detail}
               </pre>

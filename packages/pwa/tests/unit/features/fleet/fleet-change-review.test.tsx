@@ -11,6 +11,7 @@ import {
   FleetLiveRoster,
   FleetRefusalAlert,
 } from '../../../../src/features/fleet/fleet-change-review.tsx';
+import { type GrantRefusalNotice, grantRefusalNotice } from '../../../../src/lib/grants.ts';
 import { absoluteTime } from '../../../../src/lib/session-screens.ts';
 import { mount } from '../../../support/dom.ts';
 import {
@@ -98,6 +99,38 @@ describe('a daemon refusal', () => {
     );
     expect(mounted.container.textContent).toContain('This daemon refused the change');
     expect(mounted.container.querySelector('code')).toBeNull();
+    await mounted.unmount();
+  });
+
+  /**
+   * A 403 is three different situations a person acts on differently — the operator switched the
+   * capability off, the operator password is needed, or the daemon has lost its own decision. Showing
+   * only "the daemon refused" collapses them into the greyed-control dead end this feature removes.
+   */
+  it('names WHICH operator refusal a 403 was, above the daemon’s own sentence', async () => {
+    const mounted = await mount(
+      <FleetRefusalAlert
+        refusal={{
+          kind: 'forbidden',
+          detail: 'grant it on the host with `fy daemon config set fleet --configure`.',
+          code: 'grant_not_granted',
+          grant: grantRefusalNotice(
+            Object.assign(new Error('grant it on the host with `fy daemon config set fleet --configure`.'), {
+              status: 403,
+              code: 'grant_not_granted',
+            }),
+          ) as GrantRefusalNotice,
+        }}
+      />,
+    );
+    expect(pick(mounted.container, '[data-fleet-refusal-grant]').getAttribute('data-fleet-refusal-grant')).toBe(
+      'not-granted',
+    );
+    // No capability is named: a 403 says WHICH refusal it is, not which capability was demanded, and
+    // inventing one from the route would be a guess. The daemon's sentence supplies that.
+    expect(mounted.container.textContent).toContain('switched this off');
+    // And the daemon's own words survive, because they name the command a human runs.
+    expect(mounted.container.textContent).toContain('fy daemon config set fleet --configure');
     await mounted.unmount();
   });
 });

@@ -55,6 +55,7 @@ import {
 } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { grantRefusalNotice } from '../lib/grants.ts';
 import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
 import {
   describeCoControl,
@@ -146,7 +147,19 @@ export interface SessionTerminalDeckProps {
   readonly focusTerminalId?: string;
 }
 
-const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+/**
+ * What a failed terminal call says.
+ *
+ * A grant refusal is worded as one rather than shown as a bare 403: the operator may have switched
+ * `terminal` off, or the operator password may be needed, and "HTTP 403" tells a person neither. The
+ * daemon's own sentence — which names the command that changes it — is kept after the guidance.
+ */
+const failure = (error: unknown): string => {
+  const grant = grantRefusalNotice(error);
+  if (grant !== null)
+    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  return error instanceof Error ? error.message : String(error);
+};
 
 const ownershipOf = (terminal: TerminalView | null): SurfaceOwnership => terminal?.openedBy ?? { by: 'unrecorded' };
 

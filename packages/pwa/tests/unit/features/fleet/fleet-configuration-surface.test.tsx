@@ -173,7 +173,43 @@ describe('reading one daemon fleet', () => {
     expect(pick(forbidden.container, '[data-fleet-host-guidance]').textContent).toContain('Host-authorised changes');
     expect(forbidden.container.textContent).toContain('fy fleet init --first-account');
     expect(forbidden.container.textContent).toContain('fy fleet apply');
+    // A refusal with no grant code says nothing about the operator, because nothing told it to.
+    expect(absent(forbidden.container, '[data-fleet-state-grant]')).toBe(true);
     await forbidden.unmount();
+  });
+
+  /**
+   * "This credential may not read the fleet" is true of three different situations and actionable for
+   * none of them. When the daemon names which one, the panel says it — that is the difference between
+   * a person going to the host and a person going to look at the network.
+   */
+  it('names the operator refusal behind a 403 rather than only that the read was refused', async () => {
+    const locked = await open({
+      accounts: () => {
+        throw refusal('grant_locked', 'changing the settings for the agent fleet needs the operator password', 403);
+      },
+      permissions: () => {
+        throw refusal('grant_locked', 'no', 403);
+      },
+    });
+    expect(pick(locked.container, '[data-fleet-state]').getAttribute('data-fleet-state')).toBe('forbidden');
+    expect(pick(locked.container, '[data-fleet-state-grant]').getAttribute('data-fleet-state-grant')).toBe('locked');
+    expect(locked.container.textContent).toContain('needs the operator password');
+    await locked.unmount();
+
+    const switchedOff = await open({
+      accounts: () => {
+        throw refusal('grant_not_granted', 'the operator has not granted the UI the use of the agent fleet', 403);
+      },
+      permissions: () => {
+        throw refusal('grant_not_granted', 'no', 403);
+      },
+    });
+    expect(pick(switchedOff.container, '[data-fleet-state-grant]').getAttribute('data-fleet-state-grant')).toBe(
+      'not-granted',
+    );
+    expect(switchedOff.container.textContent).toContain('switched this off');
+    await switchedOff.unmount();
   });
 
   it('says a daemon that answered invalidly is damaged, not silent', async () => {
