@@ -423,4 +423,51 @@ describe('the carrier router', () => {
     // default network — which is the real `fetch`, refused here by an unroutable host.
     await should(router.fetch('http://127.0.0.1:1/v1/projects')).be.rejected();
   });
+
+  /**
+   * THE ONE PROPERTY AN INJECTED FETCHER CANNOT PROVE ABOUT ITSELF.
+   *
+   * Every other case in this file hands the router an arrow function, and an arrow
+   * has no receiver to be wrong about — so the suite stayed green while a real
+   * browser answered `Failed to execute 'fetch' on 'Window': Illegal invocation` to
+   * every daemon-bound request. `fetch` is a WebIDL operation and WebIDL refuses a
+   * call whose receiver is neither the global nor absent; `this.#network(url, init)`
+   * makes the router the receiver.
+   *
+   * So the fetcher here is deliberately NOT an arrow: it records its own `this`, and
+   * the assertion is that the router never appears there. On main this fails with the
+   * receiver set to the `DaemonCarrierRouter` instance — which is exactly the browser
+   * failure, reproduced without a browser.
+   */
+  it('should never invoke an injected network with the router as its receiver', async () => {
+    const receivers: unknown[] = [];
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: autoDial(identity, {}).dial,
+      heartbeat: () => () => undefined,
+      network: function (this: unknown): Promise<Response> {
+        receivers.push(this);
+        return Promise.resolve(new Response('ok'));
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    // Both ways in: an origin no paired daemon owns goes straight to the network, and
+    // a paired daemon's direct carrier goes through the same field.
+    await router.fetch('https://unpaired.example/v1/anything');
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+
+    should(receivers).have.length(2);
+    for (const receiver of receivers) {
+      should(receiver).not.equal(router);
+      // ES modules are strict, so a call with no receiver has `undefined`, not the global.
+      should(receiver).be.undefined();
+    }
+  });
 });
