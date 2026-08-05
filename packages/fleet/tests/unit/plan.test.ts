@@ -25,7 +25,7 @@ const LAYOUT: FleetLayout = {
 const route = (patch: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: ID_CLAUDE,
   wrapper: 'fy-claude-work',
-  home: '~/.claude-work',
+  home: 'claude-work',
   defaultModel: 'opus',
   models: ['opus'],
   ...patch,
@@ -89,7 +89,7 @@ describe('FleetPlan', () => {
       { kind: 'directory', path: '/state/fleet', mode: 0o700 },
       { kind: 'directory', path: '/state/fleet/bin', mode: 0o700 },
       { kind: 'directory', path: '/state/fleet/homes', mode: 0o700 },
-      { kind: 'directory', path: '/home/tester/.claude-work', mode: 0o700 },
+      { kind: 'directory', path: '/state/fleet/homes/claude-work', mode: 0o700 },
     ]);
   });
 
@@ -100,17 +100,17 @@ describe('FleetPlan', () => {
 
     // Assert
     should(wrapper).match({ path: '/state/fleet/bin/fy-claude-work', mode: 0o755 });
-    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR="$HOME/.claude-work"`);
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR='claude-work'`);
   });
 
-  it('should keep the declared home form in the wrapper but publish the expanded one', () => {
+  it('should keep the declared account name in the wrapper but publish the Ferretry-home expansion', () => {
     // Act
     const actual = subject.build(config(), LAYOUT, GENERATED_AT);
     const [wrapper] = operationsOf(actual, 'file');
 
     // Assert — the script stays portable; the manifest and the filesystem need an absolute path.
-    should(wrapper?.kind === 'file' && wrapper.content).containEql('"$HOME/.claude-work"');
-    should(actual.manifest.accounts[0]?.home).equal('/home/tester/.claude-work');
+    should(wrapper?.kind === 'file' && wrapper.content).containEql("'claude-work'");
+    should(actual.manifest.accounts[0]?.home).equal('/state/fleet/homes/claude-work');
   });
 
   it('should resolve a relative account home under the homes directory', () => {
@@ -148,7 +148,7 @@ describe('FleetPlan', () => {
     should(wrapper?.kind === 'file' && wrapper.content).containEql('. "$HOME/.config/fy/secrets.sh"');
   });
 
-  it('should link path assets and plan settings as unresolved layers', () => {
+  it('should copy path assets into the account home and plan settings as unresolved layers', () => {
     // Arrange
     const input = config({
       profiles: { shared: { memory: 'CLAUDE.md', skills: '~/assets/skills', settings: ['base.json', { model: 'x' }] } },
@@ -159,14 +159,14 @@ describe('FleetPlan', () => {
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
     // Assert
-    should(operationsOf(actual, 'symlink')).deepEqual([
-      { kind: 'symlink', source: '/state/fleet/assets/CLAUDE.md', path: '/home/tester/.claude-work/CLAUDE.md' },
-      { kind: 'symlink', source: '/home/tester/assets/skills', path: '/home/tester/.claude-work/skills' },
+    should(operationsOf(actual, 'copy')).deepEqual([
+      { kind: 'copy', source: '/state/fleet/assets/CLAUDE.md', path: '/state/fleet/homes/claude-work/CLAUDE.md' },
+      { kind: 'copy', source: '/home/tester/assets/skills', path: '/state/fleet/homes/claude-work/skills' },
     ]);
     should(operationsOf(actual, 'settings')).deepEqual([
       {
         kind: 'settings',
-        path: '/home/tester/.claude-work/settings.json',
+        path: '/state/fleet/homes/claude-work/settings.json',
         format: 'json',
         layers: [
           { from: 'file', path: '/state/fleet/assets/base.json' },
@@ -176,6 +176,7 @@ describe('FleetPlan', () => {
         preserveExisting: true,
       },
     ]);
+    should(operationsOf(actual, 'symlink')).deepEqual([]);
   });
 
   it('should plan no settings operation when the account declares no layers', () => {
@@ -195,7 +196,7 @@ describe('FleetPlan', () => {
           name: 'work',
           kind: 'codex',
           profiles: ['shared'],
-          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: '~/.codex-work' }) },
+          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work' }) },
         },
       ],
     });
@@ -205,12 +206,12 @@ describe('FleetPlan', () => {
 
     // Assert
     should(operationsOf(actual, 'settings').map(operation => operation.path)).deepEqual([
-      '/home/tester/.codex-work/config.toml',
+      '/state/fleet/homes/codex-work/config.toml',
     ]);
-    should(operationsOf(actual, 'symlink').map(operation => operation.path)).deepEqual([
-      '/home/tester/.codex-work/AGENTS.md',
-      '/home/tester/.codex-work/hooks.json',
-      '/home/tester/.codex-work/hooks',
+    should(operationsOf(actual, 'copy').map(operation => operation.path)).deepEqual([
+      '/state/fleet/homes/codex-work/AGENTS.md',
+      '/state/fleet/homes/codex-work/hooks.json',
+      '/state/fleet/homes/codex-work/hooks',
     ]);
   });
 
@@ -251,8 +252,8 @@ describe('FleetPlan', () => {
     const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
     // Assert
-    should(operationsOf(actual, 'symlink').map(operation => operation.path)).deepEqual([
-      '/home/tester/.claude-work/CLAUDE.md',
+    should(operationsOf(actual, 'copy').map(operation => operation.path)).deepEqual([
+      '/state/fleet/homes/claude-work/CLAUDE.md',
       '/home/tester/.claude/CLAUDE.md',
     ]);
     should(operationsOf(actual, 'directory').map(operation => operation.path)).containEql('/home/tester/.claude');

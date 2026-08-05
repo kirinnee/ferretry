@@ -143,6 +143,8 @@ export const ModelDeclarationSchema = z
 export const AccountRouteSchema = z.strictObject({
   id: AccountIdSchema,
   wrapper: SafeNameSchema,
+  /** Relative names resolve to `<FY_HOME>/fleet/homes/<name>`; use that portable default instead
+   * of `~/.claude-*` / `~/.codex-*` so each account home stays inside Ferretry's state home. */
   home: NonEmptyString,
   mode: AccountModeSchema.optional(),
   displayName: NonEmptyString.optional(),
