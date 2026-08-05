@@ -104,6 +104,30 @@ describe('GrantsCard', () => {
     );
     expect(marked(renderer, 'data-grant-one-way')[0]?.props['data-grant-one-way']).toBe('fleet');
     expect(text(renderer)).toContain('cannot be undone from here');
+    // `fleet` loses nothing else by being switched off, so it gets no ordering advice it cannot use.
+    expect(text(renderer)).not.toContain('revoke that device FIRST');
+  });
+
+  it('tells a remote caller that switching pairing off also disables their own revoke', () => {
+    // THE POINT OF DECISION. Somebody reaches for this switch because a phone was stolen — and the same
+    // permission covers `DELETE /v1/pair/devices/:deviceId`, so the coarse switch disables the remedy they
+    // came to apply. The ordering is in `docs/grants.md` too, but a document is read afterwards and the
+    // lockout happens at the click.
+    // Arrange, Act
+    const renderer = render(
+      <GrantsCard
+        connection={connection()}
+        view={view({ capabilities: [entry({ capability: 'pairing', mayGrant: false })] })}
+        nowMs={NOW}
+        onChange={() => {}}
+        onUnlock={() => {}}
+      />,
+    );
+
+    // Assert — the way back AND the order that keeps it usable.
+    const rendered = text(renderer);
+    expect(rendered).toContain('cannot be undone from here');
+    expect(rendered).toContain('revoke that device FIRST');
   });
 
   it('says nothing about one-way doors to a caller standing at the machine', () => {

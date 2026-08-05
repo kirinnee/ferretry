@@ -140,9 +140,33 @@ export const REMOTE_ONE_WAY_NOTE =
 export const LOCAL_TWO_WAY_NOTE =
   'This browser is on the machine, so it can switch these both ways. A paired device elsewhere could only switch them off.';
 
-/** The sentence a remote reader is shown before they close a door only the machine can reopen. */
+/**
+ * What switching a capability off ALSO switches off, when that is the thing somebody came here to do.
+ *
+ * ONE ENTRY TODAY, AND IT IS NOT DECORATION. Somebody reaches for `pairing` off because a phone was
+ * stolen — and that same switch refuses `DELETE /v1/pair/devices/:deviceId`, because both carry
+ * `pairing.use`. So the coarse switch disables the remedy the person is reaching for it to apply, and
+ * the order that works has to be on the control rather than in `docs/grants.md`: a document is read
+ * afterwards, the lockout happens at the click.
+ *
+ * Keyed per capability rather than written into the sentence below, because the next capability whose
+ * switch disables its own remedy needs its own sentence and no generic wording could carry it. See
+ * `docs/grants.md`, "Before you add capability seven".
+ */
+const COARSE_SWITCH_ALSO_STOPS: Readonly<Partial<Record<DaemonCapability, string>>> = {
+  pairing:
+    'It also stops this device revoking a paired one, because both are the same permission — so if you are shutting out a lost or stolen device, revoke that device FIRST and switch this off afterwards.',
+};
+
+/**
+ * The sentence a remote reader is shown before they close a door only the machine can reopen.
+ *
+ * It carries the way back — the host command — and, where the switch also disables the remedy, the
+ * ordering that avoids locking yourself out of it.
+ */
 export function remoteRevokeWarning(capability: DaemonCapability, clientName = 'fy'): string {
-  return `Switching off ${capabilityNoun(capability)} from this device cannot be undone from here — turning it back on has to be done at the machine, with \`${clientName} daemon config set ${capability} --use\`.`;
+  const alsoStops = COARSE_SWITCH_ALSO_STOPS[capability];
+  return `Switching off ${capabilityNoun(capability)} from this device cannot be undone from here — turning it back on has to be done at the machine, with \`${clientName} daemon config set ${capability} --use\`.${alsoStops === undefined ? '' : ` ${alsoStops}`}`;
 }
 
 /** What an off capability says to a caller that may not turn it on: a statement with a remedy. */

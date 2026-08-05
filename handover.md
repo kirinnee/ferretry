@@ -215,5 +215,3 @@ a 1,183.1 ms median before the change (1,182.4–1,184.8 ms) and a 26.1 ms media
 (25.2–29.3 ms): a 45.3× reduction. The old access pattern was one `await
 board(sessionId).list()` per session in `GET /v1/tasks`; a damaged board still makes the whole
 aggregate unavailable rather than looking like an empty or shortened fleet.
-
-> > > > > > > 06759636 (fix(tasks): parallelize fleet board reads)

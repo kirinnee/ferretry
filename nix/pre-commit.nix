@@ -148,6 +148,19 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # Runs on EVERY file rather than a subset, and scans the whole tree rather than the staged paths:
+    # a marker reaches `main` through the file somebody was not looking at. `docs/grants.md` shipped
+    # with three of them behind eleven green checks, one of which treefmt had rewritten into valid
+    # Markdown — see the script for why the laundered shape has to be in the pattern list.
+    a-conflict-markers = {
+      enable = true;
+      name = "No conflict markers";
+      entry = validator "scripts/validate/conflict-markers.sh";
+      files = ".*";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-enforce-exec = {
       enable = true;
       name = "Executable shell scripts";
