@@ -270,4 +270,28 @@ describe('attention command surface', () => {
     // Assert
     should(help).containEql('--kind says what the human DOES');
   });
+
+  it('should explain the asymmetric dismissal policy in dismiss help', async () => {
+    // Arrange
+    let help = '';
+    const program = new Command().exitOverride().configureOutput({
+      writeOut: value => {
+        help += value;
+      },
+      writeErr: () => {},
+    });
+    registerAttentionCommands(
+      program,
+      new AttentionController(new RecordingAttentionGateway(board), new CapturingOutput(), SESSION),
+    );
+
+    // Act
+    await should(program.parseAsync(['node', 'fy', 'attention', 'dismiss', '--help'])).be.rejected();
+
+    // Assert
+    should(help).containEql('Agents may dismiss only attention items they raised themselves');
+    should(help).containEql('A human may dismiss any attention item');
+    should(help).containEql('Every dismissal remains in the resolution audit');
+    should(help).match(/an agent may mutate only its own\s+session/u);
+  });
 });

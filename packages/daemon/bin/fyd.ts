@@ -3528,6 +3528,12 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           // path.
           new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
           clock,
+          {
+            // A missing attention.json is an empty board only for a session the
+            // registry can prove exists. Session document damage propagates
+            // rather than being flattened into "no attention".
+            has: async id => (await sessions.get(id)) !== undefined,
+          },
         ),
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
