@@ -214,10 +214,17 @@ export function renderApplyPlan(plan: FleetApplyPreview): string {
 
 /** What an apply actually did, including anything it swept away. */
 export function renderApplyResult(result: FleetApplyResult): string {
-  const lines = [
-    `applied ${plural(result.accountCount, 'account')} in ${plural(result.operationCount, 'operation')}`,
-    `  manifest: ${result.manifestPath}`,
-  ];
+  const lines =
+    result.accountCount === 0
+      ? [
+          `The manifest declares no accounts; no wrappers were created in ${plural(result.operationCount, 'operation')}.`,
+          '  Next: declare an account in config.yaml and run "fy fleet apply". On a new host, "fy fleet init --first-account" creates one for you.',
+          `  manifest: ${result.manifestPath}`,
+        ]
+      : [
+          `applied ${plural(result.accountCount, 'account')} in ${plural(result.operationCount, 'operation')}`,
+          `  manifest: ${result.manifestPath}`,
+        ];
   if (result.prunedWrappers.length > 0) {
     lines.push(`  pruned ${plural(result.prunedWrappers.length, 'wrapper')}: ${result.prunedWrappers.join(', ')}`);
   }
@@ -372,7 +379,12 @@ export function renderAccount(account: FleetManifestAccount): string {
 
 /** The provisioned fleet. */
 export function renderManifest(manifest: FleetManifest): string {
-  if (manifest.accounts.length === 0) return 'The fleet manifest declares no accounts.';
+  if (manifest.accounts.length === 0) {
+    return [
+      'The fleet manifest declares no accounts.',
+      '  Next: declare an account in config.yaml and run "fy fleet apply". On a new host, "fy fleet init --first-account" creates one for you.',
+    ].join('\n');
+  }
   const header = `${plural(manifest.accounts.length, 'account')} provisioned ${manifest.generatedAt}`;
   return [header, ...manifest.accounts.map(renderAccount)].join('\n');
 }
@@ -425,7 +437,10 @@ export function renderHealth(snapshot: FleetHealthSnapshot): string {
  * is guaranteed to be read, and an apply that writes wrappers nowhere on `PATH` reports success and
  * produces nothing runnable.
  */
-export function renderScaffoldResult(result: FleetScaffoldResult): string {
+export function renderScaffoldResult(
+  result: FleetScaffoldResult,
+  firstAccount: 'claude' | 'codex' | 'detected' | undefined = undefined,
+): string {
   const lines =
     result.created.length === 0
       ? ['The fleet is already set up; nothing was changed.']
@@ -436,7 +451,12 @@ export function renderScaffoldResult(result: FleetScaffoldResult): string {
   for (const path of result.kept)
     lines.push(`  kept     ${path} (pre-existing file wins; Ferretry did not replace it)`);
   lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
-  lines.push('', 'Then declare an account in the configuration and run "fy fleet apply".');
+  lines.push(
+    '',
+    firstAccount === undefined
+      ? 'Then declare an account in the configuration and run "fy fleet apply".'
+      : `If this command created the configuration, it declared one ${firstAccount === 'detected' ? 'detected' : firstAccount} account. Run "fy fleet apply" to materialise its wrapper; an existing configuration was kept untouched.`,
+  );
   return lines.join('\n');
 }
 

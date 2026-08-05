@@ -4,6 +4,7 @@ export const packageRole = 'fleet' as const;
 export * from './assets.ts';
 export * from './capabilities.ts';
 export * from './config.ts';
+export * from './harness.ts';
 export * from './harness-env.ts';
 export * from './health.ts';
 export * from './identity.ts';

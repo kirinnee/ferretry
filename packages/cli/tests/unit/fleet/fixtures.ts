@@ -20,6 +20,7 @@ import type {
 import { FleetApplyFailureError } from '@ferretry/fleet';
 import type { FleetApprovalMint } from '@ferretry/protocol';
 import type {
+  FleetScaffoldOptions,
   IFleetApplier,
   IFleetAuthorizationGateway,
   IFleetClock,
@@ -325,11 +326,13 @@ export class RecordingIdentitySource implements IFleetIdentitySource {
 /** A scaffolder recording that it ran, and answering with a fixed result. */
 export class RecordingScaffolder implements IFleetScaffolder {
   calls = 0;
+  readonly options: FleetScaffoldOptions[] = [];
 
   constructor(private readonly result: FleetScaffoldResult = scaffoldResult()) {}
 
-  scaffold(): Promise<FleetScaffoldResult> {
+  scaffold(options: FleetScaffoldOptions): Promise<FleetScaffoldResult> {
     this.calls += 1;
+    this.options.push(options);
     return Promise.resolve(this.result);
   }
 }

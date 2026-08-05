@@ -215,6 +215,33 @@ describe('fleet init', () => {
     should(out.text).containEql('PATH');
   });
 
+  it('should make a script-selected first account explicit to the scaffolder', async () => {
+    // Arrange + Act
+    const { parsed, scaffolder } = run(['fleet', 'init', '--first-account=codex']);
+    await parsed;
+
+    // Assert — no CLI-side defaulting means a script gets exactly the harness it named.
+    should(scaffolder.options).deepEqual([{ firstAccount: 'codex' }]);
+  });
+
+  it('should ask the host to detect a harness when no first-account value is supplied', async () => {
+    // Arrange + Act
+    const { parsed, scaffolder } = run(['fleet', 'init', '--first-account']);
+    await parsed;
+
+    // Assert — production resolves this with defaultFleetHarness from positive PATH evidence.
+    should(scaffolder.options).deepEqual([{ firstAccount: 'detected' }]);
+  });
+
+  it('should refuse an unknown first-account harness before it writes', async () => {
+    // Arrange + Act
+    const { parsed, scaffolder } = run(['fleet', 'init', '--first-account=other']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/must be "claude" or "codex"/u);
+    should(scaffolder.calls).equal(0);
+  });
+
   it('should not be the default verb — that must never be the one that writes', async () => {
     // Arrange + Act
     const { parsed, scaffolder } = run(['fleet']);

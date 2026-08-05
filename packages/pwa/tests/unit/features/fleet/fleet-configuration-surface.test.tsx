@@ -170,6 +170,9 @@ describe('reading one daemon fleet', () => {
       'read-only',
     );
     expect(forbidden.container.textContent).toContain('cannot stage a change');
+    expect(pick(forbidden.container, '[data-fleet-host-guidance]').textContent).toContain('Host-authorised changes');
+    expect(forbidden.container.textContent).toContain('fy fleet init --first-account');
+    expect(forbidden.container.textContent).toContain('fy fleet apply');
     await forbidden.unmount();
   });
 

@@ -239,6 +239,15 @@ describe('apply plan rendering', () => {
     should(rendered).not.containEql('pruned');
   });
 
+  it('should make an observed empty apply a next step, not an accomplishment', () => {
+    // Act
+    const rendered = renderApplyResult(applyResult({ accountCount: 0, operationCount: 4 }));
+
+    // Assert
+    should(rendered).containEql('The manifest declares no accounts');
+    should(rendered).containEql('fy fleet init --first-account');
+  });
+
   it('should report each harness pool an apply migrated', () => {
     // Act
     const rendered = renderApplyResult(
@@ -636,7 +645,8 @@ describe('manifest rendering', () => {
 
   it('should say plainly when the manifest declares nothing', () => {
     // Act + Assert
-    should(renderManifest(manifest([]))).equal('The fleet manifest declares no accounts.');
+    should(renderManifest(manifest([]))).containEql('The fleet manifest declares no accounts.');
+    should(renderManifest(manifest([]))).containEql('fy fleet init --first-account');
   });
 
   it('should head the listing with when provisioning ran', () => {
