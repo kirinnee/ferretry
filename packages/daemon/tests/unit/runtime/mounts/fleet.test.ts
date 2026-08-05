@@ -308,4 +308,26 @@ describe('the daemon fleet mount', () => {
     should(wrapper.startsWith(subject.root)).be.true();
     should(subject.paths.fleetManifest.startsWith(subject.root)).be.true();
   });
+
+  it('should construct its default health probe with cache state scoped to this daemon home', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+    await subject.dispatcher.dispatch(request({ method: 'POST', path: '/v1/fleet/apply', headers: human }));
+    const previousDirectory = process.cwd();
+
+    // Act — the generated wrapper creates harness state relative to its current directory, so keep it
+    // under the test root while proving the production (non-injected) process and cache construction.
+    process.chdir(subject.root);
+    try {
+      const response = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/health', headers: human }));
+      should(response.status).equal(200);
+      should(FleetHealthSnapshotSchema.parse(JSON.parse(response.body)).accounts[0]?.accountId).equal(ACCOUNT_ID);
+    } finally {
+      process.chdir(previousDirectory);
+    }
+
+    // Assert — the process may fail honestly without a real harness, but its cache is never user-global.
+    should(join(subject.paths.fleet, 'health-successes.json').startsWith(subject.root)).be.true();
+  });
 });
