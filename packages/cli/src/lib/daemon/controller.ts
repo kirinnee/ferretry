@@ -123,7 +123,7 @@ export class DaemonController {
     if (incumbent.state === 'running') {
       // A service manager reports `activating` as running. Leave that incumbent's executable and
       // sole GC root untouched, but still honor `start`'s contract to wait until its API serves.
-      const ready = await this.#awaitReady(owner, {});
+      const ready = await this.#awaitReady(owner, {}, true);
       this.deps.out.success(`${this.#name} ready (pid ${String(ready.pid)})`);
       return;
     }
@@ -281,8 +281,9 @@ export class DaemonController {
   }
 
   /** Poll until the daemon serves HTTP, it is observed to have died, or the deadline passes. */
-  async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle): Promise<HealthView> {
+  async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle, initiallyAlive = false): Promise<HealthView> {
     let state = beginReadinessWait(this.deps.clock.now());
+    if (initiallyAlive) state = { ...state, sawAlive: true };
     while (true) {
       const health = await this.deps.health.probe();
       if (health !== undefined) return health;

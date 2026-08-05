@@ -184,6 +184,19 @@ describe('daemon start', () => {
     should(nix.realPaths).be.empty();
   });
 
+  it('should report when a supervised incumbent exits before its API becomes ready', async () => {
+    // Arrange
+    const { controller, clock } = harness({
+      probes: [undefined],
+      serviceReports: [runningReport, failedReport],
+      serviceFallback: failedReport,
+    });
+
+    // Act + Assert
+    await should(controller.start()).be.rejectedWith(/exited during startup/u);
+    should(clock.slept).be.empty();
+  });
+
   it('should fall back to a direct launch when no service definition is installed', async () => {
     // Arrange
     const { controller, direct, service } = harness({
