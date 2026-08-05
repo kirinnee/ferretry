@@ -39,6 +39,24 @@ const manifest = (): FleetManifest => ({
 });
 
 describe('FileFleetProvisioner', () => {
+  it('should create the fleet root itself, because a first run has nothing else to create', async () => {
+    // Arrange
+    const parent = await temporaryDirectory();
+    const root = path.join(parent, 'fleet-root');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'manifest.json'),
+      operations: [{ kind: 'directory', path: root, mode: 0o700 }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan);
+
+    // Assert
+    (await stat(root)).isDirectory().should.be.true();
+  });
+
   it('should materialize files, copies, links, and the manifest inside explicit temporary roots', async () => {
     // Arrange
     const root = await temporaryDirectory();
