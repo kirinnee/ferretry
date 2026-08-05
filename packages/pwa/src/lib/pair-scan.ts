@@ -1,8 +1,8 @@
 /**
  * Camera pairing: the QR scan behind a port.
  *
- * THE ONE INVARIANT THAT MATTERS, exactly as for the microphone in
- * `stt/audio-capture.ts`: a camera that outlives the scan lights the device's
+ * THE ONE INVARIANT THAT MATTERS, and the reason dictation hands its microphone
+ * to the browser: a camera that outlives the scan lights the device's
  * recording indicator with nothing the reader can do about it. Every exit from
  * `scan` — a decode, an abort, a rejection — runs the same release, and the
  * release is idempotent.

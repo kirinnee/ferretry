@@ -34,11 +34,16 @@ import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/
 import { enhance } from '../lib/stt/enhancement.ts';
 import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
 import { type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
-import type { DictationPhase } from '../lib/stt/utterance.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 
-/** What the panel shows and what the push-to-talk shortcut reads. */
-export type { DictationPhase };
+/**
+ * What the panel shows and what the push-to-talk shortcut reads.
+ *
+ * Owned here rather than by the recognition port: `transcribing` covers the
+ * enhancement round trip this hook runs after the browser has settled its
+ * words, which the port itself knows nothing about.
+ */
+export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error';
 
 export interface DictationError {
   readonly code: string;

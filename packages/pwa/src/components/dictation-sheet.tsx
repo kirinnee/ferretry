@@ -33,8 +33,8 @@
 
 import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-react';
 import { useId } from 'react';
+import type { DictationPhase } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
-import type { DictationPhase } from '../lib/stt/utterance.ts';
 import { Button } from '../shell/primitives.tsx';
 import { type CaptureMonitor, InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
 
