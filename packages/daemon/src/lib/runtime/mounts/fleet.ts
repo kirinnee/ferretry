@@ -1,9 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { z } from 'zod';
 import {
   type FleetApplyPlan,
   type FleetApplyResult,
   type FleetConfig,
+  FleetConfigSchema,
   type FleetLayout,
   type FleetManifest,
   FleetManifestSchema,
@@ -15,9 +17,11 @@ import {
 } from '@ferretry/fleet';
 import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
 import { ApiError } from '../../api/error.ts';
+import { parseBody } from '../../api/body.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import type { FoundationPaths } from '../../paths.ts';
+import type { FileSystemPort } from '../../ports.ts';
 
 /**
  * The daemon front door over the shared fleet library.
@@ -31,6 +35,9 @@ export interface FleetSubsystem {
   /** The complete last-published manifest, not a wrapper-directory reconstruction. */
   accounts(): Promise<FleetManifest>;
   config(): Promise<FleetConfig>;
+  /** The deliberately narrow, remotely-safe profile environment editor. */
+  environment(): Promise<FleetEnvironmentView>;
+  updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView>;
   plan(): Promise<FleetApplyPlan>;
   usage(): Promise<FleetUsageSnapshot>;
   apply(): Promise<FleetApplyResult>;
@@ -44,7 +51,47 @@ export interface DaemonFleetOptions {
   readonly paths: FoundationPaths;
   readonly userHome: string;
   readonly clock: FleetRouteClock;
+  /** The state filesystem owns the durable, atomic replacement of config.yaml. */
+  readonly files: Pick<FileSystemPort, 'writeTextAtomic'>;
   readonly usageProbe?: FleetUsageProbe;
+}
+
+const EnvironmentSchema = z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u), z.string());
+const FleetEnvironmentUpdateSchema = z
+  .strictObject({
+    profile: z.string().trim().min(1),
+    environment: EnvironmentSchema,
+    mode: z.enum(['merge', 'replace']),
+  })
+  .readonly();
+
+type FleetEnvironmentUpdate = z.output<typeof FleetEnvironmentUpdateSchema>;
+
+interface FleetEnvironmentView {
+  readonly profiles: Readonly<Record<string, Readonly<Record<string, string>>>>;
+}
+
+const SENSITIVE_ENVIRONMENT_NAME = /(?:api[_-]?key|credential|password|secret|token|auth)/iu;
+const MACHINE_ENVIRONMENT_NAME = /(?:^|_)(?:address|host(?:name)?|home|path|port)(?:$|_)/iu;
+const MACHINE_ENVIRONMENT_VALUE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~]|[A-Za-z]:[\\/])/iu;
+
+/** Environment values are configuration only when they can travel safely. Credentials, local
+ * paths, addresses and ports must stay on the machine that owns them. Refusing the entire profile
+ * is intentional: presenting a redacted value as a copyable one invites an accidental deletion. */
+function portableEnvironment(environment: Readonly<Record<string, string>>, profile: string): Record<string, string> {
+  for (const [name, value] of Object.entries(environment)) {
+    if (SENSITIVE_ENVIRONMENT_NAME.test(name))
+      throw new FleetRefusal(
+        'fleet_environment_refused',
+        `profile ${profile} contains credential-like ${name}; it is not remotely editable or copyable`,
+      );
+    if (MACHINE_ENVIRONMENT_NAME.test(name) || MACHINE_ENVIRONMENT_VALUE.test(value))
+      throw new FleetRefusal(
+        'fleet_environment_refused',
+        `profile ${profile} contains machine-bound ${name}; it is not remotely editable or copyable`,
+      );
+  }
+  return { ...environment };
 }
 
 type FleetRefusalCode =
@@ -53,7 +100,8 @@ type FleetRefusalCode =
   | 'fleet_not_applied'
   | 'fleet_manifest_invalid'
   | 'fleet_plan_refused'
-  | 'fleet_apply_refused';
+  | 'fleet_apply_refused'
+  | 'fleet_environment_refused';
 
 /** An expected, operator-actionable refusal rather than an internal daemon defect. */
 class FleetRefusal extends Error {
@@ -142,6 +190,33 @@ class MountedFleet implements FleetSubsystem {
     } catch (error) {
       throw new FleetRefusal('fleet_config_invalid', errorMessage(error));
     }
+  }
+
+  async environment(): Promise<FleetEnvironmentView> {
+    const config = await this.config();
+    const profiles: Record<string, Record<string, string>> = {};
+    for (const [name, profile] of Object.entries(config.profiles)) {
+      profiles[name] = portableEnvironment(profile.env ?? {}, name);
+    }
+    return { profiles };
+  }
+
+  async updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView> {
+    const current = await this.config();
+    const profile = current.profiles[request.profile];
+    if (profile === undefined)
+      throw new FleetRefusal('fleet_environment_refused', `profile ${request.profile} does not exist on this daemon`);
+    const existing = portableEnvironment(profile.env ?? {}, request.profile);
+    const incoming = portableEnvironment(request.environment, request.profile);
+    const environment = request.mode === 'merge' ? { ...existing, ...incoming } : incoming;
+    const next = FleetConfigSchema.parse({
+      ...current,
+      profiles: { ...current.profiles, [request.profile]: { ...profile, env: environment } },
+    });
+    // The state filesystem writes a new, synced file then renames it into place. A failed write
+    // therefore leaves the last validated fleet configuration intact rather than half-replacing it.
+    await this.options.files.writeTextAtomic(this.configPath, Bun.YAML.stringify(next));
+    return await this.environment();
   }
 
   async plan(): Promise<FleetApplyPlan> {
@@ -233,6 +308,26 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       scope: 'admin',
       noStore: true,
       handle: async () => await respond(() => subsystem.config()),
+    },
+    {
+      method: 'GET',
+      path: '/v1/fleet/environment',
+      scope: 'admin',
+      noStore: true,
+      handle: async () => await respond(() => subsystem.environment()),
+    },
+    {
+      method: 'PUT',
+      path: '/v1/fleet/environment',
+      scope: 'admin',
+      noStore: true,
+      handle: async context => {
+        if (context.credential?.tokenClass === 'device')
+          throw new ApiError(403, 'a paired device may inspect fleet environment but may not change it', 'forbidden');
+        return await respond(
+          async () => await subsystem.updateEnvironment(await parseBody(context.request, FleetEnvironmentUpdateSchema)),
+        );
+      },
     },
     {
       method: 'GET',

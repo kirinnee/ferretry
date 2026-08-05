@@ -39,6 +39,24 @@ const manifest = (): FleetManifest => ({
 });
 
 describe('FileFleetProvisioner', () => {
+  it('should create the fleet root itself, because a first run has nothing else to create', async () => {
+    // Arrange
+    const parent = await temporaryDirectory();
+    const root = path.join(parent, 'fleet-root');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'manifest.json'),
+      operations: [{ kind: 'directory', path: root, mode: 0o700 }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan);
+
+    // Assert
+    (await stat(root)).isDirectory().should.be.true();
+  });
+
   it('should materialize files, copies, links, and the manifest inside explicit temporary roots', async () => {
     // Arrange
     const root = await temporaryDirectory();
@@ -118,6 +136,30 @@ describe('FileFleetProvisioner', () => {
 
     // Assert
     should((await stat(copied)).mode & 0o777).equal(0o644);
+  });
+
+  it('should dereference a linked directory source so the generated account home contains no symlink', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'asset-source');
+    const linkedSource = path.join(root, 'asset-link');
+    const destination = path.join(root, 'fleet', 'homes', 'one', 'skills');
+    await mkdir(source);
+    await Bun.write(path.join(source, 'skill.md'), 'copied skill\n');
+    await symlink(source, linkedSource, 'dir');
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply({
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'copy', source: linkedSource, path: destination }],
+    });
+
+    // Assert
+    should((await lstat(destination)).isSymbolicLink()).be.false();
+    should((await lstat(path.join(destination, 'skill.md'))).isSymbolicLink()).be.false();
+    should(await readFile(path.join(destination, 'skill.md'), 'utf8')).equal('copied skill\n');
   });
 
   describe('settings operations', () => {

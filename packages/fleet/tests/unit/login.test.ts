@@ -1,164 +1,469 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
-import {
-  type FleetLoginOutcome,
-  FleetLoginService,
-  requiresProviderLogin,
-  UnknownFleetAccountError,
-} from '../../src/lib/login.ts';
-import type { FleetManifest, FleetManifestAccount } from '../../src/lib/manifest.ts';
+import type {
+  CredentialCloneOutcome,
+  CredentialReading,
+  FleetCredentialStore,
+  FleetIdentity,
+  FleetIdentityMember,
+} from '../../src/lib/identity.ts';
+import { FleetIdentityService, UnknownIdentityAccountError } from '../../src/lib/identity.ts';
+import type { FleetLoginOutcome, FleetLoginResult, FleetLoginTarget } from '../../src/lib/login.ts';
+import { FleetLoginService } from '../../src/lib/login.ts';
+import type { HarnessKind } from '../../src/lib/manifest.ts';
 
-const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
-  id: '00000000-0000-4000-8000-000000000001',
-  kind: 'claude',
-  mode: 'auto',
-  wrapper: '/tmp/fy-test/bin/route-one',
-  home: '/tmp/fy-test/homes/one',
-  displayName: 'Route One',
-  defaultModel: 'model-one',
-  models: [{ id: 'model-one', displayName: 'Model One', available: true }],
+const ID_ONE = '00000000-0000-4000-8000-000000000001';
+const ID_TWO = '00000000-0000-4000-8000-000000000002';
+const ID_THREE = '00000000-0000-4000-8000-000000000003';
+
+const NOW = 1_800_000_000_000;
+const HOUR = 3_600_000;
+const VALID: CredentialReading = { state: 'valid', expiresAt: NOW + HOUR };
+
+const member = (overrides: Partial<FleetIdentityMember> = {}): FleetIdentityMember => ({
+  accountId: ID_ONE,
+  wrapper: '/fleet/bin/claude-kirin',
+  home: '/fleet/homes/claude-kirin',
+  displayName: 'Claude Kirin',
+  mode: 'interactive',
   available: true,
   unavailableReason: null,
   ...overrides,
 });
 
-const manifest = (accounts: readonly FleetManifestAccount[]): FleetManifest => ({
-  version: 1,
-  generatedAt: '2027-01-15T08:00:00.000Z',
-  accounts,
+const identity = (overrides: Partial<FleetIdentity> = {}): FleetIdentity => ({
+  key: 'claude:kirin',
+  kind: 'claude',
+  identity: 'kirin',
+  auth: 'oauth',
+  declared: true,
+  members: [member()],
+  ...overrides,
 });
 
+/**
+ * A credential store whose readings can change between surveys, so the re-read after an interactive
+ * login is exercised as it really behaves. No test touches a real credential.
+ */
+class ScriptedCredentialStore implements FleetCredentialStore {
+  readonly clones: Array<{ donor: string; target: string }> = [];
+  private pass = 0;
+
+  constructor(
+    private readonly passes: readonly Readonly<Record<string, CredentialReading>>[],
+    private readonly cloneOutcomes: Readonly<Record<string, CredentialCloneOutcome>> = {},
+  ) {}
+
+  /** Advance to the next scripted pass; the last one repeats forever. */
+  nextPass(): void {
+    this.pass = Math.min(this.pass + 1, this.passes.length - 1);
+  }
+
+  read(_kind: HarnessKind, target: FleetIdentityMember): Promise<CredentialReading> {
+    return Promise.resolve(this.passes[this.pass]?.[target.accountId] ?? { state: 'missing' });
+  }
+
+  clone(_kind: HarnessKind, donor: FleetIdentityMember, target: FleetIdentityMember): Promise<CredentialCloneOutcome> {
+    this.clones.push({ donor: donor.accountId, target: target.accountId });
+    return Promise.resolve(this.cloneOutcomes[target.accountId] ?? { ok: true });
+  }
+}
+
+/** A login port that records what it was asked to launch and never spawns anything. */
+class RecordingLoginPort {
+  readonly launched: FleetLoginTarget[] = [];
+
+  constructor(
+    private readonly outcome: FleetLoginOutcome = { status: 'logged-in' },
+    private readonly store?: ScriptedCredentialStore,
+  ) {}
+
+  login(target: FleetLoginTarget): Promise<FleetLoginOutcome> {
+    this.launched.push(target);
+    // A real login writes a credential; advancing the script is how that becomes visible.
+    this.store?.nextPass();
+    return Promise.resolve(this.outcome);
+  }
+}
+
+const statusesOf = (results: readonly FleetLoginResult[]): Record<string, string> =>
+  Object.fromEntries(results.map(result => [result.accountId, result.status]));
+
+const build = (store: ScriptedCredentialStore, port: RecordingLoginPort): FleetLoginService =>
+  new FleetLoginService({ identities: new FleetIdentityService(store), loginPort: port });
+
 describe('FleetLoginService', () => {
-  it('should execute selected accounts by opaque id without inspecting wrapper attributes', async () => {
-    // Arrange
-    const calls: string[] = [];
-    const subject = new FleetLoginService({
-      async login(value): Promise<FleetLoginOutcome> {
-        calls.push(value.id);
-        return { status: 'logged-in' };
-      },
-    });
-    const target = account({ wrapper: '/tmp/fy-test/bin/alias-with-many-hyphens' });
-
-    // Act
-    const actual = await subject.login(manifest([target]), [target.id]);
-
-    // Assert
-    should(calls).deepEqual([target.id]);
-    should(actual).deepEqual([{ accountId: target.id, status: 'logged-in' }]);
+  const twoLanes = identity({
+    members: [member({ accountId: ID_ONE }), member({ accountId: ID_TWO, mode: 'auto' })],
   });
 
-  it('should skip manifest-declared unavailable accounts', async () => {
-    // Arrange
-    let calls = 0;
-    const subject = new FleetLoginService({
-      async login(): Promise<FleetLoginOutcome> {
-        calls += 1;
-        return { status: 'logged-in' };
-      },
-    });
-    const target = account({
-      available: false,
-      unavailableReason: 'provider maintenance',
-      defaultModel: null,
-      models: [],
-    });
+  it('should copy one credential across an identity instead of asking for a second approval', async () => {
+    // Arrange — this is the capability: one usable credential, one sibling without.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort();
 
     // Act
-    const actual = await subject.login(manifest([target]));
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
 
     // Assert
-    should(calls).equal(0);
-    should(actual).deepEqual([{ accountId: target.id, status: 'unavailable', message: 'provider maintenance' }]);
+    should(port.launched).deepEqual([]);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'synced' });
   });
 
-  it('should turn port exceptions into per-account failures and continue', async () => {
+  it('should do nothing at all when every home already holds a usable credential', async () => {
     // Arrange
-    const first = account();
-    const second = account({ id: '00000000-0000-4000-8000-000000000002' });
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: VALID }]);
+    const port = new RecordingLoginPort();
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert
+    should(store.clones).deepEqual([]);
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'usable', [ID_TWO]: 'usable' });
+  });
+
+  it('should ask for exactly one approval and then fan the fresh credential out', async () => {
+    // Arrange — nothing usable anywhere, then the login writes a credential into the launched home.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert — one browser approval covered both lanes.
+    should(port.launched).have.length(1);
+    should(port.launched[0]?.accountId).equal(ID_ONE);
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'logged-in', [ID_TWO]: 'synced' });
+  });
+
+  it('should launch the interactive lane, not whichever wrapper is listed first', async () => {
+    // Arrange
+    const identityWithAutoFirst = identity({
+      members: [member({ accountId: ID_ONE, mode: 'auto' }), member({ accountId: ID_TWO, mode: 'interactive' })],
+    });
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } },
+      { [ID_ONE]: { state: 'missing' }, [ID_TWO]: VALID },
+    ]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    await build(store, port).login({ identities: [identityWithAutoFirst], mode: 'full' });
+
+    // Assert
+    should(port.launched[0]?.accountId).equal(ID_TWO);
+  });
+
+  it('should report every lane failed when the login itself failed', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort({ status: 'failed', message: 'the wrapper is not installed' });
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'failed', [ID_TWO]: 'failed' });
+    should(actual[0]?.message).equal('the wrapper is not installed');
+  });
+
+  it('should treat a login port that throws as a failure rather than crashing the pass', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' } }]);
     const subject = new FleetLoginService({
-      async login(value): Promise<FleetLoginOutcome> {
-        if (value.id === first.id) {
-          throw new Error('browser login failed');
-        }
-        return { status: 'not-required' };
+      identities: new FleetIdentityService(store),
+      loginPort: {
+        login: () => Promise.reject(new Error('the terminal was closed')),
       },
     });
 
     // Act
-    const actual = await subject.login(manifest([second, first]));
+    const actual = await subject.login({ identities: [identity()], mode: 'full' });
 
     // Assert
     should(actual).deepEqual([
-      { accountId: first.id, status: 'failed', message: 'browser login failed' },
-      { accountId: second.id, status: 'not-required' },
+      { accountId: ID_ONE, identity: 'claude:kirin', status: 'failed', message: 'the terminal was closed' },
     ]);
   });
 
-  it('should reject an unknown account id instead of matching another attribute', async () => {
+  it('should report a non-Error thrown by the login port with its own text', async () => {
     // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' } }]);
     const subject = new FleetLoginService({
-      async login(): Promise<FleetLoginOutcome> {
-        return { status: 'logged-in' };
-      },
+      identities: new FleetIdentityService(store),
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- a port may throw anything
+      loginPort: { login: () => Promise.reject('cancelled') },
     });
 
     // Act
-    const promise = subject.login(manifest([account()]), ['alias-with-many-hyphens']);
+    const actual = await subject.login({ identities: [identity()], mode: 'full' });
 
     // Assert
-    await should(promise).be.rejectedWith(UnknownFleetAccountError);
-  });
-});
-
-describe('requiresProviderLogin', () => {
-  const ID_OAUTH = '00000000-0000-4000-8000-00000000a001';
-  const ID_KEY = '00000000-0000-4000-8000-00000000a002';
-
-  const route = (id: string, wrapper: string, home: string): Record<string, unknown> => ({
-    id,
-    wrapper,
-    home,
-    defaultModel: 'opus',
-    models: ['opus'],
+    should(actual[0]?.message).equal('cancelled');
   });
 
-  const config = (): FleetConfig =>
-    FleetConfigSchema.parse({
-      agents: [
-        { name: 'work', kind: 'claude', routes: { default: route(ID_OAUTH, 'fy-claude-work', '~/.claude-work') } },
-        {
-          name: 'proxy',
-          kind: 'claude',
-          auth: 'api-key',
-          routes: { default: route(ID_KEY, 'fy-claude-proxy', '~/.claude-proxy') },
-        },
+  it('should call a login that left no usable credential a failure, not a success', async () => {
+    // Arrange — the provider page may have been closed halfway through.
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' });
+
+    // Act
+    const actual = await build(store, port).login({ identities: [identity()], mode: 'full' });
+
+    // Assert
+    should(actual[0]?.status).equal('failed');
+    should(actual[0]?.message).match(/still has no usable credential/u);
+  });
+
+  it('should report logged-in when the approval left the launched home usable and no sibling needed it', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' } }, { [ID_ONE]: VALID }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+
+    // Act
+    const actual = await build(store, port).login({ identities: [identity()], mode: 'full' });
+
+    // Assert
+    should(actual).deepEqual([{ accountId: ID_ONE, identity: 'claude:kirin', status: 'logged-in' }]);
+  });
+
+  it('should never open a browser under sync-only, and say what is still needed', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' }, [ID_TWO]: { state: 'missing' } }]);
+    const port = new RecordingLoginPort();
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'sync-only' });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'login-needed', [ID_TWO]: 'login-needed' });
+    should(actual[0]?.message).match(/--sync-only/u);
+  });
+
+  it('should still copy credentials under sync-only when a donor exists', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }]);
+
+    // Act
+    const actual = await build(store, new RecordingLoginPort()).login({
+      identities: [twoLanes],
+      mode: 'sync-only',
+    });
+
+    // Assert
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)[ID_TWO]).equal('synced');
+  });
+
+  it('should report an api-key identity as needing no login, without reading anything', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{}]);
+    const port = new RecordingLoginPort();
+
+    // Act
+    const actual = await build(store, port).login({
+      identities: [identity({ auth: 'api-key' })],
+      mode: 'full',
+    });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(actual[0]?.status).equal('not-required');
+    should(actual[0]?.message).equal('this account authenticates with a key');
+  });
+
+  it('should leave an identity it could not read untouched and report each home is reason', async () => {
+    // Arrange — no usable credential and one home unreadable: nothing may be concluded or written.
+    const store = new ScriptedCredentialStore([
+      { [ID_ONE]: { state: 'unreadable', reason: 'the keychain is locked' }, [ID_TWO]: { state: 'missing' } },
+    ]);
+    const port = new RecordingLoginPort();
+
+    // Act
+    const actual = await build(store, port).login({ identities: [twoLanes], mode: 'full' });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(store.clones).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'indeterminate', [ID_TWO]: 'indeterminate' });
+    should(actual[0]?.message).equal('the keychain is locked');
+    should(actual[1]?.message).match(/refusing to decide/u);
+  });
+
+  it('should refuse an unreadable sibling a copy while still syncing the rest', async () => {
+    // Arrange
+    const three = identity({
+      members: [
+        member({ accountId: ID_ONE }),
+        member({ accountId: ID_TWO, mode: 'auto' }),
+        member({ accountId: ID_THREE, mode: 'auto' }),
       ],
     });
+    const store = new ScriptedCredentialStore([
+      {
+        [ID_ONE]: VALID,
+        [ID_TWO]: { state: 'missing' },
+        [ID_THREE]: { state: 'unreadable', reason: 'the keychain is locked' },
+      },
+    ]);
 
-  it('should require a login for a declared OAuth account', () => {
     // Act
-    const actual = requiresProviderLogin(config())(account({ id: ID_OAUTH }));
+    const actual = await build(store, new RecordingLoginPort()).login({ identities: [three], mode: 'full' });
 
-    // Assert
-    should(actual).be.true();
+    // Assert — the unreadable home was never written to.
+    should(store.clones).deepEqual([{ donor: ID_ONE, target: ID_TWO }]);
+    should(statusesOf(actual)).deepEqual({
+      [ID_ONE]: 'usable',
+      [ID_TWO]: 'synced',
+      [ID_THREE]: 'indeterminate',
+    });
   });
 
-  it('should skip an account the configuration declares key-authenticated', () => {
+  it('should report a failed copy as a failure with the store is reason', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }], {
+      [ID_TWO]: { ok: false, reason: 'the target home is read-only' },
+    });
+
     // Act
-    const actual = requiresProviderLogin(config())(account({ id: ID_KEY }));
+    const actual = await build(store, new RecordingLoginPort()).login({ identities: [twoLanes], mode: 'full' });
 
     // Assert
-    should(actual).be.false();
+    should(statusesOf(actual)[ID_TWO]).equal('failed');
+    should(actual[1]?.message).equal('the target home is read-only');
   });
 
-  it('should require a login for an account the configuration no longer mentions', () => {
-    // Act — a manifest can outlive its configuration; attempting costs one refusal, skipping
-    // leaves the fleet signed out with nothing said.
-    const actual = requiresProviderLogin(config())(account({ id: '00000000-0000-4000-8000-00000000a999' }));
+  it('should skip an account the manifest declares unavailable and say why', async () => {
+    // Arrange
+    const withUnavailable = identity({
+      members: [
+        member({ accountId: ID_ONE }),
+        member({ accountId: ID_TWO, available: false, unavailableReason: 'the harness is not installed' }),
+      ],
+    });
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID }]);
+
+    // Act
+    const actual = await build(store, new RecordingLoginPort()).login({
+      identities: [withUnavailable],
+      mode: 'full',
+    });
 
     // Assert
-    should(actual).be.true();
+    should(store.clones).deepEqual([]);
+    should(actual).deepEqual([
+      {
+        accountId: ID_TWO,
+        identity: 'claude:kirin',
+        status: 'unavailable',
+        message: 'the harness is not installed',
+      },
+      { accountId: ID_ONE, identity: 'claude:kirin', status: 'usable' },
+    ]);
+  });
+
+  it('should report an unavailable account with no stated reason without inventing one', async () => {
+    // Arrange — the manifest schema forbids this pairing, so this only guards the renderer's input.
+    const withUnavailable = identity({
+      members: [member({ accountId: ID_TWO, available: false, unavailableReason: null })],
+    });
+
+    // Act
+    const actual = await build(new ScriptedCredentialStore([{}]), new RecordingLoginPort()).login({
+      identities: [withUnavailable],
+      mode: 'full',
+    });
+
+    // Assert
+    should(actual).deepEqual([{ accountId: ID_TWO, identity: 'claude:kirin', status: 'unavailable' }]);
+  });
+
+  it('should produce nothing to launch when every member of an identity is unavailable', async () => {
+    // Arrange
+    const allUnavailable = identity({
+      members: [member({ accountId: ID_ONE, available: false, unavailableReason: 'no harness' })],
+    });
+    const port = new RecordingLoginPort();
+
+    // Act
+    const actual = await build(new ScriptedCredentialStore([{}]), port).login({
+      identities: [allUnavailable],
+      mode: 'full',
+    });
+
+    // Assert
+    should(port.launched).deepEqual([]);
+    should(statusesOf(actual)).deepEqual({ [ID_ONE]: 'unavailable' });
+  });
+
+  it('should select the whole identity a named account belongs to', async () => {
+    // Arrange
+    const other = identity({ key: 'codex:kirin', kind: 'codex', members: [member({ accountId: ID_THREE })] });
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: { state: 'missing' } }]);
+
+    // Act — naming one lane must not leave its sibling signed out with nothing said.
+    const actual = await build(store, new RecordingLoginPort()).login({
+      identities: [twoLanes, other],
+      accountIds: [ID_ONE],
+      mode: 'full',
+    });
+
+    // Assert
+    should(Object.keys(statusesOf(actual)).sort()).deepEqual([ID_ONE, ID_TWO].sort());
+  });
+
+  it('should treat an empty selection as every identity', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: VALID, [ID_TWO]: VALID }]);
+
+    // Act
+    const actual = await build(store, new RecordingLoginPort()).login({
+      identities: [twoLanes],
+      accountIds: [],
+      mode: 'full',
+    });
+
+    // Assert
+    should(actual).have.length(2);
+  });
+
+  it('should refuse an account no identity claims', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{}]);
+
+    // Act / Assert
+    await build(store, new RecordingLoginPort())
+      .login({ identities: [twoLanes], accountIds: [ID_THREE], mode: 'full' })
+      .should.be.rejectedWith(UnknownIdentityAccountError);
+  });
+
+  it('should carry the harness kind and the home through to the port', async () => {
+    // Arrange
+    const store = new ScriptedCredentialStore([{ [ID_ONE]: { state: 'missing' } }, { [ID_ONE]: VALID }]);
+    const port = new RecordingLoginPort({ status: 'logged-in' }, store);
+    const codex = identity({
+      key: 'codex:kirin',
+      kind: 'codex',
+      members: [member({ accountId: ID_ONE, wrapper: '/fleet/bin/codex-kirin', home: '/fleet/homes/codex-kirin' })],
+    });
+
+    // Act
+    await build(store, port).login({ identities: [codex], mode: 'full' });
+
+    // Assert
+    should(port.launched[0]).deepEqual({
+      accountId: ID_ONE,
+      kind: 'codex',
+      wrapper: '/fleet/bin/codex-kirin',
+      home: '/fleet/homes/codex-kirin',
+    });
   });
 });

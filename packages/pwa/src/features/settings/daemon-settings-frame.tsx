@@ -16,6 +16,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
+import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
@@ -84,6 +85,8 @@ function WardenSettingsTab({
 export interface DaemonSettingsFrameProps {
   readonly connection: DaemonConnection;
   readonly name: string;
+  /** All paired daemons are needed only as configuration-copy sources. */
+  readonly connections?: readonly DaemonConnection[];
   readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
@@ -101,6 +104,7 @@ export interface DaemonSettingsFrameProps {
 export function DaemonSettingsFrame({
   connection,
   name,
+  connections = [connection],
   readWardenStatus,
   createWardenClient,
   createSecretClient,
@@ -131,9 +135,20 @@ export function DaemonSettingsFrame({
           />
         ),
       },
+      {
+        // Environment carries VALUES between daemons; Secrets deliberately does not — a secret is
+        // copied explicitly and per-secret or not at all, never as a side effect of copying
+        // configuration. See `docs/secrets.md`; that copy path is still a declared GAP.
+        id: 'environment',
+        label: 'Environment',
+        description: 'Copy safe fleet profile environment between daemons.',
+        Surface: ({ connection: activeConnection }) => (
+          <FleetEnvironmentSettings connection={activeConnection} connections={connections} />
+        ),
+      },
       ...additionalTabs,
     ],
-    [additionalTabs, createSecretClient, createWardenClient, readWardenStatus],
+    [additionalTabs, connections, createSecretClient, createWardenClient, readWardenStatus],
   );
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
 

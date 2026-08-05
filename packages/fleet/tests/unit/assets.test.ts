@@ -19,12 +19,12 @@ describe('HARNESS_ASSETS', () => {
     should(fields.every(field => ASSET_FIELDS.includes(field))).be.true();
   });
 
-  it.each(['claude', 'codex'] as const)('should make the %s settings asset a copy with a format', kind => {
+  it.each(['claude', 'codex'] as const)('should copy every %s asset into the Ferretry-owned home', kind => {
     // Act
     const settings = harnessAsset(HARNESS_ASSETS, kind, 'settings');
 
     // Assert — the harness rewrites this file at runtime, so a symlink into a template would break.
-    should(settings?.mode).equal('copy');
+    should(HARNESS_ASSETS[kind].every(asset => asset.mode === 'copy')).be.true();
     should(settings?.format).be.oneOf(['json', 'toml']);
   });
 
@@ -65,7 +65,7 @@ describe('harnessAsset', () => {
     const actual = harnessAsset(HARNESS_ASSETS, 'codex', 'memory');
 
     // Assert
-    should(actual).deepEqual({ field: 'memory', dest: 'AGENTS.md', mode: 'link' });
+    should(actual).deepEqual({ field: 'memory', dest: 'AGENTS.md', mode: 'copy' });
   });
 
   it('should return undefined for a field the harness does not accept', () => {

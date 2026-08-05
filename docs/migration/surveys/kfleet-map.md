@@ -35,7 +35,7 @@ him, not by line count.
 | B   | [Turn that declaration into working wrappers](#b--materialize-it)   | **Carried**; init now names PATH | **Was yes** — nothing put the wrappers on PATH; _closed by this unit_ |
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
-| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _wrapper_       | **Yes**                                                               |
+| E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
 | F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Reports everything unknown       | **Yes**                                                               |
 | G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
@@ -52,8 +52,9 @@ Three facts that the capability rows assume and that are easy to miss:
 2. **The reachability gate cannot see this package's dead capability.**
    `scripts/validate/composition-reachability.ts:22` roots a package with no `bin` at its `exports`,
    so everything under `packages/fleet`'s barrel is "reachable" by definition. `FleetLoginService`
-   passed every gate for weeks while nothing called it. `groupByIdentity`, `renderFleetUsageJson` and
-   `renderFleetUsageMetrics` still do. A green build is not evidence of absorption here.
+   passed every gate for weeks while nothing called it. `groupByIdentity` was the same, and is
+   now reached through `buildFleetIdentities`; `renderFleetUsageJson` and
+   `renderFleetUsageMetrics` still are not called. A green build is not evidence of absorption here.
 3. **Configuration used to be accepted and silently ignored** — `sharedHistory`, `health.*`, most of
    `usage.*` parsed cleanly and reached nothing. Closed by this unit: the plan now refuses.
 
@@ -228,24 +229,35 @@ an agent session used to hand that session's `ANTHROPIC_API_KEY` to a _different
 
 What is missing:
 
-| kfleet                                     | What it does                                                          | Ferretry                                                                                |
-| ------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `core/login.ts:73` `credStatus`            | reads a home's credential, classifies `valid`/`refreshable`/`missing` | **GAP**                                                                                 |
-| `core/login.ts:108` `scanIdentities`       | groups homes into provider identities with that state                 | `profiles.ts:302` `groupByIdentity` — grouping only, no state, **and nothing calls it** |
-| `core/login.ts:147` `pickDonor`            | the freshest credential in an identity                                | **GAP**                                                                                 |
-| `core/login.ts:243` `syncIdentity`         | **clones it to the siblings**                                         | **GAP**                                                                                 |
-| `core/login.ts:163` `filterLiveIdentities` | prove the CLI is broken before asking a human                         | **GAP** (depends on [G](#g--know-what-actually-works))                                  |
-| `core/login.ts:307` `resolveLoginTarget`   | raw-CLI fallback on a machine where apply has not run                 | **GAP**                                                                                 |
-| `cli/login.ts` `--status`                  | report state, change nothing                                          | **GAP**                                                                                 |
+| kfleet                                     | What it does                                                          | Ferretry                                                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `core/login.ts:73` `credStatus`            | reads a home's credential, classifies `valid`/`refreshable`/`missing` | **PORTED**, and stricter — `identity.ts` `classifyCredential` adds `unreadable`                           |
+| `core/login.ts:108` `scanIdentities`       | groups homes into provider identities with that state                 | **PORTED** — `identity.ts` `buildFleetIdentities` + `FleetIdentityService.survey`, over `groupByIdentity` |
+| `core/login.ts:147` `pickDonor`            | the freshest credential in an identity                                | **PORTED** — `identity.ts` `pickDonor`                                                                    |
+| `core/login.ts:243` `syncIdentity`         | **clones it to the siblings**                                         | **PORTED** — `identity.ts` `decideIdentity`/`FleetIdentityService.sync` + `credential-store.ts`           |
+| `core/login.ts:163` `filterLiveIdentities` | prove the CLI is broken before asking a human                         | **GAP** (depends on [G](#g--know-what-actually-works)); `indeterminate` covers the unreadable case        |
+| `core/login.ts:307` `resolveLoginTarget`   | raw-CLI fallback on a machine where apply has not run                 | **PORTED** — `process-login.ts` falls back to the harness CLI on `PATH`                                   |
+| `cli/login.ts` `--status`                  | report state, change nothing                                          | **PORTED** — `fy fleet login --status`, rendered per identity                                             |
 
-**Why this blocks deletion:** the owner's declaration produces on the order of thirty wrappers across
-roughly six provider accounts. kfleet asks for ~6 browser approvals. Ferretry asks for ~30. That is
-not a replacement.
+**Why this blocked deletion, and no longer does:** the owner's declaration produces on the order of
+thirty wrappers across roughly six provider accounts. kfleet asks for ~6 browser approvals; Ferretry
+asked for ~30. It now asks for one per provider account, because the credential is read, ranked and
+cloned across the accounts that share it.
 
-**What to build.** A credential-store port in `packages/fleet/src/adapters` (Keychain on macOS via
-`security`, `.credentials.json` on Linux, `auth.json` for Codex) behind a pure identity/donor policy
-in `src/lib`. `identity` is already declared in the config, so the grouping half is free — kfleet had
-to infer it from a name infix.
+**Still open: driving that login from a phone rather than the daemon's terminal.** Both harnesses can
+do it and neither needs a browser on the daemon's host — see
+[harness-login-flows.md](harness-login-flows.md) for the mechanism per harness, with evidence.
+
+**What was built.** A credential-store port in `packages/fleet/src/adapters/credential-store.ts`
+(Keychain on macOS via `security`, `.credentials.json` on Linux, `auth.json` for Codex) behind a pure
+identity/donor policy in `src/lib/identity.ts`. `identity` is declared in the config, so the grouping
+half came free — kfleet had to infer it from a name infix, and misfiled a renamed wrapper.
+
+**One state kfleet does not have: `unreadable`.** A locked keychain, a timed-out read and a home with
+no credential were all `missing` there, so a report said "missing" when it did not know, a merely
+unreadable sibling got **overwritten**, and an identity whose reads all failed asked for an approval
+nothing needed. Here it is distinct and cannot donate, cannot be overwritten, and produces an
+`indeterminate` verdict rather than "nobody is logged in".
 
 ---
 
@@ -277,8 +289,13 @@ Anthropic external-token via `max_tokens:1` quota headers (`:245` — note the h
 z.ai (`:382`), MiniMax (`:487`), plus classification (`:741`), **deduplication by credential**
 (`:824` — many wrappers share one credential; kfleet probes each unique credential once), pre-probe
 token refresh (`:624`), donor healing (`:885`), secrets-file resolution (`:703`), local credential
-reading (`core/creds.ts`), and the entire CLIProxyAPI availability source (`core/cliproxy-usage.ts`,
-308 lines) whose configuration Ferretry parses and never reads.
+reading (`core/creds.ts` — **now PORTED**, as `adapters/credential-store.ts`), and the entire
+CLIProxyAPI availability source (`core/cliproxy-usage.ts`, 308 lines).
+
+**CLIProxyAPI is out of scope by the owner’s decision** — it is not to be ported. Its configuration is
+not silently dropped: `usage.cliProxy` is a **hard refusal** at plan time
+(`capabilities.ts` `unimplementedCapabilities`), so a configuration naming a pool fails
+`fy fleet apply` with the reason rather than applying and quietly reading nothing.
 
 Note the dedup difference is not cosmetic: Ferretry's collector probes **per account**
 (`usage.ts:173`), so thirty wrappers on six credentials would make thirty provider calls where kfleet
@@ -623,12 +640,18 @@ the next reader concluding otherwise from a name search.
 | `core/login.ts:331` `interactiveLogin`                              | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                      |
 | `cli/init.ts`                                                       | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                           |
 | `core/health.ts`, `core/harness-probe.ts` (rest)                    | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)    |
-| `core/usage.ts` (probes), `core/cliproxy-usage.ts`, `core/creds.ts` | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
-| `core/login.ts` (rest), `cli/login.ts` (flags)                      | —                                                                                                | **GAP**, see [E](#e--get-logged-in)               |
+| `core/usage.ts` (probes)                                            | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
+| `core/cliproxy-usage.ts`                                            | —                                                                                                | **not to be ported** (owner); config refused      |
+| `core/creds.ts`                                                     | `adapters/credential-store.ts`                                                                   | ported by this unit                               |
+| `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity`          | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                               |
+| `core/login.ts:307` `resolveLoginTarget`                            | `adapters/process-login.ts`                                                                      | ported by this unit                               |
+| `cli/login.ts` `runLogin`, `--status`, `--sync-only`                | `lib/login.ts` `FleetLoginService` + `lib/fleet/render.ts`                                       | ported by this unit                               |
+| `core/login.ts:163` `filterLiveIdentities`                          | —                                                                                                | **GAP**, needs [G](#g--know-what-actually-works)  |
 | `core/shared-history.ts`, `core/codex-prewarm.ts`, `cli/prewarm.ts` | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)    |
 | `core/generate.ts` `AUTOTRUST`                                      | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                       |
 | `core/firstrun.ts`                                                  | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                |
 | `cli/serve.ts`, `cli/service.ts`                                    | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)  |
 | `cli/doctor.ts`                                                     | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                 |
 | —                                                                   | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest |
-| —                                                                   | `lib/capabilities.ts`                                                                            | **new in this unit**                              |
+| —                                                                   | `lib/capabilities.ts`                                                                            | **new**; refuses unimplemented configuration      |
+| —                                                                   | `lib/identity.ts` `unreadable` state                                                             | **new in this unit**; kfleet had no such state    |

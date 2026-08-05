@@ -70,6 +70,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     config: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    environment: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    updateEnvironment: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     plan: async () => {
       throw new Error('not exercised by the surface inventory');
     },
@@ -170,6 +176,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/health',
       'GET /v1/fleet/accounts',
       'GET /v1/fleet/config',
+      'GET /v1/fleet/environment',
+      'PUT /v1/fleet/environment',
       'GET /v1/fleet/plan',
       'GET /v1/fleet/usage',
       'POST /v1/fleet/apply',

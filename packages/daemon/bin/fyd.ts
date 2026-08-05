@@ -3553,7 +3553,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       return {
         health: createHealthSubsystem(health, scratch),
         pairing,
-        fleet: createDaemonFleetSubsystem({ paths, userHome: homedir(), clock: millisecondClock }),
+        fleet: createDaemonFleetSubsystem({ paths, userHome: homedir(), clock: millisecondClock, files: stateFiles }),
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory

@@ -1,9 +1,11 @@
 import { describe, it } from 'bun:test';
+import type { FleetIdentity, FleetIdentityMember, FleetIdentityStatus } from '@ferretry/fleet';
 import should from 'should';
 import {
   renderAccount,
   renderApplyPlan,
   renderApplyResult,
+  renderIdentityStatus,
   renderLoginResults,
   renderLoginRow,
   renderManifest,
@@ -23,6 +25,41 @@ import {
   usageRow,
   usageSnapshot,
 } from './fixtures';
+
+const KEY = 'claude:kirin';
+
+const identityMember = (accountId: string): FleetIdentityMember => ({
+  accountId,
+  wrapper: `bin-${accountId}`,
+  home: `/homes/${accountId}`,
+  displayName: `Account ${accountId}`,
+  mode: 'interactive',
+  available: true,
+  unavailableReason: null,
+});
+
+const identity = (overrides: Partial<FleetIdentity> = {}): FleetIdentity => ({
+  key: KEY,
+  kind: 'claude',
+  identity: 'kirin',
+  auth: 'oauth',
+  declared: true,
+  members: [identityMember('a')],
+  ...overrides,
+});
+
+const identityStatus = (overrides: Partial<FleetIdentityStatus> = {}): FleetIdentityStatus => {
+  const target = overrides.identity ?? identity();
+  return {
+    identity: target,
+    members: target.members.map(member => ({ member, reading: { state: 'valid' as const } })),
+    unavailable: [],
+    verdict: { kind: 'complete' as const },
+    targets: [],
+    refused: [],
+    ...overrides,
+  };
+};
 
 describe('apply plan rendering', () => {
   it('should say plainly that nothing has been written', () => {
@@ -240,23 +277,31 @@ describe('renderLoginResults', () => {
   it('should name every outcome, so a skip never reads as a success', () => {
     // Act
     const actual = renderLoginResults([
-      { accountId: 'a', status: 'logged-in' },
-      { accountId: 'b', status: 'not-required' },
-      { accountId: 'c', status: 'unavailable', message: 'pool down' },
-      { accountId: 'd', status: 'failed', message: 'login process exited with code 7' },
+      { accountId: 'a', identity: KEY, status: 'logged-in' },
+      { accountId: 'b', identity: KEY, status: 'not-required' },
+      { accountId: 'c', identity: KEY, status: 'unavailable', message: 'pool down' },
+      { accountId: 'd', identity: KEY, status: 'failed', message: 'login process exited with code 7' },
+      { accountId: 'e', identity: KEY, status: 'synced' },
+      { accountId: 'f', identity: KEY, status: 'usable' },
+      { accountId: 'g', identity: KEY, status: 'login-needed', message: 'rerun without --sync-only' },
+      { accountId: 'h', identity: KEY, status: 'indeterminate', message: 'the keychain is locked' },
     ]);
 
-    // Assert
-    should(actual).containEql('4 accounts, 1 failed');
+    // Assert — a failure and an unknown are counted apart, because they need different next steps.
+    should(actual).containEql('8 accounts, 1 failed, 1 could not be read');
     should(actual).containEql('a  logged in');
     should(actual).containEql('b  no login needed');
     should(actual).containEql('c  skipped, the manifest declares it unavailable — pool down');
     should(actual).containEql('d  FAILED — login process exited with code 7');
+    should(actual).containEql('e  credential copied from this identity');
+    should(actual).containEql('f  already had a usable credential');
+    should(actual).containEql('g  needs a login, not attempted — rerun without --sync-only');
+    should(actual).containEql('h  UNKNOWN, left untouched — the keychain is locked');
   });
 
   it('should count no failures when every account succeeded', () => {
     // Act
-    const actual = renderLoginResults([{ accountId: 'a', status: 'logged-in' }]);
+    const actual = renderLoginResults([{ accountId: 'a', identity: KEY, status: 'logged-in' }]);
 
     // Assert
     should(actual).startWith('1 account\n');
@@ -264,10 +309,110 @@ describe('renderLoginResults', () => {
 
   it('should render an unavailable account with no stated reason', () => {
     // Act
-    const actual = renderLoginRow({ accountId: 'a', status: 'unavailable' });
+    const actual = renderLoginRow({ accountId: 'a', identity: KEY, status: 'unavailable' });
 
     // Assert
     should(actual).equal('  a  skipped, the manifest declares it unavailable');
+  });
+});
+
+describe('renderIdentityStatus', () => {
+  it('should say so plainly when this host has no identities', () => {
+    should(renderIdentityStatus([])).equal('No identities on this host.');
+  });
+
+  it('should group by identity and name what each home holds', () => {
+    // Arrange
+    const target = identity({ members: [identityMember('a'), identityMember('b')] });
+    const status = identityStatus({
+      identity: target,
+      members: [
+        { member: identityMember('a'), reading: { state: 'valid' } },
+        { member: identityMember('b'), reading: { state: 'refreshable' } },
+      ],
+    });
+
+    // Act
+    const actual = renderIdentityStatus([status]);
+
+    // Assert — one identity, two homes: the shape that makes the approval count obvious.
+    should(actual).startWith('1 identity\n');
+    should(actual).containEql(`${KEY}  every home has a usable credential`);
+    should(actual).containEql('a  valid');
+    should(actual).containEql('b  expired, renewable');
+  });
+
+  it('should pluralise more than one identity', () => {
+    should(renderIdentityStatus([identityStatus(), identityStatus()])).startWith('2 identities\n');
+  });
+
+  it('should say how many homes a copy would touch, and where from', () => {
+    // Arrange
+    const status = identityStatus({
+      verdict: { kind: 'sync', donor: identityMember('a') },
+      targets: [identityMember('b')],
+    });
+
+    // Act / Assert
+    should(renderIdentityStatus([status])).containEql('1 home would be copied from a');
+  });
+
+  it('should promise one approval covers the whole identity when nothing is usable', () => {
+    // Arrange
+    const status = identityStatus({
+      verdict: { kind: 'login' },
+      members: [{ member: identityMember('a'), reading: { state: 'missing' } }],
+    });
+
+    // Act
+    const actual = renderIdentityStatus([status]);
+
+    // Assert
+    should(actual).containEql('needs one browser approval, which would then cover every home here');
+    should(actual).containEql('a  none');
+  });
+
+  it('should mark an identity it could not read as unknown, not as signed out', () => {
+    // Arrange — this is the distinction the report exists to keep.
+    const status = identityStatus({
+      verdict: { kind: 'indeterminate', reason: 'no usable credential was found, and 1 of 1 could not be read' },
+      members: [{ member: identityMember('a'), reading: { state: 'unreadable', reason: 'the keychain is locked' } }],
+    });
+
+    // Act
+    const actual = renderIdentityStatus([status]);
+
+    // Assert
+    should(actual).containEql('UNKNOWN — no usable credential was found');
+    should(actual).containEql('a  UNREADABLE');
+  });
+
+  it('should say an api-key identity has no provider login at all', () => {
+    // Arrange
+    const status = identityStatus({
+      identity: identity({ auth: 'api-key' }),
+      verdict: { kind: 'no-login', reason: 'this account authenticates with a key' },
+    });
+
+    // Act / Assert
+    should(renderIdentityStatus([status])).containEql('no provider login — this account authenticates with a key');
+  });
+
+  it('should say when the configuration no longer declares an account', () => {
+    // Arrange — a manifest outlives its configuration, and the reader should know why it stands alone.
+    const status = identityStatus({ identity: identity({ declared: false, key: 'account:a' }) });
+
+    // Act / Assert
+    should(renderIdentityStatus([status])).containEql('the configuration no longer declares this account');
+  });
+
+  it('should list an unavailable home as not read, rather than omitting it', () => {
+    // Arrange
+    const skipped = { ...identityMember('c'), available: false, unavailableReason: 'no harness' };
+    const status = identityStatus({ unavailable: [skipped] });
+
+    // Act / Assert
+    should(renderIdentityStatus([status])).containEql('c  unavailable, not read');
   });
 });
 

@@ -19,9 +19,9 @@ export type AssetField = (typeof ASSET_FIELDS)[number];
 /**
  * How one asset field is materialized.
  *
- * `link` symlinks the source, so editing the source is immediately live. `copy` makes an
- * independent file, which is required whenever the harness rewrites it at runtime — a symlink into
- * a read-only store would fail the harness's own read-modify-write.
+ * `link` is available to plans outside an account home. Generated account homes always use `copy`:
+ * their parent is the Ferretry state home, whose filesystem invariant rejects symlink components.
+ * A copy also survives moving its source and changes only on the next explicit fleet apply.
  */
 export interface HarnessAsset {
   readonly field: AssetField;
@@ -35,18 +35,18 @@ export interface HarnessAsset {
 const CLAUDE_ASSETS: readonly HarnessAsset[] = [
   // Claude rewrites settings.json at runtime (`/effort` persists there), so it must be a real file.
   { field: 'settings', dest: 'settings.json', mode: 'copy', format: 'json' },
-  { field: 'memory', dest: 'CLAUDE.md', mode: 'link' },
-  { field: 'skills', dest: 'skills', mode: 'link' },
-  { field: 'mcp', dest: '.mcp.json', mode: 'link' },
+  { field: 'memory', dest: 'CLAUDE.md', mode: 'copy' },
+  { field: 'skills', dest: 'skills', mode: 'copy' },
+  { field: 'mcp', dest: '.mcp.json', mode: 'copy' },
 ];
 
 const CODEX_ASSETS: readonly HarnessAsset[] = [
   // Codex likewise rewrites config.toml, so this is a copy rather than a link.
   { field: 'settings', dest: 'config.toml', mode: 'copy', format: 'toml' },
-  { field: 'memory', dest: 'AGENTS.md', mode: 'link' },
-  { field: 'hooks', dest: 'hooks.json', mode: 'link' },
-  { field: 'hooksDir', dest: 'hooks', mode: 'link' },
-  { field: 'skills', dest: 'skills', mode: 'link' },
+  { field: 'memory', dest: 'AGENTS.md', mode: 'copy' },
+  { field: 'hooks', dest: 'hooks.json', mode: 'copy' },
+  { field: 'hooksDir', dest: 'hooks', mode: 'copy' },
+  { field: 'skills', dest: 'skills', mode: 'copy' },
 ];
 
 /** Every harness's destinations. Injected rather than imported, so a caller can substitute one. */

@@ -17,7 +17,7 @@ import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.t
 import { daemonRequest } from '../lib/daemon-transport.ts';
 import { pinReferenceMarkdown } from '../lib/pin-links.ts';
 import { resolvedPinReference } from '../lib/pin-reference-context.ts';
-import { formatReference } from '../lib/references.ts';
+import { formatReference, parseReferenceToken } from '../lib/references.ts';
 import { type DaemonFetch, DaemonResponseError } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
@@ -373,6 +373,7 @@ interface ComposerFileSelector {
   readonly suffix: string;
   readonly complete: boolean;
   readonly valid: boolean;
+  readonly unsupported?: 'column';
 }
 
 export interface ComposerFileReferenceQuery {
@@ -384,6 +385,13 @@ export interface ComposerFileReferenceQuery {
 const EMPTY_FILE_SELECTOR: ComposerFileSelector = { suffix: '', complete: true, valid: true };
 const COLON_FILE_SELECTOR = /^(.*?):([0-9]*)(?:(:)([0-9]*)|(-)([0-9]*))?$/u;
 const HASH_FILE_SELECTOR = /^(.*?)#L([0-9]*)(?:-L?([0-9]*))?$/iu;
+/** PATH_MAX-sized ceiling before a query can become repeated ranking work. */
+export const MAX_FILE_REFERENCE_QUERY_LENGTH = 4_096;
+const UNREPRESENTABLE_FILE_REFERENCE_REASON =
+  'cannot be inserted as @file — this path has no unambiguous reference token';
+const FILE_REFERENCE_QUERY_TOO_LONG_NOTICE =
+  'File reference queries are limited to 4,096 characters; shorten the path before searching.';
+const DIRECTORY_REFERENCE_PROBE = 'ferretry-reference-probe';
 
 const selectorNumber = (value: string): number | null => {
   if (!/^[1-9][0-9]*$/u.test(value)) return null;
@@ -410,15 +418,48 @@ export function splitFileReferenceQuery(query: string): ComposerFileReferenceQue
     (!tailText || tail !== null) &&
     (separator !== '-' || line === null || tail === null || tail >= line);
   const canonicalSeparator = separator === ':' ? ':' : separator ? '-' : '';
+  const unsupported = !hash && separator === ':' ? 'column' : undefined;
   return {
     ...splitFileQuery(pathQuery),
     selector: {
       suffix: `:${lineText}${canonicalSeparator}${tailText}`,
       complete,
       valid,
+      ...(unsupported === undefined ? {} : { unsupported }),
     },
   };
 }
+
+/** Prove that authored bytes preserve the exact filesystem path and location. */
+const isCanonicalFileToken = (token: string, path: string): boolean => {
+  const reference = parseReferenceToken(token);
+  return reference?.kind === 'file' && reference.path === path && formatReference(reference) === token;
+};
+
+const hasUnambiguousPathToken = (path: string): boolean => {
+  const reference = parseReferenceToken(`@${path}`);
+  return (
+    reference?.kind === 'file' &&
+    reference.path === path &&
+    reference.line === undefined &&
+    reference.endLine === undefined
+  );
+};
+
+const hasUnambiguousFileToken = (path: string, selector: ComposerFileSelector): boolean => {
+  if (!hasUnambiguousPathToken(path)) return false;
+  // An incomplete selector is intentional composer state. An invalid or
+  // unsupported selector gets its own refusal rather than blaming the path.
+  if (!selector.suffix || !selector.complete || !selector.valid || selector.unsupported) return true;
+  return isCanonicalFileToken(`@${path}${selector.suffix}`, path);
+};
+
+const hasUnambiguousDirectoryToken = (path: string): boolean => {
+  // A directory replacement deliberately ends in `/`, which is not a complete
+  // reference. Probe a valid child token without claiming that child exists.
+  const probePath = `${path}/${DIRECTORY_REFERENCE_PROBE}`;
+  return hasUnambiguousPathToken(probePath);
+};
 
 export function createFilesProvider({
   daemon,
@@ -436,6 +477,13 @@ export function createFilesProvider({
     reset: () => cache.clear(),
     async candidates({ query, signal }): Promise<ComposerProviderResult> {
       if (signal.aborted) throw abortReason(signal);
+      if (query.length > MAX_FILE_REFERENCE_QUERY_LENGTH)
+        return {
+          candidates: [],
+          filterQuery: '',
+          contextLabel: '@ file path',
+          notice: FILE_REFERENCE_QUERY_TOO_LONG_NOTICE,
+        };
       const { directory, leaf, selector } = splitFileReferenceQuery(query);
       const key = scopedCacheKey(scope, directory);
       let listing = cache.get(key);
@@ -448,12 +496,20 @@ export function createFilesProvider({
         const path = joinRel(directory, entry.name);
         const refusal = entryRefusal(entry) ?? undefined;
         const directoryEntry = entry.type === 'dir';
-        const selectorRefusal = !selector.valid
-          ? 'line selection must use positive lines and an end at or after its start'
-          : directoryEntry && selector.suffix
-            ? 'line selection applies to files, not folders'
-            : undefined;
-        const disabledReason = refusal ?? selectorRefusal;
+        const selectorRefusal =
+          selector.unsupported === 'column'
+            ? 'column selection is not part of the @file grammar'
+            : !selector.valid
+              ? 'line selection must use positive lines and an end at or after its start'
+              : directoryEntry && selector.suffix
+                ? 'line selection applies to files, not folders'
+                : undefined;
+        const referenceRefusal = (
+          directoryEntry ? hasUnambiguousDirectoryToken(path) : hasUnambiguousFileToken(path, selector)
+        )
+          ? undefined
+          : UNREPRESENTABLE_FILE_REFERENCE_REASON;
+        const disabledReason = refusal ?? referenceRefusal ?? selectorRefusal;
         return {
           id: scopedId(directoryEntry ? 'directory' : 'file', scope, `${path}${directoryEntry ? '' : selector.suffix}`),
           kind: directoryEntry ? 'directory' : 'file',
@@ -472,7 +528,7 @@ export function createFilesProvider({
       const lineHelp = selector.suffix
         ? selector.complete
           ? undefined
-          : 'Finish the optional line selection (:LINE, :START-END, or :LINE:COL).'
+          : 'Finish the optional line selection (:LINE or :START-END).'
         : 'Optional: add :LINE or :START-END before accepting the file.';
       const bounded = listing.truncated ? '2,000 entries shown — enter a directory or refine this segment.' : undefined;
       const notice = [bounded, lineHelp].filter(Boolean).join(' ');

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, lstat, mkdir, readdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import type {
@@ -54,13 +54,17 @@ export class FileFleetProvisioner implements FleetProvisioner {
     };
   }
 
+  /**
+   * A root is inside itself. `path.relative(root, root)` is the empty string, so requiring a
+   * non-empty result rejected the one directory every first run has to create — the fleet root — and
+   * `fy fleet init` followed by `fy fleet apply` failed on any fresh host, even with `agents: []`.
+   * The empty string satisfies every escape test below on its own; only the length check excluded it.
+   */
   private assertWritablePath(target: string): void {
     const resolved = path.resolve(target);
     const allowed = this.allowedRoots.some(root => {
       const relative = path.relative(root, resolved);
-      return (
-        relative.length > 0 && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
-      );
+      return !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
     });
     if (!allowed) {
       throw new Error(`refusing to write outside configured fleet roots: ${target}`);
@@ -99,10 +103,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
       return [];
     }
     if (operation.kind === 'copy') {
-      await copyFile(operation.source, operation.path);
-      // A template linked out of a read-only store copies as 0444; force it writable so the
-      // harness can rewrite the file it is expected to own.
-      await chmod(operation.path, operation.mode ?? 0o644);
+      // Profile assets may be files or directories. Dereference every source link: a copied account
+      // home must not reintroduce a symlink beneath FY_HOME, where StateFileSystem deliberately
+      // rejects symlink components to prevent an operation escaping its state-home boundary.
+      const source = await stat(operation.source);
+      await cp(operation.source, operation.path, { recursive: source.isDirectory(), dereference: true });
+      // A template linked out of a read-only store copies as 0444; force the copied root writable so
+      // a harness can rewrite a file it owns. Directories remain private to the account.
+      await chmod(operation.path, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
       return [];
     }
     await this.writeFileAtomically(operation.path, operation.content, operation.mode);

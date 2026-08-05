@@ -2,19 +2,23 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import {
+  buildFleetIdentities,
   buildFleetScaffold,
+  FleetIdentityService,
   FleetLoginService,
   FleetPlan,
   FleetUsageCollector,
-  requiresProviderLogin,
 } from '@ferretry/fleet';
 import {
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
+  PlatformFleetCredentialStore,
   ProcessFleetLoginPort,
   readFleetWrapperScript,
+  SpawnCredentialCommand,
   spawnFleetLoginProcess,
+  whichHarnessBinary,
 } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
@@ -513,6 +517,16 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
   });
   const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
   const configPath = configured === '' ? defaultConfigPath(layout) : configured;
+  // The one place allowed to read the platform and the environment: the store itself takes both as
+  // values, which is what lets a test drive the macOS path on a host that is not macOS.
+  const identityService = new FleetIdentityService(
+    new PlatformFleetCredentialStore({
+      platform: process.platform,
+      command: new SpawnCredentialCommand(),
+      now: () => Date.now(),
+      keychainAccount: world.environment.USER ?? '',
+    }),
+  );
   return new FleetController({
     config: new FileFleetConfigSource(configPath),
     manifests: new FileFleetManifestSource(layout.manifestPath),
@@ -541,17 +555,21 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
           atLimitPercent: config.usage.atLimitPercent,
         }),
     },
-    logins: {
-      forConfig: config =>
-        new FleetLoginService(
-          new ProcessFleetLoginPort(
-            spawnFleetLoginProcess,
-            world.environment,
-            requiresProviderLogin(config),
-            readFleetWrapperScript,
-          ),
-        ),
+    // One credential store for both verbs: `--status` reads through it and a login copies through it,
+    // so what a report says a home holds is the same reading a copy decides on.
+    identities: {
+      identities: (config, manifest) => buildFleetIdentities(config, manifest),
+      survey: async identities => await identityService.survey(identities),
     },
+    logins: new FleetLoginService({
+      identities: identityService,
+      loginPort: new ProcessFleetLoginPort({
+        spawn: spawnFleetLoginProcess,
+        environment: world.environment,
+        readWrapper: readFleetWrapperScript,
+        which: whichHarnessBinary,
+      }),
+    }),
     clock: new SystemFleetClock(),
     recommendations: new ProtocolRecommendationGateway(client),
     out: world.io,
