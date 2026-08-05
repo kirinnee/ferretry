@@ -17,6 +17,8 @@ const view: GrantsView = {
       useRefusal: 'granted',
       configureRefusal: 'locked',
       origin: 'config file',
+      // A remote caller, which is what a `locked` configure axis implies: widening is a local act.
+      mayGrant: false,
     },
   ],
   passwordSet: true,

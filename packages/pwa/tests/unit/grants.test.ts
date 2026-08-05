@@ -41,6 +41,7 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
   useRefusal: 'granted',
   configureRefusal: 'granted',
   origin: 'default',
+  mayGrant: false,
   ...overrides,
 });
 
