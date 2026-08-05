@@ -98,19 +98,40 @@ function clean(source: string): string {
   let out = '';
   let index = 0;
   let previousSignificant = '';
+  /** The significant character before `previousSignificant`; only `=>` needs it. */
+  let priorSignificant = '';
 
   const emit = (text: string): void => {
     out += text;
     const trimmed = text.trim();
-    if (trimmed.length > 0) previousSignificant = trimmed.slice(-1);
+    if (trimmed.length === 0) return;
+    priorSignificant = trimmed.length > 1 ? trimmed.slice(-2, -1) : previousSignificant;
+    previousSignificant = trimmed.slice(-1);
   };
   /** Replace a consumed span with spaces, preserving its newlines and therefore its line numbers. */
   const blank = (span: string): void => {
     out += span.replace(/[^\n]/gu, ' ');
   };
 
-  /** True when a `/` here opens a regex literal rather than dividing. */
-  const startsRegex = (): boolean => previousSignificant === '' || !/[)\]}\w$]/u.test(previousSignificant);
+  /**
+   * True when a `/` here opens a regex literal rather than dividing or closing a JSX tag.
+   *
+   * The quote and angle-bracket cases are why this is not the textbook version. Half the bundle is
+   * `.tsx`, where `<Icon aria-hidden="true" />` and `</div>` both put a `/` after a character the
+   * textbook rule reads as "an operator can't precede a regex, so this must be one" — and the
+   * mis-lexed regex then eats to the next `/` or newline. It desynced 39 files before the
+   * balance tripwire caught it, and a desynced file is not under-analysed, it is CONFIDENTLY
+   * mis-analysed: every construct after the desync reads as nested and is never examined at all.
+   *
+   * `>` alone is not enough to decide, which is why the character before it is tracked: a body that
+   * opens `=> /^…/.test(value)` is an arrow returning a regex, and reading its `[` as a real bracket
+   * desynced the one file the first version of this rule still got wrong.
+   */
+  const startsRegex = (): boolean => {
+    if (previousSignificant === '') return true;
+    if (previousSignificant === '>') return priorSignificant === '=';
+    return !/[)\]}\w$'"`<]/u.test(previousSignificant);
+  };
 
   while (index < source.length) {
     const character = source[index] ?? '';
@@ -163,7 +184,17 @@ function clean(source: string): string {
           index += 2;
           continue;
         }
+        // A quoted string closes on its own line; only a template may cross one. An apostrophe in
+        // JSX TEXT — `<p>the daemon's answer</p>`, which is ordinary markup, not a literal — would
+        // otherwise open a string that swallows the rest of the file and hides whatever is in it.
+        if (character !== '`' && source[index] === '\n') break;
         index += 1;
+      }
+      if (source[index] !== character) {
+        // Unterminated: it was not a delimiter. Emit it as the plain character it is.
+        index = start + 1;
+        emit(character);
+        continue;
       }
       index = Math.min(index + 1, source.length);
       // Keep the quotes as a two-character expression and blank everything between them, so a
@@ -193,6 +224,24 @@ function braceDepths(text: string): number[] {
     }
   }
   return depths;
+}
+
+/**
+ * Depth after the last line. A tripwire, not a measurement.
+ *
+ * Every pass here decides what module scope is by counting brackets in cleaned source, so a lexer
+ * that mis-parsed one construct — a quote it took for a delimiter, a regex it took for a division —
+ * does not report a wrong answer, it reports a CONFIDENT wrong answer: the desynced region reads as
+ * nested, and nothing nested is ever examined. A file that does not close every bracket it opened
+ * is the signature of exactly that, and it exits 2 rather than passing quietly.
+ */
+function finalDepth(text: string): number {
+  let depth = 0;
+  for (const character of text) {
+    if (character === '{' || character === '(' || character === '[') depth += 1;
+    else if (character === '}' || character === ')' || character === ']') depth -= 1;
+  }
+  return depth;
 }
 
 /**
@@ -474,6 +523,14 @@ function main(): void {
   const read = (path: string): string => readFileSync(resolve(root, path), 'utf8');
   const sources = new Map(files.map(path => [path, clean(read(path))]));
   const cleanedOf = (path: string): string => sources.get(path) ?? '';
+
+  const desynced = [...sources].filter(([, cleaned]) => finalDepth(cleaned) !== 0).map(([path]) => path);
+  if (desynced.length > 0) {
+    console.error('❌ the daemon-scope lexer desynced — every bracket it opened in these files never closed:');
+    for (const path of desynced) console.error(`   ${path}`);
+    console.error('   Fix the lexer. Its module-scope answers for these files are wrong, not merely incomplete.');
+    process.exit(2);
+  }
 
   const violations: Violation[] = [];
 
