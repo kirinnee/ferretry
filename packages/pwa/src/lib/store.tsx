@@ -11,13 +11,14 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-
 import {
   bundledRelayDirectory,
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
-import { daemonApiClient, DaemonHttpTransport } from './api-client.ts';
+import { readAccountPickerCatalog, readAccountPickerHealth } from './account-picker-catalog.ts';
+import { DaemonAccountPickerStore } from './account-picker-store.ts';
+import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import {
   type DaemonConnectionRepository,
   DaemonConnectionStore,
@@ -29,9 +30,9 @@ import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
-import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
-import { type DaemonPushService, DaemonPushDevices, daemonPushService } from './push-enrolment.ts';
+import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
+import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
@@ -190,6 +191,7 @@ export interface AppStore {
   readonly fleet: DaemonFleetStore;
   readonly controls: DaemonControlsStore;
   readonly projects: DaemonProjectsStore;
+  readonly accountPicker: DaemonAccountPickerStore;
   readonly usage: DaemonUsageStore;
   readonly stt: SttSettingsStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
@@ -283,6 +285,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const fleet = new DaemonFleetStore(fleetPort);
   const controls = new DaemonControlsStore();
   const projects = new DaemonProjectsStore(daemonProjectsPort(carried));
+  const accountPicker = new DaemonAccountPickerStore({
+    catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
+    health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
+  });
   const usage = new DaemonUsageStore(daemonUsagePort(carried));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
@@ -302,6 +308,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       fleet,
       controls,
       projects,
+      accountPicker,
       usage,
       notificationPreferences,
       pushDevices,
@@ -360,6 +367,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     fleet,
     controls,
     projects,
+    accountPicker,
     usage,
     stt,
     notificationPreferences,

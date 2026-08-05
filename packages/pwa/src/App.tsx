@@ -481,8 +481,12 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   return (
     <NewSessionPage
+      accounts={store.accountPicker}
       connection={connection}
+      fleet={store.fleet}
+      projects={store.projects}
       startSession={async (daemon, request) => await (await store.clients.client(daemon)).start(request)}
+      usage={store.usage}
       onNavigate={navigate}
     />
   );
@@ -594,6 +598,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       </p>
       {session !== undefined && client !== null ? (
         <SessionChatPage
+          accountPicker={store.accountPicker}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           dictationSettings={dictation.settings}
@@ -613,6 +618,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           presentation={layout === 'drawer' ? 'sheet' : 'pane'}
           refreshError={sessionIssue}
           session={session}
+          usage={store.usage}
         />
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
