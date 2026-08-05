@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
+import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -540,5 +541,35 @@ describe('the mounted daemon surface', () => {
     // The terminal does not exist in this fixture, which still proves the route is mounted, reached,
     // and that existence is decided BEFORE any protocol switch.
     should(authorized.outcome === 'refused' ? authorized.response.status : 0).equal(404);
+  });
+
+  it('should refuse a terminal SOCKET the operator has not granted', async () => {
+    // THE HOLE THIS CLOSES. A socket table that skipped the grant check would have the daemon refuse
+    // to CREATE a terminal an operator had denied and then hand a browser the socket that drives one.
+    // Both tables go through the one authorization boundary, so there is one answer rather than two.
+    // Arrange
+    const mounted = {
+      ...subsystems(),
+      grants: grantSubsystem({ grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } } }),
+    };
+    await mounted.grants.refresh();
+    const sockets = createMountedSocketDispatcher(base, mounted);
+    const http = createMountedDispatcher(base, mounted);
+    const path = '/v1/sessions/s1/terminals/0123456789ab/stream';
+
+    // Act — a caller that did NOT arrive over loopback, which is the only caller grants govern.
+    const upgrade = await sockets.upgrade(request({ path, headers: human, loopback: false }));
+    const created = await http.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/terminals', headers: human, loopback: false }),
+    );
+
+    // Assert — the same refusal on both, and it names the next step rather than saying "forbidden".
+    should(upgrade.outcome === 'refused' ? upgrade.response.status : 0).equal(403);
+    should(created.status).equal(403);
+    should(created.body).match(/has not granted the UI the use of session terminals/u);
+
+    // And a LOOPBACK caller is unaffected: somebody at the machine already has the machine.
+    const local = await sockets.upgrade(request({ path, headers: human, loopback: true }));
+    should(local.outcome === 'refused' ? local.response.status : 0).equal(404);
   });
 });
