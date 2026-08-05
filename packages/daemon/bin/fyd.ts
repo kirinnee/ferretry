@@ -27,7 +27,6 @@ import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.
 import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
-import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
   BrowserLoginWindowService,
   BrowserProfileStore,
@@ -97,6 +96,7 @@ import { FileLearningStore, LearningMiner } from '../src/adapters/learning/index
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
+import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
   PosixSessionRootPinner,
   ProcfsSessionRootPinner,
@@ -220,14 +220,12 @@ import {
   CALLSIGN_WINDOW_MS,
   type CatalogSubsystem,
   type ChildGrantRequester,
-  type TaskBoardTaskActionAuthorizer,
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
-  taskBoardTaskActionAuthorizer,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -325,6 +323,8 @@ import {
   SelfRestartCoordinator,
   SendPending,
   SendRefused,
+  SessionAttachmentError,
+  SessionAttachmentStore,
   SessionAttachService,
   SessionControlError,
   type SessionControlFailure,
@@ -368,6 +368,7 @@ import {
   sessionHealthSettingsAt,
   type TaskAssigneeCandidate,
   type TaskBoardSubsystem,
+  type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
   TeamAdvisor,
@@ -383,6 +384,7 @@ import {
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   type TranscriptSource,
+  taskBoardTaskActionAuthorizer,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -2812,6 +2814,10 @@ function browserOrigins(config: DaemonConfig): readonly string[] {
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
+  // Pairing opens before any subsystem. Keep its validated daemon identity in
+  // this composition root so the attachment store can key state by daemon
+  // without widening the public pairing route interface.
+  let attachmentDaemonId: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
   const environment = new RuntimeEnvironment();
@@ -3343,6 +3349,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       const cryptography = new NodePairingCryptography();
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
+      attachmentDaemonId = state.daemonId;
       const credentials = new PairingDeviceRegistry(state.daemonId, cryptography, state.devices);
       return {
         credentials,
@@ -3423,6 +3430,37 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
       const sessions = createSessionDirectorySubsystem(paths, storage);
+      // Originals are keyed by this daemon's durable pairing identity even
+      // inside its private state home. A plaintext unlock is deliberately not a
+      // storage operation: it remains in the store's process-local cache only.
+      if (attachmentDaemonId === undefined)
+        throw new Error('pairing identity was not opened before attachment mounting');
+      const attachmentStore = new SessionAttachmentStore({ root: paths.state, daemonId: attachmentDaemonId });
+      const sessionAttachments = {
+        upload: async (
+          id: string,
+          request: { readonly filename: string; readonly mime: string; readonly bytes: Uint8Array },
+        ) => {
+          if ((await sessions.get(id)) === undefined)
+            throw new SessionAttachmentError('not_found', 'session was not found');
+          return await attachmentStore.upload(id, request);
+        },
+        download: async (id: string, attachmentId: string) => {
+          if ((await sessions.get(id)) === undefined)
+            throw new SessionAttachmentError('not_found', 'session was not found');
+          return await attachmentStore.download(id, attachmentId);
+        },
+        unlock: async (id: string, attachmentId: string, password: string) => {
+          if ((await sessions.get(id)) === undefined)
+            throw new SessionAttachmentError('not_found', 'session was not found');
+          return await attachmentStore.unlock(id, attachmentId, password);
+        },
+        lock: async (id: string, attachmentId: string) => {
+          if ((await sessions.get(id)) === undefined)
+            throw new SessionAttachmentError('not_found', 'session was not found');
+          return await attachmentStore.lock(id, attachmentId);
+        },
+      };
       // ONE resume service for this opened storage, shared by the revive and the migration: its
       // executor and its launch gate are what stop two relaunches of one session racing, and a
       // second service would give each caller a private copy of both. See the revive's own header.
@@ -3652,6 +3690,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
+        sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         // The record lives in this daemon's own state home, beside the lock and the index it was
         // opened with. Two daemons on one host have two homes and therefore two records, so neither

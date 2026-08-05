@@ -419,6 +419,20 @@ export const AttachmentViewSchema = z
   });
 export type AttachmentView = z.infer<typeof AttachmentViewSchema>;
 
+/** JSON avoids making the daemon's transport layer buffer multipart bodies outside its bounded API seam. */
+export const AttachmentUploadRequestSchema = z.strictObject({
+  filename: z.string().trim().min(1).max(255),
+  mime: z.string().trim().min(1).max(255),
+  base64: z.string().min(1),
+});
+export type AttachmentUploadRequest = z.infer<typeof AttachmentUploadRequestSchema>;
+
+export const AttachmentUnlockRequestSchema = z.strictObject({ password: z.string().min(1).max(4_096) });
+export type AttachmentUnlockRequest = z.infer<typeof AttachmentUnlockRequestSchema>;
+
+export const AttachmentDownloadSchema = z.strictObject({ attachment: AttachmentViewSchema, base64: z.string().min(1) });
+export type AttachmentDownload = z.infer<typeof AttachmentDownloadSchema>;
+
 export const ScratchEntrySchema = z.object({
   name: z.string().min(1),
   bytes: NonNegativeIntegerSchema,

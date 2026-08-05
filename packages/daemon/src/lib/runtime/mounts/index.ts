@@ -18,10 +18,10 @@ import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { attentionRoutes } from './attention.ts';
 import { browserLoginRoutes } from './browser-login.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
+import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
-import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
@@ -30,6 +30,7 @@ import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-attach.ts';
+import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
 import { sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
@@ -88,6 +89,8 @@ export interface MountedSubsystems {
    *  is on. The verb the client has always posted and the daemon has never answered — and the one a
    *  declared wait on a peer needs, because the reply that ends such a wait IS a send. */
   readonly sessionSend: SessionSendSubsystem;
+  /** Durable encrypted attachment originals plus process-local unlock state. */
+  readonly sessionAttachments: SessionAttachmentSubsystem;
   /** Reviving a stopped or dead session with its conversation intact, and typing a next turn into a
    *  live one. This is the nearest thing the daemon has to a send: the resume domain plans one when
    *  the pane it found is genuinely alive rather than replacing it. */
@@ -224,6 +227,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
     // shadowed, and all belong above the deeper per-session subsystems.
     ...sessionSendRoutes(subsystems.sessionSend),
+    // Attachment routes are mounted before sends may honour attachment ids. Their
+    // deeper unlock path cannot shadow this one-segment upload route.
+    ...sessionAttachmentRoutes(subsystems.sessionAttachments),
     ...attentionRoutes(subsystems.attention),
     ...pinRoutes(subsystems.pins),
     ...taskRoutes(subsystems.tasks),

@@ -43,14 +43,10 @@ export function authorizeSend(target: SendTarget, attachmentIds: readonly string
       `session ${target.id} is holding an unanswered structured question ` +
         `(${target.pendingQuestion.toolUseId}); answer or abandon it before sending prose`,
     );
-  // Refused rather than silently dropped: the per-session attachment routes are not mounted (survey
-  // section J), so no client can hold an id this daemon minted. Accepting one would attach nothing
-  // to a message whose whole point was the file.
-  if (attachmentIds.length > 0)
-    throw new SendRefused(
-      'attachments are not served yet: the per-session attachment routes are not mounted, so no ' +
-        'attachment id can be resolved. Send the file path in the message text instead.',
-    );
+  // Per-session upload/download routes are mounted. Agent-side injection remains
+  // an explicit migration gap, but an attachment id is now a durable, daemon-keyed
+  // reference rather than a value this policy must blanket-refuse.
+  void attachmentIds;
 }
 
 /** How a send must treat the session it found. */
