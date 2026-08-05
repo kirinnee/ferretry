@@ -275,8 +275,8 @@ describe('recommendTeam', () => {
         ? {
             ...entry,
             models: [
-              { id: 'forge', available: false, unavailableReason: 'down' },
-              { id: 'swift', available: true },
+              { id: 'forge', available: false as const, unavailableReason: 'down' },
+              { id: 'swift', available: true as const },
             ],
           }
         : entry,
@@ -352,7 +352,7 @@ describe('recommendTeam', () => {
       agent: 'agent-twin',
       kind: 'codex',
       displayName: 'Twin',
-      models: [{ id: 'forge', available: true }],
+      models: [{ id: 'forge', available: true as const }],
     });
     const catalogWithTwin: RoutingCatalog = {
       ...catalog,
@@ -380,7 +380,7 @@ describe('recommendTeam', () => {
       agent: 'agent-twin',
       kind: 'codex',
       displayName: 'Twin',
-      models: [{ id: 'forge', available: true }],
+      models: [{ id: 'forge', available: true as const }],
     });
     const catalogWithTwin: RoutingCatalog = {
       ...catalog,
@@ -448,7 +448,7 @@ describe('recommendTeam', () => {
       agent: 'agent-twin',
       kind: 'codex',
       displayName: 'Twin',
-      models: [{ id: 'forge', available: true }],
+      models: [{ id: 'forge', available: true as const }],
     });
     const catalogWithTwin: RoutingCatalog = {
       ...catalog,
@@ -473,8 +473,8 @@ describe('recommendTeam', () => {
   it('should drag a planner onto the team when the implementer may not plan its own work', () => {
     // Arrange — only the plan-follower is available for implementation
     const accounts = inventory.map(entry => {
-      if (entry.id === 'account-secondary') return { ...entry, models: [{ id: 'swift', available: true }] };
-      if (entry.id === 'account-primary') return { ...entry, models: [{ id: 'apex', available: true }] };
+      if (entry.id === 'account-secondary') return { ...entry, models: [{ id: 'swift', available: true as const }] };
+      if (entry.id === 'account-primary') return { ...entry, models: [{ id: 'apex', available: true as const }] };
       return entry;
     });
 
@@ -495,7 +495,7 @@ describe('recommendTeam', () => {
         agent: 'agent-secondary',
         kind: 'codex',
         displayName: 'Secondary',
-        models: [{ id: 'swift', available: true }],
+        models: [{ id: 'swift', available: true as const }],
       }),
     ];
 
@@ -510,7 +510,7 @@ describe('recommendTeam', () => {
     // Arrange — only a below-floor account is available for hard critical work
     const accounts = inventory
       .filter(entry => entry.id === 'account-secondary')
-      .map(entry => ({ ...entry, models: [{ id: 'swift', available: true }] }));
+      .map(entry => ({ ...entry, models: [{ id: 'swift', available: true as const }] }));
 
     // Act
     const recommendation = recommend('rewrite the production auth layer', { accounts, roles: ['implementer'] });
@@ -597,7 +597,7 @@ describe('recommendTeam', () => {
   it('should carry the override flag when a model is reached through one', () => {
     // Arrange
     const accounts = inventory.map(entry =>
-      entry.id === 'account-primary' ? { ...entry, models: [{ id: 'steady', available: true }] } : entry,
+      entry.id === 'account-primary' ? { ...entry, models: [{ id: 'steady', available: true as const }] } : entry,
     );
 
     // Act
@@ -683,7 +683,7 @@ describe('the scoring adjustments the catalog declares', () => {
       agent: 'agent-twin',
       kind: 'codex',
       displayName: 'Twin',
-      models: [{ id: 'forge', available: true }],
+      models: [{ id: 'forge', available: true as const }],
     });
     const withTwin: RoutingCatalog = {
       ...catalog,

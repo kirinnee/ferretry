@@ -10,12 +10,15 @@ const OTHER_ID = '9d2e1a44-3c57-4b18-8f60-7c9a5e2d1b03';
 const account = (overrides: Partial<CoreAccount> = {}): CoreAccount => ({
   id: ACCOUNT_ID,
   agent: 'claude-writer',
+  wrapper: '/state/fleet/bin/claude-writer',
+  home: '/state/fleet/homes/writer',
   kind: 'claude',
   mode: 'auto',
   displayName: 'Writer',
   defaultModel: 'sonnet',
   models: [{ id: 'sonnet', available: true }],
   available: true,
+  unavailableReason: null,
   ...overrides,
 });
 

@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { buildFleetManifest } from '@ferretry/fleet';
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -351,13 +352,40 @@ const TARGET_WRAPPER = 'claude-auto-target';
 /** An account of the OTHER family, published so the cross-family refusal has something real to name. */
 const CROSS_FAMILY_WRAPPER = 'codex-auto-target';
 
+/** Account ids as the provisioner mints them. Opaque, and the only key anything here joins on. */
+const BOOT_ACCOUNT = '00000000-0000-4000-8000-000000000b07';
+const ORIGIN_ACCOUNT = '00000000-0000-4000-8000-0000000000f1';
+const TARGET_ACCOUNT = '00000000-0000-4000-8000-0000000000f2';
+const CROSS_FAMILY_ACCOUNT = '00000000-0000-4000-8000-0000000000f3';
+const PRIMARY_ACCOUNT = '00000000-0000-4000-8000-0000000000a1';
+const STAND_IN_ACCOUNT = '00000000-0000-4000-8000-0000000000a2';
+
+/**
+ * Publish a manifest THROUGH THE FLEET'S OWN WRITER, exactly as `fy fleet apply` does.
+ *
+ * Hand-written JSON here is what hid the defect this file now covers: the daemon's end-to-end test
+ * wrote the shape the daemon's reader imagined, so both halves passed while neither could read what
+ * `fy fleet apply` actually publishes. Building through `buildFleetManifest` makes that class of
+ * fixture impossible — a payload no provisioner would write is refused here, in the test.
+ */
+async function publishManifest(home: string, accounts: readonly unknown[]): Promise<void> {
+  await mkdir(join(home, 'fleet'), { recursive: true });
+  await writeFile(
+    join(home, 'fleet', 'manifest.json'),
+    JSON.stringify(buildFleetManifest({ generatedAt: '2027-01-15T08:00:00.000Z', accounts })),
+    { mode: 0o600 },
+  );
+}
+
 /**
  * A fleet whose one account is published under a wrapper this host can actually run.
  *
- * The executable is REAL and on `PATH` for the duration of the test, because resolving a published
- * name into an absolute program is a step the start genuinely performs — the lifecycle's own
- * authorization refuses anything that is not an absolute fleet wrapper. It is never executed: the
- * launcher above is what would have run it.
+ * The executable is REAL, because turning a published wrapper into a program a start may run is a
+ * step the start genuinely performs — the lifecycle's own authorization refuses anything that is not
+ * an absolute fleet wrapper. It is never executed: the launcher above is what would have run it. The
+ * `PATH` entry is left in place deliberately even though nothing resolves a wrapper through `PATH`
+ * any more: a daemon under a service manager has no such `PATH`, and this seed must not be the
+ * reason a start works.
  */
 async function seedFleet(home: string): Promise<string> {
   const binary = join(home, 'bin');
@@ -369,25 +397,20 @@ async function seedFleet(home: string): Promise<string> {
   await writeFile(executable, `#!/bin/sh\nexport CLAUDE_CONFIG_DIR="${join(home, 'harness')}"\nexit 0\n`, {
     mode: 0o755,
   });
-  await mkdir(join(home, 'fleet'), { recursive: true });
-  await writeFile(
-    join(home, 'fleet', 'manifest.json'),
-    JSON.stringify({
-      accounts: [
-        {
-          id: 'account-boot',
-          agent: WRAPPER,
-          kind: 'claude',
-          mode: 'auto',
-          displayName: 'Boot',
-          defaultModel: 'claude-opus-5',
-          models: [{ id: 'claude-opus-5', available: true }],
-          available: true,
-        },
-      ],
-    }),
-    { mode: 0o600 },
-  );
+  await publishManifest(home, [
+    {
+      id: BOOT_ACCOUNT,
+      kind: 'claude',
+      mode: 'auto',
+      wrapper: executable,
+      home: join(home, 'harness'),
+      displayName: 'Boot',
+      defaultModel: 'claude-opus-5',
+      models: [{ id: 'claude-opus-5', available: true }],
+      available: true,
+      unavailableReason: null,
+    },
+  ]);
   process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
   return executable;
 }
@@ -406,45 +429,44 @@ async function seedMigrationFleet(home: string): Promise<void> {
   await mkdir(binary, { recursive: true });
   for (const wrapper of [WRAPPER, TARGET_WRAPPER, CROSS_FAMILY_WRAPPER])
     await writeFile(join(binary, wrapper), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-  await mkdir(join(home, 'fleet'), { recursive: true });
-  await writeFile(
-    join(home, 'fleet', 'manifest.json'),
-    JSON.stringify({
-      accounts: [
-        {
-          id: 'account-origin',
-          agent: WRAPPER,
-          kind: 'claude',
-          mode: 'auto',
-          displayName: 'Origin',
-          defaultModel: 'claude-opus-5[1m]',
-          models: [{ id: 'claude-opus-5[1m]', available: true }],
-          available: true,
-        },
-        {
-          id: 'account-target',
-          agent: TARGET_WRAPPER,
-          kind: 'claude',
-          mode: 'auto',
-          displayName: 'Target',
-          defaultModel: 'claude-sonnet-5',
-          models: [{ id: 'claude-sonnet-5', available: true }],
-          available: true,
-        },
-        {
-          id: 'account-cross-family',
-          agent: CROSS_FAMILY_WRAPPER,
-          kind: 'codex',
-          mode: 'auto',
-          displayName: 'Other Family',
-          defaultModel: 'gpt-5.6-terra',
-          models: [{ id: 'gpt-5.6-terra', available: true }],
-          available: true,
-        },
-      ],
-    }),
-    { mode: 0o600 },
-  );
+  await publishManifest(home, [
+    {
+      id: ORIGIN_ACCOUNT,
+      kind: 'claude',
+      mode: 'auto',
+      wrapper: join(binary, WRAPPER),
+      home: join(home, 'homes', 'origin'),
+      displayName: 'Origin',
+      defaultModel: 'claude-opus-5[1m]',
+      models: [{ id: 'claude-opus-5[1m]', available: true }],
+      available: true,
+      unavailableReason: null,
+    },
+    {
+      id: TARGET_ACCOUNT,
+      kind: 'claude',
+      mode: 'auto',
+      wrapper: join(binary, TARGET_WRAPPER),
+      home: join(home, 'homes', 'target'),
+      displayName: 'Target',
+      defaultModel: 'claude-sonnet-5',
+      models: [{ id: 'claude-sonnet-5', available: true }],
+      available: true,
+      unavailableReason: null,
+    },
+    {
+      id: CROSS_FAMILY_ACCOUNT,
+      kind: 'codex',
+      mode: 'auto',
+      wrapper: join(binary, CROSS_FAMILY_WRAPPER),
+      home: join(home, 'homes', 'cross-family'),
+      displayName: 'Other Family',
+      defaultModel: 'gpt-5.6-terra',
+      models: [{ id: 'gpt-5.6-terra', available: true }],
+      available: true,
+      unavailableReason: null,
+    },
+  ]);
   process.env.PATH = `${binary}:${process.env.PATH ?? ''}`;
 }
 
@@ -2072,25 +2094,20 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
     });
-    await mkdir(join(home, 'fleet'), { recursive: true });
-    await writeFile(
-      join(home, 'fleet', 'manifest.json'),
-      JSON.stringify({
-        accounts: [
-          {
-            id: 'account-primary',
-            agent: 'agent-primary',
-            kind: 'claude',
-            mode: 'auto',
-            displayName: 'Primary',
-            defaultModel: 'apex',
-            models: [{ id: 'apex', available: true }],
-            available: true,
-          },
-        ],
-      }),
-      { mode: 0o600 },
-    );
+    await publishManifest(home, [
+      {
+        id: PRIMARY_ACCOUNT,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper: join(home, 'bin', 'agent-primary'),
+        home: join(home, 'homes', 'primary'),
+        displayName: 'Primary',
+        defaultModel: 'apex',
+        models: [{ id: 'apex', available: true }],
+        available: true,
+        unavailableReason: null,
+      },
+    ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
@@ -2122,7 +2139,7 @@ describe('daemon boot lifecycle', () => {
             note: 'dependable across generic work',
           },
         ],
-        accounts: [{ accountId: 'account-primary', options: [{ model: 'apex' }] }],
+        accounts: [{ accountId: PRIMARY_ACCOUNT, options: [{ model: 'apex' }] }],
         floors: { planner: 50, reviewer: 50, hardAndDemanding: 60, hardOrCritical: 55, mid: 40, qualityFirst: 60 },
         costPenalty: { balanced: { high: 4 } },
       }),
@@ -2149,7 +2166,7 @@ describe('daemon boot lifecycle', () => {
     // The pick came from the manifest file and the model from the catalog file — nothing hardcoded.
     should(recommendedBody.roles.length).be.above(0);
     should(recommendedBody.roles.map(role => [role.primary.accountId, role.primary.model])).matchEvery(
-      (pair: readonly string[]) => should(pair).deepEqual(['account-primary', 'apex']),
+      (pair: readonly string[]) => should(pair).deepEqual([PRIMARY_ACCOUNT, 'apex']),
     );
     // The domain's own one-liner, so the guide states what it read and the words that produced it.
     should(recommendedBody.classification).match(/^Read as /u);
@@ -3437,30 +3454,29 @@ describe('daemon boot lifecycle', () => {
   });
 
   it('should report a harness it can launch without claiming it is signed in', async () => {
-    // Arrange: a published account whose wrapper this host really can run. `sh` stands in for a
-    // harness so the test proves the resolution rather than requiring Claude Code on the runner.
+    // Arrange: a published account whose wrapper this host really can run. A one-line script named
+    // `sh` stands in for a harness, so the test proves the resolution rather than requiring Claude
+    // Code on the runner — and it is resolved BY PATH, never found on `PATH`, which is the whole
+    // point: a service-managed daemon has no `PATH` containing the fleet's bin directory.
     const home = await tempDirectory('fyd-harness');
     const port = await freeLoopbackPort();
     await seedHome(home, port);
-    await mkdir(join(home, 'fleet'), { recursive: true });
-    await writeFile(
-      join(home, 'fleet', 'manifest.json'),
-      JSON.stringify({
-        accounts: [
-          {
-            id: 'account-1',
-            agent: 'sh',
-            kind: 'claude',
-            mode: 'auto',
-            displayName: 'stand-in',
-            defaultModel: null,
-            models: [],
-            available: true,
-          },
-        ],
-      }),
-      { mode: 0o600 },
-    );
+    await mkdir(join(home, 'bin'), { recursive: true });
+    await writeFile(join(home, 'bin', 'sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await publishManifest(home, [
+      {
+        id: STAND_IN_ACCOUNT,
+        kind: 'claude',
+        mode: 'auto',
+        wrapper: join(home, 'bin', 'sh'),
+        home: join(home, 'homes', 'stand-in'),
+        displayName: 'stand-in',
+        defaultModel: 'claude-opus-5',
+        models: [{ id: 'claude-opus-5', available: true }],
+        available: true,
+        unavailableReason: null,
+      },
+    ]);
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
     let release = (): void => {};

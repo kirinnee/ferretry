@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { basename } from 'node:path';
 import should from 'should';
 import {
   accountLaunchability,
@@ -7,27 +8,42 @@ import {
   harnessPreflightSummary,
   readHarnessPreflight,
   renderHarnessPreflight,
+  unreadableManifestPreflight,
 } from '../../../src/lib/core/harness-readiness.ts';
 import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
 
 /** One published account, as the fleet manifest declares it. */
 function account(patch: Partial<CoreAccount> = {}): CoreAccount {
+  const agent = patch.agent ?? 'claude-auto-one';
   return {
     id: 'account-1',
-    agent: 'claude-auto-one',
+    agent,
+    // The manifest publishes the ABSOLUTE path; the daemon derives the name from it.
+    wrapper: `/state/fleet/bin/${agent}`,
+    home: `/state/fleet/homes/${agent}`,
     kind: 'claude',
     mode: 'auto',
     displayName: 'Claude auto one',
     defaultModel: null,
     models: [],
     available: true,
+    unavailableReason: null,
     ...patch,
   };
 }
 
-/** A host that can run exactly the named wrappers and nothing else. */
+/**
+ * A host that can run exactly the named programs and nothing else.
+ *
+ * The two halves answer differently on purpose: a wrapper is asked about BY PATH, because that is
+ * what the manifest publishes and what a service-managed daemon can actually resolve, while a
+ * harness command is asked about by name against `PATH`.
+ */
 function hostWith(...installed: readonly string[]): ExecutableResolverPort {
-  return { resolve: name => (installed.includes(name) ? `/usr/local/bin/${name}` : undefined) };
+  return {
+    resolve: name => (installed.includes(name) ? `/usr/local/bin/${name}` : undefined),
+    runnable: path => installed.includes(basename(path)),
+  };
 }
 
 describe('harness readiness', () => {
@@ -37,7 +53,7 @@ describe('harness readiness', () => {
 
     // Assert — the same two conditions a start resolves an account from, which is the point: written
     // twice they would drift, and the drift is a preflight promising a start that then refuses.
-    should(usable).deepEqual({ kind: 'launchable', executable: '/usr/local/bin/claude-auto-one' });
+    should(usable).deepEqual({ kind: 'launchable', executable: '/state/fleet/bin/claude-auto-one' });
   });
 
   it('should separate a fleet that declared an account down from a host that cannot run it', () => {
@@ -57,7 +73,7 @@ describe('harness readiness', () => {
     should(notInstalled.kind).equal('absent-executable');
     should(notInstalled)
       .have.property('reason')
-      .match(/no such executable on its PATH/u);
+      .match(/but this host cannot run that file/u);
     // A manifest that reports an account down without saying why still produces a usable sentence.
     should(noStatedReason)
       .have.property('reason')
@@ -114,7 +130,7 @@ describe('harness readiness', () => {
     // Assert
     should(nonePublished).match(/publishes no agent account at all/u);
     should(noneUsable).match(/every published account is unusable/u);
-    should(noneUsable).match(/no such executable on its PATH/u);
+    should(noneUsable).match(/but this host cannot run that file/u);
     for (const warning of [nonePublished, noneUsable]) {
       // A diagnosis on its own leaves the reader exactly where they were.
       should(warning).match(/fy fleet apply/u);
@@ -160,5 +176,43 @@ describe('harness readiness', () => {
     should(ready.join('\n')).match(/harness {6}claude {2}ready — claude-auto-one/u);
     should(ready.join('\n')).match(/harness {6}codex {3}no account published, and the command is not on PATH/u);
     should(unready.join('\n')).match(/^! no agent harness is ready/mu);
+  });
+});
+
+describe('a manifest the daemon could not read', () => {
+  const refusal = 'the fleet manifest at /state/fleet/manifest.json is present but cannot be read: bad shape.';
+
+  it('should claim nothing about any account', () => {
+    // Act
+    const preflight = unreadableManifestPreflight(refusal, hostWith('claude'));
+
+    // Assert — `blocked` means "this published account cannot be launched, and here is why", and
+    // there is no honest way to say that about accounts whose file would not parse.
+    should(preflight.ready).be.false();
+    should(preflight.manifestRefusal).equal(refusal);
+    should(preflight.harnesses.map(harness => harness.blocked)).deepEqual([[], []]);
+    should(preflight.harnesses.map(harness => harness.launchable)).deepEqual([[], []]);
+    // The harness command is still a fact the manifest has no bearing on.
+    should(preflight.harnesses[0]?.commandOnPath).be.true();
+    should(preflight.harnesses[1]?.commandOnPath).be.false();
+  });
+
+  it('should say it does not know, rather than that nothing is published', () => {
+    // Arrange
+    const preflight = unreadableManifestPreflight(refusal, hostWith());
+
+    // Act
+    const summary = harnessPreflightSummary(preflight);
+    const warning = harnessAbsentWarning(preflight, 'fy');
+    const rendered = renderHarnessPreflight(preflight, 'fy').join('\n');
+
+    // Assert — "no account is published" is a claim about a file this daemon read. This is the
+    // admission that it has no idea what is published, and reporting the second as the first is the
+    // exact defect: a daemon told an operator their fleet published nothing while the CLI listed one.
+    should(summary).equal('unknown — the fleet manifest could not be read');
+    should(warning).containEql(refusal);
+    should(warning).not.match(/publishes no agent account at all/u);
+    should(rendered).match(/harness {6}claude {2}unknown — the fleet manifest could not be read/u);
+    should(rendered).match(/^! no agent harness can be resolved/mu);
   });
 });

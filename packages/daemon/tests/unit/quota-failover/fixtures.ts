@@ -23,12 +23,17 @@ export const spentRow = (agent: string, overrides: Partial<AccountUsage> = {}): 
 export const account = (agent: string, overrides: Partial<CoreAccount> = {}): CoreAccount => ({
   id: `id-${agent}`,
   agent,
+  // The published path is what a start runs; `agent` is its name. They agree here for the same
+  // reason they agree in production: one is derived from the other.
+  wrapper: `/state/fleet/bin/${agent}`,
+  home: `/state/fleet/homes/${agent}`,
   kind: 'claude',
   mode: 'auto',
   displayName: agent,
   defaultModel: 'a-model',
   models: [],
   available: true,
+  unavailableReason: null,
   ...overrides,
 });
 

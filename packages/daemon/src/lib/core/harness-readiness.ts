@@ -1,19 +1,28 @@
 import { type CoreAccount, type HarnessKind, HarnessKindSchema } from './inventory.ts';
 
 /**
- * Turning a published wrapper name into something this host can execute.
+ * Turning what the manifest publishes into something this host can execute.
  *
- * A PORT rather than a path lookup at the point of use, because it is the one step in a start that
+ * A PORT rather than a lookup at the point of use, because it is the one step in a start that
  * depends on the machine the daemon happens to be running on: a test proves the refusal a fleet
- * naming an uninstalled wrapper deserves without needing that wrapper installed to do it.
+ * publishing an absent wrapper deserves without needing that wrapper installed to do it.
  *
  * It lives HERE, beside the launchability rule, rather than in the composition root where it began.
  * The rule and the lookup are one answer to one question — "could a start actually run this?" — and
  * a second declaration of either is a second notion of what "installed" means.
+ *
+ * THE TWO HALVES ARE DIFFERENT QUESTIONS and are deliberately not one method. An account is launched
+ * by the ABSOLUTE path the manifest publishes, so {@link runnable} asks about a file. A harness's own
+ * command (`claude`, `codex`) is not published anywhere and is only ever a `PATH` name, so
+ * {@link resolve} asks about `PATH`. Answering the first with the second is the defect this port was
+ * changed to remove: a daemon started by a service manager inherits no shell profile, so a `PATH`
+ * lookup of a wrapper under `<FY_HOME>/fleet/bin` could never succeed there.
  */
 export interface ExecutableResolverPort {
-  /** The absolute executable, or `undefined` when this host has no such program. */
+  /** The absolute executable a bare NAME resolves to on this host's `PATH`, or `undefined`. */
   resolve(name: string): string | undefined;
+  /** Whether this host can run the program at this absolute path right now. */
+  runnable(path: string): boolean;
 }
 
 /**
@@ -41,16 +50,16 @@ export function accountLaunchability(account: CoreAccount, executables: Executab
       kind: 'declared-unavailable',
       reason: `account ${account.agent} cannot serve a session: ${account.unavailableReason ?? 'the manifest reports it unavailable'}`,
     };
-  // The manifest publishes an executable NAME; the lifecycle demands an absolute path, because the
-  // wrapper authorization is what stops this daemon launching anything else. Resolving it against
-  // this host's PATH is the only step that can tell a fleet the daemon cannot actually run.
-  const executable = executables.resolve(account.agent);
-  if (executable === undefined)
+  // The manifest publishes the wrapper's ABSOLUTE path and the lifecycle demands one, so the path is
+  // taken rather than reconstructed: the wrapper authorization is what stops this daemon launching
+  // anything else, and a name resolved against PATH could resolve to a different program entirely.
+  // Whether this host can actually run that file is the one thing the manifest cannot declare.
+  if (!executables.runnable(account.wrapper))
     return {
       kind: 'absent-executable',
-      reason: `the fleet publishes ${account.agent} but this host has no such executable on its PATH`,
+      reason: `the fleet publishes ${account.agent} at ${account.wrapper}, but this host cannot run that file — provisioning may not have run here, or the fleet's state home is not the one this daemon reads`,
     };
-  return { kind: 'launchable', executable };
+  return { kind: 'launchable', executable: account.wrapper };
 }
 
 /** One harness, as a boot can see it without launching anything. */
@@ -85,6 +94,16 @@ export interface HarnessPreflight {
   readonly harnesses: readonly HarnessReadiness[];
   /** The bar: at least one account, of any harness, a start could resolve. */
   readonly ready: boolean;
+  /**
+   * Why the manifest itself could not be read, when it could not be.
+   *
+   * A SEPARATE FIELD rather than an empty fleet or a blocked account, because it is a different
+   * fact from either. "No account is published" is a claim about a file this daemon read; "the
+   * manifest could not be read" is the admission that it has no idea what is published. Reporting
+   * the second as the first is precisely how a daemon came to tell an operator their fleet
+   * published nothing while the CLI listed a provisioned account from the same bytes.
+   */
+  readonly manifestRefusal?: string;
 }
 
 export function readHarnessPreflight(
@@ -104,8 +123,31 @@ export function readHarnessPreflight(
   return { harnesses, ready: harnesses.some(harness => harness.launchable.length > 0) };
 }
 
+/**
+ * The preflight a manifest this daemon cannot read earns: nothing launchable, nothing claimed about
+ * any account, and the refusal carried as what it is.
+ *
+ * `blocked` stays EMPTY deliberately. A blocked entry means "this published account cannot be
+ * launched, and here is why", and there is no honest way to say that about accounts whose file
+ * would not parse. The harness commands are still reported, because whether Claude Code is
+ * installed on this host is a fact the manifest has no bearing on.
+ */
+export function unreadableManifestPreflight(refusal: string, executables: ExecutableResolverPort): HarnessPreflight {
+  return {
+    harnesses: HarnessKindSchema.options.map(kind => ({
+      kind,
+      launchable: [],
+      blocked: [],
+      commandOnPath: executables.resolve(kind) !== undefined,
+    })),
+    ready: false,
+    manifestRefusal: refusal,
+  };
+}
+
 /** The one-line detail a boot milestone carries: what was found, per harness, in a glance. */
 export function harnessPreflightSummary(preflight: HarnessPreflight): string {
+  if (preflight.manifestRefusal !== undefined) return 'unknown — the fleet manifest could not be read';
   return preflight.harnesses
     .map(harness =>
       harness.launchable.length === 0
@@ -128,6 +170,10 @@ export function harnessPreflightSummary(preflight: HarnessPreflight): string {
  * IT NAMES A REMEDY, because a diagnosis on its own leaves the reader exactly where they were.
  */
 export function harnessAbsentWarning(preflight: HarnessPreflight, clientName: string): string {
+  // A manifest that would not parse says nothing about accounts, so nothing below it is said either:
+  // the refusal already names the file, the failure and the consequence.
+  if (preflight.manifestRefusal !== undefined)
+    return `no agent harness can be resolved on this host, so this daemon can serve its API but cannot start a session: ${preflight.manifestRefusal}`;
   const blocked = preflight.harnesses.flatMap(harness => harness.blocked);
   const installed = preflight.harnesses.filter(harness => harness.commandOnPath).map(harness => harness.kind);
   const cause =
@@ -151,15 +197,18 @@ export function harnessAbsentWarning(preflight: HarnessPreflight, clientName: st
 export function renderHarnessPreflight(preflight: HarnessPreflight, clientName: string): readonly string[] {
   const lines = preflight.harnesses.map(harness => {
     const state =
-      harness.launchable.length > 0
-        ? `ready — ${harness.launchable.join(', ')}`
-        : harness.blocked.length > 0
-          ? `not usable — ${harness.blocked.join('; ')}`
-          : harness.commandOnPath
-            ? // Named apart from the plain absence, because it is a different missing step: the
-              // harness is here, the account that would let this daemon launch it is not.
-              `no account published (the ${harness.kind} command is on PATH, but this daemon launches published wrappers)`
-            : 'no account published, and the command is not on PATH';
+      preflight.manifestRefusal !== undefined
+        ? // Not "no account published": this daemon does not know what is published.
+          `unknown — the fleet manifest could not be read (the ${harness.kind} command ${harness.commandOnPath ? 'is' : 'is not'} on PATH)`
+        : harness.launchable.length > 0
+          ? `ready — ${harness.launchable.join(', ')}`
+          : harness.blocked.length > 0
+            ? `not usable — ${harness.blocked.join('; ')}`
+            : harness.commandOnPath
+              ? // Named apart from the plain absence, because it is a different missing step: the
+                // harness is here, the account that would let this daemon launch it is not.
+                `no account published (the ${harness.kind} command is on PATH, but this daemon launches published wrappers)`
+              : 'no account published, and the command is not on PATH';
     return `harness      ${harness.kind.padEnd(6)}  ${state}`;
   });
   lines.push(
