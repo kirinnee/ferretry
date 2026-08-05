@@ -22,15 +22,15 @@ and `fix/harness-preflight`. Rows about them say so explicitly.
 
 **Provisioning is genuinely absorbed and improved. Everything that touches a live provider is not.**
 
-| kfleet area                                     | Lines | State                                                                     |
-| ----------------------------------------------- | ----: | ------------------------------------------------------------------------- |
-| config schema, merge, settings, generate, prune | 1,822 | **PORTED**, refactored, and in several places stricter than the source    |
-| usage probing (all five providers)              | 1,328 | **GAP** — the aggregation half is ported, every provider call is not      |
-| login (identity sync, donor healing)            |   581 | **PARTIAL** — a login _spawner_ exists, unmounted; the sync core does not |
-| harness liveness probing                        |   538 | **GAP**                                                                   |
-| shared history + Codex prewarm                  |   557 | **GAP** — and the configuration for it is parsed and silently ignored     |
-| `serve` / `service` (background loop, metrics)  |   509 | **GAP** — the renderers are ported, the server and the loop are not       |
-| `init`, `doctor`                                |    72 | **GAP**                                                                   |
+| kfleet area                                     | Lines | State                                                                                      |
+| ----------------------------------------------- | ----: | ------------------------------------------------------------------------------------------ |
+| config schema, merge, settings, generate, prune | 1,822 | **PORTED**, refactored, and in several places stricter than the source                     |
+| usage probing (all five providers)              | 1,328 | **GAP** — the aggregation half is ported, every provider call is not                       |
+| login (identity sync, donor healing)            |   581 | **PARTIAL** — a login _spawner_ exists (unmounted until this unit); the sync core does not |
+| harness liveness probing                        |   538 | **GAP**                                                                                    |
+| shared history + Codex prewarm                  |   557 | **GAP** — and the configuration for it is parsed and silently ignored                      |
+| `serve` / `service` (background loop, metrics)  |   509 | **GAP** — the renderers are ported, the server and the loop are not                        |
+| `init`, `doctor`                                |    72 | **GAP**                                                                                    |
 
 Three findings matter more than the line counts:
 
@@ -49,9 +49,10 @@ Three findings matter more than the line counts:
    `scripts/validate/composition-reachability.ts:22` treats a package with no `bin` as rooted at its
    `exports`. `packages/fleet` has no binary, so _everything_ under its barrel is "reachable" by
    definition. `FleetLoginService`, `ProcessFleetLoginPort`, `groupByIdentity`,
-   `renderFleetUsageJson` and `renderFleetUsageMetrics` all pass every gate while no composition root
-   calls any of them. Nothing is wrong with the gate; the fleet package is simply outside what it can
-   prove, and that is worth knowing before trusting a green build as evidence of absorption.
+   `renderFleetUsageJson` and `renderFleetUsageMetrics` all passed every gate while no composition
+   root called any of them. This unit mounted the first two; `groupByIdentity` and the two renderers
+   are still uncalled and still green. Nothing is wrong with the gate — the fleet package is simply
+   outside what it can prove, and that is worth knowing before reading a green build as absorption.
 
 ---
 
