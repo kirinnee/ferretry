@@ -50,8 +50,8 @@ content, including my own from the previous revision — one of which had alread
 6. **The doctrines are largely followed, and there are two separate drifts** — a mechanism drift that is
    genuinely `pwa/src/lib`-shaped, and a repo-wide private-method drift led by a `daemon` mount.
    Measured over 634 files with the file set, every pattern and its unit stated, after three review
-   rounds found five measurement errors in my own sweeps and none in the code. **The patchwork the owner
-   is complaining about is neither drift**: no doctrine article says anything about two programs agreeing
+   rounds found every measurement error to be in a _sweep_ and none in the code (§11.1). **The patchwork
+   the owner is complaining about is neither drift**: no doctrine article says anything about two programs agreeing
    on one fact, which is the failure in all sixteen findings. That claim rests on what the eight articles
    contain, so no count moves it. The deliverable therefore includes a new doctrine article. §7.
 7. **The fix for a duplicated fact is sometimes to SPLIT it, not to collapse it.** temperance's
@@ -72,6 +72,34 @@ working QR.
 The repository already knows this. `docs/standards/contracts/README.md` says of the state home:
 "Every one of them passed its own tests, because each writer owned its own fixture." The insight is
 correct and its application stopped at three contracts.
+
+### 1.0 The shortest proof is this document
+
+Sixteen findings follow, each verified. But the most persuasive evidence for making agreement
+**mechanical** rather than intentional is something that happened while this document was being written,
+and it is the only instance a reader can watch happen rather than take on trust.
+
+**This document contradicted itself, in the summary of its own argument against contradicting yourself.**
+A measurement-based claim was retracted in the two sections that argued it and left standing in verdict 6
+— the first thing a reader sees. For three commits the headline asserted what the body withdrew. Nobody
+caught it: not me, not three teammates re-verifying my numbers. I found it re-reading the section next to
+it for an unrelated reason.
+
+**And no gate in the plan would have caught it either.** The proposed `docs-integrity` contract (§4.3)
+finds conflict markers. It does not find two paragraphs that disagree — which is exactly why
+`docs/grants.md` shipped a heading saying "the password is the layer" eight lines above a sentence saying
+"the primary security layer is locality, not the password" (§1.2), and why `treefmt` formatted the
+evidence of the merge into legitimacy on the way past.
+
+Alongside it: **every measurement error found in three review rounds was in a _sweep_, never in the
+code** — and most were silent under-matches, which read as compliance. §11.1 enumerates them; the count
+is deliberately kept in exactly one place, since a number restated in three sections is this document's
+own subject matter.
+
+The point is not that the people involved were careless. It is that **five careful people, working
+specifically on this failure mode, with the doctrine in front of them, still produced it** — in the
+artefact arguing against it. That is the argument for §4's gates, and it is the one the owner can check
+without reading any of the code.
 
 ### 1.1 The survey — sixteen instances, twelve of them live
 
@@ -1065,11 +1093,16 @@ and only writing both down makes that visible. The unit was also worth pinning a
 That is §4.5's anti-rule one more time. The instinct on meeting two numbers is to find the wrong one;
 here the answer was that both were right and the reconciliation was the finding.
 
-> **Every silent failure in this document's own measurements was an UNDER-match, and an under-match reads
-> as compliance.** A pathspec that dropped three packages, a pattern that dropped a keyword, a pattern
-> that dropped an annotation, a three-file sample read as a corpus direction, and one narrower pattern
-> that dropped `readonly #x`. State the file set _and_ the pattern _and_ its unit, and treat any zero or
-> any suspiciously-clean count as a bug in the probe until the per-package breakdown says otherwise.
+> **Most silent failures in this document's own measurements were UNDER-matches, and an under-match reads
+> as compliance.** Rows i–v of the table below: a pathspec that dropped three packages, a pattern that
+> dropped a keyword, a pattern that dropped an annotation, a demand counted by inline literals only, and a
+> three-file sample read as a corpus direction. State the file set _and_ the pattern _and_ its unit, and
+> treat any zero or any suspiciously-clean count as a bug in the probe until the per-package breakdown
+> says otherwise.
+
+The narrower `#[a-zA-Z]` pattern of §2c is deliberately **not** in that list: it is not an error. It
+answers a smaller question correctly, which is why the resolution there was a subtraction rather than a
+verdict.
 
 **2d. And one failure that is not an under-match at all.** Reviewing the reconciliation, cinthia noticed
 they had used **two different patterns in two turns without stating either** — the three-file numbers
@@ -1080,16 +1113,39 @@ was unstated was fair _and_ was the same thing happening.
 > distinct mechanism from the four above: the instrument changed between runs, so both numbers were
 > faithful to what they measured and neither was comparable to the other.
 
-**What this round did not do is change the conclusion.** Five measurement errors were found across three
-review rounds and none of them touched the load-bearing claim, because that claim is about what the eight
-doctrine articles _contain_ — checkable by reading them, and moved by no count. What the errors did
-change is one of my own tidier framings: I had written that the drift was concentrated in the package
-with no agreement problem, and §7 now retracts that. The argument never needed it.
+**What this round did not do is change the conclusion.** No measurement error touched the load-bearing
+claim, because that claim is about what the eight doctrine articles _contain_ — checkable by reading them,
+and moved by no count. What they did change is one of my own tidier framings: I had written that the drift
+was concentrated in the package with no agreement problem, and §7 now retracts that. The argument never
+needed it.
+
+**The authoritative count, since this is the one place it belongs: seven, none in the code.** Five were
+under-matches, which is why they read as compliance:
+
+| #   | error                                                           | whose   | under-match? |
+| --- | --------------------------------------------------------------- | ------- | ------------ |
+| i   | `**` pathspec dropped three packages and 76 `pwa` files         | mine    | yes          |
+| ii  | `(private\|#)[a-zA-Z]` missed the `private` keyword — 159 v 718 | mine    | yes          |
+| iii | `export const [a-zA-Z]+ = new ` missed annotations, underscores | mine    | yes          |
+| iv  | `pairing`'s route demand, counted by inline literals only       | mine    | yes          |
+| v   | a three-file sample read as a corpus direction                  | cinthia | yes          |
+| vi  | a looser regex attributed to my stated pattern                  | cinthia | no           |
+| vii | two patterns across two turns — the comparison was void         | cinthia | no           |
 
 **3. A finding I under-counted.** I first reported `pairing` as having no route demand. It has one;
 my pattern matched only inline literals and `mounts/pairing.ts` uses a named `PAIRING_DEMAND` constant.
 The surviving finding is the narrower one in §5.1.
 
-All three are the same failure the document is about, committed by the document: **a claim and the
-thing it describes, with nothing checking that they agree.** Three teammates checking my work is what
-caught them, which is the argument for the gates in §4 rather than against them.
+**4. And the one that is this document's own defect, not a measurement error at all.** The retraction in
+item 2b landed in §7 and in this section and **not in verdict 6**, so for three commits the headline
+asserted a claim the body withdrew. Two readable statements, disagreeing, neither marked — the
+`docs/grants.md` shape (§1.2) reproduced in the document that opens by citing it. Nobody caught it: not
+me, not three teammates re-verifying my numbers. I found it re-reading the neighbouring section for an
+unrelated reason, and **no gate in §4 would have found it**, because a conflict-marker contract finds
+markers and not two paragraphs that disagree.
+
+Every one of these is the failure the document is about, committed by the document: **a claim and the
+thing it describes, with nothing checking that they agree.** Item 4 is the one worth reading twice, and
+§1.0 is why — it is the only instance in the whole survey a reader can watch happen rather than take on
+trust. That teammates caught the rest is the argument for §4's gates, not against them: every fix here
+came from somebody re-running a probe, and the one nobody re-ran is the one that survived three commits.
