@@ -18,8 +18,8 @@
 import {
   type AssetField,
   HARNESS_ASSETS,
-  harnessAsset,
   type HarnessAssetTable,
+  harnessAsset,
   unsupportedAssetFields,
 } from './assets.ts';
 import { UnimplementedFleetCapabilityError, unimplementedCapabilities } from './capabilities.ts';
@@ -40,6 +40,7 @@ import { MANAGED_MARKER, renderCommandScript, renderWrapperScript, resolveComman
 const DIRECTORY_MODE = 0o700;
 const EXECUTABLE_MODE = 0o755;
 const SETTINGS_MODE = 0o600;
+const CODEX_SQLITE_MARKER = '.ferretry-sqlite-home.json';
 
 /** Raised when a profile declares an asset the account's harness cannot accept. */
 export class UnsupportedAssetError extends Error {
@@ -101,20 +102,44 @@ export class FleetPlan implements FleetPlanBuilder {
     // resolveCommands throws on a name two generators would claim, before anything is planned.
     const commands = resolveCommands(config, accounts);
     const targets = resolveCommandTargets(commands, accounts, layout.binDirectory);
+    const sharedRoot = joinPath(layout.fleetDirectory, 'shared');
+    const codexSqliteHome = joinPath(joinPath(sharedRoot, 'codex'), 'sqlite');
+    const sharedHomes: Record<HarnessKind, { account: string; path: string }[]> = {
+      claude: accounts
+        .filter(account => account.kind === 'claude')
+        .map(account => ({ account: account.id, path: account.resolvedHome })),
+      codex: accounts
+        .filter(account => account.kind === 'codex')
+        .map(account => ({ account: account.id, path: account.resolvedHome })),
+    };
 
     const operations: FleetWriteOperation[] = [
       { kind: 'directory', path: layout.fleetDirectory, mode: DIRECTORY_MODE },
       { kind: 'directory', path: layout.binDirectory, mode: DIRECTORY_MODE },
       { kind: 'directory', path: layout.homesDirectory, mode: DIRECTORY_MODE },
     ];
+    if (config.sharedHistory.codex) {
+      // Codex's legacy per-home databases are deliberately never inspected or migrated. Sharing
+      // starts with one fresh Ferretry-owned runtime directory beside the rollout pool.
+      operations.push({ kind: 'directory', path: codexSqliteHome, mode: DIRECTORY_MODE });
+    }
 
     for (const account of accounts) {
       operations.push({ kind: 'directory', path: account.resolvedHome, mode: DIRECTORY_MODE });
-      operations.push(...this.assetOperations(account, account.resolvedHome, layout));
+      operations.push(
+        ...this.assetOperations(account, account.resolvedHome, layout, {
+          enabled: config.sharedHistory.codex,
+          sqliteHome: codexSqliteHome,
+        }),
+      );
+      const wrapperAccount =
+        account.kind === 'codex' && config.sharedHistory.codex
+          ? { ...account, env: { ...account.env, CODEX_SQLITE_HOME: codexSqliteHome } }
+          : account;
       operations.push({
         kind: 'file',
         path: joinPath(layout.binDirectory, account.wrapper),
-        content: renderWrapperScript(account, { secretsFile: config.secretsFile }),
+        content: renderWrapperScript(wrapperAccount, { secretsFile: config.secretsFile }),
         mode: EXECUTABLE_MODE,
       });
     }
@@ -129,7 +154,15 @@ export class FleetPlan implements FleetPlanBuilder {
       if (account === undefined) throw new UnknownDefaultHomeError(kind, accountId);
       const directory = layout.defaultHomeDirectories[kind];
       operations.push({ kind: 'directory', path: directory, mode: DIRECTORY_MODE });
-      operations.push(...this.assetOperations(account, directory, layout));
+      operations.push(
+        ...this.assetOperations(account, directory, layout, {
+          enabled: config.sharedHistory.codex,
+          sqliteHome: codexSqliteHome,
+        }),
+      );
+      if (!sharedHomes[kind].some(home => home.path === directory)) {
+        sharedHomes[kind].push({ account: `${account.id}.default`, path: directory });
+      }
     }
 
     for (const target of targets) {
@@ -156,7 +189,11 @@ export class FleetPlan implements FleetPlanBuilder {
       ),
     });
 
-    return { manifest, manifestPath: layout.manifestPath, operations };
+    const sharedHistoryRequests = (['claude', 'codex'] as const)
+      .filter(kind => config.sharedHistory[kind])
+      .map(kind => ({ kind, poolRoot: sharedRoot, homes: sharedHomes[kind] }));
+
+    return { manifest, manifestPath: layout.manifestPath, operations, sharedHistoryRequests };
   }
 
   /** Materialize one account's profile assets into `directory`. */
@@ -164,6 +201,7 @@ export class FleetPlan implements FleetPlanBuilder {
     account: ResolvedAccount,
     directory: string,
     layout: FleetLayout,
+    codexSqlite: { readonly enabled: boolean; readonly sqliteHome: string },
   ): readonly FleetWriteOperation[] {
     const unsupported = new Set(unsupportedAssetFields(this.assets, account.kind));
     for (const field of declaredAssetFields(account)) {
@@ -172,12 +210,31 @@ export class FleetPlan implements FleetPlanBuilder {
 
     const operations: FleetWriteOperation[] = [];
     const settings = harnessAsset(this.assets, account.kind, 'settings');
-    if (settings?.format !== undefined && account.settings.length > 0) {
-      const layers: readonly SettingsLayerSource[] = account.settings.map(layer =>
-        typeof layer === 'string'
-          ? { from: 'file', path: expandAssetPath(layer, layout.userHome, layout.assetsDirectory) }
-          : { from: 'inline', settings: layer },
-      );
+    const configuredLayers: readonly SettingsLayerSource[] = account.settings.map(layer =>
+      typeof layer === 'string'
+        ? { from: 'file', path: expandAssetPath(layer, layout.userHome, layout.assetsDirectory) }
+        : { from: 'inline', settings: layer },
+    );
+    if (account.kind === 'codex' && settings?.format !== undefined) {
+      const configPath = joinPath(directory, settings.dest);
+      operations.push({
+        kind: 'codex-sqlite-ownership',
+        path: configPath,
+        markerPath: joinPath(directory, CODEX_SQLITE_MARKER),
+        sqliteHome: codexSqlite.sqliteHome,
+        enabled: codexSqlite.enabled,
+      });
+    }
+    if (
+      settings?.format !== undefined &&
+      (configuredLayers.length > 0 || (account.kind === 'codex' && codexSqlite.enabled))
+    ) {
+      const layers: readonly SettingsLayerSource[] = [
+        ...configuredLayers,
+        ...(account.kind === 'codex' && codexSqlite.enabled
+          ? [{ from: 'inline' as const, settings: { sqlite_home: codexSqlite.sqliteHome } }]
+          : []),
+      ];
       operations.push({
         kind: 'settings',
         path: joinPath(directory, settings.dest),

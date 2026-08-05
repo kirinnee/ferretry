@@ -4,6 +4,7 @@ import {
   buildFleetHealthCollector,
   buildFleetUsageCollector,
   type FleetApplyPlan,
+  type FleetApplyPreview,
   type FleetApplyResult,
   type FleetConfig,
   FleetConfigSchema,
@@ -15,11 +16,13 @@ import {
   FleetPlan,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
+  SharedHistoryMigration,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
   FileFleetConfigSource,
   FileFleetProvisioner,
+  FileSharedHistoryFileSystem,
   fetchQuota,
   PlatformFleetCredentialStore,
   ProcessFleetHealthProbe,
@@ -49,7 +52,7 @@ export interface FleetSubsystem {
   /** The deliberately narrow, remotely-safe profile environment editor. */
   environment(): Promise<FleetEnvironmentView>;
   updateEnvironment(request: FleetEnvironmentUpdate): Promise<FleetEnvironmentView>;
-  plan(): Promise<FleetApplyPlan>;
+  plan(): Promise<FleetApplyPreview>;
   usage(): Promise<FleetUsageSnapshot>;
   /** Explicit liveness evidence, keyed to this daemon's FY_HOME. */
   health(): Promise<FleetHealthSnapshot>;
@@ -171,7 +174,11 @@ class MountedFleet implements FleetSubsystem {
     // FleetPlan may target both FY_HOME (the generated fleet) and explicit/default harness homes
     // under the user home. Those are the only two roots this daemon declares writable; an absolute
     // account home elsewhere remains visible in GET /plan and is refused by the shared adapter.
-    this.provisioner = new FileFleetProvisioner([options.paths.home, options.userHome]);
+    const allowedRoots = [options.paths.home, options.userHome];
+    this.provisioner = new FileFleetProvisioner(
+      allowedRoots,
+      new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),
+    );
   }
 
   async accounts(): Promise<FleetManifest> {
@@ -225,10 +232,11 @@ class MountedFleet implements FleetSubsystem {
     return await this.environment();
   }
 
-  async plan(): Promise<FleetApplyPlan> {
+  async plan(): Promise<FleetApplyPreview> {
     const config = await this.config();
     try {
-      return this.planner.build(config, this.layout, this.generatedAt());
+      const plan: FleetApplyPlan = this.planner.build(config, this.layout, this.generatedAt());
+      return await this.provisioner.preview(plan);
     } catch (error) {
       throw new FleetRefusal('fleet_plan_refused', errorMessage(error));
     }

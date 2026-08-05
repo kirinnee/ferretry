@@ -1,6 +1,5 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { UnimplementedFleetCapabilityError } from '../../src/lib/capabilities.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import { declaredAssetFields, FleetPlan, UnknownDefaultHomeError, UnsupportedAssetError } from '../../src/lib/plan.ts';
 import type { ResolvedAccount } from '../../src/lib/profiles.ts';
@@ -397,16 +396,53 @@ describe('FleetPlan', () => {
   });
 });
 
-describe('FleetPlan capability refusal', () => {
-  it('should refuse to plan a configuration that asks for a capability this build lacks', () => {
+describe('FleetPlan shared history', () => {
+  it('should plan the Codex pool, homes, wrapper environment, owned setting, and migration request', () => {
     // Arrange
-    const input = config({ sharedHistory: { codex: true } });
+    const input = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work' }) },
+        },
+      ],
+      defaultHomes: { codex: ID_CODEX },
+      sharedHistory: { codex: true },
+    });
 
     // Act
-    const act = (): unknown => subject.build(input, LAYOUT, GENERATED_AT);
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
 
-    // Assert — refused while planning, so `--dry-run` cannot print a plan an apply could not honour.
-    should(act).throw(UnimplementedFleetCapabilityError);
+    // Assert — this value is what dry-run observes and enriches with exact collision outcomes.
+    should(actual.sharedHistoryRequests).deepEqual([
+      {
+        kind: 'codex',
+        poolRoot: '/state/fleet/shared',
+        homes: [
+          { account: ID_CODEX, path: '/state/fleet/homes/codex-work' },
+          { account: `${ID_CODEX}.default`, path: '/home/tester/.codex' },
+        ],
+      },
+    ]);
+    should(operationsOf(actual, 'directory').map(operation => operation.path)).containEql(
+      '/state/fleet/shared/codex/sqlite',
+    );
+    should(operationsOf(actual, 'codex-sqlite-ownership')).have.length(2);
+    should(operationsOf(actual, 'settings')).containDeep([
+      {
+        path: '/state/fleet/homes/codex-work/config.toml',
+        layers: [{ from: 'inline', settings: { sqlite_home: '/state/fleet/shared/codex/sqlite' } }],
+      },
+      {
+        path: '/home/tester/.codex/config.toml',
+        layers: [{ from: 'inline', settings: { sqlite_home: '/state/fleet/shared/codex/sqlite' } }],
+      },
+    ]);
+    const [wrapper] = operationsOf(actual, 'file');
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(
+      "export CODEX_SQLITE_HOME='/state/fleet/shared/codex/sqlite'",
+    );
   });
 
   it('should plan normally when the same sections carry their defaults', () => {
@@ -415,5 +451,6 @@ describe('FleetPlan capability refusal', () => {
 
     // Assert
     should(actual.manifest.accounts).have.length(1);
+    should(actual.sharedHistoryRequests).deepEqual([]);
   });
 });

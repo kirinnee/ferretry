@@ -1,6 +1,6 @@
 import type {
   CredentialState,
-  FleetApplyPlan,
+  FleetApplyPreview,
   FleetApplyResult,
   FleetHealth,
   FleetHealthSnapshot,
@@ -12,6 +12,7 @@ import type {
   FleetUsage,
   FleetUsageSnapshot,
   FleetWriteOperation,
+  SharedHistoryChange,
 } from '@ferretry/fleet';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
@@ -27,8 +28,29 @@ function operationTarget(operation: FleetWriteOperation): string {
       return `${operation.path} ← ${operation.source}`;
     case 'prune':
       return `${operation.path} (keeping ${operation.keep.length})`;
+    case 'codex-sqlite-ownership':
+      return operation.enabled
+        ? `${operation.path} (own sqlite_home=${operation.sqliteHome}; sidecar ${operation.markerPath})`
+        : `${operation.path} (restore/remove only Ferretry's owned sqlite_home; sidecar ${operation.markerPath})`;
     default:
       return operation.path;
+  }
+}
+
+function historyChange(change: SharedHistoryChange): string {
+  switch (change.kind) {
+    case 'create-pooled-entry':
+      return `create ${change.entryType} ${change.path}`;
+    case 'move':
+      return `rename ${change.source} → ${change.destination}`;
+    case 'collision':
+      return `collision ${change.incoming} ↔ ${change.pooled}; winner ${change.winner}; preserve loser ${change.loser} at ${change.preservedAt}`;
+    case 'merge-jsonl':
+      return `merge ${change.source} → ${change.destination}; preserve source at ${change.sourcePreservedAt}`;
+    case 'link':
+      return `link ${change.path} → ${change.target}`;
+    default:
+      return `keep shared link ${change.path} → ${change.target}`;
   }
 }
 
@@ -38,10 +60,15 @@ function operationTarget(operation: FleetWriteOperation): string {
  * `--dry-run` prints exactly this and stops, so what a human reviews is the same value the applier
  * consumes — kteam's dry run re-derived a summary and could disagree with the real thing.
  */
-export function renderApplyPlan(plan: FleetApplyPlan): string {
-  const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')} — nothing has been written`;
+export function renderApplyPlan(plan: FleetApplyPreview): string {
+  const historyChanges = plan.sharedHistory.reduce((total, preview) => total + preview.changes.length, 0);
+  const header = `${plural(plan.manifest.accounts.length, 'account')}, ${plural(plan.operations.length, 'operation')}, ${plural(historyChanges, 'history change')} — nothing has been written`;
   const operations = plan.operations.map(operation => `  ${operation.kind.padEnd(9)} ${operationTarget(operation)}`);
-  return [header, ...operations, `  manifest   ${plan.manifestPath}`].join('\n');
+  const history = plan.sharedHistory.flatMap(preview => [
+    `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
+    ...preview.changes.map(change => `    ${historyChange(change)}`),
+  ]);
+  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`].join('\n');
 }
 
 /** What an apply actually did, including anything it swept away. */
@@ -52,6 +79,11 @@ export function renderApplyResult(result: FleetApplyResult): string {
   ];
   if (result.prunedWrappers.length > 0) {
     lines.push(`  pruned ${plural(result.prunedWrappers.length, 'wrapper')}: ${result.prunedWrappers.join(', ')}`);
+  }
+  for (const shared of result.sharedHistory) {
+    lines.push(
+      `  shared ${shared.kind}: ${shared.migrated} migrated entries, ${shared.conflicts} collisions preserved, ${shared.links} links → ${shared.pool}`,
+    );
   }
   return lines.join('\n');
 }

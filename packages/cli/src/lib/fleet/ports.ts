@@ -1,5 +1,6 @@
 import type {
   FleetApplyPlan,
+  FleetApplyPreview,
   FleetApplyResult,
   FleetConfig,
   FleetHealthSnapshot,
@@ -41,6 +42,7 @@ export interface IFleetPlanner {
 
 /** Performing a plan's writes. Satisfied by `@ferretry/fleet`'s file provisioner. */
 export interface IFleetApplier {
+  preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
   apply(plan: FleetApplyPlan): Promise<FleetApplyResult>;
 }
 

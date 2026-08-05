@@ -82,7 +82,13 @@ describe('FileFleetProvisioner', () => {
     const actual = await subject.apply(plan);
 
     // Assert
-    should(actual).deepEqual({ accountCount: 1, operationCount: 4, manifestPath, prunedWrappers: [] });
+    should(actual).deepEqual({
+      accountCount: 1,
+      operationCount: 4,
+      manifestPath,
+      prunedWrappers: [],
+      sharedHistory: [],
+    });
     should(await readFile(wrapper, 'utf8')).containEql('exec true');
     should((await stat(wrapper)).mode & 0o777).equal(0o755);
     should(await readFile(copied, 'utf8')).equal('placeholder material\n');
@@ -339,6 +345,203 @@ describe('FileFleetProvisioner', () => {
       // Assert
       await should(promise).be.rejectedWith(/cannot parse json settings/);
       should(await Bun.file(destination).exists()).be.false();
+    });
+  });
+
+  describe('Codex shared SQLite ownership', () => {
+    it('should record the original sqlite_home, inject the shared value, and restore only its own value', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, 'model = "user"\nsqlite_home = "/private/sqlite"\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act — enable, then disable without a configured settings layer.
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+      const enabled = await readFile(config, 'utf8');
+      const sidecar = JSON.parse(await readFile(marker, 'utf8'));
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      should(enabled).containEql(`sqlite_home = "${sqliteHome}"`);
+      should(sidecar).deepEqual({
+        version: 1,
+        sqliteHome,
+        createdConfig: false,
+        original: { present: true, value: '/private/sqlite' },
+      });
+      should(await readFile(config, 'utf8')).containEql('sqlite_home = "/private/sqlite"');
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it('should remove a config it created only when the exact owned value remains', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      await should(lstat(config)).be.rejected();
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it('should leave a user-replaced sqlite_home untouched while removing its ownership sidecar', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const manifestPath = path.join(root, 'fleet', 'manifest.json');
+      const subject = new FileFleetProvisioner([root]);
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [
+          { kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true },
+          {
+            kind: 'settings',
+            path: config,
+            format: 'toml',
+            layers: [{ from: 'inline', settings: { sqlite_home: sqliteHome } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+      await Bun.write(config, 'sqlite_home = "/user/replaced"\n');
+
+      // Act
+      await subject.apply({
+        manifest: manifest(),
+        manifestPath,
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      should(await readFile(config, 'utf8')).equal('sqlite_home = "/user/replaced"\n');
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it.each([
+      ['sidecar', '{"version":2}\n', 'model = "kept"\n'],
+      [
+        'config',
+        '{"version":1,"sqliteHome":"/shared","createdConfig":false,"original":{"present":false}}\n',
+        '= broken',
+      ],
+    ])('should fail closed on an invalid %s', async (_kind, markerText, configText) => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, configText);
+      await Bun.write(marker, markerText);
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert
+      await should(promise).be.rejected();
+      should(await readFile(config, 'utf8')).equal(configText);
+      should(await readFile(marker, 'utf8')).equal(markerText);
+    });
+
+    it.each(['sidecar', 'config'])('should fail closed on a symlinked %s', async kind => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      const outside = path.join(root, `${kind}-target`);
+      const configText = `sqlite_home = "${sqliteHome}"\n`;
+      const markerText = `${JSON.stringify({
+        version: 1,
+        sqliteHome,
+        createdConfig: false,
+        original: { present: false },
+      })}\n`;
+      await mkdir(home, { recursive: true });
+      if (kind === 'sidecar') {
+        await Bun.write(config, configText);
+        await Bun.write(outside, markerText);
+        await symlink(outside, marker);
+      } else {
+        await Bun.write(marker, markerText);
+        await Bun.write(outside, configText);
+        await symlink(outside, config);
+      }
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      });
+
+      // Assert — the linked target and the link itself are both untouched.
+      await should(promise).be.rejectedWith(/must be a regular file/u);
+      should(await readFile(outside, 'utf8')).equal(kind === 'sidecar' ? markerText : configText);
+      should((await lstat(kind === 'sidecar' ? marker : config)).isSymbolicLink()).be.true();
     });
   });
 

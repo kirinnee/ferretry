@@ -68,7 +68,7 @@ describe('apply plan rendering', () => {
     const rendered = renderApplyPlan(plan());
 
     // Assert
-    should(rendered.split('\n')[0]).equal('1 account, 2 operations — nothing has been written');
+    should(rendered.split('\n')[0]).equal('1 account, 2 operations, 0 history changes — nothing has been written');
     should(rendered).containEql('directory /state/fleet/bin');
     should(rendered).containEql('manifest   /state/fleet/manifest.json');
   });
@@ -98,6 +98,42 @@ describe('apply plan rendering', () => {
 
     // Act + Assert
     should(renderApplyPlan(sweeping)).containEql('/state/fleet/bin (keeping 2)');
+  });
+
+  it('should name the exact winner and preserved loser for every history collision', () => {
+    // Arrange
+    const incoming = '/state/fleet/homes/b/projects/thread.jsonl';
+    const pooled = '/state/fleet/shared/claude/projects/thread.jsonl';
+    const preservedAt = '/state/fleet/shared/claude/.migration-conflicts/b/projects/thread.jsonl';
+    const collision = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 1,
+          links: 2,
+          changes: [
+            {
+              kind: 'collision',
+              incoming,
+              pooled,
+              winner: incoming,
+              loser: pooled,
+              preservedAt,
+            },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(collision);
+
+    // Assert
+    should(rendered).containEql(
+      `collision ${incoming} ↔ ${pooled}; winner ${incoming}; preserve loser ${pooled} at ${preservedAt}`,
+    );
   });
 
   it('should report what an apply actually did', () => {

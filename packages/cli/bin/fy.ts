@@ -9,12 +9,14 @@ import {
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
+  SharedHistoryMigration,
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
   FileFleetConfigSource,
   FileFleetProvisioner,
   FileFleetScaffolder,
+  FileSharedHistoryFileSystem,
   fetchQuota,
   PlatformFleetCredentialStore,
   ProcessFleetHealthProbe,
@@ -545,6 +547,7 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
   });
   const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
   const configPath = configured === '' ? defaultConfigPath(layout) : configured;
+  const fleetWriteRoots = [layout.fleetDirectory, layout.userHome];
   // The one place allowed to read the platform and the environment: the store itself takes both as
   // values, which is what lets a test drive the macOS path on a host that is not macOS.
   const credentialStore = new PlatformFleetCredentialStore({
@@ -571,8 +574,12 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     planner: {
       build: (config, generatedAt) => new FleetPlan().build(config, layout, generatedAt),
     },
-    // Writes are bounded to the fleet directory: nothing outside it is ever created or pruned.
-    applier: new FileFleetProvisioner([layout.fleetDirectory]),
+    // Account/default homes may live under the user's home; history still names every exact home in
+    // its request, and both adapters independently reject anything outside these declared roots.
+    applier: new FileFleetProvisioner(
+      fleetWriteRoots,
+      new SharedHistoryMigration(new FileSharedHistoryFileSystem(fleetWriteRoots)),
+    ),
     // Built per invocation from the loaded configuration, so `usage.concurrency`,
     // `usage.atLimitPercent` and `usage.timeout` are honoured instead of parsed and dropped. The
     // timeout goes to the probe rather than the collector because only the probe can actually cancel

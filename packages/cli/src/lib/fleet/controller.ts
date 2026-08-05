@@ -100,7 +100,8 @@ export class FleetController {
     const config = await this.deps.config.load();
     const plan = this.deps.planner.build(config, this.deps.clock.now());
     if (options.dryRun === true) {
-      this.#report(plan, options, () => renderApplyPlan(plan));
+      const preview = await this.deps.applier.preview(plan);
+      this.#report(preview, options, () => renderApplyPlan(preview));
       return;
     }
     const result = await this.deps.applier.apply(plan);

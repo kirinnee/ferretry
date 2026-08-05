@@ -50,14 +50,14 @@ describe('unimplementedCapabilities', () => {
     should(actual).deepEqual([]);
   });
 
-  it('should refuse a configuration that asks for shared history on either harness', () => {
+  it('should not report shared history now that both harness pools are implemented', () => {
     // Act
     const claude = keysOf(config({ sharedHistory: { claude: true } }));
     const codex = keysOf(config({ sharedHistory: { codex: true } }));
 
     // Assert
-    should(claude).deepEqual(['sharedHistory.claude']);
-    should(codex).deepEqual(['sharedHistory.codex']);
+    should(claude).deepEqual([]);
+    should(codex).deepEqual([]);
   });
 
   it('should refuse a declared CLIProxy source', () => {
@@ -89,23 +89,12 @@ describe('unimplementedCapabilities', () => {
     // Assert
     should(actual).deepEqual([]);
   });
-
-  it('should describe what is lost, not merely that a key is unsupported', () => {
-    // Act
-    const [actual] = unimplementedCapabilities(config({ sharedHistory: { codex: true } }));
-
-    // Assert
-    should(actual?.capability).match(/rollouts/);
-    should(actual?.consequence).match(/resumable/);
-  });
 });
 
 describe('UnimplementedFleetCapabilityError', () => {
   it('should name every offending key, what it would do, and what happens instead', () => {
     // Arrange
-    const capabilities = unimplementedCapabilities(
-      config({ sharedHistory: { claude: true }, health: { enabled: true } }),
-    );
+    const capabilities = unimplementedCapabilities(config({ health: { enabled: true }, usage: { interval: 300 } }));
 
     // Act
     const actual = new UnimplementedFleetCapabilityError(capabilities);
@@ -114,8 +103,8 @@ describe('UnimplementedFleetCapabilityError', () => {
     should(actual.name).equal('UnimplementedFleetCapabilityError');
     should(actual.capabilities).have.length(2);
     should(actual.message).match(/capabilities this build does not implement/);
-    should(actual.message).match(/sharedHistory\.claude —/);
     should(actual.message).match(/health\.enabled —/);
+    should(actual.message).match(/usage\.interval —/);
     should(actual.message).match(/refused rather than ignored/);
   });
 
