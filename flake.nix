@@ -76,7 +76,33 @@
           };
           devShells = import ./nix/shells.nix {
             inherit pkgs env packages;
-            shellHook = checks.pre-commit-check.shellHook;
+            shellHook = checks.pre-commit-check.shellHook + ''
+              # Linked worktrees share the hooks directory but not their generated
+              # .pre-commit-config.yaml. The hook launcher must therefore use a config
+              # retained under the Git common directory, not a relative path in the
+              # worktree that most recently entered this devshell.
+              if git rev-parse --git-dir &> /dev/null; then
+                git_worktree="$(git rev-parse --show-toplevel)"
+                git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+                common_config="''${git_common_dir}/ferretry-pre-commit-config.yaml"
+                generated_config="$(readlink -f "''${git_worktree}/.pre-commit-config.yaml")"
+
+                nix-store --add-root "''${common_config}" --indirect --realise "''${generated_config}"
+                git config --local --unset-all core.hooksPath || true
+                for hook_type in pre-commit commit-msg; do
+                  pre-commit install -c "''${common_config}" -t "''${hook_type}"
+
+                  # pre-commit rewrites an absolute config to a path relative to the
+                  # worktree that installed the hook. Git runs this shared launcher from
+                  # every linked worktree, so resolve from the launcher's common hooks
+                  # directory instead.
+                  hook_path="$(git rev-parse --git-path hooks)/''${hook_type}"
+                  config_from_hook_dir='$(cd "$(dirname "$0")/.."; pwd)/ferretry-pre-commit-config.yaml'
+                  sed -i "s|^ARGS=(hook-impl --config=.* --hook-type=''${hook_type})$|ARGS=(hook-impl --config=\"''${config_from_hook_dir}\" --hook-type=''${hook_type})|" "''${hook_path}"
+                done
+                git config --local core.hooksPath "''${git_common_dir}/hooks"
+              fi
+            '';
           };
           checks = {
             pre-commit-check = pre-commit;
