@@ -191,6 +191,17 @@ const appStore = async (
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         wardenVerdicts: async () => (options.wardenVerdicts === undefined ? [] : await options.wardenVerdicts()),
         wardenReport: async (reportPath: string) => `# Evidence from ${reportPath}`,
+        foreignHistory: async () => ({ conversations: [], skipped: [] }),
+        foreignHistoryConversation: async () => ({
+          conversation: {
+            id: 'fixture-history',
+            harness: 'claude',
+            title: 'Fixture imported history',
+            eventCount: 1,
+            readOnly: true,
+          },
+          messages: [],
+        }),
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
           return path === '/v1/doctor' ? doctorReport : {};
@@ -702,6 +713,7 @@ describe('AppShell', () => {
       ['/d/alpha/warden', 'Sessions, Warden'],
       ['/d/alpha/analytics', 'Sessions, Analytics'],
       ['/d/alpha/learning', 'Sessions, Learning'],
+      ['/d/alpha/history', 'Sessions, Imported history'],
       ['/d/alpha/session/one', 'Sessions, one'],
     ] as const) {
       await popTo(path);

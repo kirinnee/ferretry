@@ -58,6 +58,7 @@ describe('FleetNavigationRail', () => {
     expect(links.map(link => link.getAttribute('href'))).toEqual([
       '/d/workshop/new',
       '/d/workshop/warden',
+      '/d/workshop/history',
       '/d/workshop/settings',
     ]);
 

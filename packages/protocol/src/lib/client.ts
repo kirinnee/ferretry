@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
+import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type {
   AttachmentView,
   CgroupConfigPatch,
@@ -78,6 +79,8 @@ export interface IFyApiClient {
   projects(): Promise<ProjectList>;
   sessionSkills(id: string): Promise<SessionSkills>;
   analytics(query?: string): Promise<AnalyticsResponse>;
+  foreignHistory(): Promise<ForeignHistoryListing>;
+  foreignHistoryConversation(id: string): Promise<ImportedConversationDetail>;
   scratchPlan(limit?: number): Promise<ScratchPlanView[]>;
   scratchSweep(force?: boolean): Promise<ScratchSweepView>;
   list(): Promise<SessionView[]>;
