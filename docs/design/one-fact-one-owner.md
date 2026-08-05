@@ -47,12 +47,13 @@ content, including my own from the previous revision — one of which had alread
    by hand twelve times. Forcing them into the daemon model would be a false unification.
 5. **Authorization is two layers plus a category error, not three.** `RouteScope` welds credential
    class to arrival privilege into a total order that cannot express what #295 needed. §5.
-6. **The doctrines are largely followed, and the drift is concentrated in `packages/pwa/src/lib`** — the
-   one package with no cross-process agreement problem at all. Measured over 634 files with the glob
-   stated so it is reproducible, after hadi caught my first sweep using a broken pathspec. **The
-   patchwork the owner is complaining about is not doctrine drift**: no doctrine article says anything
-   about two programs agreeing on one fact, which is the failure that keeps shipping. The deliverable
-   therefore includes a new doctrine article. §7.
+6. **The doctrines are largely followed, and there are two separate drifts** — a mechanism drift that is
+   genuinely `pwa/src/lib`-shaped, and a repo-wide private-method drift led by a `daemon` mount.
+   Measured over 634 files with the file set, every pattern and its unit stated, after three review
+   rounds found five measurement errors in my own sweeps and none in the code. **The patchwork the owner
+   is complaining about is neither drift**: no doctrine article says anything about two programs agreeing
+   on one fact, which is the failure in all sixteen findings. That claim rests on what the eight articles
+   contain, so no count moves it. The deliverable therefore includes a new doctrine article. §7.
 7. **The fix for a duplicated fact is sometimes to SPLIT it, not to collapse it.** temperance's
    `mayGrant`/`governed` case proves it. A refactor that only merges will over-merge. §4.5.
 8. **A pairing link must say who can redeem it, not merely exist.** The advertisement has three
@@ -831,7 +832,9 @@ So the deliverable includes:
 
 **A new doctrine article: `docs/standards/fact-ownership/index.md`**, holding R1–R5 of §4, the
 soundness-vs-completeness rule, temperance's workaround diagnostic, the split-don't-over-merge
-anti-rule, the input-domain rule from finding 8, and the re-test rule from §2.5.2. Linked from
+anti-rule, the input-domain rule from finding 8, the re-test rule from §2.5.2, and the two measurement
+rules from §11.1 — _an under-match reads as compliance_ and _state the probe, or two runs of the same
+measurement are not the same measurement_. Linked from
 `CLAUDE.md`'s doctrine table beside the other eight, because a rule that is not in the table is a rule
 nobody reads.
 
@@ -1064,13 +1067,24 @@ here the answer was that both were right and the reconciliation was the finding.
 
 > **Every silent failure in this document's own measurements was an UNDER-match, and an under-match reads
 > as compliance.** A pathspec that dropped three packages, a pattern that dropped a keyword, a pattern
-> that dropped an annotation. State the file set _and_ the pattern, and treat any zero or any
-> suspiciously-clean count as a bug in the probe until the per-package breakdown says otherwise.
+> that dropped an annotation, a three-file sample read as a corpus direction, and one narrower pattern
+> that dropped `readonly #x`. State the file set _and_ the pattern _and_ its unit, and treat any zero or
+> any suspiciously-clean count as a bug in the probe until the per-package breakdown says otherwise.
 
-This one matters most, because "the patchwork is not doctrine drift" is load-bearing for the owner's
-decision, and hadi was right that one wrong count in the evidence weakens an argument that deserves to
-be believed. The corrected numbers do not overturn the conclusion — they sharpen it, because the drift
-turns out to be concentrated in the one package with no agreement problem at all.
+**2d. And one failure that is not an under-match at all.** Reviewing the reconciliation, cinthia noticed
+they had used **two different patterns in two turns without stating either** — the three-file numbers
+came from my pattern, the corpus numbers from their narrower one. The complaint that my corrected pattern
+was unstated was fair _and_ was the same thing happening.
+
+> **State the probe, or two runs of "the same" measurement are not the same measurement.** This is a
+> distinct mechanism from the four above: the instrument changed between runs, so both numbers were
+> faithful to what they measured and neither was comparable to the other.
+
+**What this round did not do is change the conclusion.** Five measurement errors were found across three
+review rounds and none of them touched the load-bearing claim, because that claim is about what the eight
+doctrine articles _contain_ — checkable by reading them, and moved by no count. What the errors did
+change is one of my own tidier framings: I had written that the drift was concentrated in the package
+with no agreement problem, and §7 now retracts that. The argument never needed it.
 
 **3. A finding I under-counted.** I first reported `pairing` as having no route demand. It has one;
 my pattern matched only inline literals and `mounts/pairing.ts` uses a named `PAIRING_DEMAND` constant.
