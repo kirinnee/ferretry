@@ -12,6 +12,7 @@ export * from './paths.ts';
 export * from './plan.ts';
 export * from './profiles.ts';
 export * from './provisioning.ts';
+export * from './quota.ts';
 export * from './scaffold.ts';
 export * from './settings.ts';
 export * from './usage.ts';
