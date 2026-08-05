@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { FleetUsageSnapshot } from '@ferretry/fleet';
+import { FleetConfigSchema, type FleetUsageSnapshot } from '@ferretry/fleet';
 import should from 'should';
 import { CachedUsageFeed, type FleetUsageReader, FleetUsageSource } from '../../../src/adapters/usage/index.ts';
 import type { AccountInventoryPort, CoreAccount, UsageSourcePort } from '../../../src/lib/index.ts';
@@ -19,7 +19,8 @@ const account: CoreAccount = {
   available: true,
 };
 
-const collector = (answer: FleetUsageSnapshot | Error): FleetUsageReader => ({
+const collector = (answer: FleetUsageSnapshot | Error, enabled = true): FleetUsageReader => ({
+  config: async () => FleetConfigSchema.parse({ usage: { enabled } }),
   usage: async () => {
     if (answer instanceof Error) throw answer;
     return answer;
@@ -86,6 +87,18 @@ describe('FleetUsageSource', () => {
     const accounts = await source.read(AbortSignal.abort());
 
     // Assert
+    should(accounts).be.undefined();
+  });
+
+  it('should collect nothing when the fleet has usage switched off', async () => {
+    // Arrange — usage.enabled reached nothing before: it parsed, defaulted to true and was dropped,
+    // so an operator who turned quota probing off still had a daemon probing on a timer.
+    const source = new FleetUsageSource(collector(snapshot, false), manifest(account));
+
+    // Act
+    const accounts = await source.read();
+
+    // Assert — "do not collect" is not "this fleet has no accounts".
     should(accounts).be.undefined();
   });
 

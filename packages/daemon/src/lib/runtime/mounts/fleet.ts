@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { z } from 'zod';
 import {
   buildFleetUsageCollector,
   type FleetApplyPlan,
@@ -22,8 +21,9 @@ import {
   PlatformFleetCredentialStore,
   SpawnCredentialCommand,
 } from '@ferretry/fleet/adapters';
-import { ApiError } from '../../api/error.ts';
+import { z } from 'zod';
 import { parseBody } from '../../api/body.ts';
+import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import type { FoundationPaths } from '../../paths.ts';
@@ -236,15 +236,26 @@ class MountedFleet implements FleetSubsystem {
    */
   async usage(): Promise<FleetUsageSnapshot> {
     const [config, manifest] = [await this.config(), await this.loadManifest()];
-    return await buildFleetUsageCollector(config, this.options.usageProbe ?? this.probe(), this.options.clock).collect(
-      manifest,
-    );
+    return await buildFleetUsageCollector(
+      config,
+      this.options.usageProbe ?? this.probe(config.usage.timeout),
+      this.options.clock,
+    ).collect(manifest);
   }
 
-  /** This host's provider probe. Shared with the CLI so neither can drift from the other. */
-  private probe(): FleetUsageProbe {
+  /**
+   * This host's provider probe. Shared with the CLI so neither can drift from the other.
+   *
+   * The declared `usage.timeout` is passed IN, because it reached neither composition root: the probe
+   * landed after the plan-time refusal list was written, so a configuration that bounded its provider
+   * calls was parsed and silently dropped, and every probe ran on the adapter's own default instead.
+   * That matters more now than it did — the daemon's whole quota feed collects through here, so one
+   * hung provider call stalls the refresh every session, the advisor and every scraper is waiting on.
+   */
+  private probe(timeoutSeconds: number): FleetUsageProbe {
     return new AnthropicUsageProbe({
       fetch: fetchQuota,
+      timeoutMs: timeoutSeconds * 1_000,
       credentials: new PlatformFleetCredentialStore({
         platform: this.options.platform,
         command: new SpawnCredentialCommand(),

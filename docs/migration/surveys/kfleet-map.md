@@ -317,11 +317,31 @@ z.ai (`:382`), MiniMax (`:487`), classification (`:741`), pre-probe token refres
 healing (`:885`), and secrets-file resolution (`:703`). The entire CLIProxyAPI availability source
 (`core/cliproxy-usage.ts`, 308 lines) is **not to be ported**.
 
-**The daemon still gets its quota from kfleet.** `/usage`, `/v1/usage` and `/metrics` are served from a
-cached feed whose only two sources are an HTTP call to kfleet's `serve` and a shell-out to its CLI, so F
-reads as closed from the CLI and open from the daemon. The fix is one `UsageSourcePort` over the native
-collector — with one join that will silently break routing if got wrong. See
+**The daemon used to get its quota from kfleet — `PORTED`.** `/usage`, `/v1/usage` and `/metrics` are
+served from a cached feed whose only two sources were an HTTP call to kfleet's `serve` and a shell-out
+to its CLI, so the tool this migration exists to delete was a **runtime dependency of the daemon's
+quota** — and every consumer of it: the advisor, quota-failover, every session's quota block and every
+Prometheus scraper. That was a blocker on deleting kfleet and had not been recorded as one.
+
+Closed by `FleetUsageSource` (`daemon/src/adapters/usage/fleet-usage-source.ts`) over
+`accountUsageFromFleet` (`daemon/src/lib/usage/fleet-usage.ts`), wired **first** in `createUsageFeed`
+ahead of the two external sources. No second refresh loop: the existing `CachedUsageFeed` keeps its
+lazy refresh, its shared in-flight read, its retention of the last good snapshot and its rendered
+`/metrics`, and only the numbers underneath became native. On a host with no kfleet, the daemon now
+reports the same real Anthropic numbers `fy fleet usage` does.
+
+The join is the feature: a collector row is keyed by the manifest's opaque `accountId`, a feed row by
+`agent` — the executable name `quota-failover/service.ts` hands to `migrate(...)`. See
 [quota-two-paths.md](quota-two-paths.md).
+
+`renderFleetUsageMetrics` and `renderFleetUsageJson` are therefore **unnecessary rather than uncalled**:
+`/metrics` renders the same collection through `api/metrics.ts` `renderUsageMetrics`, and
+`/v1/fleet/usage` returns the snapshot directly. Deleting the two is a separate, safe cleanup.
+
+Still **GAP**: the two external sources are still wired behind the native one, so kfleet remains
+_configurable_ as a fallback while a host is part-way through the migration. Removing them is
+deliberately not done here — ordering matters, and a daemon whose own fleet has not been applied yet
+should keep reporting quota from whatever is answering.
 
 **CLIProxyAPI is out of scope by the owner’s decision** — it is not to be ported. Its configuration is
 not silently dropped: `usage.cliProxy` is a **hard refusal** at plan time
