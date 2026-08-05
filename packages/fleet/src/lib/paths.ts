@@ -1,9 +1,10 @@
 /**
  * Path decisions for the fleet.
  *
- * Configuration is written by a human, so it says `~/.claude-work` rather than an absolute path,
- * and it names profile assets relative to the fleet directory. Everything the provisioner touches
- * must be absolute, so those two forms are expanded here — once, in one place, purely.
+ * A portable account name such as `claude-work` resolves under the Ferretry-owned homes directory;
+ * `~/.claude-work` remains an explicit opt-out for an operator who needs it. Profile assets are
+ * relative to the fleet directory. Everything the provisioner touches must be absolute, so those
+ * forms are expanded here — once, in one place, purely.
  *
  * No filesystem, no `process`, no `os.homedir()`: the user's home and the assets root are supplied
  * by the caller, which is what lets a test point the whole fleet at a temporary directory.

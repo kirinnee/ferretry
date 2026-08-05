@@ -15,6 +15,7 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
+import { FleetEnvironmentSettings } from './fleet-environment-settings.tsx';
 
 export interface DaemonSettingsTabProps {
   readonly connection: DaemonConnection;
@@ -83,6 +84,8 @@ function WardenSettingsTab({
 export interface DaemonSettingsFrameProps {
   readonly connection: DaemonConnection;
   readonly name: string;
+  /** All paired daemons are needed only as configuration-copy sources. */
+  readonly connections?: readonly DaemonConnection[];
   readonly readWardenStatus?: WardenStatusReader;
   /** Test and harness seam; production uses the daemon-bound default client. */
   readonly createWardenClient?: WardenClientFactory;
@@ -98,6 +101,7 @@ export interface DaemonSettingsFrameProps {
 export function DaemonSettingsFrame({
   connection,
   name,
+  connections = [connection],
   readWardenStatus,
   createWardenClient,
   additionalTabs = [],
@@ -116,9 +120,17 @@ export function DaemonSettingsFrame({
           />
         ),
       },
+      {
+        id: 'environment',
+        label: 'Environment',
+        description: 'Copy safe fleet profile environment between daemons.',
+        Surface: ({ connection: activeConnection }) => (
+          <FleetEnvironmentSettings connection={activeConnection} connections={connections} />
+        ),
+      },
       ...additionalTabs,
     ],
-    [additionalTabs, createWardenClient, readWardenStatus],
+    [additionalTabs, connections, createWardenClient, readWardenStatus],
   );
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
 

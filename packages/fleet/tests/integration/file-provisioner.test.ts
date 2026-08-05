@@ -138,6 +138,30 @@ describe('FileFleetProvisioner', () => {
     should((await stat(copied)).mode & 0o777).equal(0o644);
   });
 
+  it('should dereference a linked directory source so the generated account home contains no symlink', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'asset-source');
+    const linkedSource = path.join(root, 'asset-link');
+    const destination = path.join(root, 'fleet', 'homes', 'one', 'skills');
+    await mkdir(source);
+    await Bun.write(path.join(source, 'skill.md'), 'copied skill\n');
+    await symlink(source, linkedSource, 'dir');
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply({
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'copy', source: linkedSource, path: destination }],
+    });
+
+    // Assert
+    should((await lstat(destination)).isSymbolicLink()).be.false();
+    should((await lstat(path.join(destination, 'skill.md'))).isSymbolicLink()).be.false();
+    should(await readFile(path.join(destination, 'skill.md'), 'utf8')).equal('copied skill\n');
+  });
+
   describe('settings operations', () => {
     it('should merge file and inline layers left to right into the destination', async () => {
       // Arrange

@@ -517,6 +517,7 @@ export function SettingsPage({
                       key={String(daemonId)}
                       connection={connections.find(candidate => candidate.daemonId === daemonId) ?? dictation.daemon}
                       name={connections.find(candidate => candidate.daemonId === daemonId)?.label ?? String(daemonId)}
+                      connections={connections}
                       readWardenStatus={readWardenStatus}
                       createWardenClient={createWardenClient}
                       additionalTabs={daemonSettingsTabs}
