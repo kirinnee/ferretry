@@ -354,6 +354,39 @@ describe('BrowserRecognitionSession', () => {
     should(provider.recognition.starts).equal(1);
   });
 
+  it('aborts the restarted cycle when a terminal error follows the end instead of preceding it', () => {
+    const { provider, session, failures, transcripts } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+    provider.recognition.result([{ text: 'half a sentence', final: false }]);
+
+    // Web Speech does not order `end` against `error`. When the engine
+    // announces its network failure second, the `end` before it has already
+    // opened another cycle, so the failure has to close a live microphone
+    // rather than only marking this session failed.
+    provider.recognition.onend?.();
+    should(provider.recognition.starts).equal(2);
+    provider.recognition.onstart?.();
+    provider.recognition.onerror?.({ error: 'network' });
+
+    should(provider.recognition.starts).equal(2);
+    should(provider.recognition.aborts).equal(1);
+    should(failures).deepEqual([
+      { code: 'recognition-network', message: 'The browser speech service could not be reached.' },
+    ]);
+
+    // The `aborted` callbacks that abort itself delivers may neither restart
+    // the engine again nor replace the failure the reader is reading.
+    const afterFailure = transcripts.length;
+    provider.recognition.onerror?.({ error: 'aborted' });
+    provider.recognition.onend?.();
+    should(provider.recognition.starts).equal(2);
+    should(provider.recognition.aborts).equal(1);
+    should(failures).have.length(1);
+    should(failures[0]?.code).equal('recognition-network');
+    should(transcripts).have.length(afterFailure);
+  });
+
   it('aborts and notifies when the page becomes hidden', () => {
     const { provider, session, aborted } = sessionHarness();
     session.start();
