@@ -8,7 +8,7 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { Check, ChevronDown, LoaderCircle, Plus, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { ChevronDown, LoaderCircle, Plus, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
@@ -16,6 +16,7 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 
@@ -236,48 +237,20 @@ function DaemonManagement({
 
 const DAEMON_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
 
-function DaemonSubtabChoices({
-  connections,
-  activeDaemonId,
-  onSelect,
-}: {
-  readonly connections: readonly DaemonConnectionRecord[];
-  readonly activeDaemonId: DaemonId;
-  readonly onSelect: (daemonId: DaemonId) => void;
-}) {
-  return (
-    <ul className="m-0 flex list-none flex-col gap-1 p-0">
-      {connections.map(connection => {
-        const name = daemonDisplayName(connection);
-        const selected = connection.daemonId === activeDaemonId;
-        return (
-          <li key={connection.daemonId} data-daemon-id={String(connection.daemonId)}>
-            <button
-              type="button"
-              data-daemon-subtab={String(connection.daemonId)}
-              aria-current={selected ? 'page' : undefined}
-              onClick={() => onSelect(connection.daemonId)}
-              className={cn(
-                'flex min-h-[52px] w-full items-center gap-2 rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus',
-                selected
-                  ? 'border-accent bg-accent-soft text-accent'
-                  : 'border-transparent text-muted hover:border-border hover:bg-surface-2 hover:text-fg',
-              )}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-ui font-semibold">{name}</span>
-                {name === connection.baseUrl ? null : (
-                  <span className="mt-0.5 block truncate text-meta leading-tight text-faint">{connection.baseUrl}</span>
-                )}
-              </span>
-              {selected ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
+/**
+ * Level two of the shared rail. The address is the second line only when it is
+ * not already the label, so an unnamed daemon is not printed twice, and both
+ * lines clip: an address is long and opaque, and Host checks shows it in full.
+ */
+const daemonRailItems = (connections: readonly DaemonConnectionRecord[]): readonly ChoiceRailItem<DaemonId>[] =>
+  connections.map(connection => {
+    const name = daemonDisplayName(connection);
+    return {
+      id: connection.daemonId,
+      label: name,
+      detail: name === connection.baseUrl ? undefined : connection.baseUrl,
+    };
+  });
 
 /** The named daemon selector. On a phone it deliberately becomes a picker, never a cramped tab strip. */
 export function DaemonSettings({
@@ -370,9 +343,11 @@ export function DaemonSettings({
               Every panel below belongs to the daemon you choose here.
             </p>
             <nav aria-label="Connected daemons">
-              <DaemonSubtabChoices
-                connections={connections}
-                activeDaemonId={activeDaemonId}
+              <ChoiceRail
+                items={daemonRailItems(connections)}
+                activeId={activeDaemonId}
+                marker="data-daemon-subtab"
+                truncate
                 onSelect={daemonId => {
                   onSelectDaemon(daemonId);
                   setPickerOpen(false);

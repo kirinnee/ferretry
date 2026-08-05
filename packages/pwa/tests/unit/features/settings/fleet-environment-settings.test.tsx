@@ -62,7 +62,12 @@ describe('FleetEnvironmentSettings', () => {
     );
     run(() => environment.props.onClick());
 
-    expect(view.root.findByProps({ id: 'daemon-settings-tab-environment' }).props['aria-label']).toBe('Environment');
+    // The open panel names itself through the tab that selected it rather than
+    // repeating that tab's text, so the two can never disagree.
+    expect(view.root.findByProps({ id: 'daemon-settings-tab-environment' }).props['aria-labelledby']).toBe(
+      'daemon-panel-tab-environment',
+    );
+    expect(view.root.findByProps({ id: 'daemon-panel-tab-environment' }).props.role).toBe('tab');
     run(() => view.unmount());
   });
 
