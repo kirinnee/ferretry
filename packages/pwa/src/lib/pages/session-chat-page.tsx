@@ -6,7 +6,7 @@ import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
-import { QuestionForm, type QuestionAnswerApi } from '../../components/question-form.tsx';
+import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
 import {
   type ReferenceSurface,
   ReferenceSurfaceProvider,
@@ -33,6 +33,7 @@ import {
   type SidePaneTabPresentation,
 } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
+import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import type { ChatWidthPreference } from '../controls.ts';
@@ -42,6 +43,7 @@ import { daemonSessionScope } from '../daemon-scope.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
+import type { DaemonUsageStore } from '../usage-store.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -54,6 +56,10 @@ const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
 
 export interface SessionChatPageProps {
   readonly connection: DaemonConnection;
+  /** Daemon-scoped account roster used only when the migration sheet opens. */
+  readonly accountPicker?: DaemonAccountPickerStore;
+  /** Cached daemon usage feed; never the live fleet-usage probe. */
+  readonly usage?: DaemonUsageStore;
   readonly session: SessionView;
   readonly entries: readonly TranscriptEntry[];
   readonly client: SessionChatClient;
@@ -247,6 +253,8 @@ function WorkspaceSurface({
  */
 export function SessionChatPage({
   connection,
+  accountPicker,
+  usage,
   session,
   entries,
   client,
@@ -582,12 +590,14 @@ export function SessionChatPage({
             ) : null}
           </BottomSheet>
           <MigrateSheet
+            {...(accountPicker === undefined ? {} : { accountPicker })}
             canMutate={canControl}
             connection={connection}
             onClose={() => setMigrateOpen(false)}
             onMigrated={(_daemon, _scope, view) => publish(view)}
             open={migrateOpen}
             scope={scope}
+            {...(usage === undefined ? {} : { usage })}
             view={session}
           />
         </main>

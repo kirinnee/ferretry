@@ -14,10 +14,12 @@ import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
+import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
@@ -90,6 +92,35 @@ const client = (calls: string[], next: SessionView): SessionChatClient =>
   }) as unknown as SessionChatClient;
 
 describe('SessionChatPage', () => {
+  test('threads the daemon account and cached usage stores into migration', () => {
+    const accountPicker = new DaemonAccountPickerStore({
+      catalog: async () => ({ accounts: [] }),
+      health: async () => ({ health: new Map(), error: null }),
+    });
+    const usage = new DaemonUsageStore({ usage: async () => ({ stale: false, accounts: [] }) });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        accountPicker={accountPicker}
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+        usage={usage}
+      />,
+    );
+
+    try {
+      const migrate = page.root.findByType(MigrateSheet);
+      expect(migrate.props.accountPicker).toBe(accountPicker);
+      expect(migrate.props.usage).toBe(usage);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('renders the proved transcript, composer, controls, and honest pane launchers', () => {
     const page = renderSessionChatPage(
       <SessionChatPage

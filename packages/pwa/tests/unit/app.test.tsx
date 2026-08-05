@@ -727,6 +727,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('mounts both daemon pickers for a new session without probing account health', async () => {
+    const { healthReads, view } = await renderShell('/d/alpha/new', [alpha.daemonId]);
+    try {
+      await settle();
+      expect(view.container.querySelector('#fy-new-session-agent')?.getAttribute('role')).toBe('combobox');
+      expect(view.container.querySelector('#fy-new-session-cwd')?.getAttribute('role')).toBe('combobox');
+      expect(healthReads.map(read => read.path)).toContain('/v1/fleet/accounts');
+      expect(healthReads.map(read => read.path)).not.toContain('/v1/fleet/health');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('keeps Warden evidence daemon-bound, opens the complete report, and calls a failed refresh stale', async () => {
     let reads = 0;
     let poll: (() => void) | undefined;
