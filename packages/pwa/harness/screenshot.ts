@@ -551,6 +551,11 @@ try {
               await settingsPage.getByRole('button', { name: new RegExp(`^${label}`) }).click();
             }
             await settingsPage.locator(`[data-settings-section="${id}"]`).waitFor({ state: 'visible' });
+            if (viewport.name === 'desktop') {
+              // ChoiceRail rows fade their colours over 150ms. Capture the
+              // settled state so the row we left cannot read as selected too.
+              await page.waitForTimeout(200);
+            }
           };
 
           await selectSettingsSection('behaviour');
