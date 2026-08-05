@@ -2,10 +2,10 @@
  * Cross-account harness history, planned before it is moved.
  *
  * Claude and Codex each get one independent pool. Existing state is renamed into that pool and
- * each account home receives absolute symlinks back to it, so a harness process which already has
- * a transcript inode open keeps writing to the same inode after migration. Filesystem observation
- * and mutation sit behind {@link SharedHistoryFileSystem}; all merge, collision, dry-run and
- * rollback decisions live here.
+ * each account home receives absolute symlinks back to it. Rename-based directory migration keeps
+ * live transcript inodes intact; prompt-history merges rewrite the already-pooled file in place so
+ * its inode also remains stable. Filesystem observation and mutation sit behind
+ * {@link SharedHistoryFileSystem}; all merge, collision, dry-run and rollback decisions live here.
  */
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { HarnessKind } from './manifest.ts';
@@ -89,7 +89,11 @@ export interface SharedHistoryFileSystem {
   ensureDirectory(path: string): Promise<boolean>;
   ensureFile(path: string): Promise<boolean>;
   move(source: string, destination: string): Promise<void>;
+  /** Create, write and durably sync a new file; refuse rather than replace an existing path. */
+  writeTextExclusive(path: string, text: string): Promise<void>;
   writeTextAtomic(path: string, text: string): Promise<void>;
+  /** Compare and rewrite one regular file through its existing inode. */
+  rewriteTextInPlace(path: string, expected: string, text: string): Promise<boolean>;
   createSymbolicLink(target: string, path: string): Promise<void>;
   removeSymbolicLink(path: string, expectedTarget: string): Promise<void>;
   removeEmptyDirectory(path: string): Promise<void>;
@@ -153,9 +157,12 @@ export type SharedHistoryAction =
     }
   | { readonly kind: 'move'; readonly source: string; readonly destination: string }
   | {
-      readonly kind: 'write-text';
-      readonly path: string;
-      readonly expected: string;
+      readonly kind: 'merge-jsonl';
+      readonly source: string;
+      readonly destination: string;
+      readonly preservedAt: string;
+      readonly expectedSource: string;
+      readonly expectedDestination: string;
       readonly content: string;
     }
   | { readonly kind: 'remove-empty-directory'; readonly path: string }
@@ -180,6 +187,8 @@ interface PlanningState {
   readonly actions: SharedHistoryAction[];
   readonly changes: SharedHistoryChange[];
   readonly occupiedConflicts: Set<string>;
+  readonly conflictNodes: ReadonlyMap<string, SharedHistoryNode>;
+  readonly conflictsRoot: string;
   migrated: number;
   conflicts: number;
   links: number;
@@ -271,18 +280,40 @@ function equivalentLink(path: string, target: string, expected: string): boolean
   return resolve(dirname(path), target) === resolve(expected);
 }
 
-function collectOccupiedPaths(root: string, node: SharedHistoryNode | undefined, into: Set<string>): void {
+function collectOccupiedPaths(
+  root: string,
+  node: SharedHistoryNode | undefined,
+  paths: Set<string>,
+  nodes: Map<string, SharedHistoryNode>,
+): void {
   if (node === undefined) return;
-  into.add(root);
+  paths.add(root);
+  nodes.set(root, node);
   if (node.kind !== 'directory') return;
-  for (const [name, child] of Object.entries(node.children)) collectOccupiedPaths(join(root, name), child, into);
+  for (const [name, child] of Object.entries(node.children)) {
+    collectOccupiedPaths(join(root, name), child, paths, nodes);
+  }
 }
 
-function reserveConflictPath(base: string, occupied: Set<string>): string {
+function assertConflictParentSafe(candidate: string, state: PlanningState): void {
+  let parent = dirname(candidate);
+  while (pathIsInside(state.conflictsRoot, parent)) {
+    const existing = state.conflictNodes.get(parent);
+    if (existing !== undefined && existing.kind !== 'directory') {
+      throw new Error(`shared-history conflict parent must be a directory, found ${existing.kind}: ${parent}`);
+    }
+    if (parent === state.conflictsRoot) return;
+    parent = dirname(parent);
+  }
+  throw new Error(`shared-history conflict path escaped its root: ${candidate}`);
+}
+
+function reserveConflictPath(base: string, state: PlanningState): string {
   let candidate = base;
   let suffix = 1;
-  while (occupied.has(candidate)) candidate = `${base}.${suffix++}`;
-  occupied.add(candidate);
+  while (state.occupiedConflicts.has(candidate)) candidate = `${base}.${suffix++}`;
+  assertConflictParentSafe(candidate, state);
+  state.occupiedConflicts.add(candidate);
   return candidate;
 }
 
@@ -324,10 +355,7 @@ function planForeignLink(
   poolPath: string,
   sourceNode: SharedHistorySymbolicLinkNode,
 ): void {
-  const preservedAt = reserveConflictPath(
-    join(conflictRoot(dirname(poolPath), account), basename(poolPath)),
-    state.occupiedConflicts,
-  );
+  const preservedAt = reserveConflictPath(join(conflictRoot(dirname(poolPath), account), basename(poolPath)), state);
   state.actions.push({ kind: 'move', source, destination: preservedAt });
   state.changes.push({
     kind: 'collision',
@@ -386,10 +414,7 @@ function planDirectoryMerge(
     const incomingWins = incoming.modifiedAtMs > existing.modifiedAtMs;
     const loser = incomingWins ? existingPath : incomingPath;
     const winner = incomingWins ? incomingPath : existingPath;
-    const preservedAt = reserveConflictPath(
-      join(conflictRoot(pool, account), entryRelativePath, name),
-      state.occupiedConflicts,
-    );
+    const preservedAt = reserveConflictPath(join(conflictRoot(pool, account), entryRelativePath, name), state);
     if (incomingWins) {
       state.actions.push({ kind: 'move', source: existingPath, destination: preservedAt });
       state.actions.push({ kind: 'move', source: incomingPath, destination: existingPath });
@@ -423,13 +448,17 @@ function planJsonlMerge(
   if (source.text === undefined || pooled.text === undefined) {
     throw new Error(`history JSONL was not read completely: ${sourcePath} or ${pooledPath}`);
   }
-  const sourcePreservedAt = reserveConflictPath(
-    join(conflictRoot(pool, account), basename(sourcePath)),
-    state.occupiedConflicts,
-  );
+  const sourcePreservedAt = reserveConflictPath(join(conflictRoot(pool, account), basename(sourcePath)), state);
   const merged = mergeSharedHistoryJsonl(pooled.text, source.text);
-  state.actions.push({ kind: 'move', source: sourcePath, destination: sourcePreservedAt });
-  state.actions.push({ kind: 'write-text', path: pooledPath, expected: pooled.text, content: merged });
+  state.actions.push({
+    kind: 'merge-jsonl',
+    source: sourcePath,
+    destination: pooledPath,
+    preservedAt: sourcePreservedAt,
+    expectedSource: source.text,
+    expectedDestination: pooled.text,
+    content: merged,
+  });
   state.changes.push({
     kind: 'merge-jsonl',
     source: sourcePath,
@@ -506,15 +535,19 @@ export function planSharedHistory(
 ): SharedHistoryPlan {
   validateRequest(request);
   const pool = join(request.poolRoot, request.kind);
+  const conflictsRoot = join(pool, '.migration-conflicts');
+  const conflictNodes = new Map<string, SharedHistoryNode>();
   const state: PlanningState = {
     actions: [],
     changes: [],
     occupiedConflicts: new Set<string>(),
+    conflictNodes,
+    conflictsRoot,
     migrated: 0,
     conflicts: 0,
     links: 0,
   };
-  collectOccupiedPaths(join(pool, '.migration-conflicts'), observation.conflicts, state.occupiedConflicts);
+  collectOccupiedPaths(conflictsRoot, observation.conflicts, state.occupiedConflicts, conflictNodes);
   let pooled = { ...observation.poolEntries };
   for (const home of observation.homes) {
     for (const entry of sharedHistoryEntries(request.kind)) {
@@ -564,6 +597,31 @@ function nodeIsEmpty(node: SharedHistoryNode): boolean {
 
 type Undo = () => Promise<void>;
 
+const MIGRATION_JOURNAL = '.migration-journal';
+const MAX_CONCURRENT_RETRIES = 3;
+
+interface MigrationJournal {
+  readonly version: 1;
+  readonly kind: HarnessKind;
+  readonly pool: string;
+  readonly state: 'applying' | 'rollback-incomplete';
+  readonly completed: number;
+  readonly actions: readonly SharedHistoryAction[];
+  readonly rollbackFailures?: readonly string[];
+}
+
+function migrationJournalText(journal: MigrationJournal): string {
+  return `${JSON.stringify(journal, null, 2)}\n`;
+}
+
+/** A live harness changed evidence between observation and mutation; a clean rollback may retry. */
+class SharedHistoryConcurrentChangeError extends Error {
+  constructor(readonly path: string) {
+    super(`shared-history state changed during migration: ${path}`);
+    this.name = 'SharedHistoryConcurrentChangeError';
+  }
+}
+
 /** Plans, previews and transactionally materializes one harness kind's pooled history. */
 export class SharedHistoryMigration {
   constructor(private readonly files: SharedHistoryFileSystem) {}
@@ -573,18 +631,45 @@ export class SharedHistoryMigration {
   }
 
   async materialize(request: SharedHistoryRequest): Promise<SharedHistoryPreview> {
-    const plan = await this.plan(request);
-    await this.execute(plan.actions);
-    return withoutActions(plan);
+    let lastConcurrentFailure: SharedHistoryMigrationError | undefined;
+    for (let attempt = 1; attempt <= MAX_CONCURRENT_RETRIES; attempt++) {
+      const plan = await this.plan(request);
+      try {
+        await this.execute(plan);
+        return withoutActions(plan);
+      } catch (error) {
+        if (
+          error instanceof SharedHistoryMigrationError &&
+          error.operationError instanceof SharedHistoryConcurrentChangeError &&
+          error.rollbackFailures.length === 0
+        ) {
+          lastConcurrentFailure = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new SharedHistoryMigrationError(
+      new Error(
+        `shared-history state kept changing across ${MAX_CONCURRENT_RETRIES} attempts; retry when the ${request.kind} homes are idle`,
+        { cause: lastConcurrentFailure },
+      ),
+      [],
+    );
   }
 
   private async plan(request: SharedHistoryRequest): Promise<SharedHistoryPlan> {
     validateRequest(request);
     const pool = join(request.poolRoot, request.kind);
     const entries = sharedHistoryEntries(request.kind);
+    const journalPath = join(pool, MIGRATION_JOURNAL);
     const poolRoot = await this.files.snapshot(pool, { recursive: false });
     if (poolRoot !== undefined && poolRoot.kind !== 'directory') {
       throw new Error(`shared-history pool must be a directory: ${pool}`);
+    }
+    const journal = await this.files.snapshot(journalPath, { readText: true });
+    if (journal !== undefined) {
+      throw new Error(`unfinished shared-history migration journal requires recovery before retrying: ${journalPath}`);
     }
     const poolEntries = Object.fromEntries(
       await Promise.all(
@@ -620,10 +705,41 @@ export class SharedHistoryMigration {
     return planSharedHistory(request, { poolEntries, conflicts, homes });
   }
 
-  private async execute(actions: readonly SharedHistoryAction[]): Promise<void> {
+  private async execute(plan: SharedHistoryPlan): Promise<void> {
+    if (plan.actions.length === 0) return;
+    const journalPath = join(plan.pool, MIGRATION_JOURNAL);
     const undo: Undo[] = [];
+    let journalCreated = false;
+    let completed = 0;
     try {
-      for (const action of actions) await this.executeOne(action, undo);
+      await this.files.writeTextExclusive(
+        journalPath,
+        migrationJournalText({
+          version: 1,
+          kind: plan.kind,
+          pool: plan.pool,
+          state: 'applying',
+          completed,
+          actions: plan.actions,
+        }),
+      );
+      journalCreated = true;
+      for (const action of plan.actions) {
+        await this.executeOne(action, undo);
+        completed++;
+        await this.files.writeTextAtomic(
+          journalPath,
+          migrationJournalText({
+            version: 1,
+            kind: plan.kind,
+            pool: plan.pool,
+            state: 'applying',
+            completed,
+            actions: plan.actions,
+          }),
+        );
+      }
+      await this.files.removeFile(journalPath);
     } catch (error) {
       const rollbackFailures: string[] = [];
       for (const restore of undo.toReversed()) {
@@ -631,6 +747,32 @@ export class SharedHistoryMigration {
           await restore();
         } catch (rollbackError) {
           rollbackFailures.push(errorMessage(rollbackError));
+        }
+      }
+      if (journalCreated) {
+        if (rollbackFailures.length === 0) {
+          try {
+            await this.files.removeFile(journalPath);
+          } catch (journalError) {
+            rollbackFailures.push(`could not remove migration journal after rollback: ${errorMessage(journalError)}`);
+          }
+        } else {
+          try {
+            await this.files.writeTextAtomic(
+              journalPath,
+              migrationJournalText({
+                version: 1,
+                kind: plan.kind,
+                pool: plan.pool,
+                state: 'rollback-incomplete',
+                completed,
+                actions: plan.actions,
+                rollbackFailures,
+              }),
+            );
+          } catch (journalError) {
+            rollbackFailures.push(`could not update migration journal: ${errorMessage(journalError)}`);
+          }
         }
       }
       throw new SharedHistoryMigrationError(error, rollbackFailures);
@@ -666,17 +808,50 @@ export class SharedHistoryMigration {
       undo.push(async () => await this.files.move(action.destination, action.source));
       return;
     }
-    if (action.kind === 'write-text') {
-      const current = await this.files.snapshot(action.path, { readText: true });
-      if (current?.kind !== 'file' || current.text !== action.expected) {
-        throw new Error(`shared-history file changed after planning: ${action.path}`);
+    if (action.kind === 'merge-jsonl') {
+      const source = await this.files.snapshot(action.source, { readText: true });
+      const destination = await this.files.snapshot(action.destination, { readText: true });
+      if (source?.kind !== 'file' || source.text !== action.expectedSource) {
+        throw new SharedHistoryConcurrentChangeError(action.source);
       }
-      await this.files.writeTextAtomic(action.path, action.content);
-      undo.push(async () => await this.files.writeTextAtomic(action.path, action.expected));
+      if (destination?.kind !== 'file' || destination.text !== action.expectedDestination) {
+        throw new SharedHistoryConcurrentChangeError(action.destination);
+      }
+      await this.files.move(action.source, action.preservedAt);
+      undo.push(async () => await this.files.move(action.preservedAt, action.source));
+      const preserved = await this.files.snapshot(action.preservedAt, { readText: true });
+      if (preserved?.kind !== 'file' || preserved.text !== action.expectedSource) {
+        throw new SharedHistoryConcurrentChangeError(action.preservedAt);
+      }
+      const rewritten = await this.files.rewriteTextInPlace(
+        action.destination,
+        action.expectedDestination,
+        action.content,
+      );
+      if (!rewritten) throw new SharedHistoryConcurrentChangeError(action.destination);
+      undo.push(async () => {
+        const restored = await this.files.rewriteTextInPlace(
+          action.destination,
+          action.content,
+          action.expectedDestination,
+        );
+        if (!restored) throw new Error(`shared-history rollback found a changed file: ${action.destination}`);
+      });
+      const stableSource = await this.files.snapshot(action.preservedAt, { readText: true });
+      if (stableSource?.kind !== 'file' || stableSource.text !== action.expectedSource) {
+        throw new SharedHistoryConcurrentChangeError(action.preservedAt);
+      }
       return;
     }
     if (action.kind === 'remove-empty-directory') {
-      await this.files.removeEmptyDirectory(action.path);
+      try {
+        await this.files.removeEmptyDirectory(action.path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOTEMPTY') {
+          throw new SharedHistoryConcurrentChangeError(action.path);
+        }
+        throw error;
+      }
       undo.push(async () => {
         await this.files.ensureDirectory(action.path);
       });

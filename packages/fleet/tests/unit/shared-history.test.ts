@@ -7,8 +7,8 @@ import {
   SharedHistoryMigration,
   SharedHistoryMigrationError,
   type SharedHistoryNode,
-  sharedHistoryEntries,
   type SharedHistoryRequest,
+  sharedHistoryEntries,
 } from '../../src/lib/shared-history.ts';
 
 type FlatNode =
@@ -20,6 +20,7 @@ type FlatNode =
 class MemorySharedHistoryFileSystem implements SharedHistoryFileSystem {
   private readonly nodes = new Map<string, FlatNode>();
   readonly failures = new Map<string, Error>();
+  afterExclusiveWrite: ((target: string) => void) | undefined;
 
   seed(target: string, node: SharedHistoryNode): void {
     if (node.kind === 'directory') {
@@ -104,6 +105,22 @@ class MemorySharedHistoryFileSystem implements SharedHistoryFileSystem {
     this.nodes.set(target, { kind: 'file', modifiedAtMs: 1, text });
   }
 
+  async writeTextExclusive(target: string, text: string): Promise<void> {
+    this.throwIfFailed('writeTextExclusive', target);
+    if (this.nodes.has(target)) throw new Error(`occupied: ${target}`);
+    this.nodes.set(target, { kind: 'file', modifiedAtMs: 1, text });
+    this.afterExclusiveWrite?.(target);
+  }
+
+  async rewriteTextInPlace(target: string, expected: string, text: string): Promise<boolean> {
+    this.throwIfFailed('rewriteTextInPlace', target);
+    const existing = this.nodes.get(target);
+    if (existing?.kind !== 'file') throw new Error(`not a file: ${target}`);
+    if (existing.text !== expected) return false;
+    this.nodes.set(target, { ...existing, modifiedAtMs: existing.modifiedAtMs + 1, text });
+    return true;
+  }
+
   async createSymbolicLink(target: string, destination: string): Promise<void> {
     this.throwIfFailed('createSymbolicLink', destination);
     if (this.nodes.has(destination)) throw new Error(`occupied: ${destination}`);
@@ -123,7 +140,7 @@ class MemorySharedHistoryFileSystem implements SharedHistoryFileSystem {
     this.throwIfFailed('removeEmptyDirectory', target);
     if (this.nodes.get(target)?.kind !== 'directory') throw new Error(`not a directory: ${target}`);
     if ([...this.nodes.keys()].some(candidate => candidate.startsWith(`${target}/`))) {
-      throw new Error(`not empty: ${target}`);
+      throw Object.assign(new Error(`not empty: ${target}`), { code: 'ENOTEMPTY' });
     }
     this.nodes.delete(target);
   }
@@ -375,6 +392,26 @@ describe('SharedHistoryMigration', () => {
     });
   });
 
+  it('should refuse a planted non-directory ancestor beneath the conflict root', async () => {
+    // Arrange — writing beneath this link would escape in a merely lexical filesystem adapter.
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/projects`, directory({ same: file('pool\n', 20) }));
+    files.seed(`${HOME_A}/projects`, directory({ same: file('incoming\n', 10) }));
+    files.seed(
+      `${POOL}/.migration-conflicts`,
+      directory({ 'account-a': { kind: 'symbolic-link', modifiedAtMs: 1, target: '/outside' } }),
+    );
+
+    // Act
+    const promise = new SharedHistoryMigration(files).preview(
+      request({ homes: [{ account: 'account-a', path: HOME_A }] }),
+    );
+
+    // Assert
+    await should(promise).be.rejectedWith(/conflict parent must be a directory/u);
+    should(files.has(`${HOME_A}/projects/same`)).be.true();
+  });
+
   it('should fail closed on damaged pooled state before moving any home', async () => {
     // Arrange
     const files = new MemorySharedHistoryFileSystem();
@@ -446,6 +483,66 @@ describe('SharedHistoryMigration', () => {
     await should(poolPromise).be.rejectedWith(/pool must be a directory/);
   });
 
+  it('should refuse an unfinished durable migration journal before observing homes', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/.migration-journal`, file('{"version":1}\n', 1));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(request({ homes: [{ account: 'account-a', path: HOME_A }] }));
+
+    // Assert
+    await should(promise).be.rejectedWith(/unfinished shared-history migration journal requires recovery/u);
+  });
+
+  it('should roll back and replan when a live directory gains a child after observation', async () => {
+    // Arrange
+    const { files, subject } = seededMigration();
+    let planted = false;
+    files.afterExclusiveWrite = () => {
+      if (planted) return;
+      planted = true;
+      files.seed(`${HOME_B}/projects/project/late.jsonl`, file('late\n', 30));
+    };
+
+    // Act
+    const actual = await subject.materialize(request());
+
+    // Assert — the first attempt hit ENOTEMPTY and rolled back; the retry included the late file.
+    should(planted).be.true();
+    should(actual.migrated).equal(5);
+    should(await files.snapshot(`${POOL}/projects/project/late.jsonl`, { readText: true })).match({ text: 'late\n' });
+    should(await files.snapshot(`${POOL}/.migration-journal`)).equal(undefined);
+  });
+
+  it('should replan a prompt-history merge when its source changes after observation', async () => {
+    // Arrange
+    const { files, subject } = seededMigration();
+    let appended = false;
+    files.afterExclusiveWrite = () => {
+      if (appended) return;
+      appended = true;
+      files.seed(
+        `${HOME_B}/history.jsonl`,
+        file('{"display":"two","timestamp":2}\n{"display":"late","timestamp":3}\n', 30),
+      );
+    };
+
+    // Act
+    await subject.materialize(request());
+
+    // Assert
+    should(await files.snapshot(`${POOL}/history.jsonl`, { readText: true })).match({
+      text: [
+        '{"display":"one","timestamp":1}',
+        '{"display":"two","timestamp":2}',
+        '{"display":"late","timestamp":3}',
+        '',
+      ].join('\n'),
+    });
+  });
+
   it('should roll every completed rename back when a later link cannot be created', async () => {
     // Arrange
     const { files, subject } = seededMigration();
@@ -483,6 +580,10 @@ describe('SharedHistoryMigration', () => {
     should(error).be.instanceOf(SharedHistoryMigrationError);
     should((error as SharedHistoryMigrationError).rollbackFailures).deepEqual(['restore refused']);
     should(files.has(`${POOL}/projects/session`)).be.true();
+    should(await files.snapshot(`${POOL}/.migration-journal`, { readText: true })).match({
+      kind: 'file',
+      text: /"state": "rollback-incomplete"/u,
+    });
   });
 
   it('should refuse unsafe, duplicate, relative, and overlapping requests before observation', async () => {
