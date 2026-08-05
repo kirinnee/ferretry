@@ -278,7 +278,9 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  describeGrantPosture,
   NO_PASSWORD_DISCLOSURE,
+  type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
@@ -501,6 +503,15 @@ export interface DaemonWorld {
     readonly preferredPort: number;
   };
   readonly config: DaemonConfigStore;
+  /**
+   * Whether this machine has an operator password, for the queries that report it.
+   *
+   * THE SAME PORT THE GRANT SERVICE USES, deliberately: `--check` must not answer from a second copy
+   * of a fact the running daemon decides differently. It is exposed as the whole port rather than a
+   * boolean so it stays use-never-read — there is no getter to reach for, here or anywhere above it,
+   * so no query can grow into one that prints a password.
+   */
+  readonly operatorPassword: OperatorPasswordPort;
   /** What this invocation said on the command line, overriding the document for this run only. */
   readonly overrides: RunOverrides;
   /**
@@ -3373,6 +3384,8 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
     // and wrong for a file a person named, so the two are different adapters.
     config: daemonConfigStore,
+    // The same verifier the grant service asks. Reading it here creates nothing.
+    operatorPassword: new FileOperatorPassword(paths.operatorPassword, stateFiles),
     overrides,
     stateHome: { path: paths.home, fromEnvironment: (environment.stateHomeInput().fyHome ?? '').trim() !== '' },
     // The SAME two collaborators a start resolves an account from, so the preflight cannot report
@@ -4497,6 +4510,24 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
     directorySyscalls,
   });
   for (const line of renderDoctorReport(doctor)) say(line);
+  /**
+   * The grant posture, BEFORE the address, beside everything else this command reports.
+   *
+   * IT IS HERE BECAUSE A PERSON ASKING "would this daemon start" IS THE PERSON WHO SHOULD BE TOLD.
+   * The standing complaint about this product is that it knows something and does not say it, and
+   * "what will this let a phone do once it is up" is knowable from the document already read. It does
+   * not change the exit code, exactly as the harness preflight does not: a daemon with any grant
+   * posture starts perfectly, and this reports rather than judges.
+   *
+   * IT READS, IT DOES NOT CREATE. `passwordSet` is one existence check through the same verifier
+   * port the grant service uses, so a query stays a query and there is no second source to drift.
+   */
+  for (const line of describeGrantPosture({
+    config,
+    passwordSet: await world.operatorPassword.isSet().catch(() => false),
+    clientName: CLIENT_NAME,
+  }))
+    say(line);
   const doctorExitCode = doctor.ready ? 0 : 1;
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });

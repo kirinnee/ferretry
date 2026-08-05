@@ -211,11 +211,10 @@ describe('what a refused caller is told', () => {
       sentence: describeGrantRefusal(demand, refusal, 'fy'),
     }));
 
-    // Assert — the next step differs by refusal, and that is the point: three of these are repaired
-    // at the host with a named command, and `locked` is repaired by the person in front of the UI.
-    for (const { refusal, sentence } of said) {
-      should(sentence).match(refusal === 'locked' ? /Unlock first/u : /fy /u);
-    }
+    // Assert — EVERY refusal now names a runnable command, `locked` included. That one used to say
+    // only "unlock first", which is a dead end for the person who does not HAVE the password: the
+    // axis is granted, nothing is broken, and no instruction applied to them.
+    for (const { sentence } of said) should(sentence).match(/`fy [^`]+`/u);
     should(describeGrantRefusal({ capability: 'warden', axis: 'use' }, 'granted', 'fy')).be.undefined();
     should(describeGrantRefusal({ capability: 'warden', axis: 'use' }, 'ungated', 'fy')).be.undefined();
     // The `use` refusal names the use flag rather than the configure one.
@@ -315,5 +314,22 @@ describe('the wrong-password ledger', () => {
     // Assert
     should(recordUnlockSuccess()).deepEqual(INITIAL_UNLOCK_ATTEMPTS);
     should(isUnlockLocked(INITIAL_UNLOCK_ATTEMPTS, 1)).be.false();
+  });
+});
+
+describe('the one refusal whose reader may not be the operator', () => {
+  it('should give `locked` a remedy for somebody who does not have the password', () => {
+    // The axis is GRANTED and nothing is broken — the caller simply cannot prove they are the
+    // operator. "Unlock first, then try again" is a complete instruction for the person holding the
+    // password and no instruction at all for the person who is not. Both readers now get a step.
+    // Act
+    const said = describeGrantRefusal({ capability: 'fleet', axis: 'configure' }, 'locked', 'fy') ?? '';
+
+    // Assert
+    should(said).match(/Enter it to unlock/u);
+    should(said).match(/fy daemon password set/u);
+    should(said).match(/fy daemon password clear/u);
+    // And it never implies the operator refused something they in fact allowed.
+    should(said).not.match(/has not granted/u);
   });
 });

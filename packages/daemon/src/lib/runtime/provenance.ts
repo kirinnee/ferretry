@@ -1,4 +1,5 @@
 import { CAPABILITY_AXES, DAEMON_CAPABILITIES } from '@ferretry/protocol';
+import { NO_PASSWORD_DISCLOSURE } from '../grants/policy.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
 import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
@@ -144,6 +145,70 @@ function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
         : {}),
     };
   });
+}
+
+/**
+ * Whether anything OFF this host can reach this daemon at all.
+ *
+ * IT DECIDES WHETHER THE GRANTS MATTER, which is why `--check` asks it before printing them. A daemon
+ * bound to loopback with no relay is reachable only by callers the grant layer does not govern, so
+ * reciting five capabilities at that operator would be noise dressed as security — and worse, it
+ * would imply a boundary that is not doing anything.
+ *
+ * TWO WAYS IN, and the second is the one people forget. The bind address is the obvious one. The
+ * relay is the other: the daemon DIALS OUT to a rendezvous, so a loopback bind is still reachable
+ * from anywhere the moment a relay is configured and enabled. A posture that looked only at `host`
+ * would tell somebody running the hosted relay that nothing could reach them.
+ */
+export function reachableOffHost(config: DaemonConfig): { readonly reachable: boolean; readonly how: string } {
+  const relay = config.relay;
+  if (relay !== undefined && relay.enabled) return { reachable: true, how: `the relay at ${relay.url}` };
+  // Exactly the spellings that name this machine to itself. Anything else — a LAN address, a public
+  // one, or the `0.0.0.0` wildcard — accepts connections from off the host.
+  const loopback = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
+  if (loopback.has(config.host)) return { reachable: false, how: `host ${config.host}, no relay` };
+  return { reachable: true, how: `host ${config.host}` };
+}
+
+/**
+ * The grant posture in the shape `--check` speaks: a label, a value, and a reason.
+ *
+ * ONE LINE WHEN THERE IS ONE THING TO SAY. The owner's standing complaint is that this product knows
+ * something and does not say it, so a person asking "would this daemon start" should also be told, in
+ * passing, what it will let a phone do once it has — without having to know the grant surface exists.
+ *
+ * IT READS THE DOCUMENT, NOT A SECOND COPY. `grants` comes from the same parsed configuration
+ * `--print-config` reports and the daemon enforces; `passwordSet` comes from the same verifier port
+ * the grant service asks. There is no third answer to drift.
+ */
+export function describeGrantPosture(input: {
+  readonly config: DaemonConfig;
+  readonly passwordSet: boolean;
+  readonly clientName: string;
+}): readonly string[] {
+  const reach = reachableOffHost(input.config);
+  if (!reach.reachable)
+    return [`grants       nothing off this host can reach this daemon (${reach.how}), so no grant applies today`];
+  const used = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.use === true);
+  const configurable = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.configure === true);
+  const lines = [
+    `grants       reachable off this host (${reach.how}) — a remote caller may use ${listed(used)}, and change settings for ${listed(configurable)}`,
+  ];
+  // The disclosure, ONCE, and only where it is both true and load-bearing: a machine nothing can
+  // reach off-loopback has nothing to disclose, and a machine with a password has a gate to name.
+  lines.push(
+    input.passwordSet
+      ? `             an operator password gates every one of those changes`
+      : `             ! ${NO_PASSWORD_DISCLOSURE}; set one with \`${input.clientName} daemon password set\``,
+  );
+  return lines;
+}
+
+/** A capability list as a sentence, with the two ends of the range spelled rather than implied. */
+function listed(capabilities: readonly string[]): string {
+  if (capabilities.length === 0) return 'nothing';
+  if (capabilities.length === DAEMON_CAPABILITIES.length) return 'everything';
+  return capabilities.join(', ');
 }
 
 /**

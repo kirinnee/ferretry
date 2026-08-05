@@ -163,7 +163,12 @@ export function describeGrantRefusal(
       : `the operator of this machine has not granted the UI permission to change the settings for ${noun}. Grant it on the host with \`${clientName} daemon config set ${demand.capability} --configure\`.`;
   if (refusal === 'rate-limited')
     return `too many wrong operator passwords have been tried, so this daemon is not checking any more of them for now. Wait for the lockout to pass, or clear it on the host with \`${clientName} daemon password set\`.`;
-  return `changing the settings for ${noun} needs the operator password on this machine. Unlock first, then try again.`;
+  // `locked` is the one refusal whose remedy is NOT a command for the person meeting it — they enter
+  // the password they already have. But the person who does NOT have it was, until this sentence,
+  // left at a dead end: the axis is granted, nothing is broken, and no instruction applied to them.
+  // So it names both remedies and says which is whose, rather than assuming the reader is the
+  // operator. Every branch of this function now ends somewhere a person can actually go.
+  return `changing the settings for ${noun} needs this machine's operator password. Enter it to unlock, or — if you do not have it — somebody at the host can replace it with \`${clientName} daemon password set\`, or remove the requirement entirely with \`${clientName} daemon password clear\`.`;
 }
 
 /**
