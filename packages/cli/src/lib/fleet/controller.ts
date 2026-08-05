@@ -1,6 +1,7 @@
-import { type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
+import { FleetApplyFailureError, type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
 import type {
   IFleetApplier,
+  IFleetAuthorizationGateway,
   IFleetClock,
   IFleetConfigSource,
   IFleetHealthCollectorFactory,
@@ -16,6 +17,8 @@ import type {
 import {
   renderApplyPlan,
   renderApplyResult,
+  renderFleetApplyFailure,
+  renderFleetApproval,
   renderHealth,
   renderIdentityStatus,
   renderLoginResults,
@@ -64,15 +67,45 @@ export interface FleetControllerDeps {
   readonly logins: IFleetLoginService;
   readonly clock: IFleetClock;
   readonly recommendations: IRecommendationGateway;
+  /** Required, not optional: four construction sites is cheaper than a runtime absence check. */
+  readonly authorizations: IFleetAuthorizationGateway;
   readonly out: IFleetOutput;
+}
+
+/**
+ * The machine-readable form of a failed apply.
+ *
+ * `outcome` is lifted to the top rather than left inside `failure`, so a caller can branch on one
+ * well-known key without first learning the union's shape — and `rolled-back` versus
+ * `history-failed-after-commit` is exactly the branch a script must not get wrong. `error` repeats
+ * the provisioner's own sentence so a caller that only logs the payload still says something true.
+ *
+ * `failure` is included whole and unsummarized on purpose: it IS the exact post-state, and a
+ * flattened version here would be a second contract to keep in step with the first, which is the
+ * failure mode this whole change exists to remove.
+ *
+ * `lockResidue` has to be lifted explicitly because it is a sibling of `failure` on the error rather
+ * than a member of it. Left out, a machine caller would be told which post-state it is in but not
+ * that the NEXT apply is already blocked — which is the one thing an automated retry needs to know
+ * before it tries.
+ */
+function applyFailurePayload(error: FleetApplyFailureError): Record<string, unknown> {
+  return {
+    outcome: error.failure.kind,
+    error: error.message,
+    failure: error.failure,
+    ...(error.lockResidue === undefined ? {} : { lockResidue: error.lockResidue }),
+  };
 }
 
 /**
  * Drives `fy fleet …`.
  *
  * Provisioning is a local operation: the fleet is directories, wrappers and settings on this host,
- * and the daemon is not involved. Only `recommend` crosses to the daemon, because deciding which
- * agent should do a piece of work needs the routing catalog the daemon owns.
+ * and for most of these verbs the daemon is not involved. Two of them cross to it. `recommend` does
+ * because deciding which agent should do a piece of work needs the routing catalog the daemon owns.
+ * `authorize` does because a change proposed in a paired browser can only be approved by whoever
+ * holds this host's credential, and this terminal is where that person is.
  */
 export class FleetController {
   constructor(private readonly deps: FleetControllerDeps) {}
@@ -95,6 +128,22 @@ export class FleetController {
    * The plan is built first and always, so `--dry-run` and a real apply share one decision. A plan
    * that cannot be built — an asset the harness has no destination for, a duplicate wrapper — throws
    * before a single byte is written.
+   *
+   * A FAILED APPLY IS NOT FLATTENED. The provisioner distinguishes three post-states — the host put
+   * back, the host left unverified, and the fleet genuinely committed with a later step failing — and
+   * which one it is decides what a person does next. Collapsing them into "apply failed" is how a
+   * fleet that did land gets applied again blindly. Both surfaces preserve the distinction, and both
+   * remain backward compatible:
+   *
+   * - Human: the failure is thrown carrying its full typed rendering, so the composition root prints
+   *   that to stderr and exits non-zero. stderr already carried a one-line message here; it now
+   *   carries a fuller one, and it is not also echoed to stdout, because saying it twice in two
+   *   different amounts of detail is how a reader learns to trust neither.
+   * - `--json`: the structured payload goes to stdout, which on a failed apply was previously empty —
+   *   so a machine caller that reads it is reading something new rather than something changed. The
+   *   original error is then rethrown for the exit code, so `outcome` and the exit status agree.
+   *
+   * A SUCCESSFUL apply is untouched on both surfaces.
    */
   async apply(options: FleetApplyOptions): Promise<void> {
     const config = await this.deps.config.load();
@@ -104,8 +153,19 @@ export class FleetController {
       this.#report(preview, options, () => renderApplyPlan(preview));
       return;
     }
-    const result = await this.deps.applier.apply(plan);
-    this.#report(result, options, () => renderApplyResult(result));
+    try {
+      const result = await this.deps.applier.apply(plan);
+      this.#report(result, options, () => renderApplyResult(result));
+    } catch (error) {
+      if (!(error instanceof FleetApplyFailureError)) throw error;
+      if (options.json === true) {
+        this.deps.out.success(JSON.stringify(applyFailurePayload(error), null, 2));
+        throw error;
+      }
+      // `cause` keeps the typed failure reachable for any embedder that wants it; the message is
+      // replaced because the root prints exactly one thing and it should be the useful one.
+      throw new Error(renderFleetApplyFailure(error.failure, error.lockResidue), { cause: error });
+    }
   }
 
   async list(options: FleetCommandOptions): Promise<void> {
@@ -172,6 +232,34 @@ export class FleetController {
     if (task === '') throw new Error('describe the task: fy fleet recommend "<what needs doing>"');
     const recommendation = await this.deps.recommendations.recommend({ task, usage: options.usage !== false });
     this.#report(recommendation, options, () => renderRecommendation(recommendation));
+  }
+
+  /**
+   * Approves exactly one change a paired browser has proposed.
+   *
+   * The device boundary this closes is deliberate: a browser that paired once may inspect this
+   * daemon and may build a write-free proposal, but pairing is not host authority and never becomes
+   * it. So the authority is given here, one change at a time, as a short-lived single-use code bound
+   * to one proposal — and the credential that mints it is this host's, which never leaves this
+   * machine and is never printed.
+   *
+   * `--json` IS REFUSED RATHER THAN INHERITED, and refused loudly rather than ignored. The flag is
+   * declared on the `fleet` group, so it reaches every verb whether or not the verb wants it, and
+   * `#report` would faithfully serialize a live bearer secret into something a pipe can capture and
+   * a script can spend. That would delete the property the whole detour exists for: the code is the
+   * evidence that a human on this host looked at the change and said yes. Ignoring the flag silently
+   * would be worse than refusing it — a pipeline would read a human screen as JSON and misparse it —
+   * so this says what it will not do and why.
+   */
+  async authorize(proposalId: string, options: FleetCommandOptions): Promise<void> {
+    if (options.json === true) {
+      throw new Error(
+        'fy fleet authorize has no --json: an approval code is a bearer secret for the couple of minutes it lives, ' +
+          'and a machine-readable mint is one a script can spend without the human this approval exists to ask',
+      );
+    }
+    const mint = await this.deps.authorizations.authorize(proposalId);
+    this.deps.out.success(renderFleetApproval(mint));
   }
 
   /** The provider logins this host has, joined from the declared configuration and the manifest. */

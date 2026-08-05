@@ -8,7 +8,9 @@ import {
   admitPendingSocketFrame,
   errorResponse,
   headersFrom,
+  MAX_REQUEST_BODY_BYTES,
   queryFrom,
+  readBoundedBody,
   SOCKET_CLOSES,
   SOCKET_MAX_FRAME_BYTES,
   type SocketAttachment,
@@ -68,6 +70,9 @@ export interface HostServeOptions {
   readonly port: number;
   /** Largest client frame the runtime may accept before closing the socket itself. */
   readonly maxFrameBytes: number;
+  /** Largest request body the runtime may accept before answering 413 itself, without ever handing
+   *  the daemon what it refused. */
+  readonly maxBodyBytes: number;
   /** `undefined` means the request was upgraded and there is no response to send. */
   readonly fetch: (request: Request) => Promise<Response | undefined>;
   readonly websocket: HostSocketHandlers;
@@ -96,6 +101,10 @@ export class BunHttpServe implements HttpServePort {
       // connections are unaffected: they have their own idle handling, and Bun keeps them alive with
       // automatic pings, which a terminal stream nobody is typing into depends on.
       idleTimeout: 30,
+      // The body cap, enforced by the runtime for the same reason as the frame cap below: Bun
+      // refuses an oversized body itself, so the bytes are never buffered into this heap at all.
+      // Bun's own default is 128 MiB — four times anything this API has a use for.
+      maxRequestBodySize: options.maxBodyBytes,
       fetch: options.fetch,
       websocket: {
         // The frame cap, enforced by the runtime BEFORE the daemon ever holds the bytes. Bun closes
@@ -129,7 +138,16 @@ export class BunHttpServe implements HttpServePort {
  * socket, which is why the entire routing, authorization and upgrade surface is unit-testable.
  */
 export class BunApiServer implements ApiServerPort {
-  constructor(private readonly http: HttpServePort = new BunHttpServe()) {}
+  constructor(
+    private readonly http: HttpServePort = new BunHttpServe(),
+    /**
+     * The runtime's own request-body ceiling.
+     *
+     * Injected for one reason: a case that had to send the shipped ceiling to prove the refusal would
+     * be measuring the machine it runs on rather than the bound. Nothing in the daemon passes it.
+     */
+    private readonly maxBodyBytes: number = MAX_REQUEST_BODY_BYTES,
+  ) {}
 
   async listen(surface: ApiSurface, options: ApiBindOptions): Promise<ApiServerHandle> {
     const sockets = new HostSocketRegistry();
@@ -137,6 +155,7 @@ export class BunApiServer implements ApiServerPort {
       hostname: options.host,
       port: options.port,
       maxFrameBytes: SOCKET_MAX_FRAME_BYTES,
+      maxBodyBytes: this.maxBodyBytes,
       fetch: async (request: Request) => {
         const apiRequest = toApiRequest(request, server.requestIp(request));
         const presentedOrigin = request.headers.get('origin');
@@ -382,6 +401,48 @@ export function toApiRequest(request: Request, remoteAddress: string | undefined
     headers: headersFrom(Object.fromEntries(request.headers)),
     clientAddress: remoteAddress,
     loopback: remoteAddress !== undefined && LOOPBACK.has(remoteAddress),
-    text: () => request.text(),
+    // Both reads stay LAZY — nothing here touches the body until a route asks for it, so a body-less
+    // route and a protocol switch each pay nothing. A bounded read goes piece by piece rather than
+    // through `request.text()`, because that call is the allocation the bound exists to prevent.
+    text: async limitBytes =>
+      limitBytes === undefined
+        ? await request.text()
+        : await readBoundedBody(
+            {
+              declaredLength: request.headers.get('content-length') ?? undefined,
+              chunks: () => bodyChunks(request.body),
+              // Cancelling the body is what actually reaches the peer: it closes the request stream, so
+              // a sender that declared more than it may send stops sending rather than filling a
+              // connection the daemon has already answered on.
+              discard: async () => await request.body?.cancel(),
+            },
+            limitBytes,
+          ),
   };
+}
+
+/**
+ * One body's pieces, as the runtime delivers them.
+ *
+ * Read through the stream's own reader rather than `for await (const piece of body)`: a
+ * `ReadableStream` is not declared async-iterable, and the reader is the form every runtime agrees
+ * on. A request with no body yields nothing at all, which is how a route with an optional body still
+ * reads as the empty string.
+ *
+ * The lock is released however the loop ends, including a refusal mid-upload — and RELEASED rather
+ * than cancelled, because releasing it is what lets `readBoundedBody` cancel the body itself. Stopping
+ * a refused sender belongs to whoever refused; this only stops reading.
+ */
+async function* bodyChunks(body: ReadableStream<Uint8Array> | null): AsyncIterable<Uint8Array> {
+  if (body === null) return;
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const piece = await reader.read();
+      if (piece.done) return;
+      yield piece.value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }

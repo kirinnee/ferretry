@@ -1,9 +1,11 @@
 export * from './anthropic-usage-probe.ts';
+export * from './apply-lock.ts';
 export * from './config-file.ts';
 export * from './credential-store.ts';
 export * from './file-provisioner.ts';
 export { FileSharedHistoryFileSystem } from './file-shared-history.ts';
 export * from './file-scaffolder.ts';
+export * from './mutation-journal.ts';
 export * from './process-login.ts';
 export * from './process-health-probe.ts';
 export * from './system-clock.ts';

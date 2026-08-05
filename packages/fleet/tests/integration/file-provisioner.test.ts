@@ -346,15 +346,17 @@ describe('FileFleetProvisioner', () => {
       should(JSON.parse(await readFile(destination, 'utf8'))).deepEqual({ effortLevel: 'high', model: 'fresh' });
     });
 
-    it('should ignore an unparseable existing file rather than failing the apply', async () => {
-      // Arrange
+    it('should refuse rather than merge over an existing file it cannot parse', async () => {
+      // Arrange — this used to overwrite the damaged file with a merge computed without it, which
+      // silently discarded whatever the person actually had. The keys are only preservable if the
+      // file can be read; when it cannot, leaving it alone is the one answer that loses nothing.
       const root = await temporaryDirectory();
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(destination, 'not json at all');
       const subject = new FileFleetProvisioner([root]);
 
       // Act
-      await subject.apply({
+      const promise = subject.apply({
         manifest: manifest(),
         manifestPath: path.join(root, 'fleet', 'manifest.json'),
         operations: [
@@ -370,7 +372,37 @@ describe('FileFleetProvisioner', () => {
       });
 
       // Assert
-      should(JSON.parse(await readFile(destination, 'utf8'))).deepEqual({ model: 'fresh' });
+      await should(promise).be.rejectedWith(/could not be parsed/u);
+      should(await readFile(destination, 'utf8')).equal('not json at all');
+    });
+
+    it('should refuse rather than merge over a directory where settings should be', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
+      await mkdir(destination, { recursive: true });
+      await Bun.write(path.join(destination, 'someone-elses.txt'), 'not ours\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [
+          {
+            kind: 'settings',
+            path: destination,
+            format: 'json',
+            layers: [{ from: 'inline', settings: { model: 'fresh' } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+
+      // Assert
+      await should(promise).be.rejectedWith(/not a regular file/u);
+      should(await readFile(path.join(destination, 'someone-elses.txt'), 'utf8')).equal('not ours\n');
     });
 
     it('should ignore a symlinked destination, which holds no runtime state to preserve', async () => {
@@ -745,6 +777,31 @@ describe('FileFleetProvisioner', () => {
       // Assert
       should([...actual.prunedWrappers]).deepEqual([]);
       should((await lstat(path.join(bin, 'a-link'))).isSymbolicLink()).be.true();
+    });
+
+    it('should skip every reserved prefix, including a staged replacement', async () => {
+      // Arrange — a sweep that removed the machinery's own names would destroy the only copy of
+      // what a rollback needs to put back. The three prefixes are one list precisely so that a
+      // fourth is covered the moment it joins, rather than the moment somebody remembers to widen
+      // a condition — each of these carries the managed marker and would otherwise be pruned.
+      const root = await temporaryDirectory();
+      const bin = path.join(root, 'fleet', 'bin');
+      const marker = '# managed-by-the-test';
+      const reserved = ['.fy-fleet-backup-abc', '.fy-fleet-displaced-abc', '.fy-fleet-staged-abc'];
+      for (const name of reserved) await Bun.write(path.join(bin, name), `#!/bin/sh\n${marker}\nexec true\n`);
+      await Bun.write(path.join(bin, 'stale-wrapper'), `#!/bin/sh\n${marker}\nexec true\n`);
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune', path: bin, marker, keep: [] }],
+      });
+
+      // Assert — only the genuine wrapper goes.
+      should([...actual.prunedWrappers]).deepEqual(['stale-wrapper']);
+      for (const name of reserved) should(await Bun.file(path.join(bin, name)).exists()).be.true();
     });
 
     it('should treat a missing directory as nothing to prune', async () => {

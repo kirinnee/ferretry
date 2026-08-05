@@ -1,6 +1,7 @@
 import { afterEach, describe, it } from 'bun:test';
 import should from 'should';
-import { BunApiServer, toApiRequest } from '../../../src/adapters/api/index.ts';
+import { z } from 'zod';
+import { BunApiServer, BunHttpServe, type HostServeOptions, toApiRequest } from '../../../src/adapters/api/index.ts';
 import {
   ApiDispatcher,
   ApiError,
@@ -8,7 +9,10 @@ import {
   ApiRouter,
   type ApiServerHandle,
   ApiSocketDispatcher,
+  BodyTooLargeError,
   jsonResponse,
+  MAX_REQUEST_BODY_BYTES,
+  parseBody,
   SOCKET_MAX_PENDING_FRAMES,
   type SocketDownstream,
   type SocketHandler,
@@ -718,5 +722,324 @@ describe('toApiRequest', () => {
 
     // Assert
     should(translated.query.get('sessionId')).deepEqual(['a', 'b']);
+  });
+});
+
+describe('BunApiServer request-body bounds', () => {
+  const AnySchema = z.object({}).loose();
+
+  /** A route bounded near its own contract rather than at the transport ceiling. */
+  const bounded: ApiRoute = {
+    method: 'POST',
+    path: '/bounded',
+    scope: 'public',
+    handle: async context => jsonResponse(await parseBody(context.request, AnySchema, { maxBytes: 64 })),
+  };
+
+  it('should hand the runtime the daemon‘s own ceiling', async () => {
+    // Bun's 128 MiB default is the only bound a `serve` without this option has, and it is four times
+    // the largest request this API has a use for.
+    // Arrange
+    let served: HostServeOptions | undefined;
+    const host = {
+      serve: (options: HostServeOptions) => {
+        served = options;
+        return { requestIp: () => undefined, upgrade: () => true, stop: () => undefined };
+      },
+    };
+
+    // Act
+    await new BunApiServer(host).listen(surfaceOf([mirror]), BIND);
+
+    // Assert
+    should(served?.maxBodyBytes).equal(MAX_REQUEST_BODY_BYTES);
+    should(MAX_REQUEST_BODY_BYTES).be.below(128 * 1024 * 1024);
+  });
+
+  it('should refuse a body over the runtime ceiling before any route runs', async () => {
+    // Proven against an INJECTED ceiling: sending the shipped one would measure the machine rather
+    // than the bound.
+    // Arrange
+    let calls = 0;
+    const handle = await new BunApiServer(new BunHttpServe(), 64).listen(
+      surfaceOf([
+        {
+          method: 'POST',
+          path: '/echo',
+          scope: 'public',
+          handle: async context => {
+            calls += 1;
+            return jsonResponse({ received: await context.request.text() });
+          },
+        },
+      ]),
+      BIND,
+    );
+    running.push(handle);
+
+    // Act
+    const refused = await fetch(`${handle.url}/echo`, { method: 'POST', body: 'a'.repeat(200) });
+    const admitted = await fetch(`${handle.url}/echo`, { method: 'POST', body: 'a'.repeat(64) });
+
+    // Assert: the oversized body never reached the route, and a body of exactly the ceiling still did.
+    should(refused.status).equal(413);
+    should(admitted.status).equal(200);
+    should(calls).equal(1);
+  });
+
+  it('should answer 413 over real HTTP for a body over a route bound', async () => {
+    // Arrange
+    const handle = await serve(bounded);
+
+    // Act
+    const refused = await fetch(`${handle.url}/bounded`, { method: 'POST', body: `{"a":"${'x'.repeat(200)}"}` });
+    const admitted = await fetch(`${handle.url}/bounded`, { method: 'POST', body: '{"a":"x"}' });
+
+    // Assert
+    should(refused.status).equal(413);
+    should((await refused.json()) as Record<string, unknown>).have.property('code', 'body_too_large');
+    should(admitted.status).equal(200);
+  });
+});
+
+describe('toApiRequest body reads', () => {
+  /** A body delivered in installments with NO declared length, the way a chunked upload arrives. */
+  function chunked(pieces: readonly string[]): Request {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const piece of pieces) controller.enqueue(new TextEncoder().encode(piece));
+        controller.close();
+      },
+    });
+    return new Request('http://127.0.0.1/v1/thing', { method: 'POST', body: stream, duplex: 'half' } as RequestInit);
+  }
+
+  it('should not touch the body until a route asks for it', async () => {
+    // A body-less route and a protocol switch must each pay nothing for a body they never read.
+    // Arrange
+    const source = new Request('http://127.0.0.1/v1/thing', { method: 'POST', body: 'hello daemon' });
+
+    // Act
+    const translated = toApiRequest(source, '127.0.0.1');
+
+    // Assert
+    should(source.bodyUsed).be.false();
+    should(await translated.text(64)).equal('hello daemon');
+    should(source.bodyUsed).be.true();
+  });
+
+  it('should read a body of exactly the bound', async () => {
+    // Arrange
+    const source = new Request('http://127.0.0.1/v1/thing', { method: 'POST', body: 'a'.repeat(64) });
+
+    // Act / Assert
+    should((await toApiRequest(source, undefined).text(64)).length).equal(64);
+  });
+
+  it('should refuse the length a real client declares, before reading a byte', async () => {
+    // A client that buffers its body sends `content-length`, which is the path an oversized upload
+    // actually takes — and the only one that can be refused for free.
+    // Arrange
+    const source = new Request('http://127.0.0.1/v1/thing', {
+      method: 'POST',
+      body: 'a'.repeat(65),
+      headers: { 'content-length': '65' },
+    });
+
+    // Act
+    const error = await toApiRequest(source, undefined)
+      .text(64)
+      .catch((reason: unknown) => reason);
+
+    // Assert
+    should(error).be.instanceof(BodyTooLargeError);
+    should((error as Error).message).equal('the request body is over the 64-byte limit');
+  });
+
+  it('should bound a chunked body while consuming it', async () => {
+    // Arrange
+    const source = chunked(['a'.repeat(32), 'b'.repeat(32), 'c'.repeat(32)]);
+
+    // Act
+    const error = await toApiRequest(source, undefined)
+      .text(64)
+      .catch((reason: unknown) => reason);
+
+    // Assert: no declared length to check, so the running total is the only bound there is.
+    should(source.headers.get('content-length')).be.null();
+    should(error).be.instanceof(BodyTooLargeError);
+  });
+
+  it('should cancel the remainder of a body it refused instead of leaving it in flight', async () => {
+    // Releasing the lock is not enough. A refused upload whose stream is merely unlocked is an upload
+    // the peer is still sending, into a daemon that has already answered 413 and will never read
+    // another byte of it — the sender has to be told to stop.
+    // Arrange
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      // A sender that keeps going: one piece per read, forever, until it is cancelled.
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode('a'.repeat(32)));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const source = new Request('http://127.0.0.1/v1/thing', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    // Act
+    const error = await toApiRequest(source, undefined)
+      .text(64)
+      .catch((reason: unknown) => reason);
+    // A cancelled body reports itself finished; an unlocked one would hand over the next piece.
+    const remainder = await source.body?.getReader().read();
+
+    // Assert: the transport's own cancel ran, AND the refusal the client is told about survived it.
+    // Cancelling from inside the read — while the reader still holds the body — fails quietly instead,
+    // which looks identical from the status code alone.
+    should(cancelled).be.true();
+    should(remainder?.done).be.true();
+    should(error).be.instanceof(BodyTooLargeError);
+    should((error as BodyTooLargeError).limitBytes).equal(64);
+    should((error as Error).message).equal('the request body is over the 64-byte limit');
+  });
+
+  it('should cancel a declared oversize it refused before reading, keeping the refusal', async () => {
+    // The pre-check path never enters the reader at all, so the cancellation it owes the sender cannot
+    // come from the reader's cleanup — and a cancel that rejects must not become the client's answer.
+    // Arrange
+    let cancelled = false;
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new TextEncoder().encode('a'.repeat(32)));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const source = new Request('http://127.0.0.1/v1/thing', {
+      method: 'POST',
+      body: stream,
+      headers: { 'content-length': '96' },
+      duplex: 'half',
+    } as RequestInit);
+    // The runtime primes the stream on its own; anything past this point would be the daemon reading.
+    await Bun.sleep(5);
+    const primed = pulls;
+
+    // Act
+    const error = await toApiRequest(source, undefined)
+      .text(64)
+      .catch((reason: unknown) => reason);
+
+    // Assert
+    should(cancelled).be.true();
+    should(pulls).equal(primed);
+    should(error).be.instanceof(BodyTooLargeError);
+    should((error as Error).message).equal('the request body is over the 64-byte limit');
+  });
+
+  it('should not cancel a body it read to the end', async () => {
+    // Cancellation belongs to the refusal path alone: a body that arrived complete has nothing left to
+    // stop, and cancelling it anyway would report a fault on a request that succeeded.
+    // Arrange
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"text":"hello"}'));
+        controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const source = new Request('http://127.0.0.1/v1/thing', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    // Act
+    const text = await toApiRequest(source, undefined).text(64);
+
+    // Assert
+    should(text).equal('{"text":"hello"}');
+    should(cancelled).be.false();
+  });
+
+  it('should read a chunked body that fits', async () => {
+    // Arrange
+    const source = chunked(['{"text":', '"hello"}']);
+
+    // Act / Assert
+    should(await toApiRequest(source, undefined).text(64)).equal('{"text":"hello"}');
+  });
+
+  it('should read a request with no body at all as the empty string', async () => {
+    // Arrange
+    const source = new Request('http://127.0.0.1/healthz');
+
+    // Act / Assert
+    should(await toApiRequest(source, undefined).text(64)).equal('');
+    should(await toApiRequest(source, undefined).text()).equal('');
+  });
+
+  it('should let a stream that fails through as a read failure, not an oversize', async () => {
+    // Arrange
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{'));
+        controller.error(new Error('the connection dropped'));
+      },
+    });
+    const source = new Request('http://127.0.0.1/v1/thing', {
+      method: 'POST',
+      body: stream,
+      duplex: 'half',
+    } as RequestInit);
+
+    // Act
+    const error = await toApiRequest(source, undefined)
+      .text(64)
+      .catch((reason: unknown) => reason);
+
+    // Assert: the reason the read stopped survives the cleanup. Cancelling a failed stream rejects
+    // with that same failure, so a cleanup that reported its own outcome would replace the caller's
+    // error with a duplicate — or, worse, an unhandled rejection.
+    should(error).be.instanceof(Error);
+    should(error).not.be.instanceof(BodyTooLargeError);
+    should((error as Error).message).containEql('the connection dropped');
+  });
+
+  it('should leave the body untouched when the protocol switches instead', async () => {
+    // Arrange
+    let served: ((request: Request) => Promise<Response | undefined>) | undefined;
+    const host = {
+      serve: (options: { readonly fetch: (request: Request) => Promise<Response | undefined> }) => {
+        served = options.fetch;
+        return { requestIp: () => '127.0.0.1', upgrade: () => true, stop: () => undefined };
+      },
+    };
+    // The verb is `POST` only because a `GET` cannot be constructed with a body at all; the switch is
+    // what is under test.
+    await new BunApiServer(host).listen(surfaceOf([], [{ ...recordingSocket(), method: 'POST' }]), BIND);
+    const upgrading = new Request('http://127.0.0.1/v1/stream', {
+      method: 'POST',
+      body: 'a body an upgrade has no use for',
+      headers: { upgrade: 'websocket', authorization: `Bearer ${CREDENTIALS.admin}` },
+    });
+
+    // Act
+    const response = await served?.(upgrading);
+
+    // Assert: switched, and the body was never read on the way there.
+    should(response).be.undefined();
+    should(upgrading.bodyUsed).be.false();
   });
 });

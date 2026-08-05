@@ -81,7 +81,7 @@ import { FilesystemController } from '../src/lib/filesystem/controller';
 import { ProtocolFilesystemGateway } from '../src/lib/filesystem/gateway';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
-import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
+import { ProtocolFleetAuthorizationGateway, ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
@@ -623,6 +623,11 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     }),
     clock: new SystemFleetClock(),
     recommendations: new ProtocolRecommendationGateway(client),
+    // The same shared client, and therefore the same daemon this invocation already resolved: a
+    // loopback daemon's owner-only token file, or the explicit FY_TOKEN a remote one demands. There
+    // is no second selection mechanism and no registry that turns a name into a credential — FY_HOME
+    // picks which local daemon, FY_URL plus FY_TOKEN picks a remote one, exactly as every other verb.
+    authorizations: new ProtocolFleetAuthorizationGateway(client),
     out: world.io,
   });
 }

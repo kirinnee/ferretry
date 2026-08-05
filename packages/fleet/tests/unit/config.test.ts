@@ -398,3 +398,73 @@ describe('FleetConfigSchema', () => {
     should(actual).matchAny(/unknown variant "turbo"/);
   });
 });
+
+describe('AccountRouteSchema layer', () => {
+  it('should accept a route layer carrying every profile field and both harness overlays', () => {
+    // Arrange
+    const input = config({
+      agents: [
+        agent({
+          routes: {
+            default: route({
+              layer: {
+                env: { LANE: 'default' },
+                flags: ['--lane'],
+                settings: { theme: 'dark' },
+                memory: './default.md',
+                skills: './skills-default',
+                claude: { memory: './claude.md' },
+                codex: { memory: './codex.md' },
+              },
+            }),
+          },
+        }),
+      ],
+    });
+
+    // Act
+    const actual = FleetConfigSchema.safeParse(input);
+
+    // Assert
+    should(actual.success).be.true();
+  });
+
+  it('should refuse an unknown key inside a route layer rather than ignore it', () => {
+    // Arrange
+    const input = config({
+      agents: [agent({ routes: { default: route({ layer: { memroy: './typo.md' } }) } })],
+    });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual.length).be.above(0);
+  });
+
+  it('should refuse a reserved environment name declared in a route layer', () => {
+    // Arrange
+    const input = config({
+      agents: [agent({ routes: { default: route({ layer: { env: { [RESERVED_ENV_NAMES[0]]: '/elsewhere' } } }) } })],
+    });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual).matchAny(/is reserved/);
+  });
+
+  it('should refuse a nested overlay inside a route layer overlay', () => {
+    // Arrange
+    const input = config({
+      agents: [agent({ routes: { default: route({ layer: { claude: { claude: { memory: './nested.md' } } } }) } })],
+    });
+
+    // Act
+    const actual = messagesOf(input);
+
+    // Assert
+    should(actual.length).be.above(0);
+  });
+});

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
@@ -410,6 +410,26 @@ const CLIENT_NAME = 'fy';
  */
 function sessionRootPinner(): SessionRootPinner {
   return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
+}
+
+/** Crockford-like symbols with the visually ambiguous 0, 1, I, L, O and U removed. */
+const APPROVAL_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * One fleet approval code, drawn uniformly.
+ *
+ * `randomInt(30)` rather than a random byte folded with `%`: 256 does not divide 30, so a modulo
+ * would make ten of the thirty symbols measurably likelier than the rest and quietly shrink a
+ * bearer secret's search space. The platform's own rejection sampling is what the pairing code
+ * already draws through, and one hand-rolled implementation of it in this daemon is enough.
+ *
+ * It lives in the composition root because this is the only layer allowed to reach for randomness,
+ * and because how randomness maps onto an alphabet is a decision worth having somewhere visible.
+ * The mount takes it as `mintApprovalCode`, so a test drives approvals through a value it chose.
+ */
+function mintFleetApprovalCode(): string {
+  const symbols = Array.from({ length: 8 }, () => APPROVAL_ALPHABET.charAt(randomInt(APPROVAL_ALPHABET.length)));
+  return `${symbols.slice(0, 4).join('')}-${symbols.slice(4).join('')}`;
 }
 
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
@@ -2914,6 +2934,15 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     files: stateFiles,
     platform: process.platform,
     keychainAccount: process.env.USER ?? '',
+    // Identity is minted here for the same reason everything else is: this is the only place
+    // allowed to reach for randomness, and a proposal handle or an account id derived from a clock
+    // would be guessable by anyone who knew roughly when it was made.
+    mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
+    mintUuid: () => crypto.randomUUID(),
+    mintApprovalCode: mintFleetApprovalCode,
+    // The same pinner the session file surface uses. A platform that cannot hand an open descriptor
+    // to a path-only API fails here rather than falling back to a name that can be re-pointed.
+    rootPinner: sessionRootPinner(),
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */

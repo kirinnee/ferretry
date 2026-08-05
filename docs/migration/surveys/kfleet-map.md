@@ -22,6 +22,12 @@ Two branches that are not on `main` are named where they matter: `feat/fleet-man
 and `fix/harness-preflight`. The daemon's fleet routes (#237) **did** land while this was being
 written, and [H](#h--keep-it-fresh) is written against them rather than against the state before.
 
+**Revised for the fleet configuration UI.** [M](#m--change-it-without-a-shell) was added, and the
+originals were re-read to settle one claim this document previously got wrong: it credited kfleet with
+a dry run. It has none — the correction and the evidence are in [B](#b--materialize-it). A capability
+with no original is where an invented parity claim is most likely to appear, so M states the absence
+of a source counterpart before it states anything else.
+
 ---
 
 ## Scorecard
@@ -44,6 +50,7 @@ former blocker is named where it closed; deliberate content and convenience GAPs
 | J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                    | **Was yes**; _closed by this unit_                                                 |
 | K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Seeded in the wrapper              | **Was yes**, for automation; _closed by this unit_                                 |
 | L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                            | No — annoying, not blocking                                                        |
+| M   | [Change the fleet without a shell](#m--change-it-without-a-shell)   | **New**; no source counterpart     | No — neither original had it; recorded so nobody reads it as a port                |
 
 Five facts that the capability rows assume and that are easy to miss:
 
@@ -99,7 +106,15 @@ Four things are better, and three of them are only possible because we dropped c
 - **One parse reports everything.** Unknown profiles and variants, duplicate ids, duplicate wrappers,
   duplicate homes and incoherent availability all surface together rather than during provisioning.
 
-**Nothing to build.**
+A fifth, added since: **an account route carries its own layer.** `AccountRouteSchema.layer`
+(`packages/fleet/src/lib/config.ts`) is applied **last** in `resolveAccounts`, after every shared
+slot, so two lanes of one agent can hold different instructions, skills, settings and environment
+without either leaking onto the other. The original overrode instructions per _lane_ — every account
+in that lane got the same file — and never per account. The merge order itself is unchanged; this is
+one more layer at the end of it, not a new rule.
+
+**Nothing to build in the declaration itself.** Who may _write_ that declaration, and from where, is
+[M](#m--change-it-without-a-shell).
 
 ---
 
@@ -113,9 +128,81 @@ and anything no longer declared swept away.
 **Ferretry's answer: carried, and better shaped.** `fy fleet apply` builds a complete, inspectable
 plan (`packages/fleet/src/lib/plan.ts:86`) and hands it to an adapter (`file-provisioner.ts:38`) that
 writes atomically and refuses to write outside the roots the composition root declared. `--dry-run`
-is the same code path minus the last step, so what a human reviews is the value the applier consumes;
-kfleet's dry run re-derived a summary and could disagree with the real thing. Pruning is bounded
-twice — direct children of the bin directory, and only files carrying the managed marker.
+is the same code path minus the last step, so what a human reviews is the value the applier consumes.
+Pruning is bounded twice — direct children of the bin directory, and only files carrying the managed
+marker.
+
+**Correction — kfleet has no dry run at all, and earlier drafts of this survey said it did.** Its
+`apply` takes exactly one option, `--prune` (`cli/fleet.ts:20`), and a case-insensitive search for
+`dry-run`/`dry_run`/`dryRun` over the whole source tree matches nothing. What exists is a separate
+`list` verb that re-derives a summary of agents × variants from the config (`cli/fleet.ts:43`), which
+is not a preview of a write and cannot disagree with an applier it never consults. So Ferretry's
+preview is **net-new capability**, not a better version of an existing one — the same correction
+applies to the daemon's `GET /v1/fleet/plan` and to the proposal preview in
+[M](#m--change-it-without-a-shell). Nothing about the fidelity obligation changes: it is owed to the
+invariants, not to a screen the original never had.
+
+### Ordinary provisioning now rolls back, and says what the host is
+
+kfleet's apply is non-transactional delete-then-create: an operation that throws leaves everything
+before it landed and nothing recorded. Ferretry's captures undo evidence by **moving aside** rather
+than copying — so a 284K `skills/` tree costs a rename, not a duplicate — validates every input
+(copy sources, settings layers, the Codex sidecar) **before** disturbing any destination, and unwinds
+in reverse on failure with containment re-checked at restore time, because every approval is stale by
+the time a rollback runs (`packages/fleet/src/adapters/{mutation-journal,file-provisioner}.ts`).
+Applies are serialised per fleet directory by a `link(2)` claim
+(`packages/fleet/src/adapters/apply-lock.ts`), which kfleet had no equivalent of.
+
+**A destination is never destroyed before its replacement exists.** kfleet's `copy` removed the
+destination and only then checked the source, so a missing asset deleted the account's previous one;
+here the source is `stat`ed in preflight and the live entry is moved aside, not deleted.
+
+**Publication refuses rather than overwrites, and says so instead of being fast.** A staged regular
+file is published with `link(2)` — the no-replace primitive — so a destination that reappeared between
+the capture and the publish fails with `EEXIST` rather than being silently replaced. A directory has no
+no-replace rename: `rename` will happily replace an empty one, taking its inode, mode and ownership
+with it, and checking beforehand only narrows the window. So a staged tree is published with primitives
+that are exclusive at **every level** — a non-recursive `mkdir` per directory and a `link` per file,
+recursively — and any name already taken fails instead of being overwritten. A staged entry that is not
+a regular file is refused rather than hard-linked into an account home on a guess.
+
+**The accepted trade, stated because it is a real one:** the tree becomes visible **entry by entry**
+rather than all at once, so it is _not_ true that a partly built tree is never observable. It is
+acceptable precisely because it stays truthful — a publish that fails part-way leaves the operation
+**unsealed**, and an unsealed destination is reported rather than deleted on a guess. Silently
+destroying somebody's file would not be truthful at any speed.
+
+**Ordinary provisioning ends in one of four states**, as a value rather than a message
+(`packages/fleet/src/lib/provisioning.ts` `FleetApplyFailure`):
+
+| Outcome                       | What the host is                                                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| committed                     | Everything landed and the manifest is published.                                                                                                           |
+| `rolled-back`                 | Nothing landed **and** nothing of anybody else's moved. Both conditions, or it is not this outcome.                                                        |
+| `rollback-incomplete`         | Restoration could not be verified, or content that was not this apply's had to be set aside. Exact paths are named.                                        |
+| `history-failed-after-commit` | The fleet landed, manifest included; shared history has its own boundary and failed after it. The committed state is reported exactly, never as a refusal. |
+
+**Preparing a host is not one of those four, and must not be reported as one.** Initialization writes
+starter files and **publishes no manifest** — a host that has just been prepared has a configuration
+and an assets tree, and still no accounts — so reporting it as a committed apply of zero accounts would
+tell a person their fleet is empty rather than that it is now ready. It carries two outcomes of its own:
+
+| Outcome                  | What it carries                                                                                                                                    |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `initialized`            | `created`, `kept` and `directories`, plus the `pathEntry` a person adds to their shell profile so the generated wrappers are runnable at all.      |
+| `initialization-partial` | The same three lists as they stood, plus the `reason` and the exact `failedPath` where preparation stopped. No `pathEntry`: the host is not ready. |
+
+Neither is a rollback, and `FleetScaffoldPartialError` carries that progress rather than discarding it:
+every file preparation writes is one that was absent, so removing them again could not be told apart
+from removing files somebody else had just created. Re-running completes the remainder and keeps
+everything already there, because absence is the kernel's decision.
+
+Two honest limits stay declared. **Residue is not failure**: moved-aside evidence and an
+unreleasable lock claim are reported on a successful apply rather than cleaned up, because undoing a
+committed apply to tidy up would delete the state the manifest now describes. And **the boundary
+covers a thrown error, not a killed task** — there is no journal-backed crash recovery here and none
+is claimed; a host that loses power mid-apply keeps its reserved-prefix backups and its lock claim
+on disk.
 
 Ferretry is also stricter in a way that matters: kfleet **silently dropped** an asset its per-harness
 table had no destination for, so a Claude profile could declare `hooks:` and get no hooks with no
@@ -264,6 +351,36 @@ _Closed as a capability._ The mechanism and the directory came with `fy fleet in
 with the default-assets unit above. What is left is curated _content_ — skills, hooks, MCP — which is
 a content decision rather than machinery, and is recorded in [What was left](#what-was-left).
 
+### Editing that content without a shell — bounded, and it writes nothing on its own
+
+Neither original could edit an asset remotely; Home Manager owned the tree and kfleet only referenced
+it. Ferretry now has a read boundary over `<FY_HOME>/fleet/assets` and an edit boundary that travels
+inside a proposal — `packages/daemon/src/lib/fleet/assets.ts` (the pure half) and `asset-store.ts`
+(the filesystem half). Its bounds are the interesting part, because "let the browser edit files" is
+otherwise a filesystem API with extra steps:
+
+- **Relative paths only**, checked rather than normalised: absolute paths, `..`, Windows separators,
+  control characters, empty or whitespace-edged segments, more than 200 characters and more than 8
+  directories deep are each refused with the reason. A caller that asked for
+  `../../.ssh/authorized_keys` said what it wanted, and rewriting that into something harmless would
+  hide the probe.
+- **Regular files only, no symlink component anywhere on the path**, so the tree cannot be used as a
+  hop out of itself.
+- **Text is decided fatally**, by a `TextDecoder` that refuses invalid UTF-8 rather than substituting
+  replacement characters — otherwise a binary file arrives looking editable and a round-trip corrupts
+  it.
+- **Bounded**: 64 KiB a file, 32 edits and 256 KiB in one change, 500 entries and depth 8 in a
+  listing, and a listing that hit a bound says so instead of reading as the whole tree.
+- **What it will not return, it still lists, with the reason.** Omitting a link, a binary or an
+  over-limit file would tell a person their instructions had vanished when they are merely
+  unreadable — the damaged-is-not-empty rule, applied to a file rather than to a fleet.
+- **Nothing in the reader writes.** An accepted edit reaches disk through the provisioner, inside the
+  same rollback boundary as the fleet it belongs to, because a saved instruction file with no account
+  to copy it into is exactly the half-state that boundary exists to prevent.
+
+The copy-not-symlink consequence recorded above still holds and is the thing to tell a person: an
+edited instruction file reaches an account home on the **next apply** and not before.
+
 ---
 
 ## D — See the fleet
@@ -273,9 +390,18 @@ a content decision rather than machinery, and is recorded in [What was left](#wh
 **Ferretry's answer: carried, and stronger.** `fy fleet ls` reads the published manifest
 (`packages/fleet/src/lib/manifest.ts`) — a record kfleet did not have at all; its consumers globbed
 the bin directory, so a stale executable produced a row for an account that no longer existed. PR
-#231 adds a read-only PWA surface on top of the same data, which kfleet had no equivalent of.
+#231 added a read-only PWA surface on top of the same data, which kfleet had no equivalent of, and
+[M](#m--change-it-without-a-shell) is what finally puts a fleet reader inside the product rather than
+only in the dev harness.
 
-**Nothing to build.**
+**One rule that surface owes the manifest, and now honours in one place.** Zero accounts is only ever
+rendered from a positively parsed manifest. A missing configuration, a configuration that will not
+parse, a host that declared a fleet but never applied it, a refused credential and an unreachable
+daemon are five different states with five different sentences (`classifyInventory`,
+`packages/pwa/src/features/fleet/fleet-change-model.ts`) — because a person shown an empty list would
+conclude their fleet had vanished, and this migration has shipped that exact bug three times.
+
+**Nothing to build in the read model.**
 
 ---
 
@@ -563,6 +689,11 @@ exists, and prints the `PATH` line the wrappers need. Because we are not compati
 defaults rather than copying a directory that is not there. Details in
 [What this unit closed](#what-this-unit-closed).
 
+**And it is no longer only a shell command.** The same scaffold is reachable as an `initialize`
+proposal — previewed, including the `PATH` line, before anything is written — so a person meeting a
+fresh host from a phone is not stuck. One policy, two entry points: see
+[M](#m--change-it-without-a-shell).
+
 ---
 
 ## K — Survive the first run
@@ -637,10 +768,129 @@ Not a blocker: everything it reports can be discovered another way.
 
 ---
 
+## M — Change it without a shell
+
+**This capability has no source counterpart, and the row exists so that nobody later reads it as a
+port.** It is recorded here because the owner named it — _"where can I configure my fleet on the UI?
+it should be part of the UI right?"_ — and because a capability with no original is the one most
+likely to acquire an invented fidelity claim.
+
+**What the originals actually do.** Verified by reading them, not inferred from this survey:
+
+- `kfleet` has **no create verb, no edit verb, no mutation API and no dry run**. Its whole command
+  list is `init apply list prune login doctor health usage prewarm serve service` (`src/index.ts`),
+  `apply` takes only `--prune`, and `init` prints _"next: edit config.yaml, then run kfleet apply"_.
+  The flow is: hand-edit `~/.kfleet/config.yaml`, then apply.
+- `kfleet serve` is not a control plane. It is Prometheus metrics plus a usage JSON envelope
+  (`cli/serve.ts`) — see [H](#h--keep-it-fresh).
+- The session daemon **reads** the fleet and deliberately never writes it. `fleet-inventory.ts`
+  `listWrappers()` scans the bin directory, and the learning path writes a **patch file for a human
+  to paste by hand** rather than editing the fleet itself (`kteam-ts/src/learning.ts`).
+
+So there is no original screen, no original wire contract and no original preview. **The fidelity
+obligation is to the invariants**: declared-not-derived identity, the merge order, non-clobbering
+defaults, refuse-rather-than-drop, and damaged-is-not-empty. No visual-fidelity or parity claim can
+be made about any of the surfaces below, and none is.
+
+### What Ferretry now carries
+
+**A named intent, never a document.** A caller sends one of `initialize`, `create-account` or
+`edit-account` (`FleetMutationSchema`) and the daemon derives the next configuration from the current
+one (`packages/daemon/src/lib/fleet/mutations.ts` `applyFleetMutation`). This is the decision the whole
+flow rests on: an arbitrary whole-config replacement can differ from what was previewed in ways nobody
+reads, while "create this account" has one meaning and one derivation. Identity is minted **server
+side** — the account UUID, the wrapper name (`<harness>-<name>`, or `<harness>-<variant>-<name>` off
+the default lane) and the relative home — so a caller cannot collide with, or silently re-point, an
+account it does not own. Every derivation goes back through `FleetConfigSchema`, so the duplicate-id,
+duplicate-wrapper, duplicate-home and availability cross-checks from [A](#a--declare-a-fleet) apply to
+a browser edit exactly as they do to a hand-written file.
+
+**An edit is a patch, not a replacement.** An omitted field is left alone and an explicit `null`
+removes it (`FleetAccountLayerPatchSchema`). Without that distinction an editor showing four of the
+eight overlay slots would blank the other four the first time somebody changed an account's
+instructions, and there would be no way to clear a field at all.
+
+**A held proposal, not a re-derived plan.** `FleetProposalStore`
+(`packages/daemon/src/lib/fleet/proposals.ts`) holds the candidate configuration, the bounded asset
+edits and the **exact** preview that was shown, together with the configuration revision and each
+asset revision as they were at review time. Applying consumes that stored artifact; it never rebuilds
+one from a fresh request. An input that moved in between is refused as stale rather than applied
+silently over — and the asset half of that check is the one that loses data quietly, because stored
+text composed against a file that no longer exists would overwrite whatever replaced it. Proposals are
+bounded in count and lifetime and are single-use, with tombstones so a replay is told it was consumed
+rather than that it never existed.
+
+**Approval is separate from pairing, and narrower than the credential it protects.** Reads and
+composing a proposal are open to a paired device, because composing writes nothing. Changing the host
+is not: `POST /v1/fleet/proposals/:proposalId/authorize` is `scope: 'host'`, so only the host's own
+admin token may mint an approval, and `fy fleet authorize <proposal-id>` is how a person gets one. The
+code is single-use, expires in two minutes, has a five-attempt budget bound to **its own** proposal,
+never travels in a URL, and is structurally absent from every read shape rather than filtered out of
+one. An admin bearer applies directly; a device applies only carrying that code, and the code alone
+never widens a lesser credential because the route still requires an admin-scope caller. The body-less
+admin `POST /v1/fleet/apply` is unchanged.
+
+**First run works from the browser, and reuses the scaffolder rather than inventing a second policy.**
+`initialize` goes through `buildFleetScaffold` and `FileFleetScaffolder`, whose create-if-absent
+semantics are the kernel's decision, so a person's own asset can never be replaced by a default through
+this path. The daemon answers with `initialized` or `initialization-partial` — its **own** outcomes,
+publishing no manifest, carrying the created/kept/directory evidence and the `pathEntry` (see
+[B](#b--materialize-it)) — and the surface renders each with its own words rather than folding either
+into an apply: a prepared host is told **no manifest has been published yet**, and a partly prepared one
+is told where preparation stopped and that running it again is safe because it only ever creates what is
+still absent. The `pathEntry` is shown at the review step, before anything is written, because a fleet
+whose wrappers are not on `PATH` is a fleet nobody can launch. Initialization and a damaged
+configuration stay different states with different copy, because "there is no fleet here yet" and "this
+fleet will not parse" ask a person to do opposite things.
+
+**The outcome is a body, not a message — and one body, read by both ends.** All six states travel as a
+discriminated value from the shared `FleetApplyOutcomeSchema`: the daemon parses its own response
+through it and the browser parses the same schema on the way in, so the two cannot hold different ideas
+of what happened. That is what stops "the fleet landed and only shared history failed" being rendered as
+"refused", and stops a prepared host being rendered as an applied one.
+
+**Where it lives.** One `{ id: 'fleet' }` sub-tab in the daemon's own Settings frame, mounted through
+the existing `daemonSettingsTabs` seam in `App.tsx`, with the surface under
+`packages/pwa/src/features/fleet/`. Everything is stamped with the connection it belongs to: changing
+daemon replaces the client, the evidence, the draft, the proposal, the approval code and the result
+outright, because a draft composed against one host must never be applied to another. Nothing is
+patched optimistically — the manifest and configuration are re-read from the daemon after an apply,
+including after a failure.
+
+### Still GAP, deliberately
+
+- **No delete.** There is no `remove-account` mutation, and `edit-account` cannot change an account's
+  harness, wrapper or home. Removing an account, or moving one, is still a hand edit of `config.yaml`
+  followed by an apply. (The wrapper is then swept by the existing prune; the home is not — see below.)
+- **Only accounts.** `profiles`, `variants`, `commands`, `aliases`, `defaultHomes`, `sharedHistory`,
+  `health` and `usage` have no browser editor. A change to any of them is a hand edit.
+- **Profile environment is read-only from the browser.** `PUT /v1/fleet/environment` still refuses a
+  device credential, and the shipped Environment panel was made truthfully read-only rather than left
+  offering a button that always failed. Per-**account** environment is editable through the account
+  layer; per-**profile** environment is not.
+- **Per-skill selection.** `skills` is one opaque directory reference in both originals and in
+  Ferretry, so a per-skill picker has nothing to bind to. The editor assigns a directory and edits the
+  text files under it.
+- **Home pruning.** The sweep is bounded to the wrapper directory, so removing an asset from the
+  configuration leaves the copy already inside an account home.
+- **Settings key deletion.** `preserveExisting` folds the live file in as the base layer, so an edit
+  merges over what the harness wrote and a deletion does not remove a key from disk.
+- **Comment-preserving YAML.** The configuration round-trips through the schema and
+  `Bun.YAML.stringify`, so comments, anchors and key order in a hand-written `config.yaml` do not
+  survive the first change made from a browser, and schema defaults are materialised. The surface
+  discloses this before the change, rather than after somebody loses a comment they wrote.
+- **Executable assets and unsupported slots.** No slot for something like a status line; Claude has no
+  `hooks` destination and Codex no `mcp` one, and declaring either is refused at plan time
+  ([C](#c--own-the-assets)).
+- **Crash transactionality.** As in [B](#b--materialize-it): a thrown error, not a killed task.
+
+---
+
 ## Better because we're not compatible
 
-Seven places where dropping compatibility makes the answer better, not merely different. The first
-three are taken in this unit's work; the rest are recommendations with the reasoning attached.
+Eight places where dropping compatibility makes the answer better, not merely different. Items 1–3
+were taken by the init/defaults unit and item 8 by the configuration-UI unit; the rest are
+recommendations with the reasoning attached.
 
 1. **Ship real defaults instead of copying a directory that does not exist.** _(taken)_ kfleet's
    `init` was written to copy bundled templates and no templates were ever bundled; the defaults came
@@ -676,6 +926,14 @@ three are taken in this unit's work; the rest are recommendations with the reaso
 7. **Group logins by declared identity.** kfleet infers the base agent from a wrapper-name infix and
    has to detect the collisions that causes. `identity` is already a declared field here, so the
    grouping half of [E](#e--get-logged-in) is free — only the credential-store adapter is real work.
+
+8. **Let a remote change be a named intent rather than a document.** _(taken)_ A tool that had to keep
+   accepting kfleet's file would have had one natural remote shape: send the whole configuration back.
+   That shape cannot be reviewed honestly — the applier can differ from the preview in ways nobody
+   reads. Because there is no format to preserve, `create-account` and `edit-account` could be the wire
+   contract instead, with the daemon deriving identity and the next configuration itself. That is what
+   makes the preview in [M](#m--change-it-without-a-shell) worth showing, and it is only available
+   because compatibility was waived.
 
 And one where dropping compatibility **costs** us something, flagged rather than decided:
 
@@ -759,6 +1017,11 @@ behaved as 100.
   nothing has a slot for an executable asset such as the status line.
 - **`fy fleet doctor` ([L](#l--diagnose-it)).** Not a blocker, and it should be scoped to what only
   the CLI knows so it never becomes a second harness detector.
+- **Everything except accounts, in [M](#m--change-it-without-a-shell).** Removing an account, moving
+  one, and editing `profiles`, `variants`, `commands`, `aliases`, `defaultHomes`, `sharedHistory`,
+  `health` or `usage` are still hand edits of `config.yaml`. Per-profile environment is read-only from
+  a browser by the same device-authority rule. None of it blocks deleting kfleet, which had no remote
+  editor of any kind.
 
 ---
 
@@ -767,39 +1030,45 @@ behaved as 100.
 Recorded once so nobody re-derives it. **A renamed module is not a gap**; this table exists to stop
 the next reader concluding otherwise from a name search.
 
-| kfleet module                                              | Ferretry                                                                                         |                                                                               |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| `core/types.ts`, `core/config.ts`                          | `lib/config.ts`, `adapters/config-file.ts`                                                       | renamed                                                                       |
-| `core/merge.ts`                                            | `lib/profiles.ts`                                                                                | renamed                                                                       |
-| `core/generate.ts`                                         | `lib/plan.ts` + `lib/wrappers.ts` + `lib/provisioning.ts` + `adapters/file-provisioner.ts`       | split, deliberately                                                           |
-| `core/kinds.ts`                                            | `lib/assets.ts` + `lib/wrappers.ts` + `lib/fleet/layout.ts`                                      | split by subject                                                              |
-| `core/settings.ts`                                         | `lib/settings.ts` + the provisioner's existing-file read                                         | split pure/IO                                                                 |
-| `deps.ts`                                                  | `lib/fleet/layout.ts` + `lib/paths.ts`                                                           | globals became a pure function                                                |
-| `util/format.ts`, `cli/shared.ts`                          | `IFleetOutput` + commander                                                                       | replaced                                                                      |
-| `cli/fleet.ts` (`apply`/`list`/`prune`)                    | `fy fleet apply` / `ls`; prune folded into apply                                                 | renamed                                                                       |
-| `core/harness-probe.ts:80` `sanitizeHarnessEnv`            | `lib/harness-env.ts`                                                                             | ported by this unit                                                           |
-| `core/harness-probe.ts:97` `prepareHarnessProbeEnv`        | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                                                 |
-| `core/login.ts:331` `interactiveLogin`                     | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                                                  |
-| `cli/init.ts`                                              | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                                                       |
-| `~/.kfleet/` asset tree (Home Manager's, not kfleet's)     | `lib/scaffold.ts` starters — instructions, per-harness settings, auto-lane flags                 | **neutral halves shipped**; skills/hooks/MCP GAP                              |
-| `core/health.ts`, `core/harness-probe.ts` (rest)           | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)                                |
-| `core/usage.ts:245,306` Anthropic probes                   | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                                                      |
-| `core/usage.ts:824` dedup by credential                    | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                                            |
-| `core/usage.ts` (other providers)                          | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)                                  |
-| `core/cliproxy-usage.ts`                                   | —                                                                                                | **not to be ported** (owner); config refused                                  |
-| `core/creds.ts`                                            | `adapters/credential-store.ts`                                                                   | ported by this unit                                                           |
-| `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity` | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                                                           |
-| `core/login.ts:307` `resolveLoginTarget`                   | `adapters/process-login.ts`                                                                      | ported by this unit                                                           |
-| `cli/login.ts` `runLogin`, `--status`, `--sync-only`       | `lib/login.ts` `FleetLoginService` + `lib/fleet/render.ts`                                       | ported by this unit                                                           |
-| `core/login.ts:163` `filterLiveIdentities`                 | —                                                                                                | **GAP**, needs [G](#g--know-what-actually-works)                              |
-| `core/shared-history.ts`, `core/kinds.ts` `sharedState`    | `lib/shared-history.ts`, `adapters/file-shared-history.ts`, `lib/plan.ts`                        | **PORTED**, see [I](#i--resume-anything-anywhere)                             |
-| `core/generate.ts` Codex SQLite env/settings/ownership     | `lib/plan.ts`, `adapters/file-provisioner.ts`, `lib/wrappers.ts`                                 | **PORTED**, see [I](#i--resume-anything-anywhere)                             |
-| `core/codex-prewarm.ts`, `cli/prewarm.ts`                  | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)                                |
-| — (Ferretry crash-safety extension)                        | `lib/shared-history.ts` `inspectRecovery`                                                        | domain port only; CLI recovery **GAP**, see [I](#i--resume-anything-anywhere) |
-| `core/generate.ts` `AUTOTRUST`                             | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                                                   |
-| `core/firstrun.ts`                                         | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                                            |
-| `cli/serve.ts`, `cli/service.ts`                           | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)                              |
-| `cli/doctor.ts`                                            | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                                             |
-| —                                                          | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest                             |
-| —                                                          | `lib/capabilities.ts`                                                                            | **new**; refuses unimplemented configuration                                  |
-| —                                                          | `lib/identity.ts` `unreadable` state                                                             | **new in this unit**; kfleet had no such state                                |
+| kfleet module                                              | Ferretry                                                                                         |                                                                                             |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `core/types.ts`, `core/config.ts`                          | `lib/config.ts`, `adapters/config-file.ts`                                                       | renamed                                                                                     |
+| `core/merge.ts`                                            | `lib/profiles.ts`                                                                                | renamed                                                                                     |
+| `core/generate.ts`                                         | `lib/plan.ts` + `lib/wrappers.ts` + `lib/provisioning.ts` + `adapters/file-provisioner.ts`       | split, deliberately                                                                         |
+| `core/kinds.ts`                                            | `lib/assets.ts` + `lib/wrappers.ts` + `lib/fleet/layout.ts`                                      | split by subject                                                                            |
+| `core/settings.ts`                                         | `lib/settings.ts` + the provisioner's existing-file read                                         | split pure/IO                                                                               |
+| `deps.ts`                                                  | `lib/fleet/layout.ts` + `lib/paths.ts`                                                           | globals became a pure function                                                              |
+| `util/format.ts`, `cli/shared.ts`                          | `IFleetOutput` + commander                                                                       | replaced                                                                                    |
+| `cli/fleet.ts` (`apply`/`list`/`prune`)                    | `fy fleet apply` / `ls`; prune folded into apply                                                 | renamed                                                                                     |
+| `core/harness-probe.ts:80` `sanitizeHarnessEnv`            | `lib/harness-env.ts`                                                                             | ported by this unit                                                                         |
+| `core/harness-probe.ts:97` `prepareHarnessProbeEnv`        | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                                                               |
+| `core/login.ts:331` `interactiveLogin`                     | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                                                                |
+| `cli/init.ts`                                              | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                                                                     |
+| `~/.kfleet/` asset tree (Home Manager's, not kfleet's)     | `lib/scaffold.ts` starters — instructions, per-harness settings, auto-lane flags                 | **neutral halves shipped**; skills/hooks/MCP GAP                                            |
+| `core/health.ts`, `core/harness-probe.ts` (rest)           | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)                                              |
+| `core/usage.ts:245,306` Anthropic probes                   | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                                                                    |
+| `core/usage.ts:824` dedup by credential                    | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                                                          |
+| `core/usage.ts` (other providers)                          | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)                                                |
+| `core/cliproxy-usage.ts`                                   | —                                                                                                | **not to be ported** (owner); config refused                                                |
+| `core/creds.ts`                                            | `adapters/credential-store.ts`                                                                   | ported by this unit                                                                         |
+| `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity` | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                                                                         |
+| `core/login.ts:307` `resolveLoginTarget`                   | `adapters/process-login.ts`                                                                      | ported by this unit                                                                         |
+| `cli/login.ts` `runLogin`, `--status`, `--sync-only`       | `lib/login.ts` `FleetLoginService` + `lib/fleet/render.ts`                                       | ported by this unit                                                                         |
+| `core/login.ts:163` `filterLiveIdentities`                 | —                                                                                                | **GAP**, needs [G](#g--know-what-actually-works)                                            |
+| `core/shared-history.ts`, `core/kinds.ts` `sharedState`    | `lib/shared-history.ts`, `adapters/file-shared-history.ts`, `lib/plan.ts`                        | **PORTED**, see [I](#i--resume-anything-anywhere)                                           |
+| `core/generate.ts` Codex SQLite env/settings/ownership     | `lib/plan.ts`, `adapters/file-provisioner.ts`, `lib/wrappers.ts`                                 | **PORTED**, see [I](#i--resume-anything-anywhere)                                           |
+| `core/codex-prewarm.ts`, `cli/prewarm.ts`                  | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)                                              |
+| — (Ferretry crash-safety extension)                        | `lib/shared-history.ts` `inspectRecovery`                                                        | domain port only; CLI recovery **GAP**, see [I](#i--resume-anything-anywhere)               |
+| `core/generate.ts` `AUTOTRUST`                             | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                                                                 |
+| `core/firstrun.ts`                                         | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                                                          |
+| `cli/serve.ts`, `cli/service.ts`                           | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)                                            |
+| `cli/doctor.ts`                                            | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                                                           |
+| —                                                          | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest                                           |
+| —                                                          | `lib/capabilities.ts`                                                                            | **new**; refuses unimplemented configuration                                                |
+| —                                                          | `lib/identity.ts` `unreadable` state                                                             | **new in this unit**; kfleet had no such state                                              |
+| — (`kfleet apply` is delete-then-create, no rollback)      | `adapters/{mutation-journal,apply-lock}.ts`, `lib/provisioning.ts` `FleetApplyFailure`           | **new**; reverse-order undo, per-fleet lock, four honest outcomes — [B](#b--materialize-it) |
+| — (hand-edit `config.yaml`, then `kfleet apply`)           | `daemon/src/lib/fleet/mutations.ts`                                                              | **new**; named intents, server-minted identity — [M](#m--change-it-without-a-shell)         |
+| — (no dry run anywhere in kfleet)                          | `daemon/src/lib/fleet/proposals.ts` + `GET /v1/fleet/plan`                                       | **new**; a held, single-use, expiring proposal carrying the exact preview                   |
+| — (Home Manager owned the asset tree)                      | `daemon/src/lib/fleet/{assets,asset-store}.ts`                                                   | **new**; bounded text-asset read/edit confined to `fleet/assets`                            |
+| — (kfleet had no credentials and no remote caller)         | `POST /v1/fleet/proposals/:id/authorize` + `fy fleet authorize`                                  | **new**; host-minted, single-use, proposal-bound approval                                   |
+| —                                                          | `pwa/src/features/fleet/*` mounted as the daemon `fleet` Settings sub-tab                        | **new**; no original screen, so no fidelity claim is made                                   |

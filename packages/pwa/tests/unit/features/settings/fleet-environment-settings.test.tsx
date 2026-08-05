@@ -35,14 +35,6 @@ const selectValue = async (select: HTMLSelectElement, value: string): Promise<vo
   });
 };
 
-const writeText = async (textarea: HTMLTextAreaElement, value: string): Promise<void> => {
-  const setter = must(Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set, 'textarea setter');
-  await interact(() => {
-    setter.call(textarea, value);
-    textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
@@ -50,7 +42,7 @@ afterEach(() => {
 });
 
 describe('FleetEnvironmentSettings', () => {
-  it('mounts the portable environment panel from the daemon settings frame', () => {
+  it('mounts the environment panel from the daemon settings frame', () => {
     globalThis.fetch = (async () => response({ profiles: { portable: {} } })) as unknown as typeof fetch;
     const view = render(
       <DaemonSettingsFrame
@@ -95,104 +87,100 @@ describe('FleetEnvironmentSettings', () => {
     run(() => view.unmount());
   });
 
-  it('previews a source profile, changes copy semantics, and applies an edited safe environment', async () => {
+  it('explains the device read-only authority and points at the Fleet tab with no write affordance', async () => {
     const calls: Array<{ readonly url: URL; readonly init?: RequestInit }> = [];
-    const target = { profiles: { portable: { KEEP: 'target', CHANGE: 'old', REMOVE: 'gone' }, other: {} } };
-    const source = { profiles: { portable: { CHANGE: 'new', ADD: 'value' }, other: { OTHER: 'source' } } };
+    globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+      calls.push({ url: new URL(String(input)), init });
+      return response({ profiles: { portable: { VISIBLE: 'yes' } } });
+    }) as typeof fetch;
+
+    const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[alpha]} />);
+    await settle();
+
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('read-only');
+    expect(text).toContain('Fleet tab');
+    expect(text).toContain('approve it on the host');
+    // No write affordance remains: no editor, no apply control, and never a write request.
+    expect(view.container.querySelector('textarea')).toBeNull();
+    expect([...view.container.querySelectorAll('button')].some(button => /apply/i.test(button.textContent ?? ''))).toBe(
+      false,
+    );
+    expect(calls.some(call => call.init?.method === 'PUT')).toBe(false);
+    expect(calls.some(call => call.init?.method === 'POST')).toBe(false);
+
+    await view.unmount();
+  });
+
+  it('compares the target profile against a chosen daemon and shows every difference kind without writing', async () => {
+    const calls: Array<{ readonly url: URL; readonly init?: RequestInit }> = [];
+    const target = { profiles: { portable: { KEEP: 'same', CHANGE: 'old', ONLY_HERE: 'target' }, other: {} } };
+    const source = { profiles: { portable: { KEEP: 'same', CHANGE: 'new', ONLY_THERE: 'source' }, other: {} } };
     globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = new URL(String(input));
       calls.push({ url, init });
-      if (init?.method === 'PUT') return response({ profiles: {} });
       return response(url.host === 'beta.example.test' ? source : target);
     }) as typeof fetch;
 
     const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[alpha, beta]} />);
     await settle();
     const selects = view.container.querySelectorAll<HTMLSelectElement>('select');
-    await selectValue(must(selects[0], 'source daemon selector'), 'beta');
+    await selectValue(must(selects[0], 'compare-with selector'), 'beta');
     await settle();
 
-    expect(view.container.textContent).toContain('Target diff (2 changes)');
-    expect(view.container.textContent).toContain('added ADD: — → value');
-    expect(view.container.textContent).toContain('changed CHANGE: old → new');
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('ONLY_HERE');
+    expect(text).toContain('target only');
+    expect(text).toContain('ONLY_THERE');
+    expect(text).toContain('source only');
+    expect(text).toContain('CHANGE');
+    expect(text).toContain('differs');
+    // The identical entry is inspected on the target, not reported as a difference.
+    expect(text).toContain('KEEP');
+    expect(text).toContain('same');
 
-    await interact(() =>
-      must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Replace target')),
-        'replace button',
-      ).click(),
-    );
-    expect(view.container.textContent).toContain('Target diff (4 changes)');
-    expect(view.container.textContent).toContain('removed REMOVE: gone → —');
+    // The comparison read is keyed to the chosen daemon's own address, never crossed with the target.
+    expect(calls.some(call => call.url.host === 'beta.example.test')).toBe(true);
+    // No write request is ever issued from inspection.
+    expect(calls.some(call => call.init?.method === 'PUT')).toBe(false);
 
-    await selectValue(must(selects[1], 'profile selector'), 'other');
-    expect(must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'environment editor').value).toContain(
-      'OTHER',
-    );
-    await writeText(
-      must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'environment editor'),
-      '{"EDITED":"yes","NUMBER":2}',
-    );
-    expect(view.container.textContent).toContain('Target diff (1 changes)');
-
-    await writeText(
-      must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'environment editor'),
-      '{"EDITED":"yes"}',
-    );
-    const apply = must(
-      [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Apply replace')),
-      'apply button',
-    );
-    expect(apply.disabled).toBe(false);
-    await interact(() => apply.click());
-    await settle();
-
-    const put = must(
-      calls.find(call => call.init?.method === 'PUT'),
-      'environment copy request',
-    );
-    expect(put.url.pathname).toBe('/v1/fleet/environment');
-    expect(JSON.parse(String(put.init?.body))).toEqual({
-      profile: 'other',
-      mode: 'replace',
-      environment: { EDITED: 'yes' },
-    });
-    expect(view.container.querySelector('[role="alert"]')).toBeNull();
     await view.unmount();
   });
 
-  it('disables invalid drafts and reports a daemon refusal without changing the target', async () => {
-    globalThis.fetch = (async (_input: URL | RequestInfo, init?: RequestInit) => {
-      if (init?.method === 'PUT') return response({ error: 'fleet_environment_refused' }, 403);
-      return response({ profiles: { portable: { OLD: 'value' } } });
-    }) as typeof fetch;
+  it('switches profile to update the inspected entries and reports an empty profile honestly', async () => {
+    globalThis.fetch = (async (input: URL | RequestInfo) =>
+      response(
+        new URL(String(input)).host === 'beta.example.test'
+          ? { profiles: { portable: { SAME: 'value' }, other: {} } }
+          : { profiles: { portable: { SAME: 'value' }, other: {} } },
+      )) as typeof fetch;
+
+    const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[alpha, beta]} />);
+    await settle();
+    const selects = view.container.querySelectorAll<HTMLSelectElement>('select');
+    // The default comparison is the daemon with itself: nothing differs.
+    expect(view.container.textContent).toContain('No differences');
+
+    await selectValue(must(selects[1], 'profile selector'), 'other');
+    expect(view.container.textContent).toContain('This profile publishes no environment entries.');
+
+    await selectValue(must(selects[1], 'profile selector'), 'portable');
+    expect(view.container.textContent).toContain('SAME');
+    expect(view.container.textContent).toContain('value');
+
+    await view.unmount();
+  });
+
+  it('reports honestly when the daemon publishes no fleet profiles', async () => {
+    globalThis.fetch = (async () => response({ profiles: {} })) as unknown as typeof fetch;
     const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[alpha]} />);
     await settle();
 
-    const editor = must(view.container.querySelector<HTMLTextAreaElement>('textarea'), 'environment editor');
-    await writeText(editor, 'not JSON');
-    expect(
-      must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Apply merge')),
-        'apply button',
-      ).disabled,
-    ).toBe(true);
-
-    await writeText(editor, '{"NEW":"value"}');
-    const apply = must(
-      [...view.container.querySelectorAll('button')].find(button => button.textContent?.includes('Apply merge')),
-      'apply button',
-    );
-    await interact(() => apply.click());
-    await settle();
-
-    expect(must(view.container.querySelector('[role="alert"]'), 'refusal').textContent).toContain(
-      'fleet_environment_refused',
-    );
+    expect(view.container.textContent).toContain('This daemon publishes no fleet profiles.');
     await view.unmount();
   });
 
-  it('shows a readable error when the source cannot be read', async () => {
+  it('shows a readable error when the environment cannot be read', async () => {
     globalThis.fetch = (async () => new Response('not JSON', { status: 503 })) as unknown as typeof fetch;
     const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[]} />);
     await settle();
@@ -200,7 +188,7 @@ describe('FleetEnvironmentSettings', () => {
     expect(must(view.container.querySelector('[role="alert"]'), 'read error').textContent).toContain(
       'Read failed (503)',
     );
-    expect(view.container.querySelector('[aria-label="Configuration diff"]')).toBeNull();
+    expect(view.container.querySelector('[aria-label="Target environment entries"]')).toBeNull();
     await view.unmount();
   });
 });

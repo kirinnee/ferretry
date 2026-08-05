@@ -98,6 +98,23 @@ const SECTIONS = [
 ] as const;
 
 /**
+ * The fleet cockpit frames, captured on their own page rather than inside the gallery.
+ *
+ * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
+ * screen a person actually reads while something is wrong.
+ */
+const FLEET_FRAMES = [
+  'cockpit',
+  'cockpit-staged',
+  'states',
+  'accounts',
+  'preview',
+  'failed-apply',
+  'create',
+  'layer',
+] as const;
+
+/**
  * A software keyboard, told the truth.
  *
  * Chrome's `setViewportSize` (and CDP's visible-size) shrink the LAYOUT
@@ -1077,6 +1094,82 @@ try {
           process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
           await page.keyboard.press('Escape');
           await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
+
+          /**
+           * The five fleet frames, each on a page of its own.
+           *
+           * Three of them are taller than a desktop viewport, and an element capture of a tall card
+           * inside the gallery's scroller clips to the wrong region — the first pass produced a fleet
+           * "preview" image showing the secrets cards. On a page that starts at the top with no sticky
+           * chrome, an element capture is exact.
+           */
+          for (const frame of FLEET_FRAMES) {
+            await page.goto(`${server.url}#fleet-${frame}`);
+            await page.reload();
+            await page.locator(`#harness-fleet-${frame}-page`).waitFor({ state: 'visible' });
+            // The two-column live-versus-proposed layout only exists while a change is staged, and
+            // staging it is an interaction. Driving the real clicks is the only way to capture that
+            // layout without inventing a state the surface cannot actually be in.
+            if (frame === 'cockpit-staged') {
+              await page.getByRole('button', { name: 'Edit layer' }).first().click();
+              await page.locator('[data-fleet-layer-form]').waitFor({ state: 'visible' });
+              await page.getByRole('button', { name: 'Preview this change' }).click();
+              const staged = page.locator('[data-fleet-proposal-id]');
+              if ((await staged.count()) === 0) {
+                const refused = await page.locator('[data-fleet-refusal] pre').allInnerTexts();
+                process.stdout.write(`   staging did not land: ${refused.join(' | ') || 'no refusal shown'}\n`);
+              }
+              await staged.waitFor({ state: 'visible' });
+            }
+            const fleetTarget = join(outDir, `${viewport.name}-fleet-${frame}.png`);
+            // A full-page capture of a page carrying ONE frame: Chrome captures beyond the viewport
+            // itself, so a frame taller than the screen is whole rather than stitched by hand.
+            // The REQUIRED evidence is the viewport itself — exactly 390x844 or 1440x900, the screen a
+            // person is actually holding. The full-page shot beside it supplements that; it never
+            // replaces it, because a frame that only reads well when unrolled to 2000px is not a
+            // frame that works on a phone.
+            // Back to the top: the interaction above scrolls, and a viewport capture is supposed to show
+            // what a person sees when the screen opens.
+            // Blur first: the surface moves focus to the panel it just opened, and the browser scrolls a
+            // focused element into view, so scrolling alone would be undone.
+            // The create frame is the A2 evidence: it has to be captured WITH keyboard focus on the
+            // harness radio, because the defect was that focus was not locatable there at all.
+            if (frame === 'create') {
+              await page.locator('[data-fleet-harness-selected="true"] input').evaluate(node => {
+                (node as HTMLElement).focus();
+                node.matches(':focus-visible');
+              });
+              await page.keyboard.press('ArrowRight');
+              await page.keyboard.press('ArrowLeft');
+            }
+            await page.evaluate(frameName => {
+              if (frameName === 'create') return;
+              (document.activeElement as HTMLElement | null)?.blur();
+              window.scrollTo(0, 0);
+              // The scroller may be an element rather than the document, so reset every one of them.
+              for (const node of document.querySelectorAll('*')) node.scrollTop = 0;
+            }, frame as string);
+            await page.waitForTimeout(60);
+            const viewportTarget = join(outDir, `${viewport.name}-fleet-${frame}-viewport.png`);
+            await page.screenshot({ path: viewportTarget });
+            // Production deliberately locks html/body to one viewport. Keep that lock for the
+            // required viewport evidence above, then release only the standalone harness document
+            // before the supplemental full-page shot. Otherwise Chromium measures the overflowing
+            // frame's full height but paints only the first viewport, leaving the rest black.
+            await page.evaluate(() => {
+              document.documentElement.style.height = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              document.body.style.height = 'auto';
+              document.body.style.overflow = 'auto';
+            });
+            await page.screenshot({ path: fleetTarget, fullPage: true });
+            process.stdout.write(`📸 ${viewport.name} fleet ${frame} -> ${viewportTarget} + ${fleetTarget}\n`);
+          }
+          // Back to the gallery: every capture after this one expects the shell, and a page left on a
+          // fleet fragment made the next locator wait for an app bar that is not on it.
+          await page.goto(server.url.toString());
+          await page.reload();
+          await page.locator('[data-density-region="app-bar"]').first().waitFor({ state: 'visible' });
 
           // The install stage on a page of its own, so the capture starts at
           // the real top of the screen rather than wherever the gallery's

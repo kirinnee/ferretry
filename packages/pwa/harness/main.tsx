@@ -26,6 +26,7 @@ import type {
   WardenStatusView,
 } from '@ferretry/protocol';
 import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -82,6 +83,19 @@ import {
   type UnifiedBrowserDependencies,
   UnifiedBrowserSurface,
 } from '../src/features/browser/unified-browser-surface.tsx';
+import type {
+  FleetApplyOutcome,
+  FleetManifestAccountView,
+  FleetProposalView,
+} from '../src/features/fleet/fleet-api.ts';
+import { FleetAccountForm, FleetLayerForm } from '../src/features/fleet/fleet-change-forms.tsx';
+import {
+  emptyAccountDraft,
+  type FleetAccountDraft,
+  type FleetLayerDraft,
+} from '../src/features/fleet/fleet-change-model.ts';
+import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
+import { FleetConfigurationSurface } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
@@ -281,6 +295,187 @@ const HARNESS_FLEET: FleetReadState = {
     },
   ],
 };
+
+/**
+ * The fleet CONFIGURATION fixtures: one published host, one staged change against it, one honest
+ * failure. Written out longhand and cast at the boundary, because these frames exist to be looked at
+ * and a fixture derived from the same schema the surface parses with proves nothing about either.
+ */
+const HARNESS_FLEET_ACCOUNTS = [
+  {
+    id: '11111111-1111-4111-8111-111111111111',
+    kind: 'claude',
+    mode: 'auto',
+    wrapper: 'claude-studio',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-studio',
+    displayName: 'Studio Claude',
+    defaultModel: 'claude-opus-5',
+    models: [{ id: 'claude-opus-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: '22222222-2222-4222-8222-222222222222',
+    kind: 'claude',
+    mode: 'interactive',
+    wrapper: 'claude-auto-atelier',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-atelier',
+    displayName: 'Atelier Claude',
+    defaultModel: 'claude-sonnet-5',
+    models: [{ id: 'claude-sonnet-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: '33333333-3333-4333-8333-333333333333',
+    kind: 'codex',
+    mode: 'auto',
+    wrapper: 'codex-archive',
+    home: '/home/pilot/.ferretry/fleet/homes/codex-archive',
+    displayName: 'Archive Codex',
+    defaultModel: null,
+    models: [],
+    available: false,
+    unavailableReason: 'the fleet publishes codex-archive but this host has no such executable on its PATH',
+  },
+] satisfies readonly FleetManifestAccountView[];
+
+const HARNESS_FLEET_DRAFT: FleetAccountDraft = {
+  ...emptyAccountDraft('claude'),
+  name: 'atelier',
+  displayName: 'Atelier Claude',
+  modelsText: 'claude-opus-5\nclaude-sonnet-5',
+  defaultModel: 'claude-opus-5',
+};
+
+const HARNESS_FLEET_LAYER: FleetLayerDraft = {
+  instructions: {
+    path: 'instructions/studio.md',
+    text: '# Studio\n\nBe exact. Prefer the smallest change that is provably correct.\n',
+  },
+  skillsDirectory: 'skills/studio',
+  skills: [
+    { id: 'skills/studio/review.md', path: 'skills/studio/review.md', text: '# Review\n\nRead the diff twice.\n' },
+  ],
+  settingsText: '{\n  "model": "claude-opus-5",\n  "permissions": { "allow": ["Bash(git status)"] }\n}',
+  env: [{ id: 'FY_LANE', name: 'FY_LANE', value: 'studio' }],
+  // Fields this editor does not offer, carried through the change exactly as declared.
+  preserved: { flags: ['--dangerously-skip-permissions'], mcp: 'mcp/studio.json' },
+};
+
+const HARNESS_FLEET_PROPOSAL = {
+  id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb',
+  revision: '9f1c4ab77e2d',
+  mutation: {
+    kind: 'create-account',
+    harness: 'claude',
+    name: 'atelier',
+    variant: 'default',
+    models: ['claude-opus-5'],
+    defaultModel: 'claude-opus-5',
+  },
+  summary: 'add claude-atelier',
+  expiresAt: '2026-08-05T08:41:00.000Z',
+  state: 'pending',
+  assetEdits: [
+    { path: 'instructions/atelier.md', bytes: 482 },
+    { path: 'skills/atelier/review.md', bytes: 1_204 },
+  ],
+  preview: {
+    kind: 'apply',
+    documents: [
+      { path: '/home/pilot/.ferretry/fleet/config.yaml', bytes: 3_918 },
+      { path: '/home/pilot/.ferretry/fleet/assets/instructions/atelier.md', bytes: 482 },
+    ],
+    plan: {
+      manifestPath: '/home/pilot/.ferretry/fleet/manifest.json',
+      manifest: {
+        version: 1,
+        generatedAt: '2026-08-05T08:26:00.000Z',
+        accounts: [
+          ...HARNESS_FLEET_ACCOUNTS,
+          {
+            id: '44444444-4444-4444-8444-444444444444',
+            kind: 'claude',
+            mode: 'auto',
+            wrapper: 'claude-atelier',
+            home: '/home/pilot/.ferretry/fleet/homes/claude-atelier',
+            displayName: 'Atelier Claude',
+            defaultModel: 'claude-opus-5',
+            models: [{ id: 'claude-opus-5', available: true }],
+            available: true,
+            unavailableReason: null,
+          },
+        ],
+      },
+      operations: [
+        { kind: 'directory', path: '/home/pilot/.ferretry/fleet/homes/claude-atelier', mode: 448 },
+        { kind: 'file', path: '/home/pilot/.ferretry/fleet/bin/claude-atelier', mode: 493 },
+        {
+          kind: 'copy',
+          source: '/home/pilot/.ferretry/fleet/assets/instructions/atelier.md',
+          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md',
+          mode: 420,
+        },
+        {
+          kind: 'symlink',
+          source: '/home/pilot/.ferretry/fleet/shared/claude/history',
+          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/history',
+        },
+        {
+          kind: 'settings',
+          path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
+          format: 'json',
+          layerCount: 3,
+          preserveExisting: true,
+          mode: 384,
+        },
+        {
+          kind: 'codex-sqlite-ownership',
+          path: '/home/pilot/.ferretry/fleet/homes/codex-archive/config.toml',
+          markerPath: '/home/pilot/.ferretry/fleet/homes/codex-archive/.fy-sqlite-owner',
+          sqliteHome: '/home/pilot/.ferretry/fleet/shared/codex/sqlite',
+          enabled: true,
+        },
+        {
+          kind: 'prune',
+          path: '/home/pilot/.ferretry/fleet/bin',
+          marker: 'ferretry-managed',
+          keep: ['claude-studio', 'claude-auto-atelier', 'codex-archive', 'claude-atelier'],
+        },
+      ],
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/home/pilot/.ferretry/fleet/shared/claude/history',
+          migrated: 214,
+          conflicts: 2,
+          links: 4,
+        },
+      ],
+    },
+  },
+} satisfies FleetProposalView;
+
+const HARNESS_FLEET_FAILURE = {
+  outcome: 'rollback-incomplete',
+  failedOperation: 'settings /home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
+  reason: 'no space left on device',
+  unrestored: [
+    {
+      path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json',
+      reason: 'the moved-aside original could not be renamed back',
+      backup: '/home/pilot/.ferretry/fleet/homes/claude-atelier/settings.json.fy-backup',
+    },
+  ],
+  displaced: [
+    {
+      path: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md',
+      movedTo: '/home/pilot/.ferretry/fleet/homes/claude-atelier/CLAUDE.md.fy-displaced',
+    },
+  ],
+  lockResidue: '/home/pilot/.ferretry/fleet/apply.lock',
+} satisfies FleetApplyOutcome;
 
 const HARNESS_REMOTE_LOGIN_URL = 'https://accounts.example.test/authorize?state=harness-state';
 
@@ -3566,6 +3761,100 @@ function Shell() {
       ),
     },
     {
+      label: 'Fleet account list',
+      render: () => (
+        <Card id="harness-fleet-accounts" aria-label="Fleet account list" className="min-w-0 overflow-hidden">
+          <PanelBody>
+            <FleetLiveRoster
+              accounts={HARNESS_FLEET_ACCOUNTS}
+              generatedAt="2026-08-05T08:26:00.000Z"
+              onEdit={() => {}}
+              editable={true}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Fleet create account',
+      render: () => (
+        <Card id="harness-fleet-create" aria-label="Fleet create account" className="min-w-0 overflow-hidden">
+          <PanelBody>
+            <div className="kt-panel overflow-hidden">
+              <FleetAccountForm
+                draft={HARNESS_FLEET_DRAFT}
+                onChange={() => {}}
+                onSubmit={() => {}}
+                onCancel={() => {}}
+                problems={[]}
+                disabled={false}
+                loading={false}
+                suggestion="claude"
+                variants={['default', 'auto']}
+              />
+            </div>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      /** Every layer concern at once, including an asset the browser could NOT read. */
+      label: 'Fleet layer editor',
+      render: () => (
+        <Card id="harness-fleet-layer" aria-label="Fleet layer editor" className="min-w-0 overflow-hidden">
+          <PanelBody>
+            <div className="kt-panel overflow-hidden">
+              <FleetLayerForm
+                wrapper="claude-studio"
+                layer={HARNESS_FLEET_LAYER}
+                onChange={() => {}}
+                onSubmit={() => {}}
+                onCancel={() => {}}
+                problems={[
+                  '"skills/studio/huge.md" could not be read (over the 65536-byte limit for a single file), so staging a change would overwrite text this browser never saw',
+                ]}
+                disabled={false}
+                loading={false}
+              />
+            </div>
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      label: 'Fleet plan preview',
+      render: () => (
+        <Card id="harness-fleet-preview" aria-label="Fleet plan preview" className="min-w-0 overflow-hidden">
+          <PanelBody>
+            <FleetChangeReview
+              proposal={HARNESS_FLEET_PROPOSAL}
+              live={HARNESS_FLEET_ACCOUNTS}
+              authority="approval"
+              command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
+              code=""
+              onCodeChange={() => {}}
+              onApply={() => {}}
+              onRecheck={() => {}}
+              onDiscard={() => {}}
+              busy={false}
+              refusal={null}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      /** The fail-closed frame: a host that changed and could not be verified back. */
+      label: 'Fleet failed apply',
+      render: () => (
+        <Card id="harness-fleet-failed-apply" aria-label="Fleet failed apply" className="min-w-0 overflow-hidden">
+          <PanelBody>
+            <FleetApplyReport outcome={HARNESS_FLEET_FAILURE} />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
       label: 'Remote provider login',
       render: () => <RemoteLoginHarness />,
     },
@@ -4727,15 +5016,251 @@ function BrowserFullViewportHarness() {
   );
 }
 
+/**
+ * The five fleet frames on a page of their own.
+ *
+ * They are in the gallery too, but three of them are taller than a desktop viewport, and an element
+ * capture of a tall card inside the gallery's scroller clips to the wrong region. Starting at the real
+ * top of a page with no sticky chrome is what makes the captures trustworthy.
+ */
+type HarnessFleetFrame =
+  | 'accounts'
+  | 'preview'
+  | 'failed-apply'
+  | 'create'
+  | 'layer'
+  | 'cockpit'
+  | 'cockpit-staged'
+  | 'states';
+
+/**
+ * The COCKPIT itself, driven by a stub daemon rather than by fixtures handed to a leaf.
+ *
+ * The five frames below exercise the components; this is the screen a person actually opens — the
+ * header with the daemon id, the host-state verdict and the authority badge, the live-beside-proposed
+ * grid, and the declared limits. Nothing here reaches a network: the client answers from constants and
+ * every request stays inside this page.
+ */
+function fleetCockpitClient(answers: Readonly<Record<string, unknown>>) {
+  return {
+    request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+      const tail = path.slice('/v1/fleet'.length);
+      const answer = answers[tail];
+      if (answer === undefined) throw new FyHttpError(`this harness serves no ${tail}`, 409, 'fleet_not_applied');
+      if (answer instanceof FyHttpError) throw answer;
+      return schema.parse(answer);
+    },
+  };
+}
+
+const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
+  '/permissions': {
+    mayInspect: true,
+    mayPropose: true,
+    mayApplyDirectly: false,
+    mayApplyWithApproval: true,
+    approvalCommand: 'fy fleet authorize',
+  },
+  '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
+  '/config': { variants: { default: {}, auto: {} }, agents: [] },
+  // Every compose flow lists the asset tree, because a path the person types has to be judged against
+  // what is already there. A daemon that cannot answer this is a daemon whose tree is unknown, and the
+  // surface then refuses to stage anything — so a harness without this route would capture a blocked
+  // screen rather than the change manifest these frames exist to show.
+  '/assets': { files: [], complete: true },
+};
+
+/** The four states a host can be in that are NOT a published fleet. Each one is its own sentence. */
+const HARNESS_FLEET_STAGED_ANSWERS: Readonly<Record<string, unknown>> = {
+  ...HARNESS_FLEET_COCKPIT_ANSWERS,
+  '/config': {
+    variants: { default: {}, auto: {} },
+    agents: [
+      {
+        name: 'studio',
+        kind: 'claude',
+        routes: { default: { id: HARNESS_FLEET_ACCOUNTS[0]?.id, wrapper: 'claude-studio' } },
+      },
+    ],
+  },
+  '/proposals': HARNESS_FLEET_PROPOSAL,
+};
+
+const HARNESS_FLEET_STATE_ANSWERS: readonly {
+  readonly label: string;
+  readonly answers: Readonly<Record<string, unknown>>;
+}[] = [
+  {
+    label: 'uninitialized',
+    answers: {
+      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
+      '/accounts': new FyHttpError(
+        'no published fleet manifest at /home/pilot/.ferretry/fleet/manifest.json',
+        409,
+        'fleet_not_applied',
+      ),
+      '/config': new FyHttpError(
+        'no fleet config at /home/pilot/.ferretry/fleet/config.yaml; write the declared config before applying the fleet',
+        409,
+        'fleet_config_missing',
+      ),
+    },
+  },
+  {
+    label: 'not-applied',
+    answers: {
+      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
+      '/accounts': new FyHttpError('no published fleet manifest', 409, 'fleet_not_applied'),
+      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
+    },
+  },
+  {
+    label: 'damaged',
+    answers: {
+      '/permissions': HARNESS_FLEET_COCKPIT_ANSWERS['/permissions'],
+      '/accounts': new FyHttpError(
+        'fleet manifest at /home/pilot/.ferretry/fleet/manifest.json is unreadable or invalid',
+        409,
+        'fleet_manifest_invalid',
+      ),
+      '/config': HARNESS_FLEET_COCKPIT_ANSWERS['/config'],
+    },
+  },
+  {
+    label: 'forbidden',
+    answers: {
+      '/permissions': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
+      '/accounts': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
+      '/config': new FyHttpError('a paired device may inspect the fleet but may not apply it', 403, 'forbidden'),
+    },
+  },
+];
+
+function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
+  return (
+    /* NOT `kt-content`: that is the app shell's inner scroller, and a frame taller than the screen
+       would be clipped by it rather than growing the document a full-page capture measures. */
+    <div className="mx-auto w-full max-w-[1400px] space-y-panel self-start p-panel" id="harness-fleet-cockpit">
+      {frame !== 'accounts' ? null : (
+        <section aria-label="Fleet account list" id="harness-fleet-accounts-page">
+          <FleetLiveRoster
+            accounts={HARNESS_FLEET_ACCOUNTS}
+            generatedAt="2026-08-05T08:26:00.000Z"
+            onEdit={() => {}}
+            editable={true}
+          />
+        </section>
+      )}
+      {frame !== 'preview' ? null : (
+        <section aria-label="Fleet plan preview" id="harness-fleet-preview-page">
+          <FleetChangeReview
+            proposal={HARNESS_FLEET_PROPOSAL}
+            live={HARNESS_FLEET_ACCOUNTS}
+            authority="approval"
+            command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
+            code=""
+            onCodeChange={() => {}}
+            onApply={() => {}}
+            onRecheck={() => {}}
+            onDiscard={() => {}}
+            busy={false}
+            refusal={null}
+          />
+        </section>
+      )}
+      {frame !== 'failed-apply' ? null : (
+        <section aria-label="Fleet failed apply" id="harness-fleet-failed-apply-page">
+          <FleetApplyReport outcome={HARNESS_FLEET_FAILURE} />
+        </section>
+      )}
+      {frame !== 'create' ? null : (
+        <section aria-label="Fleet create account" className="kt-panel overflow-hidden" id="harness-fleet-create-page">
+          <FleetAccountForm
+            draft={HARNESS_FLEET_DRAFT}
+            onChange={() => {}}
+            onSubmit={() => {}}
+            onCancel={() => {}}
+            problems={[]}
+            disabled={false}
+            loading={false}
+            suggestion="claude"
+            variants={['default', 'auto']}
+          />
+        </section>
+      )}
+      {frame !== 'layer' ? null : (
+        <section aria-label="Fleet layer editor" className="kt-panel overflow-hidden" id="harness-fleet-layer-page">
+          <FleetLayerForm
+            wrapper="claude-studio"
+            layer={HARNESS_FLEET_LAYER}
+            onChange={() => {}}
+            onSubmit={() => {}}
+            onCancel={() => {}}
+            problems={[
+              '"skills/studio/huge.md" could not be read (over the 65536-byte limit for a single file), so staging a change would overwrite text this browser never saw',
+            ]}
+            disabled={false}
+            loading={false}
+          />
+        </section>
+      )}
+      {frame !== 'cockpit' ? null : (
+        <section aria-label="Fleet cockpit" id="harness-fleet-cockpit-page">
+          <FleetConfigurationSurface
+            connection={daemon}
+            createClient={async () => fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS)}
+          />
+        </section>
+      )}
+      {frame !== 'cockpit-staged' ? null : (
+        <section aria-label="Fleet cockpit, change staged" id="harness-fleet-cockpit-staged-page">
+          <FleetConfigurationSurface
+            connection={daemon}
+            createClient={async () => fleetCockpitClient(HARNESS_FLEET_STAGED_ANSWERS)}
+          />
+        </section>
+      )}
+      {frame !== 'states' ? null : (
+        <section aria-label="Fleet host states" className="space-y-panel" id="harness-fleet-states-page">
+          {HARNESS_FLEET_STATE_ANSWERS.map(state => (
+            <FleetConfigurationSurface
+              key={state.label}
+              connection={daemon}
+              createClient={async () => fleetCockpitClient(state.answers)}
+            />
+          ))}
+        </section>
+      )}
+    </div>
+  );
+}
+
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
   '#onboarding-keyboard': 'scan',
 };
 
+/**
+ * One fleet frame per page, because three of them are taller than a desktop viewport and a tall
+ * element capture inside a scroller clips to the wrong region — the first pass produced a fleet
+ * "preview" image showing the secrets cards.
+ */
+const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
+  '#fleet-accounts': 'accounts',
+  '#fleet-preview': 'preview',
+  '#fleet-failed-apply': 'failed-apply',
+  '#fleet-create': 'create',
+  '#fleet-layer': 'layer',
+  '#fleet-cockpit': 'cockpit',
+  '#fleet-cockpit-staged': 'cockpit-staged',
+  '#fleet-states': 'states',
+};
+
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
+  const fleetFrame = FLEET_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
     <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
@@ -4745,6 +5270,8 @@ if (host) {
         <SessionWorkspaceHarness />
       ) : window.location.hash === '#browser-full-viewport' ? (
         <BrowserFullViewportHarness />
+      ) : fleetFrame !== undefined ? (
+        <FleetCockpitHarness frame={fleetFrame} />
       ) : screen === undefined ? (
         <Shell />
       ) : (
