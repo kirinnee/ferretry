@@ -2,10 +2,10 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import {
+  buildFleetHealthCollector,
   buildFleetIdentities,
   buildFleetScaffold,
   buildFleetUsageCollector,
-  buildFleetHealthCollector,
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
@@ -17,12 +17,12 @@ import {
   FileFleetScaffolder,
   fetchQuota,
   PlatformFleetCredentialStore,
+  ProcessFleetHealthProbe,
   ProcessFleetLoginPort,
   readFleetWrapperScript,
+  runFleetHealthProcess,
   SpawnCredentialCommand,
   spawnFleetLoginProcess,
-  ProcessFleetHealthProbe,
-  runFleetHealthProcess,
   whichHarnessBinary,
 } from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
@@ -589,6 +589,17 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
             fetch: fetchQuota,
             timeoutMs: config.usage.timeout * 1_000,
             credentials: credentialStore,
+          }),
+          new SystemUsageClock(),
+        ),
+    },
+    health: {
+      forConfig: config =>
+        buildFleetHealthCollector(
+          config,
+          new ProcessFleetHealthProbe({
+            process: runFleetHealthProcess,
+            cachePath: `${layout.fleetDirectory}/health-successes.json`,
           }),
           new SystemUsageClock(),
         ),

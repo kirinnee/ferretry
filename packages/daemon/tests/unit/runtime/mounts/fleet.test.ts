@@ -91,6 +91,21 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 describe('the daemon fleet mount', () => {
+  it('should construct its daemon-scoped production health probe without running it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-health-probe-'));
+    temporaryDirectories.push(root);
+    const userHome = join(root, 'user');
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
+    const subsystem = createDaemonFleetSubsystem({
+      paths,
+      userHome,
+      clock: { now: () => GENERATED_AT_MS },
+      files: new StateFileSystem(paths),
+      platform: 'linux',
+    }) as unknown as { healthProbe(): { probe: unknown } };
+    should(subsystem.healthProbe().probe).be.a.Function();
+  });
+
   it('should preview and atomically apply only portable profile environment, with explicit merge and replace', async () => {
     // Arrange
     const subject = await fixture();
