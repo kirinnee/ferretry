@@ -735,6 +735,52 @@ describe('AccountPickerField', () => {
     );
   });
 
+  /**
+   * A slice assembled by hand — which is what the app-shell wiring test does —
+   * can carry an ABSENT catalog rather than an explicitly null one. Reading it
+   * with a strict `=== null` test threw on `.accounts` and blanked the pane
+   * behind the error boundary, so the field lost its text box entirely. The
+   * regression is off-type on purpose: the types say `null`, the DOM said
+   * otherwise, and a picker must render a usable field either way.
+   */
+  it('renders a usable field when the roster slice carries no catalog at all', async () => {
+    // Frozen and returned by identity, because `useSyncExternalStore` compares
+    // snapshots by reference: a fake handing back a fresh object per read would
+    // re-render forever and prove nothing about the component.
+    const catalogless = Object.freeze({
+      generation: 1,
+      status: 'idle',
+      error: null,
+      health: null,
+      healthStatus: 'idle',
+      healthError: null,
+    });
+    const store = {
+      subscribe: () => () => undefined,
+      sliceFor: () => catalogless,
+      hydrate: async () => ({ accounts: [] }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
+    } as unknown as DaemonAccountPickerStore;
+
+    await show(
+      <DaemonAccountPicker
+        connection={laptop}
+        harness="codex"
+        id="fy-test-agent"
+        label="Account"
+        onValueChange={() => undefined}
+        store={store}
+        usage={usage}
+        value=""
+      />,
+    );
+
+    expect(input().id).toBe('fy-test-agent');
+    expect(input().getAttribute('role')).toBe('combobox');
+    await openList();
+    expect(panelState()).toBe('loading');
+  });
+
   it('keeps the fleet-wide sentence when the manifest really is empty', async () => {
     const store = new DaemonAccountPickerStore({
       catalog: async () => ({ accounts: [] }),

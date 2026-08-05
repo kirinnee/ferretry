@@ -613,13 +613,19 @@ export function DaemonAccountPicker({
   ...field
 }: DaemonAccountPickerProps): ReactNode {
   const slice = useAccountPickerSlice(store, connection);
-  const projected = accountPickerOptions(slice.catalog?.accounts ?? null, usage, slice.health);
+  // Read through the same optional chain as everything else here. A strict
+  // `=== null` test looks equivalent and is not: an absent catalog reaches this
+  // line as `undefined` from any slice assembled by hand, and the field then
+  // throws on `.accounts` instead of rendering — a blank pane where a working
+  // text box belongs. Unread stays unread.
+  const published = slice.catalog?.accounts ?? null;
+  const projected = accountPickerOptions(published, usage, slice.health);
   const scoped = harness === undefined ? projected : sameHarnessAccountOptions(projected, harness);
   return (
     <AccountPickerField
       {...field}
       {...(harness === undefined ? {} : { harness })}
-      {...(slice.catalog === null ? {} : { publishesAnyAccount: slice.catalog.accounts.length > 0 })}
+      {...(published === null ? {} : { publishesAnyAccount: published.length > 0 })}
       {...(onAccountChosen === undefined ? {} : { onAccountChosen })}
       {...(usageError === undefined || usageError === null ? {} : { advisory: usageError })}
       {...(offerHealthCheck
