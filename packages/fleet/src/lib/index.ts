@@ -17,7 +17,6 @@ export * from './quota.ts';
 export * from './scaffold.ts';
 export * from './settings.ts';
 export {
-  mergeSharedHistoryJsonl,
   planSharedHistory,
   type SharedHistoryAction,
   type SharedHistoryChange,

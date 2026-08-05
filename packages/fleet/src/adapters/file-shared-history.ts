@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
 import {
   type FileHandle,
+  link,
   lstat,
   mkdir,
   open,
@@ -67,17 +68,23 @@ function isInside(root: string, candidate: string): boolean {
 }
 
 /**
- * Renaming is the only legal move: a copy would hand every open reader a different inode.
+ * Keeping the inode is the only legal move: a copy would hand every open reader a different one.
  *
- * EXDEV is the one rename failure that tempts a caller into copy-then-delete, so it is translated
- * into an explicit refusal instead of surfacing as a bare errno. The planner already refuses a
- * cross-device rename from observed device evidence, before anything is written; this is the
- * last-resort guard for a mount that appeared in between. Exported because provoking a real
- * cross-device rename needs a second filesystem that no test can assume: the decision is proved
- * here, and `move` is proved to route its rename failures through it by the failures it passes on.
+ * Two errno values need translating rather than surfacing raw. EXDEV is the one that tempts a caller
+ * into copy-then-delete; the planner already refuses a cross-device move from observed device
+ * evidence before anything is written, and this is the last-resort guard for a mount that appeared
+ * in between. EEXIST is the atomic no-clobber that `link(2)` gives a regular file, and it is phrased
+ * exactly like the observation that precedes it so a caller cannot tell whether the collision was
+ * seen a moment early or refused by the kernel.
+ *
+ * Exported because provoking either for real needs a second filesystem or an injected race that no
+ * test can assume: the decision is proved here, and `move` is proved to route its failures through
+ * it by the failures it passes on.
  */
 export function sharedHistoryMoveRefusal(error: unknown, source: string, destination: string): unknown {
-  if ((error as NodeJS.ErrnoException).code !== 'EXDEV') return error;
+  const code = (error as NodeJS.ErrnoException).code;
+  if (code === 'EEXIST') return new Error(`shared-history move destination already exists: ${destination}`);
+  if (code !== 'EXDEV') return error;
   return new Error(
     `refusing to copy shared history across filesystems: ${source} -> ${destination}; copying is forbidden because a new inode would silently orphan every transcript a running harness already has open`,
   );
@@ -196,6 +203,22 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
     }
   }
 
+  /**
+   * The real directory a path names, its own final component resolved along with every ancestor.
+   *
+   * This is the one place that deliberately follows the final link, and it exists so the planner can
+   * decide identity rather than spelling: `real/a` and `alias/a` are one home, and only a resolved
+   * path says so. It reads and never writes, and the resolved directory is confined exactly like the
+   * path that was asked for — a home linked out of the writable roots becomes a refusal here rather
+   * than a directory the migration would go on to move things out of.
+   */
+  async canonicalDirectoryOf(target: string): Promise<string> {
+    await this.assertAllowedPath(target);
+    const canonical = await canonicalDirectory(path.resolve(target));
+    await this.assertAllowedPath(canonical);
+    return canonical;
+  }
+
   async ensureDirectory(target: string): Promise<void> {
     await this.assertAllowedPath(target);
     const existing = await this.observe(target);
@@ -235,16 +258,40 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
     await syncDirectory(directory);
   }
 
+  /**
+   * Move one name to another without ever replacing what is already there.
+   *
+   * `rename(2)` is the obvious call and it silently replaces an existing regular file, so an
+   * observation that the destination is free is a guard against the predictable collisions — a pool
+   * entry left by an earlier run, a re-apply, two homes contributing the same name — and not against
+   * a writer that creates that name in the window. `renameat2(RENAME_NOREPLACE)` would close it and
+   * no Node or Bun API exposes it, so a regular file goes by `link(2)` then unlink instead: the link
+   * fails EEXIST atomically rather than clobbering, and a hard link is by definition the same inode,
+   * which is the whole point of not copying.
+   *
+   * Directories and symbolic links keep the rename, for reasons rather than convenience. `link` on a
+   * directory is EPERM everywhere. `link` on a symbolic link source follows it on some platforms and
+   * not others, so quarantining a foreign link — the case where following it is exactly the damage to
+   * avoid — would be platform-dependent evidence destruction. Renaming onto an occupied directory
+   * already fails, and onto an empty one removes nothing that holds bytes.
+   *
+   * The one thing the link path gives up is single-call atomicity: a crash between the link and the
+   * unlink leaves the inode under both names. Nothing is lost or overwritten by that, the cursor has
+   * not advanced past the action, and recovery reports it as possibly half applied — which is what it
+   * is. That is a better failure than a file quietly replaced.
+   */
   async move(source: string, destination: string): Promise<void> {
     await this.assertAllowedPath(source);
     await this.assertAllowedPath(destination);
-    if ((await this.observe(source)) === undefined) throw new Error(`shared-history move source is absent: ${source}`);
+    const existing = await this.observe(source);
+    if (existing === undefined) throw new Error(`shared-history move source is absent: ${source}`);
     if ((await this.observe(destination)) !== undefined) {
       throw new Error(`shared-history move destination already exists: ${destination}`);
     }
     const from = path.dirname(source);
     const into = path.dirname(destination);
     await makeDirectoryDurable(into);
+    if (existing.kind === 'file') return await this.relinkFile(source, destination, from, into);
     try {
       await rename(source, destination);
     } catch (error) {
@@ -254,6 +301,18 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
     // only the destination can leave a crash with the same inode reachable from both places.
     await syncDirectory(into);
     if (from !== into) await syncDirectory(from);
+  }
+
+  /** Give a regular file its new name atomically, then take the old one away, syncing both parents. */
+  private async relinkFile(source: string, destination: string, from: string, into: string): Promise<void> {
+    try {
+      await link(source, destination);
+    } catch (error) {
+      throw sharedHistoryMoveRefusal(error, source, destination);
+    }
+    await syncDirectory(into);
+    await rm(source);
+    await syncDirectory(from);
   }
 
   async writeTextAtomic(target: string, text: string): Promise<void> {

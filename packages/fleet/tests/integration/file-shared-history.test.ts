@@ -1,5 +1,18 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, rm, symlink, utimes } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -398,12 +411,16 @@ describe('FileSharedHistoryFileSystem', () => {
   it('should refuse a cross-device move instead of copying pooled history', () => {
     // Act
     const refused = sharedHistoryMoveRefusal({ code: 'EXDEV' }, '/pool/source', '/other/destination');
+    const collided = sharedHistoryMoveRefusal({ code: 'EEXIST' }, '/pool/source', '/other/destination');
     const passedThrough = sharedHistoryMoveRefusal({ code: 'EINVAL' }, '/pool/source', '/other/destination');
 
     // Assert
     should(refused).be.instanceof(Error);
     should((refused as Error).message).match(/refusing to copy shared history across filesystems/);
     should((refused as Error).message).match(/\/pool\/source -> \/other\/destination/);
+    // The kernel's own no-clobber refusal is phrased like the observation that precedes it, so a
+    // caller cannot tell whether the collision was seen a moment early or refused atomically.
+    should((collided as Error).message).equal('shared-history move destination already exists: /other/destination');
     should(passedThrough).eql({ code: 'EINVAL' });
   });
 
@@ -423,6 +440,72 @@ describe('FileSharedHistoryFileSystem', () => {
     should(existing).equal((await lstat(file)).dev);
     should(missingPool).equal((await lstat(root)).dev);
     await should(subject.deviceIdOf(outside)).be.rejectedWith(/outside configured roots/);
+  });
+
+  it('should answer with one canonical directory however a path spells it', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const real = path.join(root, 'real');
+    const alias = path.join(root, 'alias');
+    await mkdir(path.join(real, 'a'), { recursive: true });
+    await symlink(real, alias);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const throughReal = await subject.canonicalDirectoryOf(path.join(real, 'a'));
+    const throughAlias = await subject.canonicalDirectoryOf(path.join(alias, 'a'));
+    const notYetThere = await subject.canonicalDirectoryOf(path.join(alias, 'a', 'fleet', 'shared'));
+
+    // Assert — the alias, the final link and the missing tail all reduce to the same real directory.
+    should(throughAlias).equal(throughReal);
+    should(throughAlias).equal(await realpath(path.join(real, 'a')));
+    should(notYetThere).equal(path.join(throughReal, 'fleet', 'shared'));
+  });
+
+  it('should refuse to canonicalize a path whose own link leaves the allowed roots', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const elsewhere = await temporaryDirectory();
+    const escapeLink = path.join(root, 'escape');
+    await symlink(elsewhere, escapeLink);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act
+    const promise = subject.canonicalDirectoryOf(escapeLink);
+
+    // Assert
+    await should(promise).be.rejectedWith(/outside configured roots/);
+  });
+
+  it('should move a regular file by hard link, keeping its inode and refusing to clobber', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'source.jsonl');
+    const destination = path.join(root, 'pool', 'destination.jsonl');
+    const occupied = path.join(root, 'pool', 'occupied.jsonl');
+    await write(source, 'evidence\n');
+    await write(occupied, 'do not lose me\n');
+    const inodeBefore = (await lstat(source)).ino;
+    const reader = await open(source, 'r');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      await subject.move(source, destination);
+      const second = path.join(root, 'second.jsonl');
+      await write(second, 'other\n');
+
+      // Assert — the same inode is now at the new name and the old one is gone.
+      should((await lstat(destination)).ino).equal(inodeBefore);
+      should(await readFile(destination, 'utf8')).equal('evidence\n');
+      should(await reader.readFile('utf8')).equal('evidence\n');
+      should(await subject.snapshot(source)).be.undefined();
+      // An occupied destination is refused, and the file that was there is untouched.
+      await should(subject.move(second, occupied)).be.rejectedWith(/move destination already exists/);
+      should(await readFile(occupied, 'utf8')).equal('do not lose me\n');
+    } finally {
+      await reader.close();
+    }
   });
 
   it('should reject an empty allowed-root declaration', () => {
@@ -601,6 +684,66 @@ describe('shared-history migration with the real filesystem', () => {
     );
     should((await lstat(path.join(inside, 'projects'))).isDirectory()).be.true();
     should(await readFile(path.join(elsewhere, 'projects', 'project', 'session.jsonl'), 'utf8')).equal('foreign\n');
+  });
+
+  it('should refuse one real home configured twice through an ancestor link, before planning it', async () => {
+    // Arrange — this is the case a lexical compare and a one-level link walk both miss: `alias` is a
+    // link to `real`, so `real/a` and `alias/a` are one directory holding one set of transcripts.
+    const root = await temporaryDirectory();
+    const real = path.join(root, 'real');
+    const alias = path.join(root, 'alias');
+    const home = path.join(real, 'a');
+    const transcript = path.join(home, 'projects', 'p1', 's.jsonl');
+    await write(transcript, 'evidence\n');
+    await write(path.join(home, 'history.jsonl'), '{"display":"one","timestamp":1}\n');
+    await symlink(real, alias);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([root]));
+
+    // Act
+    const promise = subject.preview({
+      kind: 'claude',
+      poolRoot: path.join(root, 'fleet', 'shared'),
+      homes: [
+        { account: 'a1', path: home },
+        { account: 'a2', path: path.join(alias, 'a') },
+      ],
+    });
+
+    // Assert — the dry run refuses rather than announcing a collision between a file and itself.
+    await should(promise).be.rejectedWith(/accounts a1 and a2 resolve to the same home directory/);
+    should(await readFile(transcript, 'utf8')).equal('evidence\n');
+    should(
+      await subject.preview({
+        kind: 'claude',
+        poolRoot: path.join(root, 'fleet', 'shared'),
+        homes: [{ account: 'a1', path: home }],
+      }),
+    ).match({ conflicts: 0, migrated: 2 });
+  });
+
+  it('should refuse homes that nest once their links are resolved', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const outer = path.join(root, 'outer');
+    const alias = path.join(root, 'alias');
+    await mkdir(path.join(outer, 'inner'), { recursive: true });
+    await write(path.join(outer, 'projects', 'p1', 's.jsonl'), 'evidence\n');
+    await symlink(outer, alias);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([root]));
+
+    // Act
+    const promise = subject.preview({
+      kind: 'claude',
+      poolRoot: path.join(root, 'fleet', 'shared'),
+      homes: [
+        { account: 'outer', path: outer },
+        { account: 'inner', path: path.join(alias, 'inner') },
+      ],
+    });
+
+    // Assert
+    await should(promise).be.rejectedWith(/account homes must not contain one another/);
+    should(await readFile(path.join(outer, 'projects', 'p1', 's.jsonl'), 'utf8')).equal('evidence\n');
   });
 
   it('should preserve, but not pool, prompt lines a live writer appends after the migration', async () => {

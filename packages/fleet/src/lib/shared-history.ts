@@ -99,8 +99,24 @@ export interface SharedHistoryFileSystem {
   ): Promise<SharedHistoryNode | undefined>;
   /** The device of `path`, or of its nearest existing ancestor when `path` does not exist yet. */
   deviceIdOf(path: string): Promise<number>;
+  /**
+   * The real directory `path` names: every component resolved through its symbolic links, its own
+   * final component included, with any not-yet-existing tail appended. Two paths that reach the
+   * same directory always answer with the same string — the only fact that can tell two account
+   * homes apart, since neither a lexical compare nor a one-level link walk can.
+   */
+  canonicalDirectoryOf(path: string): Promise<string>;
   ensureDirectory(path: string): Promise<void>;
   ensureFile(path: string): Promise<void>;
+  /**
+   * Rename `source` onto `destination`, which must be absent.
+   *
+   * NOT atomic against a concurrent creator. The absence check and the rename are two calls, and
+   * `rename(2)` replaces an existing regular file or symbolic link without complaint, so the check
+   * rules out the predictable collisions — a stale pool entry, a re-run, two homes contributing the
+   * same name — and not a racing writer. See the implementation for why the atomic alternatives are
+   * worse here.
+   */
   move(source: string, destination: string): Promise<void>;
   /** Create, write and durably sync a new file; refuse rather than replace an existing path. */
   writeTextExclusive(path: string, text: string): Promise<void>;
@@ -113,6 +129,7 @@ export interface SharedHistoryFileSystem {
   createSymbolicLink(target: string, path: string): Promise<void>;
   removeSymbolicLink(path: string, expectedTarget: string): Promise<void>;
   removeEmptyDirectory(path: string): Promise<void>;
+  /** Only ever used to retire the two migration records; account and pooled files are never unlinked. */
   removeFile(path: string): Promise<void>;
 }
 
@@ -195,12 +212,14 @@ export interface SharedHistoryPreview {
   readonly links: number;
   readonly changes: readonly SharedHistoryChange[];
   /**
-   * Account-home directories the migration empties and then removes.
+   * Source directories the migration drains and then removes, innermost first.
    *
-   * Each one is a directory whose children are all renamed into the pool; the now-empty directory
-   * is removed so the account home can hold the pool symlink in its place. The removal is refused
-   * and the whole migration rolled back if anything appeared in it meanwhile, so this names a
-   * mutation that really happens rather than an intention.
+   * Every directory here has all of its children renamed into the pool and is then removed while
+   * empty. Only the outermost of them — the account-home entry itself — gets a link to the pool put
+   * back in its place; the nested ones are removed with nothing put back, because their contents now
+   * live under the pooled entry that the entry link reaches. The removal is refused and the whole
+   * migration rolled back if anything appeared in one meanwhile, so this names mutations that really
+   * happen rather than intentions.
    */
   readonly emptiedSourceDirectories?: readonly string[];
   /**
@@ -263,7 +282,6 @@ const MIGRATION_CONFLICTS = '.migration-conflicts';
 const MIGRATION_JOURNAL = '.migration-journal';
 const MIGRATION_PROGRESS = '.migration-progress';
 const MAX_CONCURRENT_RETRIES = 3;
-const MAX_HOME_LINK_DEPTH = 8;
 
 interface PlanningState {
   readonly actions: SharedHistoryAction[];
@@ -310,11 +328,20 @@ function pathIsInside(parent: string, candidate: string): boolean {
   return fromParent === '' || (!fromParent.startsWith(`..${sep}`) && fromParent !== '..' && !isAbsolute(fromParent));
 }
 
+/**
+ * Everything about a request that can be decided without touching a disk.
+ *
+ * The containment check here is pairwise and lexical, and it runs whether or not the homes exist:
+ * two homes that nest are the same double count as two homes that are the same directory, and a
+ * home nobody has created yet still has to be rejected before provisioning creates both of them.
+ * The canonical check during observation catches what spelling cannot — an aliased ancestor — but it
+ * can only speak about directories that are already there, so neither check subsumes the other.
+ */
 function validateRequest(request: SharedHistoryRequest): void {
   assertAbsolutePath('shared-history pool root', request.poolRoot);
   const pool = join(request.poolRoot, request.kind);
   const accounts = new Set<string>();
-  const homes = new Set<string>();
+  const homes = new Map<string, string>();
   for (const home of request.homes) {
     assertAbsolutePath(`account "${home.account}" home`, home.path);
     // A leading dot is excluded so no account can occupy a reserved conflict directory.
@@ -323,12 +350,19 @@ function validateRequest(request: SharedHistoryRequest): void {
     }
     if (accounts.has(home.account)) throw new Error(`duplicate shared-history account: ${home.account}`);
     const resolvedHome = resolve(home.path);
-    if (homes.has(resolvedHome)) throw new Error(`duplicate shared-history home: ${home.path}`);
     if (pathIsInside(resolvedHome, pool) || pathIsInside(pool, resolvedHome)) {
       throw new Error(`shared-history home and pool must not overlap: ${home.path} and ${pool}`);
     }
+    for (const [existing, owner] of homes) {
+      if (existing === resolvedHome) throw new Error(`duplicate shared-history home: ${home.path}`);
+      if (pathIsInside(existing, resolvedHome) || pathIsInside(resolvedHome, existing)) {
+        throw new Error(
+          `shared-history account homes must not contain one another: ${owner} at ${existing} and ${home.account} at ${resolvedHome}`,
+        );
+      }
+    }
     accounts.add(home.account);
-    homes.add(resolvedHome);
+    homes.set(resolvedHome, home.account);
   }
 }
 
@@ -814,14 +848,6 @@ function withoutActions(plan: SharedHistoryPlan): SharedHistoryPreview {
   };
 }
 
-function nodeIsEmpty(node: SharedHistoryNode): boolean {
-  return node.kind === 'file'
-    ? node.size === 0
-    : node.kind === 'directory'
-      ? Object.keys(node.children).length === 0
-      : false;
-}
-
 type Undo = () => Promise<void>;
 
 const migrationActionSchema = z.discriminatedUnion('kind', [
@@ -858,7 +884,7 @@ const migrationProgressSchema = z.object({
   version: z.literal(1),
   kind: HarnessKindSchema,
   pool: z.string(),
-  state: z.enum(['applying', 'complete', 'rollback-incomplete']),
+  state: z.enum(['applying', 'complete', 'rolled-back', 'rollback-incomplete']),
   completed: z.int().nonnegative(),
   rollbackFailures: z.array(z.string()).optional(),
 });
@@ -878,8 +904,28 @@ export interface SharedHistoryRecoveryEvidence {
   readonly kind: HarnessKind;
   readonly pool: string;
   readonly state: MigrationProgressState;
+  /**
+   * What a recovery tool is allowed to do with this, ahead of any list below.
+   *
+   * `none` means the filesystem is settled — everything landed, or everything came back out — and
+   * the only outstanding work is deleting the two records. Replaying anything against a settled
+   * migration is how a recovery tool destroys a pool, so this field, not a message, is what a
+   * consumer branches on.
+   */
+  readonly recovery: 'undo-applied-actions' | 'none';
+  /**
+   * How far the cursor got before the run stopped. History, not current state: after a settled
+   * rollback these actions were applied and then reversed, so the number says how much work was
+   * undone rather than how much is on disk.
+   */
   readonly completedAtLeast: number;
   readonly totalActions: number;
+  /**
+   * The actions that are on disk right now and would have to be reversed, in order.
+   *
+   * Empty whenever `recovery` is `none`, including after a settled rollback, so that iterating it
+   * can never undo something twice. The journal file still holds the full list for a person to read.
+   */
   readonly appliedActions: readonly SharedHistoryAction[];
   readonly uncertainAction: SharedHistoryAction | undefined;
   readonly pendingActions: readonly SharedHistoryAction[];
@@ -887,15 +933,20 @@ export interface SharedHistoryRecoveryEvidence {
 }
 
 /**
- * What to tell the operator, which depends entirely on whether the migration got to commit.
+ * What to tell the operator, which depends entirely on how far the migration got.
  *
- * A journal whose cursor reads `complete` describes work that all landed and a cleanup that did
- * not; telling anyone to undo it would destroy a migrated pool. Every other state describes work
- * that stopped somewhere, and there the reverse replay is the recovery.
+ * Two states describe a settled filesystem and must never invite an undo. `complete` is work that
+ * all landed and a cleanup that did not, so undoing it would destroy a migrated pool. `rolled-back`
+ * is work that all came back out, so undoing it would reverse actions that are already reversed —
+ * a second undo of a rename is a rename in the wrong direction. Only a state that stopped somewhere
+ * uncertain gets the reverse-replay instruction.
  */
 function recoveryMessage(evidence: SharedHistoryRecoveryEvidence): string {
   if (evidence.state === 'complete') {
     return `a finished shared-history migration left its journal behind: ${evidence.journalPath}; all ${evidence.totalActions} actions were applied, so undo NOTHING — delete ${evidence.journalPath} and ${evidence.progressPath} and the next apply will carry on`;
+  }
+  if (evidence.state === 'rolled-back') {
+    return `a failed shared-history migration was fully reversed but left its journal behind: ${evidence.journalPath}; the ${evidence.completedAtLeast} action(s) it had applied were all undone, so undo NOTHING — delete ${evidence.journalPath} and ${evidence.progressPath} and the next apply will start over`;
   }
   const uncertain =
     evidence.uncertainAction === undefined
@@ -1015,12 +1066,15 @@ export class SharedHistoryMigration {
     const recovery = await this.readRecovery(pool, request.kind);
     if (recovery !== undefined) throw new SharedHistoryRecoveryRequiredError(recovery);
     const poolDeviceId = await this.files.deviceIdOf(pool);
+    // The pool is compared against homes by the same canonical identity, so a pool reached through a
+    // link cannot look like a different directory from the one a home resolves into.
+    const canonicalPool = await this.files.canonicalDirectoryOf(pool);
 
     const refusals: SharedHistoryRefusal[] = [];
     const homes: SharedHistoryObservedHome[] = [];
     const resolvedHomes = new Map<string, string>();
     for (const home of request.homes) {
-      const observed = await this.observeHome(home, entries, pool, resolvedHomes, refusals);
+      const observed = await this.observeHome(home, entries, canonicalPool, resolvedHomes, refusals);
       if (observed !== undefined) homes.push(observed);
     }
 
@@ -1058,12 +1112,12 @@ export class SharedHistoryMigration {
   private async observeHome(
     home: SharedHistoryHome,
     entries: readonly SharedHistoryEntry[],
-    pool: string,
+    canonicalPool: string,
     resolvedHomes: Map<string, string>,
     refusals: SharedHistoryRefusal[],
   ): Promise<SharedHistoryObservedHome | undefined> {
     try {
-      await this.resolveHomeRoot(home, pool, resolvedHomes);
+      await this.resolveHomeRoot(home, canonicalPool, resolvedHomes);
       return {
         ...home,
         entries: Object.fromEntries(
@@ -1083,53 +1137,61 @@ export class SharedHistoryMigration {
   }
 
   /**
-   * Follow an account home that is itself a symbolic link, without ever following one of its entries.
+   * Establish which real directory an account home is, and refuse if two accounts share one.
    *
-   * Operators do link a home into a bigger volume, and the confinement rule that matters is about
-   * the real directory an operation lands in — which the filesystem adapter already decides on the
-   * canonical path. So the link is followed here only to re-prove the two things a lexical check
-   * could not: that the home does not resolve inside the pool, and that two accounts do not resolve
-   * onto the same directory. Every entry underneath is still observed through the configured path
-   * and its own final component is never followed.
+   * A home is identified by its canonical directory, never by the path as configured. A lexical
+   * compare, and equally a walk of the home's own final link, both miss the case that actually
+   * happens: `real/a` and `alias/a` where `alias` is a link to `real`. Those are one directory, and
+   * planning them as two fabricates a collision between a file and itself, invents a prompt-history
+   * merge of a file that has already been renamed away, and produces an apply that can only fail.
+   * The same identity settles nesting — one home inside another is the same double count spread over
+   * two levels — and overlap with the pool.
+   *
+   * Following the link here does not weaken anything: entry symlinks are still never followed, and
+   * every operation still goes through the configured path so the links land where the operator
+   * asked. A home that does not exist yet is left alone; provisioning creates it.
    */
   private async resolveHomeRoot(
     home: SharedHistoryHome,
-    pool: string,
+    canonicalPool: string,
     resolvedHomes: Map<string, string>,
   ): Promise<void> {
     const declared = resolve(home.path);
-    let current = declared;
-    let node = await this.files.snapshot(current, { recursive: false });
-    for (let depth = 0; node?.kind === 'symbolic-link'; depth++) {
-      if (depth === MAX_HOME_LINK_DEPTH) {
-        throw new Error(
-          `shared-history account home link chain is too deep to follow: ${home.path}; replace the link with a real directory`,
-        );
-      }
-      current = resolve(dirname(current), node.target);
-      node = await this.files.snapshot(current, { recursive: false });
-    }
-    if (node === undefined) {
-      if (current === declared) return;
-      throw new Error(
-        `shared-history account home link ${home.path} points at a missing directory: ${current}; recreate that directory or repoint the link`,
-      );
-    }
-    if (node.kind !== 'directory') {
+    const node = await this.files.snapshot(declared, { recursive: false });
+    if (node === undefined) return;
+    if (node.kind !== 'directory' && node.kind !== 'symbolic-link') {
       throw new Error(`shared-history account home must be a directory, found ${node.kind}: ${home.path}`);
     }
-    if (pathIsInside(current, pool) || pathIsInside(pool, current)) {
+    const canonical = await this.files.canonicalDirectoryOf(declared);
+    const resolved = await this.files.snapshot(canonical, { recursive: false });
+    if (resolved === undefined) {
       throw new Error(
-        `shared-history home and pool must not overlap: ${home.path} resolves to ${current} and the pool is ${pool}; repoint the link outside the pool`,
+        `shared-history account home link ${home.path} points at a missing directory: ${canonical}; recreate that directory or repoint the link`,
       );
     }
-    const owner = resolvedHomes.get(current);
-    if (owner !== undefined) {
+    if (resolved.kind !== 'directory') {
       throw new Error(
-        `shared-history accounts ${owner} and ${home.account} resolve to the same home directory: ${current}; give each account its own directory`,
+        `shared-history account home must be a directory, found ${resolved.kind}: ${home.path} resolves to ${canonical}`,
       );
     }
-    resolvedHomes.set(current, home.account);
+    if (pathIsInside(canonical, canonicalPool) || pathIsInside(canonicalPool, canonical)) {
+      throw new Error(
+        `shared-history home and pool must not overlap: ${home.path} resolves to ${canonical} and the pool is ${canonicalPool}; repoint the link outside the pool`,
+      );
+    }
+    for (const [existing, owner] of resolvedHomes) {
+      if (existing === canonical) {
+        throw new Error(
+          `shared-history accounts ${owner} and ${home.account} resolve to the same home directory: ${canonical}; give each account its own directory`,
+        );
+      }
+      if (pathIsInside(existing, canonical) || pathIsInside(canonical, existing)) {
+        throw new Error(
+          `shared-history account homes must not contain one another: ${owner} resolves to ${existing} and ${home.account} resolves to ${canonical}; give each account its own directory`,
+        );
+      }
+    }
+    resolvedHomes.set(canonical, home.account);
   }
 
   private async readRecovery(pool: string, kind: HarnessKind): Promise<SharedHistoryRecoveryEvidence | undefined> {
@@ -1150,8 +1212,11 @@ export class SharedHistoryMigration {
           );
     if (journalNode === undefined) {
       // The journal is removed before the progress record, so a progress record on its own means a
-      // finished migration whose last unlink was interrupted. The next apply overwrites it.
-      if (progress === undefined || progress.state === 'complete') return undefined;
+      // settled migration — applied or reversed — whose last unlink was interrupted. Either way
+      // nothing is half done and the next apply overwrites it.
+      if (progress === undefined || progress.state === 'complete' || progress.state === 'rolled-back') {
+        return undefined;
+      }
       throw new Error(
         `shared-history progress record ${progressPath} reports state ${progress.state} but its journal is gone; the migration cannot be recovered automatically and must be inspected by hand`,
       );
@@ -1164,18 +1229,26 @@ export class SharedHistoryMigration {
       kind,
       pool,
     );
+    const state = progress?.state ?? 'applying';
     const completedAtLeast = Math.min(progress?.completed ?? 0, journal.actions.length);
+    // Settled means the filesystem is where it is going to stay: every action landed, or every
+    // action came back out. Either way there is nothing to replay, and one predicate drives all four
+    // fields so a consumer cannot find a list to iterate that the `recovery` field said was empty —
+    // undoing a committed migration and undoing a rollback are both destructive. `completedAtLeast`
+    // stays as history, and the journal file still holds the actions for a person to read.
+    const settled = state === 'complete' || state === 'rolled-back';
     return {
       journalPath,
       progressPath,
       kind: journal.kind,
       pool: journal.pool,
-      state: progress?.state ?? 'applying',
+      state,
+      recovery: settled ? 'none' : 'undo-applied-actions',
       completedAtLeast,
       totalActions: journal.actions.length,
-      appliedActions: journal.actions.slice(0, completedAtLeast),
-      uncertainAction: journal.actions[completedAtLeast],
-      pendingActions: journal.actions.slice(completedAtLeast + 1),
+      appliedActions: settled ? [] : journal.actions.slice(0, completedAtLeast),
+      uncertainAction: settled ? undefined : journal.actions[completedAtLeast],
+      pendingActions: settled ? [] : journal.actions.slice(completedAtLeast + 1),
       rollbackFailures: progress?.rollbackFailures ?? [],
     };
   }
@@ -1200,12 +1273,18 @@ export class SharedHistoryMigration {
   }
 
   /**
-   * Apply the plan, leaving a crash-durable record whose cost does not grow with the plan.
+   * Apply the plan, leaving a crash-durable record whose per-action cost does not grow with the plan.
    *
    * The action list is written once, exclusively, before the first mutation; after that only a
    * fixed-size cursor is rewritten, so a thousand-action migration writes a thousand small records
-   * instead of a thousand copies of itself. The cursor advances only after the mutation it counts is
-   * durable, which makes it a lower bound: recovery treats the next action as possibly half applied.
+   * instead of a thousand copies of itself. What is fixed-size is the cursor, not the journal: the
+   * journal is one document holding every action, and a `merge-jsonl` action carries the pooled
+   * text, the account's text and the additions verbatim, so a merge-heavy plan writes a journal
+   * roughly the size of the prompt histories involved. That is a one-time write, and it is the price
+   * of a record a person can read by hand.
+   *
+   * The cursor advances only after the mutation it counts is durable, which makes it a lower bound:
+   * recovery treats the next action as possibly half applied.
    */
   private async execute(plan: SharedHistoryPlan): Promise<void> {
     if (plan.actions.length === 0) return;
@@ -1259,12 +1338,16 @@ export class SharedHistoryMigration {
   }
 
   /**
-   * Retire the crash record, or keep it and say why.
+   * Retire the crash record, or keep it and say what it means.
    *
-   * A clean rollback leaves nothing applied, so the record has no reader and both files go. An
-   * incomplete one keeps them: the journal still holds the action list, and the progress record
-   * gains the failures, because deleting the only account of what is half migrated is the one
-   * unrecoverable move.
+   * The record is settled before it is retired, never after. Retiring can fail — a read-only pool, a
+   * full disk — and whatever survives that failure is what the next operator will read, so it has to
+   * already be true: a clean rollback writes `rolled-back` first, and only then unlinks. Skip that
+   * order and the surviving pair says `applying` with a completed count, which reads as "half a
+   * migration is on disk, undo it" about a filesystem that is already back where it started.
+   *
+   * If the truth cannot be recorded at all, nothing is deleted and the failure is reported: a stale
+   * record that fails the next apply closed is recoverable, and a deleted one is not.
    */
   private async closeJournal(plan: SharedHistoryPlan, completed: number, rollbackFailures: string[]): Promise<void> {
     if (rollbackFailures.length > 0) {
@@ -1276,11 +1359,16 @@ export class SharedHistoryMigration {
       return;
     }
     try {
+      await this.writeProgress(plan, 'rolled-back', completed);
+    } catch (error) {
+      rollbackFailures.push(
+        `rollback reversed every action but could not record that durably: ${errorMessage(error)}; ${join(plan.pool, MIGRATION_JOURNAL)} still describes actions that are no longer applied`,
+      );
+      return;
+    }
+    try {
       await this.files.removeFile(join(plan.pool, MIGRATION_JOURNAL));
-      // The cursor may never have been written: a failure before the first action leaves only the
-      // journal, and reporting a phantom cleanup failure would hide the real one.
-      const progressPath = join(plan.pool, MIGRATION_PROGRESS);
-      if ((await this.files.snapshot(progressPath)) !== undefined) await this.files.removeFile(progressPath);
+      await this.files.removeFile(join(plan.pool, MIGRATION_PROGRESS));
     } catch (error) {
       rollbackFailures.push(`could not remove the migration crash record after rollback: ${errorMessage(error)}`);
     }
@@ -1306,11 +1394,17 @@ export class SharedHistoryMigration {
       undo.push(async () => {
         const current = await this.files.snapshot(action.path);
         if (current === undefined) return;
-        if (nodeIsEmpty(current)) {
-          if (current.kind === 'directory') await this.files.removeEmptyDirectory(action.path);
-          else if (current.kind === 'file') await this.files.removeFile(action.path);
+        // An empty directory is safe to take back: `rmdir` is refused by the kernel the instant it
+        // holds anything, so the emptiness is decided by the removal itself and tidiness here cannot
+        // cost a byte.
+        if (current.kind === 'directory' && Object.keys(current.children).length === 0) {
+          await this.files.removeEmptyDirectory(action.path);
           return;
         }
+        // A file is never unlinked, not even one this migration created empty a moment ago. A
+        // harness can append to it through the link that was just made, and re-checking the size
+        // before an unlink only narrows that window rather than closing it — so the file goes home
+        // instead, empty or not.
         if ((await this.files.snapshot(action.restoreTo)) === undefined) {
           await this.files.move(action.path, action.restoreTo);
         }

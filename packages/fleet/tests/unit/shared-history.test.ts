@@ -28,6 +28,9 @@ type FlatNode =
     }
   | { readonly kind: 'other'; readonly modifiedAtMs: number; readonly deviceId: number };
 
+/** The fake's stand-in for the kernel's link-resolution limit, so a cycle fails instead of hanging. */
+const MEMORY_LINK_HOPS = 8;
+
 interface SnapshotCall {
   readonly target: string;
   readonly recursive: boolean | undefined;
@@ -65,7 +68,11 @@ class MemorySharedHistoryFileSystem implements SharedHistoryFileSystem {
     this.snapshots.push({ target, recursive: options.recursive, readText: options.readText });
     const failure = this.failures.get(`snapshot:${target}`);
     if (failure) throw failure;
-    const node = this.nodes.get(target);
+    // Ancestors resolve through their links exactly as the kernel resolves them, so a path reached
+    // through an aliased parent reads the same entry. Without that the fake cannot show the case
+    // this planner exists to refuse: one home directory named two ways.
+    const resolved = this.resolveAncestors(target);
+    const node = this.nodes.get(resolved);
     if (!node) return undefined;
     if (node.kind === 'file') {
       return {
@@ -82,11 +89,33 @@ class MemorySharedHistoryFileSystem implements SharedHistoryFileSystem {
       return { kind: 'directory', modifiedAtMs: node.modifiedAtMs, deviceId: node.deviceId, children };
     }
     for (const [candidate] of [...this.nodes].sort(([left], [right]) => left.localeCompare(right))) {
-      if (path.dirname(candidate) !== target) continue;
+      if (path.dirname(candidate) !== resolved) continue;
       const child = await this.snapshot(candidate);
       if (child) children[path.basename(candidate)] = child;
     }
     return { kind: 'directory', modifiedAtMs: node.modifiedAtMs, deviceId: node.deviceId, children };
+  }
+
+  /** Resolve every component through its links, the way the kernel does, and give up on a cycle. */
+  async canonicalDirectoryOf(target: string): Promise<string> {
+    return this.canonicalise(path.resolve(target), 0);
+  }
+
+  /** The same resolution an `lstat` gets: every ancestor followed, the final component left alone. */
+  private resolveAncestors(target: string): string {
+    const parent = path.dirname(target);
+    if (parent === target) return target;
+    return path.join(this.canonicalise(parent, 0), path.basename(target));
+  }
+
+  private canonicalise(target: string, hops: number): string {
+    if (hops > MEMORY_LINK_HOPS) throw new Error(`too many levels of symbolic links: ${target}`);
+    const parent = path.dirname(target);
+    if (parent === target) return target;
+    const resolved = path.join(this.canonicalise(parent, hops), path.basename(target));
+    const node = this.nodes.get(resolved);
+    if (node?.kind !== 'symbolic-link') return resolved;
+    return this.canonicalise(path.resolve(path.dirname(resolved), node.target), hops + 1);
   }
 
   async deviceIdOf(target: string): Promise<number> {
@@ -431,8 +460,9 @@ describe('SharedHistoryMigration', () => {
       kind: 'file',
       text: '{"display":"two","timestamp":2}\n{"display":"one","timestamp":1}\n',
     });
-    // The emptied source directory was removed and the pool link took its place.
-    should(await files.snapshot(`${HOME_B}/projects/project`)).equal(undefined);
+    // The emptied source directories are gone; the path only still reads through the pool link.
+    should(files.has(`${HOME_B}/projects/project`)).be.false();
+    should(await files.snapshot(`${HOME_B}/projects`)).match({ kind: 'symbolic-link' });
   });
 
   it('should file a loser nothing in this run contributed under the reserved pooled identity', async () => {
@@ -694,10 +724,10 @@ describe('SharedHistoryMigration', () => {
     shared.seed('/volume/one', directory());
     shared.seed(HOME_A, link('/volume/one'));
     shared.seed(HOME_B, link('/volume/one'));
-    const deepChain = new MemorySharedHistoryFileSystem();
-    deepChain.seed('/volume/hop-9', directory());
-    for (let hop = 0; hop < 9; hop++) deepChain.seed(`/volume/hop-${hop}`, link(`/volume/hop-${hop + 1}`));
-    deepChain.seed(HOME_A, link('/volume/hop-0'));
+    const cycle = new MemorySharedHistoryFileSystem();
+    cycle.seed('/volume/loop-a', link('/volume/loop-b'));
+    cycle.seed('/volume/loop-b', link('/volume/loop-a'));
+    cycle.seed(HOME_A, link('/volume/loop-a'));
 
     // Act
     const promises = [
@@ -705,7 +735,7 @@ describe('SharedHistoryMigration', () => {
       { subject: notDirectory, request: onlyA(), pattern: /account home must be a directory, found file/u },
       { subject: intoPool, request: onlyA(), pattern: /home and pool must not overlap/u },
       { subject: shared, request: request(), pattern: /resolve to the same home directory/u },
-      { subject: deepChain, request: onlyA(), pattern: /link chain is too deep to follow/u },
+      { subject: cycle, request: onlyA(), pattern: /too many levels of symbolic links/u },
     ].map(async testCase => ({
       promise: new SharedHistoryMigration(testCase.subject).preview(testCase.request),
       pattern: testCase.pattern,
@@ -716,6 +746,91 @@ describe('SharedHistoryMigration', () => {
       const resolved = await testCase;
       await should(resolved.promise).be.rejectedWith(resolved.pattern);
     }
+  });
+
+  it('should see one directory reached two ways as one home, not two, before planning anything', async () => {
+    // Arrange — `alias` is a link to `real`, so `real/a` and `alias/a` are the same directory. Read
+    // as two homes it fabricates a collision between a file and itself and a merge of a file that
+    // has already been renamed away, and the apply that follows can only fail.
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(
+      '/volume/real/a',
+      directory({
+        projects: directory({ 'session.jsonl': file('evidence\n', 10) }),
+        'history.jsonl': file('{"display":"one","timestamp":1}\n', 10),
+      }),
+    );
+    files.seed('/volume/alias', link('/volume/real'));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(
+      request({
+        homes: [
+          { account: 'real', path: '/volume/real/a' },
+          { account: 'alias', path: '/volume/alias/a' },
+        ],
+      }),
+    );
+
+    // Assert
+    await should(promise).be.rejectedWith(/accounts real and alias resolve to the same home directory/u);
+    should(files.has('/volume/real/a/projects/session.jsonl')).be.true();
+  });
+
+  it('should refuse homes that nest, whether the nesting is canonical or merely spelled out', async () => {
+    // Arrange — one home inside another double counts the inner one exactly as an alias would.
+    const canonical = new MemorySharedHistoryFileSystem();
+    canonical.seed(
+      '/volume/outer',
+      directory({
+        inner: directory(),
+        projects: directory({ 'session.jsonl': file('evidence\n', 10) }),
+      }),
+    );
+    canonical.seed('/volume/alias', link('/volume/outer'));
+    const subject = new SharedHistoryMigration(canonical);
+    const lexical = new SharedHistoryMigration(new MemorySharedHistoryFileSystem());
+
+    // Act
+    const canonicalPromise = subject.preview(
+      request({
+        homes: [
+          { account: 'outer', path: '/volume/outer' },
+          { account: 'inner', path: '/volume/alias/inner' },
+        ],
+      }),
+    );
+    // Neither of these exists yet, so only the pure check can catch them — and it must, because
+    // provisioning is about to create both.
+    const lexicalPromise = lexical.preview(
+      request({
+        homes: [
+          { account: 'outer', path: '/state/fleet/homes/outer' },
+          { account: 'inner', path: '/state/fleet/homes/outer/inner' },
+        ],
+      }),
+    );
+
+    // Assert
+    await should(canonicalPromise).be.rejectedWith(/account homes must not contain one another/u);
+    await should(lexicalPromise).be.rejectedWith(/account homes must not contain one another/u);
+    should(canonical.has('/volume/outer/projects/session.jsonl')).be.true();
+  });
+
+  it('should compare a home against the pool by canonical identity, not by spelling', async () => {
+    // Arrange — the pool reached through a link is still the pool.
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/inside`, directory());
+    files.seed('/volume/pool-alias', link(POOL));
+    files.seed(HOME_A, link('/volume/pool-alias/inside'));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(onlyA());
+
+    // Assert
+    await should(promise).be.rejectedWith(/home and pool must not overlap/u);
   });
 
   it('should report an unreadable home as a structured refusal and never migrate around it', async () => {
@@ -765,6 +880,7 @@ describe('SharedHistoryMigration', () => {
       kind: 'claude',
       pool: POOL,
       state: 'applying',
+      recovery: 'undo-applied-actions',
       completedAtLeast: 1,
       totalActions: 2,
       appliedActions: [{ kind: 'move', source: `${HOME_A}/projects`, destination: `${POOL}/projects` }],
@@ -1019,7 +1135,7 @@ describe('SharedHistoryMigration', () => {
     });
   });
 
-  it('should keep the crash record when the journal itself cannot be retired', async () => {
+  it('should say a stuck crash record was fully reversed, never that it should be undone', async () => {
     // Arrange
     const files = new MemorySharedHistoryFileSystem();
     files.seed(`${HOME_A}/projects`, directory({ session: file('history', 1) }));
@@ -1029,6 +1145,8 @@ describe('SharedHistoryMigration', () => {
 
     // Act
     const error = await subject.materialize(onlyA()).catch(caught => caught);
+    const evidence = await subject.inspectRecovery(onlyA());
+    const nextPreview = await subject.preview(onlyA()).catch(caught => caught);
 
     // Assert — the rollback itself was clean, so the failure is only about the record.
     should((error as SharedHistoryMigrationError).rollbackFailures).deepEqual([
@@ -1036,6 +1154,71 @@ describe('SharedHistoryMigration', () => {
     ]);
     should(files.has(JOURNAL)).be.true();
     should(await files.snapshot(`${HOME_A}/projects/session`, { readText: true })).match({ text: 'history' });
+    // The record that survived says what is true, so nobody is told to reverse reversed work.
+    should(await files.snapshot(PROGRESS, { readText: true })).match({ text: /"state":"rolled-back"/u });
+    should(evidence).match({
+      state: 'rolled-back',
+      recovery: 'none',
+      appliedActions: [],
+      uncertainAction: undefined,
+      pendingActions: [],
+    });
+    should((nextPreview as SharedHistoryRecoveryRequiredError).message).match(/were all undone, so undo NOTHING/u);
+    should((nextPreview as SharedHistoryRecoveryRequiredError).message).not.match(/undo the applied actions/u);
+  });
+
+  it('should report a rollback it could not record and delete nothing', async () => {
+    // Arrange — if the truth cannot be written down, the stale record is worth more than tidiness.
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${HOME_A}/projects`, directory({ session: file('history', 1) }));
+    files.failures.set(`createSymbolicLink:${HOME_A}/sessions`, new Error('later link refused'));
+    const writeAtomic = files.writeTextAtomic.bind(files);
+    files.writeTextAtomic = async (target, text) => {
+      if (text.includes('rolled-back')) throw new Error('progress is read only');
+      await writeAtomic(target, text);
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const error = await subject.materialize(onlyA()).catch(caught => caught);
+
+    // Assert
+    should((error as SharedHistoryMigrationError).rollbackFailures).match([
+      /reversed every action but could not record that durably: progress is read only/u,
+    ]);
+    should(files.has(JOURNAL)).be.true();
+    should(files.has(PROGRESS)).be.true();
+    should(await files.snapshot(`${HOME_A}/projects/session`, { readText: true })).match({ text: 'history' });
+  });
+
+  it('should send an ensured file home on rollback instead of unlinking it', async () => {
+    // Arrange — a harness can append through the link this migration just made, and no size check
+    // before an unlink closes that window, so the file is moved rather than removed either way.
+    const grown = new MemorySharedHistoryFileSystem();
+    grown.failures.set(`createSymbolicLink:${HOME_A}/history.jsonl`, new Error('last link refused'));
+    const appended = grown.ensureFile.bind(grown);
+    grown.ensureFile = async target => {
+      await appended(target);
+      if (target === `${POOL}/history.jsonl`) grown.seed(target, file('{"display":"live","timestamp":9}\n', 9));
+    };
+    const empty = new MemorySharedHistoryFileSystem();
+    empty.failures.set(`createSymbolicLink:${HOME_A}/history.jsonl`, new Error('last link refused'));
+
+    // Act
+    await new SharedHistoryMigration(grown).materialize(onlyA()).catch(() => undefined);
+    await new SharedHistoryMigration(empty).materialize(onlyA()).catch(() => undefined);
+
+    // Assert — the bytes that arrived are in the account home, not deleted.
+    should(grown.has(`${POOL}/history.jsonl`)).be.false();
+    should(await grown.snapshot(`${HOME_A}/history.jsonl`, { readText: true })).match({
+      text: '{"display":"live","timestamp":9}\n',
+    });
+    // An empty one is moved home too rather than unlinked: the rule does not depend on the size.
+    should(empty.has(`${POOL}/history.jsonl`)).be.false();
+    should(await empty.snapshot(`${HOME_A}/history.jsonl`, { readText: true })).match({ text: '' });
+    // Empty directories are still taken back, because rmdir cannot take one that holds anything.
+    should(empty.has(`${POOL}/projects`)).be.false();
+    should(empty.has(`${HOME_A}/projects`)).be.false();
   });
 
   it('should record a failure to update the progress record after an incomplete rollback', async () => {
