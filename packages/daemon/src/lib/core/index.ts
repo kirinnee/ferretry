@@ -4,6 +4,7 @@ export * from './classification.ts';
 export * from './context-window.ts';
 export * from './display-model.ts';
 export * from './harness-readiness.ts';
+export * from './doctor.ts';
 export * from './inventory.ts';
 export * from './session-planner.ts';
 export * from './session-shape.ts';

@@ -20,6 +20,7 @@ import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
+import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PairingSubsystem, pairingRoutes } from './pairing.ts';
@@ -64,6 +65,8 @@ import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;
+  /** Host dependencies, diagnosed for this daemon's own machine. */
+  readonly doctor: DoctorSubsystem;
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
   /** Declared fleet evidence, the shared pure plan, usage, and host-local provisioning. */
@@ -179,6 +182,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
     ...daemonHealthRoutes(subsystems.health),
+    ...doctorRoutes(subsystems.doctor),
     // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),

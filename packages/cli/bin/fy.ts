@@ -136,6 +136,29 @@ export function createProgram(): Command {
     .showHelpAfterError();
 }
 
+/**
+ * Ask the daemon binary for the one host diagnosis it owns.
+ *
+ * `fyd --check` already reads the effective state home, the address occupant, and the exact
+ * launchability rule a session start uses. Delegating keeps `fy doctor` from growing a second,
+ * inevitably divergent definition of a working host.
+ */
+function registerDoctorCommand(program: Command, environment: Record<string, string | undefined>): void {
+  program
+    .command('doctor')
+    .description('check host dependencies and what each missing program prevents')
+    .action(async () => {
+      const daemon = `${BINARY_NAME}d`;
+      const executable = Bun.which(daemon, { PATH: environment.PATH ?? '' });
+      if (executable === null)
+        throw new Error(
+          `cannot find ${daemon} on PATH — install the daemon package before running ${BINARY_NAME} doctor`,
+        );
+      const child = Bun.spawn([executable, '--check'], { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' });
+      process.exitCode = await child.exited;
+    });
+}
+
 // ─── DOMAIN WIRING · the ONLY scaffold↔domain seam (grows with the product; SIT injects doubles here) ───
 /** The adapters a CLI invocation needs; the SIT in-process driver injects captured/test doubles here. */
 export interface CliWorld {
@@ -644,6 +667,7 @@ export function registerDomain(program: Command, world: CliWorld): void {
     // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
     ownSessionId: environmentSessionId(environment),
   };
+  registerDoctorCommand(program, environment);
   for (const register of DOMAIN_REGISTRARS) register(wiring);
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────

@@ -24,7 +24,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { HealthViewSchema, type SessionStatus } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema, type SessionStatus } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { StrictMode } from 'react';
 
@@ -57,6 +57,13 @@ const beta = daemonConnection({
   baseUrl: 'https://beta.example.test',
   deviceToken: 'beta-token',
 });
+
+const doctorReport = {
+  checks: [],
+  harnesses: [{ kind: 'claude' as const, launchable: ['claude-auto-loge'], blocked: [] }],
+  ready: true,
+  limitation: 'PATH presence is all this report proves.',
+};
 
 class MemoryRepository implements DaemonConnectionRepository {
   readonly values = new Map<string, string>();
@@ -182,7 +189,7 @@ const appStore = async (
         wardenStatus: async () => ({ config: {}, anomalies: [], fingerprint: 'alpha-fingerprint' }),
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
-          return {};
+          return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
     },
@@ -1174,6 +1181,27 @@ describe('browserPushEnrolment', () => {
 /* ---------- the picker, the settings host, and the public root ------------ */
 
 describe('the settings route composition', () => {
+  it('binds the Doctor tab to the selected daemon through the typed diagnostic endpoint', async () => {
+    const { healthReads, view } = await renderShell('/d/alpha/settings#daemons', [alpha.daemonId]);
+    await settle();
+
+    await interact(() =>
+      must(
+        [...view.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab =>
+          tab.textContent?.includes('Doctor'),
+        ),
+        'Doctor tab',
+      ).click(),
+    );
+    await settle();
+
+    const doctorRead = healthReads.find(read => read.path === '/v1/doctor');
+    expect(doctorRead?.daemonId).toBe(alpha.daemonId);
+    expect(doctorRead?.schema).toBe(DoctorReportSchema);
+    expect(view.container.textContent).toContain('Required dependencies are present.');
+    await view.unmount();
+  });
+
   it('probes each pairing through the typed health endpoint, then routes switch and add through existing flows', async () => {
     const { healthReads, store, view } = await renderShell('/d/alpha/settings#daemons', [
       alpha.daemonId,

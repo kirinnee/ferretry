@@ -1,4 +1,4 @@
-import { HealthViewSchema } from '@ferretry/protocol';
+import { DoctorReportSchema, HealthViewSchema } from '@ferretry/protocol';
 import {
   createContext,
   type ReactNode,
@@ -34,6 +34,7 @@ import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
+import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
@@ -644,6 +645,22 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
     [store.clients],
   );
+  const daemonSettingsTabs = useMemo(
+    () => [
+      {
+        id: 'doctor',
+        label: 'Doctor',
+        description: 'Programs this daemon host needs, and what each absence breaks.',
+        Surface: ({ connection: activeConnection }: { readonly connection: DaemonConnection }) => (
+          <DoctorSettings
+            connection={activeConnection}
+            read={async daemon => await (await store.clients.client(daemon)).request('/v1/doctor', DoctorReportSchema)}
+          />
+        ),
+      },
+    ],
+    [store.clients],
+  );
   return (
     <SettingsPage
       daemonId={connection.daemonId}
@@ -652,6 +669,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       dictation={{ daemon: connection, ...dictation }}
       probeDaemon={probeDaemon}
       readWardenStatus={readWardenStatus}
+      daemonSettingsTabs={daemonSettingsTabs}
       onSelectDaemon={daemonId => {
         store.connections.select(daemonId);
         navigate(`${daemonSettingsPath(daemonId)}#daemons`);

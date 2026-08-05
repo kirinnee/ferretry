@@ -27,6 +27,7 @@ import { BunSqliteAnalyticsStoreFactory } from '../src/adapters/analytics/index.
 import { FileSessionAttachmentStore, NodeRawDeflate } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
+import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
   BrowserLoginWindowService,
   BrowserProfileStore,
@@ -300,6 +301,7 @@ import {
   type RoutingCatalogPort,
   type RunOverrides,
   readDaemonRelayIdentity,
+  readDoctorReport,
   readHarnessPreflight,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
@@ -307,6 +309,7 @@ import {
   refuseUnbindableAddress,
   relaunchCommand,
   renderConfiguration,
+  renderDoctorReport,
   renderHarnessPreflight,
   renderInitialAttachmentSection,
   resolveStateHome,
@@ -3591,6 +3594,22 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       });
       return {
         health: createHealthSubsystem(health, scratch),
+        doctor: {
+          report: async () => {
+            let directorySyscalls = true;
+            try {
+              loadDirectorySyscalls();
+            } catch {
+              directorySyscalls = false;
+            }
+            return readDoctorReport({
+              platform: process.platform,
+              executables,
+              harnesses: readHarnessPreflight(await accounts.accounts(), executables),
+              directorySyscalls,
+            });
+          },
+        },
         pairing,
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
@@ -4181,16 +4200,29 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
    * it cannot do is launch a session, which is a different sentence and is printed as one. Refusing
    * here would also contradict the boot, which warns and starts.
    */
-  for (const line of renderHarnessPreflight(
-    readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables),
-    CLIENT_NAME,
-  ))
-    say(line);
+  const harnesses = readHarnessPreflight(await world.harnesses.accounts.accounts(), world.harnesses.executables);
+  for (const line of renderHarnessPreflight(harnesses, CLIENT_NAME)) say(line);
+  const directorySyscalls = (() => {
+    try {
+      loadDirectorySyscalls();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const doctor = readDoctorReport({
+    platform: process.platform,
+    executables: world.harnesses.executables,
+    harnesses,
+    directorySyscalls,
+  });
+  for (const line of renderDoctorReport(doctor)) say(line);
+  const doctorExitCode = doctor.ready ? 0 : 1;
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });
     if (occupant.kind === 'vacant') {
       say(`address      ${config.bindUrl}  (free — this daemon would bind it)`);
-      return 0;
+      return doctorExitCode;
     }
     const refusal = refuseOccupiedAddress({
       daemonName: DAEMON_NAME,
@@ -4202,7 +4234,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
     say(`address      ${config.bindUrl}  (taken)`);
     say('');
     say(`! ${refusal.message}`);
-    return refusal.exitCode;
+    return Math.max(refusal.exitCode, doctorExitCode);
   }
   // No port is recorded, so this reports the walk a first boot would take rather than one address.
   const candidates = portCandidates(world.boot.preferredPort);
@@ -4211,7 +4243,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
     const occupant = await world.boot.probe.identify({ url: candidate.bindUrl });
     if (occupant.kind === 'vacant') {
       say(`address      ${candidate.bindUrl}  (free — this daemon would take and record it)`);
-      return 0;
+      return doctorExitCode;
     }
     say(
       `address      ${candidate.bindUrl}  (taken — ${occupant.kind === 'daemon' ? `another ${DAEMON_NAME}` : occupant.evidence})`,
@@ -4220,7 +4252,7 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
   const refusal = refuseExhaustedCandidates(DAEMON_NAME, candidates, world.config.path);
   say('');
   say(`! ${refusal.message}`);
-  return refusal.exitCode;
+  return Math.max(refusal.exitCode, doctorExitCode);
 }
 
 async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check' | 'print-config' }): Promise<number> {
