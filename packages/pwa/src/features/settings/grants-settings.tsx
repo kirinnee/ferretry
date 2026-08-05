@@ -422,12 +422,14 @@ export function GrantsCard({
       {/* READING BEFORE CHANGING. The list answers "what may this browser do here, why, and how much
           does each one hand over"; the switches below answer "change it". Somebody arriving from a
           refused control needs the first question answered before the second is even relevant.
-          `governed` is the DAEMON's account of the connection and is undefined until the wire carries
-          it — never inferred from this page's address, which would invert the answer over a relay. */}
-      {/* No posture prop: the list reads it from `mayGrant` on the capabilities, which is the daemon's
-          own `!governed`. Passing a second copy of the same fact would give the two a chance to
-          disagree, and neither is ever derived from this page's address. */}
-      <CapabilityList connection={connection} capabilities={view.capabilities} />
+
+          `governed` is PASSED rather than inferred. It is the DAEMON's account of the connection —
+          `isGovernedCaller(request.loopback)` — and letting the list fall back to `mayGrant` unanimity
+          here would be the second derivation of one fact, harmless while `mayGrant` is `!governed` and
+          wrong the moment it is not. It is never inferred from this page's address, which would invert
+          the answer over a relay. The fallback stays for a browser meeting an OLDER daemon that does not
+          send the field. */}
+      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">

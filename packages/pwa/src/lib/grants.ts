@@ -166,15 +166,16 @@ export function grantOnlyAtMachine(capability: DaemonCapability, clientName = 'f
  *
  * ## `unknown` IS A REAL STATE, NOT A MISSING ONE
  *
- * The daemon does not report this yet (`GrantsView` carries no `governed` field), and the friendly
- * assumption — "no answer means loopback" — is precisely the wrong one: it would paint a remote phone
- * as standing at the machine. So absence is its own posture and the screen says it cannot tell, in
- * keeping with the rest of this feature, where damaged state is never read as empty state.
+ * The daemon reports it as `GrantsView.governed`, so the live surface passes the answer through. Absence
+ * still has to mean something, because an OLDER daemon may not send it — and the friendly assumption,
+ * "no answer means loopback", is precisely the wrong one: it would paint a remote phone as standing at
+ * the machine. So absence is its own posture and the screen says it cannot tell, in keeping with the rest
+ * of this feature, where damaged state is never read as empty state.
  *
- * It also cannot be INFERRED from the refusals already on the view. A loopback caller reads `granted`
- * on every axis — and so does a remote caller holding a valid unlock on a fully-granted machine. The
- * two are indistinguishable in the current wire shape, so any inference here would be a guess that is
- * wrong for a real configuration.
+ * It also cannot be INFERRED from the refusals on the view. A loopback caller reads `granted` on every
+ * axis — and so does a remote caller holding a valid unlock on a fully-granted machine. The two are
+ * indistinguishable in those fields, so any inference from them would be a guess that is wrong for a
+ * real configuration.
  */
 export type ConnectionPosture = 'direct-local' | 'governed-remote' | 'unknown';
 
@@ -190,12 +191,16 @@ export function connectionPosture(governed: boolean | undefined): ConnectionPost
 }
 
 /**
- * The posture as the CAPABILITY VIEW reveals it, which is where it actually arrives today.
+ * The posture as the CAPABILITY VIEW reveals it — the FALLBACK, for a view that carries no `governed`.
  *
- * `GrantsView` carries no `governed` flag, but every capability carries `mayGrant`, and the daemon
- * computes that as exactly `!governed` (`grants/service.ts`). So the fact is already on the wire, once
- * per capability, and asking for a second field spelling the same thing would give the two a chance to
- * disagree. This reads it back rather than requesting a duplicate.
+ * `GrantsView.governed` is the answer to prefer and the live surface passes it, so this path is what a
+ * browser meeting an OLDER daemon degrades to rather than the ordinary route. It works because every
+ * capability carries `mayGrant`, which the daemon computes as exactly `!governed`
+ * (`grants/service.ts`) — the same fact, once per capability.
+ *
+ * It stays because the two questions are not the same one. `mayGrant` asks "may this caller widen THIS
+ * capability"; `governed` asks "where did this caller come from". They agree today; a locally-immutable
+ * capability would separate them, and this reads as "cannot tell" in that case rather than guessing.
  *
  * IT REQUIRES UNANIMITY. Every capability on one connection must agree, because they are all derived
  * from one request's carrier; a view where some say yes and some say no is not a posture this can name,
