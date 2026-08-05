@@ -78,6 +78,85 @@ function sharesCodexHistory(previews: readonly SharedHistoryPreview[]): boolean 
   return previews.some(preview => preview.kind === 'codex');
 }
 
+/** Structural, so the renderer needs nothing exported from the domain beyond the preview itself. */
+type SharedHistoryRefusal = NonNullable<SharedHistoryPreview['refusals']>[number];
+
+type SharedHistoryMerge = Extract<SharedHistoryChange, { kind: 'merge-jsonl' }>;
+
+function isMerge(change: SharedHistoryChange): change is SharedHistoryMerge {
+  return change.kind === 'merge-jsonl';
+}
+
+/**
+ * The account-home directories that stop existing.
+ *
+ * Named one by one rather than counted. A directory being emptied and removed is the only part of
+ * this migration that deletes something a person put there, and it is safe precisely because the
+ * contents left first — so the line has to carry both halves or it reads as either a silent deletion
+ * or a detail not worth printing.
+ */
+function emptiedSourceLines(preview: SharedHistoryPreview): string[] {
+  const emptied = preview.emptiedSourceDirectories ?? [];
+  if (emptied.length === 0) return [];
+  return [
+    `${INDENT}${plural(emptied.length, 'source directory').replace('directorys', 'directories')} emptied by moving every entry into the pool, then removed so a link to the pool takes each one's place:`,
+    ...emptied.map(path => `${INDENT}  ${path}`),
+  ];
+}
+
+/**
+ * What a prompt-history merge does and does not carry across.
+ *
+ * The pooled file is only ever appended to, so the merge cannot lose what is already pooled. What it
+ * cannot capture is the other direction: the source file is quarantined by rename, and an agent that
+ * already holds it open keeps writing into that same quarantined copy, whose lines therefore never
+ * reach the pool. Every one of those lines is still on disk at the preserved path — so the honest
+ * report names the path, says migrating an idle account avoids the split, and never calls it a loss.
+ *
+ * Stated per merge because the preserved path differs per account, and a person chasing one missing
+ * prompt needs the exact file, not a general warning.
+ */
+function mergeCaveatLines(preview: SharedHistoryPreview): string[] {
+  const merges = preview.changes.filter(isMerge);
+  if (merges.length === 0) return [];
+  return [
+    ...merges.map(
+      merge =>
+        `${INDENT}prompt history ${merge.source}: only the lines observed here are appended to ${merge.destination}; whatever is written to it afterwards stays at ${merge.sourcePreservedAt} and never joins the pool`,
+    ),
+    `${INDENT}  the pooled file is only appended to and every preserved copy is kept, so no prompt is discarded either way — pool prompt history while these accounts are idle if you want their last lines in the pool rather than beside it`,
+  ];
+}
+
+/**
+ * The homes that could not be read, and what that costs.
+ *
+ * A refusal is not a skip, and the difference is the whole point of printing it: an apply that meets
+ * one migrates nothing for this harness rather than pooling the homes it happened to manage to read.
+ * A report that listed these quietly would describe a partial migration that never happens.
+ */
+function refusalLines(preview: SharedHistoryPreview): string[] {
+  const refusals: readonly SharedHistoryRefusal[] = preview.refusals ?? [];
+  if (refusals.length === 0) return [];
+  return [
+    `${INDENT}! ${plural(refusals.length, 'account home')} could not be read, so an apply REFUSES the whole ${preview.kind} pool — it does not migrate the rest and quietly leave these out:`,
+    ...refusals.map(
+      refusal => `${INDENT}  ${refusal.account} (${refusal.home}) — ${refusal.reason}; refused at ${refusal.path}`,
+    ),
+    `${INDENT}  make ${refusals.length === 1 ? 'that home' : 'those homes'} readable, or stop declaring ${refusals.length === 1 ? 'it' : 'them'}, and run this again.`,
+  ];
+}
+
+/**
+ * Everything about one pool that neither the counts nor the change list already say.
+ *
+ * Shared by the dry run and the applied report so the two cannot drift: a caveat a person reads
+ * before deciding must still be there in the record of what was decided.
+ */
+function sharedHistoryDetail(preview: SharedHistoryPreview): string[] {
+  return [...emptiedSourceLines(preview), ...mergeCaveatLines(preview), ...refusalLines(preview)];
+}
+
 /**
  * Every write a plan would perform, in order.
  *
@@ -91,6 +170,7 @@ export function renderApplyPlan(plan: FleetApplyPreview): string {
   const history = plan.sharedHistory.flatMap(preview => [
     `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
     ...preview.changes.map(change => `    ${historyChange(change)}`),
+    ...sharedHistoryDetail(preview),
   ]);
   const caveat = sharesCodexHistory(plan.sharedHistory) ? CODEX_HISTORY_CAVEAT : [];
   return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...caveat].join('\n');
@@ -108,6 +188,7 @@ export function renderApplyResult(result: FleetApplyResult): string {
   for (const shared of result.sharedHistory) {
     lines.push(
       `  shared ${shared.kind}: ${shared.migrated} migrated entries, ${shared.conflicts} collisions preserved, ${shared.links} links → ${shared.pool}`,
+      ...sharedHistoryDetail(shared),
     );
   }
   if (sharesCodexHistory(result.sharedHistory)) lines.push(...CODEX_HISTORY_CAVEAT);
