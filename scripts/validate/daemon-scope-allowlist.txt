@@ -1,0 +1,71 @@
+# PWA state that is deliberately NOT keyed by daemon, and daemon-scoped caches the connection
+# registry deliberately does not hold.
+#
+# Enforced by scripts/validate/daemon-scope.sh. Read that script's header for what each pass means
+# and why the rule exists; this file is only the list of reviewed exceptions to it.
+#
+# Rules the gate enforces on this file:
+#   * one line per exception, `<retain|access|invalidate> <exact target> # <reason>` — no globs, so
+#     silencing a NEW finding always costs a visible, reviewable line in the diff;
+#   * the reason is required, and it must say why one daemon's data cannot be read as another's —
+#     "not daemon data" and "the owner clears it" are the only two shapes of answer that exist;
+#   * an entry that no longer describes a finding is a hard failure. Delete it in the change that
+#     fixed it: a stale exemption is a silencer aimed at the next bug, not documentation of an old
+#     one.
+#
+# THIS IS NOT AN EXEMPTION POLICY. Every `invalidate` line below is a store that keeps serving an
+# unpaired daemon's records unless something else clears it, and each one names the something else.
+# If you cannot name it, you have found the bug this gate was written for.
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# RETAIN — module-scope state that holds no daemon-owned data
+#
+# The pass asks one question of a module-level binding: could this remember something a daemon
+# said? A reader preference, a DOM layering stack, a pub-sub listener set and a component registry
+# all answer no, and answer it the same way — the value would be identical no matter which daemon
+# the reader is paired to, or how many.
+
+retain packages/pwa/src/features/settings/dictation-shortcut.ts:captureDepth # a re-entrancy counter for the shortcut capture field. It counts nested captures in this document; a daemon cannot observe it, let alone set it.
+retain packages/pwa/src/hooks/use-density.ts:firstLoadDefault # the reader's density, resolved once from a pointer media query. It describes the device holding the browser, which every paired daemon shares.
+retain packages/pwa/src/hooks/use-dialog-focus.ts:ESCAPE_LAYERS # the Escape-key layering stack, holding opaque DOM tokens in arrival order. Entries are identities of mounted overlays, never daemon records.
+retain packages/pwa/src/hooks/use-project-scope.ts:browserNavigation # the lazily built window-navigation adapter. A stable identity is required because it is an effect dependency; it wraps `window` and reads nothing from a daemon.
+retain packages/pwa/src/lib/md-compose.ts:volatilePref # the markdown-composer preference when localStorage refuses a write. A reader preference for their own composer, not a daemon's answer.
+retain packages/pwa/src/lib/pin-bridge.ts:controllers # mounted pin-jump controllers, held by identity for dispatch. The bridge routes to a controller; the SCOPE it routes with is the argument, not the set.
+retain packages/pwa/src/lib/pin-bridge.ts:listeners # foreground-change subscribers, held by identity. Callbacks, not records.
+retain packages/pwa/src/lib/pin-bridge.ts:foreground # holds a DaemonSessionScope and nothing else, and compares by daemonSessionKey. It IS the daemon scope the rest of the bridge is keyed by; there is no second thing here to key.
+retain packages/pwa/src/lib/search-focus.ts:listeners # search-focus subscribers, held by identity. Callbacks, not records.
+retain packages/pwa/src/hooks/use-details-tab.ts:lastTab # the map escapes into readDetailsTab/touchDetailsTab, which this pass cannot follow. Both take a DaemonSessionScope and go through daemonSessionKey (use-details-tab.ts:17,22,25), so every entry is daemon-keyed; the map is a parameter only so a test can supply its own.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:registry # the side-pane TAB DEFINITIONS, keyed by tab id. A definition is bundle-static — what a tab is called and how it renders — and is the same for every daemon. The per-session STATE, tabStates, is daemonSessionKey'd and is not on this list.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:registryVersion # a monotonic counter making useSyncExternalStore re-read the definition registry. A number, not a record.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:registryListeners # definition-registry subscribers, held by identity. Callbacks, not records.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:definitionsCache # a memo of the definition registry's sorted array. Derived from `registry`, so it holds exactly what `registry` holds.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:defaultOpenCache # a memo of which definitions open by default. Derived from `registry`, so it holds exactly what `registry` holds.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceBodies # renderers for each side-pane instance KIND, keyed by kind. A render function, not a record.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:stateVersion # a monotonic counter making useSyncExternalStore re-read tab state. A number, not a record.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:stateListeners # tab-state subscribers, held by identity. Callbacks, not records.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceSequence # a document-unique suffix for generated instance ids. Monotonic and never reused, which is the property it is here for.
+retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # instance-close subscribers, held by identity. Callbacks, not records.
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# INVALIDATE — daemon-scoped caches the connection registry does not hold, and what clears them
+#
+# Two honest reasons appear below and no third one is acceptable. Either an OWNER holds the cache
+# and forwards clearDaemon to it, or the surface is NOT MOUNTED and its line must be deleted by the
+# change that mounts it. "It is keyed by daemon so staleness is harmless" is not on that list:
+# daemon ids are DURABLE ACROSS A RE-PAIR (see lib/daemon-connection.ts), so the next pairing with
+# the same id reads the last one's records back.
+
+invalidate DaemonSessionCache # the keyed-cache PRIMITIVE, not a cache. Stores are built out of it and are registered themselves; registering the class would be registering the concept.
+invalidate DaemonUsageIndex # owned by DaemonUsageStore, which IS registered and forwards clearDaemon to it (lib/usage-store.ts:226).
+invalidate DaemonAttentionStore # owned by DaemonAttentionClient, which forwards clearDaemon to it (lib/attention-client.ts:188).
+invalidate DaemonPinStore # owned by DaemonPinClient, which forwards clearDaemon to it (lib/pin-client.ts:165).
+invalidate DaemonNotificationLedger # cleared by its own watcher: startNotificationWatch diffs the daemon set each tick and calls clearDaemon for every daemon that left the snapshot (lib/notification-ledger.ts:278). It is in-memory only and never outlives the watch.
+invalidate DaemonAttachmentBlobCache # a per-mount useRef in attachment-gallery.tsx, disposed with the component. Every entry carries its own daemonId and clearDaemon filters on it, so no cross-daemon read is reachable; the registry cannot hold a cache that is created per mount.
+
+# GAPS. Each of these is a daemon-scoped store that NOTHING under packages/pwa/src constructs — the
+# surface is not mounted, so there is no instance to register. Delete the line in the PR that mounts
+# it, and add the store to the `caches:` array in lib/store.tsx in the same change.
+invalidate DaemonAttentionClient # unmounted: no construction site in packages/pwa/src. The attention surface is reached only from tests and the harness.
+invalidate DaemonPinClient # unmounted: no construction site in packages/pwa/src. The pins board is reached only from tests and the harness.
+invalidate DaemonBrowserLoginStore # unmounted: no construction site in packages/pwa/src. The remote-browser login flow is not wired into the app.
+invalidate DaemonRuntimeModelCatalogStore # unmounted: no construction site in packages/pwa/src. runtime-controls.tsx names the type as the port it wants; nothing supplies one.

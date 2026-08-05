@@ -23,6 +23,7 @@ import {
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
+import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
@@ -232,7 +233,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const pushService = daemonPushService(fetcher);
   const connections = await DaemonConnectionStore.open({
     repository: options.repository ?? browserConnectionRepository(),
-    caches: [clients, fleet, controls, projects, usage, notificationPreferences, pushDevices],
+    // `documentDraftStore` is not built here — the composer needs it as a module default before any
+    // context exists — but it is browser-persisted daemon state like every other entry, so it is
+    // invalidated like every other entry. A store the registry cannot reach keeps serving an
+    // unpaired daemon's records; `scripts/validate/daemon-scope.sh` now fails the commit that
+    // leaves one out.
+    caches: [clients, fleet, controls, projects, usage, notificationPreferences, pushDevices, documentDraftStore],
   });
   const landingMarkerStorage = options.landingMarkerStorage ?? browserLandingMarkerStorage();
   const syncLandingPage = (): void =>

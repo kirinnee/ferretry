@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
-import { DaemonDraftStore } from '../lib/drafts.ts';
+import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
@@ -28,8 +28,6 @@ export interface ComposerProps {
    * not re-derive it, it only picks the growth ceiling from it. */
   readonly compact?: boolean;
 }
-
-const defaultDraftStore = new DaemonDraftStore();
 
 /**
  * AUTO-GROW CEILINGS, ported from kteam `ui/src/components/Composer.tsx`.
@@ -65,7 +63,7 @@ export function Composer({
   disabled = false,
   placeholder = 'Message this session',
   quota,
-  draftStore = defaultDraftStore,
+  draftStore = documentDraftStore,
   onSent,
   compact = false,
 }: ComposerProps) {
