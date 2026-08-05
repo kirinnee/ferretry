@@ -55,8 +55,6 @@ import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/t
 import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
 import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
-import { BunAudioFileReader } from '../src/adapters/stt/audio-file';
-import { TimerDelay } from '../src/adapters/stt/delay';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
@@ -487,10 +485,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client }) =>
     registerLearningCommands(program, new LearningController(new ProtocolLearningGateway(client), world.io)),
   ({ program, world, client }) =>
-    registerSttCommands(
-      program,
-      new SttController(new ProtocolSttGateway(client), world.io, new BunAudioFileReader(), new TimerDelay()),
-    ),
+    registerSttCommands(program, new SttController(new ProtocolSttGateway(client), world.io)),
   ({ program, world, client }) =>
     registerWorktreeCommands(
       program,
