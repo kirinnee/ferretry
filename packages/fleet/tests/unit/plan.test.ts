@@ -99,17 +99,39 @@ describe('FleetPlan', () => {
 
     // Assert
     should(wrapper).match({ path: '/state/fleet/bin/fy-claude-work', mode: 0o755 });
-    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR='claude-work'`);
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(
+      `export CLAUDE_CONFIG_DIR='/state/fleet/homes/claude-work'`,
+    );
   });
 
-  it('should keep the declared account name in the wrapper but publish the Ferretry-home expansion', () => {
+  it('should bind a bare relative wrapper home to the same Ferretry directory the manifest publishes', () => {
     // Act
     const actual = subject.build(config(), LAYOUT, GENERATED_AT);
     const [wrapper] = operationsOf(actual, 'file');
 
-    // Assert — the script stays portable; the manifest and the filesystem need an absolute path.
-    should(wrapper?.kind === 'file' && wrapper.content).containEql("'claude-work'");
+    // Assert
+    should(wrapper?.kind === 'file' && wrapper.content).containEql("'/state/fleet/homes/claude-work'");
     should(actual.manifest.accounts[0]?.home).equal('/state/fleet/homes/claude-work');
+  });
+
+  it.each([
+    ['~', '"$HOME"', '/home/tester'],
+    ['~/.claude-work', '"$HOME/.claude-work"', '/home/tester/.claude-work'],
+    ['$HOME', '"$HOME"', '/home/tester'],
+    ['$HOME/.claude-work', '"$HOME/.claude-work"', '/home/tester/.claude-work'],
+  ])('should preserve the portable wrapper spelling for an explicit home alias (%s)', (home, rendered, published) => {
+    // Arrange
+    const input = config({
+      agents: [{ name: 'work', kind: 'claude', routes: { default: route({ home }) } }],
+    });
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+    const [wrapper] = operationsOf(actual, 'file');
+
+    // Assert
+    should(wrapper?.kind === 'file' && wrapper.content).containEql(`export CLAUDE_CONFIG_DIR=${rendered}`);
+    should(actual.manifest.accounts[0]?.home).equal(published);
   });
 
   it('should resolve a relative account home under the homes directory', () => {
@@ -451,6 +473,35 @@ describe('FleetPlan shared history', () => {
 
     // Assert
     should(actual.manifest.accounts).have.length(1);
+    should(actual.sharedHistoryRequests).deepEqual([]);
+  });
+
+  it('should retain disabled Codex ownership reconciliation without planning a settings rewrite', () => {
+    // Arrange
+    const input = config({
+      agents: [
+        {
+          name: 'work',
+          kind: 'codex',
+          routes: { default: route({ id: ID_CODEX, wrapper: 'fy-codex-work', home: 'codex-work' }) },
+        },
+      ],
+    });
+
+    // Act
+    const actual = subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — apply needs this operation if an earlier enable left an ownership sidecar behind.
+    should(operationsOf(actual, 'codex-sqlite-ownership')).deepEqual([
+      {
+        kind: 'codex-sqlite-ownership',
+        path: '/state/fleet/homes/codex-work/config.toml',
+        markerPath: '/state/fleet/homes/codex-work/.ferretry-sqlite-home.json',
+        sqliteHome: '/state/fleet/shared/codex/sqlite',
+        enabled: false,
+      },
+    ]);
+    should(operationsOf(actual, 'settings')).deepEqual([]);
     should(actual.sharedHistoryRequests).deepEqual([]);
   });
 });

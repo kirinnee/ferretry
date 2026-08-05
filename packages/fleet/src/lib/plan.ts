@@ -42,6 +42,13 @@ const EXECUTABLE_MODE = 0o755;
 const SETTINGS_MODE = 0o600;
 const CODEX_SQLITE_MARKER = '.ferretry-sqlite-home.json';
 
+/** Home aliases stay portable in wrappers; every other form uses the exact expanded destination. */
+function wrapperHome(declared: string, resolved: string): string {
+  return declared === '~' || declared.startsWith('~/') || declared === '$HOME' || declared.startsWith('$HOME/')
+    ? declared
+    : resolved;
+}
+
 /** Raised when a profile declares an asset the account's harness cannot accept. */
 export class UnsupportedAssetError extends Error {
   constructor(
@@ -95,8 +102,8 @@ export class FleetPlan implements FleetPlanBuilder {
 
     const accounts = resolveAccounts(config).map(account => ({
       ...account,
-      // The wrapper script keeps the *declared* home so `~/x` stays portable across machines; the
-      // filesystem and the manifest need the expanded one. Both name the same directory.
+      // The filesystem and manifest always need the expanded destination. Wrapper rendering keeps
+      // only explicit home aliases portable; a bare name belongs under Ferretry's homes directory.
       resolvedHome: expandHomePath(account.home, layout.userHome, layout.homesDirectory),
     }));
     // resolveCommands throws on a name two generators would claim, before anything is planned.
@@ -132,10 +139,13 @@ export class FleetPlan implements FleetPlanBuilder {
           sqliteHome: codexSqliteHome,
         }),
       );
-      const wrapperAccount =
-        account.kind === 'codex' && config.sharedHistory.codex
-          ? { ...account, env: { ...account.env, CODEX_SQLITE_HOME: codexSqliteHome } }
-          : account;
+      const wrapperAccount = {
+        ...account,
+        home: wrapperHome(account.home, account.resolvedHome),
+        ...(account.kind === 'codex' && config.sharedHistory.codex
+          ? { env: { ...account.env, CODEX_SQLITE_HOME: codexSqliteHome } }
+          : {}),
+      };
       operations.push({
         kind: 'file',
         path: joinPath(layout.binDirectory, account.wrapper),

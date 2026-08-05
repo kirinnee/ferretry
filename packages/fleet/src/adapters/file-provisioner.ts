@@ -1,5 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, cp, lstat, mkdir, readdir, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
@@ -38,13 +51,45 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
+/** A missing ancestor and an ancestor that is not a directory both end canonical resolution. */
+function endsCanonicalResolution(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/** The canonical form of a directory, or of its nearest existing ancestor plus the missing tail. */
+async function canonicalDirectory(directory: string): Promise<string> {
+  const parent = path.dirname(directory);
+  if (parent === directory) return directory;
+  try {
+    return await realpath(directory);
+  } catch (error) {
+    if (!endsCanonicalResolution(error)) throw error;
+    return path.join(await canonicalDirectory(parent), path.basename(directory));
+  }
+}
+
+/** Canonicalize every ancestor while leaving the final entry itself lexical. */
+async function canonicalPath(target: string): Promise<string> {
+  const resolved = path.resolve(target);
+  const parent = path.dirname(resolved);
+  if (parent === resolved) return resolved;
+  return path.join(await canonicalDirectory(parent), path.basename(resolved));
+}
+
+function isInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
 /**
  * Writes a plan to a real filesystem.
  *
  * Every path is checked against the roots the composition root declared, so a configuration cannot
  * talk this adapter into writing outside the directories the fleet owns. Files are written to a
- * temporary name and renamed, so a reader never observes a half-written wrapper or manifest, and
- * the manifest is written last: it is the record that the rest of the plan already landed.
+ * temporary name and renamed, so a reader never observes a half-written wrapper or manifest. The
+ * manifest is published after ordinary operations and before history migration: it records the
+ * provisioned fleet even when a separate history migration subsequently fails.
  */
 export class FileFleetProvisioner implements FleetProvisioner {
   private readonly allowedRoots: readonly string[];
@@ -60,32 +105,106 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
-    return { ...plan, sharedHistory: await this.previewSharedHistory(plan) };
+    await this.preflightPlan(plan);
+    return {
+      ...plan,
+      operations: await this.previewOperations(plan.operations),
+      sharedHistory: await this.previewSharedHistory(plan),
+    };
   }
 
   async apply(plan: FleetApplyPlan): Promise<FleetApplyResult> {
-    FleetManifestSchema.parse(plan.manifest);
-    this.assertWritablePath(plan.manifestPath);
+    await this.preflightApply(plan);
 
     const prunedWrappers: string[] = [];
+    let operationCount = 0;
     for (const operation of plan.operations) {
-      this.assertWritablePath(operation.path);
-      prunedWrappers.push(...(await this.applyOperation(operation)));
+      // Recheck at the mutation boundary as well: an earlier operation must not be able to replace
+      // an ancestor with a link after the all-or-nothing preflight has approved this destination.
+      await this.assertOperationWritable(operation);
+      const pruned = await this.applyOperation(operation);
+      if (pruned === undefined) continue;
+      operationCount += 1;
+      prunedWrappers.push(...pruned);
     }
+
+    // History migration has its own transactional boundary. Publish the ordinary fleet first so a
+    // migration failure still leaves an honest record of the wrappers and homes that already landed.
+    await this.writeManifest(plan);
 
     const sharedHistory = [];
     for (const request of plan.sharedHistoryRequests ?? []) {
       sharedHistory.push(await this.sharedHistoryMigration().materialize(request));
     }
 
-    await this.writeManifest(plan);
     return {
       accountCount: plan.manifest.accounts.length,
-      operationCount: plan.operations.length,
+      operationCount,
       manifestPath: plan.manifestPath,
       prunedWrappers,
       sharedHistory,
     };
+  }
+
+  /** Validate the published record before preview returns or apply performs its first write. */
+  private async preflightPlan(plan: FleetApplyPlan): Promise<void> {
+    FleetManifestSchema.parse(plan.manifest);
+    await this.assertWritablePath(plan.manifestPath);
+  }
+
+  /** Validate every write before apply performs its first one. */
+  private async preflightApply(plan: FleetApplyPlan): Promise<void> {
+    await this.preflightPlan(plan);
+    for (const operation of plan.operations) await this.assertOperationWritable(operation);
+  }
+
+  private async assertOperationWritable(operation: FleetWriteOperation): Promise<void> {
+    // These two operations traverse the final destination as a directory. Every other operation
+    // replaces or lstat-checks its final entry, so only its ancestors may be followed.
+    await this.assertWritablePath(operation.path, operation.kind === 'directory' || operation.kind === 'prune');
+    if (operation.kind === 'codex-sqlite-ownership') await this.assertWritablePath(operation.markerPath);
+  }
+
+  /**
+   * A disabled ownership operation is intentionally present in the pure plan: a sidecar from an
+   * earlier enable is the only authority to restore or remove `sqlite_home`. Preview may omit that
+   * operation only after observing that no sidecar exists. Existing evidence is parsed, along with
+   * the config it governs, so damaged state is refused now rather than advertised as a clean plan.
+   */
+  private async previewOperations(operations: readonly FleetWriteOperation[]): Promise<readonly FleetWriteOperation[]> {
+    const previewed: FleetWriteOperation[] = [];
+    for (const operation of operations) {
+      if (operation.kind !== 'codex-sqlite-ownership') {
+        previewed.push(operation);
+        continue;
+      }
+
+      // Shared-history preview turns an out-of-root account home into structured, renderable
+      // evidence. Keep its ordinary ownership operation visible, but never inspect files outside
+      // the declared roots and thereby mask that more useful refusal with an adapter exception.
+      if (!(await this.isWritablePath(operation.path)) || !(await this.isWritablePath(operation.markerPath))) {
+        previewed.push(operation);
+        continue;
+      }
+
+      const markerDocument = await this.readRegularText(operation.markerPath, 'Codex SQLite ownership sidecar');
+      const marker =
+        markerDocument === undefined ? undefined : this.parseCodexSqliteMarker(markerDocument, operation.markerPath);
+      if (!operation.enabled && marker === undefined) continue;
+
+      const configDocument = await this.readRegularText(operation.path, 'Codex configuration');
+      const current =
+        configDocument === undefined
+          ? {}
+          : this.parseCodexConfig(
+              configDocument,
+              operation.path,
+              operation.enabled ? 'enabling sharing' : 'disabling sharing',
+            );
+      if (operation.enabled && marker === undefined) this.sqliteHomeState(current, operation.path);
+      previewed.push(operation);
+    }
+    return previewed;
   }
 
   private async previewSharedHistory(plan: FleetApplyPlan): Promise<FleetApplyPreview['sharedHistory']> {
@@ -109,19 +228,22 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * `fy fleet init` followed by `fy fleet apply` failed on any fresh host, even with `agents: []`.
    * The empty string satisfies every escape test below on its own; only the length check excluded it.
    */
-  private assertWritablePath(target: string): void {
-    const resolved = path.resolve(target);
-    const allowed = this.allowedRoots.some(root => {
-      const relative = path.relative(root, resolved);
-      return !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
-    });
-    if (!allowed) {
+  private async assertWritablePath(target: string, followFinalComponent = false): Promise<void> {
+    if (!(await this.isWritablePath(target, followFinalComponent))) {
       throw new Error(`refusing to write outside configured fleet roots: ${target}`);
     }
   }
 
-  /** Returns the names pruned by this operation; every other operation returns nothing. */
-  private async applyOperation(operation: FleetWriteOperation): Promise<readonly string[]> {
+  private async isWritablePath(target: string, followFinalComponent = false): Promise<boolean> {
+    const canonical = followFinalComponent
+      ? await canonicalDirectory(path.resolve(target))
+      : await canonicalPath(target);
+    const roots = await Promise.all(this.allowedRoots.map(canonicalDirectory));
+    return roots.some(root => isInside(root, canonical));
+  }
+
+  /** Returns pruned names, or `undefined` when filesystem evidence proves the operation a no-op. */
+  private async applyOperation(operation: FleetWriteOperation): Promise<readonly string[] | undefined> {
     if (operation.kind === 'directory') {
       await mkdir(operation.path, { recursive: true, mode: operation.mode });
       if (operation.mode !== undefined) {
@@ -135,8 +257,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'codex-sqlite-ownership') {
-      await this.reconcileCodexSqliteOwnership(operation);
-      return [];
+      return (await this.reconcileCodexSqliteOwnership(operation)) ? [] : undefined;
     }
 
     if (operation.kind === 'settings') {
@@ -179,8 +300,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
    */
   private async reconcileCodexSqliteOwnership(
     operation: Extract<FleetWriteOperation, { readonly kind: 'codex-sqlite-ownership' }>,
-  ): Promise<void> {
-    this.assertWritablePath(operation.markerPath);
+  ): Promise<boolean> {
+    await this.assertWritablePath(operation.markerPath);
     const markerDocument = await this.readRegularText(operation.markerPath, 'Codex SQLite ownership sidecar');
     const marker =
       markerDocument === undefined ? undefined : this.parseCodexSqliteMarker(markerDocument, operation.markerPath);
@@ -197,10 +318,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
       };
       await mkdir(path.dirname(operation.markerPath), { recursive: true, mode: 0o700 });
       await this.writeFileAtomically(operation.markerPath, `${JSON.stringify(next)}\n`, 0o600);
-      return;
+      return true;
     }
 
-    if (marker === undefined) return;
+    if (marker === undefined) return false;
     const configDocument = await this.readRegularText(operation.path, 'Codex configuration');
     if (configDocument !== undefined) {
       const current = { ...this.parseCodexConfig(configDocument, operation.path, 'disabling sharing') };
@@ -215,6 +336,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       }
     }
     await rm(operation.markerPath, { force: true });
+    return true;
   }
 
   private async readRegularText(target: string, label: string): Promise<string | undefined> {
@@ -324,6 +446,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   private async writeManifest(plan: FleetApplyPlan): Promise<void> {
+    await this.assertWritablePath(plan.manifestPath);
     const content = `${JSON.stringify(plan.manifest, null, 2)}\n`;
     await mkdir(path.dirname(plan.manifestPath), { recursive: true });
     await this.writeFileAtomically(plan.manifestPath, content, 0o600);
