@@ -10,6 +10,7 @@ import {
   findAccountById,
   isModelSelectable,
   selectableModelIds,
+  wrapperName,
 } from '../../src/lib/manifest.ts';
 import type { FleetManifestAccount } from '../../src/lib/manifest.ts';
 
@@ -286,5 +287,17 @@ describe('buildFleetManifest', () => {
     // Assert
     should(actual.accounts.length).equal(2);
     should(availableAccounts(actual).map(entry => entry.id)).deepEqual([ID_ONE]);
+  });
+});
+
+describe('wrapperName', () => {
+  it('should recover the executable name a person types from the published path', () => {
+    // Arrange / Act / Assert
+    should(wrapperName(account())).equal('crc-auto-atomi');
+  });
+
+  it('should answer the whole value when the manifest publishes a bare name', () => {
+    // Arrange / Act / Assert — nothing here reassembles a path, so a bare wrapper is its own name
+    should(wrapperName(account({ wrapper: 'crc-auto-atomi' }))).equal('crc-auto-atomi');
   });
 });

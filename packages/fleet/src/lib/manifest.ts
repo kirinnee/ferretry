@@ -12,6 +12,7 @@
  *    `defaultModel` must name a model this account declares available. A configuration that says
  *    a model is down can therefore never produce a manifest that offers or defaults to it.
  */
+import { basename } from 'node:path';
 import { z } from 'zod';
 
 const NonEmptyString = z.string().min(1);
@@ -55,7 +56,15 @@ const accountShape = {
   id: AccountIdSchema,
   kind: HarnessKindSchema,
   mode: AccountModeSchema,
-  /** Executable name generated for this account. An attribute — never parsed for meaning. */
+  /**
+   * ABSOLUTE PATH of the executable provisioning generated for this account, not a bare name.
+   *
+   * A consumer must be able to launch an account without knowing where wrappers live, and — the
+   * reason this is a path rather than a name — without a `PATH` that happens to contain the fleet's
+   * bin directory. A daemon started by a service manager inherits no shell profile, so a name-based
+   * lookup of a wrapper under `<FY_HOME>/fleet/bin` cannot resolve there however correctly the fleet
+   * was provisioned. {@link wrapperName} is the one sanctioned way to recover the name from it.
+   */
   wrapper: NonEmptyString,
   /** Absolute path of the harness config directory this account owns. */
   home: NonEmptyString,
@@ -194,6 +203,20 @@ export function buildFleetManifest(input: FleetManifestInput): FleetManifest {
     generatedAt: input.generatedAt,
     accounts: input.accounts,
   });
+}
+
+/**
+ * The executable NAME this account publishes — the word an operator types and a session record
+ * carries, taken from the published path rather than reassembled from a configuration.
+ *
+ * Publishing both a name and a path would be two spellings of one fact, and the pair that could
+ * disagree is exactly the class of defect this manifest exists to remove. So the path is published
+ * and the name is derived here, once, for every consumer that needs to say which account something
+ * ran as. It is not a meaning read out of a name: nothing downstream may infer an account's harness,
+ * lane or model from this string — {@link FleetManifestAccount.kind} and its siblings declare those.
+ */
+export function wrapperName(account: FleetManifestAccount): string {
+  return basename(account.wrapper);
 }
 
 /** Model ids this account may actually be asked to serve. Never includes an unavailable model. */
