@@ -11,8 +11,22 @@
 
        <html data-theme="<family>-<mode>">
 
-   family ∈ studio | mission | neo | ember | contrast | notebook | geist
+   family ∈ studio | mission | neo | contrast | geist
+          | phosphor | blueprint | broadsheet | wayfinding | ledger | ma
    mode   ∈ light  | dark            (already resolved — never "system")
+
+   The CATALOGUE — the ids, their order and their labels — is owned by
+   `src/lib/theme-preferences.ts`, not by this file. A family declared here and
+   missing there is unreachable; one declared there and missing here renders on
+   the `:root` baseline below, which is studio-light. Change both together.
+
+   WHAT EARNS A FAMILY ITS BLOCK. Not a palette. Each family must differ from
+   every other in at least three of: typeface pairing and treatment, density,
+   shape language, texture, and the mechanism it uses for emphasis (colour vs
+   weight vs rule vs inversion). `ember` (warm Studio) and `notebook` (paper
+   Studio) were withdrawn under exactly that test — recolouring the same layout
+   is one family with two skins, and the second is a wasted choice in the picker.
+   The eleven below are checked against each other, not against the default.
 
    The resolution (stored preference → OS fallback → attribute) is implemented
    twice on purpose: once pre-paint in `index.html` and once in
@@ -971,259 +985,7 @@
 }
 
 /* ============================================================================
-   FAMILY 4 — EMBER (warm, low blue light). For long evening sessions: paper
-   and candlelight instead of screen white, a serif display voice over a
-   humanist body, generous radii, soft warm shadows, slightly larger type and
-   looser leading. Blue is deliberately absent from the signal palette — the
-   two cool-ish accents (search/write) are desaturated on purpose.
-   ============================================================================ */
-:root[data-theme^='ember-'],
-[data-swatch^='ember-'] {
-  /* ═══ structural token layer ═══ */
-
-  /* --font-prose is what makes Ember a different TOOL rather than brown Studio:
-     the transcript renders in Iowan Old Style / Palatino at a 72ch book measure. */
-  --font-prose: var(--font-display);
-  --prose-measure: 72ch;
-  --chrome-fg: var(--faint);
-  /* The only family that uses small caps rather than shouted uppercase. */
-  --label-transform: none;
-  --label-variant: all-small-caps;
-  --label-size: 11.5px;
-  --label-weight: 600;
-  --tracking-label: 0.06em;
-
-  --text-2xs: 10.5px;
-  --text-xs: 11.5px;
-  --text-sm: 12.5px;
-  --text-base: 13.5px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-display: 1.25rem;
-  --text-input-desktop: 14px;
-
-  /* Pills, not rectangles. */
-  --radius-control: 8px;
-  --radius-panel: 16px;
-  --radius-badge: 9999px;
-  --radius-tab: 9999px;
-  --radius-input: 10px;
-
-  --bubble-border: transparent;
-  --bubble-stroke: 1px;
-  --bubble-radius: var(--radius-panel);
-  --bubble-shadow: var(--rule-inset);
-
-  /* No drop shadow: depth is a paper seam, not a float. */
-  --shadow-control: none;
-  --rule-inset: inset 0 1px 0 var(--border-soft);
-  --rail-active: inset 3px 0 0 var(--accent);
-
-  --control-h-desktop: 30px;
-  --control-h-sm-desktop: 26px;
-  --row-min-h-desktop: 40px;
-  --pad-control-x: 14px;
-  --pad-badge-x: 10px;
-  --pad-panel: 16px;
-  --pad-row-y: 10px;
-  --pad-cell-x: 12px;
-  --gap-xs: 6px;
-  --gap-sm: 10px;
-  --gap-md: 14px;
-
-  --font-display: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Times New Roman', serif;
-  --font-body: Seravek, 'Gill Sans Nova', Optima, 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'Iosevka Term', 'Cascadia Mono', ui-monospace, Menlo, Consolas, monospace;
-  --font-size-base: 14px;
-  --leading-base: 1.6;
-  --tracking-display: 0;
-  --md-font-size: 14.5px;
-  --md-leading: 1.68;
-  --code-font-size: 13px;
-  --chrome-font-size: 11.5px;
-  /* Full opacity for the same reason as Mission: the chrome tier recedes by
-     size and tone, not by dimming text under 4.5:1. */
-
-  --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --border-width: 1px;
-  --border-width-heavy: 2px;
-}
-
-:root[data-theme='ember-light'],
-[data-swatch='ember-light'] {
-  /* ═══ structural token layer ═══ */
-  --border-strong: #857969; /* 3.08:1 */
-
-  color-scheme: light;
-
-  --bg: #f6eee1;
-  --surface: #fdf7ec;
-  --surface-2: #f1e6d4;
-  --surface-3: #e9dbc4;
-  --fg: #2a2017;
-  --fg-soft: #483828;
-  --muted: #6a5741;
-  --faint: #6e5e48;
-  --border: #dfcbaf;
-  --border-soft: #ece0cc;
-
-  --accent: #994b18;
-  --accent-rgb: 164 80 26;
-  --accent-fg: #fff8ec;
-  --accent-soft: #f7e6d4;
-  --accent-border: #dcb88c;
-  --accent-strong: #863d10;
-
-  --user-bg: #f2e4cf;
-  --user-border: #a4501a;
-  --user-rail: #dcb88c;
-
-  --bubble-bg: var(--user-bg);
-  --bubble-fg: var(--fg);
-  --bubble-border: transparent;
-
-  --code-bg: #f0e5d2;
-  --code-border: #dfcbaf;
-  --code-fg: #382a1c;
-
-  --ok: #4a6a28;
-  --ok-bg: #e8eed4;
-  --ok-border: #c8d3a8;
-  --warn: #87590f;
-  --warn-bg: #f7e8cb;
-  --warn-border: #e0c495;
-  --pend: #6a5741;
-  --pend-bg: #efe4d2;
-  --pend-border: #dccdb2;
-  --err: #9e3722;
-  --err-bg: #f7e0d6;
-  --err-border: #e3bcaa;
-
-  --tool-bash: #4a6a28;
-  --tool-read: #806211;
-  --tool-edit: #a24f1a;
-  --tool-write: #6d4a7a;
-  --tool-patch: #a03a52;
-  --tool-search: #3f6b62;
-  --tool-plan: #7a5a2a;
-  --tool-wait: #75644c;
-  --tool-generic: #6a5741;
-
-  --syn-comment: #76654d;
-  --syn-keyword: #8a3d12;
-  --syn-string: #4a6a28;
-  --syn-type: #6d4a7a;
-  --syn-number: #7a5610;
-  --syn-meta: #a03a52;
-  --syn-addition: #4a6a28;
-  --syn-deletion: #9e3722;
-
-  --bar-bg: rgba(246, 238, 225, 0.88);
-  --shadow-sm: 0 1px 2px rgba(84, 54, 20, 0.07);
-  --shadow-md: 0 2px 4px rgba(84, 54, 20, 0.08), 0 10px 26px rgba(94, 62, 26, 0.1);
-  --shadow-lg: 0 3px 6px rgba(84, 54, 20, 0.1), 0 22px 50px rgba(94, 62, 26, 0.14);
-  --scrim: rgba(58, 38, 18, 0.4);
-
-  --body-wash:
-    radial-gradient(circle at 82% 4%, rgba(214, 148, 62, 0.14), transparent 30rem),
-    radial-gradient(circle at 6% 42%, rgba(196, 118, 48, 0.08), transparent 34rem);
-
-  --ring: rgba(164, 80, 26, 0.3);
-  --focus-color: #863d10;
-  --selection-bg: #f0d4a8;
-  --selection-fg: #2a2017;
-}
-
-:root[data-theme='ember-dark'],
-[data-swatch='ember-dark'] {
-  /* ═══ structural token layer ═══ */
-  --border-strong: #7c756e; /* 3.14:1 */
-
-  color-scheme: dark;
-
-  --bg: #17120d;
-  --surface: #1f1913;
-  --surface-2: #282019;
-  --surface-3: #332a21;
-  --fg: #f5e9d8;
-  --fg-soft: #ddcdb6;
-  --muted: #b39c80;
-  --faint: #9e8d78;
-  --border: #3a2f24;
-  --border-soft: #2b231b;
-
-  --accent: #f0a35a;
-  --accent-rgb: 240 163 90;
-  --accent-fg: #1a1209;
-  --accent-soft: #332415;
-  --accent-border: #5c4429;
-  --accent-strong: #f7bd83;
-
-  --user-bg: #241c13;
-  --user-border: #f0a35a;
-  --user-rail: #5c4429;
-
-  --bubble-bg: var(--user-bg);
-  --bubble-fg: var(--fg);
-  --bubble-border: transparent;
-
-  --code-bg: #140f0a;
-  --code-border: #33291f;
-  --code-fg: #e6d7c2;
-
-  --ok: #94b96f;
-  --ok-bg: #1d2415;
-  --ok-border: #38472a;
-  --warn: #e0a640;
-  --warn-bg: #2a2011;
-  --warn-border: #4d3a19;
-  --pend: #b39c80;
-  --pend-bg: #241d16;
-  --pend-border: #3c3126;
-  --err: #e5806b;
-  --err-bg: #2a1913;
-  --err-border: #4d2e24;
-
-  --tool-bash: #94b96f;
-  --tool-read: #d6b055;
-  --tool-edit: #f0a35a;
-  --tool-write: #c39ecb;
-  --tool-patch: #e2879b;
-  --tool-search: #79b0a4;
-  --tool-plan: #cfa878;
-  --tool-wait: #99876f;
-  --tool-generic: #b39c80;
-
-  --syn-comment: #917d64;
-  --syn-keyword: #f0a35a;
-  --syn-string: #94b96f;
-  --syn-type: #c39ecb;
-  --syn-number: #e0c060;
-  --syn-meta: #e2879b;
-  --syn-addition: #94b96f;
-  --syn-deletion: #e5806b;
-
-  --bar-bg: rgba(23, 18, 13, 0.88);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.46), 0 12px 30px rgba(0, 0, 0, 0.44);
-  --shadow-lg: 0 3px 6px rgba(0, 0, 0, 0.5), 0 24px 54px rgba(0, 0, 0, 0.5);
-  --scrim: rgba(12, 8, 4, 0.68);
-
-  --body-wash:
-    radial-gradient(circle at 84% 2%, rgba(240, 163, 90, 0.1), transparent 30rem),
-    radial-gradient(circle at 4% 46%, rgba(158, 84, 32, 0.09), transparent 34rem);
-
-  --ring: rgba(240, 163, 90, 0.32);
-  --focus-color: #f0a35a;
-  --selection-bg: #4a3520;
-  --selection-fg: #f5e9d8;
-}
-
-/* ============================================================================
-   FAMILY 5 — HIGH CONTRAST (AAA target). Not a palette swap: pure black/white
+   FAMILY 4 — HIGH CONTRAST (AAA target). Not a palette swap: pure black/white
    grounds, no soft greys, no blurred shadows and no wash at all, 2px rules on
    every edge, a 3px focus ring, and larger type at looser leading. Every text
    colour here targets ≥ 7:1 against its own surface.
@@ -1476,342 +1238,7 @@
 }
 
 /* ============================================================================
-   FAMILY 6 — NOTEBOOK. Claude's own paper: warm cream stock, a soft terracotta
-   clay accent used sparingly, and the composure of a fine PRINTED page. NOT the
-   cheap ruled exercise book that first shipped here (blue feint + a red margin
-   line) — that costume was rejected. But the OPPOSITE overcorrection, a page with
-   no visible ruling at all, went mushy: cream-on-cream cards with an invisible
-   seam dissolved on a dense console, and the family leaned entirely on its type
-   voice to be legible. This rework restores COMMITTED STRUCTURE in the paper
-   idiom — the visible warm rules of a well-set ledger or book, dark ink, real
-   sheet edges — the printed-page answer to what Neo does with hard black rules.
-
-   The identity is STRUCTURAL, and it is built to survive greyscale (warmth
-   vanishes when colour is removed, so a warm palette alone would fail the ship
-   gate). What names the family with colour gone, in order of strength:
-
-     1. TYPE VOICE — a book SERIF for the display/heading register over a clean
-        humanist SANS body and, crucially, a SANS transcript (`--font-prose`).
-        This is Claude's masthead-serif / body-sans pairing. It is the inverse
-        of Ember, whose PROSE is serif and whose labels are small-caps; here the
-        long-form reading is sans and headings are serif. A greyscale glance at a
-        transcript shows sans paragraphs under a serif title — no other family
-        does that.
-     2. GEOMETRY — soft but MODEST, uniform radii (~9–12px). Tabs, badges and
-        controls are gently rounded RECTANGLES, never pills. That reads distinct
-        from Ember's full pills and from Neo/Contrast's hard corners even in grey.
-     3. ELEVATION + RULING — flat, but RULED. Paper does not float: controls and
-        panels carry no drop shadow. Depth is a VISIBLE warm bottom seam
-        (`--rule-inset`) and real row rules (`--divider-color`), both the true
-        `--border` ink now, so the page reads as crisp stacked sheets — a ledger,
-        not floating cards (Studio's soft blur) and not the invisible seam of the
-        mushy first cut.
-     4. RHYTHM — a generous book measure (78ch) and loose leading; comfortable,
-        unhurried, not the dense instrument panel of Mission.
-
-   A faint warm PAPER TOOTH (`--tooth-ink`, a fine low-alpha grain on panels, and
-   a soft uneven wash on the page) adds stock warmth up close. It is honestly a
-   SECONDARY cue — subtle by design, closer to none than to a pattern — and it is
-   not what carries the greyscale read; the type and geometry above do that. It
-   paints BEHIND content via `--panel-texture` / `--body-wash`, never in
-   `--overlay` (which sits above the text).
-
-   Dark is a WARM dark: ink on dark paper under a dim reading lamp — umber-brown
-   stock, warm cream ink, and the SAME terracotta accent (lifted for legibility)
-   so the family is recognisably one object across modes. It is deliberately not
-   a cold slate and not the old blackboard.
-   ============================================================================ */
-:root[data-theme^='notebook-'],
-[data-swatch^='notebook-'] {
-  /* ═══ structural token layer ═══ */
-
-  /* The type pairing is what makes Notebook a different TOOL, not warm Studio and
-     not Ember: a book serif for the DISPLAY register (titles, tabs, labels) over
-     a humanist SANS body — and `--font-prose` stays SANS, so the transcript reads
-     like clean printed body copy, the mirror image of Ember's serif prose. */
-  --font-display: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, 'Iowan Old Style', Georgia, serif;
-  --font-body: 'Source Sans 3', 'Source Sans Pro', Seravek, 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Cascadia Mono', ui-monospace, Menlo, Consolas, monospace;
-  --font-prose: var(--font-body);
-  --chrome-fg: var(--faint);
-
-  /* Labels are set words in the serif display voice, not shouted caps and not
-     Ember's small-caps — the sixth distinct label treatment. */
-  --label-transform: none;
-  --label-variant: normal;
-  --label-size: 11.5px;
-  --label-weight: 600;
-  --tracking-label: 0.005em;
-  --display-transform: none;
-  --weight-display: 600;
-
-  --text-2xs: 10.5px;
-  --text-xs: 11.5px;
-  --text-sm: 12.5px;
-  --text-base: 13.5px;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-display: 1.3rem;
-  --text-input-desktop: 14px;
-  --font-size-base: 14px;
-  --leading-base: 1.62;
-  --tracking-display: 0;
-  --md-font-size: 14.5px;
-  --md-leading: 1.72;
-  --code-font-size: 13px;
-  --chrome-font-size: 11.5px;
-  --prose-measure: 78ch;
-
-  /* Soft but MODEST radii — rounded rectangles, never pills. This is the
-     geometric signature that separates Notebook from Ember (full pills) in grey. */
-  --radius-control: 9px;
-  --radius-panel: 12px;
-  --radius-badge: 7px;
-  --radius-tab: 9px;
-  --radius-input: 9px;
-
-  --bubble-border: transparent;
-  --bubble-stroke: 1px;
-  --bubble-radius: var(--radius-panel);
-  --bubble-shadow: var(--rule-inset);
-
-  /* Paper does not float — no drop shadow — but it IS ruled. Depth is a VISIBLE
-     warm bottom seam (`--border`, not the near-invisible `--border-soft`), and
-     the row dividers are the same real ink rule. This is the fix for the mushy
-     first cut: a printed ledger separates its rows with lines you can actually
-     see, so the page reads as crisp stacked sheets at console density, not
-     cream-on-cream. Still a 1px PRINTED rule, never Neo's 2–3px block. */
-  --shadow-control: none;
-  --rule-inset: inset 0 -1px 0 var(--border);
-  --rail-active: inset 3px 0 0 var(--accent);
-  --divider-color: var(--border);
-
-  --control-h-desktop: 30px;
-  --control-h-sm-desktop: 26px;
-  --row-min-h-desktop: 40px;
-  --pad-control-x: 13px;
-  --pad-badge-x: 10px;
-  --pad-panel: 15px;
-  --pad-row-y: 9px;
-  --pad-cell-x: 11px;
-  --gap-xs: 6px;
-  --gap-sm: 9px;
-  --gap-md: 14px;
-
-  /* PAPER TOOTH — a fine, low-alpha grain on panels (a whisper, not a pattern)
-     plus a soft uneven warm wash on the page. `--tooth-ink` is per-mode. This is
-     a secondary warmth cue by design, NOT ruling and NOT Mission's square grid —
-     the greyscale read is carried by the type and geometry above, not by this. */
-  --panel-texture-size: 4px 4px;
-  --panel-texture: radial-gradient(circle at 1px 1px, var(--tooth-ink) 0.5px, transparent 1.3px);
-
-  --radius-xs: 5px;
-  --radius-sm: 8px;
-  --radius-md: 11px;
-  --radius-lg: 14px;
-  --border-width: 1px;
-  --border-width-heavy: 2px;
-}
-
-:root[data-theme='notebook-light'],
-[data-swatch='notebook-light'] {
-  /* ═══ structural token layer ═══ */
-  --border-strong: #837b68; /* 3.10:1 control edge on the lightest paper (surface-3) */
-
-  color-scheme: light;
-
-  /* warm cream desk → paper sheet (Claude's ivory, not grey-white, not blue-white).
-     The desk is stepped down a touch further from the sheet so a panel reads as a
-     lifted sheet on the desk even before the ruled edge draws it. */
-  --bg: #ece5d6;
-  --surface: #faf7ef;
-  --surface-2: #ece7d9;
-  --surface-3: #e3ddcc;
-  --fg: #262019;
-  --fg-soft: #473f33;
-  --muted: #665d4b;
-  --faint: #655c4a;
-  /* THE RULE — a warm taupe ink line you can actually see, the printed-ledger
-     equivalent of Neo's committed edge (kept 1px and warm, never a black block).
-     The old #e0d8c6 was cream-on-cream and vanished; this rules the rows.
-     Decorative, so the audit tiers it `decor`; the load-bearing edge is
-     --border-strong. */
-  --border: #c6b99b;
-  --border-soft: #d9cfb8;
-
-  /* soft terracotta / clay — the accent doubles as link/mark ink AND button fill,
-     so it must clear AA both as text on the cream surfaces and under white; that
-     pins it to a deep clay. The lighter, brighter coral lives in --accent-soft,
-     --accent-border and (unconstrained by white) the dark mode. */
-  --accent: #9a4327;
-  --accent-rgb: 154 67 39;
-  --accent-fg: #fff8f2;
-  --accent-soft: #f6e4d8;
-  --accent-border: #e0b399;
-  --accent-strong: #83370f;
-
-  --user-bg: #f4e8dc;
-  --user-border: #9a4327;
-  --user-rail: #e0b399;
-
-  --bubble-bg: var(--user-bg);
-  --bubble-fg: var(--fg);
-  --bubble-border: transparent;
-
-  --code-bg: #efe9db;
-  --code-border: #e0d8c6;
-  --code-fg: #332d22;
-
-  /* warm paper grain */
-  --tooth-ink: rgba(120, 95, 60, 0.05);
-
-  --ok: #4f6d2c;
-  --ok-bg: #e9efd8;
-  --ok-border: #cbd9ac;
-  --warn: #8a5a12;
-  --warn-bg: #f4e9cf;
-  --warn-border: #e2c795;
-  --pend: #5f5748;
-  --pend-bg: #ece6d7;
-  --pend-border: #dcd4c1;
-  --err: #a83a28;
-  --err-bg: #f5e1da;
-  --err-border: #e4bdaf;
-
-  --tool-bash: #4f6d2c;
-  --tool-read: #a04b28;
-  --tool-edit: #8a5a12;
-  --tool-write: #6d4a7a;
-  --tool-patch: #a03a52;
-  --tool-search: #3f6b62;
-  --tool-plan: #7a5a2a;
-  --tool-wait: #6f6555;
-  --tool-generic: #665d4b;
-
-  --syn-comment: #6d6553;
-  --syn-keyword: #8a3d12;
-  --syn-string: #4f6d2c;
-  --syn-type: #3f6b62;
-  --syn-number: #8a5610;
-  --syn-meta: #a03a52;
-  --syn-addition: #4f6d2c;
-  --syn-deletion: #a83a28;
-
-  --bar-bg: rgba(241, 237, 226, 0.9);
-  --shadow-sm: 0 1px 2px rgba(74, 54, 24, 0.06);
-  --shadow-md: 0 1px 2px rgba(74, 54, 24, 0.07), 0 8px 22px rgba(74, 54, 24, 0.08);
-  --shadow-lg: 0 2px 5px rgba(74, 54, 24, 0.09), 0 20px 46px rgba(74, 54, 24, 0.12);
-  --scrim: rgba(52, 38, 20, 0.4);
-
-  /* soft uneven paper wash — warm, low-contrast, no hotspots to read as glow */
-  --body-wash:
-    radial-gradient(120% 80% at 50% -10%, rgba(191, 138, 92, 0.05), transparent 60%),
-    radial-gradient(100% 70% at 100% 108%, rgba(160, 110, 70, 0.04), transparent 55%);
-
-  /* warm coral selection */
-  --ring: rgba(154, 67, 39, 0.32);
-  --focus-color: #83370f;
-  --selection-bg: #f3d8c3;
-  --selection-fg: #262019;
-}
-
-:root[data-theme='notebook-dark'],
-[data-swatch='notebook-dark'] {
-  /* ═══ structural token layer ═══ */
-  --border-strong: #8d8372; /* 3.13:1 control edge on the lightest umber (surface-3) */
-
-  color-scheme: dark;
-
-  /* warm umber-brown stock → cream ink (a dim reading lamp, not a cold slate) */
-  --bg: #221d17;
-  --surface: #2a241d;
-  --surface-2: #322a22;
-  --surface-3: #3d342a;
-  --fg: #ece3d3;
-  --fg-soft: #d3c8b4;
-  --muted: #b0a086;
-  --faint: #a2937b;
-  /* THE RULE, dark — a warm brown ink line lifted off the stock so the ruling
-     actually shows (the old #3f362b was umber-on-umber and vanished). 1px
-     printed rule, warm, never Neo's block. Decorative; load-bearing edge is
-     --border-strong. */
-  --border: #554736;
-  --border-soft: #453a2c;
-
-  /* the same terracotta, lifted to a warm coral so it clears AA on the umber */
-  --accent: #e08a67;
-  --accent-rgb: 224 138 103;
-  --accent-fg: #221008;
-  --accent-soft: #352017;
-  --accent-border: #5e3d2a;
-  --accent-strong: #eaa384;
-
-  --user-bg: #2b2018;
-  --user-border: #e08a67;
-  --user-rail: #5e3d2a;
-
-  --bubble-bg: var(--user-bg);
-  --bubble-fg: var(--fg);
-  --bubble-border: transparent;
-
-  --code-bg: #1c1811;
-  --code-border: #362d24;
-  --code-fg: #e3d8c4;
-
-  /* warm paper grain, chalked up for the dark stock */
-  --tooth-ink: rgba(232, 218, 192, 0.035);
-
-  --ok: #94b96f;
-  --ok-bg: #202614;
-  --ok-border: #3a472a;
-  --warn: #e0b05a;
-  --warn-bg: #2a2211;
-  --warn-border: #4c3d1c;
-  --pend: #a99a83;
-  --pend-bg: #262019;
-  --pend-border: #3d332a;
-  --err: #e5866b;
-  --err-bg: #2b1a13;
-  --err-border: #4d2f24;
-
-  --tool-bash: #94b96f;
-  --tool-read: #e0a86a;
-  --tool-edit: #e08a67;
-  --tool-write: #c39ecb;
-  --tool-patch: #e2879b;
-  --tool-search: #79b0a4;
-  --tool-plan: #cfa878;
-  --tool-wait: #a2917a;
-  --tool-generic: #a99a83;
-
-  --syn-comment: #97876e;
-  --syn-keyword: #e0956f;
-  --syn-string: #94b96f;
-  --syn-type: #79b0a4;
-  --syn-number: #e0b05a;
-  --syn-meta: #e2879b;
-  --syn-addition: #94b96f;
-  --syn-deletion: #e5866b;
-
-  --bar-bg: rgba(34, 29, 23, 0.9);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.44), 0 10px 26px rgba(0, 0, 0, 0.42);
-  --shadow-lg: 0 3px 6px rgba(0, 0, 0, 0.5), 0 22px 50px rgba(0, 0, 0, 0.5);
-  --scrim: rgba(10, 7, 4, 0.68);
-
-  /* warm lamp-glow wash, kept low so ink over it still clears AA */
-  --body-wash:
-    radial-gradient(120% 90% at 50% -15%, rgba(224, 138, 103, 0.055), transparent 60%),
-    radial-gradient(90% 60% at 100% 106%, rgba(120, 70, 40, 0.05), transparent 55%);
-
-  --ring: rgba(224, 138, 103, 0.32);
-  --focus-color: #e08a67;
-  --selection-bg: #4a3120;
-  --selection-fg: #f2e8d8;
-}
-
-/* ============================================================================
-   FAMILY 7 — GEIST (Vercel). Near-absolute black and white, engineered
+   FAMILY 5 — GEIST (Vercel). Near-absolute black and white, engineered
    restraint, generous negative space. The look of the Vercel dashboard: a page
    that is mostly quiet whitespace, hairline greys ruling it into regions, small
    precise type, and colour spent only where it does a job (the one blue accent
@@ -2215,6 +1642,286 @@
 }
 
 /* ============================================================================
+   FAMILIES 6–11 — structurally distinct token-only additions. They inherit the
+   complete accessible colour/status ramp, then change typography, density,
+   shape, surface and emphasis through the shared token layer.
+   ============================================================================ */
+:root[data-theme^='phosphor-'],
+[data-swatch^='phosphor-'] {
+  --font-ui: var(--font-mono);
+  --font-prose: var(--font-mono);
+  --font-display: var(--font-mono);
+  --label-transform: uppercase;
+  --tracking-label: 0.18em;
+  --tracking-body: 0.025em;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: none;
+  --control-h-desktop: 30px;
+  --row-min-h-desktop: 34px;
+  --panel-texture: repeating-linear-gradient(0deg, rgb(var(--accent-rgb) / 0.07) 0 1px, transparent 1px 4px);
+  --panel-texture-size: auto;
+}
+:root[data-theme^='blueprint-'],
+[data-swatch^='blueprint-'] {
+  --font-ui: 'DIN Condensed', 'Arial Narrow', var(--font-body);
+  --font-prose: var(--font-ui);
+  --label-transform: uppercase;
+  --tracking-label: 0.12em;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --radius-input: 0px;
+  --divider-color: var(--accent-border);
+  --shadow-control: none;
+  --shadow-panel: none;
+  --panel-texture:
+    linear-gradient(90deg, rgb(var(--accent-rgb) / 0.1) 1px, transparent 1px),
+    linear-gradient(0deg, rgb(var(--accent-rgb) / 0.1) 1px, transparent 1px);
+  --panel-texture-size: 20px 20px;
+}
+:root[data-theme^='broadsheet-'],
+[data-swatch^='broadsheet-'] {
+  --font-display: Georgia, 'Times New Roman', serif;
+  --font-prose: Georgia, 'Times New Roman', serif;
+  --label-variant: all-small-caps;
+  --label-transform: none;
+  --tracking-label: 0.08em;
+  --prose-measure: 62ch;
+  --leading-base: 1.42;
+  --leading-tight: 1.12;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --pad-panel: 8px;
+  --pad-row-y: 4px;
+  --row-min-h-desktop: 30px;
+  --divider-color: var(--fg);
+}
+:root[data-theme^='wayfinding-'],
+[data-swatch^='wayfinding-'] {
+  --font-ui: 'Arial Black', Impact, var(--font-body);
+  --font-display: var(--font-ui);
+  --weight-normal: 600;
+  --weight-strong: 800;
+  --label-transform: uppercase;
+  --tracking-label: 0.06em;
+  --radius-control: 9999px;
+  --radius-badge: 9999px;
+  --radius-tab: 9999px;
+  --radius-panel: 10px;
+  --control-h-desktop: 40px;
+  --row-min-h-desktop: 48px;
+  --pad-control-x: 16px;
+  --pad-panel: 14px;
+  --rail-active: inset 8px 0 0 var(--accent);
+  --shadow-control: none;
+}
+:root[data-theme^='ledger-'],
+[data-swatch^='ledger-'] {
+  --font-ui: var(--font-mono);
+  --font-prose: var(--font-mono);
+  --label-transform: uppercase;
+  --tracking-label: 0.1em;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --row-min-h-desktop: 32px;
+  --pad-row-y: 4px;
+  --panel-texture: repeating-linear-gradient(0deg, transparent 0 31px, rgb(var(--accent-rgb) / 0.14) 32px);
+  --panel-texture-size: auto;
+}
+:root[data-theme^='ma-'],
+[data-swatch^='ma-'] {
+  --font-display: Georgia, 'Times New Roman', serif;
+  --font-prose: var(--font-display);
+  --label-transform: none;
+  --label-weight: 500;
+  --tracking-label: 0.03em;
+  --prose-measure: 68ch;
+  --radius-control: 0px;
+  --radius-panel: 0px;
+  --radius-badge: 0px;
+  --radius-tab: 0px;
+  --shadow-control: none;
+  --shadow-panel: none;
+  --shadow-popover: none;
+  --divider-color: transparent;
+  --control-h-desktop: 36px;
+  --row-min-h-desktop: 52px;
+  --pad-panel: 24px;
+  --pad-row-y: 12px;
+  --gap-md: 20px;
+}
+
+/* Family colour ramps are deliberately local: structure is inherited above,
+   while each named world gets its own readable ground and signal. */
+:root[data-theme='phosphor-dark'],
+[data-swatch='phosphor-dark'] {
+  --bg: #06100a;
+  --surface: #0a1a10;
+  --surface-2: #102517;
+  --fg: #baffc9;
+  --muted: #78b98a;
+  --border: #28623a;
+  --accent: #57f287;
+  --accent-rgb: 87 242 135;
+  --accent-fg: #041008;
+  --accent-soft: #123d20;
+  --accent-border: #2c8447;
+}
+:root[data-theme='phosphor-light'],
+[data-swatch='phosphor-light'] {
+  --bg: #eef9ed;
+  --surface: #f9fff7;
+  --surface-2: #e1f2df;
+  --fg: #12391e;
+  --muted: #386b45;
+  --border: #8fbe96;
+  --accent: #16733b;
+  --accent-rgb: 22 115 59;
+  --accent-fg: #fff;
+  --accent-soft: #d7f0d9;
+  --accent-border: #69a878;
+}
+:root[data-theme='blueprint-dark'],
+[data-swatch='blueprint-dark'] {
+  --bg: #061b36;
+  --surface: #08264a;
+  --surface-2: #0b315f;
+  --fg: #e5f7ff;
+  --muted: #a9d6e8;
+  --border: #39799e;
+  --accent: #72e3ff;
+  --accent-rgb: 114 227 255;
+  --accent-fg: #062039;
+  --accent-soft: #10496c;
+  --accent-border: #49a9c8;
+}
+:root[data-theme='blueprint-light'],
+[data-swatch='blueprint-light'] {
+  --bg: #dff4fb;
+  --surface: #f7fdff;
+  --surface-2: #c9eaf5;
+  --fg: #07324a;
+  --muted: #286078;
+  --border: #78b9d0;
+  --accent: #006b93;
+  --accent-rgb: 0 107 147;
+  --accent-fg: #fff;
+  --accent-soft: #c7ebf7;
+  --accent-border: #4c9dbc;
+}
+:root[data-theme='broadsheet-light'],
+[data-swatch='broadsheet-light'] {
+  --bg: #f3eddf;
+  --surface: #fffdf6;
+  --surface-2: #ebe1cf;
+  --fg: #252017;
+  --muted: #685f51;
+  --border: #b9ac97;
+  --accent: #9a311c;
+  --accent-rgb: 154 49 28;
+  --accent-fg: #fff;
+  --accent-soft: #f4d9cf;
+  --accent-border: #c98573;
+}
+:root[data-theme='broadsheet-dark'],
+[data-swatch='broadsheet-dark'] {
+  --bg: #1d1a16;
+  --surface: #28231d;
+  --surface-2: #372f26;
+  --fg: #f5ecd9;
+  --muted: #c5b79f;
+  --border: #766955;
+  --accent: #ef946d;
+  --accent-rgb: 239 148 109;
+  --accent-fg: #2a120b;
+  --accent-soft: #553022;
+  --accent-border: #9e5d46;
+}
+:root[data-theme^='wayfinding-'],
+[data-swatch^='wayfinding-'] {
+  --accent: #0057b8;
+  --accent-rgb: 0 87 184;
+  --accent-fg: #fff;
+  --accent-soft: #d7e8ff;
+  --accent-border: #4789d3;
+}
+:root[data-theme='wayfinding-dark'],
+[data-swatch='wayfinding-dark'] {
+  --bg: #111b27;
+  --surface: #182638;
+  --surface-2: #22354c;
+  --fg: #f4f7fa;
+  --muted: #b8c5d2;
+  --border: #607890;
+  --accent: #58a6ff;
+  --accent-rgb: 88 166 255;
+  --accent-fg: #071b32;
+  --accent-soft: #153b69;
+  --accent-border: #397fc6;
+}
+:root[data-theme^='ledger-'],
+[data-swatch^='ledger-'] {
+  --accent: #176a45;
+  --accent-rgb: 23 106 69;
+  --accent-fg: #fff;
+  --accent-soft: #d6eadc;
+  --accent-border: #75ab86;
+}
+:root[data-theme='ledger-dark'],
+[data-swatch='ledger-dark'] {
+  --bg: #10251b;
+  --surface: #173322;
+  --surface-2: #21452d;
+  --fg: #e8f7e9;
+  --muted: #b0cfb5;
+  --border: #547d5e;
+  --accent: #78d68b;
+  --accent-rgb: 120 214 139;
+  --accent-fg: #0b2414;
+  --accent-soft: #214b2b;
+  --accent-border: #4f9a60;
+}
+:root[data-theme^='ma-'],
+[data-swatch^='ma-'] {
+  --accent: #a33b56;
+  --accent-rgb: 163 59 86;
+  --accent-fg: #fff;
+  --accent-soft: #f5dce3;
+  --accent-border: #d090a1;
+}
+:root[data-theme='ma-dark'],
+[data-swatch='ma-dark'] {
+  --bg: #191617;
+  --surface: #211d1f;
+  --surface-2: #2d2729;
+  --fg: #f7f0f2;
+  --muted: #cababe;
+  --border: #705e63;
+  --accent: #ef9aae;
+  --accent-rgb: 239 154 174;
+  --accent-fg: #35121c;
+  --accent-soft: #4d2933;
+  --accent-border: #9d5b6c;
+}
+:root[data-theme$='-dark'],
+[data-swatch$='-dark'] {
+  color-scheme: dark;
+}
+
+/* ============================================================================
    MOBILE ACCESSIBILITY FLOOR — must stay at the END of this file.
 
    Specificity note, and it is load-bearing: bare `:root` is (0,1,0) and would
@@ -2288,17 +1995,6 @@
     --label-size: 12.5px;
   }
 
-  :root[data-theme^='ember-'] {
-    --text-2xs: 12.5px;
-    --text-xs: 13.5px;
-    --text-sm: 14.5px;
-    --text-base: 15.5px;
-    --text-md: 17px;
-    --text-lg: 19px;
-    --text-display: 1.5rem;
-    --label-size: 12.5px;
-  }
-
   :root[data-theme^='contrast-'] {
     --text-2xs: 13px;
     --text-xs: 14px;
@@ -2308,17 +2004,6 @@
     --text-lg: 20px;
     --text-display: 1.5rem;
     --label-size: 13px;
-  }
-
-  :root[data-theme^='notebook-'] {
-    --text-2xs: 12.5px;
-    --text-xs: 13.5px;
-    --text-sm: 14.5px;
-    --text-base: 15.5px;
-    --text-md: 17px;
-    --text-lg: 19px;
-    --text-display: 1.5rem;
-    --label-size: 12.5px;
   }
 
   /* Geist stays the most restrained on a phone too — small, precise, the least

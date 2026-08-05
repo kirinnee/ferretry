@@ -521,6 +521,13 @@ try {
           await page.screenshot({ path: appearanceTarget });
           process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
 
+          for (const family of ['phosphor', 'blueprint', 'broadsheet', 'wayfinding', 'ledger', 'ma']) {
+            const card = settingsPage.locator(`[data-family-card="${family}"]`);
+            const target = join(outDir, `theme-${family}-${viewport.name}.png`);
+            await card.screenshot({ path: target });
+            process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
+          }
+
           if (viewport.name === 'mobile') {
             // Closed and open are both review states. The latter is a viewport
             // shot because BottomSheet is fixed to the viewport, not to the
