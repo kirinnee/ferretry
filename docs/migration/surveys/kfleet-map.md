@@ -37,8 +37,8 @@ Ordered by what actually stops him, not by line count.
 | C   | [Own the assets those accounts run with](#c--own-the-assets)        | Destination table only           | **Yes**                                                               |
 | D   | [See what the fleet is](#d--see-the-fleet)                          | **Carried**, and stronger        | No                                                                    |
 | E   | [Get every account logged in](#e--get-logged-in)                    | One approval per _identity_      | **Was yes**; _closed by the identity unit_                            |
-| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes** — the daemon shelled out to kfleet; _closed by this unit_ |
-| G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                          | **Yes** (health is off by default upstream)                           |
+| F   | [Know which accounts have quota left](#f--know-whos-out-of-quota)   | Real numbers, CLI **and** daemon | **Was yes**; native Anthropic closed, other providers still GAP       |
+| G   | [Know which accounts actually work](#g--know-what-actually-works)   | **Carried**                      | No                                                                    |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Routes yes; no loop, no probe    | **Yes**                                                               |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused             | **Yes**, if he uses it                                                |
 | J   | [Start from nothing on a new machine](#j--start-from-nothing)       | `fy fleet init`                  | **Was yes**; _closed by this unit_                                    |
@@ -380,7 +380,16 @@ an exact-sentinel reply, so a silent failure that exits 0 still counts as down
 `launch`, `process_error`, `unexpected_reply`) and successes cached for 15 minutes; failures are
 never cached.
 
-**Ferretry's answer: nothing on `main`.**
+**Ferretry's answer: carried.** `FleetHealthCollector`
+(`packages/fleet/src/lib/health.ts`) is the shared account-scoped collector consumed by both
+`fy fleet health` and `GET /v1/fleet/health`. `ProcessFleetHealthProbe`
+(`packages/fleet/src/adapters/process-health-probe.ts`) launches each wrapper with the sentinel
+prompt and accepts health only for exit 0 **and** an exact `FERRETRY_HEALTH_OK` reply. A clean exit
+with extra, empty, or different stdout is `unexpected_reply`, never healthy. It preserves the
+source failure classifications (`rate_limited`, `authentication`, `timeout`, `launch`,
+`process_error`, `unexpected_reply`), caches only a success for 15 minutes, and scopes that cache
+to each daemon's `FY_HOME/fleet` directory. A skipped or unstartable probe is `unknown`; it is not
+rendered as healthy or down.
 
 **Did PR #231 reimplement this?** No, and there is no conflict — this was worth checking, because two
 notions of "is Claude installed" that disagree would be worse than one.
