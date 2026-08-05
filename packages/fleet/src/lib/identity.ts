@@ -281,6 +281,18 @@ export function buildFleetIdentities(config: FleetConfig, manifest: FleetManifes
   return identities;
 }
 
+/**
+ * Which provider login each published account shares, as a lookup keyed on the manifest account.
+ *
+ * The grouping every consumer that must not ask a provider the same question twice needs. An account
+ * the configuration no longer declares gets a key of its own, so a stale manifest can cost an extra
+ * provider call but can never make two unrelated accounts share one reading.
+ */
+export function accountIdentityKeys(config: FleetConfig): (account: FleetManifestAccount) => string {
+  const declared = new Map(resolveAccounts(config).map(account => [account.id, `${account.kind}:${account.identity}`]));
+  return account => declared.get(account.id) ?? `account:${account.id}`;
+}
+
 /** One member with what was found in its home. */
 export interface FleetIdentityMemberStatus {
   readonly member: FleetIdentityMember;

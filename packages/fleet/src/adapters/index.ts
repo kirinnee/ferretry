@@ -1,3 +1,4 @@
+export * from './anthropic-usage-probe.ts';
 export * from './config-file.ts';
 export * from './credential-store.ts';
 export * from './file-provisioner.ts';

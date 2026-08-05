@@ -13,7 +13,7 @@
  * where `<suffix>` is the first eight hex digits of `sha256(<home>)` — the name Claude Code derives
  * from its own config directory, which is why the home path must be the resolved absolute one.
  *
- * **Credential material never leaves this file.** `read` returns a classification and `clone` copies
+ * **Credential material never leaves this adapter layer.** `read` returns a classification and `clone` copies
  * end to end, so no service, renderer or log line is ever handed a token. Nothing here writes a
  * message containing material, and the classifiers it calls are pure functions over it.
  *
@@ -191,12 +191,22 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
     return { ok: true };
   }
 
+  /**
+   * The raw credential for one home.
+   *
+   * **Adapter-to-adapter only.** The usage probe genuinely needs the bearer token — a classification
+   * cannot be sent to a provider — and it is an adapter, so the material stays inside this layer. No
+   * `src/lib` module and no service may call this: everything above the adapters is served by
+   * {@link read}, which returns a verdict and never a secret.
+   */
+  async material(kind: HarnessKind, home: string): Promise<CredentialMaterial> {
+    if (kind === 'codex') return await readFileMaterial(codexPath(home));
+    if (this.deps.platform !== 'darwin') return await readFileMaterial(claudeFilePath(home));
+    return await this.#readKeychain(home);
+  }
+
   async #material(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialMaterial> {
-    if (kind === 'codex') return await readFileMaterial(codexPath(member.home));
-    if (this.deps.platform !== 'darwin') {
-      return await readFileMaterial(claudeFilePath(member.home));
-    }
-    return await this.#readKeychain(member.home);
+    return await this.material(kind, member.home);
   }
 
   async #write(kind: HarnessKind, target: FleetIdentityMember, blob: string): Promise<CredentialCloneOutcome> {
