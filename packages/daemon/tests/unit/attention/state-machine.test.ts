@@ -572,7 +572,7 @@ describe('Attention state machine', () => {
     // Act
     const resolved = succeeded(applyAttentionCommand(board.ledger, command));
     const retry = succeeded(applyAttentionCommand(resolved.ledger, command));
-    const forbidden = failed(applyAttentionCommand(board.ledger, { ...command, actor: OTHER_AGENT, at: THIRD }));
+    const forbidden = failed(applyAttentionCommand(board.ledger, { ...command, actor: AGENT, at: THIRD }));
 
     // Assert
     should(resolved.snapshot.count).equal(0);
