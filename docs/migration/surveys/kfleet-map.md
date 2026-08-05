@@ -312,6 +312,12 @@ z.ai (`:382`), MiniMax (`:487`), classification (`:741`), pre-probe token refres
 healing (`:885`), and secrets-file resolution (`:703`). The entire CLIProxyAPI availability source
 (`core/cliproxy-usage.ts`, 308 lines) is **not to be ported**.
 
+**The daemon still gets its quota from kfleet.** `/usage`, `/v1/usage` and `/metrics` are served from a
+cached feed whose only two sources are an HTTP call to kfleet's `serve` and a shell-out to its CLI, so F
+reads as closed from the CLI and open from the daemon. The fix is one `UsageSourcePort` over the native
+collector — with one join that will silently break routing if got wrong. See
+[quota-two-paths.md](quota-two-paths.md).
+
 **CLIProxyAPI is out of scope by the owner’s decision** — it is not to be ported. Its configuration is
 not silently dropped: `usage.cliProxy` is a **hard refusal** at plan time
 (`capabilities.ts` `unimplementedCapabilities`), so a configuration naming a pool fails
