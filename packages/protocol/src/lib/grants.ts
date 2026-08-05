@@ -224,6 +224,16 @@ export const GrantsViewSchema = z.strictObject({
 });
 export type GrantsView = z.infer<typeof GrantsViewSchema>;
 
+/**
+ * Setting or clearing the operator password from the host.
+ *
+ * AN ABSENT `password` CLEARS IT. That is a real operation — an operator may decide their machine no
+ * longer needs the layer — and it is spelled as absence rather than as an empty string so a client
+ * bug producing `""` fails the minimum-length rule instead of silently disarming the gate.
+ */
+export const GrantPasswordRequestSchema = z.strictObject({ password: OperatorPasswordSchema.optional() });
+export type GrantPasswordRequest = z.infer<typeof GrantPasswordRequestSchema>;
+
 /** The unlock exchange. The password travels in a body, never in a path or a query. */
 export const GrantUnlockRequestSchema = z.strictObject({ password: z.string().min(1).max(1024) });
 export type GrantUnlockRequest = z.infer<typeof GrantUnlockRequestSchema>;

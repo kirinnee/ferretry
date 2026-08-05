@@ -5,6 +5,7 @@ export * from './browser/transport/index.ts';
 export * from './catalog/index.ts';
 export * from './core/index.ts';
 export * from './filesystem/state-file-system.ts';
+export * from './grants/index.ts';
 export * from './learning/index.ts';
 export * from './migrate/bun-process-inventory.ts';
 export * from './migrate/file-migration-report.ts';

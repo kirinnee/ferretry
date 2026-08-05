@@ -1,3 +1,4 @@
+import { CAPABILITY_AXES, DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
 import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
@@ -99,6 +100,7 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
       ...(key === 'publicUrl' && document[key] === undefined ? { note: 'follows host and port' } : {}),
     });
   }
+  for (const row of describeGrants(report)) rows.push(row);
   rows.push({
     name: 'bind url',
     value: report.config.bindUrl,
@@ -111,6 +113,37 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
     origin: report.overrides.logLevel === undefined ? 'default' : 'flag',
   });
   return rows;
+}
+
+/**
+ * What a NON-LOOPBACK caller may do, one row per capability.
+ *
+ * PER CAPABILITY RATHER THAN ONE `grants` ROW, because the whole value of this report is the origin
+ * column, and a single row rendering ten booleans as JSON would answer "what" while destroying "which
+ * of these did I choose". An operator who wrote down `warden` and left the other four alone can read
+ * that here in one glance; a single row would have shown all five as `config file`.
+ *
+ * THE ROW SAYS WHO IT APPLIES TO. `--print-config` is read by somebody trying to work out why
+ * something is refused, and the commonest wrong answer would be to see `configure off` and conclude
+ * their own command line is blocked. Loopback is ungoverned, so the heading says so once.
+ */
+function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
+  const document = (report.document ?? {}) as { readonly grants?: Record<string, Record<string, unknown>> };
+  return DAEMON_CAPABILITIES.map(capability => {
+    const grant = report.config.grants[capability] ?? { use: false, configure: false };
+    const written = document.grants?.[capability];
+    // Per AXIS, not per capability: an operator who wrote `{"use": false}` and left `configure` alone
+    // chose one of the two, and a row claiming both came from the file would be false.
+    const chosen = CAPABILITY_AXES.filter(axis => written?.[axis] !== undefined);
+    return {
+      name: `grants.${capability}`,
+      value: CAPABILITY_AXES.map(axis => `${axis}=${grant[axis] ? 'on' : 'off'}`).join(' '),
+      origin: chosen.length === 0 ? ('default' as const) : ('config file' as const),
+      ...(chosen.length === 1 && chosen[0] !== undefined
+        ? { note: `${chosen[0]} was written down; the other is the default` }
+        : {}),
+    };
+  });
 }
 
 /**
@@ -128,6 +161,10 @@ export function renderConfiguration(rows: readonly ResolvedValue[], config: Daem
     const detail = row.note === undefined ? `(${row.origin})` : `(${row.origin} — ${row.note})`;
     return `${row.name.padEnd(nameWidth)}  ${row.value.padEnd(valueWidth)}  ${detail}`;
   });
+  // Stated ONCE, beneath the rows rather than repeated on each of them: the grant rows are meaningless
+  // without it, and a person reading five identical parentheticals stops reading them.
+  if (rows.some(row => row.name.startsWith('grants.')))
+    lines.push('', 'grants apply to callers that are NOT on this host; a loopback caller is ungoverned.');
   if (advertisesForeignAddress(config))
     lines.push('', `! ${foreignAdvertisementNotice(config.bindUrl, config.publicUrl, configFile)}`);
   return lines.join('\n');

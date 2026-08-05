@@ -1,14 +1,14 @@
 import { BrowserLoginActionSchema } from '@ferretry/protocol';
-import {
-  BrowserControlError,
-  type BrowserLoginLifecycle,
-  type BrowserLoginStatus,
-} from '../../browser/control/index.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import {
+  BrowserControlError,
+  type BrowserLoginLifecycle,
+  type BrowserLoginStatus,
+} from '../../browser/control/index.ts';
 
 /**
  * The daemon-global human browser-login window: a short-lived virtual desktop, served over a
@@ -96,6 +96,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       method: 'GET',
       path: '/v1/browser/login',
       scope: 'admin',
+      capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => await answer(async () => await window.status()),
     },
@@ -103,6 +104,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       method: 'POST',
       path: '/v1/browser/login',
       scope: 'admin',
+      capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => await act(window, context),
     },
@@ -112,6 +114,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       method: 'GET',
       path: '/v1/sessions/:sessionId/browser',
       scope: 'admin',
+      capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => {
         throw browserAutomationUnmounted();
@@ -121,6 +124,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       method: 'POST',
       path: '/v1/sessions/:sessionId/browser',
       scope: 'admin',
+      capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => {
         throw browserAutomationUnmounted();

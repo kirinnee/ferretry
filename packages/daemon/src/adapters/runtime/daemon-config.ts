@@ -1,10 +1,11 @@
+import type { CapabilityGrants } from '@ferretry/protocol';
 import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   defaultDaemonConfigDocument,
-  parseDaemonConfig,
   type FileSystemPort,
   type FoundationPaths,
+  parseDaemonConfig,
 } from '../../lib/index.ts';
 
 /** Durable daemon configuration adapter; the state filesystem keeps the document private and atomic. */
@@ -74,5 +75,32 @@ export class FileDaemonConfig {
     const text = await this.files.readText(this.paths.daemonConfig);
     const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
     await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, port }, null, 2)}\n`);
+  }
+
+  /**
+   * What this machine has agreed a non-loopback caller may do.
+   *
+   * A DOCUMENT WITH NO `grants` KEY IS A COMPLETE ANSWER, not a missing one: the schema fills every
+   * axis with the product default, so an operator who has never thought about this gets the permissive
+   * behaviour the product promises. A document whose `grants` key is WRONG — an unknown capability, a
+   * string where a boolean belongs — throws, and the subsystem above turns that into denied rather
+   * than into a guess. Silence and damage are different things.
+   */
+  async readGrants(): Promise<CapabilityGrants> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    return DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text)).grants;
+  }
+
+  /**
+   * Records a change to the grants.
+   *
+   * The document is RE-READ and exactly one key rewritten, for the reason `record` does the same: an
+   * operator's own fields must survive a write this daemon makes, and rewriting from a parsed
+   * configuration would persist derived addresses that then stop tracking what they were derived from.
+   */
+  async writeGrants(grants: CapabilityGrants): Promise<void> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, grants }, null, 2)}\n`);
   }
 }

@@ -1,4 +1,4 @@
-import { DAEMON_CAPABILITIES, daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
+import { type DaemonCapability, daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
@@ -177,20 +177,22 @@ export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
  * boolean turn into a parse failure — and a parse failure refuses the boot rather than falling back
  * to anything. Unknown is never permitted.
  */
+const grantSchemaFor = (capability: DaemonCapability) =>
+  z
+    .strictObject({
+      use: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].use),
+      configure: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].configure),
+    })
+    .prefault({});
+
 export const CapabilityGrantsDocumentSchema = z
-  .strictObject(
-    Object.fromEntries(
-      DAEMON_CAPABILITIES.map(capability => [
-        capability,
-        z
-          .strictObject({
-            use: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].use),
-            configure: z.boolean().default(DEFAULT_CAPABILITY_GRANTS[capability].configure),
-          })
-          .prefault({}),
-      ]),
-    ),
-  )
+  .strictObject({
+    fleet: grantSchemaFor('fleet'),
+    terminal: grantSchemaFor('terminal'),
+    browser: grantSchemaFor('browser'),
+    filesystem: grantSchemaFor('filesystem'),
+    warden: grantSchemaFor('warden'),
+  })
   .prefault({});
 
 /**
@@ -249,6 +251,17 @@ export const DaemonConfigDocumentSchema = z
      * for a staging key would be handed a header built from the production one.
      */
     secretEnvironment: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/u), z.string()).default({}),
+    /**
+     * What this machine has agreed a caller who is NOT on this host may do.
+     *
+     * IT BELONGS IN THIS DOCUMENT rather than in a file of its own, so `--print-config` reports it
+     * beside `port` and `corsOrigins` with the same provenance treatment: a person asking why the UI
+     * refused something should read the answer where they already read every other effective value,
+     * and should be told whether they chose it or the product did. What does NOT live here is the
+     * password VERIFIER that gates changing these — this file travels into backups and screen shares,
+     * which is exactly the journey a verifier must not make.
+     */
+    grants: CapabilityGrantsDocumentSchema,
   })
   .strict();
 
