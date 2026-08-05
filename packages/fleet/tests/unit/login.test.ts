@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type FleetLoginOutcome, FleetLoginService, UnknownFleetAccountError } from '../../src/lib/login.ts';
+import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
+import {
+  type FleetLoginOutcome,
+  FleetLoginService,
+  requiresProviderLogin,
+  UnknownFleetAccountError,
+} from '../../src/lib/login.ts';
 import type { FleetManifest, FleetManifestAccount } from '../../src/lib/manifest.ts';
 
 const account = (overrides: Partial<FleetManifestAccount> = {}): FleetManifestAccount => ({
@@ -103,5 +109,56 @@ describe('FleetLoginService', () => {
 
     // Assert
     await should(promise).be.rejectedWith(UnknownFleetAccountError);
+  });
+});
+
+describe('requiresProviderLogin', () => {
+  const ID_OAUTH = '00000000-0000-4000-8000-00000000a001';
+  const ID_KEY = '00000000-0000-4000-8000-00000000a002';
+
+  const route = (id: string, wrapper: string, home: string): Record<string, unknown> => ({
+    id,
+    wrapper,
+    home,
+    defaultModel: 'opus',
+    models: ['opus'],
+  });
+
+  const config = (): FleetConfig =>
+    FleetConfigSchema.parse({
+      agents: [
+        { name: 'work', kind: 'claude', routes: { default: route(ID_OAUTH, 'fy-claude-work', '~/.claude-work') } },
+        {
+          name: 'proxy',
+          kind: 'claude',
+          auth: 'api-key',
+          routes: { default: route(ID_KEY, 'fy-claude-proxy', '~/.claude-proxy') },
+        },
+      ],
+    });
+
+  it('should require a login for a declared OAuth account', () => {
+    // Act
+    const actual = requiresProviderLogin(config())(account({ id: ID_OAUTH }));
+
+    // Assert
+    should(actual).be.true();
+  });
+
+  it('should skip an account the configuration declares key-authenticated', () => {
+    // Act
+    const actual = requiresProviderLogin(config())(account({ id: ID_KEY }));
+
+    // Assert
+    should(actual).be.false();
+  });
+
+  it('should require a login for an account the configuration no longer mentions', () => {
+    // Act — a manifest can outlive its configuration; attempting costs one refusal, skipping
+    // leaves the fleet signed out with nothing said.
+    const actual = requiresProviderLogin(config())(account({ id: '00000000-0000-4000-8000-00000000a999' }));
+
+    // Assert
+    should(actual).be.true();
   });
 });

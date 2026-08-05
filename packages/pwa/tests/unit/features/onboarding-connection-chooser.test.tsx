@@ -70,13 +70,13 @@ describe('the connection chooser', () => {
     await unknown.unmount();
   });
 
-  it('says out loud that nothing dials a relay yet', async () => {
+  it('says out loud what the fallback does not cover', async () => {
     const view = await mount(<OnboardingConnectionChooser onChoose={() => {}} fallback={CHECKING_HOSTED_RELAY} />);
 
     // The reader this matters most to is the one whose daemon is behind NAT, who
     // would otherwise pick the recommended row and connect to nothing.
     const gap = must(view.container.querySelector('[data-onboarding-transport-gap]'), 'the transport gap');
-    expect(gap.textContent).toContain('dials it yet');
+    expect(gap.textContent).toContain('Pairing itself always goes straight to the daemon');
     expect(gap.className).toContain('text-warn');
     // And the disclosure of what the relay would see, folded away.
     const aside = must(view.container.querySelector<HTMLDetailsElement>('details'), 'the disclosure');

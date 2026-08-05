@@ -42,6 +42,20 @@ export function registerFleetCommands(program: Command, controller: FleetControl
 
   scoped(
     fleet
+      .command('init')
+      .description('prepare this host: the fleet directories, a starter configuration, and asset space')
+      .addHelpText(
+        'after',
+        '\nCreates only what is missing, so it is safe to re-run — an upgrade that adds a default\n' +
+          'fills it in without touching anything you have edited. It also prints the PATH line the\n' +
+          'generated wrappers need, which is the one step nothing else can do for you.',
+      ),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.init(merged(command));
+  });
+
+  scoped(
+    fleet
       .command('apply')
       .description('realize the declared configuration: homes, wrappers, settings and the manifest')
       .option('--dry-run', 'print every write the configuration implies and stop'),
@@ -54,6 +68,22 @@ export function registerFleetCommands(program: Command, controller: FleetControl
       await controller.usage(merged(command));
     },
   );
+
+  scoped(
+    fleet
+      .command('login')
+      .description('run each account’s provider login, one at a time')
+      .argument('[accountId...]', 'only these accounts, by id; default is every account')
+      .addHelpText(
+        'after',
+        '\nAccounts are logged in one at a time because each is a browser approval a human performs.\n' +
+          'An account whose wrapper reads a secret from the environment still gets it; every other\n' +
+          'provider variable is stripped, so a login run from inside an agent session cannot\n' +
+          'authenticate against that session’s account instead of this one.',
+      ),
+  ).action(async (accountIds: string[], _flags: unknown, command: Command) => {
+    await controller.login(accountIds, merged(command));
+  });
 
   scoped(
     fleet

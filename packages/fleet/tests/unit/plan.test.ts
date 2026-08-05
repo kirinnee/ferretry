@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { UnimplementedFleetCapabilityError } from '../../src/lib/capabilities.ts';
 import { type FleetConfig, FleetConfigSchema } from '../../src/lib/config.ts';
 import { declaredAssetFields, FleetPlan, UnknownDefaultHomeError, UnsupportedAssetError } from '../../src/lib/plan.ts';
 import type { ResolvedAccount } from '../../src/lib/profiles.ts';
@@ -392,5 +393,26 @@ describe('FleetPlan', () => {
       unavailableReason: 'pool down',
       defaultModel: null,
     });
+  });
+});
+
+describe('FleetPlan capability refusal', () => {
+  it('should refuse to plan a configuration that asks for a capability this build lacks', () => {
+    // Arrange
+    const input = config({ sharedHistory: { codex: true } });
+
+    // Act
+    const act = (): unknown => subject.build(input, LAYOUT, GENERATED_AT);
+
+    // Assert — refused while planning, so `--dry-run` cannot print a plan an apply could not honour.
+    should(act).throw(UnimplementedFleetCapabilityError);
+  });
+
+  it('should plan normally when the same sections carry their defaults', () => {
+    // Act
+    const actual = subject.build(config({ sharedHistory: {}, health: {}, usage: {} }), LAYOUT, GENERATED_AT);
+
+    // Assert
+    should(actual.manifest.accounts).have.length(1);
   });
 });

@@ -1,8 +1,10 @@
 import type {
   FleetApplyPlan,
   FleetApplyResult,
+  FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
+  FleetScaffoldResult,
   FleetUsage,
   FleetUsageSnapshot,
   FleetWriteOperation,
@@ -89,6 +91,57 @@ export function renderUsage(snapshot: FleetUsageSnapshot): string {
   const exhausted = snapshot.accounts.filter(account => account.atLimit).length;
   const header = `${plural(snapshot.accounts.length, 'account')}${exhausted === 0 ? '' : `, ${exhausted} at limit`}`;
   return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
+}
+
+/**
+ * What init prepared, what it deliberately left, and the one thing a person must still do.
+ *
+ * The `PATH` line is printed every time, including on a re-run that created nothing: the command
+ * that makes a directory of executables is the only place where saying how the shell will find them
+ * is guaranteed to be read, and an apply that writes wrappers nowhere on `PATH` reports success and
+ * produces nothing runnable.
+ */
+export function renderScaffoldResult(result: FleetScaffoldResult): string {
+  const lines =
+    result.created.length === 0
+      ? ['The fleet is already set up; nothing was changed.']
+      : [
+          `prepared the fleet in ${result.directories[0] ?? 'its directory'}`,
+          ...result.created.map(path => `  created  ${path}`),
+        ];
+  for (const path of result.kept) lines.push(`  kept     ${path} (already there, left as it is)`);
+  lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
+  lines.push('', 'Then declare an account in the configuration and run "fy fleet apply".');
+  return lines.join('\n');
+}
+
+/** One login outcome. Every status is named, so "nothing happened" is never how a failure reads. */
+export function renderLoginRow(result: FleetLoginResult): string {
+  const detail = result.message === undefined ? '' : ` — ${result.message}`;
+  switch (result.status) {
+    case 'logged-in':
+      return `  ${result.accountId}  logged in`;
+    case 'not-required':
+      return `  ${result.accountId}  no login needed (this account authenticates with a key)`;
+    case 'unavailable':
+      return `  ${result.accountId}  skipped, the manifest declares it unavailable${detail}`;
+    default:
+      return `  ${result.accountId}  FAILED${detail}`;
+  }
+}
+
+/**
+ * The whole login pass.
+ *
+ * The header counts failures explicitly rather than only successes: a run where three of four
+ * accounts failed and the summary said "4 accounts" is the shape of report this product keeps
+ * getting wrong.
+ */
+export function renderLoginResults(results: readonly FleetLoginResult[]): string {
+  if (results.length === 0) return 'No accounts to log in.';
+  const failed = results.filter(result => result.status === 'failed').length;
+  const header = `${plural(results.length, 'account')}${failed === 0 ? '' : `, ${failed} failed`}`;
+  return [header, ...results.map(renderLoginRow)].join('\n');
 }
 
 function optionLine(option: RoleOption, prefix: string): string {

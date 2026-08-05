@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ResolvedAccount, ResolvedCommand } from '../../src/lib/profiles.ts';
 import {
+  FIRST_RUN_SEED_TOGGLE,
   MANAGED_MARKER,
   UnknownCommandTargetError,
   envReferenceName,
@@ -156,7 +157,9 @@ describe('renderWrapperScript', () => {
     should(withSecrets).containEql('if [ -r "$HOME/.config/fy/provider-env" ]; then');
     should(withSecrets).containEql('  . "$HOME/.config/fy/provider-env"');
     should(withSecrets.match(/^\s*\. /gm)?.length).equal(1);
-    should(without).not.containEql('. ');
+    // A sourcing *line*, not the substring: a wrapper's prose and its jq filters contain ". " for
+    // entirely innocent reasons, and a check that cannot tell those apart stops meaning anything.
+    should(without.match(/^\s*\. /gm)).be.null();
   });
 
   it('should source a secrets file given as an absolute path as an inert literal', () => {
@@ -344,5 +347,91 @@ describe('resolveCommandTargets', () => {
     // Act + Assert
     should(() => resolveCommandTargets(commands, [account()], '/state/fleet/bin')).throw(UnknownCommandTargetError);
     should(() => resolveCommandTargets(commands, [account()], '/state/fleet/bin')).throw(/unknown account/);
+  });
+});
+
+describe('first-run seeding', () => {
+  const claude = (env: Record<string, string> = {}) => account({ kind: 'claude', env });
+
+  it('should seed the prompts that stall a launch nobody is watching', () => {
+    // Act
+    const actual = renderWrapperScript(claude());
+
+    // Assert — the four flags the harness gates its one-time prompts on.
+    should(actual).containEql('hasTrustDialogAccepted');
+    should(actual).containEql('hasCompletedOnboarding');
+    should(actual).containEql('hasCompletedClaudeInChromeOnboarding');
+    should(actual).containEql('claudeInChromeDefaultEnabled');
+  });
+
+  it('should seed on every launch rather than trusting a write made once', () => {
+    // Act
+    const actual = renderWrapperScript(claude());
+
+    // Assert — it is in the wrapper, before the exec, so it re-asserts every invocation.
+    const seedAt = actual.indexOf('hasTrustDialogAccepted');
+    const execAt = actual.indexOf('exec claude');
+    should(seedAt).be.greaterThan(-1);
+    should(seedAt).be.lessThan(execAt);
+  });
+
+  it('should write the browser default only when it has never been chosen', () => {
+    // Act
+    const actual = renderWrapperScript(claude());
+
+    // Assert — a home where somebody deliberately chose true must not be silently turned off.
+    should(actual).containEql('if .claudeInChromeDefaultEnabled == null then');
+  });
+
+  it('should offer a way to launch without it', () => {
+    // Act
+    const actual = renderWrapperScript(claude());
+
+    // Assert
+    should(actual).containEql(FIRST_RUN_SEED_TOGGLE);
+    should(actual).containEql(`\${${FIRST_RUN_SEED_TOGGLE}:-1}`);
+  });
+
+  it('should say so out loud when it cannot seed, rather than skipping in silence', () => {
+    // Act
+    const actual = renderWrapperScript(claude());
+
+    // Assert — a launch that may stall for an unexplained reason is what this exists to prevent.
+    should(actual).containEql('command -v jq');
+    should(actual).match(/jq is not installed[^\n]*>&2/u);
+  });
+
+  it('should approve the key the account itself exports', () => {
+    // Act — the harness asks about a custom API key and defaults to No, blocking a headless session.
+    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
+
+    // Assert
+    should(actual).containEql('customApiKeyResponses');
+  });
+
+  it('should pass the key through the environment, never through a process listing', () => {
+    // Act
+    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: '$FY_TOKEN' }));
+
+    // Assert — `jq --arg` would put a key fragment in argv, where any `ps` can read it.
+    should(actual).containEql('$ENV.FY_SEED_KEY');
+    should(actual).not.containEql('--arg');
+  });
+
+  it('should seed after the exports, because it reads what they decided', () => {
+    // Act
+    const actual = renderWrapperScript(claude({ ANTHROPIC_API_KEY: 'placeholder' }));
+
+    // Assert
+    should(actual.indexOf('export ANTHROPIC_API_KEY')).be.lessThan(actual.indexOf('customApiKeyResponses'));
+  });
+
+  it('should leave a Codex wrapper alone — it has no such prompts', () => {
+    // Act
+    const actual = renderWrapperScript(account({ kind: 'codex', env: {} }));
+
+    // Assert
+    should(actual).not.containEql('hasTrustDialogAccepted');
+    should(actual).not.containEql(FIRST_RUN_SEED_TOGGLE);
   });
 });

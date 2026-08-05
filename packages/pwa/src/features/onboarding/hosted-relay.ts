@@ -32,13 +32,13 @@
  * directory, this module makes no request, and the answer is `undetermined`. It
  * never invents a hostname.
  *
- * ONE THING IS STILL HONESTLY MISSING, and this module refuses to paper over it:
- * NO CLIENT SPEAKS THE RELAY PROTOCOL YET. `packages/relay` is complete and
- * tested, and neither `packages/daemon` nor `packages/pwa` mounts it, so even an
- * advertised address is not dialled by anything today. `TRANSPORT_NOT_WIRED_NOTE`
- * says exactly that, on the glass, rather than implying a fallback that would not
- * happen. This module is the discovery half, proved; the transport half is a
- * separate unit and the screen does not pretend otherwise.
+ * WHAT IS STILL HONESTLY MISSING, now that both ends dial: not the transport — `fyd`
+ * dials a rendezvous and `packages/pwa/src/lib/relay-carrier.ts` arrives at one — but
+ * two things a reader has to be told anyway. PAIRING cannot be relayed, because a
+ * relayed session is opened with the device grant the pairing exchange has not issued
+ * yet. And a relayed connection has no LIVE UPDATES: §14 carries one request and one
+ * answer per record. `TRANSPORT_NOT_WIRED_NOTE` says both, on the glass, rather than
+ * implying a fallback that is more seamless than it is.
  */
 
 /** The public discovery path from `docs/relay-protocol.md` §13, joined onto the configured origin. */
@@ -207,22 +207,31 @@ export const HOSTED_RELAY_ROW_NOTE =
   'connection when it is not.';
 
 /**
- * WHICH CARRIER IS ACTUALLY IN USE — the honest version.
+ * WHICH CARRIER IS ACTUALLY IN USE — the honest version, at the one moment this
+ * screen can honestly say anything about it.
  *
  * This line used to be the literal string `'Direct'`, passed in by the
  * composition root whenever anything was paired. That was a claim nothing had
- * measured, and it was the same claim whichever carrier the reader had chosen.
+ * measured. It then said no relay was ever dialled, which was true when it was
+ * written and IS NO LONGER: `relay-carrier.ts` attempts direct first and falls
+ * back to a rendezvous automatically.
  *
- * What is true today: the only carrier the app dials IS direct, because nothing
- * mounts `packages/relay`. So a reader who chose a relay is told both — the
- * carrier in use, and that their choice is not the thing carrying it yet. When a
- * transport lands, this function is where the measured answer replaces the
- * derived one, and its callers do not change.
+ * So what it says now is what onboarding actually knows. PAIRING IS ALWAYS
+ * DIRECT — a relayed session is opened with the device grant the pairing exchange
+ * has not issued yet, which `docs/relay-protocol.md` §13 records — so at the end
+ * of setup the carrier in use genuinely is direct, and the relay is what takes
+ * over later if this browser moves somewhere the daemon cannot be reached from.
+ *
+ * THE MEASURED ANSWER LIVES ELSEWHERE, deliberately: `ActiveCarrierCard` renders
+ * `chooseConnection().reason` for whichever carrier a live session won on. A
+ * setup screen cannot report a measurement that has not been taken yet, and
+ * guessing one here is the mistake this function has already made twice.
  */
 export const activeCarrierStatus = (chosen: 'default-relay' | 'own-relay' | 'direct' | undefined): string => {
-  if (chosen === 'default-relay') return 'Direct — the default relay is chosen, but nothing dials a relay yet.';
-  if (chosen === 'own-relay') return 'Direct — your own relay is chosen, but nothing dials a relay yet.';
-  return 'Direct — the only carrier this build dials.';
+  const measured = 'Settings › Daemons names the carrier in use, and why, once this daemon is asked for anything.';
+  if (chosen === 'default-relay') return `Direct — pairing is always direct. ${measured}`;
+  if (chosen === 'own-relay') return `Direct — pairing is always direct, including through your own relay. ${measured}`;
+  return `Direct — pairing is always direct. ${measured}`;
 };
 
 /**
@@ -277,17 +286,24 @@ export const OWN_RELAY_DISCLOSURE = [
 ] as const;
 
 /**
- * The gap, said on the screen rather than only in a review.
+ * What the fallback does and does not cover, said on the screen rather than only in
+ * a review.
  *
- * `packages/relay` is complete and tested and NOTHING mounts it: neither the
- * daemon nor this browser speaks the relay protocol yet. A step that showed a
- * relay address without saying this would be advertising a fallback that cannot
- * happen, which is worse than saying there is only one carrier.
+ * This note used to say nothing dialled a relay at all. Both ends do now — `fyd`
+ * dials a rendezvous and this browser arrives at one — so the honest version names
+ * the two real constraints instead: PAIRING itself is always direct, because a
+ * relayed session is opened with the grant pairing has not issued yet; and a relayed
+ * connection has no live updates, because §14 carries one request and one answer per
+ * record and a stream needs an envelope neither end has built.
+ *
+ * A step that promised a seamless fallback would be overselling exactly as badly as
+ * the old one undersold it.
  */
 export const TRANSPORT_NOT_WIRED_NOTE =
-  'Today only the direct path exists in the app: the relay protocol is implemented and deployed, but neither the ' +
-  'daemon nor this browser dials it yet. So the daemon has to be reachable from here — same network, a VPN, a ' +
-  'tailnet, or a public address — and this step will name the carrier in use once that connection can choose one.';
+  'Pairing itself always goes straight to the daemon, so it has to be reachable from here just once — same ' +
+  'network, a VPN, a tailnet, or a public address. After that the relay carries the connection whenever it is ' +
+  'not, with one exception: live updates need a direct connection, so over a relay screens refresh when you ask ' +
+  'them to rather than on their own.';
 
 /**
  * The hosted carrier's cost, in the terms somebody actually cares about.

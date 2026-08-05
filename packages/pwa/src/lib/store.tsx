@@ -1,4 +1,6 @@
 import type { FyApiClient } from '@ferretry/protocol/client';
+import type { RelayCrypto } from '@ferretry/relay';
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import {
   createContext,
   type ReactNode,
@@ -22,11 +24,12 @@ import {
   type DaemonConnectionsSnapshot,
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
-import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, type RelayCarrier, sameDaemonConnection } from './daemon-connection.ts';
 import { documentDraftStore } from './drafts.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingResult, type PairingSeed, pairedDaemonConnection } from './pairing.ts';
+import { DaemonCarrierRouter, type RelayDial } from './relay-carrier.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { type DaemonPushService, DaemonPushDevices, daemonPushService } from './push-enrolment.ts';
 import type { DaemonFetch } from './runtime-models.ts';
@@ -195,6 +198,14 @@ export interface AppStore {
    * for enrolment alone, which is the one call that hands a daemon an endpoint.
    */
   readonly pushService: DaemonPushService;
+  /**
+   * WHICH CARRIER EACH DAEMON'S TRAFFIC IS ON, and the thing that puts it there.
+   *
+   * Direct first, the relay as the automatic fallback, and a sentence naming which
+   * won and why the other did not — `docs/relay-protocol.md` §1. Read `choice()` for
+   * the disclosure; call nothing else on it from a surface.
+   */
+  readonly carrier: DaemonCarrierRouter;
   readonly pair: (seed: PairingSeed) => Promise<DaemonConnection>;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
@@ -212,11 +223,37 @@ export interface CreateAppStoreOptions {
   readonly connectClient?: ConnectDaemonClient;
   /** A deliberately content-free hint used only by the static landing page. */
   readonly landingMarkerStorage?: LandingMarkerStorage;
+  /** WebCrypto by default. Injected only so a suite can carry a session deterministically. */
+  readonly relayCrypto?: RelayCrypto;
+  /** The browser WebSocket by default. Injected so no suite opens one. */
+  readonly relayDial?: RelayDial;
 }
+
+/**
+ * The origin a daemon's requests are built against.
+ *
+ * `baseUrl` is already normalised to an origin by `daemonBaseUrl`, so this is a
+ * total function — but it is written as one place rather than inline so the router's
+ * lookup and the request builder can never disagree about what "the same daemon"
+ * means.
+ */
+const daemonOrigin = (daemon: DaemonConnection): string => daemon.baseUrl;
 
 /** Builds the document-lifetime stores and registers every daemon cache together. */
 export async function createAppStore(options: CreateAppStoreOptions = {}): Promise<AppStore> {
   const fetcher = options.fetcher ?? fetch;
+  // Every DAEMON-BOUND call goes through the carrier router; the two that are not
+  // bound to a paired daemon — the pairing exchange and the relay advertisement —
+  // keep the raw fetcher on purpose. Pairing especially: a relayed session is opened
+  // with the device grant pairing has not issued yet, so it cannot be relayed, and
+  // routing a RE-pair through an existing session would exchange a fresh code under
+  // the credential it is replacing.
+  const carrier = new DaemonCarrierRouter({
+    network: fetcher,
+    crypto: options.relayCrypto ?? new WebCryptoRelayCrypto(),
+    ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+  });
+  const carried = carrier.fetch;
   const clients = new DaemonApiPool(options.connectClient);
   const fleetPort: DaemonFleetPort = {
     list: async daemon => await (await clients.client(daemon)).list(),
@@ -224,22 +261,36 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   };
   const fleet = new DaemonFleetStore(fleetPort);
   const controls = new DaemonControlsStore();
-  const projects = new DaemonProjectsStore(daemonProjectsPort(fetcher));
-  const usage = new DaemonUsageStore(daemonUsagePort(fetcher));
+  const projects = new DaemonProjectsStore(daemonProjectsPort(carried));
+  const usage = new DaemonUsageStore(daemonUsagePort(carried));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
   const pushDevices = new DaemonPushDevices(browserStorage);
-  const pushService = daemonPushService(fetcher);
+  const pushService = daemonPushService(carried);
   const connections = await DaemonConnectionStore.open({
     repository: options.repository ?? browserConnectionRepository(),
     // `documentDraftStore` is not built here — the composer needs it as a module default before any
     // context exists — but it is browser-persisted daemon state like every other entry, so it is
     // invalidated like every other entry. A store the registry cannot reach keeps serving an
     // unpaired daemon's records; `scripts/validate/daemon-scope.sh` now fails the commit that
-    // leaves one out.
-    caches: [clients, fleet, controls, projects, usage, notificationPreferences, pushDevices, documentDraftStore],
+    // leaves one out. The carrier router is in the list for the same reason: a live relay session
+    // holds the credential that opened it, so it must not outlive the pairing.
+    caches: [
+      clients,
+      fleet,
+      controls,
+      projects,
+      usage,
+      notificationPreferences,
+      pushDevices,
+      documentDraftStore,
+      carrier,
+    ],
   });
+  // The router must never hold its own copy of who is paired: a second copy is how a
+  // request keeps going to a daemon somebody has unpaired.
+  carrier.resolveByOrigin(origin => connections.list().find(record => daemonOrigin(record) === origin));
   const landingMarkerStorage = options.landingMarkerStorage ?? browserLandingMarkerStorage();
   const syncLandingPage = (): void =>
     syncLandingMarker(landingMarkerStorage, connections.getSnapshot().connections.length);
@@ -248,7 +299,41 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // add, eviction, and explicit unpair now keeps the marker honest.
   connections.subscribe(syncLandingPage);
 
+  const readDefaultRelay = async (): Promise<HostedRelayFallback> =>
+    // The directory origin is the build constant and nothing else: no literal, no
+    // relative path, no guess. Unset ships no directory and answers without
+    // dialling, which is what a local build or a fork honestly is.
+    await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher });
+
+  /**
+   * ASK THE LIVE ADVERTISEMENT, THEN GIVE EVERY DAEMON THE ANSWER.
+   *
+   * Read once per document load, never from storage: `relayUrl: null` is a kill
+   * switch its operator can throw without an app release, so a browser that carried
+   * a remembered hosted address would be the switch not working (§13). A discovery
+   * failure and a `null` are the SAME answer here — no hosted carrier — because
+   * neither is permission to guess an address.
+   *
+   * An owner-supplied relay is left alone. That address has no runtime source, so
+   * overwriting it with a hosted one would take away the only carrier its owner
+   * configured.
+   */
+  let hosted: RelayCarrier | undefined;
+  const applyHostedRelay = (): void => {
+    for (const record of connections.list()) {
+      if (record.relay?.operator === 'self') continue;
+      connections.attachRelay(record.daemonId, hosted);
+    }
+  };
+  connections.subscribe(applyHostedRelay);
+  void readDefaultRelay().then(fallback => {
+    hosted =
+      fallback.kind === 'available' ? { kind: 'relay', relayUrl: fallback.relayUrl, operator: 'hosted' } : undefined;
+    applyHostedRelay();
+  });
+
   return {
+    carrier,
     connections,
     clients,
     fleet,
@@ -259,10 +344,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     notificationPreferences,
     pushDevices,
     pushService,
-    // The directory origin is the build constant and nothing else: no literal, no
-    // relative path, no guess. Unset ships no directory and answers without
-    // dialling, which is what a local build or a fork honestly is.
-    readDefaultRelay: async () => await readHostedRelayFallback({ directoryUrl: bundledRelayDirectory(), fetcher }),
+    readDefaultRelay,
     pair: async seed => {
       const connection = await exchangePairing(seed, fetcher);
       connections.add(connection);

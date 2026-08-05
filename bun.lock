@@ -20,7 +20,7 @@
     },
     "packages/cli": {
       "name": "fy",
-      "version": "0.126.0",
+      "version": "0.128.0",
       "bin": {
         "fy": "bin/fy.ts",
       },
@@ -40,7 +40,7 @@
     },
     "packages/daemon": {
       "name": "@ferretry/daemon",
-      "version": "0.0.0",
+      "version": "0.128.0",
       "bin": {
         "fyd": "bin/fyd.ts",
       },
@@ -71,6 +71,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@ferretry/protocol": "workspace:*",
+        "@ferretry/relay": "workspace:*",
         "@xterm/addon-fit": "^0.11.0",
         "@xterm/xterm": "^6.0.0",
         "highlight.js": "^11.11.1",
@@ -80,6 +81,7 @@
         "react-dom": "^19.0.0",
         "react-markdown": "^10.1.0",
         "remark-gfm": "^4.0.1",
+        "zod": "4.4.3",
       },
       "devDependencies": {
         "@happy-dom/global-registrator": "^20.11.1",

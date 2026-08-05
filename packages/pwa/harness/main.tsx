@@ -25,6 +25,7 @@ import type {
   WardenStatusView,
 } from '@ferretry/protocol';
 import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
+import { chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -98,6 +99,8 @@ import type { SetupSharePort } from '../src/features/onboarding/setup-handoff-pa
 import { PairingScreen } from '../src/features/pairing/pairing-screen.tsx';
 import { PinsBoard } from '../src/features/pins/pins-board.tsx';
 import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
+import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
+import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -112,8 +115,6 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
-import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
-import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
@@ -301,6 +302,23 @@ const HARNESS_SKILLS: SkillsCatalog = {
  * point of these cards is what the strip and the settings surface LOOK like, at
  * both widths, not whether a microphone exists in headless Chrome.
  */
+/**
+ * A carrier a reader would actually want to see rendered: the RELAYED one.
+ *
+ * Direct is the boring case and the one every other harness screen already implies.
+ * What is worth looking at is the fallback disclosure — the reason sentence naming
+ * why direct was passed over, the hosted operator's observer list, and the warning
+ * that live updates do not travel over a relay.
+ */
+const HARNESS_RELAYED_CARRIER = chooseConnection([
+  {
+    method: { kind: 'direct', daemonUrl: 'https://studio.tail1234.ts.net' },
+    reachable: false,
+    detail: 'Failed to fetch',
+  },
+  { method: { kind: 'relay', relayUrl: 'https://relay.ferretry.dev', operator: 'hosted' }, reachable: true },
+]);
+
 const HARNESS_STT_SETTINGS: SttSettings = {
   ...DEFAULT_STT_SETTINGS,
   dictionary: ['ferretry = ferretree', 'nitroso'],
@@ -417,6 +435,8 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         />
       }
       probeDaemon={harnessSettingsProbe}
+      carrier={HARNESS_RELAYED_CARRIER}
+      relayAdvertised
       readWardenStatus={async connection => {
         if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
         return WARDEN;

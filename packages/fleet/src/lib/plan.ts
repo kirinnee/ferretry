@@ -22,6 +22,7 @@ import {
   type HarnessAssetTable,
   unsupportedAssetFields,
 } from './assets.ts';
+import { UnimplementedFleetCapabilityError, unimplementedCapabilities } from './capabilities.ts';
 import type { FleetConfig } from './config.ts';
 import { buildFleetManifest, type FleetManifest, type HarnessKind } from './manifest.ts';
 import { expandAssetPath, expandHomePath, joinPath } from './paths.ts';
@@ -84,6 +85,13 @@ export class FleetPlan implements FleetPlanBuilder {
   constructor(private readonly assets: HarnessAssetTable = HARNESS_ASSETS) {}
 
   build(config: FleetConfig, layout: FleetLayout, generatedAt: string): FleetApplyPlan {
+    // Before anything is planned: a configuration asking for something this build does not do is
+    // refused here rather than applied and quietly not done. It is a planning-time check because
+    // `--dry-run` must refuse it too — a dry run that printed a clean plan for a configuration a
+    // real apply could not honour would be the misleading half of the same bug.
+    const unimplemented = unimplementedCapabilities(config);
+    if (unimplemented.length > 0) throw new UnimplementedFleetCapabilityError(unimplemented);
+
     const accounts = resolveAccounts(config).map(account => ({
       ...account,
       // The wrapper script keeps the *declared* home so `~/x` stays portable across machines; the

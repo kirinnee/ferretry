@@ -7,6 +7,7 @@
  * retaining the previous daemon's link, health result, or action target.
  */
 
+import type { ConnectionChoice } from '@ferretry/relay';
 import { Check, ChevronDown, ChevronLeft, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
@@ -21,6 +22,7 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
@@ -255,6 +257,16 @@ export interface SettingsPageProps {
   readonly onRemoveDaemon: (daemonId: DaemonId) => void;
   /** Opens the app's existing connection picker and pairing flow. */
   readonly onAddDaemon: () => void;
+  /**
+   * WHICH CARRIER THE ACTIVE DAEMON'S TRAFFIC IS ON, measured rather than preferred.
+   *
+   * `undefined` is a real state and not a missing prop: before the first request there
+   * is nothing to name, and the card says so. See `docs/relay-protocol.md` §1 — a
+   * surface showing a connection without naming its carrier is not conforming.
+   */
+  readonly carrier?: ConnectionChoice | undefined;
+  /** Whether the live advertisement offers a rendezvous to fall back to at all. */
+  readonly relayAdvertised?: boolean;
   /** Called for the header's in-app Back action. */
   readonly onNavigate?: (to: string) => void;
   readonly className?: string;
@@ -280,6 +292,8 @@ export function SettingsPage({
   onRenameDaemon,
   onRemoveDaemon,
   onAddDaemon,
+  carrier,
+  relayAdvertised = false,
   onNavigate,
   className,
 }: SettingsPageProps) {
@@ -498,6 +512,7 @@ export function SettingsPage({
                       onRemoveDaemon={onRemoveDaemon}
                       onAddDaemon={onAddDaemon}
                     />
+                    <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />
                     <DaemonSettingsFrame
                       key={String(daemonId)}
                       connection={connections.find(candidate => candidate.daemonId === daemonId) ?? dictation.daemon}
