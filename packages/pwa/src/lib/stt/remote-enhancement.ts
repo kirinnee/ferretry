@@ -16,7 +16,7 @@
  * therefore never be posted to a daemon the reader did not choose.
  */
 
-import { MAX_STT_DICTIONARY_ENTRIES } from '@ferretry/protocol';
+import { MAX_STT_DICTIONARY_ENTRIES, MAX_STT_USER_CONTEXT_CHARS } from '@ferretry/protocol';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { daemonRequest } from '../daemon-transport.ts';
 import type { DictionaryEntry } from './enhancement.ts';
@@ -151,7 +151,11 @@ export async function requestRemoteEnhancement(
       // vocabulary every remote correction instead of a few terms.
       dictionary: input.dictionary.slice(0, MAX_STT_DICTIONARY_ENTRIES),
       context: input.context,
-      userContext: input.userContext,
+      // Same contract, same reason: the settings field accepts a longer context
+      // than this wire does because local correction reads all of it. A stored
+      // value the UI called valid must never be the thing that makes every
+      // remote correction fail, so the tail of the prose is dropped instead.
+      userContext: input.userContext.slice(0, MAX_STT_USER_CONTEXT_CHARS),
     }),
     signal: controller.signal,
   });

@@ -27,12 +27,22 @@ export type SttEnhancementProvider = z.infer<typeof SttEnhancementProviderSchema
  */
 export const MAX_STT_DICTIONARY_ENTRIES = 128;
 
+/**
+ * How many characters of a reader's own free-text context one request may carry.
+ *
+ * Exported for the same reason as the dictionary bound, and for one more: a client's editor is
+ * allowed to accept a LONGER context than this wire does, because the client's own correction reads
+ * all of it. Nothing about a longer stored value is invalid — so a client sends the first characters
+ * up to this limit instead of letting a value its own UI accepted refuse the whole request.
+ */
+export const MAX_STT_USER_CONTEXT_CHARS = 2_000;
+
 export const SttEnhancementRequestSchema = z.strictObject({
   text: z.string().max(8_000),
   provider: SttEnhancementProviderSchema,
   model: z.string().trim().min(1).max(128).optional(),
   context: z.array(z.string()).max(10).optional(),
-  userContext: z.string().max(2_000).optional(),
+  userContext: z.string().max(MAX_STT_USER_CONTEXT_CHARS).optional(),
   dictionary: z
     .array(
       z.strictObject({
