@@ -19,6 +19,22 @@ jobs:
       - name: Run pre-commit
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
 
+  nix-install:
+    name: Nix Install Bundle
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      # This is the documented `nix shell github:kirinnee/ferretry` package graph. It used to copy
+      # Bun's workspace links by hand, so fyd gained @ferretry/relay while this build stayed stale;
+      # every other job installed the real workspace and remained green. Build the actual bundle.
+      - name: Build documented Nix install bundle
+        run: nix build .#default --no-link
+
   relay-configurations:
     name: Relay Configurations
     permissions:
