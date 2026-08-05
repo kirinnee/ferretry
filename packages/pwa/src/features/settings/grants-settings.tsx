@@ -593,7 +593,12 @@ export function GrantsSurface({
         <h3 className="m-0 text-title font-semibold text-fg">Capability limits unavailable</h3>
         <p className="mb-0 mt-1 text-ui leading-base text-muted">
           This daemon did not say what a paired device may do on it, so Ferretry will not show a limit or claim there is
-          none. Nothing here is evidence that this machine is unrestricted. {loadFailure.reason}
+          none. Nothing here is evidence that this machine is unrestricted.
+        </p>
+        {/* The daemon's own words, on their own line rather than run into the sentence above: they are
+            a message from somewhere else, and appending one mid-paragraph reads as a typo. */}
+        <p className="mb-0 mt-2 text-meta leading-base text-faint" data-grant-load-failure="">
+          {loadFailure.reason}
         </p>
       </section>
     );
