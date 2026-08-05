@@ -2,7 +2,14 @@ import { afterEach, describe, it } from 'bun:test';
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type FleetApplyPlan, FleetConfigSchema, FleetManifestSchema, FleetUsageSnapshotSchema } from '@ferretry/fleet';
+import {
+  type FleetApplyPlan,
+  FleetConfigSchema,
+  type FleetHealthProbe,
+  FleetHealthSnapshotSchema,
+  FleetManifestSchema,
+  FleetUsageSnapshotSchema,
+} from '@ferretry/fleet';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -24,7 +31,7 @@ interface FleetFixture {
   readonly dispatcher: ApiDispatcher;
 }
 
-async function fixture(): Promise<FleetFixture> {
+async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}): Promise<FleetFixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-route-'));
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
@@ -38,6 +45,7 @@ async function fixture(): Promise<FleetFixture> {
     clock: { now: () => GENERATED_AT_MS },
     files: new StateFileSystem(paths),
     platform: 'linux',
+    healthProbe: options.healthProbe,
   });
   const credentials = {
     ...CREDENTIALS,
@@ -257,7 +265,11 @@ describe('the daemon fleet mount', () => {
 
   it('should apply only inside disposable roots and then serve manifest and honest usage evidence', async () => {
     // Arrange — both FY_HOME and the supplied user home are children of this disposable root.
-    const subject = await fixture();
+    const subject = await fixture({
+      healthProbe: {
+        probe: async () => ({ state: 'healthy', cached: false, checkedAt: GENERATED_AT_MS, ms: 4 }),
+      },
+    });
     await writeConfig(subject);
 
     // Act
@@ -266,6 +278,7 @@ describe('the daemon fleet mount', () => {
     );
     const accountsResponse = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/accounts', headers: human }));
     const usageResponse = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/usage', headers: human }));
+    const healthResponse = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/health', headers: human }));
 
     // Assert
     should(applied.status).equal(200);
@@ -289,6 +302,9 @@ describe('the daemon fleet mount', () => {
       atLimit: false,
     });
     should(usage.accounts[0]?.error).match(/no readable access token/u);
+    const health = FleetHealthSnapshotSchema.parse(JSON.parse(healthResponse.body));
+    should(healthResponse.status).equal(200);
+    should(health.accounts[0]?.accountId).equal(ACCOUNT_ID);
     should(wrapper.startsWith(subject.root)).be.true();
     should(subject.paths.fleetManifest.startsWith(subject.root)).be.true();
   });

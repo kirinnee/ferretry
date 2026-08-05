@@ -9,6 +9,7 @@ import {
   IDENTITY_KEY,
   RecordingApplier,
   RecordingIdentitySource,
+  RecordingHealthCollector,
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
@@ -215,6 +216,29 @@ describe('reporting quota', () => {
     // Assert
     should(out.warnings).be.empty();
     should(JSON.parse(out.text)).have.property('accounts');
+  });
+});
+
+describe('reporting health', () => {
+  it('should probe the declared accounts and render the explicit result', async () => {
+    // Arrange
+    const health = new RecordingHealthCollector();
+    const { subject, out } = controller({ health });
+
+    // Act
+    await subject.health({});
+
+    // Assert
+    should(health.collected).have.length(1);
+    should(out.text).containEql('HEALTHY');
+  });
+
+  it('should refuse health probing when a transitional embedding did not configure it', async () => {
+    // Arrange
+    const { subject } = controller();
+
+    // Act + Assert
+    await should(subject.health({})).be.rejectedWith(/health probing is not configured/u);
   });
 });
 
