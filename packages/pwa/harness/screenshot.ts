@@ -521,6 +521,10 @@ try {
           await page.screenshot({ path: appearanceTarget });
           process.stdout.write(`📸 Settings Appearance ${viewport.name} -> ${appearanceTarget}\n`);
 
+          const themeCatalogueTarget = join(outDir, `theme-catalogue-${viewport.name}.png`);
+          await settingsPage.locator('[data-settings-section="appearance"]').screenshot({ path: themeCatalogueTarget });
+          process.stdout.write(`📸 Theme catalogue ${viewport.name} -> ${themeCatalogueTarget}\n`);
+
           if (viewport.name === 'mobile') {
             // Closed and open are both review states. The latter is a viewport
             // shot because BottomSheet is fixed to the viewport, not to the
