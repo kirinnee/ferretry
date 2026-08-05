@@ -9,6 +9,7 @@
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
+import { Composer, type ComposerProps } from '../../src/components/composer.tsx';
 import {
   COMPOSER_REFERENCE_TIERS,
   type ComposerAutocompleteCandidate,
@@ -19,7 +20,6 @@ import {
   ComposerAutocompletePopover,
   type ComposerAutocompleteSurface,
 } from '../../src/components/composer-autocomplete-popover.tsx';
-import { Composer, type ComposerProps } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -300,16 +300,13 @@ describe('composer send arbitration', () => {
    * first keystroke from its built-in commands, so leaving the skills request
    * in flight is the honest first-keystroke state rather than a stub of one.
    */
-  const onDesktop = async (body: () => Promise<void>): Promise<void> => {
+  const withPendingSkills = async (body: () => Promise<void>): Promise<void> => {
     const savedFetch = globalThis.fetch;
-    const savedMatchMedia = globalThis.matchMedia;
     Object.defineProperty(globalThis, 'fetch', { configurable: true, value: () => new Promise(() => undefined) });
-    Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: () => ({ matches: true }) });
     try {
       await body();
     } finally {
       Object.defineProperty(globalThis, 'fetch', { configurable: true, value: savedFetch });
-      Object.defineProperty(globalThis, 'matchMedia', { configurable: true, value: savedMatchMedia });
     }
   };
 
@@ -337,7 +334,7 @@ describe('composer send arbitration', () => {
     return prevented;
   };
 
-  const composerFor = (sessionId: string, sent: string[]): ReactTestRenderer =>
+  const composerFor = (sessionId: string, sent: string[], enterKeyPreference?: 'send' | 'newline'): ReactTestRenderer =>
     mounted(
       render(
         <Composer
@@ -349,13 +346,14 @@ describe('composer send arbitration', () => {
             } as unknown as ComposerProps['api']
           }
           daemon={daemon}
+          enterKeyPreference={enterKeyPreference}
           sessionId={sessionId}
         />,
       ),
     );
 
   test('shows the slash candidates and lets Enter accept the row the reader can see', async () => {
-    await onDesktop(async () => {
+    await withPendingSkills(async () => {
       const sent: string[] = [];
       const view = composerFor('session-a', sent);
       type(view, '/');
@@ -370,23 +368,29 @@ describe('composer send arbitration', () => {
     });
   });
 
-  test('sends when the open list has nothing the reader could accept', async () => {
-    await onDesktop(async () => {
+  test('falls through to the reader preference when the open list has nothing to accept', async () => {
+    await withPendingSkills(async () => {
       const sent: string[] = [];
-      const view = composerFor('session-b', sent);
+      const view = composerFor('session-b-send', sent, 'send');
       type(view, '/zzz');
       expect(options(view)).toHaveLength(0);
       // The list is open and honest about being empty, so Enter is the send it
-      // always was.
+      // was configured to be.
       expect(texts(view)).toContain('Loading installed skills…');
 
       expect(await pressEnter(view)).toBe(true);
+      expect(sent).toEqual(['/zzz']);
+
+      const newline = composerFor('session-b-newline', sent, 'newline');
+      type(newline, '/also-empty');
+      expect(options(newline)).toHaveLength(0);
+      expect(await pressEnter(newline)).toBe(false);
       expect(sent).toEqual(['/zzz']);
     });
   });
 
   test('leaves Tab alone unless a visible row would take it', async () => {
-    await onDesktop(async () => {
+    await withPendingSkills(async () => {
       const view = composerFor('session-c', []);
       type(view, '/zzz');
       let prevented = false;

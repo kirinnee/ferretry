@@ -26,6 +26,7 @@ import {
 } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
+import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
@@ -50,6 +51,8 @@ export interface SessionChatPageProps {
   readonly refreshError?: string | null;
   /** The reader's chat measure. `full` is the shipped default and is uncapped. */
   readonly chatWidth?: ChatWidthPreference;
+  /** Browser-local transcript composer key preference. */
+  readonly composerEnterKey?: ComposerEnterKeyPreference | null;
   readonly onBack: (daemonId: string) => void;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
@@ -206,6 +209,7 @@ export function SessionChatPage({
   canControl = true,
   refreshError = null,
   chatWidth = 'full',
+  composerEnterKey,
   onBack,
   onSessionChange,
   onRefresh,
@@ -428,6 +432,7 @@ export function SessionChatPage({
                   api={client}
                   busy={busy}
                   compact={compact}
+                  enterKeyPreference={composerEnterKey}
                   daemon={connection}
                   disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
                   onSent={onRefresh}

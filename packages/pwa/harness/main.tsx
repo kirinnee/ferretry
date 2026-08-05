@@ -111,7 +111,7 @@ import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
-import { WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
+import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
 import { WardenVerdicts } from '../src/features/warden/warden-verdicts.tsx';
 import { useAppViewport } from '../src/hooks/use-app-viewport.ts';
@@ -413,6 +413,11 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         />
       }
       probeDaemon={harnessSettingsProbe}
+      readWardenStatus={async connection => {
+        if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+        return WARDEN;
+      }}
+      createWardenClient={HARNESS_WARDEN_CLIENT}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
@@ -707,6 +712,18 @@ const WARDEN_CONFIG: WardenConfigView = {
   config: WARDEN.config,
   accounts: WARDEN.config.accounts,
   warnings: ['Account order takes effect on the next sweep.'],
+};
+
+/** The settings harness owns its Warden fixture too: no visual review should
+ * dial a live daemon, and the unreachable pairing stays unavailable rather
+ * than borrowing the healthy daemon’s policy. */
+const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  return {
+    wardenConfig: async () => WARDEN_CONFIG,
+    wardenStatus: async () => WARDEN,
+    updateWardenConfig: async () => WARDEN_CONFIG,
+  };
 };
 
 const LEARNING_STATUS: LearningStatus = {

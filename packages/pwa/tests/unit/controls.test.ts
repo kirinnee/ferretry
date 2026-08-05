@@ -1,12 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  browserControlsStorage,
   CONTROLS_KEY,
   CONTROLS_VERSION,
+  type ControlsRecord,
+  type ControlsStorage,
   controlsFor,
   DaemonControlsStore,
   DEFAULT_DEVICE_CONTROLS,
-  browserControlsStorage,
   emptyControlsRecord,
   evictDaemonScopes,
   MAX_DAEMON_SCOPES,
@@ -15,8 +17,6 @@ import {
   withDaemonScope,
   withDeviceControls,
   withoutDaemonScope,
-  type ControlsRecord,
-  type ControlsStorage,
 } from '../../src/lib/controls.ts';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 
@@ -84,6 +84,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // IS the previous behaviour — so the field cannot change what an older
       // blob meant, which is why it needed no version bump.
       chatWidth: 'full',
+      // Enter follows the current device until the reader explicitly chooses.
+      composerEnterKey: null,
       sidebarCollapsed: true,
     });
     // The old shape had no daemon scopes at all.
@@ -118,6 +120,18 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { chatWidth: 'wide' } })).device.chatWidth).equal(
       'full',
     );
+  });
+
+  it('keeps an explicit composer Enter choice device-local and rejects invented values', () => {
+    for (const composerEnterKey of ['send', 'newline'] as const) {
+      should(
+        parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { composerEnterKey } })).device.composerEnterKey,
+      ).equal(composerEnterKey);
+    }
+    should(
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { composerEnterKey: 'toggle' } })).device
+        .composerEnterKey,
+    ).be.null();
   });
 
   it('accepts each valid persisted density and mode, and rejects the rest', () => {
