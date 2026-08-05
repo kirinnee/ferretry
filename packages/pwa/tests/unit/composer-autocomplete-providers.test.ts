@@ -92,10 +92,14 @@ describe('composer skills provider', () => {
 
     expect(providerA.id).not.toBe(providerB.id);
     expect(decodeURIComponent(providerA.id)).toContain('["daemon-a","same/session"]');
-    expect(providerA.initialCandidates?.(context('/', ''))).toMatchObject({
+    const initial = providerA.initialCandidates?.(context('/', ''));
+    expect(initial).toMatchObject({
       candidates: [{ kind: 'command', replacement: '/compact' }],
       notice: 'Loading installed skills…',
     });
+    expect(
+      initial?.candidates.filter(candidate => candidate.kind === 'command').map(candidate => candidate.replacement),
+    ).toEqual(['/compact']);
 
     const [resultA, resultB] = await Promise.all([
       providerA.candidates(context('/', 'sum')),
