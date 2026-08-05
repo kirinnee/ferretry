@@ -60,6 +60,19 @@ export interface HarnessReadiness {
   readonly launchable: readonly string[];
   /** Every published account this harness has that a start could NOT resolve, and why. */
   readonly blocked: readonly string[];
+  /**
+   * Whether the harness's own command is on this host's `PATH` — a WEAKER and different fact.
+   *
+   * It is reported because of the one genuinely confusing case: somebody installs Claude Code, is
+   * told no harness is ready, and is right to object. This daemon does not launch `claude`; it
+   * launches the wrappers the fleet manifest publishes, so an installed harness with no declared
+   * account is invisible to a start no matter how present it is. Saying "installed, but no account
+   * is published for it" turns a report that looks wrong into one that names the missing step.
+   *
+   * The name comes from {@link HarnessKind} itself rather than a second table, so there is nothing
+   * here that can disagree with the kind an account declares.
+   */
+  readonly commandOnPath: boolean;
 }
 
 /**
@@ -86,7 +99,7 @@ export function readHarnessPreflight(
       if (launchability.kind === 'launchable') launchable.push(account.agent);
       else blocked.push(launchability.reason);
     }
-    return { kind, launchable, blocked };
+    return { kind, launchable, blocked, commandOnPath: executables.resolve(kind) !== undefined };
   });
   return { harnesses, ready: harnesses.some(harness => harness.launchable.length > 0) };
 }
@@ -116,9 +129,14 @@ export function harnessPreflightSummary(preflight: HarnessPreflight): string {
  */
 export function harnessAbsentWarning(preflight: HarnessPreflight, clientName: string): string {
   const blocked = preflight.harnesses.flatMap(harness => harness.blocked);
+  const installed = preflight.harnesses.filter(harness => harness.commandOnPath).map(harness => harness.kind);
   const cause =
     blocked.length === 0
-      ? 'the fleet manifest publishes no agent account at all'
+      ? // The confusing case gets its own sentence: a person who just installed the harness is told
+        // what is actually missing rather than a claim they can see is wrong.
+        installed.length === 0
+        ? 'the fleet manifest publishes no agent account at all'
+        : `${installed.join(' and ')} ${installed.length === 1 ? 'is' : 'are'} on this host's PATH, but the fleet manifest publishes no account for ${installed.length === 1 ? 'it' : 'either'} — this daemon launches the wrappers the manifest declares, never the harness command directly`
       : `every published account is unusable — ${blocked.join('; ')}`;
   return `no agent harness is ready on this host, so this daemon can serve its API but cannot start a session: ${cause}. Install Claude Code or Codex, declare an account for it, and run \`${clientName} fleet apply\` to publish the manifest this daemon reads — \`${clientName} fleet ls\` shows what is published now. The daemon does not need restarting for that — it re-reads the manifest on every session start — but this line is what it saw at boot.`;
 }
@@ -137,7 +155,11 @@ export function renderHarnessPreflight(preflight: HarnessPreflight, clientName: 
         ? `ready — ${harness.launchable.join(', ')}`
         : harness.blocked.length > 0
           ? `not usable — ${harness.blocked.join('; ')}`
-          : 'no account published';
+          : harness.commandOnPath
+            ? // Named apart from the plain absence, because it is a different missing step: the
+              // harness is here, the account that would let this daemon launch it is not.
+              `no account published (the ${harness.kind} command is on PATH, but this daemon launches published wrappers)`
+            : 'no account published, and the command is not on PATH';
     return `harness      ${harness.kind.padEnd(6)}  ${state}`;
   });
   lines.push(

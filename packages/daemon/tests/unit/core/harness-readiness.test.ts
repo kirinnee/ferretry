@@ -124,6 +124,30 @@ describe('harness readiness', () => {
     }
   });
 
+  it('should name the missing step when the harness is installed but no account is published', () => {
+    // Arrange: somebody has just installed Claude Code. Told "no harness is ready", they would be
+    // right to object — and the report would look wrong while being technically accurate.
+    const justInstalled = readHarnessPreflight([], hostWith('claude'));
+
+    // Act
+    const warning = harnessAbsentWarning(justInstalled, 'fy');
+    const rendered = renderHarnessPreflight(justInstalled, 'fy').join('\n');
+
+    // Assert — this daemon launches the wrappers the manifest publishes, never the harness command,
+    // so the actionable fact is the account, not the install.
+    should(justInstalled.harnesses[0]?.commandOnPath).be.true();
+    should(justInstalled.harnesses[1]?.commandOnPath).be.false();
+    should(justInstalled.ready).be.false();
+    should(warning).match(/claude is on this host's PATH/u);
+    // Singular, because only one is installed: a sentence that says "either" of one thing reads as a
+    // template nobody proofread, and this message is the one a confused person is relying on.
+    should(warning).match(/publishes no account for it —/u);
+    should(harnessAbsentWarning(readHarnessPreflight([], hostWith('claude', 'codex')), 'fy')).match(
+      /claude and codex are on this host's PATH.*for either/u,
+    );
+    should(rendered).match(/the claude command is on PATH, but this daemon launches published wrappers/u);
+  });
+
   it('should state the limit of what it verified every single time', () => {
     // Act
     const ready = renderHarnessPreflight(readHarnessPreflight([account()], hostWith('claude-auto-one')), 'fy');
@@ -134,7 +158,7 @@ describe('harness readiness', () => {
     // everything is fine, which is exactly when it is easiest to forget.
     should(ready.join('\n')).match(/not that they are signed in/u);
     should(ready.join('\n')).match(/harness {6}claude {2}ready — claude-auto-one/u);
-    should(ready.join('\n')).match(/harness {6}codex {3}no account published/u);
+    should(ready.join('\n')).match(/harness {6}codex {3}no account published, and the command is not on PATH/u);
     should(unready.join('\n')).match(/^! no agent harness is ready/mu);
   });
 });
