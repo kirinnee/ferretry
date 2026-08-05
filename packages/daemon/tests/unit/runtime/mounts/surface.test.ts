@@ -59,6 +59,9 @@ const pairingSubsystem = (): PairingSubsystem => ({
     throw new Error('not exercised by the surface inventory');
   },
   status: () => undefined,
+  revoke: () => undefined,
+  devices: async () => [],
+  revokeDevice: async () => false,
   redeem: async () => ({ kind: 'refused' }),
 });
 
@@ -270,6 +273,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pair',
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
+      'DELETE /v1/pair/code/:pairingId',
+      // Who may reach this machine, and one entry's removal. NOTE WHAT IS ABSENT: there is no route
+      // that returns a device token or its digest — the list is a projection with no field for one.
+      'GET /v1/pair/devices',
+      'DELETE /v1/pair/devices/:deviceId',
       // The grant surface. NOTE WHAT IS ABSENT: no route returns the operator password, its hash or
       // its length — `GET /v1/grants` answers with booleans and reasons, and this list is the proof.
       'GET /v1/grants',

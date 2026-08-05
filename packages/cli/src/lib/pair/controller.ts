@@ -24,8 +24,8 @@ import {
  * How often the daemon is asked what became of the code.
  *
  * One second, which is also the countdown's tick: two rates would mean a screen that says `0:47` while
- * the answer beside it is three seconds stale. The route is host-scoped and loopback-only, so this is
- * 120 local requests for the whole life of a code.
+ * the answer beside it is three seconds stale. This command runs ON the host, so it is 120 local
+ * requests for the whole life of a code.
  */
 export const PAIR_POLL_INTERVAL_MS = 1_000;
 

@@ -200,8 +200,11 @@ export interface MountedSubsystems {
 export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: MountedSubsystems): readonly ApiRoute[] {
   return [
     ...daemonApiRoutes(base),
-    // Pairing is three fixed paths: public redemption and two host-local admin operations. It sits
-    // beside the base surface because it establishes the credential every remote route later sees.
+    // Pairing is public redemption plus the code and device operations that produce and end the
+    // credentials it hands out. It sits beside the base surface because it establishes the credential
+    // every remote route later sees — and it is governed by the `pairing` capability rather than by the
+    // `host` scope, because a browser is always a paired device and could otherwise never add a second
+    // one. See the mount's header for why that is the correct layer.
     ...pairingRoutes(subsystems.pairing),
     // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
     // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under

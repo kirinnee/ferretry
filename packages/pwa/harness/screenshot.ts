@@ -651,8 +651,8 @@ try {
           // at both widths, rather than the sheet's, which are rendered only
           // once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 9)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 9`);
+          if (daemonPanels !== 10)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 10`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -667,8 +667,8 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 9)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 9`);
+            if (openPanelChoices !== 10)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 10`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
             await page.screenshot({ path: panelPickerOpenTarget });
             process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
@@ -691,6 +691,9 @@ try {
             // The live panel, inside the frame, because that is where a reader meets it. The gallery
             // cards prove the individual states; this proves it is reachable and fits both widths.
             ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],
+            // Adding a device, in the frame, where a reader meets it. The gallery cards below prove the
+            // individual states; this proves it is reachable, daemon-scoped and fits both widths.
+            ['Add a device', 'devices', '[data-add-device-surface="harness-daemon"]'],
             ['Environment', 'environment', '[aria-label="Target environment entries"]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
@@ -876,6 +879,32 @@ try {
             const target = join(outDir, `${name}-${viewport.name}.png`);
             await frame.screenshot({ path: target });
             process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
+          }
+          // Adding a device, in the states somebody actually meets. THE CODE IN THESE FRAMES IS FAKE —
+          // see `HARNESS_INVITE`. A committed PNG of a real minted code would be a live credential in
+          // the repository, and a QR is a machine-readable label rather than obfuscation.
+          //
+          // The tall viewport is still borrowed, for the reason the grant frames borrow one: a QR, a
+          // countdown, a selectable link and a device list are taller than a phone, and Chrome may cull
+          // unpainted rows during an element screenshot.
+          for (const [name, selector] of [
+            [`pair-devices`, `[data-harness="pair-devices"]`],
+            [`pair-invite`, `[data-harness="pair-invite"]`],
+            [`pair-expired`, `[data-harness="pair-expired"]`],
+            [`pair-empty`, `[data-harness="pair-empty"]`],
+            [`pair-refused`, `[data-harness="pair-refused"]`],
+          ] as const) {
+            const frame = page.locator(selector);
+            await frame.scrollIntoViewIfNeeded();
+            // Settled content, not a spinner: every frame is rendered from a fixture, so a capture still
+            // showing "Reading…" would be a regression to review rather than a state.
+            await frame
+              .locator('[data-add-device-surface], [aria-label="Adding a device unavailable"]')
+              .first()
+              .waitFor({ state: 'visible' });
+            const target = join(outDir, `${name}-${viewport.name}.png`);
+            await frame.screenshot({ path: target });
+            process.stdout.write(`📸 Add a device ${name} ${viewport.name} -> ${target}\n`);
           }
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);

@@ -21,6 +21,8 @@ const view: GrantsView = {
       mayGrant: false,
     },
   ],
+  // Governed: this fixture stands for a caller who is NOT on the host, the only one grants apply to.
+  governed: true,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 5,

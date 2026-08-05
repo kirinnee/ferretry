@@ -160,6 +160,9 @@ export class CapabilityGrantService implements CapabilityGuard {
     const lockedUntilMs = isUnlockLocked(this.attempts, now) ? this.attempts.lockedUntilMs : undefined;
     return {
       capabilities,
+      // Projected, never re-derived: it is the same `isGovernedCaller(request.loopback)` every decision
+      // above was made with, so a view can never disagree with the enforcement it describes.
+      governed: evaluation.governed,
       passwordSet: this.passwordSet,
       unlocked: held !== undefined,
       ...(held === undefined ? {} : { unlockExpiresAt: new Date(held.expiresAtMs).toISOString() }),

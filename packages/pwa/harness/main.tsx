@@ -20,6 +20,8 @@ import type {
   GrantRefusal,
   GrantsView,
   LearningStatus,
+  PairedDevicesView,
+  PairingCodeMintResponse,
   PinSnapshot,
   ProposalView,
   SecretList,
@@ -132,6 +134,12 @@ import { DictationShortcutPicker } from '../src/features/settings/dictation-shor
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import type { GrantClient } from '../src/features/settings/grants-api.ts';
+import type { PairingClient } from '../src/features/settings/add-device-api.ts';
+import {
+  AddDeviceCard,
+  AddDeviceSurface,
+  type PairingClientFactory,
+} from '../src/features/settings/add-device-settings.tsx';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
@@ -997,6 +1005,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       }}
       createWardenClient={HARNESS_WARDEN_CLIENT}
       createGrantClient={HARNESS_GRANT_CLIENT}
+      createPairingClient={HARNESS_PAIRING_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
@@ -1385,7 +1394,9 @@ const HARNESS_GRANTS_LOCKED: GrantsView = {
     grantEntry('browser', on, 'granted', 'locked'),
     grantEntry('filesystem', on, 'granted', 'locked', 'config file'),
     grantEntry('warden', { use: true, configure: false }, 'granted', 'not-granted', 'config file'),
+    grantEntry('pairing', on, 'granted', 'locked', 'config file'),
   ],
+  governed: true,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 5,
@@ -1395,10 +1406,11 @@ const HARNESS_GRANTS_LOCKED: GrantsView = {
 const HARNESS_GRANTS_UNGATED: GrantsView = {
   // `mayGrant: true` — this fixture is the caller standing AT the machine, the only one that may widen.
   // It is what makes the "direct local" capability-list frame a real loopback view rather than a remote
-  // view wearing a local badge.
+  // view wearing a local badge, and `governed: false` is the same fact on the view itself.
   capabilities: DAEMON_CAPABILITIES.map(capability =>
     grantEntry(capability, on, 'granted', 'ungated', 'default', true),
   ),
+  governed: false,
   passwordSet: false,
   unlocked: false,
 };
@@ -1406,6 +1418,7 @@ const HARNESS_GRANTS_UNGATED: GrantsView = {
 /** Five wrong passwords: the daemon has stopped checking, so no prompt is offered at all. */
 const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'rate-limited')),
+  governed: true,
   passwordSet: true,
   unlocked: false,
   attemptsRemaining: 0,
@@ -1415,8 +1428,79 @@ const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
 /** A daemon that cannot read its own grant document: denied, loudly, and not shown as permissive. */
 const HARNESS_GRANTS_UNDETERMINED: GrantsView = {
   capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'undetermined', 'undetermined')),
+  governed: true,
   passwordSet: true,
   unlocked: false,
+};
+
+/**
+ * THE PAIRING CODE IN EVERY CAPTURE IS FAKE, AND IT HAS TO BE.
+ *
+ * A committed PNG of a real minted code would be a real credential in the repository, readable by
+ * anybody who can read the review — a QR is not obfuscation, it is a machine-readable label. So the
+ * harness never mints: the code, the id and the fingerprint below are invented, the daemon address is
+ * `example.test`, and the expiry is frozen so the countdown renders the same number in every capture.
+ */
+const HARNESS_PAIR_NOW_MS = Date.parse('2026-01-01T00:00:00.000Z');
+const HARNESS_PAIR_DAEMON_ID = `fy_daemon_${'Hh'.repeat(21)}A`;
+const HARNESS_PAIR_URL = `https://ferretry.pages.dev/pair#v1;url=${encodeURIComponent('https://workstation.example.test')};code=7F3K-Q2ND;fp=${encodeURIComponent(HARNESS_PAIR_DAEMON_ID)}`;
+
+const HARNESS_INVITE: PairingCodeMintResponse = {
+  pairingId: `fy_pair_${'Pp'.repeat(11)}`,
+  code: '7F3K-Q2ND',
+  ttlSeconds: 120,
+  expiresAt: '2026-01-01T00:01:34.000Z',
+  daemonId: HARNESS_PAIR_DAEMON_ID,
+  daemonName: 'workstation',
+  daemonUrl: 'https://workstation.example.test',
+  pairUrl: HARNESS_PAIR_URL,
+};
+
+/** Two devices, one of them the browser doing the looking, so the "this device" mark is reviewable. */
+const HARNESS_PAIRED_DEVICES: PairedDevicesView = {
+  devices: [
+    {
+      id: `fy_device_id_${'Dd'.repeat(11)}`,
+      name: 'Ernest’s Pixel 8',
+      platform: 'browser',
+      createdAt: '2025-12-20T18:22:00.000Z',
+      lastSeenAt: '2025-12-31T22:04:00.000Z',
+    },
+    {
+      id: `fy_device_id_${'Ee'.repeat(11)}`,
+      name: 'Studio iMac',
+      platform: 'browser',
+      createdAt: '2025-11-02T09:15:00.000Z',
+      lastSeenAt: '2025-11-02T09:15:00.000Z',
+    },
+  ],
+  hostLocal: true,
+  thisDeviceId: `fy_device_id_${'Dd'.repeat(11)}`,
+};
+
+/**
+ * The pairing client the settings harness mounts.
+ *
+ * IT NEVER MINTS A REAL CODE. Every value it answers with is the frozen fake above, so no capture and no
+ * served harness session can put a working credential on screen or in a PNG. The unreachable pairing
+ * throws, so the refusal panel is reviewable in the frame as well as in its own gallery card.
+ */
+const HARNESS_PAIRING_CLIENT: PairingClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let devices = HARNESS_PAIRED_DEVICES;
+  return {
+    request: (async (path: string, _schema: unknown, init?: RequestInit) => {
+      if (path === '/v1/pair/code' && init?.method === 'POST') return HARNESS_INVITE;
+      if (path.startsWith('/v1/pair/code/') && init?.method === 'DELETE')
+        return { pairingId: HARNESS_INVITE.pairingId, status: 'expired', expiresAt: HARNESS_INVITE.expiresAt };
+      if (path.startsWith('/v1/pair/devices/') && init?.method === 'DELETE') {
+        const id = decodeURIComponent(path.slice('/v1/pair/devices/'.length));
+        devices = { ...devices, devices: devices.devices.filter(device => device.id !== id) };
+        return devices;
+      }
+      return devices;
+    }) as PairingClient['request'],
+  };
 };
 
 /**
@@ -4931,6 +5015,25 @@ function Shell() {
       ),
     },
     {
+      // The panel before anybody presses anything: who may reach this machine, each with its own revoke
+      // and the sentence saying what that revoke will do. The device this browser IS carries its mark.
+      label: 'Add a device — devices on this machine',
+      render: () => (
+        <div data-harness="pair-devices">
+          <AddDeviceCard
+            connection={daemon}
+            view={HARNESS_PAIRED_DEVICES}
+            invite={null}
+            nowMs={HARNESS_PAIR_NOW_MS}
+            onMint={() => {}}
+            onDiscardInvite={() => {}}
+            onRevokeCode={() => {}}
+            onRevokeDevice={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
       // THE FRAME THAT MATTERS. Same loopback-looking address, and the daemon said the connection is
       // governed — so this must read "Remote — governed". A screenshot showing "Direct" here would be
       // the inversion #289 exists to prevent, visible.
@@ -4938,6 +5041,25 @@ function Shell() {
       render: () => (
         <div data-harness="capability-list-remote">
           <CapabilityList connection={daemon} capabilities={HARNESS_GRANTS_LOCKED.capabilities} governed />
+        </div>
+      ),
+    },
+    {
+      // A live code: the QR, the code in words, the same link selectable for somebody who has to retype
+      // it, the countdown, and Revoke now beside Done. The code is FAKE — see `HARNESS_INVITE`.
+      label: 'Add a device — code on screen',
+      render: () => (
+        <div data-harness="pair-invite">
+          <AddDeviceCard
+            connection={daemon}
+            view={HARNESS_PAIRED_DEVICES}
+            invite={HARNESS_INVITE}
+            nowMs={HARNESS_PAIR_NOW_MS}
+            onMint={() => {}}
+            onDiscardInvite={() => {}}
+            onRevokeCode={() => {}}
+            onRevokeDevice={() => {}}
+          />
         </div>
       ),
     },
@@ -4957,6 +5079,68 @@ function Shell() {
       render: () => (
         <div data-harness="capability-list-unknown">
           <CapabilityList connection={daemon} capabilities={[]} />
+        </div>
+      ),
+    },
+    {
+      // The same code after its two minutes. It stops being shown as a credential at all — no QR, no
+      // link — and says what to do instead, because a stale QR that still looks live is the thing a
+      // person aims a phone at while wondering what they did wrong.
+      label: 'Add a device — code expired',
+      render: () => (
+        <div data-harness="pair-expired">
+          <AddDeviceCard
+            connection={daemon}
+            view={HARNESS_PAIRED_DEVICES}
+            invite={HARNESS_INVITE}
+            nowMs={Date.parse('2026-01-01T00:03:00.000Z')}
+            onMint={() => {}}
+            onDiscardInvite={() => {}}
+            onRevokeCode={() => {}}
+            onRevokeDevice={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // Nothing but the machine itself can reach this daemon. Said as a fact with the way forward, never
+      // as a bare empty list — an empty list reads as "something was removed".
+      label: 'Add a device — nothing paired yet',
+      render: () => (
+        <div data-harness="pair-empty">
+          <AddDeviceCard
+            connection={daemon}
+            view={{ devices: [], hostLocal: true }}
+            invite={null}
+            nowMs={HARNESS_PAIR_NOW_MS}
+            onMint={() => {}}
+            onDiscardInvite={() => {}}
+            onRevokeCode={() => {}}
+            onRevokeDevice={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // The refused case, which is the one worth reviewing hardest: a caller away from the host whose
+      // operator switched pairing off. The daemon's own sentence is rendered whole — it names the
+      // command that changes the answer — plus the one thing the daemon cannot know.
+      label: 'Add a device — the operator said no',
+      render: () => (
+        <div data-harness="pair-refused">
+          <AddDeviceSurface
+            connection={daemon}
+            createClient={async () => ({
+              request: async () => {
+                throw Object.assign(
+                  new Error(
+                    'the operator of this machine has not granted the UI the use of device pairing. Grant it on the host with `fy daemon config set pairing --use`.',
+                  ),
+                  { code: 'grant_not_granted' },
+                );
+              },
+            })}
+          />
         </div>
       ),
     },

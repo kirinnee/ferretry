@@ -94,6 +94,49 @@ export class StatePairingRepository implements PairingDeviceStore {
     return { daemonId, daemonName: name, devices: records };
   }
 
+  /**
+   * The grants this daemon has persisted, in grant order.
+   *
+   * It reads the CACHE rather than the file, and that is not a shortcut: the cache is what `add` and
+   * `remove` keep in step with the document they just wrote, so re-reading the disk here would let a
+   * list disagree with the write that produced it while a queued write is still settling.
+   */
+  async list(): Promise<readonly PairingDeviceRecord[]> {
+    const records = this.records;
+    if (records === undefined) throw new Error('pairing state is not open');
+    return records;
+  }
+
+  /**
+   * Forgets one grant, serialised behind every other write to the same document.
+   *
+   * It joins the same `writes` chain as `add` for the reason that chain exists: two callers rewriting
+   * `devices.json` from two snapshots taken at the same moment would each write a document missing the
+   * other's change, and the loser would be silently re-granted access.
+   */
+  async remove(id: string): Promise<boolean> {
+    const operation = this.writes.then(async () => {
+      const daemonId = this.daemonId;
+      const records = this.records;
+      if (daemonId === undefined || records === undefined) throw new Error('pairing state is not open');
+      const next = records.filter(existing => existing.id !== id);
+      // Nothing to write when nothing matched. A no-op rewrite would be harmless but it would also
+      // report "revoked" for a device that was never here, and those are different answers.
+      if (next.length === records.length) return false;
+      await this.files.writeTextAtomic(
+        this.devicesPath,
+        `${JSON.stringify({ schemaVersion: 1, daemonId, devices: next })}\n`,
+      );
+      this.records = next;
+      return true;
+    });
+    this.writes = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await operation;
+  }
+
   async add(record: PairingDeviceRecord): Promise<void> {
     const operation = this.writes.then(async () => {
       const daemonId = this.daemonId;

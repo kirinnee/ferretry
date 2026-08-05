@@ -1,0 +1,488 @@
+/**
+ * ADDING A DEVICE TO ONE DAEMON, from the browser.
+ *
+ * ## EVERYTHING HERE BELONGS TO ONE MACHINE
+ *
+ * The panel is handed a `DaemonConnection` and every read, mint and revoke goes through it. A code minted
+ * for daemon A is never shown under daemon B, and the device list is scoped the same way: switching hosts
+ * drops the code, the list and any failure, because the alternative is somebody revoking a device on the
+ * wrong machine while looking at a list they trust.
+ *
+ * ## THE CODE LIVES IN MEMORY AND DIES HERE
+ *
+ * A minted code is component state. It is never written to any store, `localStorage`, URL or log — closing
+ * the panel, switching daemons or pressing Done ends it, and nothing can read it back afterwards. The QR
+ * is computed in this tab from that state, so the credential reaches no third party either. This is why
+ * the harness screenshots use a fixed fake code: a committed PNG of a real one would be a real leak.
+ *
+ * ## A REFUSAL IS EXPLAINED, NEVER GREYED
+ *
+ * A caller who is not on the host and whose operator has switched `pairing` off cannot read this panel at
+ * all — the routes are governed. That refusal is rendered as the daemon's own sentence, which names the
+ * command that changes it, plus the one thing the daemon cannot know: pairing from the machine itself is
+ * never restricted. A greyed button with no explanation is the dead end this product keeps removing.
+ */
+
+import type { PairedDevice, PairedDevicesView, PairingCodeMintResponse } from '@ferretry/protocol';
+import { Check, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useId, useState } from 'react';
+
+import { QrSymbol } from '../../components/qr-symbol.tsx';
+import { daemonApiClient } from '../../lib/api-client.ts';
+import { cn } from '../../lib/class-names.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import {
+  isThisDevice,
+  orderedPairedDevices,
+  PAIRING_CODE_DISCLOSURE,
+  PAIRING_EXPIRED_NOTE,
+  PAIRING_EXPIRY_NOTE,
+  PAIRING_SCAN_HINT,
+  PAIRING_TICK_MS,
+  PAIRING_TYPE_HINT,
+  pairedDeviceSummary,
+  pairingCountdown,
+  pairingRefusal,
+  revokeConsequence,
+} from '../../lib/pairing-invite.ts';
+import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
+import {
+  mintPairingCode,
+  type PairingClient,
+  type PairingFailure,
+  pairingFailure,
+  readPairedDevices,
+  revokePairedDevice,
+  revokePairingCode,
+} from './add-device-api.ts';
+
+/** The invite, as this screen holds it: the daemon it belongs to, and what the daemon answered. */
+interface HeldInvite {
+  readonly daemonId: DaemonConnection['daemonId'];
+  readonly minted: PairingCodeMintResponse;
+}
+
+/**
+ * The QR, or a stated reason there is none.
+ *
+ * A pairing URL that will not encode is a daemon problem — an address far longer than any this protocol
+ * produces — and it is said out loud rather than rendered as an empty square. The selectable link below
+ * still works, so the panel degrades to something usable instead of to a blank.
+ */
+function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
+  let matrix: QrMatrix;
+  try {
+    matrix = encodeQr(pairUrl);
+  } catch (cause) {
+    return (
+      <p
+        role="alert"
+        className="m-0 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-meta leading-base text-warn"
+        data-pair-qr-failure=""
+      >
+        This link is too long for a QR code, so there is none to show. Use the link below instead.
+        {cause instanceof QrEncodeError ? ` ${cause.message}` : ''}
+      </p>
+    );
+  }
+  return (
+    <div className="rounded-control border border-border bg-white p-3" data-pair-qr="">
+      <QrSymbol matrix={matrix} label="Pairing code for this machine" className="h-auto w-full max-w-[240px]" />
+    </div>
+  );
+}
+
+/** One paired device: what it is, when it arrived, and the control that ends its access. */
+function PairedDeviceRow({
+  device,
+  view,
+  busy,
+  onRevoke,
+}: {
+  readonly device: PairedDevice;
+  readonly view: PairedDevicesView;
+  readonly busy: boolean;
+  readonly onRevoke: () => void;
+}) {
+  const mine = isThisDevice(device, view);
+  const describedBy = useId();
+
+  return (
+    <li
+      className="flex min-w-0 flex-col gap-1 border-t border-border-soft py-2 first:border-t-0"
+      data-paired-device={device.id}
+    >
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <MonitorSmartphone size={15} className="shrink-0 text-muted" aria-hidden="true" />
+        {/* Attacker-influenced text: the redeeming device chose this name, so it is rendered as text.
+            It WRAPS rather than truncating, and the row wraps with it: a phone squeezing three items
+            onto one line turned "Ernest's Pixel 8" into "Ernest's Pi…", and a device somebody is about
+            to revoke is the last place to hide which device it is. */}
+        <span className="min-w-[9rem] flex-1 break-words text-ui font-semibold text-fg">{device.name}</span>
+        {mine ? (
+          <span
+            className="rounded-control border border-accent bg-accent-soft px-2 py-0.5 text-meta font-medium text-accent"
+            data-paired-device-self=""
+          >
+            this device
+          </span>
+        ) : null}
+        <button
+          type="button"
+          disabled={busy}
+          aria-describedby={describedBy}
+          data-pair-revoke-device={device.id}
+          onClick={onRevoke}
+          className="kt-btn min-h-[40px] shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+          data-variant="danger"
+        >
+          <Trash2 size={14} aria-hidden="true" />
+          Revoke
+        </button>
+      </div>
+      <p className="m-0 text-meta leading-base text-faint">{pairedDeviceSummary(device)}</p>
+      {/* What the button will do, in the same breath as the button. Never after the press. */}
+      <p id={describedBy} className="m-0 text-meta leading-base text-muted">
+        {revokeConsequence(device, view)}
+      </p>
+    </li>
+  );
+}
+
+export interface AddDeviceCardProps {
+  readonly connection: DaemonConnection;
+  readonly view: PairedDevicesView;
+  /** The live invite, when one has been minted in this panel. */
+  readonly invite: PairingCodeMintResponse | null;
+  /** Now, supplied rather than read, so the countdown is deterministic in a test and a screenshot. */
+  readonly nowMs: number;
+  readonly busy?: boolean;
+  readonly failure?: PairingFailure | null;
+  readonly onMint: () => void;
+  readonly onDiscardInvite: () => void;
+  readonly onRevokeCode: () => void;
+  readonly onRevokeDevice: (deviceId: string) => void;
+}
+
+/**
+ * The render-only panel.
+ *
+ * It takes the view and reports intent; it fetches nothing and holds no connection state, so the same
+ * component is what the harness screenshots and what a test drives.
+ */
+export function AddDeviceCard({
+  connection,
+  view,
+  invite,
+  nowMs,
+  busy = false,
+  failure = null,
+  onMint,
+  onDiscardInvite,
+  onRevokeCode,
+  onRevokeDevice,
+}: AddDeviceCardProps) {
+  const headingId = useId();
+  const devices = orderedPairedDevices(view);
+  const countdown = invite === null ? null : pairingCountdown(invite.expiresAt, nowMs);
+
+  return (
+    <section
+      className="flex min-w-0 flex-col gap-3"
+      aria-labelledby={headingId}
+      data-add-device-surface={String(connection.daemonId)}
+    >
+      <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">
+            <ShieldCheck size={16} className="text-accent" aria-hidden="true" />
+            Devices on this machine
+          </h3>
+          <span
+            className="rounded-control border border-border-soft bg-surface-2 px-2 py-0.5 text-meta text-faint"
+            data-pair-host-local={view.hostLocal ? 'yes' : 'no'}
+          >
+            {view.hostLocal ? 'you are at this machine' : 'you are away from this machine'}
+          </span>
+        </div>
+        <p className="m-0 text-ui leading-base text-muted">
+          A device is added by reading a code this machine mints. The code lasts two minutes and works once, so a phone
+          that reads it becomes a device you can see and revoke below.
+        </p>
+        {invite === null ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              data-pair-mint=""
+              onClick={onMint}
+              className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Plus size={15} aria-hidden="true" />
+              Add a device
+            </button>
+            <span className="text-meta leading-base text-faint">{PAIRING_EXPIRY_NOTE}</span>
+          </div>
+        ) : null}
+      </section>
+
+      {invite !== null && countdown !== null ? (
+        <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel" aria-label="Pairing code" data-pair-invite="">
+          <div className="flex flex-wrap items-baseline gap-2">
+            <p className="m-0 text-ui font-semibold text-fg">Show this to the device you are adding</p>
+            <span
+              role="timer"
+              aria-live="off"
+              data-pair-countdown={countdown.expired ? 'expired' : 'live'}
+              className={cn(
+                'rounded-control border px-2 py-0.5 font-mono text-meta font-medium',
+                countdown.expired ? 'border-err-border bg-err-bg text-err' : 'border-ok-border bg-ok-bg text-ok',
+              )}
+            >
+              {countdown.expired ? 'expired' : countdown.label}
+            </span>
+          </div>
+          {countdown.expired ? (
+            <p
+              role="status"
+              className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
+            >
+              {PAIRING_EXPIRED_NOTE}
+            </p>
+          ) : (
+            <>
+              <InviteSymbol pairUrl={invite.pairUrl} />
+              <p className="m-0 text-meta leading-base text-muted">{PAIRING_SCAN_HINT}</p>
+              {/* The code in words as well as in the link: a person reading a QR out loud reads this. */}
+              <p className="m-0 flex flex-wrap items-baseline gap-2 text-ui text-fg">
+                <span className="text-meta uppercase tracking-label text-faint">Code</span>
+                <code data-pair-code="" className="select-all font-mono text-title font-semibold tracking-widest">
+                  {invite.code}
+                </code>
+              </p>
+              <p className="m-0 text-meta leading-base text-muted">{PAIRING_TYPE_HINT}</p>
+              {/* `select-all` and `break-all`: this is meant to be selected and retyped, on a phone. */}
+              <code
+                data-pair-url=""
+                className="block select-all break-all rounded-control border border-border bg-surface-2 px-2 py-1 font-mono text-meta text-fg"
+              >
+                {invite.pairUrl}
+              </code>
+              <p className="m-0 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-meta leading-base text-muted">
+                {PAIRING_CODE_DISCLOSURE}
+              </p>
+            </>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              data-pair-revoke-code=""
+              onClick={onRevokeCode}
+              className="kt-btn min-h-[44px] disabled:cursor-not-allowed disabled:opacity-60"
+              data-variant="danger"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              Revoke now
+            </button>
+            <button type="button" data-pair-discard="" onClick={onDiscardInvite} className="kt-btn min-h-[44px]">
+              <Check size={14} aria-hidden="true" />
+              Done
+            </button>
+          </div>
+          <p className="m-0 text-meta leading-base text-faint">
+            Revoke now ends the code on the machine, so nothing can redeem it. Done only clears it from this screen —
+            the code keeps working until it runs out.
+          </p>
+        </section>
+      ) : null}
+
+      <section className="kt-panel flex min-w-0 flex-col gap-1 p-panel" aria-label="Paired devices">
+        <p className="m-0 text-ui font-semibold text-fg">
+          {devices.length === 0
+            ? 'No devices are paired to this machine'
+            : `${String(devices.length)} device${devices.length === 1 ? '' : 's'} may reach this machine`}
+        </p>
+        {devices.length === 0 ? (
+          <p className="m-0 text-meta leading-base text-muted">
+            Nothing but this machine itself can reach this daemon yet. Adding a device is how that changes, and every
+            device you add appears here with its own revoke.
+          </p>
+        ) : (
+          <ul className="m-0 list-none p-0">
+            {devices.map(device => (
+              <PairedDeviceRow
+                key={device.id}
+                device={device}
+                view={view}
+                busy={busy}
+                onRevoke={() => onRevokeDevice(device.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {failure === null ? null : (
+        <p
+          role="alert"
+          className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-ui leading-base text-err"
+          data-pair-failure=""
+        >
+          <CircleAlert size={14} className="mr-1 inline" aria-hidden="true" />
+          {/* The daemon's own sentence, whole. It already names the command a human runs. */}
+          {failure.message}
+        </p>
+      )}
+    </section>
+  );
+}
+
+export type PairingClientFactory = (connection: DaemonConnection) => Promise<PairingClient>;
+/** Now, injected, so nothing in this surface reads a clock a test cannot move. */
+export type PairingClock = () => number;
+
+/**
+ * The live, daemon-bound Add-a-device surface.
+ *
+ * A FAILED READ IS NOT AN EMPTY MACHINE. A list this browser could not fetch renders as a stated reason,
+ * never as "no devices are paired" — a person shown an empty list over a daemon the browser could not
+ * reach would conclude their phone had been unpaired, which is exactly wrong.
+ */
+export function AddDeviceSurface({
+  connection,
+  createClient = daemonApiClient,
+  now = Date.now,
+}: {
+  readonly connection: DaemonConnection;
+  readonly createClient?: PairingClientFactory;
+  readonly now?: PairingClock;
+}) {
+  const [client, setClient] = useState<PairingClient | null>(null);
+  const [loaded, setLoaded] = useState<{
+    readonly daemonId: DaemonConnection['daemonId'];
+    readonly view: PairedDevicesView;
+  } | null>(null);
+  const [loadFailure, setLoadFailure] = useState<{
+    readonly daemonId: DaemonConnection['daemonId'];
+    readonly failure: PairingFailure;
+  } | null>(null);
+  const [invite, setInvite] = useState<HeldInvite | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<PairingFailure | null>(null);
+  const [nowMs, setNowMs] = useState(() => now());
+
+  useEffect(() => {
+    let current = true;
+    setClient(null);
+    setLoaded(null);
+    setLoadFailure(null);
+    setFailure(null);
+    // The code belongs to the daemon that minted it, so switching machines drops it rather than carrying a
+    // live credential across the boundary everything else here is keyed by.
+    setInvite(null);
+    void createClient(connection)
+      .then(async next => {
+        const view = await readPairedDevices(next);
+        if (!current) return;
+        setClient(next);
+        setLoaded({ daemonId: connection.daemonId, view });
+      })
+      .catch((cause: unknown) => {
+        if (current) setLoadFailure({ daemonId: connection.daemonId, failure: pairingFailure(cause) });
+      });
+    return () => {
+      current = false;
+    };
+  }, [connection, createClient]);
+
+  /**
+   * The countdown's clock, running ONLY while a code is on screen.
+   *
+   * A panel with no live code has nothing to count, and a timer left running would re-render the device
+   * list once a second for the rest of the session. The interval is cleared by the same effect that owns
+   * it, so closing the panel or discarding the code stops it.
+   */
+  useEffect(() => {
+    if (invite === null) return;
+    setNowMs(now());
+    const timer = setInterval(() => setNowMs(now()), PAIRING_TICK_MS);
+    return () => clearInterval(timer);
+  }, [invite, now]);
+
+  const mint = useCallback(async () => {
+    if (client === null || loaded?.daemonId !== connection.daemonId) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      setInvite({ daemonId: connection.daemonId, minted: await mintPairingCode(client) });
+    } catch (cause) {
+      setFailure(pairingFailure(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [client, connection.daemonId, loaded?.daemonId]);
+
+  const revokeCode = useCallback(async () => {
+    const held = invite;
+    if (client === null || held === null || held.daemonId !== connection.daemonId) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      await revokePairingCode(client, held.minted.pairingId);
+      // Cleared on success only: a code this browser failed to revoke is still live on the machine, and
+      // hiding it would tell somebody a door was shut when it is open.
+      setInvite(null);
+    } catch (cause) {
+      setFailure(pairingFailure(cause));
+    } finally {
+      setBusy(false);
+    }
+  }, [client, connection.daemonId, invite]);
+
+  const revokeDevice = useCallback(
+    async (deviceId: string) => {
+      if (client === null || loaded?.daemonId !== connection.daemonId) return;
+      setBusy(true);
+      setFailure(null);
+      try {
+        setLoaded({ daemonId: connection.daemonId, view: await revokePairedDevice(client, deviceId) });
+      } catch (cause) {
+        setFailure(pairingFailure(cause));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [client, connection.daemonId, loaded?.daemonId],
+  );
+
+  if (loaded?.daemonId === connection.daemonId)
+    return (
+      <AddDeviceCard
+        connection={connection}
+        view={loaded.view}
+        invite={invite?.daemonId === connection.daemonId ? invite.minted : null}
+        nowMs={nowMs}
+        busy={busy}
+        failure={failure}
+        onMint={() => void mint()}
+        onDiscardInvite={() => setInvite(null)}
+        onRevokeCode={() => void revokeCode()}
+        onRevokeDevice={deviceId => void revokeDevice(deviceId)}
+      />
+    );
+  if (loadFailure?.daemonId === connection.daemonId)
+    return (
+      <section className="kt-panel p-panel" role="status" aria-label="Adding a device unavailable">
+        <h3 className="m-0 text-title font-semibold text-fg">Adding a device is unavailable here</h3>
+        <p className="mb-0 mt-1 text-ui leading-base text-muted" data-pair-refusal="">
+          {pairingRefusal(loadFailure.failure.message)}
+        </p>
+      </section>
+    );
+  return (
+    <section className="kt-panel p-panel" role="status" aria-label="Loading paired devices">
+      <p className="m-0 text-ui leading-base text-muted">Reading which devices may reach this machine…</p>
+    </section>
+  );
+}

@@ -112,3 +112,59 @@ export const PairingCodeStatusResponseSchema = z.discriminatedUnion('status', [
   }),
 ]);
 export type PairingCodeStatusResponse = z.infer<typeof PairingCodeStatusResponseSchema>;
+
+/** A device identity, as minted for one grant on one daemon. Not a credential and never derived from one. */
+export const PairedDeviceIdSchema = z.string().regex(/^fy_device_id_[A-Za-z0-9_-]{22}$/u, 'invalid device id');
+export type PairedDeviceId = z.infer<typeof PairedDeviceIdSchema>;
+
+/**
+ * One device that may reach this daemon, as anybody but the daemon may see it.
+ *
+ * THE DIGEST IS NOT HERE, AND THAT IS THE POINT. A device grant is stored as `{ …, tokenHash }`, and
+ * this schema is the projection that crosses the wire — so "no route returns a credential or anything
+ * derived from one" is a property of the type rather than a discipline every handler has to remember.
+ * A digest is not a token, but it is the only thing standing between a leaked file and a forged one,
+ * and a UI has no use for it.
+ *
+ * `name` is chosen by the redeeming device and is therefore ATTACKER-INFLUENCED TEXT. It is bounded and
+ * control-character-free by `PairingDeviceNameSchema`, and consumers must render it as text content.
+ */
+export const PairedDeviceSchema = z.strictObject({
+  id: PairedDeviceIdSchema,
+  /** Untrusted text: render as text content only. */
+  name: PairingDeviceNameSchema,
+  platform: z.literal('browser'),
+  createdAt: InstantSchema,
+  lastSeenAt: InstantSchema,
+});
+export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
+
+/**
+ * Who may reach one daemon, plus the two facts a UI needs before it offers to change that.
+ *
+ * ONE READ, NOT A PROBE PER CONTROL. A screen that discovers its own limits by watching calls fail
+ * cannot explain anything before somebody presses a button, and explaining before the press is the
+ * whole requirement — the same reason `GrantsViewSchema` answers in one call.
+ *
+ * `hostLocal` is HOW THE REQUEST ARRIVED, decided from the carrier and never from an address, a `Host`
+ * header or a URL (see `docs/grants.md`). It is on the view because it is the difference between "this
+ * button works and nothing is gating it" and "this button needs the operator's grant", and a browser
+ * cannot tell which it is: a relayed hop terminates on the very host it serves, so the address this
+ * browser dialled says nothing about how the daemon received it.
+ *
+ * It is the SAME fact `GrantsView.governed` carries, inverted, and there is one source for both —
+ * `ApiRequest.loopback`, which the transport sets and no header can move. Each view spells it from its
+ * own screen's point of view: a grant surface talks about whether the operator's answers govern you, a
+ * pairing surface talks about whether you are standing at the machine. Neither re-derives it, so they
+ * cannot drift; if you are changing one of these, the other is the thing to read first.
+ *
+ * `thisDeviceId` names the caller's OWN grant when the caller is a paired device, so a list of
+ * revocable devices can mark the one whose revocation ends this session. Absent for the host's own
+ * admin credential, which is not a paired device and cannot be revoked from here.
+ */
+export const PairedDevicesViewSchema = z.strictObject({
+  devices: z.array(PairedDeviceSchema).readonly(),
+  hostLocal: z.boolean(),
+  thisDeviceId: PairedDeviceIdSchema.optional(),
+});
+export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;

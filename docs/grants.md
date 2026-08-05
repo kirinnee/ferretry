@@ -36,7 +36,7 @@ Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that
 presents every loopback-looking signal it can.
 
-## Five capabilities, two axes
+## Six capabilities, two axes
 
 | capability   | what it covers                                                         |
 | ------------ | ---------------------------------------------------------------------- |
@@ -45,6 +45,7 @@ presents every loopback-looking signal it can.
 | `browser`    | the human login window and per-session browser control                 |
 | `filesystem` | the read-only session working-tree surface                             |
 | `warden`     | supervision status, sweeps and the warden configuration                |
+| `pairing`    | minting and revoking pairing codes, and the paired-device list         |
 
 Each has two axes, and they are different questions:
 
@@ -55,11 +56,46 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 attention, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
+<<<<<<< HEAD
+
 ## Permissive by default; LOCALITY is the layer
 
 Both axes default to **enabled** for every capability. The dangerous act is structurally
 unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
 closed would make a fresh remote session useless until somebody walked to the machine.
+=======
+
+### `pairing` is the one that produces credentials
+
+Exercising every other capability does something _with_ this machine. Exercising `pairing` hands
+**another device** access to it, and a minted device credential outlives the decision that allowed it —
+so it is worth saying out loud why it needs no exception to the permissive default:
+
+- **A browser is always a paired device.** That is the whole reason this capability exists. `POST
+/v1/pair/code` used to be `host`-scoped, and `host` is refused unless the caller authenticated with
+  the admin token — a file on the machine. So the UI could not add a second device even while running
+  _on_ the machine, and "add a device" had no home outside a terminal. The routes now sit at `admin`
+  scope with a `pairing` demand, which is the layer that can say "loopback yes, remote by decision".
+- **The scope move widens the layer beneath this one.** Any paired device reaching the daemon over
+  loopback can now mint. That is the loopback principle applied consistently — somebody at the machine
+  already has the machine — and a grant cannot narrow it, because a grant only ever governs a caller
+  who is not on this host. It is stated here rather than discovered, because it is the part of the
+  design a reviewer should agree to.
+- **Its safety is the one-way gate, not its default.** A caller who is not on the host may switch
+  `pairing` **off** and can never switch it back **on**. An operator who decides that only the machine
+  itself hands out credentials therefore makes a decision that sticks: a stolen phone cannot restore an
+  access its owner revoked, and it cannot re-grant itself the ability to mint more.
+- **Revoking is on the `use` axis, deliberately.** Ending a code and ending a device's access are both
+  _exercising_ pairing rather than changing how the host behaves. Putting either behind `configure`
+  would add a gate between a person and a stolen phone at the one moment it matters.
+
+## Permissive by default; the password is the layer
+
+Both axes default to **enabled** for all six. The product should let a person do as much as possible
+from the UI, and the security model is something a cautious operator turns **on** rather than a wall
+everyone starts behind.
+
+> > > > > > > 141154ed (feat(pwa): add a device to one daemon from the browser)
 
 **The primary security layer is locality, not the password.** A remote caller can never turn a
 capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
@@ -188,7 +224,11 @@ command says so at the moment somebody might be tempted to do that instead.
 
 ## Declared GAPs
 
-- **`configure` has no route of its own for `terminal`, `browser` or `filesystem`.** Those three
+- **An SSH tunnel to the daemon port reads as loopback**, because the socket genuinely is local. The
+  model accepts this — a tunnel needs shell access, and anybody with that can read the admin token
+  anyway — but `pairing` is the capability where it matters most, so it is written down rather than
+  discovered.
+- **`configure` has no route of its own for `terminal`, `browser`, `filesystem` or `pairing`.** Those four
   subsystems have no host settings the API can change today, so their configure axis governs exactly
   one thing: whether a remote caller may re-grant that capability. It is not decoration — it is the
   coarse switch's own lock — but it is narrower than `fleet` and `warden`, whose configure axis gates

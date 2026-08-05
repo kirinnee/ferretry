@@ -38,10 +38,16 @@
  *
  * ## PERMISSIVE BY DEFAULT, RESTRICTIVE BY CHOICE
  *
- * Both axes default to ENABLED for every capability. A person should be able to do as much as
- * possible from the UI, and the security model is a layer a cautious operator turns on rather than a
- * wall everyone starts behind. The layer is the OPERATOR PASSWORD: set one, and every `configure`
- * demand needs an unlock; set none, and nothing is obstructed.
+ * Both axes default to ENABLED for every capability, `pairing` included. A person should be able to do
+ * as much as possible from the UI, and the security model is a layer a cautious operator turns on
+ * rather than a wall everyone starts behind. The layer is the OPERATOR PASSWORD: set one, and every
+ * `configure` demand needs an unlock; set none, and nothing is obstructed.
+ *
+ * `pairing` DESERVES A SENTENCE BECAUSE IT IS THE ONE THAT PRODUCES CREDENTIALS. Exercising it hands
+ * another device access to the machine, which is why the protection it relies on is not its default but
+ * the one-way gate: a caller who is not on the host may turn a capability OFF and may never turn one
+ * back ON. An operator who decides that only the machine itself hands out credentials therefore makes
+ * a decision that sticks, and no device that has been shut out can restore itself.
  *
  * That direction has an honest cost, and it is named rather than hidden: with permissive defaults and
  * no password, anyone holding a pairing can change this machine's fleet and settings. It is stated in
@@ -65,14 +71,19 @@ import { InstantSchema } from './common.ts';
 /**
  * The capabilities an operator is asked about, in the order they are asked.
  *
- * FIVE, and the list is closed. Every one of them either reaches out of the daemon's own state onto
+ * SIX, and the list is closed. Every one of them either reaches out of the daemon's own state onto
  * the host — spawning a shell, writing an account's wrapper, opening a browser the operator is
  * signed into, reading a working tree — or decides how much of the host the daemon may spend on its
  * own. Everything the daemon does *inside its own state home* (sessions, tasks, attention, pins) is
  * deliberately NOT here: a grant list that grows to cover every route becomes a second copy of the
  * route table, and a second copy is how the two stop agreeing.
+ *
+ * `pairing` is LAST because it was added last, and appending rather than inserting is deliberate: the
+ * order is the order an operator is asked and reads, so an existing report's rows must not reshuffle
+ * because a sixth question exists. What it reaches is not the daemon's own state either — a pairing
+ * code is a credential for the machine, redeemable by whoever holds it.
  */
-export const DAEMON_CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden'] as const;
+export const DAEMON_CAPABILITIES = ['fleet', 'terminal', 'browser', 'filesystem', 'warden', 'pairing'] as const;
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];
 
 export const DaemonCapabilitySchema = z.enum(DAEMON_CAPABILITIES);
@@ -226,6 +237,23 @@ export type CapabilityGrantView = z.infer<typeof CapabilityGrantViewSchema>;
  */
 export const GrantsViewSchema = z.strictObject({
   capabilities: z.array(CapabilityGrantViewSchema).readonly(),
+  /**
+   * Whether the operator's grants GOVERN this caller at all — false for a loopback caller.
+   *
+   * SERVED RATHER THAN INFERRED, because the browser cannot work it out and the two ways it would try
+   * are both wrong. A page loaded from a loopback address can be reaching this daemon through the relay,
+   * whose tunnel sets `loopback: false` unconditionally, so anything derived from a URL or a hostname
+   * would tell a remote phone it is standing at the machine — the exact inversion this whole layer
+   * exists to prevent. Nor can it be read off the refusals: a loopback caller sees `granted` on every
+   * axis, and so does a remote caller holding a valid unlock on a fully granted machine.
+   *
+   * It is what lets a UI say WHICH sentence is true — "you have this because you are at the machine" or
+   * "you have this because it was granted" — instead of picking one and being wrong for a real
+   * configuration. The same carrier fact reaches the pairing surface as `PairedDevicesView.hostLocal`,
+   * spelled from that screen's point of view; there is one source, `ApiRequest.loopback`, and neither
+   * view re-derives it.
+   */
+  governed: z.boolean(),
   /** Whether an operator password exists at all. NEVER the password, its hash, or its length. */
   passwordSet: z.boolean(),
   /** Whether the caller currently holds a valid unlock. */

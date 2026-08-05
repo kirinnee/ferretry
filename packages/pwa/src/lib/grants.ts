@@ -58,6 +58,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   browser: 'the browser',
   filesystem: 'session working trees',
   warden: 'fleet supervision',
+  pairing: 'device pairing',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -69,6 +70,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   browser: 'Browser',
   filesystem: 'Session files',
   warden: 'Fleet supervision',
+  pairing: 'Device pairing',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
@@ -87,6 +89,8 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
   browser: 'The login window and per-session control of a browser you are signed into.',
   filesystem: 'Reading the files in a session’s working tree.',
   warden: 'Supervision status, sweeps, and how much quota the daemon may spend unattended.',
+  pairing:
+    'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a remote browser can never undo.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -294,6 +298,10 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   filesystem: 'narrow',
   // Decides how much of somebody's quota the machine may spend unattended, but reaches no further.
   warden: 'moderate',
+  // BROAD, and it is the only row whose weight is about what comes NEXT. Pairing reaches nothing on the
+  // host by itself; what it hands out is a credential that carries every other capability, so weighing it
+  // by its own reach would rate it `narrow` and read as the mildest switch on the screen.
+  pairing: 'broad',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];

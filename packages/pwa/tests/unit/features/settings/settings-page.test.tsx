@@ -701,6 +701,7 @@ describe('daemon settings', () => {
     expect(panels.map(panel => panel.getAttribute('data-daemon-panel'))).toEqual([
       'warden',
       'secrets',
+      'devices',
       'grants',
       'environment',
       'carrier',
@@ -795,6 +796,7 @@ describe('daemon settings', () => {
     expect(choices.map(choice => choice.getAttribute('data-daemon-panel-choice'))).toEqual([
       'warden',
       'secrets',
+      'devices',
       'grants',
       'environment',
       'carrier',
@@ -802,7 +804,15 @@ describe('daemon settings', () => {
     ]);
     expect(sheet.querySelectorAll('[role="tab"]')).toHaveLength(0);
     expect(sheet.querySelectorAll('[role="tablist"]')).toHaveLength(0);
-    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual(['page', null, null, null, null, null]);
+    expect(choices.map(choice => choice.getAttribute('aria-current'))).toEqual([
+      'page',
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
 
     await interact(() =>
       must(

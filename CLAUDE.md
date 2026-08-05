@@ -94,13 +94,21 @@ declared GAPs are [docs/secrets.md](docs/secrets.md); read it before describing 
 against, because the useful property is narrower than people assume.
 
 `packages/daemon` also decides **what a caller who is NOT on this host may do**, per capability
-(`fleet`, `terminal`, `browser`, `filesystem`, `warden`) and per axis (_use_ / _configure_). **A
+(`fleet`, `terminal`, `browser`, `filesystem`, `warden`, `pairing`) and per axis (_use_ / _configure_). **A
 loopback caller is ungoverned** — somebody at the machine already has the machine — and "loopback"
 means how the request ARRIVED, decided from the carrier: the relay terminates on the host it serves,
 so any check reading a peer address, a `Host` header or a URL would hand a remote phone full control.
 Defaults are permissive and the **operator password** is the opt-in layer; a grant can only ever
 narrow what a credential could already do, and an undetermined document fails closed. The contract,
 the widen/narrow asymmetry and the declared GAPs are [docs/grants.md](docs/grants.md).
+
+How another device GETS that access is [docs/pairing.md](docs/pairing.md): a two-minute single-use code,
+a device token the daemon keeps only a hash of, and revocation of either. **No route returns a device
+token or a digest** — the wire projection has no field for one — and a **pairing code is a live
+credential**, so its QR is generated locally and never by an image service, never announced to a screen
+reader, never persisted, and never screenshotted for real (committed captures use a fixed fake code).
+Minting is governed by the `pairing` capability rather than by the `host` scope, because a browser is
+always a paired device and could otherwise never add a second one.
 
 ## Migration context
 
