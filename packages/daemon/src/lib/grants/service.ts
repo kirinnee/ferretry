@@ -3,6 +3,7 @@ import {
   DAEMON_CAPABILITIES,
   type DaemonCapability,
   GRANT_UNLOCK_TTL_SECONDS,
+  type GrantAuditView,
   type GrantRefusal,
   type GrantsPatch,
   type GrantsView,
@@ -307,6 +308,23 @@ export class CapabilityGrantService implements CapabilityGuard {
   /** Whether this machine has the security layer turned on. Never the password itself. */
   hasPassword(): boolean {
     return this.passwordSet;
+  }
+
+  /**
+   * Who changed what, most recent first.
+   *
+   * IT IS NOT GATED ON THE GRANTS IT REPORTS. A caller refused a capability is exactly the caller who
+   * needs to know when and by whom it was refused — gating the history behind the decision would make
+   * the answer unreachable to the only person asking the question. It discloses actors and axes; no
+   * credential and nothing about the password has ever been written to that file.
+   */
+  async history(limit: number): Promise<GrantAuditView> {
+    const reading = await this.deps.audit.recent(limit);
+    return {
+      entries: reading.entries.map(entry => ({ at: entry.at, actor: entry.actor, changes: entry.changes })),
+      unreadable: reading.unreadable,
+      truncated: reading.truncated,
+    };
   }
 
   /** What the daemon's own reports may say about this subsystem. Never the password itself. */

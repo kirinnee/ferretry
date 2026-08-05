@@ -1,6 +1,8 @@
 import {
+  GRANT_AUDIT_MAX_ENTRIES,
   GRANT_UNLOCK_TTL_SECONDS,
   GrantPasswordRequestSchema,
+  type GrantAuditView,
   type GrantsPatch,
   GrantsPatchSchema,
   type GrantsView,
@@ -43,6 +45,8 @@ import type { UnlockOutcome } from '../../grants/types.ts';
  * the property holds because there is no getter to call, not because callers are trusted to behave.
  */
 export interface GrantSubsystem {
+  /** Who changed what, newest first. Ungated for the reason the read above is. */
+  history(limit: number): Promise<GrantAuditView>;
   /**
    * Re-reads the operator's decision.
    *
@@ -152,6 +156,16 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       scope: 'warden',
       noStore: true,
       handle: async context => jsonResponse(subsystem.view(presentationOf(context))),
+    },
+    {
+      method: 'GET',
+      path: '/v1/grants/audit',
+      // `admin` rather than the read's `warden`: this names DEVICES, and a capability-scoped warden
+      // has no business learning which phones an operator has paired. It is not capability-gated for
+      // the same reason the grant read is not — the caller who was refused is the one asking.
+      scope: 'admin',
+      noStore: true,
+      handle: async () => jsonResponse(await subsystem.history(GRANT_AUDIT_MAX_ENTRIES).catch(refuse)),
     },
     {
       method: 'POST',

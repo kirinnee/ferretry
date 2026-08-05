@@ -1,4 +1,4 @@
-# Capability grants — what a caller who is not on this host may do
+| the change record | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |# Capability grants — what a caller who is not on this host may do
 
 Read this before describing what grants protect against, because the useful property is narrower
 than the name suggests.
@@ -185,9 +185,11 @@ command says so at the moment somebody might be tempted to do that instead.
   coarse switch's own lock — but it is narrower than `fleet` and `warden`, whose configure axis gates
   real host-changing routes (`PUT /v1/fleet/environment`, `POST /v1/fleet/apply`,
   `PATCH /v1/warden/config`).
-- **The audit journal has no read surface.** `state/grant-audit.jsonl` is written and never served;
-  there is no `fy daemon config history`. The record exists so the question is answerable, but
-  answering it means reading the file.
+- ~~The audit journal has no read surface.~~ **Closed.** `GET /v1/grants/audit` and
+  `fy daemon config history` (alias `log`) read the tail of `state/grant-audit.jsonl`. The read is
+  `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a
+  64 KiB window of the file and the newest 50 records; and a line it cannot parse is **counted and
+  reported**, never dropped — a truncated or tampered journal must not read as a clean history.
 - **The daemon's fleet event stream (`GET /v1/events`) is not governed.** It carries session events
   the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
   would make revoking `fleet` break the session list. If a future event kind carries fleet

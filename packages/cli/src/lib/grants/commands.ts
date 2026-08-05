@@ -55,6 +55,15 @@ export function registerGrantCommands(program: Command, controller: () => GrantC
     });
 
   config
+    .command('history')
+    .alias('log')
+    .description('who changed a grant on this machine, and when')
+    .option('--json', 'print the protocol document instead of the human listing')
+    .action(async (options: GrantCommandOptions) => {
+      await controller().history(options);
+    });
+
+  config
     .command('set <capability>')
     .description('grant or revoke one capability, by axis')
     .option('--use', 'let a remote caller exercise this capability')

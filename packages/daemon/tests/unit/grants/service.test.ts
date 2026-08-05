@@ -64,6 +64,7 @@ function world(options: { grants?: CapabilityGrants; password?: string; broken?:
       record: async entry => {
         audit.push(entry);
       },
+      recent: async limit => ({ entries: [...audit].reverse().slice(0, limit), unreadable: 0, truncated: false }),
     },
     clientName: 'fy',
   });

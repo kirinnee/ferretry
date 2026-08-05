@@ -4,6 +4,7 @@ import type {
   FileSystemPort,
   GrantAuditEntry,
   GrantAuditPort,
+  GrantAuditReading,
   GrantClock,
   GrantDocumentPort,
   UnlockTokenFactory,
@@ -89,5 +90,63 @@ export class JournalGrantAudit implements GrantAuditPort {
       this.path,
       JSON.stringify({ kind: 'grant.changed', at: entry.at, actor: entry.actor, changes: entry.changes }),
     );
+  }
+
+  /**
+   * The most recent records, newest first.
+   *
+   * IT READS THE TAIL, NOT THE FILE. This journal is append-only and never rotated, so a machine
+   * reconfigured over a year would otherwise have its whole history materialised to answer "what
+   * changed recently". A window of {@link AUDIT_WINDOW_BYTES} is read from the end, and the first
+   * line in it is dropped when the window started mid-record — a half-record parsed as a whole one
+   * is a fabricated history entry, which is worse than a missing one.
+   *
+   * A LINE IT CANNOT PARSE IS COUNTED, NOT SKIPPED. Dropping damage silently would let a truncated or
+   * tampered journal read as a clean history, which is the absent-evidence-as-benign-result defect
+   * this product has been bitten by repeatedly. The caller is told the count and can say so.
+   */
+  async recent(limit: number): Promise<GrantAuditReading> {
+    const information = await this.files.information(this.path);
+    if (information === undefined) return { entries: [], unreadable: 0, truncated: false };
+    const size = information.size;
+    const from = Math.max(0, size - AUDIT_WINDOW_BYTES);
+    const bytes = await this.files.readSlice(this.path, from, size - from);
+    if (bytes === undefined) return { entries: [], unreadable: 0, truncated: from > 0 };
+    const lines = new TextDecoder().decode(bytes).split('\n');
+    // The window may have opened mid-record; that first fragment is not a record and must not be
+    // reported as an unreadable one either, because nothing is actually wrong with the file.
+    if (from > 0) lines.shift();
+    let unreadable = 0;
+    const entries: GrantAuditEntry[] = [];
+    for (const line of lines) {
+      if (line.trim() === '') continue;
+      const parsed = readAuditLine(line);
+      if (parsed === undefined) unreadable += 1;
+      else entries.push(parsed);
+    }
+    return { entries: entries.reverse().slice(0, limit), unreadable, truncated: from > 0 };
+  }
+}
+
+/**
+ * How much of the journal's tail one read covers.
+ *
+ * 64 KiB is thousands of records — far more than the bounded page ever returns — so the window is
+ * about capping the ALLOCATION rather than the answer. A cap applied after the file is in memory is
+ * a cap applied too late.
+ */
+const AUDIT_WINDOW_BYTES = 64 * 1024;
+
+/** One journal line, or nothing when it is not a record this daemon wrote. */
+function readAuditLine(line: string): GrantAuditEntry | undefined {
+  try {
+    const value = JSON.parse(line) as Record<string, unknown>;
+    if (value.kind !== 'grant.changed') return undefined;
+    const { at, actor, changes } = value;
+    if (typeof at !== 'string' || typeof actor !== 'string' || !Array.isArray(changes)) return undefined;
+    if (at === '' || actor === '' || !changes.every(change => typeof change === 'string')) return undefined;
+    return { at, actor, changes: changes as readonly string[] };
+  } catch {
+    return undefined;
   }
 }

@@ -1571,6 +1571,7 @@ export interface GrantWorld {
  */
 export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
   let recorded = world.grants ?? DEFAULT_CAPABILITY_GRANTS;
+  const recordedChanges: GrantAuditEntry[] = [];
   let stored = world.password;
   let minted = 0;
   return new CapabilityGrantService({
@@ -1601,7 +1602,18 @@ export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
       },
     },
     clock: { nowMs: () => world.nowMs ?? 1_700_000_000_000 },
-    audit: { record: async () => undefined },
+    // A REAL round trip, not a stub: the route's whole job is to give back what the patch put in, and
+    // two halves that never meet would let a report show a history nothing wrote.
+    audit: {
+      record: async entry => {
+        recordedChanges.push(entry);
+      },
+      recent: async limit => ({
+        entries: [...recordedChanges].reverse().slice(0, limit),
+        unreadable: 0,
+        truncated: false,
+      }),
+    },
     clientName: 'fy',
   });
 }
