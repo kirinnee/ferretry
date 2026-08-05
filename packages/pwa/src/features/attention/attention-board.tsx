@@ -20,7 +20,6 @@ import {
 import type {
   AttentionAsk,
   AttentionBy,
-  AttentionDisposition,
   AttentionItem,
   AttentionResponse,
   AttentionSnapshot,
@@ -85,27 +84,45 @@ export const describeResponse = (response: AttentionResponse): string => {
   return `Answered: ${response.answer}`;
 };
 
-const actor = (by: AttentionBy, name: string | null): string =>
-  by === 'agent' ? `agent ${name ?? '(unnamed)'}` : by === 'human' ? 'you' : 'the daemon';
+/**
+ * An agent's display name is optional in the recorded ledger and is null for most
+ * real work, so the session it acted from is the fallback that carries audit value:
+ * a person can look a session up, where a generic placeholder identifies nobody.
+ */
+const agentLabel = (name: string | null, session: string | null): string =>
+  name ?? session ?? 'an unidentified session';
+
+const actor = (by: AttentionBy, name: string | null, session: string | null): string =>
+  by === 'agent' ? `agent ${agentLabel(name, session)}` : by === 'human' ? 'you' : 'the daemon';
+
+type AttentionResolution = Pick<
+  ResolvedAttentionItem,
+  'resolvedBy' | 'resolvedByName' | 'resolvedBySession' | 'disposition' | 'response'
+>;
 
 /**
  * A dismissal is audit evidence, not a generic completed state. The badge makes
- * clears performed without the human especially easy to scan.
+ * clears performed without the human especially easy to scan — and it keeps an
+ * agent that answered on the human's behalf distinct from one that withdrew its
+ * own request, because only the recorded response separates the two.
  */
-export function resolutionBadge(
-  by: AttentionBy,
-  name: string | null,
-  disposition: AttentionDisposition,
-): { label: string; className: string; icon: typeof Check } {
+export function resolutionBadge({
+  resolvedBy,
+  resolvedByName,
+  resolvedBySession,
+  disposition,
+  response,
+}: AttentionResolution): { label: string; className: string; icon: typeof Check } {
+  const agent = agentLabel(resolvedByName, resolvedBySession);
   if (disposition === 'dismissed') {
-    if (by === 'agent') {
+    if (resolvedBy === 'agent') {
       return {
-        label: `dismissed by agent ${name ?? '(unnamed)'}`,
+        label: `dismissed by agent ${agent}`,
         className: 'border-warn/50 bg-warn/10 text-warn',
         icon: Bot,
       };
     }
-    if (by === 'human') {
+    if (resolvedBy === 'human') {
       return {
         label: 'dismissed by you',
         className: 'border-border bg-surface-2 text-muted',
@@ -118,14 +135,14 @@ export function resolutionBadge(
       icon: Check,
     };
   }
-  if (by === 'agent') {
+  if (resolvedBy === 'agent') {
     return {
-      label: `retracted by agent ${name ?? '(unnamed)'}`,
+      label: `${response ? 'answered' : 'retracted'} by agent ${agent}`,
       className: 'border-warn/50 bg-warn/10 text-warn',
       icon: Bot,
     };
   }
-  if (by === 'human') {
+  if (resolvedBy === 'human') {
     return {
       label: 'done by you',
       className: 'border-ok/50 bg-ok/10 text-ok',
@@ -341,7 +358,7 @@ function AttentionRow({
       </div>
       <div className="mt-sm flex flex-wrap items-center gap-x-sm gap-y-xs text-meta text-faint">
         <span>
-          {sourceLabel(item.source)} · raised by {actor(item.raisedBy, item.raisedByName)} ·{' '}
+          {sourceLabel(item.source)} · raised by {actor(item.raisedBy, item.raisedByName, item.raisedBySession)} ·{' '}
           {new Date(item.waitingSince).toLocaleString()}
         </span>
         <button
@@ -517,7 +534,7 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttention
       ) : (
         <ul className="m-0 flex list-none flex-col gap-sm p-0 pb-row-y pt-xs">
           {items.map(item => {
-            const badge = resolutionBadge(item.resolvedBy, item.resolvedByName, item.disposition);
+            const badge = resolutionBadge(item);
             const BadgeIcon = badge.icon;
             return (
               <li

@@ -1503,7 +1503,9 @@ const ATTENTION: AttentionSnapshot = {
       resolvedAt: '2026-07-31T11:27:00.000Z',
       resolvedBy: 'agent',
       resolvedBySession: 'harness-session',
-      resolvedByName: 'Zoe',
+      // The recorded ledger carries no display name for most agent work, so the audit
+      // badge has to read the way it will in production: named by its session.
+      resolvedByName: null,
       resolutionNote: 'The agent retracted its own stale request after the release plan changed.',
       disposition: 'dismissed',
     },

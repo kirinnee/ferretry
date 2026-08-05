@@ -50,12 +50,71 @@ const snapshot = (overrides: Partial<AttentionSnapshot> = {}): AttentionSnapshot
 
 describe('AttentionBoard', () => {
   it('distinguishes who dismissed an item from who answered or cleared it', () => {
-    expect(resolutionBadge('agent', 'zoe', 'dismissed').label).toBe('dismissed by agent zoe');
-    expect(resolutionBadge('agent', null, 'done').label).toBe('retracted by agent (unnamed)');
-    expect(resolutionBadge('human', null, 'dismissed').label).toBe('dismissed by you');
-    expect(resolutionBadge('human', null, 'done').label).toBe('done by you');
-    expect(resolutionBadge('daemon', null, 'dismissed').label).toBe('dismissed by the daemon');
-    expect(resolutionBadge('daemon', null, 'done').label).toBe('cleared by the daemon');
+    const agent = { resolvedBy: 'agent' as const, resolvedBySession: 'sess-agent-7' };
+    const person = { resolvedBy: 'human' as const, resolvedBySession: null, resolvedByName: null };
+    const daemon = { resolvedBy: 'daemon' as const, resolvedBySession: null, resolvedByName: null };
+    expect(resolutionBadge({ ...agent, resolvedByName: 'zoe', disposition: 'dismissed' }).label).toBe(
+      'dismissed by agent zoe',
+    );
+    expect(resolutionBadge({ ...agent, resolvedByName: null, disposition: 'done' }).label).toBe(
+      'retracted by agent sess-agent-7',
+    );
+    expect(resolutionBadge({ ...person, disposition: 'dismissed' }).label).toBe('dismissed by you');
+    expect(resolutionBadge({ ...person, disposition: 'done' }).label).toBe('done by you');
+    expect(resolutionBadge({ ...daemon, disposition: 'dismissed' }).label).toBe('dismissed by the daemon');
+    expect(resolutionBadge({ ...daemon, disposition: 'done' }).label).toBe('cleared by the daemon');
+  });
+
+  it('names the acting agent by its session when the ledger records no display name', () => {
+    const agent = { resolvedBy: 'agent' as const, resolvedBySession: 'sess-agent-7' };
+    // The real daemon leaves the name null far more often than the session, so a
+    // session id — not a placeholder — is what the audit has to show.
+    expect(resolutionBadge({ ...agent, resolvedByName: null, disposition: 'dismissed' }).label).toBe(
+      'dismissed by agent sess-agent-7',
+    );
+    expect(resolutionBadge({ ...agent, resolvedByName: 'zoe', disposition: 'done' }).label).toBe(
+      'retracted by agent zoe',
+    );
+    // A damaged record that names neither still has to read as an agent action.
+    expect(
+      resolutionBadge({ resolvedBy: 'agent', resolvedBySession: null, resolvedByName: null, disposition: 'done' })
+        .label,
+    ).toBe('retracted by agent an unidentified session');
+  });
+
+  it('separates an agent that answered for the human from one that retracted its own request', () => {
+    const answered = resolutionBadge({
+      resolvedBy: 'agent',
+      resolvedBySession: 'sess-agent-7',
+      resolvedByName: null,
+      disposition: 'done',
+      response: { kind: 'permission', decision: 'approve' },
+    });
+    expect(answered.label).toBe('answered by agent sess-agent-7');
+    // Answering on the human's behalf is still agent provenance, so it keeps the warn treatment.
+    expect(answered.className).toContain('text-warn');
+    expect(
+      resolutionBadge({
+        resolvedBy: 'agent',
+        resolvedBySession: 'sess-agent-7',
+        resolvedByName: null,
+        disposition: 'done',
+      }).label,
+    ).toBe('retracted by agent sess-agent-7');
+  });
+
+  it('falls back to the raising session when an unresolved item carries no agent name', async () => {
+    const { container } = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={snapshot({ items: [{ ...item, raisedByName: null }] })}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(container.textContent).toContain('raised by agent sess-1');
+    expect(container.textContent).not.toContain('(unnamed)');
   });
 
   it('renders the oldest item as a rail-led ledger and routes the permission answer', async () => {
@@ -171,6 +230,17 @@ describe('AttentionBoard', () => {
               disposition: 'done',
               response: { kind: 'permission', decision: 'approve' },
             },
+            {
+              ...item,
+              id: 'A4',
+              resolvedAt: '2026-07-31T12:05:00.000Z',
+              resolvedBy: 'agent',
+              resolvedBySession: 'sess-agent-7',
+              resolvedByName: null,
+              resolutionNote: 'The agent approved it while the human was away.',
+              disposition: 'done',
+              response: { kind: 'permission', decision: 'approve' },
+            },
           ],
         })}
         loading={false}
@@ -181,6 +251,8 @@ describe('AttentionBoard', () => {
     expect(audit.container.textContent).toContain('offline');
     expect(audit.container.textContent).toContain('Could not verify attention');
     expect(audit.container.textContent).toContain('Resolution audit');
+    expect(audit.container.textContent).toContain('done by you');
+    expect(audit.container.textContent).toContain('answered by agent sess-agent-7');
   });
 
   it('fails closed when the daemon cannot provide a complete attention ledger', async () => {
