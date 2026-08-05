@@ -74,6 +74,27 @@ describe('FleetEnvironmentSettings', () => {
     run(() => view.unmount());
   });
 
+  it('keeps Host checks explicitly unavailable without the browser pairing record', () => {
+    const view = render(<DaemonSettingsFrame connection={alpha} connections={[alpha]} name="Alpha" />);
+    const hostChecks = must(
+      view.root
+        .findAllByProps({ role: 'tab' })
+        .find(tab => tab.props['aria-controls'] === 'daemon-settings-tab-host-checks'),
+      'host checks tab',
+    );
+
+    run(() => hostChecks.props.onClick());
+
+    expect(
+      view.root
+        .findByProps({ 'aria-label': 'Host checks unavailable' })
+        .findAllByType('p')
+        .flatMap(paragraph => paragraph.children)
+        .join(''),
+    ).toContain('browser pairing record was not supplied');
+    run(() => view.unmount());
+  });
+
   it('previews a source profile, changes copy semantics, and applies an edited safe environment', async () => {
     const calls: Array<{ readonly url: URL; readonly init?: RequestInit }> = [];
     const target = { profiles: { portable: { KEEP: 'target', CHANGE: 'old', REMOVE: 'gone' }, other: {} } };

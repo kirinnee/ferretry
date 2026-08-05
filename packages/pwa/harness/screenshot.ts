@@ -478,13 +478,38 @@ try {
           process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
 
           await selectSettingsSection('daemons');
-          for (const state of ['reachable', 'unreachable', 'checking'] as const)
-            await settingsPage.locator(`[data-daemon-reachability="${state}"]`).waitFor({ state: 'visible' });
-          const daemonRows = await settingsPage.locator('[data-daemon-id]').count();
-          if (daemonRows !== 3) fail(`settings many-daemon fixture rendered ${daemonRows} rows instead of 3`);
+          const daemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
+          if (daemonTabs !== 3)
+            fail(`settings many-daemon fixture rendered ${daemonTabs} daemon sub-tabs instead of 3`);
           const daemonsTarget = join(outDir, `settings-daemons-${viewport.name}.png`);
           await page.screenshot({ path: daemonsTarget });
           process.stdout.write(`📸 Settings Daemons (many) ${viewport.name} -> ${daemonsTarget}\n`);
+
+          const selectDaemon = async (name: string) => {
+            if (viewport.name === 'mobile') {
+              await settingsPage.locator('[data-daemon-subtab-trigger]').click();
+              const picker = page.getByRole('dialog', { name: 'Choose a daemon' });
+              await picker.waitFor({ state: 'visible' });
+              await picker.getByRole('button', { name: new RegExp(`^${name}`) }).click();
+              await picker.waitFor({ state: 'hidden' });
+            } else {
+              await settingsPage
+                .locator('[data-daemon-subtabs="desktop"]')
+                .getByRole('tab', { name: new RegExp(`^${name}`) })
+                .click();
+            }
+          };
+
+          if (viewport.name === 'mobile') {
+            await settingsPage.locator('[data-daemon-subtab-trigger]').click();
+            const daemonPicker = page.getByRole('dialog', { name: 'Choose a daemon' });
+            await daemonPicker.waitFor({ state: 'visible' });
+            const daemonPickerTarget = join(outDir, 'settings-daemon-picker-open-mobile.png');
+            await page.screenshot({ path: daemonPickerTarget });
+            process.stdout.write(`📸 Settings daemon picker open -> ${daemonPickerTarget}\n`);
+            await page.keyboard.press('Escape');
+            await daemonPicker.waitFor({ state: 'hidden' });
+          }
 
           const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
           const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
@@ -492,7 +517,21 @@ try {
           await page.screenshot({ path: wardenFrameTarget });
           process.stdout.write(`📸 Settings daemon Warden ${viewport.name} -> ${wardenFrameTarget}\n`);
 
-          await settingsPage.getByRole('button', { name: 'Use Travel laptop' }).click();
+          for (const [label, slug, ready] of [
+            ['Secrets', 'secrets', '[aria-label="Secrets unavailable"], [aria-label="Loading secrets"]'],
+            ['Environment', 'environment', '#daemon-settings-tab-environment'],
+            ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+            ['Carrier', 'carrier', '[data-active-carrier]'],
+            ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
+          ] as const) {
+            await wardenFrame.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+            await wardenFrame.locator(ready).first().waitFor({ state: 'visible' });
+            const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
+            await page.screenshot({ path: target });
+            process.stdout.write(`📸 Settings daemon ${label} ${viewport.name} -> ${target}\n`);
+          }
+
+          await selectDaemon('Travel laptop');
           const unavailableWardenFrame = settingsPage.locator('[data-daemon-settings-frame="unreachable-daemon"]');
           await unavailableWardenFrame.scrollIntoViewIfNeeded();
           await unavailableWardenFrame.getByLabel('Warden status unavailable').waitFor({ state: 'visible' });
@@ -502,7 +541,11 @@ try {
             `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
           );
 
-          const currentDaemon = settingsPage.locator('[data-daemon-id="harness-daemon"]');
+          await selectDaemon('Studio workstation');
+          const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+          await currentFrame.getByRole('tab', { name: /^Host checks/ }).click();
+          const currentDaemon = currentFrame.locator('[data-daemon-host-checks="harness-daemon"]');
+          await currentDaemon.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
           await currentDaemon.getByText('Manage daemon', { exact: true }).click();
           await currentDaemon.getByText('Removing this pairing only forgets it in this browser.').waitFor({
             state: 'visible',
@@ -526,9 +569,14 @@ try {
             await settingsPage.getByRole('button', { name: /^Daemons/ }).click();
           }
           await settingsPage.locator('[data-settings-section="daemons"]').waitFor({ state: 'visible' });
+          await settingsPage
+            .locator('[data-daemon-settings-frame="harness-daemon"]')
+            .getByRole('tab', { name: /^Host checks/ })
+            .click();
           await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
-          const oneDaemonRows = await settingsPage.locator('[data-daemon-id]').count();
-          if (oneDaemonRows !== 1) fail(`settings one-daemon fixture rendered ${oneDaemonRows} rows instead of 1`);
+          const oneDaemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
+          if (oneDaemonTabs !== 1)
+            fail(`settings one-daemon fixture rendered ${oneDaemonTabs} daemon sub-tab instead of 1`);
           const oneDaemonTarget = join(outDir, `settings-daemons-one-${viewport.name}.png`);
           await page.screenshot({ path: oneDaemonTarget });
           process.stdout.write(`📸 Settings Daemons (one) ${viewport.name} -> ${oneDaemonTarget}\n`);

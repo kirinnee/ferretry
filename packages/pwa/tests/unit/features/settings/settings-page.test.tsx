@@ -1,8 +1,9 @@
 import type { ConnectionChoice } from '@ferretry/relay';
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
-import type { DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -89,11 +90,15 @@ const selectDesktopSection = (view: ReactTestRenderer, section: string): void =>
   run(() => view.root.findByProps({ 'data-settings-section-choice': section }).props.onClick());
 };
 
-const row = (container: HTMLElement, id: string): HTMLElement =>
-  must(container.querySelector<HTMLElement>(`[data-daemon-id="${id}"]`), `${id} row`);
+const daemonSubtab = (container: HTMLElement, id: string): HTMLButtonElement =>
+  must(container.querySelector<HTMLButtonElement>(`[data-daemon-subtab="${id}"]`), `${id} daemon sub-tab`);
+
+const hostChecks = (container: HTMLElement, id: string): HTMLElement =>
+  must(container.querySelector<HTMLElement>(`[data-daemon-host-checks="${id}"]`), `${id} host checks`);
 
 const reachability = (container: HTMLElement, id: string): string | null =>
-  row(container, id).querySelector('[data-daemon-reachability]')?.getAttribute('data-daemon-reachability') ?? null;
+  hostChecks(container, id).querySelector('[data-daemon-reachability]')?.getAttribute('data-daemon-reachability') ??
+  null;
 
 const writeInput = async (input: HTMLInputElement, value: string): Promise<void> => {
   const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
@@ -312,25 +317,23 @@ describe('SettingsPage controls and daemon-qualified links', () => {
 });
 
 describe('daemon settings', () => {
-  it('shows exact names and addresses, marks the routed daemon current, and delegates switch and add', async () => {
+  it('uses named daemon sub-tabs, falls back to the address, and delegates switch and add', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const callbacks = calls();
     const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
-    const alphaRow = row(view.container, 'daemon-alpha');
-    const betaRow = row(view.container, 'daemon-beta');
+    const alphaTab = daemonSubtab(view.container, 'daemon-alpha');
+    const betaTab = daemonSubtab(view.container, 'daemon-beta');
 
-    expect(alphaRow.getAttribute('aria-current')).toBe('true');
-    expect(betaRow.getAttribute('aria-current')).toBeNull();
-    expect(alphaRow.textContent).toContain('Alpha workstation');
-    expect(alphaRow.textContent).toContain('https://alpha.example.test');
-    expect(betaRow.textContent).toContain('daemon-beta');
-    expect(betaRow.textContent).toContain('https://beta.example.test');
+    expect(alphaTab.getAttribute('role')).toBe('tab');
+    expect(alphaTab.getAttribute('aria-selected')).toBe('true');
+    expect(betaTab.getAttribute('aria-selected')).toBe('false');
+    expect(alphaTab.textContent).toContain('Alpha workstation');
+    expect(betaTab.textContent).toContain('https://beta.example.test');
+    expect(betaTab.textContent).not.toContain('daemon-beta');
     expect(view.container.textContent).not.toContain('alpha-secret');
     expect(view.container.textContent).not.toContain('beta-secret');
 
-    await interact(() =>
-      must(betaRow.querySelector<HTMLButtonElement>('[aria-label="Use daemon-beta"]'), 'switch daemon').click(),
-    );
+    await interact(() => betaTab.click());
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-add-daemon]'), 'add daemon').click(),
     );
@@ -339,34 +342,82 @@ describe('daemon settings', () => {
     await view.unmount();
   });
 
+  it('uses the shared BottomSheet for daemon selection on a phone instead of rendering a narrow name strip', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const callbacks = calls();
+    const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
+    const trigger = must(
+      view.container.querySelector<HTMLButtonElement>('[data-daemon-subtab-trigger]'),
+      'daemon picker trigger',
+    );
+
+    expect(trigger.parentElement?.getAttribute('data-daemon-subtabs')).toBe('mobile');
+    expect(view.container.querySelector('[data-bottom-sheet="daemon-subtab-picker"]')).toBeNull();
+    await interact(() => trigger.click());
+
+    const picker = must(view.container.querySelector<HTMLElement>('#daemon-subtab-picker'), 'daemon picker dialog');
+    expect(picker.getAttribute('role')).toBe('dialog');
+    await interact(() =>
+      must(picker.querySelector<HTMLButtonElement>('[data-daemon-subtab="daemon-beta"]'), 'Beta daemon choice').click(),
+    );
+
+    expect(callbacks.selected).toEqual(['daemon-beta']);
+    expect(view.container.querySelector('[data-bottom-sheet]')?.getAttribute('aria-hidden')).toBe('true');
+    await view.unmount();
+  });
+
+  it('keeps Carrier and host controls inside the selected daemon frame', () => {
+    const view = render(page({ connections: [alpha] }));
+    selectDesktopSection(view, 'daemons');
+    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon-alpha' });
+
+    expect(view.root.findAll(node => node.props['data-active-carrier'] !== undefined)).toHaveLength(0);
+    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-carrier' }).props.onClick());
+    expect(frame.findAll(node => node.props['data-active-carrier'] !== undefined)).toHaveLength(1);
+    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-host-checks' }).props.onClick());
+    expect(frame.findByProps({ 'data-daemon-host-checks': 'daemon-alpha' })).toBeDefined();
+    run(() => view.unmount());
+  });
+
   it('keeps rename and removal behind the row disclosure and targets only that daemon', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const callbacks = calls();
     const view = await mount(page({ connections: [alpha, beta], calls: callbacks }));
-    const betaRow = row(view.container, 'daemon-beta');
-    const details = must(betaRow.querySelector<HTMLDetailsElement>('details'), 'daemon management disclosure');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
+    const alphaHostChecks = hostChecks(view.container, 'daemon-alpha');
+    const details = must(
+      [...alphaHostChecks.querySelectorAll<HTMLDetailsElement>('details')].find(
+        candidate => candidate.querySelector('summary')?.textContent === 'Manage daemon',
+      ),
+      'daemon management disclosure',
+    );
 
     expect(details.open).toBe(false);
     expect(callbacks.removed).toEqual([]);
     await interact(() => must(details.querySelector<HTMLElement>('summary'), 'Manage daemon').click());
     expect(details.open).toBe(true);
     expect(details.textContent).toContain('only forgets it in this browser');
-    expect(details.textContent).toContain('https://beta.example.test');
+    expect(details.textContent).toContain('https://alpha.example.test');
 
     const input = must(details.querySelector<HTMLInputElement>('input'), 'display name');
     const form = must(input.closest('form'), 'rename form');
-    await writeInput(input, '  Beta lab  ');
+    await writeInput(input, '  Alpha lab  ');
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    expect(callbacks.renamed).toEqual([{ id: 'daemon-beta', label: 'Beta lab' }]);
+    expect(callbacks.renamed).toEqual([{ id: 'daemon-alpha', label: 'Alpha lab' }]);
 
     await writeInput(input, '');
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-    expect(callbacks.renamed.at(-1)).toEqual({ id: 'daemon-beta', label: undefined });
+    expect(callbacks.renamed.at(-1)).toEqual({ id: 'daemon-alpha', label: undefined });
 
     await interact(() =>
-      must(details.querySelector<HTMLButtonElement>('[data-remove-daemon="daemon-beta"]'), 'remove pairing').click(),
+      must(details.querySelector<HTMLButtonElement>('[data-remove-daemon="daemon-alpha"]'), 'remove pairing').click(),
     );
-    expect(callbacks.removed).toEqual(['daemon-beta']);
+    expect(callbacks.removed).toEqual(['daemon-alpha']);
     await view.unmount();
   });
 
@@ -374,18 +425,27 @@ describe('daemon settings', () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const callbacks = calls();
     const view = await mount(page({ connections: [alpha], calls: callbacks }));
-    const input = must(row(view.container, 'daemon-alpha').querySelector<HTMLInputElement>('input'), 'display name');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
+    const input = must(
+      hostChecks(view.container, 'daemon-alpha').querySelector<HTMLInputElement>('input'),
+      'display name',
+    );
     const form = must(input.closest('form'), 'rename form');
 
     await writeInput(input, 'x'.repeat(65));
-    expect(row(view.container, 'daemon-alpha').querySelector('[role="alert"]')?.textContent).toContain(
+    expect(hostChecks(view.container, 'daemon-alpha').querySelector('[role="alert"]')?.textContent).toContain(
       '64 characters or fewer',
     );
     await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(callbacks.renamed).toEqual([]);
 
     await writeInput(input, 'bad\u0007name');
-    expect(row(view.container, 'daemon-alpha').querySelector('[role="alert"]')?.textContent).toContain(
+    expect(hostChecks(view.container, 'daemon-alpha').querySelector('[role="alert"]')?.textContent).toContain(
       'control or formatting characters',
     );
     await view.unmount();
@@ -394,27 +454,29 @@ describe('daemon settings', () => {
   it('fails closed while probing, then distinguishes a valid response from a rejection', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const alphaHealth = deferred<unknown>();
-    const betaHealth = deferred<unknown>();
     const probed: string[] = [];
     const probe: DaemonReachabilityProbe = connection => {
       probed.push(`${connection.daemonId}:${connection.deviceToken}`);
-      return connection.daemonId === alpha.daemonId ? alphaHealth.promise : betaHealth.promise;
+      return alphaHealth.promise;
     };
     const view = await mount(page({ connections: [alpha, beta], probe }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
-    expect(probed).toEqual(['daemon-alpha:alpha-secret', 'daemon-beta:beta-secret']);
+    expect(probed).toEqual(['daemon-alpha:alpha-secret']);
     expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
-    expect(reachability(view.container, 'daemon-beta')).toBe('checking');
     expect(view.container.querySelector('[data-daemon-reachability="reachable"]')).toBeNull();
 
     alphaHealth.resolve({ ok: false });
-    betaHealth.reject(new Error('connection refused'));
     await settle();
 
     // A schema-valid health response proves reachability; its own `ok` flag is
     // daemon health, not network reachability.
     expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
-    expect(reachability(view.container, 'daemon-beta')).toBe('unreachable');
     await view.unmount();
   });
 
@@ -431,7 +493,14 @@ describe('daemon settings', () => {
   it('never shows a daemon as reachable while its carrier says nothing worked', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const health = deferred<unknown>();
-    const view = await mount(page({ connections: [alpha, beta], probe: () => health.promise }));
+    const controls = new DaemonControlsStore(memoryStorage());
+    const view = await mount(page({ connections: [alpha, beta], controls, probe: () => health.promise }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     health.resolve({});
     await settle();
@@ -442,12 +511,26 @@ describe('daemon settings', () => {
       reason: 'No configured connection worked: direct was not reachable (Failed to fetch).',
       passedOver: [{ method: { kind: 'direct', daemonUrl: 'https://alpha.example.test' }, detail: 'Failed to fetch' }],
     };
-    await view.render(page({ connections: [alpha, beta], probe: () => health.promise, carrier: refused }));
+    await view.render(page({ connections: [alpha, beta], controls, probe: () => health.promise, carrier: refused }));
+    await settle();
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-carrier"]'),
+        'carrier tab',
+      ).click(),
+    );
+    expect(view.container.textContent).toContain('No configured connection worked');
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     expect(reachability(view.container, 'daemon-alpha')).toBe('unreachable');
-    // Only the active daemon has a measured carrier here. A row with no measurement
-    // keeps its own probe's answer rather than borrowing somebody else's.
-    expect(reachability(view.container, 'daemon-beta')).toBe('reachable');
+    // A machine's status is mounted only inside its own selected sub-tab. There
+    // is no second daemon row here that could borrow alpha's carrier result.
+    expect(view.container.querySelector('[data-daemon-host-checks="daemon-beta"]')).toBeNull();
     await view.unmount();
   });
 
@@ -461,6 +544,12 @@ describe('daemon settings', () => {
       passedOver: [],
     };
     const view = await mount(page({ connections: [alpha], probe: () => health.promise, carrier: carried }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     // A carrier that worked is not permission to skip the probe: this badge is about
     // the daemon answering, and it says `checking` until one does.
@@ -480,6 +569,12 @@ describe('daemon settings', () => {
       connection.deviceToken === 'alpha-secret' ? oldHealth.promise : newHealth.promise;
     const controls = new DaemonControlsStore(memoryStorage());
     const view = await mount(page({ current: alpha, connections: [alpha], controls, probe }));
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
+    );
 
     oldHealth.resolve({});
     await settle();
@@ -507,6 +602,27 @@ describe('daemon settings', () => {
     await view.unmount();
   });
 
+  it('fails closed before a rotated pairing can publish new health evidence', async () => {
+    const rotated = daemon('daemon-alpha', 'https://alpha.example.test', 'alpha-rotated', 'Alpha workstation');
+    const RepairedHostChecks = () => {
+      const [connection, setConnection] = useState<DaemonConnectionRecord>(alpha);
+      useLayoutEffect(() => setConnection(rotated), []);
+      return (
+        <DaemonHostChecks
+          connection={connection}
+          probeDaemon={pendingProbe}
+          onRenameDaemon={() => {}}
+          onRemoveDaemon={() => {}}
+        />
+      );
+    };
+
+    const view = await mount(<RepairedHostChecks />);
+
+    expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
+    await view.unmount();
+  });
+
   it('runs a manual reachability retry against the exact row', async () => {
     window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
     const attempts = [deferred<unknown>(), deferred<unknown>()];
@@ -516,6 +632,12 @@ describe('daemon settings', () => {
         connections: [alpha],
         probe: () => must(attempts[reads++]?.promise, 'probe attempt'),
       }),
+    );
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[aria-controls="daemon-settings-tab-host-checks"]'),
+        'host checks tab',
+      ).click(),
     );
     attempts[0]?.resolve({});
     await settle();

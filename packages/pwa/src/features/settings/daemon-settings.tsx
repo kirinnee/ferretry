@@ -8,13 +8,14 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { Check, ChevronDown, LoaderCircle, Plus, RefreshCw, Server, Trash2, Wifi, WifiOff } from 'lucide-react';
+import { Check, ChevronDown, LoaderCircle, Plus, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
 
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 
@@ -24,20 +25,7 @@ export interface DaemonSettingsProps {
   readonly activeDaemonId: DaemonId;
   readonly connections: readonly DaemonConnectionRecord[];
   readonly probeDaemon: DaemonReachabilityProbe;
-  /**
-   * WHAT THE CARRIER ROUTER LAST MEASURED FOR THE ACTIVE DAEMON.
-   *
-   * Supplied so the two things on this screen that answer "can this browser reach that
-   * daemon" cannot answer it differently. They have: a green `Reachable` pill sat
-   * beside a Carrier panel reading `No configured connection worked`, and both were
-   * being honest — the probe took the typed client's own direct transport and the
-   * carrier took the router. One path fixed the mechanism; this fixes the freshness.
-   *
-   * A refusal here OUTRANKS a probe that answered, because a carrier decision is made
-   * by a real request and this badge is a poll that may be most of a minute old. It
-   * only ever makes the badge worse, never better: a carrier that has not measured
-   * anything yet is `undefined`, and an absence is not evidence of health.
-   */
+  /** A live carrier refusal can only make a prior health result worse, never better. */
   readonly activeCarrier?: ConnectionChoice | undefined;
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
   readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
@@ -45,8 +33,9 @@ export interface DaemonSettingsProps {
   readonly onAddDaemon: () => void;
 }
 
-const daemonDisplayName = (connection: DaemonConnectionRecord): string =>
-  connection.label ?? String(connection.daemonId);
+/** A fingerprint proves identity, but it is not a useful label for choosing a machine. */
+export const daemonDisplayName = (connection: DaemonConnectionRecord): string =>
+  connection.label?.trim() || connection.baseUrl;
 
 type Reachability = 'checking' | 'reachable' | 'unreachable';
 
@@ -99,20 +88,6 @@ function useDaemonReachability(connection: DaemonConnection, probe: DaemonReacha
     : { value: 'checking' as const, refreshing: true, refresh: () => refresh.current() };
 }
 
-/**
- * The badge cannot be greener than the carrier.
- *
- * A poll and a live measurement disagreeing is not a tie to be broken by whichever
- * rendered last. `chooseConnection` said `ok: false` because a real request tried
- * every carrier this daemon has and none of them carried it, which is strictly more
- * evidence than a health response from up to thirty seconds ago. So a carrier
- * refusal demotes the badge, and nothing here can ever promote it: `undefined` — the
- * state before anything has been carried — leaves the probe's answer alone, because
- * an absence of measurement is not a measurement of health.
- */
-const withCarrierEvidence = (probed: Reachability, carrier: ConnectionChoice | undefined): Reachability =>
-  carrier?.ok === false ? 'unreachable' : probed;
-
 function ReachabilityBadge({
   connection,
   name,
@@ -125,7 +100,10 @@ function ReachabilityBadge({
   carrier?: ConnectionChoice | undefined;
 }) {
   const reachability = useDaemonReachability(connection, probe);
-  const value = withCarrierEvidence(reachability.value, carrier);
+  // A carrier refusal comes from an actual request through the same router the
+  // typed client uses. It may demote an older successful poll, but missing or
+  // successful carrier evidence never turns an uncertain probe green.
+  const value: Reachability = carrier?.ok === false ? 'unreachable' : reachability.value;
   const label = value === 'reachable' ? 'Reachable' : value === 'unreachable' ? 'Unreachable' : 'Checking';
   const Icon = value === 'reachable' ? Wifi : value === 'unreachable' ? WifiOff : LoaderCircle;
 
@@ -256,118 +234,213 @@ function DaemonManagement({
   );
 }
 
-function DaemonRow({
-  connection,
-  active,
-  probeDaemon,
-  carrier,
+const DAEMON_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
+
+function DaemonSubtabChoices({
+  connections,
+  activeDaemonId,
   onSelect,
-  onRename,
-  onRemove,
 }: {
-  readonly connection: DaemonConnectionRecord;
-  readonly active: boolean;
-  readonly probeDaemon: DaemonReachabilityProbe;
-  readonly carrier?: ConnectionChoice | undefined;
-  readonly onSelect: () => void;
-  readonly onRename: (label?: string) => void;
-  readonly onRemove: () => void;
+  readonly connections: readonly DaemonConnectionRecord[];
+  readonly activeDaemonId: DaemonId;
+  readonly onSelect: (daemonId: DaemonId) => void;
 }) {
-  const name = daemonDisplayName(connection);
   return (
-    <li
-      className={cn('rounded-panel border bg-surface-2 p-3 shadow-panel', active ? 'border-accent' : 'border-border')}
-      aria-current={active ? 'true' : undefined}
-      data-daemon-id={String(connection.daemonId)}
-    >
-      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 gap-2.5">
-          <span
-            className={cn(
-              'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-control border',
-              active ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface text-muted',
-            )}
-            aria-hidden="true"
-          >
-            <Server size={18} />
-          </span>
-          <span className="min-w-0">
-            <span className="flex flex-wrap items-center gap-2">
-              <strong className="break-words text-title text-fg">{name}</strong>
-              {active ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-meta font-semibold text-accent">
-                  <Check size={12} aria-hidden="true" />
-                  Current daemon
-                </span>
-              ) : null}
-            </span>
-            <code className="mt-1 block break-all font-mono text-meta text-faint">{connection.baseUrl}</code>
-          </span>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <ReachabilityBadge connection={connection} name={name} probe={probeDaemon} carrier={carrier} />
-          {!active ? (
-            <button type="button" className="kt-btn min-h-[44px]" onClick={onSelect} aria-label={`Use ${name}`}>
-              Use this daemon
+    <ul className="m-0 flex list-none flex-col gap-1 p-0">
+      {connections.map(connection => {
+        const name = daemonDisplayName(connection);
+        const selected = connection.daemonId === activeDaemonId;
+        return (
+          <li key={connection.daemonId} data-daemon-id={String(connection.daemonId)}>
+            <button
+              type="button"
+              data-daemon-subtab={String(connection.daemonId)}
+              aria-current={selected ? 'page' : undefined}
+              onClick={() => onSelect(connection.daemonId)}
+              className={cn(
+                'flex min-h-[52px] w-full items-center gap-2 rounded-control border px-control-x py-2 text-left transition-colors focus-visible:outline-focus focus-visible:outline-offset-focus',
+                selected
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-transparent text-muted hover:border-border hover:bg-surface-2 hover:text-fg',
+              )}
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-ui font-semibold">{name}</span>
+                {name === connection.baseUrl ? null : (
+                  <span className="mt-0.5 block truncate text-meta leading-tight text-faint">{connection.baseUrl}</span>
+                )}
+              </span>
+              {selected ? <Check size={15} className="shrink-0" aria-hidden="true" /> : null}
             </button>
-          ) : null}
-        </div>
-      </div>
-      <div className="mt-3">
-        <DaemonManagement connection={connection} name={name} onRename={onRename} onRemove={onRemove} />
-      </div>
-    </li>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
+/** The named daemon selector. On a phone it deliberately becomes a picker, never a cramped tab strip. */
 export function DaemonSettings({
   activeDaemonId,
   connections,
-  probeDaemon,
-  activeCarrier,
   onSelectDaemon,
-  onRenameDaemon,
-  onRemoveDaemon,
   onAddDaemon,
-}: DaemonSettingsProps) {
+}: Omit<DaemonSettingsProps, 'probeDaemon' | 'activeCarrier' | 'onRenameDaemon' | 'onRemoveDaemon'>) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const titleId = useId();
+  const active = connections.find(connection => connection.daemonId === activeDaemonId);
+  const activeName = active ? daemonDisplayName(active) : 'Selected daemon unavailable';
+
   return (
-    <section className="kt-panel p-panel" aria-labelledby="settings-daemon-list-heading">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 id="settings-daemon-list-heading" className="m-0 text-title font-semibold text-fg">
-            Connected daemons
-          </h3>
-          {/* The old sentence claimed the probe went "directly" to the daemon. It did,
-              which was the bug: everything else went through the carrier, so this badge
-              could sit green while nothing worked. It now asks the same question the
-              same way, and the sentence says which question that is. */}
-          <p className="mb-0 mt-1 text-ui leading-base text-muted">
-            Each pairing keeps its own sessions, files, and live state. Reachability is one health request over whatever
-            carrier that daemon is on, rechecked every 30 seconds — Carrier, below, names the one that answered and why.
-          </p>
+    <section className="min-w-0" aria-label="Daemon settings">
+      <div className="hidden min-w-0 items-center gap-2 md:flex" data-daemon-subtabs="desktop">
+        <div
+          role="tablist"
+          aria-label="Connected daemons"
+          className="flex min-w-0 flex-1 gap-1 overflow-x-auto overflow-y-hidden rounded-panel border border-border bg-surface p-1 shadow-panel"
+        >
+          {connections.map(connection => {
+            const name = daemonDisplayName(connection);
+            const selected = connection.daemonId === activeDaemonId;
+            return (
+              <button
+                key={connection.daemonId}
+                type="button"
+                role="tab"
+                data-daemon-subtab={String(connection.daemonId)}
+                aria-selected={selected}
+                aria-controls={`daemon-subtab-panel-${String(connection.daemonId)}`}
+                title={connection.baseUrl}
+                onClick={() => onSelectDaemon(connection.daemonId)}
+                className={cn(
+                  'flex min-h-[44px] min-w-[132px] max-w-[220px] flex-1 items-center rounded-control px-control-x py-2 text-left focus-visible:outline-focus focus-visible:outline-offset-focus',
+                  selected ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface-2 hover:text-fg',
+                )}
+              >
+                <span className="truncate text-ui font-semibold">{name}</span>
+              </button>
+            );
+          })}
         </div>
-        <button type="button" className="kt-btn min-h-[44px] shrink-0" onClick={onAddDaemon} data-add-daemon="">
+        <button
+          type="button"
+          className="kt-btn min-h-[44px] shrink-0"
+          onClick={onAddDaemon}
+          data-add-daemon=""
+          aria-label="Add daemon"
+        >
           <Plus size={16} aria-hidden="true" />
-          Add daemon
+          Add
         </button>
       </div>
 
-      <ul className="mb-0 mt-4 flex list-none flex-col gap-3 p-0" aria-label="Connected daemons">
-        {connections.map(connection => (
-          <DaemonRow
-            key={connection.daemonId}
-            connection={connection}
-            active={connection.daemonId === activeDaemonId}
-            probeDaemon={probeDaemon}
-            // Only the active daemon has a measured carrier on this screen, and a row with
-            // no measurement is left to its probe rather than given somebody else's answer.
-            carrier={connection.daemonId === activeDaemonId ? activeCarrier : undefined}
-            onSelect={() => onSelectDaemon(connection.daemonId)}
-            onRename={nextLabel => onRenameDaemon(connection.daemonId, nextLabel)}
-            onRemove={() => onRemoveDaemon(connection.daemonId)}
-          />
-        ))}
-      </ul>
+      <div className="md:hidden" data-daemon-subtabs="mobile">
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-expanded={pickerOpen}
+          aria-controls="daemon-subtab-picker"
+          data-daemon-subtab-trigger=""
+          onClick={() => setPickerOpen(true)}
+          className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block text-meta font-semibold uppercase tracking-label text-faint">
+              Configuring daemon
+            </span>
+            <span className="block truncate text-ui font-semibold text-fg">{activeName}</span>
+          </span>
+          <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
+        </button>
+        <BottomSheet
+          id="daemon-subtab-picker"
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          labelledBy={titleId}
+          closeLabel="Close daemon picker"
+          panelClassName="bg-surface"
+          maxHeight={DAEMON_PICKER_HEIGHT}
+          zIndexClass="z-50"
+        >
+          <div className="min-h-0 overflow-y-auto px-panel pb-4">
+            <h2 id={titleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
+              Choose a daemon
+            </h2>
+            <p className="mb-3 mt-1 text-ui leading-base text-muted">
+              Every panel below belongs to the daemon you choose here.
+            </p>
+            <nav aria-label="Connected daemons">
+              <DaemonSubtabChoices
+                connections={connections}
+                activeDaemonId={activeDaemonId}
+                onSelect={daemonId => {
+                  onSelectDaemon(daemonId);
+                  setPickerOpen(false);
+                }}
+              />
+            </nav>
+            <button type="button" className="kt-btn mt-3 min-h-[44px] w-full" onClick={onAddDaemon} data-add-daemon="">
+              <Plus size={16} aria-hidden="true" />
+              Add daemon
+            </button>
+          </div>
+        </BottomSheet>
+      </div>
+    </section>
+  );
+}
+
+/** Machine-specific reachability and pairing controls; mounted only inside that machine's sub-tab. */
+export function DaemonHostChecks({
+  connection,
+  probeDaemon,
+  carrier,
+  onRenameDaemon,
+  onRemoveDaemon,
+}: {
+  readonly connection: DaemonConnectionRecord;
+  readonly probeDaemon: DaemonReachabilityProbe;
+  readonly carrier?: ConnectionChoice | undefined;
+  readonly onRenameDaemon: (daemonId: DaemonId, label?: string) => void;
+  readonly onRemoveDaemon: (daemonId: DaemonId) => void;
+}) {
+  const name = daemonDisplayName(connection);
+  return (
+    <section
+      className="kt-panel p-panel"
+      aria-labelledby="settings-host-checks-heading"
+      data-daemon-host-checks={String(connection.daemonId)}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 id="settings-host-checks-heading" className="m-0 text-title font-semibold text-fg">
+            Host checks
+          </h3>
+          <p className="mb-0 mt-1 text-ui leading-base text-muted">
+            Reachability and this browser’s pairing record for {name}.
+          </p>
+        </div>
+        <ReachabilityBadge connection={connection} name={name} probe={probeDaemon} carrier={carrier} />
+      </div>
+      <details className="mt-3 rounded-control border border-border-soft bg-surface-2 px-control-x">
+        <summary className="flex min-h-[44px] cursor-pointer items-center text-ui font-semibold text-muted hover:text-fg focus-visible:outline-focus focus-visible:outline-offset-focus">
+          Technical identity
+        </summary>
+        <div className="border-t border-border-soft py-3 text-meta leading-base text-muted">
+          <p className="m-0">Address</p>
+          <code className="mt-1 block break-all font-mono text-fg">{connection.baseUrl}</code>
+          <p className="mb-0 mt-3">Daemon fingerprint</p>
+          <code className="mt-1 block break-all font-mono text-fg">{String(connection.daemonId)}</code>
+        </div>
+      </details>
+      <div className="mt-3">
+        <DaemonManagement
+          connection={connection}
+          name={name}
+          onRename={label => onRenameDaemon(connection.daemonId, label)}
+          onRemove={() => onRemoveDaemon(connection.daemonId)}
+        />
+      </div>
     </section>
   );
 }
