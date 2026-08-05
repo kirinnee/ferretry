@@ -279,8 +279,8 @@ describe('apply plan rendering', () => {
     should(renderApplyResult(applyResult())).not.containEql('Codex resume');
   });
 
-  it('should name each source directory the migration empties and removes', () => {
-    // Arrange
+  it('should promise a pool link only for the emptied directories that actually get one', () => {
+    // Arrange: the domain drains every depth, but only the shared-history entry is linked.
     const emptied = plan({
       sharedHistory: [
         {
@@ -288,9 +288,9 @@ describe('apply plan rendering', () => {
           pool: '/state/fleet/shared/claude',
           migrated: 2,
           conflicts: 0,
-          links: 2,
-          changes: [],
-          emptiedSourceDirectories: ['/homes/a/projects', '/homes/b/projects'],
+          links: 1,
+          changes: [{ kind: 'link', path: '/homes/b/projects', target: '/state/fleet/shared/claude/projects' }],
+          emptiedSourceDirectories: ['/homes/b/projects/p1/deep', '/homes/b/projects/p1', '/homes/b/projects'],
         },
       ],
     });
@@ -298,13 +298,70 @@ describe('apply plan rendering', () => {
     // Act
     const rendered = renderApplyPlan(emptied);
 
-    // Assert
-    should(rendered).containEql('2 source directories emptied by moving every entry into the pool, then removed');
-    should(rendered).containEql('/homes/a/projects');
-    should(rendered).containEql('/homes/b/projects');
+    // Assert: the linked entry and the drained descendants are two different sentences.
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link to the pool:\n      /homes/b/projects\n',
+    );
+    should(rendered).containEql(
+      '2 source directories emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:\n      /homes/b/projects/p1/deep\n      /homes/b/projects/p1',
+    );
+    // And the false claim the old wording made over the whole list is gone.
+    should(rendered).not.containEql('3 source directories emptied by moving');
+    should(rendered).not.containEql("takes each one's place");
   });
 
-  it('should keep the emptied source directories in the record of what an apply did', () => {
+  it('should never claim a link replaces a nested directory when nothing is linked at all', () => {
+    // Arrange: drained descendants with no link change of their own.
+    const nested = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 0,
+          links: 0,
+          changes: [],
+          emptiedSourceDirectories: ['/homes/a/projects/p1'],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(nested);
+
+    // Assert
+    should(rendered).containEql('1 source directory emptied further down and removed with nothing put back');
+    should(rendered).containEql('/homes/a/projects/p1');
+    should(rendered).not.containEql('replaced by a link to the pool');
+  });
+
+  it('should say nothing about descendants when only the entry directory was emptied', () => {
+    // Arrange
+    const flat = plan({
+      sharedHistory: [
+        {
+          kind: 'claude',
+          pool: '/state/fleet/shared/claude',
+          migrated: 1,
+          conflicts: 0,
+          links: 1,
+          changes: [{ kind: 'link', path: '/homes/a/projects', target: '/state/fleet/shared/claude/projects' }],
+          emptiedSourceDirectories: ['/homes/a/projects'],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(flat);
+
+    // Assert
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link',
+    );
+    should(rendered).not.containEql('emptied further down');
+  });
+
+  it('should keep the same split in the record of what an apply did', () => {
     // Act
     const rendered = renderApplyResult(
       applyResult({
@@ -312,19 +369,23 @@ describe('apply plan rendering', () => {
           {
             kind: 'claude',
             pool: '/state/fleet/shared/claude',
-            migrated: 1,
+            migrated: 2,
             conflicts: 0,
             links: 1,
-            changes: [],
-            emptiedSourceDirectories: ['/homes/a/projects'],
+            changes: [{ kind: 'link', path: '/homes/a/projects', target: '/state/fleet/shared/claude/projects' }],
+            emptiedSourceDirectories: ['/homes/a/projects/p1', '/homes/a/projects'],
           },
         ],
       }),
     );
 
     // Assert
-    should(rendered).containEql('1 source directory emptied by moving every entry into the pool, then removed');
-    should(rendered).containEql('/homes/a/projects');
+    should(rendered).containEql(
+      '1 source directory emptied by moving every entry into the pool, then replaced by a link to the pool:\n      /homes/a/projects\n',
+    );
+    should(rendered).containEql(
+      '1 source directory emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:\n      /homes/a/projects/p1',
+    );
   });
 
   it('should say an unreadable home makes apply refuse the pool, not skip the home', () => {

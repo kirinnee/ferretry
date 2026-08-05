@@ -87,20 +87,48 @@ function isMerge(change: SharedHistoryChange): change is SharedHistoryMerge {
   return change.kind === 'merge-jsonl';
 }
 
+type SharedHistoryLink = Extract<SharedHistoryChange, { kind: 'link' }>;
+
+function isLink(change: SharedHistoryChange): change is SharedHistoryLink {
+  return change.kind === 'link';
+}
+
+const directoryCount = (count: number): string =>
+  plural(count, 'source directory').replace('directorys', 'directories');
+
 /**
- * The account-home directories that stop existing.
+ * The account-home directories that stop existing, split by what stands where they were.
  *
- * Named one by one rather than counted. A directory being emptied and removed is the only part of
- * this migration that deletes something a person put there, and it is safe precisely because the
- * contents left first — so the line has to carry both halves or it reads as either a silent deletion
- * or a detail not worth printing.
+ * A directory being emptied and removed is the only part of this migration that takes away something
+ * a person put there, so each one is named rather than counted, and the reason it is safe travels on
+ * the same line — the contents left first.
+ *
+ * But `emptiedSourceDirectories` is every directory the migration drained, at every depth, and only
+ * the shared-history entry at the top of each one gets a pool symlink put back. Saying "a link takes
+ * each one's place" over that whole list is simply false for the nested ones: those are removed with
+ * nothing put back, which is correct — the entry above them already carries the link — and is a
+ * different sentence. The `link` changes in this same preview name exactly the entry-level paths, so
+ * the split is read off the evidence already being reported rather than guessed from path shapes.
  */
 function emptiedSourceLines(preview: SharedHistoryPreview): string[] {
   const emptied = preview.emptiedSourceDirectories ?? [];
   if (emptied.length === 0) return [];
+  const linked = new Set(preview.changes.filter(isLink).map(change => change.path));
+  const replaced = emptied.filter(path => linked.has(path));
+  const drained = emptied.filter(path => !linked.has(path));
   return [
-    `${INDENT}${plural(emptied.length, 'source directory').replace('directorys', 'directories')} emptied by moving every entry into the pool, then removed so a link to the pool takes each one's place:`,
-    ...emptied.map(path => `${INDENT}  ${path}`),
+    ...(replaced.length === 0
+      ? []
+      : [
+          `${INDENT}${directoryCount(replaced.length)} emptied by moving every entry into the pool, then replaced by a link to the pool:`,
+          ...replaced.map(path => `${INDENT}  ${path}`),
+        ]),
+    ...(drained.length === 0
+      ? []
+      : [
+          `${INDENT}${directoryCount(drained.length)} emptied further down and removed with nothing put back, because the shared-history entry above each one carries the pool link:`,
+          ...drained.map(path => `${INDENT}  ${path}`),
+        ]),
   ];
 }
 
