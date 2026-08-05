@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_URL } from '@ferretry/protocol';
 import should from 'should';
-import { FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
-import type { FileSystemPort, FoundationPaths } from '../../../src/lib/index.ts';
+import { DaemonConfigDocumentError, FileDaemonConfig } from '../../../src/adapters/runtime/daemon-config.ts';
+import { DEFAULT_CAPABILITY_GRANTS, type FileSystemPort, type FoundationPaths } from '../../../src/lib/index.ts';
 
 const paths = { daemonConfig: '/state/config/daemon.json' } as FoundationPaths;
 
@@ -114,5 +114,48 @@ describe('FileDaemonConfig', () => {
 
     // Assert
     should(JSON.parse(documents.text() ?? '{}')).have.property('port', 7_433);
+  });
+});
+
+describe('a configuration document this daemon will not act on', () => {
+  it('should name the FILE in every refusal rather than dumping a validation error', async () => {
+    // Refusing is only half the contract. This already stopped the daemon — the schema is strict and
+    // nothing falls back — but what reached the operator was a raw dump with no path in it, which is
+    // the "non-zero exit that explains nothing" this package already corrected for occupied
+    // addresses. The cause travels underneath, because the field name in it is the actual answer.
+    // Arrange
+    const unknownKey = documentStore(JSON.stringify({ grants: { kubernetes: { use: true } } }));
+    const brokenJson = documentStore('{ not json');
+
+    // Act
+    const peeked = await unknownKey.store.peek().catch((error: unknown) => error);
+    const loaded = await unknownKey.store.load().catch((error: unknown) => error);
+    const grants = await unknownKey.store.readGrants().catch((error: unknown) => error);
+    const written = await brokenJson.store.writtenGrants().catch((error: unknown) => error);
+    const recorded = await brokenJson.store.record(7_431).catch((error: unknown) => error);
+
+    // Assert — one sentence, one file, wherever the mistake is met.
+    for (const raised of [peeked, loaded, grants, written, recorded]) {
+      should(raised).be.instanceof(DaemonConfigDocumentError);
+      should((raised as Error).message).match(/\/state\/config\/daemon\.json could not be read/u);
+    }
+    should((peeked as DaemonConfigDocumentError).cause).not.be.undefined();
+  });
+
+  it('should refuse to write grants over a document it could not read', async () => {
+    // Rewriting a document this daemon does not understand would discard whatever the operator
+    // actually wrote there — including the very field that is wrong, which is the one they need.
+    // Arrange
+    const documents = documentStore(JSON.stringify({ port: 'not a number' }));
+
+    // Act
+    const raised = await documents.store
+      .writeGrants(DEFAULT_CAPABILITY_GRANTS)
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(raised).be.instanceof(DaemonConfigDocumentError);
+    should(documents.text()).equal(JSON.stringify({ port: 'not a number' }));
   });
 });
