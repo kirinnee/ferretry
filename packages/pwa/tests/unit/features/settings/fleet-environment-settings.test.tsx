@@ -146,7 +146,7 @@ describe('FleetEnvironmentSettings', () => {
   });
 
   it('shows a readable error when the source cannot be read', async () => {
-    globalThis.fetch = (async () => new Response('not JSON', { status: 503 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response('not JSON', { status: 503 })) as unknown as typeof fetch;
     const view = await mount(<FleetEnvironmentSettings connection={alpha} connections={[]} />);
     await settle();
 
