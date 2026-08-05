@@ -241,7 +241,11 @@ export function DaemonSettingsFrame({
       <div
         role="tablist"
         aria-label={`${name} daemon settings`}
-        className="mb-3 flex gap-1 overflow-x-auto rounded-panel border border-border bg-surface p-1 shadow-panel"
+        // One row, horizontal overflow only. `overflow-x-auto` alone computes
+        // `overflow-y` as auto too, which grows the phantom vertical scrollbar
+        // kteam's `ui/DESIGN-side-pane-tabs.md` names; pin it hidden. The
+        // sibling daemon strip already does this.
+        className="mb-3 flex gap-1 overflow-x-auto overflow-y-hidden rounded-panel border border-border bg-surface p-1 shadow-panel"
       >
         {tabs.map(tab => {
           const selected = tab.id === active.id;
