@@ -12,6 +12,7 @@ import type {
   AnalyticsResponse,
   AttentionSnapshot,
   BrowserStatus,
+  DoctorReport,
   LearningStatus,
   PinSnapshot,
   ProposalView,
@@ -106,6 +107,7 @@ import { SessionSearchControl, SessionSearchProvider } from '../src/features/ses
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
+import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
@@ -482,6 +484,22 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         return WARDEN;
       }}
       createWardenClient={HARNESS_WARDEN_CLIENT}
+      daemonSettingsTabs={[
+        {
+          id: 'doctor',
+          label: 'Doctor',
+          description: 'Programs this daemon host needs, and what each absence breaks.',
+          Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+            <DoctorSettings
+              connection={connection}
+              read={async target => {
+                if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+                return HARNESS_DOCTOR;
+              }}
+            />
+          ),
+        },
+      ]}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
@@ -776,6 +794,26 @@ const WARDEN_CONFIG: WardenConfigView = {
   config: WARDEN.config,
   accounts: WARDEN.config.accounts,
   warnings: ['Account order takes effect on the next sweep.'],
+};
+
+/** One concrete host diagnosis keeps the Doctor tab reviewable without a daemon. */
+const HARNESS_DOCTOR: DoctorReport = {
+  ready: false,
+  harnesses: [
+    { kind: 'claude', launchable: ['claude-auto-studio'], blocked: [] },
+    { kind: 'codex', launchable: [], blocked: ['codex-auto-studio: not on PATH'] },
+  ],
+  checks: [
+    { name: 'tmux', requirement: 'required', status: 'present', summary: 'on PATH', impact: 'sessions can start' },
+    {
+      name: 'codex-auto-studio',
+      requirement: 'required',
+      status: 'missing',
+      summary: 'not on PATH',
+      impact: 'Codex sessions cannot start on this daemon.',
+    },
+  ],
+  limitation: 'PATH presence is all this report proves.',
 };
 
 /**

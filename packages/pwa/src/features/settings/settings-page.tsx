@@ -22,10 +22,9 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
-import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
-import { type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
+import { daemonDisplayName, type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
@@ -430,6 +429,9 @@ export function SettingsPage({
       theme,
     ],
   );
+  const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
+  const selectedConnection = selectedRecord ?? dictation.daemon;
+  const selectedName = selectedRecord ? daemonDisplayName(selectedRecord) : selectedConnection.baseUrl;
 
   return (
     <main
@@ -506,22 +508,23 @@ export function SettingsPage({
                     <DaemonSettings
                       activeDaemonId={daemonId}
                       connections={connections}
-                      probeDaemon={probeDaemon}
-                      activeCarrier={carrier}
                       onSelectDaemon={onSelectDaemon}
-                      onRenameDaemon={onRenameDaemon}
-                      onRemoveDaemon={onRemoveDaemon}
                       onAddDaemon={onAddDaemon}
                     />
-                    <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />
                     <DaemonSettingsFrame
                       key={String(daemonId)}
-                      connection={connections.find(candidate => candidate.daemonId === daemonId) ?? dictation.daemon}
-                      name={connections.find(candidate => candidate.daemonId === daemonId)?.label ?? String(daemonId)}
+                      connection={selectedConnection}
+                      connectionRecord={selectedRecord}
+                      name={selectedName}
                       connections={connections}
                       readWardenStatus={readWardenStatus}
                       createWardenClient={createWardenClient}
                       additionalTabs={daemonSettingsTabs}
+                      carrier={carrier}
+                      relayAdvertised={relayAdvertised}
+                      probeDaemon={probeDaemon}
+                      onRenameDaemon={onRenameDaemon}
+                      onRemoveDaemon={onRemoveDaemon}
                     />
                   </>
                 ) : null}
