@@ -41,6 +41,7 @@ import {
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CommandUsageSource,
+  ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
   DaemonHealthProbe,
@@ -50,6 +51,7 @@ import {
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileDaemonConfig,
+  FileOperatorPassword,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
@@ -59,6 +61,7 @@ import {
   FileSecretKey,
   FleetUsageSource,
   HttpUsageSource,
+  JournalGrantAudit,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
@@ -70,6 +73,7 @@ import {
   PerformanceStopwatch,
   ProcessSecretReader,
   quotaFailoverRoot,
+  RandomUnlockTokens,
   RuntimeEnvironment,
   SocketViewerDownstream,
   SqliteHomeLockFactory,
@@ -81,6 +85,7 @@ import {
   StatePairingRepository,
   SystemClock,
   SystemFrameClock,
+  SystemGrantClock,
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoRelayIdentityKeys,
@@ -215,6 +220,7 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   CALLSIGN_WINDOW_MS,
+  CapabilityGrantService,
   type CatalogSubsystem,
   type ChildGrantRequester,
   ClaudeTranscriptParser,
@@ -269,6 +275,7 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  NO_PASSWORD_DISCLOSURE,
   normalizeCallsign,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
@@ -3963,6 +3970,23 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // is redeemed against a registry that never issued it. Memory-only and per-daemon by
         // construction — see the domain's own header for why it is never persisted.
         socketTickets,
+        /**
+         * What this machine has agreed a caller who is NOT on it may do.
+         *
+         * Built from the SAME configuration document `--print-config` reports, so the grants an
+         * operator reads and the grants the authorization boundary enforces are one value rather
+         * than two. The password verifier is deliberately NOT in that document — it lives in its own
+         * mode-0600 file under `state`, because the configuration document is the one that travels
+         * into backups and screen shares.
+         */
+        grants: new CapabilityGrantService({
+          document: new ConfigGrantDocument(new FileDaemonConfig(paths, stateFiles)),
+          passwords: new FileOperatorPassword(paths.operatorPassword, stateFiles),
+          tokens: new RandomUnlockTokens(),
+          clock: new SystemGrantClock(),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clientName: CLIENT_NAME,
+        }),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
@@ -4137,6 +4161,23 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // self-check that could not run is reported by the next one's freshness, and refusing to serve
   // because the daemon could not measure itself is strictly worse than serving and saying so.
   world.notices.step('subsystems mounted');
+  /**
+   * The grants, read BEFORE the address is bound.
+   *
+   * A DAEMON THAT CANNOT SAY WHAT IT IS ALLOWED TO DO DOES NOT SERVE. A grant document this boot
+   * cannot read as a complete decision is not "everything is allowed" — it is damage, and starting
+   * anyway would leave every remote caller refused by a daemon that never said why. The throw is
+   * caught by `execute`, which reports it and exits non-zero, so the operator is told which document
+   * to repair instead of discovering it as a UI that stopped working.
+   */
+  await subsystems.grants.refresh();
+  // Said ONCE, at boot, and only when it is true. Nobody is interrogated at install time — a person
+  // on this host is governed by none of this — but a machine that will accept a paired device with
+  // nothing standing behind its configure routes should have said so somewhere a human reads.
+  world.notices.step(
+    'capability grants read',
+    subsystems.grants.hasPassword() ? 'an operator password gates remote configuration' : NO_PASSWORD_DISCLOSURE,
+  );
   await health.selfCheck().catch(() => undefined);
   world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends

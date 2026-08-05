@@ -20,7 +20,7 @@ import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, human } from './support.ts';
+import { CREDENTIALS, GRANTED, human } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
@@ -62,7 +62,7 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     ...CREDENTIALS,
     devices: { identify: (token: string) => (token === 'paired-device' ? 'device-1' : undefined) },
   };
-  return { root, userHome, paths, dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials) };
+  return { root, userHome, paths, dispatcher: new ApiDispatcher(new ApiRouter(fleetRoutes(subsystem)), credentials, GRANTED) };
 }
 
 afterEach(async () => {

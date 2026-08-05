@@ -1,4 +1,5 @@
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
+import type { CapabilityGuard } from '../../api/capability.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
@@ -20,6 +21,7 @@ import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
+import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
@@ -174,6 +176,16 @@ export interface MountedSubsystems {
    *  exchange: the route below sells a ticket, and the socket dispatcher is the only boundary handed
    *  the redeemer — which is what keeps a ticket useless against an ordinary route. */
   readonly socketTickets: SocketTicketSubsystem & SocketTicketRedeemer;
+  /**
+   * What this machine has agreed a caller who is NOT on it may do.
+   *
+   * TWO ROLES IN ONE FIELD, and both are load-bearing. It serves the routes a UI reads to explain its
+   * own limits, and it IS the `CapabilityGuard` the authorization boundary consults before every
+   * governed request and every socket upgrade. Separating them would let a daemon serve a grant report
+   * that no route was actually enforcing — a display with no evidence behind it, which is the exact
+   * shape of bug this migration has already hit three times.
+   */
+  readonly grants: GrantSubsystem & CapabilityGuard;
 }
 
 /**
@@ -188,6 +200,13 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Pairing is three fixed paths: public redemption and two host-local admin operations. It sits
     // beside the base surface because it establishes the credential every remote route later sees.
     ...pairingRoutes(subsystems.pairing),
+    // The grant surface sits beside pairing for the same reason pairing sits beside the base feeds:
+    // it establishes what the credential pairing hands out is then ALLOWED to do. Every path is under
+    // `/v1/grants`, which no other subsystem uses, so it can neither shadow nor be shadowed. It is
+    // registered EARLY and is itself ungoverned so a restricted UI can always read the reason it is
+    // restricted — a grant report a restricted caller could not fetch would be the greyed control
+    // with no explanation this whole feature exists to remove.
+    ...grantRoutes(subsystems.grants),
     // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
     // liveness answer, and this is the scoped report the protocol declares under the same subject.
     // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
@@ -278,7 +297,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
 
 /** The dispatcher the transport adapter serves, over the full mounted surface. */
 export function createMountedDispatcher(base: DaemonApiDependencies, subsystems: MountedSubsystems): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(mountedDaemonRoutes(base, subsystems)), base.credentials);
+  // The guard is the SUBSYSTEM itself, so the answer a route enforces and the answer the report shows
+  // are one object rather than two that can drift.
+  return new ApiDispatcher(new ApiRouter(mountedDaemonRoutes(base, subsystems)), base.credentials, subsystems.grants);
 }
 
 /**
@@ -310,6 +331,9 @@ export function createMountedSocketDispatcher(
     new ApiRouter(mountedSocketRoutes(subsystems)),
     base.credentials,
     subsystems.socketTickets,
+    // The SAME guard the request/response table uses. A terminal socket that skipped it would let a
+    // browser drive a shell this machine had refused to let it open.
+    subsystems.grants,
   );
 }
 

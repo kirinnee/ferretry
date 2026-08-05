@@ -18,7 +18,7 @@ import {
   terminalTicketRoutes,
 } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, FakeTerminals, human, NO_TICKETS } from './support.ts';
+import { CREDENTIALS, FakeTerminals, GRANTED, human, NO_TICKETS } from './support.ts';
 
 /**
  * The terminal lifecycle's HTTP surface, driven through the real router.
@@ -29,7 +29,7 @@ import { CREDENTIALS, FakeTerminals, human, NO_TICKETS } from './support.ts';
  */
 
 function dispatcher(terminals: FakeTerminals = new FakeTerminals()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), CREDENTIALS, GRANTED);
 }
 
 const post = (path: string, body?: unknown, headers: Readonly<Record<string, string>> = human) =>
@@ -122,7 +122,7 @@ describe('the terminal mount', () => {
       const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(new FakeTerminals())), {
         ...CREDENTIALS,
         devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-      });
+      }, GRANTED);
 
       // Act
       const created = await dispatch.dispatch(
@@ -143,7 +143,7 @@ describe('the terminal mount', () => {
       const dispatch = new ApiDispatcher(new ApiRouter(terminalRoutes(terminals)), {
         ...CREDENTIALS,
         devices: { identify: (token: string) => (token === 'device-secret' ? 'device-1' : undefined) },
-      });
+      }, GRANTED);
 
       // Act
       const refused = await dispatch.dispatch(
@@ -368,6 +368,7 @@ describe('the terminal mount', () => {
           }),
         ),
         CREDENTIALS,
+        GRANTED,
       );
 
       // Act
@@ -404,6 +405,7 @@ describe('the terminal mount', () => {
           }),
         ),
         CREDENTIALS,
+        GRANTED,
       );
 
       // Act
@@ -442,7 +444,7 @@ describe('the terminal stream ticket counter', () => {
     const created = await dispatcher(terminals).dispatch(post('/v1/sessions/s1/terminals'));
     const terminal = TerminalViewSchema.parse(jsonBody(created));
     const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials);
+    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
     const path = `/v1/sessions/s1/terminals/${terminal.id}/stream`;
 
     // Act
@@ -462,7 +464,7 @@ describe('the terminal stream ticket counter', () => {
   it('should refuse to mint a ticket for a terminal this daemon does not hold', async () => {
     const terminals = new FakeTerminals();
     const tickets = new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` });
-    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials);
+    const counter = new ApiDispatcher(new ApiRouter(terminalTicketRoutes(terminals, tickets)), credentials, GRANTED);
 
     const sold = await counter.dispatch(
       post('/v1/sessions/s1/terminals/0123456789ab/stream/ticket', undefined, device),
@@ -482,7 +484,7 @@ describe('the terminal stream ticket counter', () => {
  */
 describe('the mounted terminal stream', () => {
   function sockets(terminals: FakeTerminals = new FakeTerminals()): ApiSocketDispatcher {
-    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, NO_TICKETS);
+    return new ApiSocketDispatcher(new ApiRouter(terminalSocketRoutes(terminals)), CREDENTIALS, NO_TICKETS, GRANTED);
   }
 
   /** A downstream that records, standing in for the socket the transport would supply. */

@@ -1,6 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import type { CapabilityGrants } from '@ferretry/protocol';
-import type { GrantAuditEntry, GrantAuditPort, GrantClock, GrantDocumentPort, UnlockTokenFactory } from '../../lib/index.ts';
+import type {
+  FileSystemPort,
+  GrantAuditEntry,
+  GrantAuditPort,
+  GrantClock,
+  GrantDocumentPort,
+  UnlockTokenFactory,
+} from '../../lib/index.ts';
 
 /** The daemon configuration document, seen as the one thing the grant subsystem needs from it. */
 export interface GrantConfigStore {
@@ -51,27 +58,30 @@ export class SystemGrantClock implements GrantClock {
   }
 }
 
-/** Where one recorded grant change is written. */
-export interface GrantJournalSink {
-  append(line: string): Promise<void>;
-}
-
 /**
- * A grant change, journalled.
+ * A grant change, appended to this daemon's own durable grant journal.
  *
- * WHY IT IS NOT OPTIONAL. Board permissions were made auditable rather than implicit for the same
- * reason: a permission model whose changes leave no trace can only ever be understood by its effects,
- * so the question "when did this machine start letting a phone apply the fleet, and who said so"
- * becomes unanswerable at exactly the moment somebody needs it answered.
+ * WHY IT IS NOT OPTIONAL. A permission model whose changes leave no trace can only ever be understood
+ * by its effects, so "when did this machine start letting a phone apply the fleet, and who said so"
+ * becomes unanswerable at exactly the moment somebody needs it answered — which is the same reason
+ * board permissions were made auditable rather than implicit.
  *
  * IT RECORDS THE ACTOR, NEVER A CREDENTIAL. `device:<id>` and `admin-ui` say who; a token would say
- * how, and putting that in an append-only file is how a durable log becomes a durable secret.
+ * how, and putting that in an append-only file is how a durable record becomes a durable secret. The
+ * password never appears, in any form, for the same reason.
+ *
+ * IT LIVES IN THE STATE HOME, so it is keyed by daemon by construction: one daemon's record can never
+ * be read as another's, because a state home has exactly one owner.
  */
 export class JournalGrantAudit implements GrantAuditPort {
-  constructor(private readonly sink: GrantJournalSink) {}
+  constructor(
+    private readonly path: string,
+    private readonly files: FileSystemPort,
+  ) {}
 
   async record(entry: GrantAuditEntry): Promise<void> {
-    await this.sink.append(
+    await this.files.appendLineDurable(
+      this.path,
       JSON.stringify({ kind: 'grant.changed', at: entry.at, actor: entry.actor, changes: entry.changes }),
     );
   }

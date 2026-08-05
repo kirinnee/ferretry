@@ -56,6 +56,14 @@ export interface FoundationPaths {
    * where `--print-config` can report them with their provenance.
    */
   readonly operatorPassword: string;
+  /**
+   * Where a change to the grants is written down, one JSON line per change.
+   *
+   * IN THE STATE HOME, so it is keyed by daemon by construction — a state home has exactly one owner,
+   * and one daemon's record can therefore never be read as another's. It holds actors and axes, never
+   * a token and never anything about the password.
+   */
+  readonly grantAudit: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -90,6 +98,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     temporary: join(state, 'tmp'),
     daemonIdentity: join(state, 'daemon-identity.json'),
     operatorPassword: join(state, 'operator-password.json'),
+    grantAudit: join(state, 'grant-audit.jsonl'),
   };
 }
 

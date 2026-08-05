@@ -43,6 +43,16 @@ import type { UnlockOutcome } from '../../grants/types.ts';
  * the property holds because there is no getter to call, not because callers are trusted to behave.
  */
 export interface GrantSubsystem {
+  /**
+   * Re-reads the operator's decision.
+   *
+   * Declared here even though no route calls it, because the COMPOSITION ROOT must call it before the
+   * address is bound and a field the mount does not name is a field a substitute world can silently
+   * omit. A daemon that has not read its own grants must not serve.
+   */
+  refresh(): Promise<void>;
+  /** Whether the security layer is on for this machine. Never the password itself. */
+  hasPassword(): boolean;
   view(presentation: CapabilityPresentation): GrantsView;
   unlock(password: string): Promise<UnlockOutcome>;
   patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView>;
