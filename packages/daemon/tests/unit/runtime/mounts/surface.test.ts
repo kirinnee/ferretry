@@ -264,8 +264,9 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/terminals/:terminalId',
       'POST /v1/sessions/:sessionId/terminals/:terminalId/stream/ticket',
       // The human login window, and the per-session automation that is deliberately a stated refusal
-      // rather than a 404: there is no browser worker program in this repository and no production
-      // `BrowserViewerHost`. See the mount's own header.
+      // rather than a 404: the browser worker and its transport are both here, but nothing composes
+      // them into a per-session runtime and a production `BrowserViewerHost`. See the mount's own
+      // header.
       'GET /v1/browser/login',
       'POST /v1/browser/login',
       'GET /v1/sessions/:sessionId/browser',
