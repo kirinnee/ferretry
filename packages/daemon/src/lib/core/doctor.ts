@@ -164,9 +164,10 @@ export function renderDoctorReport(report: DoctorReport): readonly string[] {
     return check.requirement === 'optional' ? 'note' : 'missing';
   };
   return [
-    ...report.checks.map(
-      check => `${label(check).padEnd(8)} ${check.name.padEnd(16)} ${check.summary} — ${check.impact}`,
-    ),
+    ...report.checks.map(check => {
+      const detail = check.status === 'missing' ? `${check.summary} — ${check.impact}` : check.summary;
+      return `${label(check).padEnd(8)} ${check.name.padEnd(16)} ${detail}`;
+    }),
     `note     limitation        ${report.limitation}`,
   ];
 }
