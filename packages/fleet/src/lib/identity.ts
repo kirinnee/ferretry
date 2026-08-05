@@ -240,25 +240,29 @@ export function buildFleetIdentities(config: FleetConfig, manifest: FleetManifes
   const identities: FleetIdentity[] = [];
 
   for (const [key, group] of groupByIdentity(resolveAccounts(config))) {
-    const members: FleetIdentityMember[] = [];
-    for (const resolved of group) {
-      const account = published.get(resolved.id);
-      if (account === undefined) continue;
-      claimed.add(resolved.id);
-      members.push(memberOf(account));
-    }
-    if (members.length === 0) continue;
+    // Checked across the whole declared group, not just its published members: an identity that
+    // disagrees with itself about `auth` is a contradiction whether or not every lane made it into
+    // the manifest, and there is no safe way to pick one reading.
     const modes = [...new Set(group.map(resolved => resolved.auth))];
     if (modes.length > 1) throw new MixedIdentityAuthError(key, modes);
-    const first = group[0];
+
+    const matched = group.flatMap(resolved => {
+      const account = published.get(resolved.id);
+      return account === undefined ? [] : [{ resolved, account }];
+    });
+    const first = matched[0];
+    // Declared but never provisioned: the configuration names these accounts and the manifest has
+    // none of them, so there is no home to read and nothing to log in.
     if (first === undefined) continue;
+
+    for (const { resolved } of matched) claimed.add(resolved.id);
     identities.push({
       key,
-      kind: first.kind,
-      identity: first.identity,
-      auth: first.auth,
+      kind: first.resolved.kind,
+      identity: first.resolved.identity,
+      auth: first.resolved.auth,
       declared: true,
-      members,
+      members: matched.map(({ account }) => memberOf(account)),
     });
   }
 
