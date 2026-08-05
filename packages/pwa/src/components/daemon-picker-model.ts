@@ -239,6 +239,21 @@ const registeredProjectOption = (project: FleetProject): RegisteredProjectOption
   };
 };
 
+/**
+ * The registry protocol does not use a path as Project identity, so damaged or
+ * legacy state may publish two records whose paths normalize to the same value.
+ * A path picker cannot distinguish those rows and submits only the path anyway;
+ * keep the daemon's first row and expose that canonical value once.
+ */
+const registeredProjectOptions = (projects: readonly FleetProject[]): readonly RegisteredProjectOption[] => {
+  const options = new Map<string, RegisteredProjectOption>();
+  for (const project of projects) {
+    const option = registeredProjectOption(project);
+    if (!options.has(option.path)) options.set(option.path, option);
+  }
+  return [...options.values()];
+};
+
 const recentProjectOption = (entry: RecentProjectPath): RecentProjectOption => {
   const path = normalizeProjectPath(entry.path);
   const name = baseName(path);
@@ -277,7 +292,7 @@ export const projectPickerOptions = (
   registry: readonly FleetProject[] | null,
   sessions: readonly SessionView[] | null,
 ): ProjectPickerCatalog => {
-  const registered = registry === null ? null : registry.map(registeredProjectOption);
+  const registered = registry === null ? null : registeredProjectOptions(registry);
   if (sessions === null) return { registered, recent: null };
   const knownProjects = registry ?? [];
   const recent = recentProjectPaths(sessions)

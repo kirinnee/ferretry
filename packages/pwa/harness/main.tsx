@@ -3091,25 +3091,27 @@ function HarnessPickerLabel({
  */
 function HarnessAccountPicker({
   checked = false,
+  id,
   slice = pickerSlice(),
 }: {
   readonly checked?: boolean;
+  readonly id: string;
   readonly slice?: DaemonAccountPickerSlice;
 }) {
   const resolved = checked ? pickerSlice({ health: HARNESS_PICKER_HEALTH, healthStatus: 'ready' }) : slice;
   return (
-    <HarnessPickerLabel hint="the wrapper that will run this session" id="harness-picker-agent" label="Account">
+    <HarnessPickerLabel hint="the wrapper that will run this session" id={id} label="Account">
       <HarnessPickerHost
         render={(value, onValueChange) => (
           <AccountPickerField
-            describedBy="harness-picker-agent-help"
+            describedBy={`${id}-help`}
             healthCheck={{
               status: resolved.healthStatus,
               error: resolved.healthError,
               checked: resolved.health?.size ?? 0,
               onCheck: () => undefined,
             }}
-            id="harness-picker-agent"
+            id={id}
             label="Account"
             onValueChange={onValueChange}
             placeholder="claude-auto-studio"
@@ -3174,6 +3176,7 @@ function PickerFrameHarness({ frame }: { readonly frame: HarnessPickerFrame }) {
           <HarnessProjectPicker />
         ) : frame === 'account-failed' ? (
           <HarnessAccountPicker
+            id={`harness-picker-${frame}-agent`}
             slice={pickerSlice({
               catalog: null,
               status: 'error',
@@ -3181,7 +3184,7 @@ function PickerFrameHarness({ frame }: { readonly frame: HarnessPickerFrame }) {
             })}
           />
         ) : (
-          <HarnessAccountPicker checked={frame === 'account-checked'} />
+          <HarnessAccountPicker checked={frame === 'account-checked'} id={`harness-picker-${frame}-agent`} />
         )}
       </div>
     </main>
@@ -5510,7 +5513,7 @@ function Shell() {
       label: 'Daemon pickers at rest',
       render: () => (
         <section aria-label="Daemon pickers at rest" className="grid gap-panel" id="harness-pickers">
-          <HarnessAccountPicker checked={true} />
+          <HarnessAccountPicker checked={true} id="harness-picker-rest-agent" />
           <HarnessProjectPicker />
         </section>
       ),
@@ -5523,6 +5526,7 @@ function Shell() {
       render: () => (
         <section aria-label="Account picker unreadable roster" id="harness-picker-failed">
           <HarnessAccountPicker
+            id="harness-picker-failed-agent"
             slice={pickerSlice({
               catalog: null,
               status: 'error',

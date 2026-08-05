@@ -197,6 +197,19 @@ describe('projectPickerOptions', () => {
     expect(catalog.registered?.[0]?.key).toBe('/work/repo');
   });
 
+  it('offers a canonical registered path once when the registry repeats it', () => {
+    const catalog = projectPickerOptions(
+      [
+        project({ id: 'first', name: 'first', path: '/work/repo/' }),
+        project({ id: 'second', name: 'second', path: '/work/repo' }),
+      ],
+      [],
+    );
+
+    expect(catalog.registered).toHaveLength(1);
+    expect(catalog.registered?.[0]).toMatchObject({ id: 'first', name: 'first', path: '/work/repo' });
+  });
+
   it('preserves optional registry metadata when the registry carried it, and omits it when it did not', () => {
     const catalog = projectPickerOptions(
       [
