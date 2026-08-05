@@ -150,7 +150,12 @@ export function decodeTunnelDaemonMessage(plaintext: Uint8Array): RelayTunnelDae
  * fleet that does not exist.
  */
 export type RelayTunnelAnswer =
-  | { readonly kind: 'response'; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string }
+  | {
+      readonly kind: 'response';
+      readonly status: number;
+      readonly headers: Readonly<Record<string, string>>;
+      readonly body: string;
+    }
   | { readonly kind: 'oversize'; readonly status: number; readonly byteLength: number };
 
 /* ---------- the session ---------------------------------------------------- */
@@ -162,6 +167,15 @@ export interface RelayClientSessionDependencies {
   /** The device grant pairing issued. Sent once, at sequence 1, inside the channel. */
   readonly deviceToken: string;
   readonly socket: RelayClientSocket;
+  /**
+   * The largest request identifier this session will mint.
+   *
+   * §14's bound by default. It is a parameter rather than a constant because the
+   * exhaustion path — the one that ends the session instead of wrapping — is
+   * otherwise four billion requests away from anything a test can reach, and an
+   * unprovable refusal is a refusal nobody can be sure of.
+   */
+  readonly maxRequestId?: number;
 }
 
 type SessionPhase = 'awaiting-ready' | 'awaiting-hello' | 'awaiting-auth' | 'serving' | 'ended';
@@ -242,12 +256,14 @@ export class RelayClientSession {
    * Rejects rather than resolving on any refusal. A request that resolved with a
    * fabricated answer would be the whole failure this protocol exists to avoid.
    */
-  async request(message: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>): Promise<RelayTunnelAnswer> {
+  async request(
+    message: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>,
+  ): Promise<RelayTunnelAnswer> {
     if (this.#failure !== undefined) throw this.#failure;
     if (this.#phase !== 'serving') {
       throw new RelaySessionError('this relay session is not serving requests', RELAY_CLOSE_CODES.protocolError);
     }
-    if (this.#nextRequestId > MAX_TUNNEL_REQUEST_ID) {
+    if (this.#nextRequestId > (this.deps.maxRequestId ?? MAX_TUNNEL_REQUEST_ID)) {
       // §14 requires an identifier unique within the session, so there is no wrap
       // that is not also a reuse. Ending is the option with no failure mode.
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has exhausted its request identifiers');
@@ -375,12 +391,20 @@ export class RelayClientSession {
     this.#sessionId = sessionId;
     this.#pendingHandshake = pending;
     this.#phase = 'awaiting-hello';
-    this.#sendSessionFrame({
-      kind: FRAME_KINDS.handshake,
-      sessionId,
-      sequence: HANDSHAKE_FRAME_SEQUENCE,
-      payload: encodeHandshakeMessage(pending.hello),
-    });
+    // The hello occupies sequence 0 of this direction, which is why it is sent as a
+    // frame rather than through the record path: it is the one end-to-end frame that
+    // is not a record. It is also the first frame of a fresh window, so there is
+    // nothing to ask about credit — a check here would be a guard nothing can trip,
+    // which reads as protection and is not any.
+    this.#send = recordSent(this.#send);
+    this.deps.socket.send(
+      encodeFrame({
+        kind: FRAME_KINDS.handshake,
+        sessionId,
+        sequence: HANDSHAKE_FRAME_SEQUENCE,
+        payload: encodeHandshakeMessage(pending.hello),
+      }),
+    );
   }
 
   #onCredit(frame: RelayFrame): void {
@@ -482,23 +506,29 @@ export class RelayClientSession {
     const owed = creditToReturn(this.#receive);
     if (owed === 0) return;
     this.#receive = recordCredited(this.#receive, owed);
-    this.#sendSessionFrame({
-      kind: FRAME_KINDS.credit,
-      sessionId,
-      sequence: 0,
-      payload: encodeCreditPayload(owed),
-    });
+    // Credit is hop-by-hop and carries sequence 0, so it is not part of the
+    // end-to-end stream and never spends this side's send window.
+    this.deps.socket.send(
+      encodeFrame({ kind: FRAME_KINDS.credit, sessionId, sequence: 0, payload: encodeCreditPayload(owed) }),
+    );
   }
 
+  /**
+   * Queue one record for sending.
+   *
+   * The only thing checked here is the QUEUE DEPTH: a queue deeper than one window
+   * is an unbounded buffer, and the peer's own window bounds how many answers can be
+   * outstanding, so a deeper one means the peer is not honouring the protocol.
+   * Whether a record FITS is `sealRecord`'s question and is asked there — checking
+   * the same length in two places is how two places come to disagree about the
+   * envelope.
+   */
   #sendRecord(message: RelayTunnelClientMessage): void {
-    const plaintext = encodeTunnelClientMessage(message);
-    if (plaintext.byteLength > MAX_PLAINTEXT_BYTES || this.#waiting.length >= CREDIT_WINDOW_FRAMES) {
-      // A request too large for one record cannot be split by this protocol, and a
-      // queue deeper than one window is an unbounded buffer. Both fail closed.
-      this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session cannot carry that request');
+    if (this.#waiting.length >= CREDIT_WINDOW_FRAMES) {
+      this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has too many records waiting on credit');
       return;
     }
-    this.#waiting.push(plaintext);
+    this.#waiting.push(encodeTunnelClientMessage(message));
     this.#flush();
   }
 
@@ -527,23 +557,6 @@ export class RelayClientSession {
         this.deps.socket.send(encodeFrame(sealed.frame));
       }
     });
-  }
-
-  /** A session-scoped frame that is not a record: this side's hello, and credit. */
-  #sendSessionFrame(frame: RelayFrame): void {
-    if (frame.kind === FRAME_KINDS.credit) {
-      this.deps.socket.send(encodeFrame(frame));
-      return;
-    }
-    if (!maySend(this.#send)) {
-      // The hello is the first frame of a fresh window, so this cannot happen
-      // against a carrier that granted the window it published. Sending it anyway
-      // would be `4430` from the rendezvous, which ends the session either way.
-      this.#fail(RELAY_CLOSE_CODES.flowViolation, 'no credit for the client hello');
-      return;
-    }
-    this.#send = recordSent(this.#send);
-    this.deps.socket.send(encodeFrame(frame));
   }
 
   /**
