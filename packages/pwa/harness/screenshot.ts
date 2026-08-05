@@ -488,7 +488,7 @@ try {
           const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
           const attention = page.getByLabel('Attention ledger');
-          await attention.getByText('Resolution audit', { exact: true }).click();
+          await attention.locator('summary').filter({ hasText: 'Resolution audit' }).click();
           await attention.screenshot({ path: attentionTarget });
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
