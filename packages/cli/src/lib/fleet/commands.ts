@@ -43,7 +43,11 @@ export function registerFleetCommands(program: Command, controller: FleetControl
   });
 
   scoped(
-    fleet.command('ls', { isDefault: true }).alias('accounts').description('the accounts provisioning last published'),
+    fleet
+      .command('ls', { isDefault: true })
+      .alias('accounts')
+      .alias('list')
+      .description('the accounts provisioning last published'),
   ).action(async (_flags: unknown, command: Command) => {
     await controller.list(merged(command));
   });

@@ -42,6 +42,30 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
     should(config.agents).match([{ kind: 'codex', routes: { default: { wrapper: 'codex-primary' } } }]);
   });
 
+  it('should add the first account after plain init left an empty configuration', async () => {
+    const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-empty-first-account-sit-'));
+    temporaryDirectories.push(stateHome);
+    const environment = { FY_HOME: stateHome, FY_TOKEN: '', FY_URL: '', FY_SESSION_ID: '' };
+
+    // Act — this is the exact recovery journey a person takes after their first init was empty.
+    const plainInit = await driver.run(['fleet', 'init'], environment);
+    const firstAccount = await driver.run(['fleet', 'init', '--first-account=codex'], environment);
+    const applied = await driver.run(['fleet', 'apply'], environment);
+    const listed = await driver.run(['fleet', 'ls'], environment);
+
+    // Assert
+    should(plainInit.code).equal(0, plainInit.err);
+    should(firstAccount.code).equal(0, firstAccount.err);
+    should(firstAccount.out).containEql('Declared one codex account');
+    should(applied.code).equal(0, applied.err);
+    should(listed.code).equal(0, listed.err);
+    should(listed.out).containEql('1 account provisioned');
+    const config = Bun.YAML.parse(await readFile(path.join(stateHome, 'fleet', 'config.yaml'), 'utf8')) as {
+      agents?: readonly { kind?: string }[];
+    };
+    should(config.agents).match([{ kind: 'codex' }]);
+  });
+
   it('should prefer Claude when the host can launch both harnesses', async () => {
     const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-detected-account-sit-'));
     const harnessBin = path.join(stateHome, 'harness-bin');

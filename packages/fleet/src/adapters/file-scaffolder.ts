@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   type FleetScaffold,
@@ -45,7 +45,8 @@ export class FileFleetScaffolder implements FleetScaffolder {
     const directories: string[] = [];
     const created: string[] = [];
     const kept: string[] = [];
-    const progress = { created, kept, directories };
+    const updated: string[] = [];
+    const progress = { created, kept, updated, directories };
 
     for (const directory of scaffold.directories) {
       try {
@@ -63,7 +64,14 @@ export class FileFleetScaffolder implements FleetScaffolder {
         // Recorded from inside, the moment the file exists: a `chmod` that fails afterwards does
         // not un-write it, and leaving it out of the report would hide a file that is on the host.
         if (!(await this.writeIfAbsent(file.path, file.content, file.mode, () => created.push(file.path)))) {
-          kept.push(file.path);
+          const replacement =
+            file.updateIfPresent === undefined ? undefined : file.updateIfPresent(await readFile(file.path, 'utf8'));
+          if (replacement === undefined) {
+            kept.push(file.path);
+          } else {
+            await writeFile(file.path, replacement, { mode: file.mode });
+            updated.push(file.path);
+          }
         }
       } catch (error) {
         throw new FleetScaffoldPartialError(file.path, progress, error);
@@ -73,6 +81,11 @@ export class FileFleetScaffolder implements FleetScaffolder {
     return {
       created,
       kept,
+      updated,
+      ...(scaffold.declaration !== undefined &&
+      (created.includes(scaffold.declaration.path) || updated.includes(scaffold.declaration.path))
+        ? { declaredFirstAccount: scaffold.declaration.account }
+        : {}),
       directories: scaffold.directories,
       pathEntry: scaffold.pathEntry,
     };

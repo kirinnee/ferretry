@@ -84,6 +84,15 @@ describe('fleet command surface', () => {
     should(out.text).containEql('1 account provisioned');
   });
 
+  it('should accept the obvious list alias', async () => {
+    // Arrange + Act
+    const { parsed, out } = run(['fleet', 'list']);
+    await parsed;
+
+    // Assert
+    should(out.text).containEql('1 account provisioned');
+  });
+
   it('should apply the configuration', async () => {
     // Arrange + Act
     const { parsed, applier } = run(['fleet', 'apply']);

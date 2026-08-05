@@ -126,6 +126,41 @@ describe('the starter configuration', () => {
     });
   });
 
+  it('should add the selected account to the empty starter without replacing its comments', () => {
+    // Arrange — this is the file left by a previous plain `fy fleet init`.
+    const selected = buildFleetScaffold({
+      layout: LAYOUT,
+      ids: IDS,
+      configPath: '/state/fleet/config.yaml',
+      firstAccount: 'codex',
+    });
+    const update = selected.files.find(file => file.path === '/state/fleet/config.yaml')?.updateIfPresent;
+    const existing = `${config()}# A comment the owner added before asking for an account.\n`;
+
+    // Act
+    const updated = update?.(existing) ?? '';
+    const parsed = FleetConfigSchema.parse(Bun.YAML.parse(updated));
+
+    // Assert — the surrounding document stays as it was, but it is no longer an empty fleet.
+    should(updated).containEql('# A comment the owner added before asking for an account.');
+    should(parsed.agents).match([{ name: 'primary', kind: 'codex' }]);
+  });
+
+  it('should leave a configuration with accounts alone when asked for a first account', () => {
+    // Arrange
+    const selected = buildFleetScaffold({
+      layout: LAYOUT,
+      ids: IDS,
+      configPath: '/state/fleet/config.yaml',
+      firstAccount: 'claude',
+    });
+    const update = selected.files.find(file => file.path === '/state/fleet/config.yaml')?.updateIfPresent;
+    const existing = selected.files.find(file => file.path === '/state/fleet/config.yaml')?.content ?? '';
+
+    // Act / Assert
+    should(update?.(existing)).be.undefined();
+  });
+
   it('should mount every starter through the harness-scoped base profile', () => {
     // Act
     const parsed = FleetConfigSchema.parse(Bun.YAML.parse(config()));

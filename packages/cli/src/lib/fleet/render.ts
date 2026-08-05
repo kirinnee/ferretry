@@ -442,20 +442,23 @@ export function renderScaffoldResult(
   firstAccount: 'claude' | 'codex' | 'detected' | undefined = undefined,
 ): string {
   const lines =
-    result.created.length === 0
+    result.created.length === 0 && result.updated.length === 0
       ? ['The fleet is already set up; nothing was changed.']
       : [
           `prepared the fleet in ${result.directories[0] ?? 'its directory'}`,
           ...result.created.map(path => `  created  ${path} (Ferretry starter)`),
+          ...result.updated.map(path => `  updated  ${path} (declared the requested first account)`),
         ];
   for (const path of result.kept)
     lines.push(`  kept     ${path} (pre-existing file wins; Ferretry did not replace it)`);
   lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
   lines.push(
     '',
-    firstAccount === undefined
-      ? 'Then declare an account in the configuration and run "fy fleet apply".'
-      : `If this command created the configuration, it declared one ${firstAccount === 'detected' ? 'detected' : firstAccount} account. Run "fy fleet apply" to materialise its wrapper; an existing configuration was kept untouched.`,
+    result.declaredFirstAccount !== undefined
+      ? `Declared one ${result.declaredFirstAccount} account. Run "fy fleet apply" to materialise its wrapper.`
+      : firstAccount === undefined
+        ? 'Then declare an account in the configuration and run "fy fleet apply".'
+        : 'Kept the existing configuration unchanged; it already declares one or more accounts, so no account was added.',
   );
   return lines.join('\n');
 }

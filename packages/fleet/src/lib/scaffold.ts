@@ -37,6 +37,11 @@ export interface FleetScaffoldFile {
   readonly path: string;
   readonly content: string;
   readonly mode: number;
+  /**
+   * Optional, narrow exception to create-if-absent for a declaration that is
+   * valid but empty. Returning undefined keeps the existing bytes untouched.
+   */
+  readonly updateIfPresent?: (existing: string) => string | undefined;
 }
 
 /**
@@ -68,6 +73,8 @@ export interface FleetScaffold {
   readonly directories: readonly string[];
   readonly directoryMode: number;
   readonly files: readonly FleetScaffoldFile[];
+  /** The configuration declaration this scaffold can add to an empty file. */
+  readonly declaration?: { readonly path: string; readonly account: HarnessKind };
   /** The line a person must add to their shell profile for the generated wrappers to be runnable. */
   readonly pathEntry: string;
 }
@@ -281,6 +288,53 @@ export interface FleetScaffoldInput {
 }
 
 /**
+ * Adds the generated starter account to a configuration that explicitly has
+ * no accounts, without normalising the rest of the person's YAML.
+ *
+ * The initial starter uses `agents: []`, so that common path is a one-line
+ * substitution which preserves every surrounding comment and section. An
+ * omitted `agents` key is also an empty declaration under the configuration
+ * schema; append a new root key in that case. Any other zero-looking shape is
+ * refused rather than guessed at: damaged state is not an empty fleet.
+ */
+function declareFirstAccountInEmptyConfig(
+  existing: string,
+  kind: HarnessKind,
+  ids: FleetScaffoldIds,
+): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = Bun.YAML.parse(existing) ?? {};
+  } catch (error) {
+    throw new Error(
+      `cannot add a first account because the existing configuration is not valid YAML: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('cannot add a first account because the existing configuration is not a YAML mapping');
+  }
+  const agents = (parsed as Record<string, unknown>).agents;
+  if (agents === undefined) return `${existing.replace(/\s*$/u, '')}\n\n${starterAccount(kind, ids[kind])}\n`;
+  if (!Array.isArray(agents)) {
+    throw new Error('cannot add a first account because the existing configuration has a non-list "agents" value');
+  }
+  if (agents.length > 0) return undefined;
+
+  const replacement = starterAccount(kind, ids[kind]);
+  const updated = existing.replace(/^agents\s*:\s*\[\s*\](\s*(?:#.*)?)$/mu, (_line, comment: string) => {
+    return `${replacement.slice(0, 'agents:'.length)}${comment}${replacement.slice('agents:'.length)}`;
+  });
+  if (updated === existing) {
+    throw new Error(
+      'cannot add a first account because the empty "agents" declaration has a structure Ferretry cannot safely edit',
+    );
+  }
+  return updated;
+}
+
+/**
  * Everything a fresh fleet starts with, as a value.
  *
  * The directories include the assets directory, which provisioning does not create — a relative
@@ -302,12 +356,20 @@ export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
     ],
     directoryMode: DIRECTORY_MODE,
     files: [
-      { path: configPath, content: configTemplate(ids, firstAccount), mode: FILE_MODE },
+      {
+        path: configPath,
+        content: configTemplate(ids, firstAccount),
+        mode: FILE_MODE,
+        ...(firstAccount === undefined
+          ? {}
+          : { updateIfPresent: (existing: string) => declareFirstAccountInEmptyConfig(existing, firstAccount, ids) }),
+      },
       { path: assetPath('README.md'), content: ASSETS_README, mode: FILE_MODE },
       { path: assetPath('CLAUDE.md'), content: STARTER_INSTRUCTIONS, mode: FILE_MODE },
       { path: assetPath('templates/claude/settings.json'), content: CLAUDE_SETTINGS, mode: FILE_MODE },
       { path: assetPath('templates/codex/config.toml'), content: CODEX_SETTINGS, mode: FILE_MODE },
     ],
+    ...(firstAccount === undefined ? {} : { declaration: { path: configPath, account: firstAccount } }),
     pathEntry: `export PATH="${layout.binDirectory}:$PATH"`,
   };
 }
@@ -318,6 +380,10 @@ export interface FleetScaffoldResult {
   readonly created: readonly string[];
   /** Files left exactly as found. */
   readonly kept: readonly string[];
+  /** Existing declarations that were safely extended rather than replaced. */
+  readonly updated: readonly string[];
+  /** Present only when this run actually declared the requested first account. */
+  readonly declaredFirstAccount?: HarnessKind;
   /** Directories ensured, whether or not they already existed. */
   readonly directories: readonly string[];
   readonly pathEntry: string;
