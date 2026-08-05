@@ -705,6 +705,17 @@ try {
             `📸 Settings unavailable daemon Warden ${viewport.name} -> ${unavailableWardenTarget}\n`,
           );
 
+          // The unavailable pairing must not borrow the healthy daemon's
+          // measured relay. Capture its own failed direct + relay evidence so
+          // that daemon scoping is reviewable in pixels, not only in fixture code.
+          await selectDaemonPanel(unavailableWardenFrame, 'Carrier');
+          await unavailableWardenFrame.locator('[data-active-carrier]').waitFor({ state: 'visible' });
+          const unavailableCarrierTarget = join(outDir, `settings-daemon-carrier-unavailable-${viewport.name}.png`);
+          await page.screenshot({ path: unavailableCarrierTarget });
+          process.stdout.write(
+            `📸 Settings unavailable daemon Carrier ${viewport.name} -> ${unavailableCarrierTarget}\n`,
+          );
+
           await selectDaemon('Studio workstation');
           const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
           await selectDaemonPanel(currentFrame, 'Host checks');
