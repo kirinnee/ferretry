@@ -106,10 +106,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
     await this.preflightPlan(plan);
+    const sharedHistory = await this.previewSharedHistory(plan);
     return {
       ...plan,
-      operations: await this.previewOperations(plan.operations),
-      sharedHistory: await this.previewSharedHistory(plan),
+      operations: await this.previewOperations(plan.operations, sharedHistory),
+      sharedHistory,
     };
   }
 
@@ -155,7 +156,21 @@ export class FileFleetProvisioner implements FleetProvisioner {
   /** Validate every write before apply performs its first one. */
   private async preflightApply(plan: FleetApplyPlan): Promise<void> {
     await this.preflightPlan(plan);
+    this.assertNoSharedHistoryRefusals(await this.previewSharedHistory(plan));
     for (const operation of plan.operations) await this.assertOperationWritable(operation);
+  }
+
+  /** A partly observed history request must refuse before any ordinary or history mutation lands. */
+  private assertNoSharedHistoryRefusals(previews: FleetApplyPreview['sharedHistory']): void {
+    for (const preview of previews) {
+      const refusals = preview.refusals ?? [];
+      if (refusals.length === 0) continue;
+      throw new Error(
+        `refusing to migrate ${preview.kind} history while ${refusals.length} account home(s) cannot be read: ${refusals
+          .map(refusal => `${refusal.account} (${refusal.home}): ${refusal.reason}`)
+          .join('; ')}`,
+      );
+    }
   }
 
   private async assertOperationWritable(operation: FleetWriteOperation): Promise<void> {
@@ -171,18 +186,33 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * operation only after observing that no sidecar exists. Existing evidence is parsed, along with
    * the config it governs, so damaged state is refused now rather than advertised as a clean plan.
    */
-  private async previewOperations(operations: readonly FleetWriteOperation[]): Promise<readonly FleetWriteOperation[]> {
+  private async previewOperations(
+    operations: readonly FleetWriteOperation[],
+    sharedHistory: FleetApplyPreview['sharedHistory'],
+  ): Promise<readonly FleetWriteOperation[]> {
+    const refusedHomes = sharedHistory.flatMap(preview => (preview.refusals ?? []).map(refusal => refusal.home));
     const previewed: FleetWriteOperation[] = [];
     for (const operation of operations) {
+      const followsFinalComponent = operation.kind === 'directory' || operation.kind === 'prune';
+      const pathWritable = await this.isWritablePath(operation.path, followsFinalComponent);
+      if (!pathWritable && !this.isRepresentedByRefusedHome(operation.path, refusedHomes)) {
+        throw new Error(`refusing to write outside configured fleet roots: ${operation.path}`);
+      }
+
       if (operation.kind !== 'codex-sqlite-ownership') {
         previewed.push(operation);
         continue;
       }
 
+      const markerWritable = await this.isWritablePath(operation.markerPath);
+      if (!markerWritable && !this.isRepresentedByRefusedHome(operation.markerPath, refusedHomes)) {
+        throw new Error(`refusing to write outside configured fleet roots: ${operation.markerPath}`);
+      }
+
       // Shared-history preview turns an out-of-root account home into structured, renderable
-      // evidence. Keep its ordinary ownership operation visible, but never inspect files outside
-      // the declared roots and thereby mask that more useful refusal with an adapter exception.
-      if (!(await this.isWritablePath(operation.path)) || !(await this.isWritablePath(operation.markerPath))) {
+      // evidence. Only paths lexically beneath that exact refused home inherit the evidence; keep
+      // their ownership operation visible, but never inspect files outside the declared roots.
+      if (!pathWritable || !markerWritable) {
         previewed.push(operation);
         continue;
       }
@@ -205,6 +235,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
       previewed.push(operation);
     }
     return previewed;
+  }
+
+  private isRepresentedByRefusedHome(target: string, refusedHomes: readonly string[]): boolean {
+    const resolved = path.resolve(target);
+    return refusedHomes.some(home => isInside(path.resolve(home), resolved));
   }
 
   private async previewSharedHistory(plan: FleetApplyPlan): Promise<FleetApplyPreview['sharedHistory']> {

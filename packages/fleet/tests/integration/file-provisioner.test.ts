@@ -6,7 +6,7 @@ import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../src/lib/provisioning.ts';
-import type { SharedHistoryMigration } from '../../src/lib/shared-history.ts';
+import type { SharedHistoryMigration, SharedHistoryRequest } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -168,6 +168,75 @@ describe('FileFleetProvisioner', () => {
     should(manifestObservedByMigration).deepEqual(manifest());
     should(wrapperObservedByMigration).equal('#!/bin/sh\nexec true "$@"\n');
     should(JSON.parse(await readFile(manifestPath, 'utf8'))).deepEqual(manifest());
+  });
+
+  it('should preflight every history kind and refuse before any apply mutation', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const wrapper = path.join(root, 'fleet', 'bin', 'alias-with-hyphens');
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const clean = {
+      kind: 'claude' as const,
+      pool: path.join(root, 'fleet', 'shared', 'claude'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [],
+    };
+    const refused = {
+      kind: 'codex' as const,
+      pool: path.join(root, 'fleet', 'shared', 'codex'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [
+        {
+          account: 'codex-outside',
+          home: other,
+          path: other,
+          reason: `refusing shared-history access outside configured roots: ${other}`,
+        },
+      ],
+    };
+    const previewedKinds: string[] = [];
+    const materializedKinds: string[] = [];
+    const sharedHistory = {
+      preview: async (request: SharedHistoryRequest) => {
+        previewedKinds.push(request.kind);
+        return request.kind === 'claude' ? clean : refused;
+      },
+      materialize: async (request: SharedHistoryRequest) => {
+        materializedKinds.push(request.kind);
+        return request.kind === 'claude' ? clean : refused;
+      },
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath,
+      operations: [{ kind: 'file', path: wrapper, content: '#!/bin/sh\nexec true "$@"\n', mode: 0o755 }],
+      sharedHistoryRequests: [
+        { kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] },
+        { kind: 'codex', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const promise = subject.apply(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(
+      /refusing to migrate codex history while 1 account home\(s\) cannot be read: codex-outside/u,
+    );
+    should(previewedKinds).deepEqual(['claude', 'codex']);
+    should(materializedKinds).deepEqual([]);
+    should(await Bun.file(wrapper).exists()).be.false();
+    should(await Bun.file(manifestPath).exists()).be.false();
   });
 
   it('should force a copied asset writable so the harness can rewrite what it owns', async () => {
@@ -759,7 +828,25 @@ describe('FileFleetProvisioner', () => {
     should(act).throw(/at least one allowed fleet root/);
   });
 
-  it('should keep out-of-root account operations visible for a structured shared-history refusal', async () => {
+  it('should reject an out-of-root operation during preview when sharing is disabled', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const other = await temporaryDirectory();
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'directory', path: other, mode: 0o700 }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const promise = subject.preview(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(`refusing to write outside configured fleet roots: ${other}`);
+  });
+
+  it('should keep an enabled out-of-root account visible when its history preview refuses it', async () => {
     // Arrange
     const root = await temporaryDirectory();
     const other = await temporaryDirectory();
@@ -795,7 +882,7 @@ describe('FileFleetProvisioner', () => {
           path: config,
           markerPath: marker,
           sqliteHome: path.join(root, 'fleet', 'shared', 'codex', 'sqlite'),
-          enabled: false,
+          enabled: true,
         },
       ],
       sharedHistoryRequests: [
@@ -814,6 +901,57 @@ describe('FileFleetProvisioner', () => {
     // Assert — preview neither reads nor hides unbounded ordinary operations; history explains why.
     should(actual.operations).deepEqual(plan.operations);
     should(actual.sharedHistory).deepEqual([expectedHistory]);
+  });
+
+  it('should not let one refused home mask an unrelated out-of-root preview operation', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const refusedHome = await temporaryDirectory();
+    const unrelatedHome = await temporaryDirectory();
+    const unrelatedPath = path.join(unrelatedHome, 'unrelated');
+    const expectedHistory = {
+      kind: 'codex' as const,
+      pool: path.join(root, 'fleet', 'shared', 'codex'),
+      migrated: 0,
+      conflicts: 0,
+      links: 0,
+      changes: [],
+      emptiedSourceDirectories: [],
+      refusals: [
+        {
+          account: 'account-refused',
+          home: refusedHome,
+          path: refusedHome,
+          reason: `refusing shared-history access outside configured roots: ${refusedHome}`,
+        },
+      ],
+    };
+    const sharedHistory = {
+      preview: async () => expectedHistory,
+      materialize: async () => expectedHistory,
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'directory', path: refusedHome, mode: 0o700 },
+        { kind: 'file', path: unrelatedPath, content: 'must refuse\n', mode: 0o600 },
+      ],
+      sharedHistoryRequests: [
+        {
+          kind: 'codex',
+          poolRoot: path.join(root, 'fleet', 'shared'),
+          homes: [{ account: 'account-refused', path: refusedHome }],
+        },
+      ],
+    };
+    const subject = new FileFleetProvisioner([root], sharedHistory);
+
+    // Act
+    const promise = subject.preview(plan);
+
+    // Assert
+    await should(promise).be.rejectedWith(`refusing to write outside configured fleet roots: ${unrelatedPath}`);
   });
 
   it('should refuse every destination outside the configured roots before apply writes anything', async () => {
