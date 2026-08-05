@@ -196,6 +196,7 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
               selection={selection}
               targetLineRef={targetLineRef}
               markdown={markdown}
+              preview={{ daemon, scope, revision: file.revision }}
             />
           ) : (
             <Note role="status">Nothing to show.</Note>

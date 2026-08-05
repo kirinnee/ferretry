@@ -21,6 +21,8 @@ export interface FsResource<T> {
   readonly data: T | null;
   readonly error: string | null;
   readonly loading: boolean;
+  /** Increments for an explicit network reread; child renderers use it to discard derived bytes. */
+  readonly revision: number;
   readonly reload: () => void;
 }
 
@@ -65,6 +67,7 @@ export const useFsResource = <T>(key: string | null, load: (signal: AbortSignal)
     data: fresh ? state.data : null,
     error: fresh ? state.error : null,
     loading: key !== null && !fresh,
+    revision: nonce,
     reload: useCallback(() => {
       setState({ key: null, data: null, error: null });
       setNonce(current => current + 1);

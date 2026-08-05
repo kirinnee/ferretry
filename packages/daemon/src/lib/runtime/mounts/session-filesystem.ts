@@ -93,8 +93,16 @@ async function file(
   const rev = queryValue(context.request, 'rev');
   if (rev !== undefined && rev !== 'head')
     throw new ApiError(400, 'query parameter "rev" must be "head"', 'invalid_rev');
+  const format = queryValue(context.request, 'format');
+  if (format !== undefined && format !== 'base64')
+    throw new ApiError(400, 'query parameter "format" must be "base64"', 'invalid_format');
   try {
-    return jsonResponse(await filesystem.readFile(cwd, target, rev === 'head' ? { rev: 'head' } : {}));
+    return jsonResponse(
+      await filesystem.readFile(cwd, target, {
+        ...(rev === 'head' ? { rev: 'head' as const } : {}),
+        ...(format === 'base64' ? { base64: true } : {}),
+      }),
+    );
   } catch (error) {
     return refuse(error);
   }

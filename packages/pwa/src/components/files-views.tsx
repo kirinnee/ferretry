@@ -40,6 +40,9 @@ import {
   type OpenFileTab,
 } from './files-tab-model.ts';
 import { Markdown, type MarkdownProps } from './markdown.tsx';
+import { RichFilePreview, richFileKind } from './rich-file-preview.tsx';
+import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 
 /** Everything the Markdown renderer needs that only the pane's host can prove. */
 export type FilesMarkdownContext = Omit<MarkdownProps, 'text' | 'className'>;
@@ -363,9 +366,15 @@ export interface FileBodyProps {
   selection?: FileLineSelection;
   targetLineRef?: RefObject<HTMLSpanElement | null>;
   markdown?: FilesMarkdownContext;
+  /** Rich bytes stay behind an authenticated fetch and are rendered from a local object URL. */
+  preview?: {
+    readonly daemon: DaemonConnection;
+    readonly scope: DaemonSessionScope;
+    readonly revision: number;
+  };
 }
 
-export const FileBody = ({ file, path, raw = false, selection, targetLineRef, markdown }: FileBodyProps) => {
+export const FileBody = ({ file, path, raw = false, selection, targetLineRef, markdown, preview }: FileBodyProps) => {
   const refusal = fileRefusal(file);
   const content = file.content ?? '';
   const lang = file.lang ?? langFromPath(path);
@@ -394,6 +403,9 @@ export const FileBody = ({ file, path, raw = false, selection, targetLineRef, ma
         <Markdown text={content} {...markdown} />
       </div>
     );
+  const richKind = richFileKind(path);
+  if (!raw && selection === undefined && richKind !== null && preview)
+    return <RichFilePreview daemon={preview.daemon} scope={preview.scope} path={path} revision={preview.revision} />;
   if (selection)
     return (
       <>
