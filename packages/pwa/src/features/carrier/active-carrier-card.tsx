@@ -56,20 +56,34 @@ export const CARRIER_NO_LIVE_UPDATES =
 export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCardProps) {
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
+  const caveat =
+    method?.kind === 'relay'
+      ? CARRIER_NO_LIVE_UPDATES
+      : choice !== undefined && !relayAdvertised
+        ? CARRIER_NO_FALLBACK
+        : undefined;
   return (
-    <section aria-label="Connection carrier">
-      <h3>{disclosure?.label ?? 'Carrier'}</h3>
+    <section className="kt-panel p-panel" aria-labelledby="settings-carrier-heading" data-active-carrier="">
+      <h3 id="settings-carrier-heading" className="m-0 text-title font-semibold text-fg">
+        {disclosure?.label ?? 'Carrier'}
+      </h3>
       {/* The measured sentence, or the honest absence of one. Never a default. */}
-      <p>{choice === undefined ? CARRIER_UNMEASURED : choice.reason}</p>
-      {method?.kind === 'relay' ? <p>{CARRIER_NO_LIVE_UPDATES}</p> : null}
-      {choice !== undefined && !relayAdvertised && method?.kind !== 'relay' ? <p>{CARRIER_NO_FALLBACK}</p> : null}
+      <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
+      </p>
+      {/* A constraint the reader will otherwise discover as a screen that stops
+          updating, or a daemon that stops answering from a café. `text-warn` because
+          it is a limit on what works, not decoration. */}
+      {caveat === undefined ? null : <p className="mb-0 mt-2 text-meta leading-base text-warn">{caveat}</p>}
       {disclosure === undefined ? null : (
         <>
-          <p>{disclosure.summary}</p>
+          <p className="mb-0 mt-3 text-ui leading-base text-fg">{disclosure.summary}</p>
           {/* Under a "who can see this" heading an empty list reads as a redaction, so
               the list is only ever rendered with its heading and never on its own. */}
-          <h4>What the parties on this path can see</h4>
-          <ul>
+          <h4 className="mb-0 mt-4 text-meta font-semibold uppercase tracking-label text-faint">
+            What the parties on this path can see
+          </h4>
+          <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {disclosure.observers.map(observer => (
               <li key={observer}>{observer}</li>
             ))}
@@ -81,8 +95,8 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
           should be able to see, not a silent degradation. */}
       {choice === undefined || choice.passedOver.length === 0 ? null : (
         <>
-          <h4>Passed over</h4>
-          <ul>
+          <h4 className="mb-0 mt-4 text-meta font-semibold uppercase tracking-label text-faint">Passed over</h4>
+          <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {choice.passedOver.map(skip => (
               <li key={`${skip.method.kind}:${skip.detail}`}>
                 {describeConnectionMethod(skip.method).label}: {skip.detail}
