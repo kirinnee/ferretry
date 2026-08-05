@@ -222,13 +222,17 @@ export interface CapabilityListProps {
   readonly connection: DaemonConnection;
   readonly capabilities: readonly CapabilityGrantView[];
   /**
-   * How the DAEMON saw this connection, when a caller happens to know it independently.
+   * How the DAEMON saw this connection.
    *
-   * NORMALLY OMITTED. The posture is read from the capabilities themselves — `mayGrant` is the daemon's
-   * own `!governed` — so there is one source of the fact rather than two that can disagree. This
-   * override exists for a caller that has the boolean from elsewhere and for tests that pin one posture
-   * against a fixture; it is never derived from the page, because a `127.0.0.1` address bar does not
-   * mean a loopback connection.
+   * NORMALLY SUPPLIED, from `GrantsView.governed` — it is the daemon's own
+   * `isGovernedCaller(request.loopback)` and the only honest source, because a page on a loopback address
+   * can be reaching the daemon through the relay. Passing it means the screen reads the fact rather than
+   * inferring it, which is the point of the field existing at all.
+   *
+   * OMITTED, the posture falls back to `mayGrant` unanimity. That is correct while `mayGrant` is
+   * `!governed`, and it degrades to "cannot tell" if it ever stops being — which is what the empty-list
+   * and capabilities-disagree cases already rely on. Never derived from the page: a `127.0.0.1` address
+   * bar does not mean a loopback connection.
    */
   readonly governed?: boolean | undefined;
 }
