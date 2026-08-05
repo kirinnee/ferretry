@@ -9,12 +9,13 @@
  */
 
 import type { ConnectionChoice } from '@ferretry/relay';
-import { Check, KeyRound, ShieldCheck } from 'lucide-react';
-import { type ComponentType, useMemo, useState } from 'react';
+import { ChevronDown, KeyRound, ShieldCheck } from 'lucide-react';
+import { type ComponentType, type ReactNode, useId, useMemo, useState } from 'react';
 import { useWardenStatus, type WardenStatusReader } from '../../hooks/use-warden-status.ts';
-import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
@@ -32,6 +33,24 @@ export interface DaemonSettingsTabDefinition {
   readonly description: string;
   readonly Surface: ComponentType<DaemonSettingsTabProps>;
 }
+
+/** The panel each desktop tab controls; unchanged, because the harness, the app suite and the docs all name it. */
+const DAEMON_PANEL_ID = 'daemon-settings-tab-';
+/** Each desktop tab's own id, so the open panel can point its `aria-labelledby` back at it. */
+const DAEMON_PANEL_TAB_ID = 'daemon-panel-tab-';
+/** The same ceiling the two sibling Settings pickers use: keyboard-safe, never taller than 72dvh. */
+const PANEL_PICKER_HEIGHT = 'min(72dvh, calc(var(--app-h, 100dvh) - var(--gap-sm)))';
+
+/**
+ * Icons for the two panels that had them before this rail existed. Every other
+ * panel is deliberately iconless: an invented glyph reads as a category that
+ * does not exist. Nothing here encodes health — there is no per-panel health
+ * read on the daemon, so a status dot would be a colour with no evidence.
+ */
+const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
+  warden: <ShieldCheck size={16} className="shrink-0" aria-hidden="true" />,
+  secrets: <KeyRound size={16} className="shrink-0" aria-hidden="true" />,
+};
 
 const unavailableWardenStatus: WardenStatusReader = async () => {
   throw new Error('No Warden status reader was supplied.');
@@ -214,11 +233,33 @@ export function DaemonSettingsFrame({
       relayAdvertised,
     ],
   );
+  // The selection lives HERE, inside the frame the caller keys by daemon id, so
+  // switching hosts remounts it. Hoisting it beside the rail would survive that
+  // remount and show daemon B under daemon A's panel name.
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? 'warden');
+  const [panelPickerOpen, setPanelPickerOpen] = useState(false);
+  const pickerTitleId = useId();
 
+  /**
+   * A dynamically supplied panel can disappear between renders. The fallback is
+   * resolved at render time and deliberately fail-closed: the reader lands on a
+   * panel that exists rather than on a blank frame, and the choice is always the
+   * first one, so it is predictable rather than positional guesswork.
+   *
+   * `activeTab` itself is left alone. If that panel is supplied again it becomes
+   * selected again, which is the behaviour a reader who never chose to leave it
+   * would expect; nothing else reads the id, so a selection with no panel is
+   * inert rather than wrong.
+   */
   const active = tabs.find(tab => tab.id === activeTab) ?? tabs[0];
   if (!active) return null;
   const Surface = active.Surface;
+  const items: readonly ChoiceRailItem[] = tabs.map(tab => ({
+    id: tab.id,
+    label: tab.label,
+    detail: tab.description,
+    icon: PANEL_ICONS[tab.id],
+  }));
 
   return (
     <section
@@ -232,46 +273,95 @@ export function DaemonSettingsFrame({
         <h3 id="daemon-settings-heading" className="mt-1 text-title font-semibold text-fg">
           {name}
         </h3>
-        <p className="mb-0 mt-1 text-ui leading-base text-muted">
+        {/* The saved name identifies the machine; the address disambiguates it.
+            An unnamed daemon already shows its address as the name, so it is not
+            repeated. The fingerprint stays inside Host checks' disclosure. */}
+        {name === connection.baseUrl ? null : (
+          <p className="m-0 mt-0.5 break-all font-mono text-meta leading-tight text-faint">{connection.baseUrl}</p>
+        )}
+        <p className="mb-0 mt-2 text-ui leading-base text-muted">
           These settings change only this machine. They are shared by browsers paired to it, not this browser’s
           appearance or behaviour preferences.
         </p>
       </header>
 
-      <div
-        role="tablist"
-        aria-label={`${name} daemon settings`}
-        className="mb-3 flex gap-1 overflow-x-auto rounded-panel border border-border bg-surface p-1 shadow-panel"
-      >
-        {tabs.map(tab => {
-          const selected = tab.id === active.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              aria-controls={`daemon-settings-tab-${tab.id}`}
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'flex min-h-[44px] min-w-[132px] flex-1 items-center gap-2 rounded-control px-control-x py-2 text-left focus-visible:outline-focus focus-visible:outline-offset-focus',
-                selected ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-surface-2 hover:text-fg',
-              )}
-            >
-              {tab.id === 'warden' ? <ShieldCheck size={16} aria-hidden="true" /> : null}
-              {tab.id === 'secrets' ? <KeyRound size={16} aria-hidden="true" /> : null}
-              <span className="min-w-0">
-                <span className="block text-ui font-semibold">{tab.label}</span>
-                <span className="block truncate text-meta leading-tight text-faint">{tab.description}</span>
-              </span>
-              {selected ? <Check size={14} className="ml-auto shrink-0" aria-hidden="true" /> : null}
-            </button>
-          );
-        })}
-      </div>
+      <div className="md:grid md:grid-cols-[200px_minmax(0,1fr)] md:items-start md:gap-3">
+        {/* The tablist precedes the trigger that replaces it on a narrow screen,
+            so document order is reading order: the control that owns the panel
+            comes before its alternative, and before the panel itself. */}
+        <div
+          data-daemon-settings-tabs="desktop"
+          className="hidden rounded-panel border border-border bg-surface p-2 shadow-panel md:sticky md:top-2 md:block"
+        >
+          <p className="m-0 mb-1 px-1 text-meta font-semibold uppercase tracking-label text-faint">Panels</p>
+          <ChoiceRail
+            presentation="tabs"
+            items={items}
+            activeId={active.id}
+            onSelect={setActiveTab}
+            marker="data-daemon-panel"
+            label={`${name} settings panels`}
+            tabIdPrefix={DAEMON_PANEL_TAB_ID}
+            panelIdPrefix={DAEMON_PANEL_ID}
+          />
+        </div>
 
-      <div id={`daemon-settings-tab-${active.id}`} role="tabpanel" aria-label={active.label}>
-        <Surface connection={connection} />
+        {/* A phone gets no tablist at all: one touch-safe trigger names the open
+            panel and opens the app's shared sheet to change it. */}
+        <div className="md:hidden" data-daemon-settings-tabs="mobile">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={panelPickerOpen}
+            aria-controls="daemon-panel-picker"
+            data-daemon-panel-trigger=""
+            onClick={() => setPanelPickerOpen(true)}
+            className="flex min-h-[52px] w-full items-center gap-2 rounded-control border border-border bg-surface-2 px-control-x py-2 text-left shadow-panel focus-visible:outline-focus focus-visible:outline-offset-focus"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block text-meta font-semibold uppercase tracking-label text-faint">Daemon panel</span>
+              <span className="block truncate text-ui font-semibold text-fg">{active.label}</span>
+            </span>
+            <ChevronDown size={17} className="shrink-0 text-muted" aria-hidden="true" />
+          </button>
+          <BottomSheet
+            id="daemon-panel-picker"
+            open={panelPickerOpen}
+            onClose={() => setPanelPickerOpen(false)}
+            labelledBy={pickerTitleId}
+            closeLabel="Close daemon panel picker"
+            panelClassName="bg-surface"
+            maxHeight={PANEL_PICKER_HEIGHT}
+            zIndexClass="z-50"
+          >
+            <div className="min-h-0 overflow-y-auto px-panel pb-4">
+              <h2 id={pickerTitleId} className="m-0 font-display text-title font-semibold tracking-display text-fg">
+                Choose a panel
+              </h2>
+              <p className="mb-3 mt-1 text-ui leading-base text-muted">Every setting below belongs to {name}.</p>
+              <nav aria-label={`${name} settings panels`}>
+                <ChoiceRail
+                  items={items}
+                  activeId={active.id}
+                  marker="data-daemon-panel-choice"
+                  onSelect={id => {
+                    setActiveTab(id);
+                    setPanelPickerOpen(false);
+                  }}
+                />
+              </nav>
+            </div>
+          </BottomSheet>
+        </div>
+
+        <div
+          id={`${DAEMON_PANEL_ID}${active.id}`}
+          role="tabpanel"
+          aria-labelledby={`${DAEMON_PANEL_TAB_ID}${active.id}`}
+          className="mt-3 min-w-0 md:mt-0"
+        >
+          <Surface connection={connection} />
+        </div>
       </div>
     </section>
   );

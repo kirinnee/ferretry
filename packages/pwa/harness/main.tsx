@@ -12,6 +12,8 @@ import type {
   AnalyticsResponse,
   AttentionSnapshot,
   BrowserStatus,
+  CgroupConfigPatch,
+  CgroupConfigView,
   DoctorReport,
   LearningStatus,
   PinSnapshot,
@@ -27,7 +29,7 @@ import type {
 } from '@ferretry/protocol';
 import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { chooseConnection } from '@ferretry/relay';
+import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -95,7 +97,7 @@ import {
   type FleetLayerDraft,
 } from '../src/features/fleet/fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
-import { FleetConfigurationSurface } from '../src/features/fleet/fleet-configuration-surface.tsx';
+import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
@@ -118,6 +120,8 @@ import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
+import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -556,6 +560,49 @@ const HARNESS_RELAYED_CARRIER = chooseConnection([
   { method: { kind: 'relay', relayUrl: 'https://relay.ferretry.dev', operator: 'hosted' }, reachable: true },
 ]);
 
+/**
+ * The same page for a daemon that answered nothing.
+ *
+ * Its direct address failed and the hosted relay could not reach it either, so
+ * no carrier is claimed: the panel names both attempts instead of showing the
+ * healthy machine's relay path under this machine's name.
+ */
+const HARNESS_OFFLINE_CARRIER = chooseConnection([
+  {
+    method: { kind: 'direct', daemonUrl: 'https://offline.example.test' },
+    reachable: false,
+    detail: 'Failed to fetch',
+  },
+  {
+    method: { kind: 'relay', relayUrl: 'https://relay.ferretry.dev', operator: 'hosted' },
+    reachable: false,
+    detail: 'this daemon never claimed a rendezvous',
+  },
+]);
+
+/**
+ * Carrier evidence belongs to ONE pairing, so it is read per daemon.
+ *
+ * The fixture used to hand every frame the healthy machine's relayed
+ * measurement, which is exactly the confusion the carrier panel exists to
+ * prevent — a reader would have seen Travel laptop reporting a path measured for
+ * Studio workstation. The daemon whose probe never answers reports NO
+ * measurement rather than a stale one; unmeasured is a state the card renders.
+ *
+ * `relayAdvertised` is true for each of them because the advertisement is a
+ * service fact this browser read once, not a property of any host: the offline
+ * pairing had a relay to fall back to and it still did not answer, which its
+ * passed-over list says outright.
+ */
+const harnessSettingsCarrier = (
+  daemonId: DaemonConnection['daemonId'],
+): { readonly carrier: ConnectionChoice | undefined; readonly relayAdvertised: boolean } =>
+  daemonId === daemon.daemonId
+    ? { carrier: HARNESS_RELAYED_CARRIER, relayAdvertised: true }
+    : daemonId === unreachableDaemon.daemonId
+      ? { carrier: HARNESS_OFFLINE_CARRIER, relayAdvertised: true }
+      : { carrier: undefined, relayAdvertised: true };
+
 const HARNESS_STT_SETTINGS: SttSettings = {
   ...DEFAULT_STT_SETTINGS,
   dictionary: ['ferretry = ferretree', 'nitroso'],
@@ -778,6 +825,116 @@ function DictationFlowHarness({
 }
 
 /**
+ * The host this fixture's resource limits are computed against.
+ *
+ * `effective` is the pair of cgroup v2 values a daemon would actually write, so
+ * a harness that echoed the same strings back after an apply would show a cap
+ * nobody asked for. These are recomputed from the percentages the card sent
+ * against this one fixed host, which is what makes the Apply button reviewable.
+ */
+const HARNESS_CGROUP_HOST = { cpus: 8, memoryBytes: 34_359_738_368 } as const;
+
+const harnessCgroupQuota = (cpuPercent: number, memoryPercent: number) => ({
+  cpuQuota: `${HARNESS_CGROUP_HOST.cpus * cpuPercent * 1_000} 100000`,
+  memoryMax: String(Math.round((HARNESS_CGROUP_HOST.memoryBytes * memoryPercent) / 100)),
+});
+
+const harnessCgroupView = (config: CgroupConfigView['config']): CgroupConfigView => ({
+  config,
+  // This fixture host is Linux with cgroup v2, so the controls it renders are
+  // controls that would do something. The unsupported presentation is a real
+  // state, but it belongs to a platform this fixture is not pretending to be.
+  supported: true,
+  fleetSlice: 'fy.slice',
+  effective: {
+    cpus: HARNESS_CGROUP_HOST.cpus,
+    memoryBytes: HARNESS_CGROUP_HOST.memoryBytes,
+    fleet: harnessCgroupQuota(config.fleet.cpuPercent, config.fleet.memoryPercent),
+    perAgent: harnessCgroupQuota(config.perAgent.cpuPercent, config.perAgent.memoryPercent),
+  },
+  // Nothing is running under this fixture's slice, so there is no session whose
+  // restart a change would wait for and no half-applied host to report.
+  restartRequiredSessions: [],
+  warnings: [],
+});
+
+const HARNESS_CGROUP_CONFIG: CgroupConfigView['config'] = {
+  enabled: true,
+  fleet: { cpuPercent: 80, memoryPercent: 75 },
+  perAgent: { cpuPercent: 25, memoryPercent: 25 },
+};
+
+/**
+ * The in-memory cgroup daemon. State lives per client, so every capture starts
+ * from the declared configuration above rather than from whatever an earlier
+ * capture typed, and the patch is merged exactly as the partial protocol shape
+ * arrives.
+ */
+const harnessCgroupClient = async (connection: DaemonConnection) => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let config = HARNESS_CGROUP_CONFIG;
+  return {
+    cgroupConfig: async () => harnessCgroupView(config),
+    updateCgroupConfig: async (patch: CgroupConfigPatch) => {
+      config = {
+        enabled: patch.enabled ?? config.enabled,
+        fleet: { ...config.fleet, ...patch.fleet },
+        perAgent: { ...config.perAgent, ...patch.perAgent },
+      };
+      return harnessCgroupView(config);
+    },
+  };
+};
+
+/**
+ * The three panels the composition root supplies, in the order it supplies them.
+ *
+ * The fixture renders the production EIGHT — Warden, Secrets, Environment,
+ * Resource limits, Doctor, Fleet, Carrier, Host checks — because a fixture with
+ * fewer cannot show what eight of them do to the frame that lists them. Each one
+ * is the real surface behind a client that answers from memory: no leaf is faked
+ * and nothing here reaches the network, which the screenshot driver enforces by
+ * aborting every request that leaves the loopback origin.
+ *
+ * Declared once at module scope so the definitions (and therefore the `Surface`
+ * component identities) are stable across renders, instead of remounting every
+ * panel whenever this page's state changes.
+ */
+const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
+  {
+    id: 'resource-limits',
+    label: 'Resource limits',
+    description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+    // Wrapped, unlike production, only to inject the in-memory client: the
+    // default client would reach the daemon this fixture does not have.
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <CgroupConfigSurface connection={connection} createClient={harnessCgroupClient} />
+    ),
+  },
+  {
+    id: 'doctor',
+    label: 'Doctor',
+    description: 'Programs this daemon host needs, and what each absence breaks.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <DoctorSettings
+        connection={connection}
+        read={async target => {
+          if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+          return HARNESS_DOCTOR;
+        }}
+      />
+    ),
+  },
+  // The real definition the composition root mounts, given the same stub daemon
+  // the fleet cockpit frames use: one published fleet, staging allowed, applying
+  // only with approval.
+  fleetSettingsTab(async connection => {
+    if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+    return fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS);
+  }),
+];
+
+/**
  * The settings fixture is also mounted on a page of its own by
  * `?settings-harness=1`. That gives the screenshot driver the exact 390×844 and
  * 1440×900 responsive canvas instead of measuring a route-sized component
@@ -795,6 +952,8 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   );
   const [activeDaemonId, setActiveDaemonId] = useState(daemon.daemonId);
   const [settings, setSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
+  // Measured for the daemon on screen, never carried over from the last one.
+  const activeCarrier = harnessSettingsCarrier(activeDaemonId);
 
   const page = (
     <SettingsPage
@@ -823,29 +982,14 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         />
       }
       probeDaemon={harnessSettingsProbe}
-      carrier={HARNESS_RELAYED_CARRIER}
-      relayAdvertised
+      carrier={activeCarrier.carrier}
+      relayAdvertised={activeCarrier.relayAdvertised}
       readWardenStatus={async connection => {
         if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
         return WARDEN;
       }}
       createWardenClient={HARNESS_WARDEN_CLIENT}
-      daemonSettingsTabs={[
-        {
-          id: 'doctor',
-          label: 'Doctor',
-          description: 'Programs this daemon host needs, and what each absence breaks.',
-          Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-            <DoctorSettings
-              connection={connection}
-              read={async target => {
-                if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-                return HARNESS_DOCTOR;
-              }}
-            />
-          ),
-        },
-      ]}
+      daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
@@ -1542,16 +1686,82 @@ const HARNESS_FS_FILES: Readonly<Record<string, unknown>> = {
   },
 };
 
+/**
+ * The fleet profile environment the harness daemon publishes.
+ *
+ * The comparison defaults to this daemon against itself — what the surface does
+ * at rest — so the difference list is legitimately empty rather than a
+ * disagreement invented between two hosts this fixture cannot both answer for.
+ */
+const HARNESS_FLEET_ENVIRONMENT = {
+  profiles: {
+    default: {
+      FERRETRY_FLEET: 'studio',
+      FY_HOME: '/home/pilot/.ferretry',
+      PATH: '/nix/var/nix/profiles/default/bin:/usr/bin:/bin',
+      TZ: 'Asia/Singapore',
+    },
+    auto: {
+      FERRETRY_FLEET: 'studio',
+      FY_HOME: '/home/pilot/.ferretry',
+      FY_UNATTENDED: '1',
+      PATH: '/nix/var/nix/profiles/default/bin:/usr/bin:/bin',
+      TZ: 'Asia/Singapore',
+    },
+  },
+};
+
+/**
+ * The reads the harness daemon answers beyond the file tabs' `/fs` routes.
+ *
+ * Most surfaces take a client factory this fixture injects (Warden, resource
+ * limits, Fleet). These two cannot: `SecretsSurface` falls back to
+ * `daemonApiClient` because no secret-client seam is forwarded through
+ * `SettingsPage` — the GAP `docs/secrets.md` declares — and
+ * `FleetEnvironmentSettings` calls `fetch` itself. Unanswered, their captures
+ * showed "Reading this daemon's secret store…" and "Failed to fetch": the
+ * harness's own aborted request, reviewed as if the product had produced it.
+ */
+const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
+  '/v1/secrets': SECRETS_READY,
+  '/v1/fleet/environment': HARNESS_FLEET_ENVIRONMENT,
+};
+
+/** Which pairing a request is addressed to, taken from the fixtures themselves. */
+const HARNESS_DAEMON_HOSTS = {
+  answering: new URL(daemon.baseUrl).hostname,
+  offline: new URL(unreachableDaemon.baseUrl).hostname,
+  checking: new URL(checkingDaemon.baseUrl).hostname,
+} as const;
+
+const harnessJson = (body: unknown): Response =>
+  new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+
 const harnessFetch = globalThis.fetch.bind(globalThis);
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input), window.location.href);
-  if (url.hostname !== 'daemon.invalid' || !url.pathname.includes('/fs')) return await harnessFetch(input, init);
-  const body = url.pathname.endsWith('/fs/changes')
-    ? HARNESS_FS_CHANGES
-    : url.pathname.endsWith('/fs/file')
-      ? (HARNESS_FS_FILES[url.searchParams.get('path') ?? ''] ?? { path: url.searchParams.get('path') ?? '' })
-      : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] });
-  return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  // A pairing that does not answer keeps not answering: the offline daemon fails
+  // the way a browser fails, and the checking daemon never settles — the same
+  // read its reachability probe performs. Neither borrows the healthy host's data.
+  if (url.hostname === HARNESS_DAEMON_HOSTS.offline) throw new TypeError('Failed to fetch');
+  if (url.hostname === HARNESS_DAEMON_HOSTS.checking) return await new Promise<Response>(() => undefined);
+  if (url.hostname !== HARNESS_DAEMON_HOSTS.answering) return await harnessFetch(input, init);
+  if (url.pathname.includes('/fs'))
+    return harnessJson(
+      url.pathname.endsWith('/fs/changes')
+        ? HARNESS_FS_CHANGES
+        : url.pathname.endsWith('/fs/file')
+          ? (HARNESS_FS_FILES[url.searchParams.get('path') ?? ''] ?? { path: url.searchParams.get('path') ?? '' })
+          : (HARNESS_FS_LISTINGS[url.searchParams.get('path') ?? ''] ?? { entries: [] }),
+    );
+  // Reads only, and only routes named above. A write has no answer here on
+  // purpose: this page keeps no store, so inventing a receipt for one would show
+  // a saved secret that nothing holds. Anything else still leaves, where the
+  // driver's abort of non-loopback traffic remains the real guarantee.
+  const read = method === 'GET' ? HARNESS_DAEMON_READS[url.pathname] : undefined;
+  if (read !== undefined) return harnessJson(read);
+  return await harnessFetch(input, init);
 }) as typeof fetch;
 
 /** Two link states worth looking at: an ordinary remote page and one that
