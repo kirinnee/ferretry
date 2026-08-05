@@ -1,9 +1,9 @@
 import { daemonAddress, FY_DEFAULT_DAEMON_PORT } from '@ferretry/protocol';
 import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
-import type { RunOverrides } from './arguments.ts';
 import { normalizeAnalyticsModelIdentity } from '../analytics/model-identity.ts';
 import type { AnalyticsPricingRate } from '../analytics/pricing.ts';
+import type { RunOverrides } from './arguments.ts';
 
 const HostSchema = z.string().trim().min(1).max(255);
 const PortSchema = z.number().int().min(1).max(65_535);
@@ -103,23 +103,26 @@ export const AnalyticsPricingCatalogSchema = z
 export type AnalyticsPricingCatalog = readonly AnalyticsPricingRate[];
 
 /**
- * Where the daemon reads account health from.
+ * Where the daemon reads account health from, BESIDES this host's own fleet.
  *
- * Both sources are optional and tried in order. Neither is defaulted to a particular tool or
- * address: the source hardcoded one collector's name and flags into the daemon, so a host that ran
- * anything else had no fallback at all and no way to configure one.
+ * The native collector is always first and needs nothing declared here. Both external sources are
+ * optional and tried after it, in order. Neither is defaulted to a particular tool or address: the
+ * source hardcoded one collector's name and flags into the daemon, so a host that ran anything else
+ * had no fallback at all and no way to configure one.
+ *
+ * There is deliberately no refresh period in this block. How often quota is re-read is the fleet's
+ * `usage.interval`, declared beside the thresholds and concurrency that shape the same collection —
+ * a second name for it here is what let a daemon and its fleet disagree about one cadence.
  */
 export const UsageFeedConfigSchema = z
   .object({
-    /** The fleet collector's JSON usage endpoint. */
+    /** An external collector's JSON usage endpoint. */
     url: z.url().optional(),
     /**
-     * Fallback command for hosts where the collector is not listening, as argv. The daemon appends
-     * the flags it needs (see `USAGE_PROBE_FLAGS`); an empty list means there is no fallback.
+     * Fallback command for hosts that serve usage from another tool's CLI, as argv. The daemon
+     * appends the flags it needs (see `USAGE_PROBE_FLAGS`); an empty list means there is no fallback.
      */
     fallbackCommand: z.array(z.string().trim().min(1)).readonly().default([]),
-    /** How long one collected snapshot is served before the feed refreshes it. */
-    refreshSeconds: z.number().int().positive().default(300),
   })
   .strict();
 

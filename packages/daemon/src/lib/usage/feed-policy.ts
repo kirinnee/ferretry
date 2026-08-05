@@ -1,12 +1,28 @@
-import { AccountUsageSchema, type AccountUsage } from '@ferretry/protocol';
+import { type AccountUsage, AccountUsageSchema } from '@ferretry/protocol';
 import type { UsageSnapshot } from './types.ts';
 
 /**
- * How long one collected snapshot is served before the feed refreshes it. The fleet collector
- * probes on its own schedule; the daemon shares a single cached read across every session rather
- * than multiplying probes by the size of the fleet.
+ * How long one collected snapshot is served when the fleet declares no interval of its own. The
+ * daemon shares a single cached read across every session rather than multiplying provider probes
+ * by the size of the fleet.
  */
 export const USAGE_REFRESH_MS = 300_000;
+
+/**
+ * The feed's refresh period, from the fleet's declared `usage.interval`.
+ *
+ * ONE NAME FOR ONE CADENCE. The fleet configuration and the daemon configuration each grew a way to
+ * say how often quota is re-read — `usage.interval`, which was refused at plan time because nothing
+ * re-probed on a schedule, and `usage.refreshSeconds`, which drove the only loop that existed. They
+ * were always the same number. Now that the feed collects natively, the fleet's declaration is what
+ * that loop runs on, and the second name is gone rather than left to disagree with the first.
+ *
+ * An absent interval is a host with no fleet configuration at all, which is a daemon that has not
+ * been provisioned yet rather than one asking for a particular cadence, so it keeps the default.
+ */
+export function usageRefreshMs(intervalSeconds: number | undefined): number {
+  return intervalSeconds === undefined ? USAGE_REFRESH_MS : intervalSeconds * 1_000;
+}
 
 /** Everything the feed remembers between reads. Replaced wholesale, never mutated in place. */
 export interface UsageCacheState {

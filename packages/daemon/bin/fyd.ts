@@ -58,6 +58,7 @@ import {
   FileScratchCollector,
   FileSecretDocumentStore,
   FileSecretKey,
+  FleetUsageSource,
   HttpUsageSource,
   KeyedSerialExecutor,
   ManifestAccountInventory,
@@ -380,6 +381,7 @@ import {
   UnknownPeerRefused,
   type UsageFeedPort,
   usageProbeCommand,
+  usageRefreshMs,
   WARDEN_LABEL,
   type WardenFleetSession,
   type WardenSubsystem,
@@ -593,9 +595,10 @@ export interface DaemonWorld {
    */
   readonly createSessionResume: (storage: DaemonStorage, launcher: ResumeLauncher) => SessionResumeService;
   /** The daemon-wide account-health feed: one snapshot shared by every session
-   *  instead of one probe per session. Its sources are configured, so it is
-   *  built once configuration has loaded. */
-  readonly createUsageFeed: (config: DaemonConfig) => UsageFeedPort;
+   *  instead of one probe per session. Its sources are configured and its refresh
+   *  period is the fleet's declared `usage.interval`, so it is built once both
+   *  documents have been read — which is why it resolves rather than returns. */
+  readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
   /** Opens this daemon's durable identity and device grants before any remote route is served. */
   readonly createPairing: (
     config: DaemonConfig,
@@ -2902,6 +2905,24 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
   const accounts = new ManifestAccountInventory(stateFiles, paths.fleetManifest);
+  /**
+   * ONE fleet mount for this daemon, held as a local because two things now read quota through it:
+   * the admin route that answers `GET /v1/fleet/usage`, and the usage feed every session, the
+   * advisor, quota-failover and every scraper read. A second mount would assemble a second collector,
+   * and the two would eventually disagree about whether an account has quota left — which is the one
+   * thing `buildFleetUsageCollector` exists to prevent.
+   *
+   * The platform and the keychain account are read here because this is the only place allowed to
+   * touch the environment; the mount takes them as values so a test can drive either platform.
+   */
+  const fleet = createDaemonFleetSubsystem({
+    paths,
+    userHome: homedir(),
+    clock: millisecondClock,
+    files: stateFiles,
+    platform: process.platform,
+    keychainAccount: process.env.USER ?? '',
+  });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */
   const advisorOver = (usage: UsageFeedPort): TeamAdvisor => new TeamAdvisor(accounts, routing, usage);
@@ -3277,17 +3298,35 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       ),
     createResumeLauncher,
     createSessionResume,
-    createUsageFeed: config => {
-      // The collector endpoint first, then the command fallback for hosts where it is not
-      // listening. Both are optional: a daemon configured with neither serves an empty fleet and
-      // says so, rather than pretending every account is at zero.
+    createUsageFeed: async config => {
+      // THIS HOST'S OWN COLLECTOR FIRST. Everything downstream of this feed — the advisor,
+      // quota-failover, every session's quota block, `/metrics` — used to be answered entirely by
+      // whatever external tool the two sources below were pointed at, so the daemon's quota was a
+      // runtime dependency of a tool this migration exists to delete. The native source asks the
+      // provider directly, through the same collector `GET /v1/fleet/usage` answers with.
+      //
+      // The external sources are kept BEHIND it rather than deleted: a host part-way through the
+      // migration may still be running that tool, and this daemon should keep reporting quota if its
+      // own fleet has not been applied yet. Both remain optional, and a daemon configured with
+      // neither and no fleet serves an empty feed and says so rather than pretending every account
+      // is at zero.
       const command = usageProbeCommand(config.usage.fallbackCommand);
       return new CachedUsageFeed(
         [
+          new FleetUsageSource(fleet, accounts),
           ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
           ...(command === undefined ? [] : [new CommandUsageSource(new BunCommandRunner(process.env), command)]),
         ],
-        { refreshMs: config.usage.refreshSeconds * 1_000 },
+        // The fleet's own declared probe interval. A host with no fleet configuration has not asked
+        // for a cadence at all, so it keeps the default rather than being given one by a refusal.
+        {
+          refreshMs: usageRefreshMs(
+            await fleet.config().then(
+              declared => declared.usage.interval,
+              () => undefined,
+            ),
+          ),
+        },
       );
     },
     createPairing: async (config, pairingClock) => {
@@ -3553,16 +3592,9 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       return {
         health: createHealthSubsystem(health, scratch),
         pairing,
-        // The platform and the keychain account are read here because this is the only place allowed
-        // to touch the environment; the mount takes them as values so a test can drive either platform.
-        fleet: createDaemonFleetSubsystem({
-          paths,
-          userHome: homedir(),
-          clock: millisecondClock,
-          files: stateFiles,
-          platform: process.platform,
-          keychainAccount: process.env.USER ?? '',
-        }),
+        // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
+        // report different quota for the same account on the same host.
+        fleet,
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory
@@ -3838,7 +3870,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   world.notices.step('harnesses checked', harnessPreflightSummary(harnesses));
   if (!harnesses.ready) world.notices.state(harnessAbsentWarning(harnesses, CLIENT_NAME));
 
-  const usage = world.createUsageFeed(config);
+  const usage = await world.createUsageFeed(config);
   const startedAtMs = world.clock.now();
   const pairing = await world.createPairing(config, world.clock);
   world.notices.step('pairing identity opened');
