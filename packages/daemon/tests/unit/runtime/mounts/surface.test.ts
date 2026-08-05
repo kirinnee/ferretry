@@ -182,6 +182,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
       'GET /v1/health',
+      'GET /v1/doctor',
       'GET /v1/fleet/accounts',
       'GET /v1/fleet/config',
       'GET /v1/fleet/environment',
@@ -304,6 +305,7 @@ describe('the mounted daemon surface', () => {
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
     const report = await dispatcher.dispatch(request({ path: '/v1/health', headers: human }));
+    const doctor = await dispatcher.dispatch(request({ path: '/v1/doctor', headers: human }));
     const fleetAccounts = await dispatcher.dispatch(request({ path: '/v1/fleet/accounts', headers: human }));
     const gc = await dispatcher.dispatch(request({ path: '/v1/gc', headers: human }));
     const sessions = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: human }));
@@ -361,6 +363,7 @@ describe('the mounted daemon surface', () => {
     // The liveness probe and the scoped report are two different answers under one subject, and both
     // are reached: the daemon's own health is a mounted subsystem now, not a hardcoded literal.
     should(report.status).equal(200);
+    should(doctor.status).equal(200);
     should(fleetAccounts.status).equal(200);
     should(gc.status).equal(200);
     should(sessions.status).equal(200);

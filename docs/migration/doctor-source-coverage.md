@@ -8,3 +8,11 @@
 | macOS `launchctl` / Linux `systemctl` service management                                                  | `readDoctorReport()` platform input                                      | **PORTED.** The unused manager is not applicable, never a missing dependency.                                           |
 | `directory-syscalls.ts` platform libc FFI                                                                 | `fyd --check` and `/v1/doctor` call `loadDirectorySyscalls()`            | **PORTED.** The report tests the actual library load rather than inferring success from the platform.                   |
 | Credential storage platform split (PR #240 authority)                                                     | —                                                                        | **NOT EXAMINED.** Doctor does not create a duplicate credential-readiness rule.                                         |
+
+## Mounted-surface test contract
+
+The mounted daemon-surface test intentionally restates `GET /v1/doctor` in its
+expected route list instead of deriving it from the route table. Derivation would
+only compare the mounted surface to itself; the explicit list makes a new endpoint
+an acknowledged public-surface change. A future fixture helper may reduce response
+stub boilerplate, but should retain that independent route assertion.

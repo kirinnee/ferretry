@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { readDoctorReport } from '../../../src/lib/core/doctor.ts';
+import { readDoctorReport, renderDoctorReport } from '../../../src/lib/core/doctor.ts';
 import type { HarnessPreflight } from '../../../src/lib/core/harness-readiness.ts';
 
 const harnesses: HarnessPreflight = {
@@ -47,5 +47,24 @@ describe('doctor report', () => {
         executables: { resolve: name => (name === 'tmux' || name === 'bash' ? `/bin/${name}` : undefined) },
       }).ready,
     ).be.false();
+  });
+
+  it('should exercise every platform verdict and state the PATH limitation in the rendered report', () => {
+    const installed = ['tmux', 'bash', 'git', 'launchctl', 'cat', 'tail', 'ps', 'nix-store', 'jq'];
+    const darwin = report('darwin', installed);
+    const linux = report('linux', [...installed, 'systemctl']);
+    const noConfinement = readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: false,
+      executables: { resolve: () => undefined },
+    });
+
+    should(darwin.checks.find(check => check.name === 'launchctl')?.status).equal('present');
+    should(linux.checks.find(check => check.name === 'systemctl')?.status).equal('present');
+    should(linux.checks.find(check => check.name === 'launchctl')?.status).equal('not_applicable');
+    should(noConfinement.checks.find(check => check.name === 'directory syscalls')?.status).equal('missing');
+    should(renderDoctorReport(noConfinement).join('\n')).match(/PATH presence is all this report proves/u);
+    should(renderDoctorReport(noConfinement).join('\n')).match(/note\s+jq/u);
   });
 });
