@@ -144,16 +144,26 @@ export interface GrantGuidance {
  * feature exists to remove.
  */
 const GUIDANCE = {
-  granted: {
-    tone: 'ok',
-    badge: 'Allowed',
-    explanation: 'The operator allowed this, and the operator password stood behind it.',
-    offersUnlock: false,
-  },
+  /**
+   * Allowed. It deliberately does NOT claim the password stood behind it.
+   *
+   * `granted` is what a `use` axis reads on every machine, password or not, so wording it as "the
+   * password stood behind this" states something false on the common setup — and beside a header that
+   * already says no password is set, a reader is entitled to believe one of the two is lying.
+   */
+  granted: { tone: 'ok', badge: 'Allowed', explanation: 'The operator allows this.', offersUnlock: false },
+  /**
+   * Allowed with nothing behind it — a disclosure, not a refusal.
+   *
+   * IT DOES NOT REPEAT THE WHOLE DISCLOSURE. That sentence is owed once, and the card states it in the
+   * header; restating it under five capabilities × the configure axis prints it five times on one
+   * screen, which is exactly the nagging `docs/grants.md` rules out. The row says the short fact and
+   * lets the header carry the consequence.
+   */
   ungated: {
     tone: 'disclosure',
     badge: 'Allowed',
-    explanation: `Allowed, and nothing is standing behind it. ${NO_PASSWORD_DISCLOSURE}`,
+    explanation: 'Allowed, and no operator password is standing behind it.',
     offersUnlock: false,
   },
   'not-granted': {
