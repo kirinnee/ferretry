@@ -5,6 +5,12 @@ import type { UsageSnapshot } from './types.ts';
  * How long one collected snapshot is served when the fleet declares no interval of its own. The
  * daemon shares a single cached read across every session rather than multiplying provider probes
  * by the size of the fleet.
+ *
+ * It is a FALLBACK, not the cadence. The source hardcoded this constant and annotated it as being
+ * the fleet tool's `usage.interval` — which is 60 seconds, not 300; 300 is that tool's *health*
+ * interval. So the one place claiming the two numbers were the same number had already got which
+ * number wrong, undetectably, because nothing read the declared one. It is kept conservative here
+ * precisely because it now applies only where nothing has been declared.
  */
 export const USAGE_REFRESH_MS = 300_000;
 
