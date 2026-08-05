@@ -117,7 +117,12 @@ export function earnedRecipes(
  * of the capability who is trying to get the value out. Say so wherever this promise is made.
  */
 export function redactSecretValues(text: string, values: ReadonlyMap<SecretName, string>): string {
-  const ordered = [...values.entries()].sort(([, a], [, b]) => b.length - a.length);
+  // An EMPTY value is skipped, and this guard is not theoretical: `''` is a separator that splits a
+  // string into its characters, so one empty entry would return the whole text with a mask wedged
+  // between every character — the output a person reads, destroyed, while hiding nothing. The store
+  // refuses a value this short at its boundary; this function refuses to depend on that, because it
+  // is the last thing standing between a credential and a screen.
+  const ordered = [...values.entries()].filter(([, value]) => value !== '').sort(([, a], [, b]) => b.length - a.length);
   let result = text;
   for (const [name, value] of ordered) result = result.split(value).join(secretMask(name));
   return result;

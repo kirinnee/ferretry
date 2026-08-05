@@ -181,3 +181,21 @@ describe('redaction', () => {
     should(redacted).equal(encoded);
   });
 });
+
+describe('redaction refuses to destroy the text it is protecting', () => {
+  it('should skip an empty value rather than mask between every character', () => {
+    // Arrange — `''` is a separator that splits a string into characters. One empty entry would
+    // return the whole text with a mask between every letter: unreadable, and hiding nothing.
+    const withEmpty = values({ REAL: TOKEN, BROKEN: '' });
+
+    // Act
+    const redacted = redactSecretValues(`prefix ${TOKEN} suffix`, withEmpty);
+
+    // Assert
+    should(redacted).equal('prefix [redacted:REAL] suffix');
+  });
+
+  it('should skip an empty value in JSON too', () => {
+    should(redactJsonValue({ note: 'plain text' }, values({ BROKEN: '' }))).deepEqual({ note: 'plain text' });
+  });
+});
