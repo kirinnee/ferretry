@@ -38,8 +38,6 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
-  BunSttCommandRunner,
-  BunSttWorkerSpawner,
   CachedUsageFeed,
   CommandUsageSource,
   ConfigSecretRecipes,
@@ -80,9 +78,6 @@ import {
   StateHomeLayout,
   StateHomeLockedError,
   StatePairingRepository,
-  SttModelStore,
-  SttService,
-  SttWorkerClient,
   SystemClock,
   SystemFrameClock,
   TmuxPaneSnapshot,
@@ -230,10 +225,8 @@ import {
   contextWindowForSession,
   createFoundationPaths,
   createMountedDispatcher,
-  createMountedRawDispatcher,
   createMountedSocketDispatcher,
   createSessionPaths,
-  createSttPaths,
   createWardenPaths,
   type DaemonConfig,
   type DaemonConfigStore,
@@ -362,7 +355,7 @@ import {
   type SocketTicketBroker,
   SocketTicketRegistry,
   SttEnhancementService,
-  type SttSubsystem,
+  type SttEnhancementSubsystem,
   searchTranscript,
   selectableAutoAccounts,
   sessionHealthSettingsAt,
@@ -399,14 +392,9 @@ import {
 } from '../src/lib/index.ts';
 import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import { daemonVersion } from '../src/lib/version.ts';
-import { startSttWorker } from './stt-worker.ts';
 
 // Identity is single-sourced from package.json, matching the CLI's composition root.
 const DAEMON_NAME = Object.keys(pkg.bin ?? {})[0] ?? pkg.name;
-
-// The worker is started only by BunSttWorkerSpawner, but importing its entry makes the complete
-// production graph — including the runtime and recognizer factory — visible to the reachability gate.
-void startSttWorker;
 
 /** The CLI a human drives. Named here rather than derived, because the daemon
  *  package cannot read the CLI package's `bin` without depending on it. */
@@ -717,12 +705,11 @@ export interface DaemonWorld {
      */
     browserLogin: BrowserLoginLifecycle,
     /**
-     * Dictation, passed IN for the same reason as every other host adapter here: transcribing spawns
-     * a worker process that loads a multi-gigabyte model, and installing one downloads it. A test
-     * substitutes this and keeps the raw route table, the credentials and the dispatcher exactly as
-     * production builds them.
+     * Dictation enhancement, passed IN for the same reason as every other host adapter here: one call
+     * spends the operator's provider credential over the network. A test substitutes this and keeps
+     * the route, the credentials and the dispatcher exactly as production builds them.
      */
-    stt: SttSubsystem,
+    sttEnhancement: SttEnhancementSubsystem,
     /** Local paths are configuration, so the catalog is constructed against this exact document. */
     catalogs: CatalogSubsystem,
     /** Operator-owned API-equivalent pricing for this daemon's analytics only. */
@@ -744,13 +731,14 @@ export interface DaemonWorld {
    *  the uptime and freshness the API reports are drivable from a test. */
   readonly clock: MillisecondClockPort;
   /**
-   * The speech-to-text surface and its on-demand worker supervisor.
+   * The hosted-model pass that repairs a dictated transcript — the daemon's whole remaining share of
+   * dictation, now that recognition happens in the browser.
    *
-   * Typed as the MOUNT's narrow interface rather than as `SttService`, so a test can supply a
-   * surface without a model store, a Whisper worker and an enhancement transport behind it. The
+   * Typed as the MOUNT's narrow interface rather than as `SttEnhancementService`, so a test can
+   * answer the route without an outbound transport, a secret reader and a stopwatch behind it. The
    * production service satisfies it structurally.
    */
-  readonly stt: SttSubsystem;
+  readonly sttEnhancement: SttEnhancementSubsystem;
   /** Resolves when the process should shut down. Injected so a test can drive a
    *  full boot without the daemon running forever. */
   readonly untilShutdown: () => Promise<void>;
@@ -2873,18 +2861,6 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   // that does and does not promise — in particular that a value an agent deliberately transformed is
   // not recognisable, and this is not a defence against one that is trying.
   const secretRedactor = new SecretRedactor(secretVault);
-  const sttModels = new SttModelStore({
-    paths: createSttPaths(paths),
-    fetch: async url => await fetch(url),
-    runner: new BunSttCommandRunner(),
-    now: () => clock.now(),
-    uniqueId: () => crypto.randomUUID(),
-  });
-  const sttWorker = new SttWorkerClient({
-    model: async () => await sttModels.resolveDaemonModel(),
-    spawner: new BunSttWorkerSpawner(),
-    clock: { nowIso: () => clock.now() },
-  });
   // ONE executor for every task board in the process. The file store keys its transactions on the
   // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
   // would let two concurrent requests to the same board interleave read-modify-write and lose one.
@@ -3420,7 +3396,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       reviver,
       preflight,
       browserLogin,
-      stt,
+      sttEnhancement,
       catalogs,
       pricingCatalog,
       analyticsStore,
@@ -3722,7 +3698,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           sessionControl,
         ),
         recommend: createRecommendSubsystem(advisorOver, usage),
-        stt,
+        sttEnhancement,
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.
@@ -3837,15 +3813,11 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     },
     credentials: new StateApiCredentials(paths, stateFiles),
     clock: millisecondClock,
-    stt: new SttService({
-      models: sttModels,
-      worker: sttWorker,
-      enhancer: new SttEnhancementService(
-        new FetchEnhancementTransport(),
-        new ProcessSecretReader(),
-        new PerformanceStopwatch(),
-      ),
-    }),
+    sttEnhancement: new SttEnhancementService(
+      new FetchEnhancementTransport(),
+      new ProcessSecretReader(),
+      new PerformanceStopwatch(),
+    ),
     untilShutdown: untilTerminated,
   };
 }
@@ -3991,18 +3963,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.createResumeLauncher(opened.storage),
     world.migratePreflight,
     world.browserLogin.window,
-    world.stt,
+    world.sttEnhancement,
     catalogs,
     config.analyticsPricing,
     analyticsStore,
     pairing.subsystem,
     world.createSocketTickets(),
   );
-  // Registered with the other host acquisitions: the dictation surface spawns a Whisper worker on
-  // the first transcription and holds it loaded for the next one, so a daemon that exited without
-  // closing it would leave a process holding a multi-gigabyte model with nothing left to reap it.
-  // Closing is idempotent and costs nothing when no transcription ever ran.
-  cleanups.push(async () => await world.stt.close());
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.
@@ -4023,9 +3990,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // restart is "the outgoing daemon is still draining its socket" — kteam's own supervisor hit that
   // window routinely and reported a permanent failure for a condition that clears in a second.
   //
-  // ALL THREE parts of the surface are served by the one host, from the one credential set: the
-  // request/response routes, the protocol switches that carry terminal streams, and the byte-shaped
-  // routes that carry dictation audio.
+  // BOTH parts of the surface are served by the one host, from the one credential set: the
+  // request/response routes, and the protocol switches that carry terminal streams and the event
+  // feed. There was a third — routes that owned the transport's own bytes — and dictation audio was
+  // its only member; recognition moved into the browser and the seam went with it.
   // Hoisted, because the relay carrier below serves this exact dispatcher rather than a second one:
   // every route a browser can reach directly it can reach relayed, on one authorization boundary.
   const dispatcher = createMountedDispatcher(base, subsystems);
@@ -4037,7 +4005,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
           {
             http: dispatcher,
             sockets: createMountedSocketDispatcher(base, subsystems),
-            raw: createMountedRawDispatcher(base, subsystems),
             corsOrigins: browserOrigins(config),
           },
           { host: config.host, port: config.port },

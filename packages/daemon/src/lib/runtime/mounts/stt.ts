@@ -1,101 +1,89 @@
-import { daemonVersion } from '../../version.ts';
-import { STT_API_PREFIX } from '../../stt/routes.ts';
-import type { RawRoute } from '../../api/raw.ts';
-import { VERSION_HEADER } from '../../api/responses.ts';
-import type { RouteContext } from '../../api/route.ts';
+import type { SttEnhancementResult } from '@ferretry/protocol';
+import type { ApiRequest, ApiResponse } from '../../api/http.ts';
+import { jsonResponse } from '../../api/responses.ts';
+import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { enhancementErrorStatus, enhancementErrorView } from '../../stt/enhancement.ts';
+import { SttEnhancementError } from '../../stt/errors.ts';
 
 /**
- * Dictation: the daemon's speech-to-text surface.
+ * Dictation enhancement: the daemon's ONE remaining speech-to-text route.
  *
- * The whole subsystem — a Whisper worker supervisor, a model store that installs and verifies model
- * files, an audio decoder with a duration budget, and an LLM enhancement pass — was built and fully
- * tested, and the composition root CONSTRUCTED it and called nothing. `fy stt status`, `models`,
- * `install`, `transcribe` and `enhance` are shipped commands whose gateway
- * (`packages/cli/src/lib/stt/gateway.ts`) has spoken these exact paths since it was ported, against
- * a daemon that answered `unknown_route` to every one of them. This mounts them.
+ * Recognition itself now happens in the browser, so the model store, the worker supervisor, the
+ * audio decoder and their six routes are gone. What could not follow the browser is this one:
+ * enhancement is an outbound call to a hosted chat model authenticated with a credential only the
+ * daemon holds (`GROQ_API_KEY`, read from this daemon's own environment — see `lib/stt/ports.ts`).
+ * A static public bundle has no way to carry that key, so a browser that wants its transcript
+ * repaired by a hosted model asks a daemon it is paired to, and the daemon spends its own credential.
  *
- * THEY ARE RAW ROUTES, NOT `ApiRoute`s, and that is forced rather than chosen. Transcription
- * streams audio bytes under a budget it must refuse a body against rather than buffer, and
- * `ApiRequest` reads text only; `ApiResponse` carries a string body, and the model-file read answers
- * with a ranged slice, an ETag and a 304. See `api/raw.ts` for the seam and why it is still behind
- * the one authorization boundary.
+ * IT IS AN ORDINARY `ApiRoute`, which is what the shape always deserved: JSON in, JSON out. The six
+ * deleted routes were byte-shaped — audio under a budget that had to be refused unread, a ranged
+ * model file with an ETag — and that is what forced the daemon's third, raw route table. Enhance
+ * never needed it, and with recognition gone the raw table has no members at all: it is deleted with
+ * this change rather than left as machinery no route uses.
  *
- * EVERY ROUTE IS `admin`. Dictation spends the operator's Groq key on `enhance` and spawns a
- * process that loads a multi-gigabyte model on `transcribe`, which is strictly more authority than
- * reading a session. A warden-scoped token judges sessions; it does not get to run the operator's
- * hardware or bill their account.
+ * `admin` SCOPE, unchanged from when this was raw. Enhancement spends the operator's provider
+ * account on every call, which is strictly more authority than reading a session. A warden-scoped
+ * token judges sessions; it does not get to bill the operator.
  *
- * WHAT IS DELIBERATELY NOT MOUNTED: the public model-file read under `/stt-models/`. It exists to
- * hand a BROWSER the weights for in-page transcription, and nothing in this repository mints such a
- * URL — the PWA has no dictation client and `resolvePublicFile` has no caller outside the service.
- * Serving it as `public` would put an unauthenticated file feed on the daemon for no client, and
- * serving it as `admin` would contradict both its name and its purpose. It lands with the browser
- * transcription client, which is what decides which of those two it is.
+ * THERE IS NOTHING TO CLOSE. The deleted half held a worker process with a multi-gigabyte model
+ * loaded and had to be reaped on shutdown. Enhancement holds one outbound request at a time and
+ * nothing between them, so this mount has no lifecycle and the composition root registers no cleanup.
  */
 
 /**
- * The speech-to-text surface as the routes need it.
+ * The enhancer as this route needs it.
  *
- * Declared here rather than imported because `SttService` is an ADAPTER and `src/lib` may not import
- * `src/adapters`. The service satisfies this structurally, so the composition root hands one over
- * unchanged.
+ * Declared here rather than imported so a test can answer the route without a transport, a secret
+ * reader and a clock behind it. `SttEnhancementService` satisfies it structurally, so the
+ * composition root hands one over unchanged. `enhance` takes `unknown` deliberately: the service
+ * parses the body against the wire schema ITSELF and raises the precise refusal — `too_long`,
+ * `provider_unknown`, `bad_model` — that the client already knows how to read. A schema parse here
+ * would answer the generic `invalid_request` instead and lose that taxonomy.
  */
-export interface SttSubsystem {
-  /** Handles any path this surface owns; answers `undefined` for anything else. */
-  handle(request: Request): Promise<Response | undefined>;
-  /** Releases the worker process the surface may have spawned. */
-  close(): Promise<void>;
+export interface SttEnhancementSubsystem {
+  enhance(input: unknown): Promise<SttEnhancementResult>;
 }
 
-/**
- * Runs one request through the subsystem and stamps the daemon version on the way out.
- *
- * TWO TABLES MATCH ONE PATH HERE, and the divergence between them is real rather than theoretical.
- * The router matches RAW segments so that authorization inspects exactly what the handler will,
- * while the service re-resolves the path through `matchSttRoute`, which DECODES each component and
- * rejects one that regains a separator or a terminator. So `GET /v1/stt/models/a%2Fb` matches the
- * `:modelId` pattern, is authorized, and then resolves to no route at all inside the service.
- *
- * That gap is answered 404 rather than allowed to become a 500 about `undefined`: an id that names
- * no model is a missing model, which is the same answer the service gives for one that is merely
- * absent. Re-implementing the decode here to keep the tables in lockstep would put a second copy of
- * a security-relevant path check in the daemon, which is worse than one honest 404.
- */
-async function serve(subsystem: SttSubsystem, request: Request): Promise<Response> {
-  const response = await subsystem.handle(request);
-  if (response === undefined) {
-    return Response.json({ error: 'model not found', code: 'model_not_found' }, { status: 404 });
+/** The body, as JSON. Malformed JSON is the enhancer's own `bad_request`, not a second vocabulary. */
+async function readJson(request: ApiRequest): Promise<unknown> {
+  const text = await request.text().catch(() => {
+    throw new SttEnhancementError('bad_request', 'request body could not be read');
+  });
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new SttEnhancementError('bad_request', 'request body is not valid JSON');
   }
-  // Every API response carries the daemon version so a client can name a skew rather than guess why
-  // a route it knows about refused. The service builds its own responses and cannot know it.
-  response.headers.set(VERSION_HEADER, daemonVersion);
-  return response;
-}
-
-function route(method: string, path: string, subsystem: SttSubsystem): RawRoute {
-  return {
-    method,
-    path,
-    scope: 'admin',
-    serve: async (_context: RouteContext, request: Request) => await serve(subsystem, request),
-  };
 }
 
 /**
- * The dictation routes.
+ * One transcript in, one repaired transcript out.
  *
- * Order matters — the router tries routes in registration order — so `/v1/stt/models` is registered
- * before the `:modelId` pattern beneath it, and `…/:modelId/install` before the bare `:modelId` it
- * would otherwise be read as a two-segment id by.
+ * Every refusal the enhancer raises is projected by the DOMAIN's own pair — `enhancementErrorStatus`
+ * and `enhancementErrorView` — rather than restated here, so the status and the `{error, code}` body
+ * a client parses are the ones `lib/stt/enhancement.ts` decided. Anything else escaping is a defect
+ * and reaches the dispatcher's 500, which never echoes a thrown message: an enhancement failure can
+ * carry the provider's own text, and this route's payload is dictated speech.
  */
-export function sttRawRoutes(subsystem: SttSubsystem): readonly RawRoute[] {
+async function enhance(subsystem: SttEnhancementSubsystem, context: RouteContext): Promise<ApiResponse> {
+  try {
+    return jsonResponse(await subsystem.enhance(await readJson(context.request)));
+  } catch (error) {
+    if (error instanceof SttEnhancementError) {
+      return jsonResponse(enhancementErrorView(error), enhancementErrorStatus(error.code));
+    }
+    throw error;
+  }
+}
+
+/** The one dictation route. */
+export function sttEnhancementRoutes(subsystem: SttEnhancementSubsystem): readonly ApiRoute[] {
   return [
-    route('GET', `${STT_API_PREFIX}/status`, subsystem),
-    route('GET', `${STT_API_PREFIX}/models`, subsystem),
-    route('GET', `${STT_API_PREFIX}/models/:modelId/install`, subsystem),
-    route('POST', `${STT_API_PREFIX}/models/:modelId/install`, subsystem),
-    route('GET', `${STT_API_PREFIX}/models/:modelId`, subsystem),
-    route('POST', `${STT_API_PREFIX}/transcribe`, subsystem),
-    route('POST', `${STT_API_PREFIX}/enhance`, subsystem),
+    {
+      method: 'POST',
+      path: '/v1/stt/enhance',
+      scope: 'admin',
+      handle: async context => await enhance(subsystem, context),
+    },
   ];
 }

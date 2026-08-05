@@ -5,7 +5,6 @@ export * from './dispatcher.ts';
 export * from './error.ts';
 export * from './http.ts';
 export * from './metrics.ts';
-export * from './raw.ts';
 export * from './responses.ts';
 export * from './route.ts';
 export * from './router.ts';

@@ -12,6 +12,7 @@ import {
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
+  type SttEnhancementResult,
   type SurfaceOpener,
   type TaskActionRequest,
   type TaskCreateRequestInput,
@@ -80,7 +81,8 @@ import {
 } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
 import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
-import type { SttSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
+import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
+import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
 import type {
   TaskBoardSubsystem,
   TaskBoardTaskActionAuthorizer,
@@ -1311,29 +1313,30 @@ export class BrokenBrowserLogin implements BrowserLoginLifecycle {
 }
 
 /**
- * A dictation surface that records what it was handed and answers whatever it was told to.
+ * A dictation enhancer that records what it was handed and answers whatever it was told to.
  *
- * The real one spawns a Whisper worker and downloads model files, so nothing about the mount can be
- * exercised against it. This keeps the route table, the credentials and the dispatcher exactly as
- * production builds them and substitutes only the process-spawning half.
+ * The real one spends the operator's provider credential over the network, so nothing about the mount
+ * can be exercised against it. This keeps the route, the credentials and the dispatcher exactly as
+ * production builds them and substitutes only the outbound call.
  */
-export class FakeStt implements SttSubsystem {
-  readonly seen: string[] = [];
-  closed = 0;
+export class FakeSttEnhancer implements SttEnhancementSubsystem {
+  readonly seen: unknown[] = [];
 
   constructor(
-    /** `undefined` means "this surface does not own that path", which is what the real service
-     *  answers for a model id that decodes to something with a separator in it. */
-    private readonly answer: (request: Request) => Response | undefined = () => Response.json({ ok: true }),
+    /** Either the result to answer with, or the refusal to raise — the two shapes the real service
+     *  has, since every failure it knows about is an `SttEnhancementError`. */
+    private readonly answer: SttEnhancementResult | SttEnhancementError = {
+      text: 'Hello, world.',
+      provider: 'groq',
+      model: 'llama-3.1-8b-instant',
+      latencyMs: 42,
+    },
   ) {}
 
-  async handle(request: Request): Promise<Response | undefined> {
-    this.seen.push(`${request.method} ${new URL(request.url).pathname}`);
-    return this.answer(request);
-  }
-
-  async close(): Promise<void> {
-    this.closed += 1;
+  async enhance(input: unknown): Promise<SttEnhancementResult> {
+    this.seen.push(input);
+    if (this.answer instanceof SttEnhancementError) throw this.answer;
+    return this.answer;
   }
 }
 

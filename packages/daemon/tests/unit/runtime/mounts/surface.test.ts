@@ -3,11 +3,9 @@ import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
 import {
   createMountedDispatcher,
-  createMountedRawDispatcher,
   createMountedSocketDispatcher,
   type MountedSubsystems,
   mountedDaemonRoutes,
-  mountedRawRoutes,
   mountedSocketRoutes,
   type PairingSubsystem,
   type ScratchGcSubsystem,
@@ -28,7 +26,7 @@ import {
   FakeSessionResume,
   FakeSessionSend,
   FakeSessionSignal,
-  FakeStt,
+  FakeSttEnhancer,
   FakeTaskBoards,
   FakeTerminals,
   FakeWarden,
@@ -168,7 +166,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
-  stt: new FakeStt(),
+  sttEnhancement: new FakeSttEnhancer(),
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -280,6 +278,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/learning/proposals/:id/patch',
       'POST /v1/learning/run',
       'POST /v1/recommend',
+      // Dictation enhancement: the daemon's one remaining speech-to-text route, and a fixed literal
+      // under a prefix no other subsystem uses. Recognition happens in the browser.
+      'POST /v1/stt/enhance',
       // The working-tree read. Its three deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',
@@ -461,46 +462,10 @@ describe('the mounted daemon surface', () => {
     should(routes).deepEqual(['GET /v1/events', 'GET /v1/sessions/:sessionId/terminals/:terminalId/stream']);
   });
 
-  it('should serve every byte-shaped route from one table too', () => {
-    // The third table, asserted for the same reason as the other two. Dictation is the only
-    // subsystem whose traffic is bytes — audio in, a model file out — so a route missing from here
-    // is a `fy stt` command answering `unknown_route`, however completely the surface is built.
-    // Arrange / Act
-    const routes = mountedRawRoutes(subsystems()).map(route => `${route.method} ${route.path}`);
-
-    // Assert
-    should(routes).deepEqual([
-      'GET /v1/stt/status',
-      'GET /v1/stt/models',
-      'GET /v1/stt/models/:modelId/install',
-      'POST /v1/stt/models/:modelId/install',
-      'GET /v1/stt/models/:modelId',
-      'POST /v1/stt/transcribe',
-      'POST /v1/stt/enhance',
-    ]);
-  });
-
-  it('should authorize a byte-shaped route over the same credentials as the HTTP surface', async () => {
-    // Three dispatchers, one credential set, for the same reason the socket one shares it: a table
-    // with its own credentials is a second, quieter authorization boundary that would drift.
-    // Arrange
-    const mounted = subsystems();
-    const dispatcher = createMountedRawDispatcher(base, mounted);
-
-    // Act
-    const anonymous = await dispatcher.serve(
-      request({ path: '/v1/stt/status' }),
-      new Request('http://127.0.0.1:9999/v1/stt/status'),
-    );
-    const authorized = await dispatcher.serve(
-      request({ path: '/v1/stt/status', headers: human }),
-      new Request('http://127.0.0.1:9999/v1/stt/status'),
-    );
-
-    // Assert
-    should(anonymous.kind === 'refused' ? anonymous.response.status : 0).equal(401);
-    should(authorized.kind === 'served' ? authorized.response.status : 0).equal(200);
-  });
+  // THERE IS NO THIRD TABLE. A route that answered with the transport's own `Response` existed for
+  // one subsystem only — the daemon's speech recognition, whose traffic was audio in and ranged model
+  // files out. Recognition moved into the browser, and the seam went with it rather than staying as a
+  // table with no members. The one surviving dictation route is JSON, and it is asserted above.
 
   it('should authorize a protocol switch over the same credentials as the HTTP surface', async () => {
     // Two dispatchers, one credential set. A socket dispatcher built from different credentials would
