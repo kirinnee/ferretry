@@ -7,6 +7,7 @@ export * from '../components/composer.tsx';
 export * from '../components/composer-autocomplete.ts';
 export * from '../components/composer-runtime.tsx';
 export * from '../components/daemon-picker-model.ts';
+export * from '../components/daemon-pickers.tsx';
 export * from '../components/dictation-control.tsx';
 export * from '../components/dictation-sheet.tsx';
 export * from '../components/file-tree.tsx';
