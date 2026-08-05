@@ -246,13 +246,24 @@ export class FileMutationJournal {
   /**
    * Remove a directory this batch created, but only while it is still empty. Anything that arrived
    * inside it since is someone else's, and reverting a fleet write is never a licence to delete it.
+   *
+   * Refusing to delete it is still a failure to restore, though, and it is reported as one: the
+   * host had no such directory before this apply and now has one. Swallowing that would let a
+   * rollback claim the host is exactly as it was while a directory — and whatever a concurrent
+   * writer put in it — remains.
    */
   private async removeCreatedDirectory(target: string): Promise<void> {
     try {
       await rmdir(target);
     } catch (error) {
+      if (isMissing(error)) return;
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || code === 'ENOTEMPTY' || code === 'EEXIST' || code === 'ENOTDIR') return;
+      if (code === 'ENOTEMPTY' || code === 'EEXIST') {
+        throw new Error(`refusing to remove ${target}: this apply created it but it is no longer empty`);
+      }
+      if (code === 'ENOTDIR') {
+        throw new Error(`refusing to remove ${target}: this apply created a directory and it is no longer one`);
+      }
       throw error;
     }
   }

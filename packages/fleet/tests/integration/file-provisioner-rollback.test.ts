@@ -422,6 +422,51 @@ describe('FileFleetProvisioner rollback', () => {
     should((await stat(existing)).isDirectory()).be.true();
   });
 
+  it('should report a directory it created that somebody else has since put a file in', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const created = path.join(root, 'homes', 'one');
+    const intruder = path.join(created, 'not-ours.txt');
+    const interfere: FleetWriteOperation = {
+      kind: 'file',
+      path: path.join(root, 'interfere'),
+      content: 'x\n',
+      mode: 0o600,
+    };
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        { kind: 'directory', path: created, mode: 0o700 },
+        interfere,
+        poisonAfter(path.join(root, 'interfere')),
+      ],
+    };
+    const subject = new FileFleetProvisioner([root]);
+    const racing = new Proxy(subject, {
+      get(target, property, receiver) {
+        if (property !== 'applyOperation') return Reflect.get(target, property, receiver);
+        return async (operation: FleetWriteOperation, journal: unknown) => {
+          const run = await (
+            Reflect.get(target, property, receiver) as (a: FleetWriteOperation, b: unknown) => Promise<string[]>
+          ).call(target, operation, journal);
+          if (operation === interfere) await writeFile(intruder, 'somebody else works here\n');
+          return run;
+        };
+      },
+    });
+
+    // Act
+    const actual = await failureOf(racing.apply(plan));
+
+    // Assert — their file survives, and the directory this apply created is named as unrestored.
+    should(actual.kind).equal('rollback-incomplete');
+    if (actual.kind !== 'rollback-incomplete') return;
+    should(await readFile(intruder, 'utf8')).equal('somebody else works here\n');
+    should(actual.unrestored.map(entry => entry.path)).containEql(created);
+    should(actual.unrestored.find(entry => entry.path === created)?.reason).match(/no longer empty/u);
+  });
+
   it('should put a pruned wrapper back when a later operation fails', async () => {
     // Arrange
     const root = await temporaryDirectory();
