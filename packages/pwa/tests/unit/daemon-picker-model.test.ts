@@ -82,6 +82,15 @@ describe('accountPickerOptions', () => {
     expect(accountPickerOptions(null, [], null)).toBeNull();
   });
 
+  it('carries the reset timestamps through onto the joined quota row', () => {
+    const usage = [usageRow({ fiveHourResetAt: 1_760_000_000, weeklyResetAt: 1_760_600_000 })];
+
+    const options = accountPickerOptions([claudeAccount()], usage, null);
+
+    expect(options?.[0]?.quota?.fiveHourResetAt).toBe(1_760_000_000);
+    expect(options?.[0]?.quota?.weeklyResetAt).toBe(1_760_600_000);
+  });
+
   it('treats a positively empty roster as an empty list', () => {
     expect(accountPickerOptions([], [], null)).toEqual([]);
   });

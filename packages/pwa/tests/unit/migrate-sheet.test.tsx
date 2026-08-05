@@ -701,6 +701,17 @@ describe('MigrateSheet account picker', () => {
     };
   };
 
+  it('sanitizes the useId-derived picker id so a CSS selector against it never throws', async () => {
+    await showSheet(
+      <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,
+    );
+
+    const id = combobox().id;
+
+    expect(id).toMatch(/^[a-zA-Z0-9_-]+$/);
+    expect(container().querySelector(`#${id}`)).toBe(combobox());
+  });
+
   it('offers only this daemon’s same-CLI accounts, and never a row from the other one', async () => {
     await showSheet(
       <MigrateSheet {...props({ accountPicker: new DaemonAccountPickerStore(roster().port), usage: quotaStore() })} />,

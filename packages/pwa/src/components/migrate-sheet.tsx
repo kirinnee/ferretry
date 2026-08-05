@@ -26,6 +26,7 @@ import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-conne
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
+import { pickerIdBase } from '../shell/picker-model.ts';
 import { Button } from '../shell/primitives.tsx';
 import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
@@ -216,7 +217,13 @@ export function MigrateSheet({
   const { config, state } = view;
   const headingId = useId();
   const agentHelpId = useId();
-  const agentFieldId = `${headingId}-agent`;
+  // `headingId` is `useId()`'s raw colon-bearing form, and this id is passed
+  // straight through as `DaemonAccountPicker`'s explicit `id` prop — which
+  // `PickerCombobox` then uses verbatim as its element-id base, skipping the
+  // sanitizing fallback it only applies to its own generated id. Sanitizing
+  // here is what keeps the picker's derived ids (listbox, options, panel)
+  // selector-safe.
+  const agentFieldId = `${pickerIdBase(headingId)}-agent`;
   const modelId = useId();
   const modelListId = useId();
   const currentModel = (config.model || config.modelHint || '').trim();

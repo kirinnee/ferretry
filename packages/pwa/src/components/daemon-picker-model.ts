@@ -57,7 +57,7 @@ import { baseName, type FleetProject, normalizeProjectPath, projectKeyFor } from
  */
 export type AccountUsageRow = Pick<
   UsageAccountView,
-  'agent' | 'fiveHourPercent' | 'weeklyPercent' | 'atLimit' | 'authOk'
+  'agent' | 'fiveHourPercent' | 'weeklyPercent' | 'fiveHourResetAt' | 'weeklyResetAt' | 'atLimit' | 'authOk'
 >;
 
 export interface AccountPickerOption {
