@@ -57,6 +57,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
   const [sourceId, setSourceId] = useState(String(connection.daemonId));
   const [profile, setProfile] = useState('');
   const [mode, setMode] = useState<CopyMode>('merge');
+  const [draftText, setDraftText] = useState('{}');
   const [issue, setIssue] = useState<string>();
   const [loading, setLoading] = useState(false);
 
@@ -70,6 +71,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
       setSource(nextSource);
       const firstProfile = profile || Object.keys(nextTarget.profiles)[0] || '';
       setProfile(firstProfile);
+      setDraftText(JSON.stringify(nextSource.profiles[firstProfile] ?? {}, undefined, 2));
     } catch (error) {
       setIssue(error instanceof Error ? error.message : 'Configuration could not be read. No copy can be prepared.');
       setTarget(undefined);
@@ -83,9 +85,20 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
     void reload();
   }, [reload]);
 
-  const sourceEnvironment = source?.profiles[profile] ?? {};
   const targetEnvironment = target?.profiles[profile] ?? {};
-  const proposed = mode === 'merge' ? { ...targetEnvironment, ...sourceEnvironment } : sourceEnvironment;
+  const drafted = useMemo(() => {
+    try {
+      const value: unknown = JSON.parse(draftText);
+      if (value === null || Array.isArray(value) || typeof value !== 'object') return undefined;
+      return Object.entries(value).reduce<Record<string, string>>((environment, [name, value]) => {
+        if (typeof value === 'string') environment[name] = value;
+        return environment;
+      }, {});
+    } catch {
+      return undefined;
+    }
+  }, [draftText]);
+  const proposed = drafted === undefined ? {} : mode === 'merge' ? { ...targetEnvironment, ...drafted } : drafted;
   const diff = useMemo(() => changes(targetEnvironment, proposed), [targetEnvironment, proposed]);
 
   const apply = async () => {
@@ -100,7 +113,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           'x-ferretry-client': 'ui',
         },
         credentials: 'include',
-        body: JSON.stringify({ profile, mode, environment: sourceEnvironment }),
+        body: JSON.stringify({ profile, mode, environment: drafted }),
       });
       if (!response.ok)
         throw new Error((await response.json().catch(() => ({}))).error ?? `Copy refused (${response.status})`);
@@ -146,7 +159,11 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           <select
             className="kt-input mt-1 min-h-[44px] w-full"
             value={profile}
-            onChange={event => setProfile(event.target.value)}
+            onChange={event => {
+              const nextProfile = event.target.value;
+              setProfile(nextProfile);
+              setDraftText(JSON.stringify(source?.profiles[nextProfile] ?? {}, undefined, 2));
+            }}
           >
             {Object.keys(target?.profiles ?? {}).map(name => (
               <option key={name}>{name}</option>
@@ -167,6 +184,20 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           </button>
         ))}
       </div>
+      <label className="text-ui text-muted">
+        Environment entries
+        <textarea
+          className="kt-input mono mt-1 min-h-36 w-full resize-y"
+          value={draftText}
+          onChange={event => setDraftText(event.target.value)}
+          spellCheck={false}
+          aria-describedby="fleet-environment-help"
+        />
+      </label>
+      <p id="fleet-environment-help" className="m-0 text-meta text-faint">
+        Edit the source-derived JSON before applying. Values must be strings; unsafe names and values are refused by the
+        daemon and leave the target unchanged.
+      </p>
       {issue ? (
         <p role="alert" className="m-0 rounded-control bg-warn/15 p-2 text-ui text-warn">
           {issue}
@@ -192,7 +223,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
       <button
         type="button"
         className="kt-btn kt-btn--primary self-start"
-        disabled={loading || !profile || diff.length === 0}
+        disabled={loading || !profile || drafted === undefined || diff.length === 0}
         onClick={() => void apply()}
       >
         <ArrowRightLeft size={16} aria-hidden="true" /> Apply {mode} after review
