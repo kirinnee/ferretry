@@ -11,11 +11,9 @@
  * them is a tab pattern:
  *
  *   `navigation`  Ordinary buttons marked `aria-current="page"`. This is what a
- *                 sheet full of choices actually is. Giving a sheet row
- *                 `role="tab"` would claim a panel the row does not control,
- *                 and it would also make every single-match `role=tab` query on
- *                 the page ambiguous — a failure that reads as "found multiple"
- *                 in a test rather than as a mistake in the markup.
+ *                 sheet full of choices actually is; a sheet row given
+ *                 `role="tab"` would claim a panel it does not control, and put
+ *                 a second tablist on a page that has one panel to swap.
  *   `tabs`        Real WAI-ARIA tabs: one `role="tablist"` that declares
  *                 `aria-orientation="vertical"`, roving tabindex, stable row
  *                 ids so the panel can point back, and the keyboard policy
