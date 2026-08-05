@@ -95,7 +95,26 @@ const SECTIONS = [
   'harness-onboarding-scan',
   'harness-onboarding-pair',
   'harness-onboarding-done',
+  // The two picker fields AT REST, and an unreadable roster beside a field that
+  // still works. The OPEN list is captured on its own pages below instead: it is
+  // an absolutely-positioned popover, and this gallery is a scroller.
+  'harness-pickers',
+  'harness-picker-failed',
 ] as const;
+
+/**
+ * The picker frames, each on a page of its own.
+ *
+ * Same reason as the fleet frames one level down, plus one of its own: the list
+ * only exists while the field has FOCUS, and it paints outside the field's box.
+ * Inside the gallery an element capture clips it and a full-page stitch repaints
+ * the sticky app bar over it, so a page with no scrolling ancestor and no sticky
+ * chrome is the only place a capture of an open list is the truth.
+ */
+const PICKER_FRAMES = ['account', 'account-checked', 'account-failed', 'project'] as const;
+
+/** The touch floor the whole control family holds itself to, asserted rather than eyeballed. */
+const TOUCH_TARGET_MINIMUM = 44;
 
 /**
  * The fleet cockpit frames, captured on their own page rather than inside the gallery.
@@ -1330,6 +1349,178 @@ try {
             await page.screenshot({ path: fleetTarget, fullPage: true });
             process.stdout.write(`📸 ${viewport.name} fleet ${frame} -> ${viewportTarget} + ${fleetTarget}\n`);
           }
+          /**
+           * THE PICKERS, EACH ON ITS OWN PAGE, WITH THE LIST ACTUALLY OPEN.
+           *
+           * Every state here is reached by driving the real control — click the field, type into it,
+           * arrow through it — because the list only exists while the field has focus and a posed
+           * popover would prove nothing about the component that has to produce one.
+           *
+           * The three assertions below are the point of the pass, and they are assertions rather
+           * than pictures because a screenshot cannot tell a list that fits from one that is being
+           * clipped by an ancestor: both look like a list.
+           */
+          for (const frame of PICKER_FRAMES) {
+            await page.goto(`${server.url}#picker-${frame}`);
+            await page.reload();
+            const pickerPage = page.locator(`#harness-picker-${frame}-page`);
+            await pickerPage.waitFor({ state: 'visible' });
+
+            const field = page.locator('input[role="combobox"]');
+            await field.click();
+            const expectsList = frame !== 'account-failed';
+            if (expectsList) {
+              await page.locator('[role="listbox"]').waitFor({ state: 'visible' });
+              // Move the cursor with the keyboard, so the capture carries a real active row and
+              // `aria-activedescendant` is pointing at something.
+              await page.keyboard.press('ArrowDown');
+              await page.keyboard.press('ArrowDown');
+            } else {
+              // The whole claim of this frame: the roster failed and the field still works.
+              await page.locator('[data-picker-state="failed"]').waitFor({ state: 'visible' });
+              await field.type('claude-auto-typed-by-hand');
+              const typed = await field.inputValue();
+              if (typed !== 'claude-auto-typed-by-hand') {
+                fail(`the failed-roster field did not accept a typed value (got ${JSON.stringify(typed)})`);
+              }
+            }
+
+            const geometry = await page.evaluate(
+              ([wantsList, minimum]) => {
+                const root = document.documentElement;
+                const listbox = document.querySelector<HTMLElement>('[role="listbox"]');
+                const box = (element: Element) => {
+                  const rect = element.getBoundingClientRect();
+                  return {
+                    top: Math.round(rect.top),
+                    left: Math.round(rect.left),
+                    right: Math.round(rect.right),
+                    bottom: Math.round(rect.bottom),
+                    height: Math.round(rect.height),
+                  };
+                };
+                // Every ancestor that can scroll, and therefore can clip. A popover that leaves one
+                // of these rectangles is painted where nobody can see it.
+                const clippers: Array<{ readonly at: string; readonly box: ReturnType<typeof box> }> = [];
+                if (listbox !== null) {
+                  for (let node = listbox.parentElement; node !== null; node = node.parentElement) {
+                    const style = getComputedStyle(node);
+                    if (/auto|scroll|hidden|clip/u.test(`${style.overflowY}${style.overflowX}`)) {
+                      clippers.push({
+                        at: node.tagName.toLowerCase() + (node.id ? `#${node.id}` : ''),
+                        box: box(node),
+                      });
+                    }
+                  }
+                }
+                const controls = [...document.querySelectorAll<HTMLElement>('input[role="combobox"], button')];
+                const options = [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+                const measured = [...controls, ...options]
+                  .filter(element => element.getBoundingClientRect().height > 0)
+                  .map(element => ({
+                    what: element.getAttribute('role') ?? element.tagName.toLowerCase(),
+                    height: Math.round(element.getBoundingClientRect().height),
+                  }));
+                return {
+                  viewport: { width: window.innerWidth, height: window.innerHeight },
+                  pageScrollsX: root.scrollWidth > root.clientWidth,
+                  scrollWidth: root.scrollWidth,
+                  listbox: listbox === null ? null : box(listbox),
+                  optionCount: options.length,
+                  activeDescendant:
+                    document.querySelector('input[role="combobox"]')?.getAttribute('aria-activedescendant') ?? null,
+                  // What is actually on the glass at the list's own centre. A rectangle in the right
+                  // place that something else paints over is still an invisible list.
+                  centreOwnedByList:
+                    listbox === null
+                      ? null
+                      : (() => {
+                          const rect = listbox.getBoundingClientRect();
+                          const hit = document.elementFromPoint(
+                            Math.round(rect.left + rect.width / 2),
+                            Math.round(rect.top + Math.min(rect.height / 2, 20)),
+                          );
+                          return hit !== null && listbox.contains(hit);
+                        })(),
+                  clippers,
+                  wantsList,
+                  undersized: measured.filter(entry => entry.height < minimum),
+                  smallest: measured.reduce((low, entry) => Math.min(low, entry.height), Number.POSITIVE_INFINITY),
+                };
+              },
+              [expectsList, TOUCH_TARGET_MINIMUM] as const,
+            );
+
+            process.stdout.write(
+              `   picker ${frame} @ ${viewport.name}: page scroll x=${geometry.pageScrollsX} ` +
+                `(scrollWidth=${geometry.scrollWidth} vs ${geometry.viewport.width}) ` +
+                `options=${geometry.optionCount} active=${geometry.activeDescendant ?? '(none)'} ` +
+                `list=${geometry.listbox === null ? '(none)' : `${geometry.listbox.top}-${geometry.listbox.bottom}px`} ` +
+                `centre owned by list=${String(geometry.centreOwnedByList)} ` +
+                `smallest control=${geometry.smallest}px clippers=${geometry.clippers.length}\n`,
+            );
+
+            // 1. No horizontal overflow. Asserted at BOTH widths but it is 390px that has ever
+            //    failed it, and a picker whose list forces a sideways scroll is unusable on a phone.
+            if (geometry.pageScrollsX) {
+              fail(
+                `the ${frame} picker made the page scroll horizontally at ${viewport.name} ` +
+                  `(${geometry.scrollWidth}px in a ${geometry.viewport.width}px viewport)`,
+              );
+            }
+
+            // 2. Every visible control and every offered row is at least a thumb tall.
+            if (geometry.undersized.length > 0) {
+              fail(
+                `the ${frame} picker has controls below ${TOUCH_TARGET_MINIMUM}px at ${viewport.name}: ` +
+                  geometry.undersized.map(entry => `${entry.what} ${entry.height}px`).join(', '),
+              );
+            }
+
+            // 3. The open list is inside the viewport, on the glass, and inside every ancestor that
+            //    could clip it. This is the one a picture cannot make for us.
+            if (geometry.wantsList) {
+              const list = geometry.listbox;
+              if (list === null) fail(`the ${frame} picker rendered no listbox to measure at ${viewport.name}`);
+              if (geometry.optionCount === 0) fail(`the ${frame} picker opened an empty list at ${viewport.name}`);
+              if (geometry.activeDescendant === null) {
+                fail(`the ${frame} picker points aria-activedescendant at nothing after two ArrowDowns`);
+              }
+              if (
+                list.top < 0 ||
+                list.bottom > geometry.viewport.height ||
+                list.left < 0 ||
+                list.right > geometry.viewport.width
+              ) {
+                fail(
+                  `the ${frame} picker's list leaves the ${viewport.name} viewport: ` +
+                    `${list.left},${list.top} → ${list.right},${list.bottom} in ` +
+                    `${geometry.viewport.width}x${geometry.viewport.height}`,
+                );
+              }
+              for (const clipper of geometry.clippers) {
+                if (
+                  list.top < clipper.box.top ||
+                  list.bottom > clipper.box.bottom ||
+                  list.left < clipper.box.left ||
+                  list.right > clipper.box.right
+                ) {
+                  fail(
+                    `the ${frame} picker's list is clipped by ${clipper.at} at ${viewport.name}: ` +
+                      `list ${list.top}-${list.bottom}px vs clipper ${clipper.box.top}-${clipper.box.bottom}px`,
+                  );
+                }
+              }
+              if (geometry.centreOwnedByList !== true) {
+                fail(`something is painted over the ${frame} picker's list at ${viewport.name}`);
+              }
+            }
+
+            const pickerTarget = join(outDir, `${viewport.name}-picker-${frame}.png`);
+            await page.screenshot({ path: pickerTarget });
+            process.stdout.write(`📸 ${viewport.name} picker ${frame} -> ${pickerTarget}\n`);
+          }
+
           // Back to the gallery: every capture after this one expects the shell, and a page left on a
           // fleet fragment made the next locator wait for an app bar that is not on it.
           await page.goto(server.url.toString());

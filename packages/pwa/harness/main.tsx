@@ -45,6 +45,19 @@ import {
 } from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
+import {
+  type AccountUsageRow,
+  accountPickerOptions,
+  projectPickerOptions,
+} from '../src/components/daemon-picker-model.ts';
+import {
+  AccountPickerField,
+  accountFieldOptions,
+  accountFieldSource,
+  ProjectPickerField,
+  projectFieldOptions,
+  projectFieldSource,
+} from '../src/components/daemon-pickers.tsx';
 import { DictationControl, useDictationBundle } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
 import { FileInstanceSurface } from '../src/components/file-instance-surface.tsx';
@@ -126,20 +139,20 @@ import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
-import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
-import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
-import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
-import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
-import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
-import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
-import { CapabilityList } from '../src/features/settings/capability-list.tsx';
-import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import type { PairingClient } from '../src/features/settings/add-device-api.ts';
 import {
   AddDeviceCard,
   AddDeviceSurface,
   type PairingClientFactory,
 } from '../src/features/settings/add-device-settings.tsx';
+import { CapabilityList } from '../src/features/settings/capability-list.tsx';
+import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
+import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
+import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
+import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
+import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
+import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
+import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
@@ -163,12 +176,14 @@ import type { LiveClockOptions } from '../src/hooks/use-live-clock.ts';
 import type { ScopeNavigation } from '../src/hooks/use-project-scope.ts';
 import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hooks/use-remote-browser.ts';
 import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
+import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
+import type { DaemonAccountPickerSlice } from '../src/lib/account-picker-store.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../src/lib/drafts.ts';
-import type { SessionGroup } from '../src/lib/fleet-grouping.ts';
+import type { FleetProject, SessionGroup } from '../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../src/lib/fleet-store.ts';
 import { buildLineage } from '../src/lib/lineage.ts';
 import { writeMdComposePref } from '../src/lib/md-compose.ts';
@@ -2829,6 +2844,350 @@ const DASHBOARD_STATE_CARDS = [
   readonly scopeRecovered: boolean;
 }>;
 
+// ─── the account and project pickers ─────────────────────────────────────────
+
+/**
+ * THE PICKER ROSTER, and why it is not `HARNESS_FLEET_ACCOUNTS`.
+ *
+ * That fixture is already the subject of the fleet roster card and three fleet
+ * fragment captures, so widening it to carry quota and health would silently
+ * change images that have already been reviewed. This one exists to make ONE
+ * screenshot answer every question a reader asks of an account row, so each
+ * entry carries a different combination of the three independent facts:
+ *
+ *   studio    available · quota well inside both windows · checked healthy
+ *   atelier   available · AT LIMIT                       · checked down (timeout)
+ *   loge      available · signed out (`authOk: false`)    · checked unknown
+ *   terra     available · no quota row at all             · never checked
+ *   archive   UNAVAILABLE with the manifest's reason      · no quota · never checked
+ *
+ * The last two are the ones worth staring at: "no quota row" has to render
+ * `quota —` rather than 0 %, and "never checked" has to read differently from a
+ * check that ran and could not tell.
+ */
+/** Named rather than indexed, so the health map below joins on an id a reader can see. */
+const PICKER_ID = {
+  studio: 'aaaaaaaa-1111-4111-8111-111111111111',
+  atelier: 'aaaaaaaa-2222-4222-8222-222222222222',
+  loge: 'aaaaaaaa-3333-4333-8333-333333333333',
+  terra: 'aaaaaaaa-4444-4444-8444-444444444444',
+  archive: 'aaaaaaaa-5555-4555-8555-555555555555',
+} as const;
+
+const HARNESS_PICKER_ACCOUNTS = [
+  {
+    id: PICKER_ID.studio,
+    kind: 'claude',
+    mode: 'auto',
+    wrapper: 'claude-auto-studio',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-studio',
+    displayName: 'Studio Claude',
+    defaultModel: 'claude-opus-5',
+    models: [{ id: 'claude-opus-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: PICKER_ID.atelier,
+    kind: 'claude',
+    mode: 'auto',
+    wrapper: 'claude-auto-atelier',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-atelier',
+    displayName: 'Atelier Claude',
+    defaultModel: 'claude-sonnet-5',
+    models: [{ id: 'claude-sonnet-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: PICKER_ID.loge,
+    kind: 'claude',
+    mode: 'interactive',
+    wrapper: 'claude-auto-loge',
+    home: '/home/pilot/.ferretry/fleet/homes/claude-auto-loge',
+    displayName: 'Loge Claude',
+    defaultModel: 'claude-opus-5',
+    models: [{ id: 'claude-opus-5', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: PICKER_ID.terra,
+    kind: 'codex',
+    mode: 'auto',
+    wrapper: 'codex-auto-terra',
+    home: '/home/pilot/.ferretry/fleet/homes/codex-auto-terra',
+    displayName: 'Terra Codex',
+    defaultModel: 'gpt-5.6-terra',
+    models: [{ id: 'gpt-5.6-terra', available: true }],
+    available: true,
+    unavailableReason: null,
+  },
+  {
+    id: PICKER_ID.archive,
+    kind: 'codex',
+    mode: 'auto',
+    wrapper: 'codex-auto-archive',
+    home: '/home/pilot/.ferretry/fleet/homes/codex-auto-archive',
+    displayName: 'Archive Codex',
+    defaultModel: null,
+    models: [],
+    available: false,
+    unavailableReason: 'the fleet publishes codex-auto-archive but this host has no such executable on its PATH',
+  },
+] satisfies readonly PickerAccount[];
+
+/** The cached quota feed's rows, joined onto accounts by WRAPPER. Two are deliberately absent. */
+const HARNESS_PICKER_USAGE: readonly AccountUsageRow[] = [
+  { agent: 'claude-auto-studio', fiveHourPercent: 37, weeklyPercent: 61, atLimit: false, authOk: true },
+  { agent: 'claude-auto-atelier', fiveHourPercent: 100, weeklyPercent: 88, atLimit: true, authOk: true },
+  { agent: 'claude-auto-loge', authOk: false },
+];
+
+/** What one press of “Check accounts” came back with. Two accounts are absent from it. */
+const HARNESS_PICKER_HEALTH: ReadonlyMap<string, PickerAccountHealth> = new Map([
+  [
+    PICKER_ID.studio,
+    {
+      accountId: PICKER_ID.studio,
+      kind: 'claude' as const,
+      state: 'healthy' as const,
+      cached: true,
+      checkedAt: HARNESS_NOW - 120_000,
+      ms: 1_840,
+    },
+  ],
+  [
+    PICKER_ID.atelier,
+    {
+      accountId: PICKER_ID.atelier,
+      kind: 'claude' as const,
+      state: 'down' as const,
+      cached: false,
+      checkedAt: HARNESS_NOW - 4_000,
+      ms: 30_000,
+      failureKind: 'timeout' as const,
+      error: 'timed out after 30s waiting for the sentinel reply',
+    },
+  ],
+  [
+    PICKER_ID.loge,
+    {
+      accountId: PICKER_ID.loge,
+      kind: 'claude' as const,
+      state: 'unknown' as const,
+      cached: false,
+      checkedAt: HARNESS_NOW - 3_000,
+      ms: 210,
+      failureKind: 'authentication' as const,
+      error: 'this wrapper is not signed in, so liveness could not be established',
+    },
+  ],
+]);
+
+/** A settled roster slice. No store and no network: the ADAPTER is under review. */
+const pickerSlice = (overrides: Partial<DaemonAccountPickerSlice> = {}): DaemonAccountPickerSlice => ({
+  generation: 1,
+  catalog: { accounts: HARNESS_PICKER_ACCOUNTS },
+  status: 'ready',
+  error: null,
+  health: null,
+  healthStatus: 'idle',
+  healthError: null,
+  ...overrides,
+});
+
+const pickerAccountSource = (slice: DaemonAccountPickerSlice) =>
+  accountFieldSource(
+    slice,
+    accountFieldOptions(accountPickerOptions(slice.catalog?.accounts ?? null, HARNESS_PICKER_USAGE, slice.health)),
+  );
+
+/** Two registered folders, and folders a session has used that no registry names. */
+const HARNESS_PICKER_REGISTRY: readonly FleetProject[] = [
+  { name: 'ferretry', path: '/home/pilot/work/ferretry', id: 'p-1', source: 'clone' },
+  { name: 'home-manager', path: '/home/pilot/.config/home-manager', id: 'p-2', source: 'existing-folder' },
+];
+
+const harnessPickerSession = (id: string, cwd: string, at: string): SessionView =>
+  ({
+    config: { ...harnessSession.config, id, cwd, updatedAt: at },
+    state: { ...harnessSession.state, id, lastActivityAt: at },
+    directory: cwd,
+  }) as SessionView;
+
+/**
+ * Where the "recent" half comes from. The worktree beneath `ferretry` is in here
+ * on purpose: the projection folds it into the registered root rather than
+ * offering two ways to reach the same place.
+ */
+const HARNESS_PICKER_SESSIONS: readonly SessionView[] = [
+  harnessPickerSession('picker-a', '/home/pilot/scratch/spike', '2026-07-31T11:40:00.000Z'),
+  harnessPickerSession('picker-b', '/home/pilot/work/ferretry/wt-pickers', '2026-07-31T11:20:00.000Z'),
+  harnessPickerSession('picker-c', '/home/pilot/work/nitroso', '2026-07-31T10:05:00.000Z'),
+];
+
+const HARNESS_PICKER_PROJECT_SOURCE = projectFieldSource(
+  { projects: HARNESS_PICKER_REGISTRY, status: 'ready', error: null },
+  {
+    sessions: HARNESS_PICKER_SESSIONS,
+    byId: new Map(HARNESS_PICKER_SESSIONS.map(view => [view.config.id, view])),
+    status: 'ready',
+    error: null,
+  },
+  projectFieldOptions(projectPickerOptions(HARNESS_PICKER_REGISTRY, HARNESS_PICKER_SESSIONS)),
+);
+
+/**
+ * The value owner both pickers need.
+ *
+ * A picker's whole contract is that the TYPED STRING is the answer, so a harness
+ * that passed a constant `value` would be reviewing a control nobody can use.
+ * This holds the state exactly as a write surface does, which is also what lets
+ * the screenshot driver type into it and watch the list narrow.
+ */
+function HarnessPickerHost({
+  initial = '',
+  render,
+}: {
+  readonly initial?: string;
+  readonly render: (value: string, onValueChange: (next: string) => void) => ReactNode;
+}) {
+  const [value, setValue] = useState(initial);
+  return <>{render(value, setValue)}</>;
+}
+
+/** One labelled field, in the shape both write surfaces wrap their inputs in. */
+function HarnessPickerLabel({
+  hint,
+  id,
+  label,
+  children,
+}: {
+  readonly hint: string;
+  readonly id: string;
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="grid gap-1.5">
+      <span className="flex flex-wrap items-baseline gap-2">
+        <label className="text-ui font-semibold text-fg" htmlFor={id}>
+          {label}
+        </label>
+        <span className="text-meta text-faint" id={`${id}-help`}>
+          {hint}
+        </span>
+      </span>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The account field, as a write surface mounts it — the SHIPPED presentational
+ * component over the SHIPPED projections, with a slice literal standing in for
+ * the store. Nothing here poses a popover or fakes a row.
+ */
+function HarnessAccountPicker({
+  checked = false,
+  slice = pickerSlice(),
+}: {
+  readonly checked?: boolean;
+  readonly slice?: DaemonAccountPickerSlice;
+}) {
+  const resolved = checked ? pickerSlice({ health: HARNESS_PICKER_HEALTH, healthStatus: 'ready' }) : slice;
+  return (
+    <HarnessPickerLabel hint="the wrapper that will run this session" id="harness-picker-agent" label="Account">
+      <HarnessPickerHost
+        render={(value, onValueChange) => (
+          <AccountPickerField
+            describedBy="harness-picker-agent-help"
+            healthCheck={{
+              status: resolved.healthStatus,
+              error: resolved.healthError,
+              checked: resolved.health?.size ?? 0,
+              onCheck: () => undefined,
+            }}
+            id="harness-picker-agent"
+            label="Account"
+            onValueChange={onValueChange}
+            placeholder="claude-auto-studio"
+            source={pickerAccountSource(resolved)}
+            value={value}
+          />
+        )}
+      />
+    </HarnessPickerLabel>
+  );
+}
+
+function HarnessProjectPicker() {
+  return (
+    <HarnessPickerLabel hint="working directory for the session" id="harness-picker-cwd" label="Project">
+      <HarnessPickerHost
+        render={(value, onValueChange) => (
+          <ProjectPickerField
+            describedBy="harness-picker-cwd-help"
+            id="harness-picker-cwd"
+            label="Project"
+            onValueChange={onValueChange}
+            placeholder="/absolute/path/to/project"
+            source={HARNESS_PICKER_PROJECT_SOURCE}
+            value={value}
+          />
+        )}
+      />
+    </HarnessPickerLabel>
+  );
+}
+
+/** Which picker a standalone page is showing. */
+type HarnessPickerFrame = 'account' | 'account-checked' | 'account-failed' | 'project';
+
+/**
+ * ONE PICKER, ON A PAGE OF ITS OWN, and this is not a convenience.
+ *
+ * The popover is `absolute` inside its field and paints outside the field's own
+ * box. In the stacked gallery that box lives inside a scroller, so an element
+ * capture clips the list away and a full-page stitch repaints the sticky bar
+ * over it — the same trap the fleet frames documented. A page with no scrolling
+ * ancestor and no sticky chrome is the only place a viewport capture of an OPEN
+ * list is the truth, and it is also the only place the 44px and
+ * inside-the-viewport assertions mean anything.
+ */
+function PickerFrameHarness({ frame }: { readonly frame: HarnessPickerFrame }) {
+  useAppViewport();
+  return (
+    <main
+      aria-label={`Picker ${frame}`}
+      className="min-h-dvh bg-bg p-panel"
+      id={`harness-picker-${frame}-page`}
+      data-harness-picker={frame}
+    >
+      <div className="mx-auto grid w-full max-w-[720px] gap-panel">
+        <header className="grid gap-xs">
+          <p className="m-0 text-meta font-semibold uppercase tracking-label text-faint">Daemon pickers</p>
+          <h1 className="m-0 text-title font-semibold text-fg">{frame === 'project' ? 'Project' : 'Account'}</h1>
+        </header>
+        {frame === 'project' ? (
+          <HarnessProjectPicker />
+        ) : frame === 'account-failed' ? (
+          <HarnessAccountPicker
+            slice={pickerSlice({
+              catalog: null,
+              status: 'error',
+              error: 'this daemon refused the account roster: fleet_manifest_invalid',
+            })}
+          />
+        ) : (
+          <HarnessAccountPicker checked={frame === 'account-checked'} />
+        )}
+      </div>
+    </main>
+  );
+}
+
 function Shell() {
   const [version, bump] = useState(0);
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
@@ -5144,6 +5503,35 @@ function Shell() {
         </div>
       ),
     },
+    {
+      // The two fields AT REST, which is the state a form actually opens in and
+      // the one the standalone pages below cannot show — they exist to capture an
+      // OPEN list, and an open list hides the field it belongs to.
+      label: 'Daemon pickers at rest',
+      render: () => (
+        <section aria-label="Daemon pickers at rest" className="grid gap-panel" id="harness-pickers">
+          <HarnessAccountPicker checked={true} />
+          <HarnessProjectPicker />
+        </section>
+      ),
+    },
+    {
+      // A roster this browser could not read, beside a field that still works.
+      // The failure is the whole point: an unreadable roster must never be drawn
+      // as a host with no accounts, and the way out has to stay visible.
+      label: 'Account picker — unreadable roster',
+      render: () => (
+        <section aria-label="Account picker unreadable roster" id="harness-picker-failed">
+          <HarnessAccountPicker
+            slice={pickerSlice({
+              catalog: null,
+              status: 'error',
+              error: 'this daemon refused the account roster: fleet_manifest_invalid',
+            })}
+          />
+        </section>
+      ),
+    },
   ];
 
   return (
@@ -5901,10 +6289,24 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-states': 'states',
 };
 
+/**
+ * One picker per page, because the popover is absolutely positioned and the
+ * gallery's scroller clips it. Its own map rather than a branch bolted onto the
+ * fleet one: two units appending to the same object is the conflict this file
+ * keeps trying to teach.
+ */
+const PICKER_FRAGMENTS: Readonly<Record<string, HarnessPickerFrame>> = {
+  '#picker-account': 'account',
+  '#picker-account-checked': 'account-checked',
+  '#picker-account-failed': 'account-failed',
+  '#picker-project': 'project',
+};
+
 const host = document.getElementById('root');
 if (host) {
   const screen = ONBOARDING_FRAGMENTS[window.location.hash];
   const fleetFrame = FLEET_FRAGMENTS[window.location.hash];
+  const pickerFrame = PICKER_FRAGMENTS[window.location.hash];
   const settingsHarness = new URLSearchParams(window.location.search).has('settings-harness');
   createRoot(host).render(
     <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
@@ -5916,6 +6318,8 @@ if (host) {
         <BrowserFullViewportHarness />
       ) : fleetFrame !== undefined ? (
         <FleetCockpitHarness frame={fleetFrame} />
+      ) : pickerFrame !== undefined ? (
+        <PickerFrameHarness frame={pickerFrame} />
       ) : screen === undefined ? (
         <Shell />
       ) : (
