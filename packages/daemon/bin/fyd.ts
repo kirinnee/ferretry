@@ -371,6 +371,7 @@ import {
   WardenSweepService,
   type WorkingDirectoryResolver,
 } from '../src/lib/index.ts';
+import { createDaemonFleetSubsystem } from '../src/lib/runtime/mounts/fleet.ts';
 import { daemonVersion } from '../src/lib/version.ts';
 import { startSttWorker } from './stt-worker.ts';
 
@@ -2789,6 +2790,7 @@ function browserOrigins(config: DaemonConfig): readonly string[] {
 /** Builds the production adapter set. Subsystem units extend this as they land. */
 export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
   const clock = new SystemClock();
+  const millisecondClock = { now: () => Date.now() };
   const environment = new RuntimeEnvironment();
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
   const worktreeClock = new SystemWorktreeClock();
@@ -3507,6 +3509,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       return {
         health: createHealthSubsystem(health, scratch),
         pairing,
+        fleet: createDaemonFleetSubsystem({ paths, userHome: homedir(), clock: millisecondClock }),
         attention: new AttentionService(
           // The ledger repository is handed raw ids from the transport, so the id is parsed here
           // rather than asserted: an id the layout would not accept must never become a directory
@@ -3668,7 +3671,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),
-    clock: { now: () => Date.now() },
+    clock: millisecondClock,
     stt: new SttService({
       models: sttModels,
       worker: sttWorker,
