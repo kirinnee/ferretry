@@ -757,10 +757,11 @@ git ls-files "packages/*/src/lib/*" | grep '\.ts$' | grep -v tests    # 634 file
 and the two patterns that needed pinning:
 
 ```bash
-# private members — DECLARATIONS ONLY. `^\s+(private|#)[a-zA-Z]` looks right and is not: `private`
-# is followed by a SPACE, so that pattern silently counts only `#name` fields and misses every
-# TypeScript `private` modifier. 159 vs 718.
-rg -c '^\s*(private\s|(readonly\s+)?#[A-Za-z])'
+# private members — DECLARATIONS ONLY, and the UNIT IS MATCHING LINES, which for this pattern equals
+# occurrences (718 either way, checked with -o) because every declaration sits on its own line.
+# `^\s+(private|#)[a-zA-Z]` looks right and is not: `private` is followed by a SPACE, so that pattern
+# silently counts only `#name` fields and misses every TypeScript `private` modifier. 159 vs 718.
+rg -c '^\s*(private\s|(readonly\s+)?#[A-Za-z])'   # 718 lines in 117 files
 
 # module-level singletons — tolerate a type annotation, then exclude value-object constructors.
 # `^export const [a-zA-Z]+ = new ` misses `export const X: ReadonlySet<T> = new Set(…)` twice over:
@@ -768,15 +769,15 @@ rg -c '^\s*(private\s|(readonly\s+)?#[A-Za-z])'
 rg -n '^export const [A-Za-z_][A-Za-z0-9_]*(: [^=]+)? = new ' | grep -vE '= *new (Set|Map|WeakMap|WeakSet|RegExp|Date|URL)\b'
 ```
 
-| doctrine                                                          | rule probed                              | result on 634 files                                                                                                                                                                                                                                                                                    |
-| ----------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| SOLID — zero private methods                                      | declarations, pinned above               | **718 declarations in 117 of 634 files (18%).** Real, broad drift against the corollary — and **not `pwa`-concentrated**: the largest single file is `daemon/lib/runtime/mounts/fleet.ts` (28), then `pwa/lib/stt/browser-recognition.ts` (24), `daemon/lib/session/events/service.ts` (22). See below |
-| SOLID — no singletons                                             | pinned above                             | **one**, `pwa/src/lib/drafts.ts:189` `documentDraftStore`. Seven others match before the value-object exclusion; all are frozen `new Set(…)` collections. **A knowing, documented exception** — the composer needs a value at module load, before any React context exists. See below                  |
-| Datetime — never read the ambient clock in domain code            | `Date.now()` / argless `new Date()`      | **9 reads, and every one is an injectable default** (8 default parameters in 6 `pwa/src/lib` files, plus `options.now ?? (() => new Date())`). **Zero required ambient reads.** See below                                                                                                              |
-| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                                                                                                                             |
-| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **6 files**: the four `daemon/src/lib/session/*/settings.ts`, `session/resume/types.ts`, `pwa/lib/account-picker-catalog.ts`                                                                                                                                                                           |
-| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                                                                                                                             |
-| Functional — railway over throwing                                | `throw new`                              | 165 (daemon 89, cli 38, pwa 29, fleet 8, protocol 1). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary and `ApiError` is one                                                                                                                                 |
+| doctrine                                                          | rule probed                              | result on 634 files                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SOLID — zero private methods                                      | declarations, pinned above               | **718 matching lines in 117 of 634 files (18%)**; lines == occurrences here. Real, broad drift against the corollary — and **not `pwa`-concentrated**: the largest single file is `daemon/lib/runtime/mounts/fleet.ts` (28), then `pwa/lib/stt/browser-recognition.ts` (24), `daemon/lib/session/events/service.ts` (22) — four of the top five in `daemon`. See below |
+| SOLID — no singletons                                             | pinned above                             | **one**, `pwa/src/lib/drafts.ts:189` `documentDraftStore`. Seven others match before the value-object exclusion; all are frozen `new Set(…)` collections. **A knowing, documented exception** — the composer needs a value at module load, before any React context exists. See below                                                                                  |
+| Datetime — never read the ambient clock in domain code            | `Date.now()` / argless `new Date()`      | **9 reads, and every one is an injectable default** (8 default parameters in 6 `pwa/src/lib` files, plus `options.now ?? (() => new Date())`). **Zero required ambient reads.** See below                                                                                                                                                                              |
+| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                                                                                                                                                                                             |
+| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **6 files**: the four `daemon/src/lib/session/*/settings.ts`, `session/resume/types.ts`, `pwa/lib/account-picker-catalog.ts`                                                                                                                                                                                                                                           |
+| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                                                                                                                                                                                             |
+| Functional — railway over throwing                                | `throw new`                              | 165 (daemon 89, cli 38, pwa 29, fleet 8, protocol 1). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary and `ApiError` is one                                                                                                                                                                                                 |
 
 **Two results deserve a sentence rather than a cell, because both are doctrine questions rather than
 defects — and the doctrine should answer them so nobody re-litigates them.**
@@ -805,7 +806,7 @@ defects — and the doctrine should answer them so nobody re-litigates them.**
 > defaults and the one singleton are there. Every item is a _bypass of a mechanism the package already
 > has_ — zod is a direct dependency used in three files.
 >
-> **Drift B — the private-method corollary, and it is repo-wide.** 718 declarations in 117 files, led by
+> **Drift B — the private-method corollary, and it is repo-wide.** 718 declarations (matching lines) in 117 files, led by
 > a daemon mount. This is a genuine doctrine question, not sloppiness in one package.
 >
 > **Neither is the patchwork.** That is a third thing: **none of the eight doctrine articles says
@@ -1042,6 +1043,24 @@ in the same direction.**
 cinthia framed the second as over-matching that needed an exclusion; it is actually **under**-matching
 that needed annotation tolerance _and_ an exclusion, so the judgement ("frozen collections are value
 objects, not services") becomes stated rather than accidental.
+
+**2c. Two correct patterns, two different numbers, reconciled exactly.** A third review round produced
+626 declarations in 112 files against my 718 in 117 — same class again, and the right response is not to
+pick one. The delta is **entirely `readonly #field`**:
+
+```
+cinthia   ^\s*(private\s|#[a-zA-Z])                      626 lines / 112 files
+mine      ^\s*(private\s|(readonly\s+)?#[A-Za-z])        718 lines / 117 files
+delta     ^\s*readonly\s+#[A-Za-z]                        92 lines /  29 files    626 + 92 = 718
+```
+
+`readonly #x` is a private member declaration, so 718 is the correct count for the thing being measured
+and 626 is a correct count of a smaller thing. Neither pattern is buggy; they answer different questions,
+and only writing both down makes that visible. The unit was also worth pinning and was **not** the cause:
+`rg -c` counts matching lines, and for this pattern lines and occurrences are both 718.
+
+That is §4.5's anti-rule one more time. The instinct on meeting two numbers is to find the wrong one;
+here the answer was that both were right and the reconciliation was the finding.
 
 > **Every silent failure in this document's own measurements was an UNDER-match, and an under-match reads
 > as compliance.** A pathspec that dropped three packages, a pattern that dropped a keyword, a pattern
