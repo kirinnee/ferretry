@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -26,6 +26,45 @@ afterEach(async () => {
 });
 
 describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => {
+  it('should declare a script-selected first account without a YAML edit', async () => {
+    const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-first-account-sit-'));
+    temporaryDirectories.push(stateHome);
+    const environment = { FY_HOME: stateHome, FY_TOKEN: '', FY_URL: '', FY_SESSION_ID: '' };
+
+    // Act
+    const initialized = await driver.run(['fleet', 'init', '--first-account=codex'], environment);
+
+    // Assert — this is deliberately an init-only assertion: no wrapper is materialised until apply.
+    should(initialized.code).equal(0, initialized.err);
+    const config = Bun.YAML.parse(await readFile(path.join(stateHome, 'fleet', 'config.yaml'), 'utf8')) as {
+      agents?: readonly { kind?: string; routes?: Record<string, { wrapper?: string }> }[];
+    };
+    should(config.agents).match([{ kind: 'codex', routes: { default: { wrapper: 'codex-primary' } } }]);
+  });
+
+  it('should prefer Claude when the host can launch both harnesses', async () => {
+    const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-detected-account-sit-'));
+    const harnessBin = path.join(stateHome, 'harness-bin');
+    temporaryDirectories.push(stateHome);
+    await mkdir(harnessBin);
+    for (const harness of ['claude', 'codex']) {
+      const executable = path.join(harnessBin, harness);
+      await writeFile(executable, '#!/bin/sh\nexit 0\n', 'utf8');
+      await chmod(executable, 0o755);
+    }
+    const environment = { FY_HOME: stateHome, FY_TOKEN: '', FY_URL: '', FY_SESSION_ID: '', PATH: harnessBin };
+
+    // Act — the optional flag asks the host for positive launch evidence; the shared policy owns the tie-break.
+    const initialized = await driver.run(['fleet', 'init', '--first-account'], environment);
+
+    // Assert
+    should(initialized.code).equal(0, initialized.err);
+    const config = Bun.YAML.parse(await readFile(path.join(stateHome, 'fleet', 'config.yaml'), 'utf8')) as {
+      agents?: readonly { kind?: string }[];
+    };
+    should(config.agents).match([{ kind: 'claude' }]);
+  });
+
   it('should carry every starter in the shipped command and never replace an existing one', async () => {
     const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-assets-sit-'));
     temporaryDirectories.push(stateHome);

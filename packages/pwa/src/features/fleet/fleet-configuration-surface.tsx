@@ -181,6 +181,8 @@ const AUTHORITY_COPY: Readonly<Record<FleetAuthorityMode, string>> = {
   'read-only': 'Read only',
 };
 
+const FIRST_ACCOUNT_COMMANDS = 'fy fleet init --first-account\nfy fleet apply';
+
 /** The host-state verdict, in the header, in two words. The panel below says the rest. */
 const STATE_BADGE: Readonly<Record<FleetInventory['kind'], { label: string; tone: string }>> = {
   live: { label: 'published', tone: 'ok' },
@@ -780,6 +782,28 @@ export function FleetConfigurationSurface({
             session.permissions?.mayPropose === true ? [] : ['This credential cannot stage a change on this daemon.']
           }
         />
+        {session.permissions?.mayPropose === true ? null : (
+          <section
+            className="mt-3 border-t border-border-soft pt-3"
+            data-fleet-host-guidance=""
+            aria-labelledby={id('-host-guidance-heading')}
+          >
+            <p className="kt-label m-0" id={id('-host-guidance-heading')}>
+              Host-authorised changes
+            </p>
+            <p className="m-0 mt-1 text-meta leading-base text-muted">
+              This paired device may inspect this daemon, but only a terminal on the host may write fleet files or
+              materialise wrappers. For a new fleet, run these commands on that host:
+            </p>
+            <pre className="m-0 mt-2 overflow-x-auto rounded-control border border-border-soft bg-surface-2 p-3 font-mono text-meta leading-base text-fg">
+              {FIRST_ACCOUNT_COMMANDS}
+            </pre>
+            <p className="mb-0 mt-2 text-meta leading-base text-muted">
+              Init creates only missing files. For an existing configuration, use a host-authorised Fleet session to
+              stage its change, then run the host approval command it shows.
+            </p>
+          </section>
+        )}
       </section>
     </section>
   );

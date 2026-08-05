@@ -6,6 +6,7 @@ import {
   buildFleetIdentities,
   buildFleetScaffold,
   buildFleetUsageCollector,
+  defaultFleetHarness,
   FleetIdentityService,
   FleetLoginService,
   FleetPlan,
@@ -557,14 +558,31 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     manifests: new FileFleetManifestSource(layout.manifestPath),
     // Scaffolding seeds the configuration `apply` will actually read, so both take the same path.
     scaffolder: {
-      scaffold: async () =>
-        await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
+      scaffold: async options => {
+        const firstAccount =
+          options.firstAccount === 'detected'
+            ? defaultFleetHarness(
+                (['claude', 'codex'] as const).flatMap(kind =>
+                  Bun.which(kind, { PATH: world.environment.PATH ?? '' }) === null
+                    ? []
+                    : [{ kind, launchable: [kind] }],
+                ),
+              )
+            : options.firstAccount;
+        if (options.firstAccount === 'detected' && firstAccount === undefined) {
+          throw new Error(
+            'no launchable Claude or Codex CLI was found on this host — install one, or choose explicitly with "fy fleet init --first-account=claude"',
+          );
+        }
+        return await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
           buildFleetScaffold({
             layout,
             configPath,
             ids: { claude: randomUUID(), codex: randomUUID() },
+            ...(firstAccount === undefined ? {} : { firstAccount }),
           }),
-        ),
+        );
+      },
     },
     planner: {
       build: (config, generatedAt) => new FleetPlan().build(config, layout, generatedAt),

@@ -39,6 +39,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ferretry/fleet": "workspace:*",
     "@ferretry/protocol": "workspace:*",
     "@ferretry/relay": "workspace:*",
     "@xterm/addon-fit": "^0.11.0",

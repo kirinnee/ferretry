@@ -3,6 +3,7 @@ import type {
   FleetApplyOptions,
   FleetCommandOptions,
   FleetController,
+  FleetInitOptions,
   FleetLoginOptions,
   FleetRecommendOptions,
 } from './controller.ts';
@@ -51,6 +52,10 @@ export function registerFleetCommands(program: Command, controller: FleetControl
     fleet
       .command('init')
       .description('prepare this host: the fleet directories, a starter configuration, and asset space')
+      .option(
+        '--first-account [harness]',
+        'declare the first account in a new configuration; without a harness, chooses a launchable CLI (Claude first)',
+      )
       .addHelpText(
         'after',
         '\nCreates only what is missing, so it is safe to re-run — an upgrade that adds a default\n' +
@@ -58,7 +63,16 @@ export function registerFleetCommands(program: Command, controller: FleetControl
           'generated wrappers need, which is the one step nothing else can do for you.',
       ),
   ).action(async (_flags: unknown, command: Command) => {
-    await controller.init(merged(command));
+    const { firstAccount, ...options } = merged(command) as Omit<FleetInitOptions, 'firstAccount'> & {
+      readonly firstAccount?: unknown;
+    };
+    if (firstAccount !== undefined && firstAccount !== true && firstAccount !== 'claude' && firstAccount !== 'codex') {
+      throw new Error('first account must be "claude" or "codex": fy fleet init --first-account=claude');
+    }
+    await controller.init({
+      ...options,
+      ...(firstAccount === undefined ? {} : { firstAccount: firstAccount === true ? 'detected' : firstAccount }),
+    });
   });
 
   scoped(

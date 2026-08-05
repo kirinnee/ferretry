@@ -103,6 +103,29 @@ describe('the starter configuration', () => {
     should(parsed.agents).be.empty();
   });
 
+  it('should declare one usable starter only when the caller selected its harness', () => {
+    // Act — the file-first default stays empty; this is the explicit fast path for a first host.
+    const selected = buildFleetScaffold({
+      layout: LAYOUT,
+      ids: IDS,
+      configPath: '/state/fleet/config.yaml',
+      firstAccount: 'codex',
+    });
+    const content = selected.files.find(file => file.path === '/state/fleet/config.yaml')?.content ?? '';
+    const parsed = FleetConfigSchema.parse(Bun.YAML.parse(content));
+
+    // Assert — one account is immediately valid for apply, while its id remains caller-supplied and stable.
+    should(parsed.agents).have.length(1);
+    should(parsed.agents[0]).match({ name: 'primary', kind: 'codex' });
+    should(parsed.agents[0]?.routes.default).match({
+      id: IDS.codex,
+      wrapper: 'codex-primary',
+      home: 'codex-primary',
+      defaultModel: 'gpt-5.6',
+      models: [{ id: 'gpt-5.6', available: true }],
+    });
+  });
+
   it('should mount every starter through the harness-scoped base profile', () => {
     // Act
     const parsed = FleetConfigSchema.parse(Bun.YAML.parse(config()));

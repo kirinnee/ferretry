@@ -11,6 +11,7 @@ import type {
   FleetManifest,
   FleetScaffoldResult,
   FleetUsageSnapshot,
+  HarnessKind,
 } from '@ferretry/fleet';
 import type { FleetApprovalMint, IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
@@ -98,7 +99,13 @@ export interface IFleetLoginService {
  * asset space. Creates only what is absent, so it is safe on a host that already has one.
  */
 export interface IFleetScaffolder {
-  scaffold(): Promise<FleetScaffoldResult>;
+  scaffold(options: FleetScaffoldOptions): Promise<FleetScaffoldResult>;
+}
+
+/** How `init` should seed a configuration that does not exist yet. */
+export interface FleetScaffoldOptions {
+  /** Select a named harness, or ask the host to choose from positive launch evidence. */
+  readonly firstAccount?: HarnessKind | 'detected';
 }
 
 /** Reading the wall clock, injected so a plan's `generatedAt` is deterministic in a test. */

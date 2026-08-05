@@ -33,6 +33,11 @@ export interface FleetCommandOptions {
   readonly json?: boolean;
 }
 
+/** Flags that shape the first configuration only; an existing file is always left alone. */
+export interface FleetInitOptions extends FleetCommandOptions {
+  readonly firstAccount?: 'claude' | 'codex' | 'detected';
+}
+
 /** Flags that shape an apply. */
 export interface FleetApplyOptions extends FleetCommandOptions {
   /** Print every write the configuration implies and stop. */
@@ -117,9 +122,9 @@ export class FleetController {
    * external configuration manager behind Ferretry to have placed one. Creates only what is absent,
    * so running it on a live fleet fills in anything a newer release added and disturbs nothing else.
    */
-  async init(options: FleetCommandOptions): Promise<void> {
-    const result = await this.deps.scaffolder.scaffold();
-    this.#report(result, options, () => renderScaffoldResult(result));
+  async init(options: FleetInitOptions): Promise<void> {
+    const result = await this.deps.scaffolder.scaffold({ firstAccount: options.firstAccount });
+    this.#report(result, options, () => renderScaffoldResult(result, options.firstAccount));
   }
 
   /**

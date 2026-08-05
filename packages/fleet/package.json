@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/lib/index.ts",
+    "./harness": "./src/lib/harness.ts",
     "./adapters": "./src/adapters/index.ts"
   },
   "types": "./src/lib/index.ts",

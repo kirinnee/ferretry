@@ -24,6 +24,8 @@
  * Pure: this module decides *what* a fresh fleet contains. Writing it — and deciding what is already
  * there — is an adapter's job.
  */
+
+import type { HarnessKind } from './manifest.ts';
 import type { FleetLayout } from './provisioning.ts';
 
 /** Directories the fleet owns are private: they hold credentials and generated executables. */
@@ -81,13 +83,34 @@ export interface FleetScaffoldIds {
   readonly codex: string;
 }
 
-const configTemplate = (ids: FleetScaffoldIds): string => `# The fleet: every agent account this host can run.
+const starterAccount = (kind: HarnessKind, id: string): string => {
+  const label = kind === 'claude' ? 'Claude' : 'Codex';
+  const model = kind === 'claude' ? 'claude-opus-5' : 'gpt-5.6';
+  return `agents:
+  - name: primary
+    kind: ${kind}
+    # "oauth" signs in through the provider; "api-key" has nothing to sign into.
+    auth: oauth
+    routes:
+      default:
+        id: ${id}
+        wrapper: ${kind}-primary
+        home: ${kind}-primary
+        displayName: ${label} (primary)
+        defaultModel: ${model}
+        models:
+          - ${model}`;
+};
+
+const configTemplate = (
+  ids: FleetScaffoldIds,
+  firstAccount: HarnessKind | undefined,
+): string => `# The fleet: every agent account this host can run.
 #
 # Each account gets its own home, its own generated wrapper, and its own settings.
 # Run "fy fleet apply" after editing, then "fy fleet ls" to see what was published.
 #
-# Nothing below is required. The file is valid as it stands and applies to an empty
-# fleet; uncomment the example and edit it to declare your first account.
+# Nothing below is required. The file is valid as it stands and applies to an empty fleet.
 
 # Shell file every generated wrapper sources before it runs, so that an environment
 # value written as exactly "$NAME" resolves at launch instead of being baked into a
@@ -128,13 +151,16 @@ variants:
         - --dangerously-bypass-approvals-and-sandbox
         - --no-alt-screen
 
-agents: []
+${firstAccount === undefined ? 'agents: []' : starterAccount(firstAccount, ids[firstAccount])}
 
 # ── Example ───────────────────────────────────────────────────────────────────
-# Delete the "agents: []" line above and uncomment this to declare one Claude
-# account with an interactive lane and an automation lane. The ids below were
-# generated for you; every account needs its own, and it must never change once
-# anything has referenced it.
+# ${
+  firstAccount === undefined
+    ? 'Delete the "agents: []" line above and uncomment this to declare one Claude'
+    : 'This is a second Claude account with an interactive lane and an automation lane.'
+}
+# The ids below were generated for you; every account needs its own, and it must
+# never change once anything has referenced it.
 #
 # agents:
 #   - name: work
@@ -250,6 +276,8 @@ export interface FleetScaffoldInput {
    * second notion of that here would let init seed a configuration apply never looks at.
    */
   readonly configPath: string;
+  /** A single account to declare in a newly-created starter; absent keeps the file-first empty fleet. */
+  readonly firstAccount?: HarnessKind;
 }
 
 /**
@@ -259,7 +287,7 @@ export interface FleetScaffoldInput {
  * asset reference used to resolve into a path nothing had made.
  */
 export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
-  const { layout, ids, configPath } = input;
+  const { layout, ids, configPath, firstAccount } = input;
   const separator = layout.assetsDirectory.endsWith('/') ? '' : '/';
   const assetPath = (name: string): string => `${layout.assetsDirectory}${separator}${name}`;
   return {
@@ -274,7 +302,7 @@ export function buildFleetScaffold(input: FleetScaffoldInput): FleetScaffold {
     ],
     directoryMode: DIRECTORY_MODE,
     files: [
-      { path: configPath, content: configTemplate(ids), mode: FILE_MODE },
+      { path: configPath, content: configTemplate(ids, firstAccount), mode: FILE_MODE },
       { path: assetPath('README.md'), content: ASSETS_README, mode: FILE_MODE },
       { path: assetPath('CLAUDE.md'), content: STARTER_INSTRUCTIONS, mode: FILE_MODE },
       { path: assetPath('templates/claude/settings.json'), content: CLAUDE_SETTINGS, mode: FILE_MODE },
