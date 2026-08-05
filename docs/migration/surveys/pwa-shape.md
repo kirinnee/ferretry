@@ -148,6 +148,8 @@ Counting rule: one row is one implicit backend binding, singleton/server-store s
 
 No production runtime client hardcodes a daemon host or port: runtime coupling is current-origin, one injected token, and session-only identity. The only hardcoded daemon origin is the two-entry Vite development proxy.
 
+**This list is the SOURCE's shape, not Ferretry's.** Every row below describes kteam, where one bundle was served by the one daemon it talked to. Ferretry's answer to the whole list is `scripts/validate/daemon-scope.sh`, a pre-commit contract that fails the commit when a PWA surface retains daemon data without a `daemonSessionKey`, opens a request without a `DaemonConnection`, or declares `clearDaemon` without reaching the connection registry ([Contracts](../../standards/contracts/README.md#daemon-scoping)). Rows 46, 50, 53, 54 and 55 in particular are carried in Ferretry by `(daemonId, sessionId)`-keyed modules, and the gate is what stops the fifty-seventh row from being written.
+
 |   # | Assumption site                                                                                                                                                                                   |
 | --: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |   1 | Vite's `/stt-models` dev proxy hardcodes the sole target `http://127.0.0.1:7337` (`vite.config.ts:83-88`).                                                                                        |

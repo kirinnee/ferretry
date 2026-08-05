@@ -104,6 +104,20 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # One browser, several paired daemons: the ids a daemon mints are unique only within it, so
+    # anything the bundle remembers about daemon-owned data has to be keyed by (daemonId, …). Runs
+    # on the whole PWA rather than the touched files because two of its three passes are questions
+    # about the bundle as a whole — which caches the connection registry reaches, and which stores
+    # nothing constructs.
+    a-daemon-scope = {
+      enable = true;
+      name = "PWA daemon scoping";
+      entry = validator "scripts/validate/daemon-scope.sh";
+      files = "^(packages/pwa/src/.*\\.tsx?|scripts/validate/daemon-scope\\.(sh|ts)|scripts/validate/daemon-scope-allowlist\\.txt)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-legacy-state = {
       enable = true;
       name = "No legacy package state";
