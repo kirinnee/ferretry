@@ -1,6 +1,11 @@
 import { chmod, lstat, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { FleetScaffold, FleetScaffolder, FleetScaffoldResult } from '../lib/scaffold.ts';
+import {
+  type FleetScaffold,
+  type FleetScaffolder,
+  FleetScaffoldPartialError,
+  type FleetScaffoldResult,
+} from '../lib/scaffold.ts';
 
 /**
  * Writes a first-run scaffold to a real filesystem.
@@ -28,18 +33,41 @@ export class FileFleetScaffolder implements FleetScaffolder {
     this.allowedRoots = allowedRoots.map(root => path.resolve(root));
   }
 
+  /**
+   * Prepare a host, reporting exactly what landed if it cannot finish.
+   *
+   * A scaffold has no undo — every file it writes is one that was absent, so taking them back could
+   * not be told apart from deleting files somebody else had just made. Failing part-way is
+   * therefore a real state a person is left in, and it is described rather than collapsed into an
+   * error that implies nothing happened.
+   */
   async scaffold(scaffold: FleetScaffold): Promise<FleetScaffoldResult> {
-    for (const directory of scaffold.directories) {
-      this.assertWritablePath(directory);
-      await mkdir(directory, { recursive: true, mode: scaffold.directoryMode });
-    }
-
+    const directories: string[] = [];
     const created: string[] = [];
     const kept: string[] = [];
+    const progress = { created, kept, directories };
+
+    for (const directory of scaffold.directories) {
+      try {
+        this.assertWritablePath(directory);
+        await mkdir(directory, { recursive: true, mode: scaffold.directoryMode });
+      } catch (error) {
+        throw new FleetScaffoldPartialError(directory, progress, error);
+      }
+      directories.push(directory);
+    }
+
     for (const file of scaffold.files) {
-      this.assertWritablePath(file.path);
-      if (await this.writeIfAbsent(file.path, file.content, file.mode)) created.push(file.path);
-      else kept.push(file.path);
+      try {
+        this.assertWritablePath(file.path);
+        // Recorded from inside, the moment the file exists: a `chmod` that fails afterwards does
+        // not un-write it, and leaving it out of the report would hide a file that is on the host.
+        if (!(await this.writeIfAbsent(file.path, file.content, file.mode, () => created.push(file.path)))) {
+          kept.push(file.path);
+        }
+      } catch (error) {
+        throw new FleetScaffoldPartialError(file.path, progress, error);
+      }
     }
 
     return {
@@ -58,7 +86,18 @@ export class FileFleetScaffolder implements FleetScaffolder {
    * their fleet is set up while the next `apply` fails somewhere far away with a confusing error.
    * Refuse and name the path instead.
    */
-  private async writeIfAbsent(destination: string, content: string, mode: number): Promise<boolean> {
+  /**
+   * @param onCreated Called the instant the file exists, before anything that can still fail.
+   *   A scaffold has no undo, so a file this wrote is on the host whether or not the mode was set
+   *   afterwards — and a partial report that omitted it would send somebody looking for a file that
+   *   is already there.
+   */
+  private async writeIfAbsent(
+    destination: string,
+    content: string,
+    mode: number,
+    onCreated: () => void,
+  ): Promise<boolean> {
     await mkdir(path.dirname(destination), { recursive: true });
     try {
       await writeFile(destination, content, { flag: 'wx', mode });
@@ -70,6 +109,7 @@ export class FileFleetScaffolder implements FleetScaffolder {
       }
       return false;
     }
+    onCreated();
     // `wx` honours the process umask, so a mode meant to be private may not be. Set it explicitly.
     await chmod(destination, mode);
     return true;

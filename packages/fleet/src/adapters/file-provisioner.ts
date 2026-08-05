@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import type { Stats } from 'node:fs';
 import {
   chmod,
   cp,
+  link,
   lstat,
   mkdir,
   readdir,
   readFile,
   realpath,
-  rename,
   rm,
   stat,
   symlink,
@@ -16,9 +17,10 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
-import { FleetApplyLock, type FleetApplyLockOptions } from './apply-lock.ts';
+import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
 import { FileMutationJournal, isMutationBackupName } from './mutation-journal.ts';
 import {
+  ABSENT_DOCUMENT_REVISION,
   type FleetApplyCommittedState,
   FleetApplyFailureError,
   type FleetApplyPlan,
@@ -55,8 +57,30 @@ type CodexSqliteMarker = z.output<typeof CodexSqliteMarkerSchema>;
 /** Reserved basename prefix for a replacement being built beside the entry it will become. */
 const STAGE_PREFIX = '.fy-fleet-staged-';
 
+const MODE_BITS = 0o7777;
+
+/**
+ * Drop a staged replacement without ever becoming the reported failure.
+ *
+ * These run in a `finally`, on both the succeeding and the failing path. A throw here would replace
+ * the error that actually caused the failure — leaving the caller to debug a cleanup instead of the
+ * cause — or turn a published write into a spurious rollback. Leftovers carry a reserved prefix,
+ * are skipped by the sweep, and are inert.
+ */
+async function discardQuietly(staged: string): Promise<void> {
+  try {
+    await rm(staged, { recursive: true, force: true });
+  } catch {
+    // Deliberately swallowed: see above.
+  }
+}
+
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** A missing ancestor and an ancestor that is not a directory both end canonical resolution. */
@@ -123,10 +147,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * against the same `manifestPath`, so its directory is the one name they all agree on.
    */
   private lockFor(plan: FleetApplyPlan): FleetApplyLock {
-    return new FleetApplyLock(
-      path.join(path.dirname(path.resolve(plan.manifestPath)), '.fy-fleet-apply.lock'),
-      this.lockOptions,
-    );
+    return fleetApplyLockFor(plan.manifestPath, this.lockOptions);
   }
 
   async preview(plan: FleetApplyPlan): Promise<FleetApplyPreview> {
@@ -155,11 +176,36 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // "the state before", so their rollbacks undo one another and neither report is true. The queue
     // orders callers inside this one object; the lock file orders this object against a separate
     // command-line invocation, which the queue alone cannot see.
+    // Containment is decided before the claim, not after: the lock lives beside the manifest, so
+    // taking it first would create a directory for a plan that is about to be refused for pointing
+    // outside the allowed roots — the refusal would be correct and the host would still be changed.
+    await this.assertWritablePath(plan.manifestPath);
     const lock = this.lockFor(plan);
-    const run = this.queue.then(
-      () => lock.run(() => this.applyExclusively(plan, documents)),
-      () => lock.run(() => this.applyExclusively(plan, documents)),
-    );
+    // The claim is a file this adapter creates, so it is held to the same containment as every
+    // other write. Checking only the manifest would let a plan whose manifest sits inside the roots
+    // still cause a lock file — and a directory for it — somewhere they do not.
+    await this.assertWritablePath(lock.path);
+    const guarded = async (): Promise<FleetApplyResult> => {
+      const token = await lock.acquire();
+      try {
+        const result = await this.applyExclusively(plan, documents);
+        const lockResidue = await lock.release(token);
+        return lockResidue === undefined ? result : { ...result, lockResidue };
+      } catch (error) {
+        // The release runs either way, and its residue never changes what the apply was: a failed
+        // apply that also leaked its lock is still that failure, now carrying one more fact.
+        const lockResidue = await lock.release(token);
+        if (lockResidue === undefined) throw error;
+        if (error instanceof FleetApplyFailureError) throw new FleetApplyFailureError(error.failure, lockResidue);
+        // A refusal that never reached the rollback machinery still has to carry the residue, or a
+        // leaked claim silently blocks every later apply with nothing said about it.
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}; the exclusive apply claim at ${lockResidue} could not be cleared`,
+          { cause: error },
+        );
+      }
+    };
+    const run = this.queue.then(guarded, guarded);
     this.queue = run.then(
       () => undefined,
       () => undefined,
@@ -247,9 +293,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   /** Undo the batch and classify what the host is now, which is the only thing a caller can act on. */
   private async rollback(journal: FileMutationJournal, stage: string, error: unknown): Promise<Error> {
-    const unrestored = await journal.rollback();
+    const { unrestored, displaced } = await journal.rollback();
     const reason = error instanceof Error ? error.message : String(error);
-    if (unrestored.length === 0) {
+    // "Rolled back" is a claim about the host, not about the fleet: anything of somebody else's
+    // that had to be moved out of the way leaves a renamed path and a reserved file behind, so it
+    // belongs with the incomplete outcomes however cleanly the fleet itself reverted.
+    if (unrestored.length === 0 && displaced.length === 0) {
       return new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: stage, reason });
     }
     return new FleetApplyFailureError({
@@ -257,6 +306,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       failedOperation: stage,
       reason,
       unrestored,
+      ...(displaced.length === 0 ? {} : { displaced }),
     });
   }
 
@@ -264,8 +314,28 @@ export class FileFleetProvisioner implements FleetProvisioner {
     await this.assertWritablePath(document.path);
     await journal.captureDirectory(path.dirname(document.path));
     await journal.capture(document.path);
+    // Checked here and nowhere earlier. The capture has already renamed whatever was at the path
+    // out of everyone's reach, so what it moved aside is exactly what this write is replacing and
+    // the answer cannot go stale between the question and the write. A check made before the
+    // capture leaves a window in which the host is edited and the edit is silently overwritten.
+    //
+    // Unconditional, deliberately: a write that expected to find a file and finds nothing is a
+    // write whose author never saw the deletion, and recreating the file would silently undo it.
+    if (document.expect !== undefined) await this.assertExpected(document, journal);
     await mkdir(path.dirname(document.path), { recursive: true });
     await this.writeFileAtomically(document.path, document.content, document.mode);
+  }
+
+  private async assertExpected(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
+    const backup = journal.backupOf(document.path);
+    const found =
+      backup === undefined
+        ? ABSENT_DOCUMENT_REVISION
+        : new Bun.CryptoHasher('sha256').update(await readFile(backup)).digest('hex');
+    if (found === document.expect) return;
+    throw new Error(
+      `refusing to write ${document.path}: it is not what this change was composed against, so applying would discard the newer version`,
+    );
   }
 
   /** Validate the published record before preview returns or apply performs its first write. */
@@ -447,15 +517,20 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'settings') {
-      // Resolved before anything is moved aside: `preserveExisting` folds the file currently at the
-      // destination in as the base layer, and capturing it first would read it as absent.
-      const content = await this.resolveSettings(operation.path, operation.format, operation.layers, {
+      await journal.captureDirectory(path.dirname(operation.path));
+      // Clear the path only when this batch already owned it. After a fresh capture the path is
+      // empty, and anything that has appeared since belongs to somebody else — the publishing link
+      // then fails with EEXIST rather than silently replacing their file.
+      if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
+      // Resolved from what the capture moved aside, not from the live path before it. Reading the
+      // live path first left a window in which a harness wrote a runtime key, the capture then
+      // moved that newer file away, and the merge — computed from the older one — discarded it.
+      // The backup cannot change under this read, so the keys folded in are exactly the keys that
+      // were there when this operation took ownership of the destination.
+      const content = await this.resolveSettings(journal.backupOf(operation.path), operation.format, operation.layers, {
         preserveExisting: operation.preserveExisting,
       });
-      await journal.captureDirectory(path.dirname(operation.path));
-      await journal.capture(operation.path);
       await mkdir(path.dirname(operation.path), { recursive: true });
-      await rm(operation.path, { recursive: true, force: true });
       await this.writeFileAtomically(operation.path, content, operation.mode);
       return [];
     }
@@ -464,8 +539,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
     await mkdir(path.dirname(operation.path), { recursive: true });
 
     if (operation.kind === 'symlink') {
-      await journal.capture(operation.path);
-      await rm(operation.path, { recursive: true, force: true });
+      // Clear the path only when this batch already owned it. After a fresh capture the path is
+      // empty, and anything that has appeared since belongs to somebody else: letting `symlink`
+      // fail with EEXIST surfaces that as a refusal instead of deleting their work.
+      if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
       await symlink(operation.source, operation.path);
       return [];
     }
@@ -484,11 +561,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // A template linked out of a read-only store copies as 0444; force the copied root writable
         // so a harness can rewrite a file it owns. Directories remain private to the account.
         await chmod(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
-        await journal.capture(operation.path);
-        await rm(operation.path, { recursive: true, force: true });
-        await rename(staged, operation.path);
+        if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
+        await this.publish(staged, operation.path);
       } finally {
-        await rm(staged, { recursive: true, force: true });
+        await discardQuietly(staged);
       }
       return [];
     }
@@ -613,7 +689,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       if (keep.has(entry)) continue;
       // A backup of a managed wrapper still carries the managed marker. Sweeping it away would
       // destroy the only copy of what this very batch may still need to put back.
-      if (isMutationBackupName(entry)) continue;
+      if (isMutationBackupName(entry) || entry.startsWith(STAGE_PREFIX)) continue;
       const target = path.join(directory, entry);
       const stats = await lstat(target);
       if (!stats.isFile()) continue;
@@ -622,20 +698,35 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const content = await readFile(target, 'utf8');
       if (!content.includes(marker)) continue;
       await journal.capture(target);
+      // The decision was made from the file as it was read; the capture moved aside the file as it
+      // is now. If something replaced it in between, what was moved aside is not what this sweep
+      // agreed to remove — and putting it back by hand would replace the newcomer in turn. So the
+      // apply fails here and the rollback decides: it restores only where the name is still free,
+      // and otherwise keeps the backup and reports the path as unrestored.
+      if (!(await this.stillCarries(journal.backupOf(target), marker))) {
+        throw new Error(`refusing to prune ${target}: it changed between being read and being removed`);
+      }
       pruned.push(entry);
     }
     return pruned;
   }
 
+  private async stillCarries(backup: string | undefined, marker: string): Promise<boolean> {
+    if (backup === undefined) return false;
+    const stats = await lstat(backup);
+    if (!stats.isFile()) return false;
+    return (await readFile(backup, 'utf8')).includes(marker);
+  }
+
   private async resolveSettings(
-    destination: string,
+    previous: string | undefined,
     format: SettingsFormat,
     layers: readonly SettingsLayerSource[],
     options: { readonly preserveExisting: boolean },
   ): Promise<string> {
     const resolved: SettingsObject[] = [];
-    if (options.preserveExisting) {
-      const existing = await this.readExistingSettings(destination, format);
+    if (options.preserveExisting && previous !== undefined) {
+      const existing = await this.readExistingSettings(previous, format);
       if (existing !== undefined) resolved.push(existing);
     }
     for (const layer of layers) {
@@ -652,12 +743,34 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * can be merged, so both yield nothing rather than failing the apply.
    */
   private async readExistingSettings(destination: string, format: SettingsFormat): Promise<SettingsObject | undefined> {
+    let stats: Awaited<ReturnType<typeof lstat>>;
     try {
-      const stats = await lstat(destination);
-      if (!stats.isFile()) return undefined;
-      return parseSettings(await readFile(destination, 'utf8'), format);
-    } catch {
-      return undefined;
+      stats = await lstat(destination);
+    } catch (error) {
+      // Absent is the ordinary first-apply case and carries nothing to preserve.
+      if (isMissing(error)) return undefined;
+      throw error;
+    }
+    // A symlink is the one justified exception: it holds template content the assets directory is
+    // the authority for, not runtime keys, so there is nothing of the person's in it to lose.
+    // Everything else is fail-closed. A settings file that cannot be read or parsed — and a
+    // directory or a device node where one should be — is state this apply is about to replace with
+    // a merge computed without it, and silently discarding somebody's configuration because it was
+    // damaged is the worst of the available answers. Refusing leaves it where it is, to be looked at.
+    if (stats.isSymbolicLink()) return undefined;
+    if (!stats.isFile()) {
+      throw new Error(`refusing to merge settings over ${destination}: it is not a regular file`);
+    }
+    let document: string;
+    try {
+      document = await readFile(destination, 'utf8');
+    } catch (error) {
+      throw new Error(`refusing to merge settings over ${destination}: it could not be read (${reasonOf(error)})`);
+    }
+    try {
+      return parseSettings(document, format);
+    } catch (error) {
+      throw new Error(`refusing to merge settings over ${destination}: it could not be parsed (${reasonOf(error)})`);
     }
   }
 
@@ -675,9 +788,70 @@ export class FileFleetProvisioner implements FleetProvisioner {
     try {
       await writeFile(temporary, content, { flag: 'wx', mode });
       await chmod(temporary, mode);
-      await rename(temporary, destination);
+      await this.publish(temporary, destination);
     } finally {
-      await rm(temporary, { force: true });
+      await discardQuietly(temporary);
     }
+  }
+
+  /**
+   * Move a staged entry into its final name, refusing rather than overwriting.
+   *
+   * Every destination is captured before this runs, so the name is free and `link` succeeds. If it
+   * does not, something arrived in the window between the capture and the publish — and a rename,
+   * which would silently replace it, is exactly the wrong answer. Directories cannot be linked, so
+   * a staged tree is renamed after the same emptiness has been established by the capture.
+   */
+  private async publish(staged: string, destination: string): Promise<void> {
+    const information = await lstat(staged);
+    if (!information.isDirectory()) {
+      // `link` is the no-replace primitive: it fails rather than overwriting, so a destination that
+      // reappeared between the capture and here is refused instead of silently replaced.
+      await link(staged, destination);
+      await rm(staged, { force: true });
+      return;
+    }
+    // A directory has no no-replace rename: `rename` will happily replace an empty one, taking its
+    // inode, mode and ownership with it, and a check beforehand only narrows the window rather than
+    // closing it. So the tree is published with primitives that are exclusive at every level —
+    // non-recursive `mkdir` for each directory, `link` for each file — and any name already taken
+    // fails rather than being overwritten.
+    //
+    // The trade is that the tree becomes visible entry by entry instead of all at once. That is
+    // acceptable precisely because it stays truthful: a publish that fails part-way leaves the
+    // operation unsealed, and an unsealed destination is reported rather than deleted on a guess.
+    // Silently destroying somebody's file would not be truthful at any speed.
+    await this.publishTree(staged, destination, information.mode & MODE_BITS);
+    await rm(staged, { recursive: true, force: true });
+  }
+
+  private async publishTree(staged: string, destination: string, mode: number): Promise<void> {
+    await mkdir(destination, { mode });
+    for (const entry of await readdir(staged, { withFileTypes: true })) {
+      const from = path.join(staged, entry.name);
+      const to = path.join(destination, entry.name);
+      const information = await lstat(from);
+      if (information.isDirectory()) {
+        await this.publishTree(from, to, information.mode & MODE_BITS);
+        continue;
+      }
+      await this.publishFile(from, to, information);
+    }
+    await chmod(destination, mode);
+  }
+
+  /**
+   * Place one staged regular file under a name nothing else holds.
+   *
+   * `link` is the exclusive primitive: if a concurrent writer claimed this name after the parent
+   * directory was created, it fails with `EEXIST` and their bytes stay theirs.
+   */
+  private async publishFile(from: string, to: string, information: Stats): Promise<void> {
+    // The copy dereferences its sources, so a link, a socket or a device here is not something this
+    // apply produced — and hard-linking one into an account home is not a thing to do on a guess.
+    if (!information.isFile()) {
+      throw new Error(`refusing to publish ${to}: the staged entry is not a regular file`);
+    }
+    await link(from, to);
   }
 }

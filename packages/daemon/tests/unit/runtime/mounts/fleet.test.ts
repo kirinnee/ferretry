@@ -13,6 +13,7 @@ import {
 } from '@ferretry/fleet';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
+import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
@@ -33,6 +34,9 @@ interface FleetFixture {
   readonly dispatcher: ApiDispatcher;
 }
 
+/** Shared counter behind the deterministic identity a fixture mints. */
+let minted = 1;
+
 async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}): Promise<FleetFixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-daemon-fleet-route-'));
   temporaryDirectories.push(root);
@@ -47,6 +51,11 @@ async function fixture(options: { readonly healthProbe?: FleetHealthProbe } = {}
     clock: { now: () => GENERATED_AT_MS },
     files: new StateFileSystem(paths),
     platform: 'linux',
+    // Counted rather than random, so a proposal handle and an account id are both assertable.
+    mintId: () => `proposal${String(minted++).padStart(14, '0')}`,
+    mintUuid: () => `00000000-0000-4000-8000-${String(minted++).padStart(12, '0')}`,
+    mintApprovalCode: () => 'AAAA-BBBB',
+    rootPinner: new ProcfsSessionRootPinner(),
     healthProbe: options.healthProbe,
   });
   const credentials = {
@@ -104,6 +113,10 @@ describe('the daemon fleet mount', () => {
       clock: { now: () => GENERATED_AT_MS },
       files: new StateFileSystem(paths),
       platform: 'linux',
+      mintId: () => 'proposal00000000000000',
+      mintUuid: () => '00000000-0000-4000-8000-000000000001',
+      mintApprovalCode: () => 'AAAA-BBBB',
+      rootPinner: new ProcfsSessionRootPinner(),
     }) as unknown as { healthProbe(): { probe: unknown } };
     should(subsystem.healthProbe().probe).be.a.Function();
   });

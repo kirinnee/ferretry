@@ -94,6 +94,27 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     apply: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    permissions: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    assets: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    asset: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    propose: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    readProposal: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    authorizeProposal: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    applyProposal: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
   },
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
@@ -209,6 +230,16 @@ describe('the mounted daemon surface', () => {
       'GET /v1/fleet/usage',
       'GET /v1/fleet/health',
       'POST /v1/fleet/apply',
+      'GET /v1/fleet/permissions',
+      'GET /v1/fleet/assets',
+      'GET /v1/fleet/assets/:assetPath',
+      'POST /v1/fleet/proposals',
+      'GET /v1/fleet/proposals/:proposalId',
+      // Host-scoped: only the host's own admin token may mint an approval, and NOTE WHAT IS ABSENT —
+      // no route returns a minted code to anyone who did not just ask for it, and no read discloses
+      // one at all.
+      'POST /v1/fleet/proposals/:proposalId/authorize',
+      'POST /v1/fleet/proposals/:proposalId/apply',
       'GET /v1/gc',
       'POST /v1/gc',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is

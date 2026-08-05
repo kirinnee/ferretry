@@ -124,11 +124,39 @@ export interface FleetDocumentWrite {
   readonly path: string;
   readonly content: string;
   readonly mode: number;
+  /**
+   * The digest this write expects to find already at `path`, or `ABSENT_DOCUMENT_REVISION` when it
+   * expects nothing there.
+   *
+   * Checked *after* the existing entry has been captured, which is the only point at which the
+   * answer cannot go stale: capture renames the entry away atomically, so nothing else can reach
+   * the path afterwards and what was moved aside is exactly what the check is about. A check made
+   * before the capture leaves a window in which the host is edited and the edit is then silently
+   * overwritten by text composed against the older version.
+   */
+  readonly expect?: string;
 }
+
+/** The expected-digest value meaning "nothing should be here yet". */
+export const ABSENT_DOCUMENT_REVISION = 'absent';
 
 export interface FleetProvisioner {
   preview(plan: FleetApplyPlan): Promise<FleetApplyPreview>;
   apply(plan: FleetApplyPlan, documents?: readonly FleetDocumentWrite[]): Promise<FleetApplyResult>;
+}
+
+/**
+ * State a rollback moved out of the way rather than deleting.
+ *
+ * A rollback only ever renames; it never deletes anything it cannot prove it wrote. When what sat
+ * at a destination turned out not to be this apply's own work, it is kept under a reserved name and
+ * reported here, because it is somebody's data and only they can decide what it is worth.
+ */
+export interface DisplacedState {
+  /** Where it was. */
+  readonly path: string;
+  /** Where it is now. */
+  readonly movedTo: string;
 }
 
 /** A path whose prior state could not be put back, and the reason it could not. */
@@ -154,6 +182,11 @@ export interface FleetApplyCommittedState {
   readonly sharedHistory: readonly SharedHistoryPreview[];
   /** Moved-aside evidence left on disk by the committed apply. */
   readonly backupResidue?: readonly string[];
+  /**
+   * The exclusive claim this apply could not verify releasing. Residue, never a failure — but it
+   * blocks the next apply until it is cleared, so it is named rather than swallowed.
+   */
+  readonly lockResidue?: string;
 }
 
 /**
@@ -166,16 +199,23 @@ export interface FleetApplyCommittedState {
 export type FleetApplyFailure =
   | {
       /** Nothing was committed. Every captured entry was verified back to its prior state. */
+      /**
+       * Nothing was committed and the host is exactly as it was: every captured entry verified
+       * back, and nothing of anyone else's moved. Both conditions, because a rollback that had to
+       * set somebody's file aside left the host with a path renamed and a reserved file present —
+       * true of the fleet, but not true of the host, and this is the state a reader acts on.
+       */
       readonly kind: 'rolled-back';
       readonly failedOperation: string;
       readonly reason: string;
     }
   | {
-      /** Restoration was attempted and could not be verified for the named paths. */
+      /** Restoration could not be verified, or something not ours had to be moved out of the way. */
       readonly kind: 'rollback-incomplete';
       readonly failedOperation: string;
       readonly reason: string;
       readonly unrestored: readonly UnrestoredPath[];
+      readonly displaced?: readonly DisplacedState[];
     }
   | {
       /**
@@ -193,8 +233,19 @@ function describeFailure(failure: FleetApplyFailure): string {
     return `apply failed at ${failure.failedOperation}: ${failure.reason} — the host was restored to its previous state and nothing was committed`;
   }
   if (failure.kind === 'rollback-incomplete') {
-    const paths = failure.unrestored.map(entry => `${entry.path} (${entry.reason})`).join('; ');
-    return `apply failed at ${failure.failedOperation}: ${failure.reason} — restoration could not be verified for: ${paths}`;
+    const parts: string[] = [];
+    if (failure.unrestored.length > 0) {
+      parts.push(
+        `restoration could not be verified for: ${failure.unrestored.map(entry => `${entry.path} (${entry.reason})`).join('; ')}`,
+      );
+    }
+    const displaced = failure.displaced ?? [];
+    if (displaced.length > 0) {
+      parts.push(
+        `content that was not this apply's was moved aside: ${displaced.map(entry => `${entry.path} → ${entry.movedTo}`).join('; ')}`,
+      );
+    }
+    return `apply failed at ${failure.failedOperation}: ${failure.reason} — ${parts.join('; and ')}`;
   }
   return `the fleet was applied and its manifest published at ${failure.committed.manifestPath}, but ${failure.failedHarness} shared history failed afterwards: ${failure.reason}`;
 }
@@ -204,8 +255,16 @@ function describeFailure(failure: FleetApplyFailure): string {
  * structured evidence so a caller that only logs it still says something true.
  */
 export class FleetApplyFailureError extends Error {
-  constructor(readonly failure: FleetApplyFailure) {
-    super(describeFailure(failure));
+  constructor(
+    readonly failure: FleetApplyFailure,
+    /** An exclusive claim whose release could not be verified. Never changes the classification. */
+    readonly lockResidue?: string,
+  ) {
+    super(
+      lockResidue === undefined
+        ? describeFailure(failure)
+        : `${describeFailure(failure)}; the exclusive apply claim at ${lockResidue} could not be cleared`,
+    );
     this.name = 'FleetApplyFailureError';
   }
 }
@@ -223,6 +282,12 @@ export interface FleetApplyResult {
    * committed apply to tidy up would delete the very state the manifest now describes.
    */
   readonly backupResidue?: readonly string[];
+  /**
+   * The exclusive claim this apply could not verify releasing. Residue, never a failure — reporting
+   * it as one would turn a fleet that fully landed into a fleet the caller believes was refused —
+   * but it blocks the next apply until it is cleared, so it is named rather than swallowed.
+   */
+  readonly lockResidue?: string;
 }
 
 export class FleetApplyService {

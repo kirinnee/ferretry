@@ -1,10 +1,10 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileFleetScaffolder } from '../../src/adapters/file-scaffolder.ts';
-import type { FleetScaffold } from '../../src/lib/scaffold.ts';
+import { type FleetScaffold, FleetScaffoldPartialError } from '../../src/lib/scaffold.ts';
 
 const scaffoldFor = (root: string): FleetScaffold => ({
   directories: [root, path.join(root, 'bin'), path.join(root, 'assets')],
@@ -122,6 +122,97 @@ describe('FileFleetScaffolder', () => {
 
       // Assert
       await should(act()).be.rejectedWith(/refusing to write outside configured fleet roots/u);
+    });
+  });
+
+  it('should name exactly what it kept, what it created and where it stopped', async () => {
+    await withTemporaryFleet(async root => {
+      // Arrange — one starter already exists (so it is KEPT), the next lands (CREATED), and a third
+      // cannot be written because a directory occupies its name. Preparing a host has no undo, so
+      // all three facts are a real state somebody is left in and all three are reported.
+      const subject = new FileFleetScaffolder([root]);
+      const scaffold = scaffoldFor(root);
+      const third = path.join(root, 'assets', 'STARTER.md');
+      await mkdir(third, { recursive: true });
+      await writeFile(path.join(root, 'config.yaml'), 'agents: [] # mine already\n');
+      const blocked: FleetScaffold = {
+        ...scaffold,
+        files: [...scaffold.files, { path: third, content: 'third\n', mode: 0o600 }],
+      };
+
+      // Act
+      let failure: FleetScaffoldPartialError | undefined;
+      try {
+        await subject.scaffold(blocked);
+      } catch (error) {
+        failure = error as FleetScaffoldPartialError;
+      }
+
+      // Assert — exact arrays, not a bare error that implies nothing happened.
+      should(failure).be.instanceof(FleetScaffoldPartialError);
+      should(failure?.failedPath).equal(third);
+      should(failure?.cause).match({
+        message: `${third} exists but is not a file, so the fleet cannot be prepared here`,
+      });
+      should(failure?.progress.kept).deepEqual([path.join(root, 'config.yaml')]);
+      should(failure?.progress.created).deepEqual([path.join(root, 'assets', 'README.md')]);
+      should(failure?.progress.directories).deepEqual([root, path.join(root, 'bin'), path.join(root, 'assets')]);
+      // The kept file is untouched and the created one really is there.
+      should(await readFile(path.join(root, 'config.yaml'), 'utf8')).equal('agents: [] # mine already\n');
+      should(await readFile(path.join(root, 'assets', 'README.md'), 'utf8')).equal('# assets\n');
+    });
+  });
+
+  it('should name a file it published even when sealing its mode then fails', async () => {
+    await withTemporaryFleet(async root => {
+      // Arrange — the write succeeds and the chmod that follows does not. The file is on the host
+      // either way, so a report that omitted it would send somebody looking for something already
+      // there. This is why publication is recorded from inside, before the fallible step.
+      const subject = new FileFleetScaffolder([root]);
+      const scaffold = scaffoldFor(root);
+      const failing = new Proxy(subject, {
+        get(target, property, receiver) {
+          if (property !== 'writeIfAbsent') return Reflect.get(target, property, receiver);
+          return async (destination: string, content: string, mode: number, onCreated: () => void) => {
+            await mkdir(path.dirname(destination), { recursive: true });
+            await writeFile(destination, content, { flag: 'wx', mode });
+            onCreated();
+            throw new Error('the mode could not be set');
+          };
+        },
+      });
+
+      // Act
+      let failure: FleetScaffoldPartialError | undefined;
+      try {
+        await failing.scaffold(scaffold);
+      } catch (error) {
+        failure = error as FleetScaffoldPartialError;
+      }
+
+      // Assert
+      should(failure).be.instanceof(FleetScaffoldPartialError);
+      should(failure?.failedPath).equal(path.join(root, 'config.yaml'));
+      should(failure?.progress.created).deepEqual([path.join(root, 'config.yaml')]);
+      should(await readFile(path.join(root, 'config.yaml'), 'utf8')).equal('agents: []\n');
+    });
+  });
+
+  it('should finish what an interrupted preparation left, keeping everything already there', async () => {
+    await withTemporaryFleet(async root => {
+      // Arrange — the first pass stops part-way.
+      const subject = new FileFleetScaffolder([root]);
+      const scaffold = scaffoldFor(root);
+      const blocker = path.join(root, 'assets', 'README.md');
+      await should(subject.scaffold({ ...scaffold, directories: [...scaffold.directories, blocker] })).be.rejected();
+      await rm(blocker, { recursive: true, force: true });
+
+      // Act — running it again is the documented recovery.
+      const actual = await subject.scaffold(scaffold);
+
+      // Assert — absence is still the kernel's decision, so what landed first time is kept.
+      should(actual.kept).deepEqual([path.join(root, 'config.yaml')]);
+      should(actual.created).deepEqual([blocker]);
     });
   });
 

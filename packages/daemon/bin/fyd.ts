@@ -412,6 +412,31 @@ function sessionRootPinner(): SessionRootPinner {
   return process.platform === 'linux' ? new ProcfsSessionRootPinner() : new PosixSessionRootPinner();
 }
 
+/** Crockford-like symbols with the visually ambiguous 0, 1, I, L, O and U removed. */
+const APPROVAL_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * One fleet approval code, drawn uniformly.
+ *
+ * Rejection sampling rather than a modulo: 256 does not divide 30, so folding a random byte with
+ * `%` would make ten of the thirty symbols measurably likelier than the rest and quietly shrink a
+ * bearer secret's search space. Bytes that land in the ragged tail are discarded instead.
+ *
+ * It lives in the composition root because this is the only layer allowed to reach for randomness,
+ * and because how randomness maps onto an alphabet is a decision worth having somewhere visible.
+ */
+function mintFleetApprovalCode(): string {
+  const limit = 256 - (256 % APPROVAL_ALPHABET.length);
+  const symbols: string[] = [];
+  while (symbols.length < 8) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(8))) {
+      if (byte >= limit || symbols.length >= 8) continue;
+      symbols.push(APPROVAL_ALPHABET[byte % APPROVAL_ALPHABET.length] ?? '');
+    }
+  }
+  return `${symbols.slice(0, 4).join('')}-${symbols.slice(4).join('')}`;
+}
+
 /** The tmux process port demands an absolute executable; PATH lookup is the root's business. */
 function resolveTmuxExecutable(): string {
   const executable = Bun.which('tmux');
@@ -2914,6 +2939,15 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     files: stateFiles,
     platform: process.platform,
     keychainAccount: process.env.USER ?? '',
+    // Identity is minted here for the same reason everything else is: this is the only place
+    // allowed to reach for randomness, and a proposal handle or an account id derived from a clock
+    // would be guessable by anyone who knew roughly when it was made.
+    mintId: () => crypto.randomUUID().replaceAll('-', '').slice(0, 22),
+    mintUuid: () => crypto.randomUUID(),
+    mintApprovalCode: mintFleetApprovalCode,
+    // The same pinner the session file surface uses. A platform that cannot hand an open descriptor
+    // to a path-only API fails here rather than falling back to a name that can be re-pointed.
+    rootPinner: sessionRootPinner(),
   });
   /** One advisor per usage feed. The inventory and the catalog are the same for every caller; only
    *  how spent each account is depends on whether the caller asked for a live probe. */

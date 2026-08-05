@@ -19,12 +19,28 @@
  *   became a link out of the allowed roots is reported as unrestored rather than followed.
  */
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, rename, rm, rmdir } from 'node:fs/promises';
+import type { Stats } from 'node:fs';
+import { chmod, lstat, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
-import type { UnrestoredPath } from '../lib/provisioning.ts';
+import type { DisplacedState, UnrestoredPath } from '../lib/provisioning.ts';
 
-/** What a destination looked like immediately after this batch wrote it, or that it was left absent. */
-type Seal = { readonly present: false } | { readonly present: true; readonly ino: number; readonly mtimeMs: number };
+/**
+ * What a destination looked like immediately after this batch wrote it, or that it was left absent.
+ *
+ * A directory is summarised by everything beneath it, not by the directory itself. Its own inode
+ * and timestamp do not move when a file two levels down is edited, so a root-only seal would call
+ * a tree unchanged while somebody's work sat inside it — and the rollback would then delete that
+ * work recursively while reporting the host fully restored.
+ *
+ * `fingerprint: undefined` means the destination could not be summarised within its bound. It never
+ * compares equal, so an unsummarisable tree is reported rather than removed on a guess.
+ */
+type Seal = { readonly present: false } | { readonly present: true; readonly fingerprint: string | undefined };
+
+/** How many entries a tree seal will describe before it gives up and refuses to claim knowledge. */
+const MAX_SEAL_ENTRIES = 2000;
+/** How large a file may be before its identity rests on size and timestamps rather than content. */
+const MAX_DIGEST_BYTES = 4 * 1024 * 1024;
 
 interface JournalEntryBase {
   readonly path: string;
@@ -36,7 +52,12 @@ type JournalEntry = JournalEntryBase &
   (
     | { readonly kind: 'restore'; readonly backup: string }
     | { readonly kind: 'remove' }
-    | { readonly kind: 'mode'; readonly mode: number }
+    /**
+     * `mode` is the prior mode to put back; `left` is the mode this apply set. Only the directory's
+     * own permissions are recorded, never its contents: later operations write inside it by design,
+     * so a content-aware seal here would report every ordinary apply as changed.
+     */
+    | { readonly kind: 'mode'; readonly mode: number; left?: number }
     | { readonly kind: 'rmdir' }
   );
 
@@ -47,9 +68,12 @@ type JournalEntry = JournalEntryBase &
  */
 const BACKUP_PREFIX = '.fy-fleet-backup-';
 
+/** Reserved basename prefix for state a rollback moved out of the way instead of deleting. */
+const DISPLACED_PREFIX = '.fy-fleet-displaced-';
+
 /** Whether a directory entry is this journal's own moved-aside evidence. */
 export function isMutationBackupName(name: string): boolean {
-  return name.startsWith(BACKUP_PREFIX);
+  return name.startsWith(BACKUP_PREFIX) || name.startsWith(DISPLACED_PREFIX);
 }
 
 const PERMISSION_BITS = 0o7777;
@@ -62,9 +86,51 @@ function reasonOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Enough of one entry to notice any edit to it: identity, size, timestamp and permissions. */
+function fingerprintOf(relative: string, information: Stats): string {
+  // `ctimeMs` moves on a chmod and a chown as well as on a write, so it catches changes that leave
+  // content and timestamps alone — but it also moves when the entry itself is renamed. The root of
+  // a summary is exactly the entry rollback renames aside before re-examining it, so its ctime is
+  // left out there and every entry beneath it, which a parent rename does not touch, keeps it.
+  // What the root loses is made up by hashing its content: see `contentDigest`.
+  const changed = relative === '' ? '' : `:${information.ctimeMs}`;
+  return `${relative}:${information.ino}:${information.size}:${information.mtimeMs}${changed}:${information.mode}`;
+}
+
+/**
+ * A rename-stable identity for the content of a regular file.
+ *
+ * Dropping `ctimeMs` from the root of a fingerprint is what lets a displaced entry be compared with
+ * the seal taken before it was renamed — but it also drops the one field that would notice a
+ * same-size, same-mtime rewrite in place. Hashing the bytes restores that, and a hash does not care
+ * that the file has been renamed.
+ *
+ * Bounded: past the limit the size and timestamps stand alone, and the comment above is the honest
+ * statement of what that leaves unproven.
+ */
+async function contentDigest(target: string, size: number): Promise<string> {
+  if (size > MAX_DIGEST_BYTES) return `unhashed:${size}`;
+  return new Bun.CryptoHasher('sha256').update(await readFile(target)).digest('hex');
+}
+
+/** Describe everything beneath a directory, or report that it is larger than the bound allows. */
+async function summarise(directory: string, prefix: string, parts: string[]): Promise<boolean> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (parts.length >= MAX_SEAL_ENTRIES) return true;
+    const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+    const child = path.join(directory, entry.name);
+    const information = await lstat(child);
+    parts.push(fingerprintOf(relative, information));
+    if (information.isDirectory() && (await summarise(child, relative, parts))) return true;
+  }
+  return false;
+}
+
 export class FileMutationJournal {
   readonly #entries: JournalEntry[] = [];
   readonly #captured = new Set<string>();
+  readonly #displaced: DisplacedState[] = [];
 
   /**
    * @param assertWritable Containment check re-run at restore time. It must not follow the final
@@ -78,6 +144,18 @@ export class FileMutationJournal {
   }
 
   /**
+   * Where the entry captured from `target` was moved to, or `undefined` when nothing was there.
+   *
+   * This is how a caller inspects what it displaced without racing anybody: the capture already
+   * renamed it out of reach, so the backup cannot change under the inspection.
+   */
+  backupOf(target: string): string | undefined {
+    const resolved = path.resolve(target);
+    const entry = this.#entries.findLast(candidate => candidate.path === resolved);
+    return entry?.kind === 'restore' ? entry.backup : undefined;
+  }
+
+  /**
    * Record what each destination this operation claimed now looks like. Rollback compares against
    * these seals and refuses to touch anything that has changed since — a destination that someone
    * else has rewritten holds their evidence, not ours, and undoing over it would be a second loss
@@ -85,19 +163,43 @@ export class FileMutationJournal {
    */
   async sealOperation(from: number): Promise<void> {
     for (const entry of this.#entries.slice(from)) {
-      if (entry.kind !== 'restore' && entry.kind !== 'remove') continue;
+      if (entry.kind === 'rmdir') continue;
+      if (entry.kind === 'mode') {
+        entry.left = await this.modeOf(entry.path);
+        continue;
+      }
       entry.seal = await this.identify(entry.path);
     }
   }
 
-  private async identify(target: string): Promise<Seal> {
+  private async modeOf(target: string): Promise<number | undefined> {
     try {
-      const information = await lstat(target);
-      return { present: true, ino: information.ino, mtimeMs: information.mtimeMs };
+      return (await lstat(target)).mode & PERMISSION_BITS;
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      return undefined;
+    }
+  }
+
+  private async identify(target: string): Promise<Seal> {
+    let information: Awaited<ReturnType<typeof lstat>>;
+    try {
+      information = await lstat(target);
     } catch (error) {
       if (!isMissing(error)) throw error;
       return { present: false };
     }
+    if (information.isFile()) {
+      return {
+        present: true,
+        fingerprint: `${fingerprintOf('', information)}:${await contentDigest(target, information.size)}`,
+      };
+    }
+    if (!information.isDirectory()) return { present: true, fingerprint: fingerprintOf('', information) };
+
+    const parts = [fingerprintOf('', information)];
+    const overflowed = await summarise(target, '', parts);
+    return { present: true, fingerprint: overflowed ? undefined : parts.toSorted().join('\n') };
   }
 
   /** Whether a destination still holds exactly what this batch left there. */
@@ -110,7 +212,8 @@ export class FileMutationJournal {
     // destroys their evidence. Refuse, and let it be reported.
     if (seal === undefined) return !current.present;
     if (!seal.present || !current.present) return seal.present === current.present;
-    return current.ino === seal.ino && current.mtimeMs === seal.mtimeMs;
+    // An unsummarisable tree never matches: not knowing is not the same as knowing it is ours.
+    return seal.fingerprint !== undefined && seal.fingerprint === current.fingerprint;
   }
 
   /**
@@ -118,9 +221,12 @@ export class FileMutationJournal {
    * path wins: a later operation in the same batch overwrites something this batch already wrote,
    * and rollback has to reach the state the batch started from, not an intermediate one.
    */
-  async capture(target: string): Promise<void> {
+  async capture(target: string): Promise<boolean> {
     const resolved = path.resolve(target);
-    if (this.#captured.has(resolved)) return;
+    // Already captured by an earlier operation in this batch, so whatever occupies the path now is
+    // this batch's own work. The caller is told, because clearing it is then safe and clearing
+    // anything else would be destroying a stranger's file.
+    if (this.#captured.has(resolved)) return false;
     this.#captured.add(resolved);
 
     try {
@@ -128,12 +234,13 @@ export class FileMutationJournal {
     } catch (error) {
       if (!isMissing(error)) throw error;
       this.#entries.push({ kind: 'remove', path: resolved });
-      return;
+      return true;
     }
 
     const backup = path.join(path.dirname(resolved), `${BACKUP_PREFIX}${randomUUID()}`);
     await rename(resolved, backup);
     this.#entries.push({ kind: 'restore', path: resolved, backup });
+    return true;
   }
 
   /**
@@ -175,7 +282,10 @@ export class FileMutationJournal {
    * not be restored, and those are the sole surviving copy of the original. Deleting them to tidy
    * up would turn "unknown state, here is where your data is" into plain data loss.
    */
-  async rollback(): Promise<readonly UnrestoredPath[]> {
+  async rollback(): Promise<{
+    readonly unrestored: readonly UnrestoredPath[];
+    readonly displaced: readonly DisplacedState[];
+  }> {
     const unrestored: UnrestoredPath[] = [];
     for (const entry of this.#entries.toReversed()) {
       try {
@@ -189,7 +299,7 @@ export class FileMutationJournal {
         });
       }
     }
-    return unrestored;
+    return { unrestored, displaced: [...this.#displaced] };
   }
 
   /**
@@ -218,7 +328,7 @@ export class FileMutationJournal {
           `refusing to overwrite ${entry.path}: it changed after this apply wrote it, so the original was left at ${entry.backup}`,
         );
       }
-      await rm(entry.path, { recursive: true, force: true });
+      await this.clear(entry);
       await rename(entry.backup, entry.path);
       return;
     }
@@ -226,7 +336,7 @@ export class FileMutationJournal {
       if (!(await this.isUnchanged(entry))) {
         throw new Error(`refusing to remove ${entry.path}: it changed after this apply created it`);
       }
-      await rm(entry.path, { recursive: true, force: true });
+      await this.clear(entry);
       return;
     }
     if (entry.kind === 'mode') {
@@ -237,10 +347,45 @@ export class FileMutationJournal {
       if (!information.isDirectory()) {
         throw new Error(`refusing to restore the mode of an entry that is no longer a directory: ${entry.path}`);
       }
+      // Undoing a mode change is only ours to undo while the mode is still the one this apply set.
+      // Somebody who has since chosen their own is not corrected by a rollback.
+      if (entry.left !== undefined && (information.mode & PERMISSION_BITS) !== entry.left) {
+        throw new Error(`refusing to restore the mode of ${entry.path}: it changed after this apply set it`);
+      }
       await chmod(entry.path, entry.mode);
       return;
     }
     await this.removeCreatedDirectory(entry.path);
+  }
+
+  /**
+   * Free a destination without ever deleting live state.
+   *
+   * The seal was checked a moment ago, and a moment is enough for a writer to change the tree —
+   * a recursive delete decided on a stale digest is the same data loss the digest exists to
+   * prevent. So the entry is *renamed* out of the way first, which is atomic and unreachable to
+   * anyone else afterwards, and only then re-examined: if the displaced copy is still exactly what
+   * this apply wrote, it is dropped; if it is not, it is kept and named.
+   */
+  private async clear(entry: JournalEntry): Promise<void> {
+    const displaced = path.join(path.dirname(entry.path), `${DISPLACED_PREFIX}${randomUUID()}`);
+    try {
+      await rename(entry.path, displaced);
+    } catch (error) {
+      // Already gone, which is the state this was trying to reach.
+      if (isMissing(error)) return;
+      throw error;
+    }
+    // Recorded the instant the rename succeeds, before anything that can fail. State that has been
+    // moved and not reported is state nobody can find; the record is withdrawn below only once it
+    // is proven to be this apply's own work and actually removed.
+    this.#displaced.push({ path: entry.path, movedTo: displaced });
+
+    const settled = await this.identify(displaced);
+    const seal = entry.seal;
+    if (seal === undefined || !seal.present || !settled.present || seal.fingerprint !== settled.fingerprint) return;
+    await rm(displaced, { recursive: true, force: true });
+    this.#displaced.pop();
   }
 
   /**

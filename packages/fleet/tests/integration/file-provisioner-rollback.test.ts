@@ -686,6 +686,166 @@ describe('FileFleetProvisioner rollback', () => {
     await assertNoResidue(root);
   });
 
+  it('should refuse to delete a copied tree whose child somebody else edited', async () => {
+    // Arrange — the destination directory's own inode and timestamp do not move when a file inside
+    // it is rewritten, so a seal that only described the root would call this tree ours and delete
+    // the edit recursively while reporting a clean rollback.
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'assets', 'skills');
+    const destination = path.join(root, 'fleet', 'homes', 'one', 'skills');
+    const contested = path.join(destination, 'nested', 'skill.md');
+    await mkdir(path.join(source, 'nested'), { recursive: true });
+    await writeFile(path.join(source, 'nested', 'skill.md'), 'ours\n');
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, 'previous.md'), 'the account had this\n');
+    const interfere: FleetWriteOperation = {
+      kind: 'file',
+      path: path.join(root, 'interfere'),
+      content: 'x\n',
+      mode: 0o600,
+    };
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'copy', source, path: destination }, interfere, poisonAfter(path.join(root, 'interfere'))],
+    };
+    const subject = new FileFleetProvisioner([root]);
+    const racing = new Proxy(subject, {
+      get(target, property, receiver) {
+        if (property !== 'applyOperation') return Reflect.get(target, property, receiver);
+        return async (operation: FleetWriteOperation, journal: unknown) => {
+          const run = await (
+            Reflect.get(target, property, receiver) as (a: FleetWriteOperation, b: unknown) => Promise<string[]>
+          ).call(target, operation, journal);
+          if (operation === interfere) await writeFile(contested, 'somebody else edited this\n');
+          return run;
+        };
+      },
+    });
+
+    // Act
+    const actual = await failureOf(racing.apply(plan));
+
+    // Assert — their edit survives and the tree is reported, not silently removed.
+    should(actual.kind).equal('rollback-incomplete');
+    if (actual.kind !== 'rollback-incomplete') return;
+    should(await readFile(contested, 'utf8')).equal('somebody else edited this\n');
+    should(actual.unrestored.map(entry => entry.path)).containEql(destination);
+    const backup = actual.unrestored.find(entry => entry.path === destination)?.backup ?? '';
+    should(await readFile(path.join(backup, 'previous.md'), 'utf8')).equal('the account had this\n');
+  });
+
+  it('should refuse to publish over a file somebody created inside the destination tree', async () => {
+    // Arrange — the destination directory is claimed exclusively, but a concurrent writer can still
+    // create a child name inside it before the tree finishes publishing. Replacing that child would
+    // be the same silent clobber at one level down.
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'assets', 'skills');
+    const destination = path.join(root, 'fleet', 'homes', 'one', 'skills');
+    await mkdir(source, { recursive: true });
+    await writeFile(path.join(source, 'skill.md'), 'ours\n');
+    await mkdir(path.dirname(destination), { recursive: true });
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'copy', source, path: destination }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+    const racing = new Proxy(subject, {
+      get(target, property, receiver) {
+        if (property !== 'publishFile') return Reflect.get(target, property, receiver);
+        return async (from: string, to: string, information: unknown) => {
+          // Somebody claims this exact child name after its parent was created and immediately
+          // before the link that would place ours.
+          await writeFile(to, 'somebody else got here first\n');
+          return await (
+            Reflect.get(target, property, receiver) as (a: string, b: string, c: unknown) => Promise<void>
+          ).call(target, from, to, information);
+        };
+      },
+    });
+
+    // Act
+    const actual = await failureOf(racing.apply(plan));
+
+    // Assert — their file survives, and the apply says the host is not as it was.
+    should(actual.kind).equal('rollback-incomplete');
+    should(await readFile(path.join(destination, 'skill.md'), 'utf8')).equal('somebody else got here first\n');
+  });
+
+  it('should refuse to prune a wrapper that was replaced between being read and being removed', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const binDirectory = path.join(root, 'fleet', 'bin');
+    const stale = path.join(binDirectory, 'claude-retired');
+    await mkdir(binDirectory, { recursive: true });
+    await writeFile(stale, '#!/bin/sh\n# managed-marker\nexec true\n');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [{ kind: 'prune', path: binDirectory, marker: '# managed-marker', keep: [] }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+    const racing = new Proxy(subject, {
+      get(target, property, receiver) {
+        if (property !== 'stillCarries') return Reflect.get(target, property, receiver);
+        // The sweep read a managed wrapper; by the time it was moved aside it was somebody's file.
+        return async () => false;
+      },
+    });
+
+    // Act
+    const actual = await failureOf(racing.apply(plan));
+
+    // Assert — the rollback puts it back rather than the sweep replacing it by hand.
+    should(actual.kind).equal('rolled-back');
+    should(await readFile(stale, 'utf8')).equal('#!/bin/sh\n# managed-marker\nexec true\n');
+  });
+
+  it('should refuse to write a document whose file was deleted after the change was composed', async () => {
+    // Arrange — a change composed against an existing file must not quietly recreate it once
+    // somebody has deleted it; the author of the change never saw that deletion.
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'config.yaml');
+    await mkdir(path.dirname(document), { recursive: true });
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    const actual = await failureOf(
+      subject.apply(plan, [
+        { path: document, content: 'agents: []\n', mode: 0o600, expect: 'a-digest-of-what-is-no-longer-there' },
+      ]),
+    );
+
+    // Assert
+    should(actual.kind).equal('rolled-back');
+    should(actual.kind === 'rolled-back' && actual.reason).match(/not what this change was composed against/u);
+    should(await Bun.file(document).exists()).be.false();
+  });
+
+  it('should write a document that expected to find nothing and finds nothing', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const document = path.join(root, 'fleet', 'assets', 'CLAUDE.md');
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    await subject.apply(plan, [{ path: document, content: 'be brief\n', mode: 0o600, expect: 'absent' }]);
+
+    // Assert
+    should(await readFile(document, 'utf8')).equal('be brief\n');
+  });
+
   it('should refuse to overwrite a destination that changed after this apply wrote it', async () => {
     // Arrange
     const root = await temporaryDirectory();

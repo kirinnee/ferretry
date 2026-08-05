@@ -346,15 +346,17 @@ describe('FileFleetProvisioner', () => {
       should(JSON.parse(await readFile(destination, 'utf8'))).deepEqual({ effortLevel: 'high', model: 'fresh' });
     });
 
-    it('should ignore an unparseable existing file rather than failing the apply', async () => {
-      // Arrange
+    it('should refuse rather than merge over an existing file it cannot parse', async () => {
+      // Arrange — this used to overwrite the damaged file with a merge computed without it, which
+      // silently discarded whatever the person actually had. The keys are only preservable if the
+      // file can be read; when it cannot, leaving it alone is the one answer that loses nothing.
       const root = await temporaryDirectory();
       const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
       await Bun.write(destination, 'not json at all');
       const subject = new FileFleetProvisioner([root]);
 
       // Act
-      await subject.apply({
+      const promise = subject.apply({
         manifest: manifest(),
         manifestPath: path.join(root, 'fleet', 'manifest.json'),
         operations: [
@@ -370,7 +372,37 @@ describe('FileFleetProvisioner', () => {
       });
 
       // Assert
-      should(JSON.parse(await readFile(destination, 'utf8'))).deepEqual({ model: 'fresh' });
+      await should(promise).be.rejectedWith(/could not be parsed/u);
+      should(await readFile(destination, 'utf8')).equal('not json at all');
+    });
+
+    it('should refuse rather than merge over a directory where settings should be', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
+      await mkdir(destination, { recursive: true });
+      await Bun.write(path.join(destination, 'someone-elses.txt'), 'not ours\n');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [
+          {
+            kind: 'settings',
+            path: destination,
+            format: 'json',
+            layers: [{ from: 'inline', settings: { model: 'fresh' } }],
+            mode: 0o600,
+            preserveExisting: true,
+          },
+        ],
+      });
+
+      // Assert
+      await should(promise).be.rejectedWith(/not a regular file/u);
+      should(await readFile(path.join(destination, 'someone-elses.txt'), 'utf8')).equal('not ours\n');
     });
 
     it('should ignore a symlinked destination, which holds no runtime state to preserve', async () => {

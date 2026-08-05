@@ -37,6 +37,29 @@ export interface FleetScaffoldFile {
   readonly mode: number;
 }
 
+/**
+ * Preparation stopped part-way, and this is exactly what the host now carries.
+ *
+ * There is no undo: every file a scaffold writes is one that was absent, so removing them again
+ * could not be distinguished from removing files somebody else had just created. The only honest
+ * answer is to name what landed and where it stopped — and to say that running it again finishes
+ * the job, because absence remains the kernel's decision on the second pass too.
+ */
+export class FleetScaffoldPartialError extends Error {
+  constructor(
+    readonly failedPath: string,
+    readonly progress: {
+      readonly created: readonly string[];
+      readonly kept: readonly string[];
+      readonly directories: readonly string[];
+    },
+    override readonly cause: unknown,
+  ) {
+    super(`preparing the fleet stopped at ${failedPath}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'FleetScaffoldPartialError';
+  }
+}
+
 /** The complete first-run shape: directories to ensure, files to seed, and what to tell the shell. */
 export interface FleetScaffold {
   /** Created in order. `mkdir -p` semantics: an existing directory is not an error. */

@@ -98,6 +98,14 @@ const SECTIONS = [
 ] as const;
 
 /**
+ * The fleet cockpit frames, captured on their own page rather than inside the gallery.
+ *
+ * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
+ * screen a person actually reads while something is wrong.
+ */
+const FLEET_FRAMES = ['cockpit', 'states', 'accounts', 'preview', 'failed-apply', 'create', 'layer'] as const;
+
+/**
  * A software keyboard, told the truth.
  *
  * Chrome's `setViewportSize` (and CDP's visible-size) shrink the LAYOUT
@@ -1077,6 +1085,36 @@ try {
           process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
           await page.keyboard.press('Escape');
           await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
+
+          /**
+           * The five fleet frames, each on a page of its own.
+           *
+           * Three of them are taller than a desktop viewport, and an element capture of a tall card
+           * inside the gallery's scroller clips to the wrong region — the first pass produced a fleet
+           * "preview" image showing the secrets cards. On a page that starts at the top with no sticky
+           * chrome, an element capture is exact.
+           */
+          for (const frame of FLEET_FRAMES) {
+            await page.goto(`${server.url}#fleet-${frame}`);
+            await page.reload();
+            await page.locator(`#harness-fleet-${frame}-page`).waitFor({ state: 'visible' });
+            const fleetTarget = join(outDir, `${viewport.name}-fleet-${frame}.png`);
+            // A full-page capture of a page carrying ONE frame: Chrome captures beyond the viewport
+            // itself, so a frame taller than the screen is whole rather than stitched by hand.
+            // The REQUIRED evidence is the viewport itself — exactly 390x844 or 1440x900, the screen a
+            // person is actually holding. The full-page shot beside it supplements that; it never
+            // replaces it, because a frame that only reads well when unrolled to 2000px is not a
+            // frame that works on a phone.
+            const viewportTarget = join(outDir, `${viewport.name}-fleet-${frame}-viewport.png`);
+            await page.screenshot({ path: viewportTarget });
+            await page.screenshot({ path: fleetTarget, fullPage: true });
+            process.stdout.write(`📸 ${viewport.name} fleet ${frame} -> ${viewportTarget} + ${fleetTarget}\n`);
+          }
+          // Back to the gallery: every capture after this one expects the shell, and a page left on a
+          // fleet fragment made the next locator wait for an app bar that is not on it.
+          await page.goto(server.url.toString());
+          await page.reload();
+          await page.locator('[data-density-region="app-bar"]').first().waitFor({ state: 'visible' });
 
           // The install stage on a page of its own, so the capture starts at
           // the real top of the screen rather than wherever the gallery's

@@ -20,6 +20,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { fleetSettingsTab } from './features/fleet/fleet-configuration-surface.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
@@ -662,6 +663,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
           />
         ),
       },
+      fleetSettingsTab(async daemon => await store.clients.client(daemon)),
     ],
     [store.clients],
   );
