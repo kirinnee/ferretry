@@ -2,6 +2,9 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetIdentity,
+  FleetIdentityStatus,
+  FleetLoginRequest,
   FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
@@ -13,8 +16,8 @@ import type {
   IFleetApplier,
   IFleetClock,
   IFleetConfigSource,
+  IFleetIdentitySource,
   IFleetLoginService,
-  IFleetLoginServiceFactory,
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
@@ -26,6 +29,7 @@ import type {
 import type { RecommendationRequest, TeamRecommendation } from '../../../src/lib/fleet/wire';
 
 export const ACCOUNT_ID = '00000000-0000-4000-8000-00000000c1a0';
+export const IDENTITY_KEY = 'claude:Claude (work)';
 export const GENERATED_AT = '2026-07-31T09:00:00.000Z';
 
 /** Captures what a controller printed, keeping stdout and warnings apart. */
@@ -199,23 +203,70 @@ export class RecordingUsageCollector implements IFleetUsageCollector, IFleetUsag
   }
 }
 
-/** A login service recording the manifest and the selection it was handed. */
-export class RecordingLoginService implements IFleetLoginService, IFleetLoginServiceFactory {
-  readonly configs: FleetConfig[] = [];
-  readonly requests: Array<{ manifest: FleetManifest; accountIds: readonly string[] | undefined }> = [];
+/** A login service recording the request it was handed. */
+export class RecordingLoginService implements IFleetLoginService {
+  readonly requests: FleetLoginRequest[] = [];
 
   constructor(
-    private readonly results: readonly FleetLoginResult[] = [{ accountId: ACCOUNT_ID, status: 'logged-in' }],
+    private readonly results: readonly FleetLoginResult[] = [
+      { accountId: ACCOUNT_ID, identity: IDENTITY_KEY, status: 'logged-in' },
+    ],
   ) {}
 
-  forConfig(config: FleetConfig): IFleetLoginService {
-    this.configs.push(config);
-    return this;
+  login(request: FleetLoginRequest): Promise<readonly FleetLoginResult[]> {
+    this.requests.push(request);
+    return Promise.resolve(this.results);
+  }
+}
+
+/**
+ * An identity source recording what it was asked, answering with one declared identity per account.
+ *
+ * The join it stands in for is the real one: the configuration says which accounts share a login, the
+ * manifest says where they live. A fake that grouped by name would hide the very mistake the real
+ * implementation exists to avoid.
+ */
+export class RecordingIdentitySource implements IFleetIdentitySource {
+  readonly joins: Array<{ config: FleetConfig; manifest: FleetManifest }> = [];
+  readonly surveyed: Array<readonly FleetIdentity[]> = [];
+
+  constructor(private readonly statuses?: readonly FleetIdentityStatus[]) {}
+
+  identities(config: FleetConfig, manifest: FleetManifest): readonly FleetIdentity[] {
+    this.joins.push({ config, manifest });
+    return manifest.accounts.map(account => ({
+      key: `${account.kind}:${account.displayName}`,
+      kind: account.kind,
+      identity: account.displayName,
+      auth: 'oauth' as const,
+      declared: true,
+      members: [
+        {
+          accountId: account.id,
+          wrapper: account.wrapper,
+          home: account.home,
+          displayName: account.displayName,
+          mode: account.mode,
+          available: account.available,
+          unavailableReason: account.unavailableReason,
+        },
+      ],
+    }));
   }
 
-  login(manifest: FleetManifest, accountIds?: readonly string[]): Promise<readonly FleetLoginResult[]> {
-    this.requests.push({ manifest, accountIds });
-    return Promise.resolve(this.results);
+  survey(identities: readonly FleetIdentity[]): Promise<readonly FleetIdentityStatus[]> {
+    this.surveyed.push(identities);
+    return Promise.resolve(
+      this.statuses ??
+        identities.map(identity => ({
+          identity,
+          members: identity.members.map(member => ({ member, reading: { state: 'valid' as const } })),
+          unavailable: [],
+          verdict: { kind: 'complete' as const },
+          targets: [],
+          refused: [],
+        })),
+    );
   }
 }
 

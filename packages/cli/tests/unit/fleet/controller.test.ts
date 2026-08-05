@@ -6,7 +6,9 @@ import {
   CapturingOutput,
   FrozenClock,
   GENERATED_AT,
+  IDENTITY_KEY,
   RecordingApplier,
+  RecordingIdentitySource,
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
@@ -31,6 +33,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     planner: new RecordingPlanner(),
     applier: new RecordingApplier(),
     usage: new RecordingUsageCollector(),
+    identities: new RecordingIdentitySource(),
     logins: new RecordingLoginService(),
     clock: new FrozenClock(),
     recommendations: new RecordingRecommendationGateway(),
@@ -287,6 +290,7 @@ describe('logging accounts in', () => {
     // Assert
     should(logins.requests).have.length(1);
     should(logins.requests[0]?.accountIds).be.undefined();
+    should(logins.requests[0]?.mode).equal('full');
     should(out.text).containEql('logged in');
   });
 
@@ -302,16 +306,17 @@ describe('logging accounts in', () => {
     should(logins.requests[0]?.accountIds).deepEqual([ACCOUNT_ID]);
   });
 
-  it('should build the login service from the loaded configuration', async () => {
-    // Arrange — which accounts have a provider login is declared in configuration, not the manifest.
-    const logins = new RecordingLoginService();
-    const { subject } = controller({ logins });
+  it('should join the declared configuration to the published manifest before deciding anything', async () => {
+    // Arrange — which accounts share a login is declared in configuration, not published in the manifest.
+    const identities = new RecordingIdentitySource();
+    const { subject } = controller({ identities });
 
     // Act
     await subject.login([], {});
 
     // Assert
-    should(logins.configs).have.length(1);
+    should(identities.joins).have.length(1);
+    should(identities.joins[0]?.manifest.accounts).have.length(1);
   });
 
   it('should refuse to log in before the fleet has ever been applied', async () => {
@@ -325,7 +330,7 @@ describe('logging accounts in', () => {
   it('should report a failure rather than letting it read as a quiet success', async () => {
     // Arrange
     const logins = new RecordingLoginService([
-      { accountId: ACCOUNT_ID, status: 'failed', message: 'login process exited with code 7' },
+      { accountId: ACCOUNT_ID, identity: IDENTITY_KEY, status: 'failed', message: 'login process exited with code 7' },
     ]);
     const { subject, out } = controller({ logins });
 
@@ -343,6 +348,66 @@ describe('logging accounts in', () => {
 
     // Act
     await subject.login([], { json: true });
+
+    // Assert
+    should(JSON.parse(out.text)).have.length(1);
+  });
+
+  it('should ask for a copy-only pass under --sync-only', async () => {
+    // Arrange
+    const logins = new RecordingLoginService();
+    const { subject } = controller({ logins });
+
+    // Act
+    await subject.login([], { syncOnly: true });
+
+    // Assert — the mode is what stops a browser approval, so it must reach the service.
+    should(logins.requests[0]?.mode).equal('sync-only');
+  });
+
+  it('should change nothing under --status', async () => {
+    // Arrange
+    const logins = new RecordingLoginService();
+    const identities = new RecordingIdentitySource();
+    const { subject, out } = controller({ logins, identities });
+
+    // Act
+    await subject.login([], { status: true });
+
+    // Assert — no login pass at all: a report must not be able to copy or approve anything.
+    should(logins.requests).deepEqual([]);
+    should(identities.surveyed).have.length(1);
+    should(out.text).containEql(IDENTITY_KEY);
+  });
+
+  it('should narrow a status report to the identities the named accounts belong to', async () => {
+    // Arrange
+    const identities = new RecordingIdentitySource();
+    const { subject } = controller({ identities });
+
+    // Act
+    await subject.login([ACCOUNT_ID], { status: true });
+
+    // Assert
+    should(identities.surveyed[0]).have.length(1);
+  });
+
+  it('should refuse a status report for an account no identity claims', async () => {
+    // Arrange
+    const { subject } = controller();
+
+    // Act / Assert — an unknown id is an error, not an empty report.
+    await should(subject.login(['00000000-0000-4000-8000-0000000000ff'], { status: true })).be.rejectedWith(
+      /unknown fleet account/u,
+    );
+  });
+
+  it('should print the survey payload under --status --json', async () => {
+    // Arrange
+    const { subject, out } = controller();
+
+    // Act
+    await subject.login([], { status: true, json: true });
 
     // Assert
     should(JSON.parse(out.text)).have.length(1);

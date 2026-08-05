@@ -7,6 +7,7 @@ import {
   CapturingOutput,
   FrozenClock,
   RecordingApplier,
+  RecordingIdentitySource,
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
@@ -21,6 +22,7 @@ function run(argv: string[]) {
   const recommendations = new RecordingRecommendationGateway();
   const usage = new RecordingUsageCollector();
   const logins = new RecordingLoginService();
+  const identities = new RecordingIdentitySource();
   const scaffolder = new RecordingScaffolder();
   const out = new CapturingOutput();
   const program = new Command().name('fy').exitOverride();
@@ -34,6 +36,7 @@ function run(argv: string[]) {
       planner: new RecordingPlanner(),
       applier,
       usage,
+      identities,
       logins,
       clock: new FrozenClock(),
       recommendations,
@@ -46,6 +49,7 @@ function run(argv: string[]) {
     recommendations,
     usage,
     logins,
+    identities,
     scaffolder,
     out,
   };
@@ -160,6 +164,25 @@ describe('fleet login', () => {
 
     // Assert
     should(JSON.parse(out.text)).have.length(1);
+  });
+
+  it('should carry --sync-only through as a copy-only pass', async () => {
+    // Arrange + Act
+    const { parsed, logins } = run(['fleet', 'login', '--sync-only']);
+    await parsed;
+
+    // Assert
+    should(logins.requests[0]?.mode).equal('sync-only');
+  });
+
+  it('should report without logging anything in under --status', async () => {
+    // Arrange + Act
+    const { parsed, logins, identities } = run(['fleet', 'login', '--status']);
+    await parsed;
+
+    // Assert
+    should(logins.requests).deepEqual([]);
+    should(identities.surveyed).have.length(1);
   });
 });
 
