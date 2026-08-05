@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { buildFleetManifest } from '@ferretry/fleet';
-import { FleetManifestUnreadableError, parseAccountManifest } from '../../../src/lib/core/index.ts';
+import {
+  fleetManifestRefusal,
+  FleetManifestUnreadableError,
+  parseAccountManifest,
+} from '../../../src/lib/core/index.ts';
 
 const SOURCE = '/state/fleet/manifest.json';
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
@@ -119,5 +123,22 @@ describe('parseAccountManifest', () => {
     // Act / Assert — the daemon reads one file at one path; anything else there is damage
     should(() => parseAccountManifest({ error: 'not provisioned' }, SOURCE)).throw(FleetManifestUnreadableError);
     should(() => parseAccountManifest('nonsense', SOURCE)).throw(/present but cannot be read/u);
+  });
+});
+
+describe('fleetManifestRefusal', () => {
+  it('should name the file, the failure and what will now be refused', () => {
+    // Arrange
+    const error = new FleetManifestUnreadableError(SOURCE, 'accounts[0]: unrecognized key "agent"');
+
+    // Act
+    const refusal = fleetManifestRefusal(error, 'fy');
+
+    // Assert — the consequence is stated because the two readings of one file are what confuse:
+    // `fy fleet ls` will list these accounts happily while this daemon refuses every start.
+    should(refusal).containEql(SOURCE);
+    should(refusal).containEql('unrecognized key');
+    should(refusal).match(/Every session start will be refused/u);
+    should(refusal).match(/`fy fleet apply`/u);
   });
 });

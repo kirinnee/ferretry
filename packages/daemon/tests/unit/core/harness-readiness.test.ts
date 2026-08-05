@@ -8,6 +8,7 @@ import {
   harnessPreflightSummary,
   readHarnessPreflight,
   renderHarnessPreflight,
+  unreadableManifestPreflight,
 } from '../../../src/lib/core/harness-readiness.ts';
 import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
 
@@ -175,5 +176,43 @@ describe('harness readiness', () => {
     should(ready.join('\n')).match(/harness {6}claude {2}ready — claude-auto-one/u);
     should(ready.join('\n')).match(/harness {6}codex {3}no account published, and the command is not on PATH/u);
     should(unready.join('\n')).match(/^! no agent harness is ready/mu);
+  });
+});
+
+describe('a manifest the daemon could not read', () => {
+  const refusal = 'the fleet manifest at /state/fleet/manifest.json is present but cannot be read: bad shape.';
+
+  it('should claim nothing about any account', () => {
+    // Act
+    const preflight = unreadableManifestPreflight(refusal, hostWith('claude'));
+
+    // Assert — `blocked` means "this published account cannot be launched, and here is why", and
+    // there is no honest way to say that about accounts whose file would not parse.
+    should(preflight.ready).be.false();
+    should(preflight.manifestRefusal).equal(refusal);
+    should(preflight.harnesses.map(harness => harness.blocked)).deepEqual([[], []]);
+    should(preflight.harnesses.map(harness => harness.launchable)).deepEqual([[], []]);
+    // The harness command is still a fact the manifest has no bearing on.
+    should(preflight.harnesses[0]?.commandOnPath).be.true();
+    should(preflight.harnesses[1]?.commandOnPath).be.false();
+  });
+
+  it('should say it does not know, rather than that nothing is published', () => {
+    // Arrange
+    const preflight = unreadableManifestPreflight(refusal, hostWith());
+
+    // Act
+    const summary = harnessPreflightSummary(preflight);
+    const warning = harnessAbsentWarning(preflight, 'fy');
+    const rendered = renderHarnessPreflight(preflight, 'fy').join('\n');
+
+    // Assert — "no account is published" is a claim about a file this daemon read. This is the
+    // admission that it has no idea what is published, and reporting the second as the first is the
+    // exact defect: a daemon told an operator their fleet published nothing while the CLI listed one.
+    should(summary).equal('unknown — the fleet manifest could not be read');
+    should(warning).containEql(refusal);
+    should(warning).not.match(/publishes no agent account at all/u);
+    should(rendered).match(/harness {6}claude {2}unknown — the fleet manifest could not be read/u);
+    should(rendered).match(/^! no agent harness can be resolved/mu);
   });
 });

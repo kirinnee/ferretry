@@ -68,3 +68,48 @@ describe('doctor report', () => {
     should(renderDoctorReport(noConfinement).join('\n')).match(/note\s+jq/u);
   });
 });
+
+describe('doctor report over a manifest the daemon could not read', () => {
+  const refusal = 'the fleet manifest at /state/fleet/manifest.json is present but cannot be read: bad shape.';
+  const unreadable: HarnessPreflight = {
+    ready: false,
+    manifestRefusal: refusal,
+    harnesses: [
+      { kind: 'claude', launchable: [], blocked: [], commandOnPath: true },
+      { kind: 'codex', launchable: [], blocked: [], commandOnPath: true },
+    ],
+  };
+
+  it('should name the unreadable manifest first, and stop the harness line overclaiming', () => {
+    // Act
+    const result = readDoctorReport({
+      platform: 'linux',
+      harnesses: unreadable,
+      directorySyscalls: true,
+      executables: { resolve: () => undefined },
+    });
+
+    // Assert — every harness line below is empty for one reason, and a reader who is not told the
+    // manifest would not parse reads those blanks as "nothing is published".
+    should(result.checks[0]?.name).equal('fleet manifest');
+    should(result.checks[0]?.status).equal('missing');
+    should(result.checks[0]?.impact).containEql(refusal);
+    should(result.checks[1]?.summary).equal(
+      'no wrapper could be resolved, because the fleet manifest could not be read',
+    );
+    should(result.ready).be.false();
+  });
+
+  it('should not invent a manifest check when the manifest read fine', () => {
+    // Act
+    const result = readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: () => undefined },
+    });
+
+    // Assert
+    should(result.checks.some(check => check.name === 'fleet manifest')).be.false();
+  });
+});

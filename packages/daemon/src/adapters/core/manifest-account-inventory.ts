@@ -35,10 +35,8 @@ export class ManifestAccountInventory implements AccountInventoryPort {
     try {
       payload = JSON.parse(text);
     } catch (error) {
-      throw new FleetManifestUnreadableError(this.manifestPath, `it is not valid JSON (${errorText(error)})`);
+      throw new FleetManifestUnreadableError(this.manifestPath, `it is not valid JSON (${(error as Error).message})`);
     }
     return parseAccountManifest(payload, this.manifestPath);
   }
 }
-
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
