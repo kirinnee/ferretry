@@ -3,8 +3,8 @@
  *
  * Claude and Codex each get one independent pool. Existing state is renamed into that pool and
  * each account home receives absolute symlinks back to it. Rename-based directory migration keeps
- * live transcript inodes intact; prompt-history merges rewrite the already-pooled file in place so
- * its inode also remains stable. Filesystem observation and mutation sit behind
+ * live transcript inodes intact; prompt-history merges append missing evidence through the
+ * already-pooled file so its inode also remains stable. Filesystem observation and mutation sit behind
  * {@link SharedHistoryFileSystem}; all merge, collision, dry-run and rollback decisions live here.
  *
  * Three properties are decided before anything is written, so a dry run can show them: a rename

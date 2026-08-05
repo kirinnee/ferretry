@@ -454,15 +454,20 @@ rollouts into that database over app-server JSON-RPC without an LLM call.
 `<FY_HOME>/fleet/shared/{claude,codex}` and includes every declared account home plus each nominated
 bare default home. `FleetPlan` describes those requests; `FileFleetProvisioner.preview` observes the
 real disposable/home filesystem without writing; both the CLI dry-run and daemon `/v1/fleet/plan`
-report every rename, link, JSONL merge, collision winner and preserved loser before apply.
+report every rename, link, append-only JSONL merge, emptied source directory, collision winner,
+preserved loser and refused home before apply.
 
 `lib/shared-history.ts` owns a pure collision/migration plan and a fail-closed executor;
 `adapters/file-shared-history.ts` supplies canonically confined filesystem operations. Existing
-history moves by rename, JSONL prompt history is rewritten through the pooled inode, and collisions
-retain the loser under `.migration-conflicts/<account>`. A durable intent journal, guarded reads,
-bounded clean rollback/replan for live changes, explicit cross-device refusal and a daemon filesystem
-exemption confined to provisioner-owned `fleet/homes/**` → same-daemon `fleet/shared/**` links keep the
-one-time migration conservative.
+history moves by rename, JSONL prompt history contributes only missing lines by appending to the
+pooled inode, and collisions retain the loser under the account that actually owned it (or the
+reserved `.pooled` identity for pre-existing pool state). The account JSONL inode is quarantined, so
+a process that already had it open keeps writing safely there; those later lines are preserved but do
+not enter the pool, which is why prompt-history migration should run while the accounts are idle. A
+durable action journal plus fixed-size progress cursor, guarded reads, bounded clean rollback/replan
+for live changes, explicit cross-device refusal and a daemon filesystem exemption confined to
+provisioner-owned `fleet/homes/**` → same-daemon `fleet/shared/**` links keep the one-time migration
+conservative.
 
 Codex wrappers and `config.toml` point at a fresh `<pool>/sqlite` directory. An ownership sidecar
 records the previous `sqlite_home`; disabling restores/removes only the exact value Ferretry owned and
@@ -472,6 +477,13 @@ preserves a user replacement. Existing per-home SQLite databases are deliberatel
 the fresh SQLite database through `app-server --stdio` (`initialize` plus active/archived
 `thread/list`, no LLM turn). Ferretry does not yet expose that command or protocol client, so migrated
 rollouts may not be indexed in the fresh database until Codex performs its own reconciliation.
+
+**GAP — operator crash recovery command.** `SharedHistoryMigration.inspectRecovery`,
+`SharedHistoryRecoveryEvidence` and `SharedHistoryRecoveryRequiredError` validate and expose a stale
+journal's applied, uncertain and pending actions without mutating anything. They are not exported from
+the fleet barrel or mounted in the CLI/daemon yet. A `fy fleet history recover` surface must show that
+evidence and replay a guarded rollback only after confirmation; until then a stale journal fails
+closed with manual recovery instructions rather than being guessed away.
 
 ---
 
@@ -677,6 +689,9 @@ behaved as 100.
 - **Credential sync ([E](#e--get-logged-in)).** Same reason.
 - **Codex SQLite prewarm ([I](#i--resume-anything-anywhere)).** The shared directory and ownership
   semantics are ported; the non-LLM app-server reconciliation command remains a declared GAP.
+- **Shared-history crash recovery ([I](#i--resume-anything-anywhere)).** Durable evidence and a
+  read-only inspection primitive exist; the confirmed operator command that replays a guarded rollback
+  remains a declared GAP.
 - **The probe loop ([H](#h--keep-it-fresh)).** Its routes landed on `main` as #237 while this unit was writing; the loop behind them, and a real probe to feed it, are that unit's area.
 - **Default asset _content_ beyond a starting point ([C](#c--own-the-assets)).** The owner's
   `CLAUDE.md`, skills and templates are his and carry personal paths and work tooling. What Ferretry
@@ -691,37 +706,38 @@ behaved as 100.
 Recorded once so nobody re-derives it. **A renamed module is not a gap**; this table exists to stop
 the next reader concluding otherwise from a name search.
 
-| kfleet module                                              | Ferretry                                                                                         |                                                   |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
-| `core/types.ts`, `core/config.ts`                          | `lib/config.ts`, `adapters/config-file.ts`                                                       | renamed                                           |
-| `core/merge.ts`                                            | `lib/profiles.ts`                                                                                | renamed                                           |
-| `core/generate.ts`                                         | `lib/plan.ts` + `lib/wrappers.ts` + `lib/provisioning.ts` + `adapters/file-provisioner.ts`       | split, deliberately                               |
-| `core/kinds.ts`                                            | `lib/assets.ts` + `lib/wrappers.ts` + `lib/fleet/layout.ts`                                      | split by subject                                  |
-| `core/settings.ts`                                         | `lib/settings.ts` + the provisioner's existing-file read                                         | split pure/IO                                     |
-| `deps.ts`                                                  | `lib/fleet/layout.ts` + `lib/paths.ts`                                                           | globals became a pure function                    |
-| `util/format.ts`, `cli/shared.ts`                          | `IFleetOutput` + commander                                                                       | replaced                                          |
-| `cli/fleet.ts` (`apply`/`list`/`prune`)                    | `fy fleet apply` / `ls`; prune folded into apply                                                 | renamed                                           |
-| `core/harness-probe.ts:80` `sanitizeHarnessEnv`            | `lib/harness-env.ts`                                                                             | ported by this unit                               |
-| `core/harness-probe.ts:97` `prepareHarnessProbeEnv`        | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                     |
-| `core/login.ts:331` `interactiveLogin`                     | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                      |
-| `cli/init.ts`                                              | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                           |
-| `core/health.ts`, `core/harness-probe.ts` (rest)           | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)    |
-| `core/usage.ts:245,306` Anthropic probes                   | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                          |
-| `core/usage.ts:824` dedup by credential                    | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                |
-| `core/usage.ts` (other providers)                          | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)      |
-| `core/cliproxy-usage.ts`                                   | —                                                                                                | **not to be ported** (owner); config refused      |
-| `core/creds.ts`                                            | `adapters/credential-store.ts`                                                                   | ported by this unit                               |
-| `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity` | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                               |
-| `core/login.ts:307` `resolveLoginTarget`                   | `adapters/process-login.ts`                                                                      | ported by this unit                               |
-| `cli/login.ts` `runLogin`, `--status`, `--sync-only`       | `lib/login.ts` `FleetLoginService` + `lib/fleet/render.ts`                                       | ported by this unit                               |
-| `core/login.ts:163` `filterLiveIdentities`                 | —                                                                                                | **GAP**, needs [G](#g--know-what-actually-works)  |
-| `core/shared-history.ts`, `core/kinds.ts` `sharedState`    | `lib/shared-history.ts`, `adapters/file-shared-history.ts`, `lib/plan.ts`                        | **PORTED**, see [I](#i--resume-anything-anywhere) |
-| `core/generate.ts` Codex SQLite env/settings/ownership     | `lib/plan.ts`, `adapters/file-provisioner.ts`, `lib/wrappers.ts`                                 | **PORTED**, see [I](#i--resume-anything-anywhere) |
-| `core/codex-prewarm.ts`, `cli/prewarm.ts`                  | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)    |
-| `core/generate.ts` `AUTOTRUST`                             | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                       |
-| `core/firstrun.ts`                                         | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                |
-| `cli/serve.ts`, `cli/service.ts`                           | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)  |
-| `cli/doctor.ts`                                            | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                 |
-| —                                                          | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest |
-| —                                                          | `lib/capabilities.ts`                                                                            | **new**; refuses unimplemented configuration      |
-| —                                                          | `lib/identity.ts` `unreadable` state                                                             | **new in this unit**; kfleet had no such state    |
+| kfleet module                                              | Ferretry                                                                                         |                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| `core/types.ts`, `core/config.ts`                          | `lib/config.ts`, `adapters/config-file.ts`                                                       | renamed                                                                       |
+| `core/merge.ts`                                            | `lib/profiles.ts`                                                                                | renamed                                                                       |
+| `core/generate.ts`                                         | `lib/plan.ts` + `lib/wrappers.ts` + `lib/provisioning.ts` + `adapters/file-provisioner.ts`       | split, deliberately                                                           |
+| `core/kinds.ts`                                            | `lib/assets.ts` + `lib/wrappers.ts` + `lib/fleet/layout.ts`                                      | split by subject                                                              |
+| `core/settings.ts`                                         | `lib/settings.ts` + the provisioner's existing-file read                                         | split pure/IO                                                                 |
+| `deps.ts`                                                  | `lib/fleet/layout.ts` + `lib/paths.ts`                                                           | globals became a pure function                                                |
+| `util/format.ts`, `cli/shared.ts`                          | `IFleetOutput` + commander                                                                       | replaced                                                                      |
+| `cli/fleet.ts` (`apply`/`list`/`prune`)                    | `fy fleet apply` / `ls`; prune folded into apply                                                 | renamed                                                                       |
+| `core/harness-probe.ts:80` `sanitizeHarnessEnv`            | `lib/harness-env.ts`                                                                             | ported by this unit                                                           |
+| `core/harness-probe.ts:97` `prepareHarnessProbeEnv`        | `lib/harness-env.ts` `referencedEnvNames` + `adapters/process-login.ts` `readFleetWrapperScript` | split pure/IO                                                                 |
+| `core/login.ts:331` `interactiveLogin`                     | `adapters/process-login.ts`                                                                      | ported; mounted by this unit                                                  |
+| `cli/init.ts`                                              | `lib/scaffold.ts` + `adapters/file-scaffolder.ts`                                                | redesigned by this unit                                                       |
+| `core/health.ts`, `core/harness-probe.ts` (rest)           | —                                                                                                | **GAP**, see [G](#g--know-what-actually-works)                                |
+| `core/usage.ts:245,306` Anthropic probes                   | `adapters/anthropic-usage-probe.ts` + `lib/quota.ts`                                             | ported by the quota unit                                                      |
+| `core/usage.ts:824` dedup by credential                    | `lib/usage.ts` `identityOf`                                                                      | keyed on declared identity instead                                            |
+| `core/usage.ts` (other providers)                          | —                                                                                                | **GAP**, see [F](#f--know-whos-out-of-quota)                                  |
+| `core/cliproxy-usage.ts`                                   | —                                                                                                | **not to be ported** (owner); config refused                                  |
+| `core/creds.ts`                                            | `adapters/credential-store.ts`                                                                   | ported by this unit                                                           |
+| `core/login.ts:73,108,147,243` `credStatus`…`syncIdentity` | `lib/identity.ts` + `adapters/credential-store.ts`                                               | ported by this unit                                                           |
+| `core/login.ts:307` `resolveLoginTarget`                   | `adapters/process-login.ts`                                                                      | ported by this unit                                                           |
+| `cli/login.ts` `runLogin`, `--status`, `--sync-only`       | `lib/login.ts` `FleetLoginService` + `lib/fleet/render.ts`                                       | ported by this unit                                                           |
+| `core/login.ts:163` `filterLiveIdentities`                 | —                                                                                                | **GAP**, needs [G](#g--know-what-actually-works)                              |
+| `core/shared-history.ts`, `core/kinds.ts` `sharedState`    | `lib/shared-history.ts`, `adapters/file-shared-history.ts`, `lib/plan.ts`                        | **PORTED**, see [I](#i--resume-anything-anywhere)                             |
+| `core/generate.ts` Codex SQLite env/settings/ownership     | `lib/plan.ts`, `adapters/file-provisioner.ts`, `lib/wrappers.ts`                                 | **PORTED**, see [I](#i--resume-anything-anywhere)                             |
+| `core/codex-prewarm.ts`, `cli/prewarm.ts`                  | —                                                                                                | **GAP**, see [I](#i--resume-anything-anywhere)                                |
+| — (Ferretry crash-safety extension)                        | `lib/shared-history.ts` `inspectRecovery`                                                        | domain port only; CLI recovery **GAP**, see [I](#i--resume-anything-anywhere) |
+| `core/generate.ts` `AUTOTRUST`                             | `lib/wrappers.ts` first-run seeding                                                              | **PORTED HERE**, redesigned                                                   |
+| `core/firstrun.ts`                                         | — (not needed: our login goes through the wrapper)                                               | see [K](#k--survive-the-first-run)                                            |
+| `cli/serve.ts`, `cli/service.ts`                           | —                                                                                                | **not to be ported**, see [H](#h--keep-it-fresh)                              |
+| `cli/doctor.ts`                                            | —                                                                                                | **GAP**, see [L](#l--diagnose-it)                                             |
+| —                                                          | `lib/manifest.ts`                                                                                | **new in Ferretry**; kfleet published no manifest                             |
+| —                                                          | `lib/capabilities.ts`                                                                            | **new**; refuses unimplemented configuration                                  |
+| —                                                          | `lib/identity.ts` `unreadable` state                                                             | **new in this unit**; kfleet had no such state                                |
