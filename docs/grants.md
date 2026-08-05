@@ -96,6 +96,38 @@ so it is worth saying out loud why it needs no exception to the permissive defau
   discovered. Splitting revoke onto its own axis would fix the sequence by making revoking harder than
   granting, which is the trade this whole section refuses.
 
+## Before you add capability seven: the coarse switch usually disables the remedy
+
+> **Any control that can lock somebody out has to carry the way back at the point of decision, not in a
+> doc.** A document is read afterwards; the lockout happens at the click.
+
+This has now turned up three times, in two subsystems that share no code — which is what makes it
+doctrine rather than a quirk of this feature:
+
+1. **`fleet`, `terminal`, `browser`, `filesystem`, `warden`** — switching one off from a paired device is
+   the change that device can never undo, because turning anything back on is a local act. So the widen
+   refusal **names the host command**, and turning a capability off from a remote browser **warns before
+   rather than after**.
+2. **`pairing`** — switching it off in response to a stolen phone also refuses
+   `DELETE /v1/pair/devices/:deviceId`, so the coarse switch disables the revoke that was the actual
+   remedy. Hence the ordering in the section above, stated where somebody reaches for the switch.
+3. **The state-home refusal** — outside grants entirely, with no capability involved: a daemon that
+   cannot claim its state home **names `fy daemon adopt`** rather than reporting that it failed.
+
+Every one is safe and every one is recoverable at the machine. None was fixed by changing a permission,
+and that is the part worth carrying forward. Splitting a remedy onto its own axis to fix a sequence would
+make revoking harder than granting, which inverts the asymmetry the whole design rests on.
+
+So when a seventh capability is added, ask in this order:
+
+1. What does somebody reach for this switch to STOP?
+2. Does switching it off also stop the thing that undoes it?
+3. If so, put the way back **on the control** — the command to run, or the ordering to follow — because
+   whoever needs it is looking at the switch, not at this file.
+
+A capability whose coarse switch disables its own remedy is not a flaw to be gated away. It is a one-way
+door, and a one-way door has to be **labelled on the side somebody approaches it from.**
+
 ## Permissive by default; the password is the layer
 
 Both axes default to **enabled** for all six. The product should let a person do as much as possible
