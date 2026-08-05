@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
 import {
-  FY_REQUEST_TIMEOUT_MS,
   FetchHttpTransport,
+  FY_REQUEST_TIMEOUT_MS,
   FyApiClient,
   FyHttpError,
   FyTransportError,
@@ -13,7 +13,7 @@ import { BASE_CLIENT_OPTIONS as BASE_OPTIONS, connectClient as connect, headersO
 import { captureError, emptyResponse, jsonResponse, QueuedHttpTransport, textResponse } from './fakes.ts';
 
 describe('FyApiClient construction and generic requests', () => {
-  it('should expose exactly 36 instance methods and connect separately', async () => {
+  it('should expose the exact public instance method set and connect separately', async () => {
     // Arrange
     const expected = [
       'analytics',
@@ -34,6 +34,7 @@ describe('FyApiClient construction and generic requests', () => {
       'rename',
       'request',
       'resume',
+      'runtime',
       'scratchPlan',
       'scratchSweep',
       'send',
@@ -62,7 +63,6 @@ describe('FyApiClient construction and generic requests', () => {
 
     // Assert
     should(methods).deepEqual(expected);
-    should(methods).have.length(36);
     should(client).be.instanceof(FyApiClient);
     should(typeof FyApiClient.connect).equal('function');
   });
