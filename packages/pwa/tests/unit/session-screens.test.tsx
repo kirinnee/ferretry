@@ -10,7 +10,7 @@ import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
 import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
-import { Transcript } from '../../src/components/transcript.tsx';
+import { quotableTranscriptSelectionText, Transcript } from '../../src/components/transcript.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -71,6 +71,24 @@ const findText = (node: ReactTestInstance, text: string): ReactTestInstance[] =>
   node.findAll(item => item.children.includes(text));
 
 describe('session screen components', () => {
+  test('quotes only a non-empty selection that belongs to the transcript', () => {
+    const inside = {} as Node;
+    const outside = {} as Node;
+    const selection = (text: string, anchorNode: Node | null, focusNode: Node | null, collapsed = false) => ({
+      isCollapsed: collapsed,
+      rangeCount: 1,
+      anchorNode,
+      focusNode,
+      toString: () => text,
+    });
+    const contains = (node: Node | null) => node === inside;
+
+    expect(quotableTranscriptSelectionText(null, contains)).toBe('');
+    expect(quotableTranscriptSelectionText(selection('selected', outside, outside), contains)).toBe('');
+    expect(quotableTranscriptSelectionText(selection('  selected  ', inside, outside), contains)).toBe('selected');
+    expect(quotableTranscriptSelectionText(selection('selected', inside, inside, true), contains)).toBe('');
+  });
+
   test('formats session state and elapsed time for every visible range', () => {
     expect(isTerminalSessionStatus('completed')).toBe(true);
     expect(isTerminalSessionStatus('running')).toBe(false);
