@@ -27,6 +27,7 @@ import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings, daemonDisplayName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
+import type { PairingClientFactory } from './add-device-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
@@ -227,6 +228,8 @@ export interface SettingsPageProps {
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the grant surface, so no test or harness opens a socket to read a limit. */
   readonly createGrantClient?: GrantClientFactory;
+  /** And for pairing, so no harness capture can ever contain a real minted code. */
+  readonly createPairingClient?: PairingClientFactory;
   /** Future daemon-owned tabs, appended after Warden in the shared frame. */
   readonly daemonSettingsTabs?: readonly DaemonSettingsTabDefinition[];
   readonly onSelectDaemon: (daemonId: DaemonId) => void;
@@ -265,6 +268,7 @@ export function SettingsPage({
   readWardenStatus,
   createWardenClient,
   createGrantClient,
+  createPairingClient,
   daemonSettingsTabs,
   onSelectDaemon,
   onRenameDaemon,
@@ -517,6 +521,7 @@ export function SettingsPage({
                         readWardenStatus={readWardenStatus}
                         createWardenClient={createWardenClient}
                         {...(createGrantClient ? { createGrantClient } : {})}
+                        {...(createPairingClient ? { createPairingClient } : {})}
                         additionalTabs={daemonSettingsTabs}
                         carrier={carrier}
                         relayAdvertised={relayAdvertised}

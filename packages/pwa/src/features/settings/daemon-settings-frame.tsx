@@ -18,6 +18,7 @@ import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { ChoiceRail, type ChoiceRailItem } from '../../shell/choice-rail.tsx';
 import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
+import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { WardenStrip } from '../warden/warden-strip.tsx';
@@ -123,6 +124,8 @@ export interface DaemonSettingsFrameProps {
   readonly createSecretClient?: SecretClientFactory;
   /** And for the grant surface, so no test or harness opens a socket to read a limit. */
   readonly createGrantClient?: GrantClientFactory;
+  /** And for pairing, so no harness screenshot can ever contain a real minted code. */
+  readonly createPairingClient?: PairingClientFactory;
   /** Fleet and later host-owned settings are supplied here, after Warden. */
   readonly additionalTabs?: readonly DaemonSettingsTabDefinition[];
   /** Measured for this exact daemon connection, never inferred from a preference. */
@@ -147,6 +150,7 @@ export function DaemonSettingsFrame({
   createWardenClient,
   createSecretClient,
   createGrantClient,
+  createPairingClient,
   additionalTabs = [],
   carrier,
   relayAdvertised = false,
@@ -176,6 +180,24 @@ export function DaemonSettingsFrame({
           <SecretsSurface
             connection={activeConnection}
             {...(createSecretClient ? { createClient: createSecretClient } : {})}
+          />
+        ),
+      },
+      {
+        /**
+         * Adding a device, immediately after the two panels that own this machine's own configuration.
+         *
+         * It is here rather than in a global Settings section because a pairing code belongs to ONE
+         * machine: the code, the device list and every revoke are read from this tab's connection, so a
+         * reader can never revoke a device on the daemon they just switched away from.
+         */
+        id: 'devices',
+        label: 'Add a device',
+        description: 'Pair another phone or browser with this machine, and revoke one.',
+        Surface: ({ connection: activeConnection }) => (
+          <AddDeviceSurface
+            connection={activeConnection}
+            {...(createPairingClient ? { createClient: createPairingClient } : {})}
           />
         ),
       },
@@ -248,6 +270,7 @@ export function DaemonSettingsFrame({
       connectionRecord,
       connections,
       createGrantClient,
+      createPairingClient,
       createSecretClient,
       createWardenClient,
       onRemoveDaemon,

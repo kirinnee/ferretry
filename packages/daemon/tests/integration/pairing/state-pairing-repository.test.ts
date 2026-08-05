@@ -200,4 +200,50 @@ describe('StatePairingRepository', () => {
       'a device identity already exists',
     );
   });
+
+  it('should forget one grant durably and report an id it never held', async () => {
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-remove');
+    const state = await repository.open('workstation');
+    await repository.add(record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'));
+    await repository.add(record(state.daemonId, 'fy_device_id_bbbbbbbbbbbbbbbbbbbbbb'));
+
+    // Act
+    const removed = await repository.remove('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa');
+    const absent = await repository.remove('fy_device_id_cccccccccccccccccccccc');
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert — the document is what decides who comes back after a restart, so a revocation that only
+    // dropped the live grant would hand the device its access back at the next boot.
+    should(removed).be.true();
+    should(absent).be.false();
+    should((await repository.list()).map(device => device.id)).deepEqual(['fy_device_id_bbbbbbbbbbbbbbbbbbbbbb']);
+    should(reopened.devices.map(device => device.id)).deepEqual(['fy_device_id_bbbbbbbbbbbbbbbbbbbbbb']);
+  });
+
+  it('should serialize a removal against a concurrent grant so neither write is lost', async () => {
+    // Two snapshots taken at the same moment would each write a document missing the other's change,
+    // and the loser here would be a device silently re-granted access.
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-remove-concurrent');
+    const state = await repository.open('workstation');
+    await repository.add(record(state.daemonId, 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'));
+
+    // Act
+    await Promise.all([
+      repository.add(record(state.daemonId, 'fy_device_id_bbbbbbbbbbbbbbbbbbbbbb')),
+      repository.remove('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa'),
+    ]);
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+
+    // Assert
+    should(reopened.devices.map(device => device.id)).deepEqual(['fy_device_id_bbbbbbbbbbbbbbbbbbbbbb']);
+  });
+
+  it('should refuse to list or remove before the state home is open', async () => {
+    const { repository } = await fixture('pairing-state-closed');
+
+    await should(repository.list()).be.rejectedWith('pairing state is not open');
+    await should(repository.remove('fy_device_id_aaaaaaaaaaaaaaaaaaaaaa')).be.rejectedWith('pairing state is not open');
+  });
 });

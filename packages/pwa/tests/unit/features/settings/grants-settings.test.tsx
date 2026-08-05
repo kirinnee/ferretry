@@ -25,6 +25,9 @@ const entry = (overrides: Partial<CapabilityGrantView> = {}): CapabilityGrantVie
 
 const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability })),
+  // Governed by default: these fixtures stand for a caller who is NOT on the host, which is the only
+  // caller the grants apply to.
+  governed: true,
   passwordSet: false,
   unlocked: false,
   ...overrides,

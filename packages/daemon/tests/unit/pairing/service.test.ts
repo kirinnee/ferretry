@@ -17,6 +17,8 @@ const DEVICE_TOKEN = `fy_device_${'d'.repeat(43)}` as DeviceToken;
 const SECOND_DEVICE_TOKEN = `fy_device_${'e'.repeat(43)}` as DeviceToken;
 const CODE = '7F3K-Q2ND' as PairingCode;
 const SECOND_CODE = '6E2J-P3MC' as PairingCode;
+const FIRST_DEVICE_ID = `fy_device_id_${'1'.padStart(22, 'a')}`;
+const SECOND_DEVICE_ID = `fy_device_id_${'2'.padStart(22, 'a')}`;
 
 class FakeClock {
   nowMs = Date.parse('2026-08-03T12:00:00.000Z');
@@ -41,9 +43,16 @@ class FakeCryptography implements PairingCryptography {
     return this.tokens.shift() ?? SECOND_DEVICE_TOKEN;
   }
 
+  /**
+   * A REALISTIC id, because the protocol's device projection parses it.
+   *
+   * `device-1` would exercise the state machine perfectly well and then fail the moment a record was
+   * projected for the wire — the boundary that keeps a digest off the wire also insists on the id
+   * shape, and a fixture that cannot cross it proves nothing about the surface it is standing in for.
+   */
   deviceId(): string {
     this.deviceIds += 1;
-    return `device-${this.deviceIds}`;
+    return `fy_device_id_${String(this.deviceIds).padStart(22, 'a')}`;
   }
 
   hashDeviceToken(daemonId: string, token: string): string {
@@ -52,12 +61,24 @@ class FakeCryptography implements PairingCryptography {
 }
 
 class RecordingDevices implements PairingDeviceStore {
-  readonly records: PairingDeviceRecord[] = [];
+  records: PairingDeviceRecord[] = [];
   failure: Error | undefined;
 
   async add(record: PairingDeviceRecord): Promise<void> {
     if (this.failure !== undefined) throw this.failure;
     this.records.push(record);
+  }
+
+  async list(): Promise<readonly PairingDeviceRecord[]> {
+    return this.records;
+  }
+
+  async remove(id: string): Promise<boolean> {
+    if (this.failure !== undefined) throw this.failure;
+    const remaining = this.records.filter(record => record.id !== id);
+    if (remaining.length === this.records.length) return false;
+    this.records = remaining;
+    return true;
   }
 }
 
@@ -138,7 +159,7 @@ describe('PairingService redemption', () => {
     });
     should(devices.records).deepEqual([
       {
-        id: 'device-1',
+        id: FIRST_DEVICE_ID,
         daemonId: DAEMON_ID,
         name: 'Ernest phone',
         platform: 'browser',
@@ -148,7 +169,7 @@ describe('PairingService redemption', () => {
       },
     ]);
     should(JSON.stringify(devices.records)).not.containEql(DEVICE_TOKEN);
-    should(credentials.identify(DEVICE_TOKEN)).equal('device-1');
+    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
     should(service.status(PAIRING_ID)).deepEqual({
       pairingId: PAIRING_ID,
       status: 'redeemed',
@@ -214,7 +235,11 @@ describe('PairingService redemption', () => {
       release = resolve;
     });
     const base = fixture();
-    const devices: PairingDeviceStore = { add: async () => await persisted };
+    const devices: PairingDeviceStore = {
+      add: async () => await persisted,
+      list: async () => [],
+      remove: async () => false,
+    };
     const service = new PairingService({
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
@@ -290,6 +315,144 @@ describe('PairingService redemption', () => {
       ['', '2222-2222'],
       [SECOND_CODE, CODE],
     ]);
+  });
+});
+
+describe('PairingService revocation', () => {
+  it('should end a live code early, leaving nothing to redeem', async () => {
+    // Arrange
+    const { service } = fixture();
+    const minted = service.mint();
+
+    // Act
+    const revoked = service.revoke(minted.pairingId);
+    const attempted = await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Assert
+    should(revoked).deepEqual({
+      pairingId: PAIRING_ID,
+      status: 'expired',
+      expiresAt: '2026-08-03T12:02:00.000Z',
+    });
+    should(attempted).deepEqual({ kind: 'refused' });
+  });
+
+  it('should keep a redeemed code redeemed rather than reporting it expired', async () => {
+    // A revoke arriving after a device got in must not tell the operator nobody did. The code is
+    // already spent either way; what differs is the answer, and only one of them is true.
+    // Arrange
+    const { service } = fixture();
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    const revoked = service.revoke(PAIRING_ID);
+
+    // Assert
+    should(revoked).containDeep({ status: 'redeemed', deviceName: 'phone' });
+  });
+
+  it('should be idempotent for a code it knows and silent about one it never minted', () => {
+    // Arrange
+    const { service } = fixture();
+    service.mint();
+
+    // Act
+    const first = service.revoke(PAIRING_ID);
+    const second = service.revoke(PAIRING_ID);
+    const unknown = service.revoke(`fy_pair_${'z'.repeat(22)}` as PairingId);
+
+    // Assert — two people shutting the same door is the expected use, not an error.
+    should(first).deepEqual(second);
+    should(unknown).be.undefined();
+  });
+
+  it('should project paired devices without their token digests', async () => {
+    // Arrange
+    const { devices, service } = fixture();
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'Ernest phone' }, 'peer-one');
+
+    // Act
+    const listed = await service.devices();
+
+    // Assert — the record HAS a digest and the projection has no field for one.
+    should(devices.records[0]?.tokenHash).be.a.String();
+    should(listed).deepEqual([
+      {
+        id: FIRST_DEVICE_ID,
+        name: 'Ernest phone',
+        platform: 'browser',
+        createdAt: '2026-08-03T12:00:00.000Z',
+        lastSeenAt: '2026-08-03T12:00:00.000Z',
+      },
+    ]);
+    should(JSON.stringify(listed)).not.containEql('tokenHash');
+  });
+
+  it('should end a revoked device’s access for the very next request', async () => {
+    // THE HALF THAT ACTUALLY REVOKES. Rewriting the document decides what comes back after a restart;
+    // dropping the live grant decides whether the next request is served, which is the only one the
+    // person holding the lost phone is making.
+    // Arrange
+    const { credentials, devices, service } = fixture();
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'first' }, 'peer-one');
+    service.mint();
+    await service.redeem({ code: SECOND_CODE, deviceName: 'second' }, 'peer-two');
+
+    // Act
+    const removed = await service.revokeDevice(FIRST_DEVICE_ID);
+
+    // Assert — the revoked grant is gone from both halves, and the sibling grant is untouched.
+    // `identify` is asserted only NOT to be the revoked device: this fixture's digest is deliberately
+    // sensitive to nothing but token length, so the two grants share one, and which of them answers
+    // is a property of the fake rather than of the service. `PairingDeviceRegistry refusals` below
+    // proves the real separation against a digest that has it.
+    should(removed).be.true();
+    should(credentials.identify(DEVICE_TOKEN)).not.equal(FIRST_DEVICE_ID);
+    should(devices.records.map(record => record.id)).deepEqual([SECOND_DEVICE_ID]);
+  });
+
+  it('should stop authenticating the revoked device when nothing else is paired', async () => {
+    // Arrange
+    const { credentials, service } = fixture();
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    await service.revokeDevice(FIRST_DEVICE_ID);
+
+    // Assert
+    should(credentials.identify(DEVICE_TOKEN)).be.undefined();
+    should(await service.devices()).be.empty();
+  });
+
+  it('should report a device it never had rather than claiming to have revoked one', async () => {
+    const { service } = fixture();
+
+    should(await service.revokeDevice(FIRST_DEVICE_ID)).be.false();
+  });
+
+  it('should leave the live credential alone when the document cannot be written', async () => {
+    // The order is the point: persist first, and only a successful write drops the grant. The other
+    // way round, a failed write leaves a phone that stops working now and works again after a
+    // restart — the least explainable outcome available.
+    // Arrange
+    const { credentials, devices, service } = fixture();
+    service.mint();
+    await service.redeem({ code: CODE, deviceName: 'phone' }, 'peer-one');
+    devices.failure = new Error('disk unavailable');
+
+    // Act
+    const attempt = await service.revokeDevice(FIRST_DEVICE_ID).then(
+      () => 'resolved',
+      (reason: unknown) => (reason as Error).message,
+    );
+
+    // Assert
+    should(attempt).equal('disk unavailable');
+    should(credentials.identify(DEVICE_TOKEN)).equal(FIRST_DEVICE_ID);
   });
 });
 

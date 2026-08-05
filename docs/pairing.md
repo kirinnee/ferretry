@@ -1,0 +1,126 @@
+# Pairing — how another device gets access to one machine
+
+A Ferretry daemon serves exactly the devices it has been told to serve. Pairing is the whole of that
+decision: a short-lived code is minted on one side, read by the device being added, and exchanged once
+for a durable device credential. This document is the contract. Implement against it rather than
+against the code, and change it in the same commit as the behaviour.
+
+## The one-sentence version
+
+The machine mints a code that lives for **two minutes** and works **once**; the device that reads it
+gets a device token; the machine keeps only a hash of that token and can revoke it at any time.
+
+## What travels, and what never does
+
+| value        | where it lives                                  | who may read it                       |
+| ------------ | ----------------------------------------------- | ------------------------------------- |
+| pairing code | the daemon's memory for its TTL, and one screen | whoever is being shown the code       |
+| pairing id   | the mint response, and revoke URLs              | anybody who may reach the pairing API |
+| device token | the redeeming device, once                      | that device, forever after            |
+| token digest | `state/devices.json`                            | the daemon, to compare against        |
+
+Two properties hold by construction rather than by discipline:
+
+- **No route returns a device token or anything derived from one.** `PairedDeviceSchema` — the
+  projection that crosses the wire — has no field for a digest. A daemon that volunteered one is
+  refused by the schema rather than rendered.
+- **The code never enters a URL path or query.** Revocation is addressed by **pairing id**, which is a
+  non-secret handle the mint answers with for exactly this reason: a URL reaches every access log in
+  the path, and a code in a log outlives its two minutes. The pairing _link_ carries the code in a
+  **fragment**, which is never sent in an HTTP request.
+
+## The exchange
+
+```
+POST /v1/pair/code            (admin scope, `pairing.use`)   → { pairingId, code, expiresAt, pairUrl, … }
+GET  /v1/pair/code/:pairingId (admin scope, `pairing.use`)   → pending | redeemed | expired
+DELETE /v1/pair/code/:pairingId (admin scope, `pairing.use`) → the code's fate, never the code
+POST /v1/pair                 (public)                        → { deviceToken, daemonId, … }
+GET  /v1/pair/devices         (admin scope, `pairing.use`)   → who may reach this machine
+DELETE /v1/pair/devices/:id   (admin scope, `pairing.use`)   → the remaining list
+```
+
+`POST /v1/pair` is the only public route on this surface, and it is public because a device redeeming a
+code has no credential yet — the **code is** the credential for that one request. Everything else either
+mints a credential or lists and revokes them.
+
+### Who may mint
+
+Read [grants.md](grants.md) first: minting is governed by the `pairing` capability, so a caller **on the
+host** is ungoverned and a caller **off the host** mints while the operator leaves `pairing` on. The two
+facts a UI needs before it offers anything — whether this request arrived on the host, and which grant is
+the caller's own — are on `GET /v1/pair/devices` as `hostLocal` and `thisDeviceId`. Both are
+carrier-derived and server-derived respectively; neither may be inferred in a browser.
+
+### What bounds a guess
+
+- a **two-minute** TTL and a **five-attempt** budget per code, whichever comes first;
+- a fixed-window rate limit per peer, independent of that budget, so broken uploads cannot spend it;
+- one active code per daemon: minting **replaces** its predecessor, which is why a UI must not offer a
+  mint button beside a live code;
+- the comparison is constant-time and runs even when there is no active code, so timing says nothing
+  about whether one exists.
+
+## The QR code is a live credential
+
+Whatever draws a QR of a pairing link is handling a credential for somebody's machine, so:
+
+- **Generate it locally.** Never call a QR image service and never put a pairing URL in any third-party
+  request. The browser does it with `packages/pwa/src/lib/qr-code.ts` — a pure byte-mode encoder in the
+  bundle — and the command line does it with block characters in the terminal.
+- **Never announce it.** The rendered symbol's accessible name says what it _is_, never what it encodes:
+  a screen reader reading a pairing URL aloud puts a credential in the accessibility tree.
+- **Never persist it.** No store, no `localStorage`, no URL, no log, no memo keyed by input. A code lives
+  in component state for its TTL and then it is gone.
+- **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
+  machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
+
+## Revoking
+
+Two different things are revocable and they are not the same act:
+
+- **A code** — ends the window early. Idempotent for a code the daemon knows; a 404 for an id it never
+  minted, because "revoked" and "there was nothing here" are different answers and a screen that cannot
+  tell them apart claims to have closed a door it never found. A code that was already **redeemed** stays
+  reported as redeemed rather than becoming "expired": a device got in, and saying otherwise is a lie.
+- **A device** — ends its access. The document is written **first**, and only a successful write drops the
+  live grant from the registry; the other order turns a failed write into a phone that stops working now
+  and works again after a restart. There is no `await` between the two, so no request can authenticate
+  against a credential the daemon has already promised to forget.
+
+Revoking the credential **you are currently using** is legitimate — handing a laptop back is exactly that
+— so it is offered rather than blocked. What is not acceptable is being surprised by it, which is why each
+row states what its revoke will do before the press.
+
+## Where it lives
+
+| concern                     | module                                                             |
+| --------------------------- | ------------------------------------------------------------------ |
+| the state machine           | `packages/daemon/src/lib/pairing/service.ts`                       |
+| the routes and their scope  | `packages/daemon/src/lib/runtime/mounts/pairing.ts`                |
+| durable identity and grants | `packages/daemon/src/adapters/pairing/state-pairing-repository.ts` |
+| the wire contract           | `packages/protocol/src/lib/pairing.ts`                             |
+| the command line            | `packages/cli/src/lib/pair/`                                       |
+| the browser panel           | `packages/pwa/src/features/settings/add-device-settings.tsx`       |
+| the QR encoder              | `packages/pwa/src/lib/qr-code.ts`                                  |
+
+## Declared GAPs
+
+- **`lastSeenAt` is never updated after pairing.** It is written once, at redemption, so the device list
+  shows when a grant was created and not when the daemon last heard from it. The field is served because
+  the shape is right; a UI must not present it as recent activity until something advances it.
+- **A device cannot be renamed.** The name is whatever the device called itself when it redeemed, and it
+  is attacker-influenced text bounded by `PairingDeviceNameSchema`. Two phones that both say "Chrome" are
+  told apart only by when they were added.
+- **There is no pairing audit record.** A revoked device leaves no trace beyond its absence from
+  `devices.json`, so "when did this credential go away, and who ended it" is not answerable. The grant
+  layer has an audit journal; this does not.
+- **A device token never expires.** Revocation is the only way one ends. There is no rotation, no
+  last-used cutoff and no maximum age, so a phone that redeemed a code a year ago is still a device.
+- **The browser cannot scan on WebKit.** `BarcodeDetector` is Chromium-only, so the in-app scanner is
+  absent there. This is not the blocked path it looks like — the intended carrier is the phone's own
+  camera app, which opens the PWA pre-filled on every platform — but a reader who opened the app first
+  gets the paste field rather than a bundled decoder every visitor would have to download.
+- **`pairing.configure` governs no route.** Like `terminal`, `browser` and `filesystem`, its configure
+  axis governs exactly one thing: whether a remote caller may re-grant the capability. See
+  [grants.md](grants.md).

@@ -18,8 +18,9 @@ import type { EnforcedGrants } from './types.ts';
  * PERMISSIVE, and chosen rather than shrugged at. The governing principle is *control as much as
  * possible from the UI, with a security layer for the cautious* — so a person should be able to do
  * everything from a browser until they decide otherwise, and the restriction is something they turn
- * on rather than a wall they start behind. Both axes are therefore enabled for all five
- * capabilities.
+ * on rather than a wall they start behind. Both axes are therefore enabled for all six capabilities,
+ * `pairing` included — see `docs/grants.md` for why the one that hands out credentials needs no
+ * exception: a caller who is not on this host can switch it off and can never switch it back on.
  *
  * THE PRIMARY SECURITY LAYER IS LOCALITY, NOT THE PASSWORD. A remote caller can never turn a
  * capability ON — not with the operator password, not with a valid unlock, not ever. Widening is a
@@ -44,6 +45,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   browser: { use: true, configure: true },
   filesystem: { use: true, configure: true },
   warden: { use: true, configure: true },
+  pairing: { use: true, configure: true },
 };
 
 /**
@@ -134,6 +136,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   browser: 'the browser',
   filesystem: 'session working trees',
   warden: 'fleet supervision',
+  pairing: 'device pairing',
 };
 
 /** The capability as an operator reads it, for a report row or a refusal. */

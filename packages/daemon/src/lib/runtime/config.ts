@@ -192,6 +192,12 @@ export const CapabilityGrantsDocumentSchema = z
     browser: grantSchemaFor('browser'),
     filesystem: grantSchemaFor('filesystem'),
     warden: grantSchemaFor('warden'),
+    // Every capability in `DAEMON_CAPABILITIES` needs its key HERE, spelled out. The keys are literal
+    // rather than derived from the array so the parsed type stays exact, and the cost of that is this
+    // comment: a capability missing from this object is refused when an operator writes it AND absent
+    // from what `readGrants` returns, while `CapabilityGrants` says it is there. TypeScript does not
+    // catch the second — a strict object widens on the way out.
+    pairing: grantSchemaFor('pairing'),
   })
   .prefault({});
 

@@ -39,6 +39,8 @@ const capability = (
 
 const view = (overrides: Partial<GrantsView> = {}): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(name => capability(name, { use: true, configure: true })),
+  // The CLI runs on the host, so the caller these fixtures stand for is the ungoverned one.
+  governed: false,
   passwordSet: false,
   unlocked: false,
   ...overrides,

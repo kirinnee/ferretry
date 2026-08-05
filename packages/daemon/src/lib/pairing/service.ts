@@ -3,6 +3,8 @@ import {
   DaemonIdSchema,
   DaemonNameSchema,
   DeviceTokenSchema,
+  type PairedDevice,
+  PairedDeviceSchema,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
   type PairingCode,
@@ -50,6 +52,16 @@ export interface PairingDeviceRecord {
 
 export interface PairingDeviceStore {
   add(record: PairingDeviceRecord): Promise<void>;
+  /** Every grant this daemon has persisted, in the order it granted them. */
+  list(): Promise<readonly PairingDeviceRecord[]>;
+  /**
+   * Forgets one grant, reporting whether there was one to forget.
+   *
+   * The BOOLEAN is the contract: revoking a device that is already gone is not an error — two people
+   * revoking the same lost phone is the expected way this is used — but a caller that cannot tell
+   * "removed" from "was never here" cannot answer honestly either.
+   */
+  remove(id: string): Promise<boolean>;
 }
 
 /**
@@ -69,6 +81,18 @@ export class PairingDeviceRegistry implements DeviceCredentialVerifier {
     private readonly compare: (left: string, right: string) => boolean = secretsMatch,
   ) {
     for (const record of records) this.add(record);
+  }
+
+  /**
+   * Forgets one grant, so the credential stops authenticating THIS INSTANT.
+   *
+   * The registry is the live verifier, and it is the half of a revocation that actually ends access:
+   * the document on disk decides what comes back after a restart, while this decides whether the next
+   * request is served. A revocation that only rewrote the file would leave a revoked phone working
+   * until somebody restarted the daemon, which is precisely when nobody is going to.
+   */
+  remove(id: string): boolean {
+    return this.records.delete(id);
   }
 
   add(record: PairingDeviceRecord): void {
@@ -214,6 +238,69 @@ export class PairingService {
     this.observations.set(pairingId, expired);
     if (active?.pairingId === pairingId) this.active = undefined;
     return expired;
+  }
+
+  /**
+   * Ends one minted code before its two minutes are up.
+   *
+   * IT IS ADDRESSED BY PAIRING ID, NEVER BY CODE. The id is the non-secret handle a mint answers with
+   * for exactly this reason: this value reaches a URL, and a URL reaches every access log in the path,
+   * so a revoke keyed by the code would put the code somewhere it outlives its TTL.
+   *
+   * `undefined` means this daemon never minted that id — reported as a 404 rather than a cheerful
+   * success, because "revoked" and "there was nothing here" are different answers and a screen that
+   * cannot tell them apart will claim to have closed a door it never found. An id it DOES know is
+   * always answered with the observation, so revoking an already-expired or already-redeemed code is
+   * idempotent rather than an error: two people shutting the same door is the expected use.
+   */
+  revoke(pairingId: PairingId): PairingCodeStatusResponse | undefined {
+    const observation = this.observations.get(pairingId);
+    if (observation === undefined) return undefined;
+    const active = this.active;
+    if (active?.pairingId === pairingId) this.expire(active);
+    // Re-read rather than returning what `expire` wrote: a code that was already redeemed keeps its
+    // redeemed observation, and reporting it as expired would tell an operator no device got in.
+    return this.observations.get(pairingId) ?? observation;
+  }
+
+  /**
+   * Every device that may reach this daemon, projected for the wire.
+   *
+   * THE DIGEST IS DROPPED HERE, and it is dropped by construction rather than by remembering to: the
+   * return type is the protocol's `PairedDevice`, which has no field for one. A record's `tokenHash` is
+   * the only thing standing between a leaked state file and a forged credential, and no caller of this
+   * has any use for it.
+   */
+  async devices(): Promise<readonly PairedDevice[]> {
+    const records = await this.options.devices.list();
+    return records.map(record =>
+      PairedDeviceSchema.parse({
+        id: record.id,
+        name: record.name,
+        platform: record.platform,
+        createdAt: record.createdAt,
+        lastSeenAt: record.lastSeenAt,
+      }),
+    );
+  }
+
+  /**
+   * Takes one device's access away.
+   *
+   * THE ORDER IS DELIBERATE: the document is written first, and only a successful write removes the
+   * live credential. The other order — kill it in memory, then persist — turns a failed write into a
+   * daemon whose answer disagrees with its own state file, so the phone stops working now and starts
+   * working again at the next restart, which is the least explainable outcome available. This way a
+   * write failure means nothing was revoked, the caller is told, and the operator can try again.
+   *
+   * There is no await between the write and the in-memory removal, so no request can be authenticated
+   * against a credential this daemon has already promised to forget.
+   */
+  async revokeDevice(id: string): Promise<boolean> {
+    const removed = await this.options.devices.remove(id);
+    if (!removed) return false;
+    this.options.credentials.remove(id);
+    return true;
   }
 
   async redeem(value: unknown, rateLimitKey: string): Promise<PairingRedemption> {
