@@ -15,10 +15,10 @@ const eventAt = (sequence: number): FyEvent => ({ ...fyEvent, sequence, time: IN
 const pathsOf = (transport: QueuedHttpTransport): string[] =>
   transport.calls.map(call => call.url.slice(BASE_URL.length));
 
-const filePartOf = (transport: QueuedHttpTransport, index = 0): File => {
-  const form = transport.calls[index]?.init.body;
-  should(form).be.instanceof(FormData);
-  return (form as FormData).get('file') as File;
+const uploadBodyOf = (transport: QueuedHttpTransport, index = 0): Record<string, unknown> => {
+  const body = transport.calls[index]?.init.body;
+  should(typeof body).equal('string');
+  return JSON.parse(body as string) as Record<string, unknown>;
 };
 
 describe('FyApiClient event history paging', () => {
@@ -100,7 +100,7 @@ describe('FyApiClient event history paging', () => {
 });
 
 describe('FyApiClient attachment upload', () => {
-  it('should upload a blob under a generated filename', async () => {
+  it('should encode a blob into the bounded JSON attachment contract', async () => {
     // Arrange
     const transport = new QueuedHttpTransport(jsonResponse(attachmentView));
     const client = await connectClient(transport);
@@ -113,9 +113,7 @@ describe('FyApiClient attachment upload', () => {
     should(actual).deepEqual(attachmentView);
     should(transport.calls[0]?.url).equal(`${BASE_URL}/v1/sessions/session-1/attachments`);
     should(transport.calls[0]?.init.method).equal('POST');
-    should(filePartOf(transport).name).equal('attachment');
-    should(filePartOf(transport).type).equal(input.type);
-    should(await filePartOf(transport).text()).equal('note');
+    should(uploadBodyOf(transport)).deepEqual({ filename: 'attachment', mime: input.type, base64: 'bm90ZQ==' });
   });
 
   it('should prefer a File name and honour an explicit filename override', async () => {
@@ -128,8 +126,8 @@ describe('FyApiClient attachment upload', () => {
     await client.upload(SESSION_ID, new File(['note'], 'from-file.txt'), 'override.txt');
 
     // Assert
-    should(filePartOf(transport, 0).name).equal('from-file.txt');
-    should(filePartOf(transport, 1).name).equal('override.txt');
+    should(uploadBodyOf(transport, 0).filename).equal('from-file.txt');
+    should(uploadBodyOf(transport, 1).filename).equal('override.txt');
   });
 
   it('should load a path through the injected file loader', async () => {
@@ -150,9 +148,12 @@ describe('FyApiClient attachment upload', () => {
 
     // Assert
     should(loaded).deepEqual(['/tmp/loaded.txt', '/tmp/loaded.txt']);
-    should(filePartOf(transport, 0).name).equal('loaded.txt');
-    should(filePartOf(transport, 1).name).equal('renamed.txt');
-    should(await filePartOf(transport, 0).text()).equal('from disk');
+    should(uploadBodyOf(transport, 0)).deepEqual({
+      filename: 'loaded.txt',
+      mime: 'application/octet-stream',
+      base64: 'ZnJvbSBkaXNr',
+    });
+    should(uploadBodyOf(transport, 1).filename).equal('renamed.txt');
   });
 
   it('should refuse a path upload when no file loader is installed', async () => {

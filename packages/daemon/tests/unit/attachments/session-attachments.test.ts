@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { SessionAttachmentStore } from '../../../src/lib/attachments/index.ts';
+import { PdfDecryptError, SessionAttachmentStore } from '../../../src/lib/attachments/index.ts';
 
 const encryptedPdf = new TextEncoder().encode('%PDF-1.7\n1 0 obj << /Encrypt 2 0 R >>\n');
 const plaintext = new TextEncoder().encode('%PDF-1.7\nsecret plaintext must stay in RAM\n');
@@ -61,6 +61,68 @@ describe('SessionAttachmentStore', () => {
         },
         error => should(error).have.property('failure', 'not_found'),
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the encrypted original intact and locked after a wrong password', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-attachments-'));
+    try {
+      const store = new SessionAttachmentStore({
+        root,
+        daemonId: 'daemon-a',
+        decrypt: async () => {
+          throw new PdfDecryptError('wrong_password');
+        },
+      });
+      const uploaded = await store.upload('session-a', {
+        filename: 'private.pdf',
+        mime: 'application/pdf',
+        bytes: encryptedPdf,
+      });
+
+      await store.unlock('session-a', uploaded.id, 'wrong password').then(
+        () => {
+          throw new Error('unlock must refuse a wrong password');
+        },
+        error => should(error).have.property('failure', 'wrong_password'),
+      );
+
+      const downloaded = await store.download('session-a', uploaded.id);
+      should(downloaded.attachment.encrypted?.locked).be.true();
+      should(new TextDecoder().decode(downloaded.bytes)).equal(new TextDecoder().decode(encryptedPdf));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when decryption cannot produce plaintext', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-attachments-'));
+    try {
+      const store = new SessionAttachmentStore({
+        root,
+        daemonId: 'daemon-a',
+        decrypt: async () => {
+          throw new PdfDecryptError('unreadable_document');
+        },
+      });
+      const uploaded = await store.upload('session-a', {
+        filename: 'damaged.pdf',
+        mime: 'application/pdf',
+        bytes: encryptedPdf,
+      });
+
+      await store.unlock('session-a', uploaded.id, 'correct password').then(
+        () => {
+          throw new Error('unlock must refuse an unreadable document');
+        },
+        error => should(error).have.property('failure', 'decryption_failed'),
+      );
+
+      const downloaded = await store.download('session-a', uploaded.id);
+      should(downloaded.attachment.encrypted).deepEqual({ kind: 'pdf', locked: true });
+      should(downloaded.bytes.byteLength).equal(encryptedPdf.byteLength);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
