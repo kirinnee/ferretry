@@ -24,7 +24,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
-import { daemonDisplayName, type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
+import { type DaemonReachabilityProbe, DaemonSettings, daemonDisplayName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
@@ -239,7 +239,7 @@ export interface SettingsPageProps {
   readonly connections: readonly DaemonConnectionRecord[];
   /** Reader-local controls; only device fields are edited here. */
   readonly controls: DaemonControlsStore;
-  /** The daemon-scoped dictation surface: engine readiness, chord, enhancer. */
+  /** Browser-local dictation capability, shortcut, and enhancer settings. */
   readonly dictation: DictationSettingsProps;
   /** The daemon-aware notification host, supplied by the composition root. */
   readonly notifications?: ReactNode;
@@ -430,8 +430,6 @@ export function SettingsPage({
     ],
   );
   const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
-  const selectedConnection = selectedRecord ?? dictation.daemon;
-  const selectedName = selectedRecord ? daemonDisplayName(selectedRecord) : selectedConnection.baseUrl;
 
   return (
     <main
@@ -511,21 +509,27 @@ export function SettingsPage({
                       onSelectDaemon={onSelectDaemon}
                       onAddDaemon={onAddDaemon}
                     />
-                    <DaemonSettingsFrame
-                      key={String(daemonId)}
-                      connection={selectedConnection}
-                      connectionRecord={selectedRecord}
-                      name={selectedName}
-                      connections={connections}
-                      readWardenStatus={readWardenStatus}
-                      createWardenClient={createWardenClient}
-                      additionalTabs={daemonSettingsTabs}
-                      carrier={carrier}
-                      relayAdvertised={relayAdvertised}
-                      probeDaemon={probeDaemon}
-                      onRenameDaemon={onRenameDaemon}
-                      onRemoveDaemon={onRemoveDaemon}
-                    />
+                    {selectedRecord === undefined ? (
+                      <p className="m-0 text-ui leading-base text-warn" role="alert">
+                        This daemon is not present in the browser’s pairing registry, so its settings cannot be shown.
+                      </p>
+                    ) : (
+                      <DaemonSettingsFrame
+                        key={String(daemonId)}
+                        connection={selectedRecord}
+                        connectionRecord={selectedRecord}
+                        name={daemonDisplayName(selectedRecord)}
+                        connections={connections}
+                        readWardenStatus={readWardenStatus}
+                        createWardenClient={createWardenClient}
+                        additionalTabs={daemonSettingsTabs}
+                        carrier={carrier}
+                        relayAdvertised={relayAdvertised}
+                        probeDaemon={probeDaemon}
+                        onRenameDaemon={onRenameDaemon}
+                        onRemoveDaemon={onRemoveDaemon}
+                      />
+                    )}
                   </>
                 ) : null}
               </div>

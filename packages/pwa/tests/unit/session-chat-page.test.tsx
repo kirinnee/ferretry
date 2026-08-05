@@ -17,6 +17,7 @@ import { SessionSearchProvider } from '../../src/features/session-search/session
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { type SessionChatClient, SessionChatPage } from '../../src/lib/pages/session-chat-page.tsx';
+import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { openSidePaneTab, registerSidePaneTab, resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
@@ -290,6 +291,29 @@ describe('SessionChatPage', () => {
     );
     try {
       expect(page.root.findByType(Composer).props.compact).toBe(true);
+      // Absent settings leave the optional dictation slot genuinely empty
+      // rather than handing the composer an undefined it must re-check.
+      expect('dictationSettings' in page.root.findByType(Composer).props).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('forwards browser-local dictation settings to the composer when the app has them', () => {
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        dictationSettings={DEFAULT_STT_SETTINGS}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(page.root.findByType(Composer).props.dictationSettings).toBe(DEFAULT_STT_SETTINGS);
     } finally {
       run(() => page.unmount());
     }

@@ -17,24 +17,18 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSheet.tsx`), and WHY.
  *
- *   1. WHERE THE AUDIO GOES. kteam's copy said "on this device" throughout,
- *      because its only engine was browser-local Parakeet. Ferretry has not
- *      ported that engine (it needs `onnxruntime-web`, a ~25 MB WASM asset and a
- *      bundler — see PR #126), so the shipped engine posts the utterance to the
- *      reader's own paired daemon. Repeating kteam's wording here would tell the
- *      reader their audio never left the browser while it was being uploaded.
- *      The layout, stages, controls and iconography are unchanged; only the
- *      sentences that name a location were rewritten to be true.
- *   2. NO ROLLING PREVIEW. kteam decoded snapshots while the reader spoke and
- *      showed a pause-independent caption. That is `live-transcription.ts`,
- *      which is NOT PORTED with the local engine. `liveText` survives as the
- *      seam an engine can fill; the daemon engine leaves it empty and the panel
- *      shows the standing hint instead of pretending to hear words.
- *   3. THE INPUT METER IS ACTUALLY MOUNTED. kteam's sheet declared an
+ *   1. WHERE THE AUDIO GOES. Browser SpeechRecognition owns capture. Ferretry
+ *      never uploads microphone audio to its daemon, but some browser engines
+ *      use their vendor's online recognition service, so the copy promises the
+ *      former and does not falsely promise universal offline processing.
+ *   2. LIVE WORDS COME FROM THE BROWSER. Interim SpeechRecognition results fill
+ *      `liveText`; the completed result, not a provisional caption, is what the
+ *      controller inserts.
+ *   3. THE INPUT METER REMAINS AN OPTIONAL VISUAL SEAM. kteam's sheet declared an
  *      `inputMonitor` prop, never destructured it, and `InputWaveform` was
- *      imported by nothing except its own test — a fully tested component no
- *      reader ever saw. It is rendered here, during `recording`, which is what
- *      that prop was always for.
+ *      imported by nothing except its own test. It is still usable by isolated
+ *      visual fixtures, but production does not open a second microphone stream
+ *      merely to paint a waveform beside browser-owned recognition.
  */
 
 import { AlertCircle, EyeOff, Loader2, Mic, RotateCcw, Square, X } from 'lucide-react';
@@ -90,11 +84,9 @@ export interface DictationFailureCopy {
  * is only the headline and the one actionable hint.
  *
  * The vocabulary is the union of what this product can actually raise:
- * `CaptureErrorCode` from `lib/stt/capture-error.ts`, `SttErrorCode` from
- * `lib/stt/daemon-engine.ts`, and the `enhancement-` prefix the hook attaches to
- * a post-transcription correction failure. kteam's `not-prepared`, `backlog` and
- * `empty-segment` codes belonged to the browser-local decoder queue and have no
- * source here, so they are gone rather than left as unreachable copy.
+ * `BrowserRecognitionErrorCode` from `lib/stt/browser-recognition.ts` and the
+ * `enhancement-` prefix the hook attaches to a post-transcription correction
+ * failure.
  */
 export function dictationFailureCopy(code: string | undefined): DictationFailureCopy {
   if (code?.startsWith('enhancement-')) {
@@ -117,17 +109,15 @@ export function dictationFailureCopy(code: string | undefined): DictationFailure
       return { title: 'Microphone unavailable', hint: 'This page needs a secure (https) connection to record.' };
     case 'capture-failed':
       return { title: 'Recording could not start', hint: 'The microphone stopped before any audio was captured.' };
-    case 'unauthorized':
-      return { title: 'This daemon refused the recording', hint: 'Pair with it again, then try dictating.' };
-    case 'unavailable':
+    case 'recognition-unavailable':
+      return { title: 'Dictation unavailable here' };
+    case 'recognition-network':
       return {
-        title: 'Speech is not set up on this daemon',
-        hint: 'Install a speech model on the daemon, then try again.',
+        title: 'Browser speech service unreachable',
+        hint: 'Check this device’s connection, then try again.',
       };
-    case 'busy':
-      return { title: 'The daemon is already transcribing', hint: 'Wait for the current recording to finish.' };
-    case 'network':
-      return { title: 'The daemon could not be reached', hint: 'Check that it is running and reachable, then retry.' };
+    case 'recognition-failed':
+      return { title: 'Browser recognition failed', hint: 'Try again or use another supported browser.' };
     case 'too-long':
       return { title: 'Recording too long' };
     case 'bad-audio':
@@ -143,10 +133,8 @@ export interface DictationSheetProps {
   /** Milliseconds elapsed in the CURRENT recording. Ignored off `recording`. */
   readonly elapsedMs: number;
   /**
-   * A rolling read-only caption, when an engine can produce one. The shipped
-   * daemon engine cannot, so this is normally empty; it is the seam a future
-   * browser-local engine fills. The panel NEVER edits it — what gets inserted is
-   * the finished transcript, not this.
+   * A rolling read-only browser-recognition caption. The panel NEVER edits it —
+   * what gets inserted is the finished transcript, not this provisional text.
    */
   readonly liveText?: string;
   /** A read-only analyser branch off the recorder's own stream and audio graph. */
@@ -192,9 +180,9 @@ export function dictationStripStatus(
   switch (stage) {
     case 'recording':
       if (preview) return preview;
-      return 'Speak, then press Stop. The words drop into your draft — nothing is ever sent for you.';
+      return 'Speak, then press Stop. Recognition is handled by this browser and only updates your draft.';
     case 'transcribing':
-      return `Transcribing on your daemon and correcting once… ${
+      return `Finishing in your browser and correcting once… ${
         preview ? `Last heard: ${preview}` : 'The result will be added to your draft.'
       }`;
     case 'empty':
@@ -204,7 +192,7 @@ export function dictationStripStatus(
         .filter(Boolean)
         .join(' ');
     case 'starting':
-      return 'Opening the microphone…';
+      return 'Opening browser speech recognition…';
   }
 }
 
@@ -230,7 +218,7 @@ export function DictationSheet({
   const failure = dictationFailureCopy(errorCode);
   const title =
     stage === 'transcribing'
-      ? 'Finishing'
+      ? 'Finishing in browser'
       : stage === 'recording'
         ? 'Recording'
         : stage === 'error'
@@ -287,7 +275,10 @@ export function DictationSheet({
         <p
           data-live-transcript={liveText.trim() ? 'preview' : 'waiting'}
           title={status}
-          className="m-0 min-w-0 flex-1 truncate text-ui leading-base text-fg"
+          className={cn(
+            'm-0 min-w-0 flex-1 leading-base text-fg',
+            stage === 'error' ? 'whitespace-normal break-words text-meta' : 'truncate text-ui',
+          )}
         >
           {status}
         </p>
@@ -354,7 +345,7 @@ export function DictationSheet({
         {stage === 'recording'
           ? 'Recording'
           : stage === 'transcribing'
-            ? 'Transcribing on your daemon, then adding it to your draft'
+            ? 'Finishing transcription in your browser, then adding it to your draft'
             : stage === 'empty'
               ? 'No speech was captured'
               : stage === 'error'
@@ -364,8 +355,8 @@ export function DictationSheet({
                 : 'Starting'}
       </span>
       <span id={safetyId} className="sr-only">
-        Recording goes to your own paired daemon and nowhere else. Dictation only updates your draft and is never sent
-        automatically.
+        Ferretry never sends microphone audio to your daemon. Your browser may use its own online speech service.
+        Dictation only updates your draft and is never sent automatically.
       </span>
     </section>
   );

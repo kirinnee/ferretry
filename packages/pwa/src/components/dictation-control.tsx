@@ -22,20 +22,20 @@
  * Insert. This bundle forwards `draft`/`selectionRef`, adapts the result to the
  * host's `onDraftChange`, and closes the panel once the single insertion lands.
  *
- * HIDDEN, NOT DISABLED, when the browser cannot record. In an insecure context
- * `navigator.mediaDevices` is UNDEFINED — the capability is absent, not refused
- * — and a disabled button would imply "not right now".
+ * UNAVAILABLE IS VISIBLE. A browser without recognition still gets the mic
+ * control; tapping it opens the same panel with an actionable "unavailable
+ * here" reason. Hiding the control would make feature detection look like a
+ * broken click path, especially on Firefox and an installed iOS PWA.
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationControl.tsx`): every
  * daemon-derived input is a parameter rather than a module singleton (see
- * `hooks/use-dictation.ts`), and the live-caption state is gone with the rolling
- * preview that produced it, so "is there a flow to resume?" is decided by the
- * phase, the error and whether the microphone ever opened.
+ * `hooks/use-dictation.ts`). Browser SpeechRecognition now supplies the live
+ * caption without a bundled model or an audio transport.
  */
 
 import type { IFyApiClient } from '@ferretry/protocol';
 import { Mic } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type DictationShortcutBinding,
   dictationShortcutAria,
@@ -43,15 +43,14 @@ import {
 } from '../features/settings/dictation-shortcut.ts';
 import {
   type DictationDraftResult,
-  type DictationEngine,
   type DictationHandle,
   type DictationPhase,
   useDictation,
 } from '../hooks/use-dictation.ts';
-import { type ShortcutHost, useDictationShortcut } from '../hooks/use-dictation-shortcut.ts';
+import { browserShortcutHost, type ShortcutHost, useDictationShortcut } from '../hooks/use-dictation-shortcut.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import type { CaptureHost } from '../lib/stt/audio-capture.ts';
+import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
@@ -83,9 +82,8 @@ export interface DictationControlProps {
    */
   onDraftChange(result: DictationDraftResult): void;
   readonly settings: SttSettings;
-  /** `null` when this browser has no microphone API: render nothing. */
-  readonly captureHost: CaptureHost | null;
-  readonly engine?: DictationEngine;
+  /** Browser feature/runtime seam; production feature-detects the ambient page. */
+  readonly recognition?: BrowserRecognitionProvider;
   readonly enhancementFetch?: RemoteEnhancementFetch;
   /**
    * The keyboard and visibility surfaces push-to-talk listens to. `null` (the
@@ -123,7 +121,7 @@ export function dictationStatusCopy(phase: DictationPhase, errorMessage?: string
     case 'recording':
       return 'Recording…';
     case 'transcribing':
-      return 'Transcribing on your daemon…';
+      return 'Finishing in your browser…';
     case 'error':
       return errorMessage ?? 'Dictation failed.';
     case 'idle':
@@ -151,7 +149,7 @@ export function dictationTriggerStartsFresh(input: {
 export interface DictationBundle {
   /** False when this browser cannot record, or dictation is switched off. */
   readonly supported: boolean;
-  /** The 44px mic button that opens the panel, or `null` when unsupported. */
+  /** The 44px mic button; unsupported browsers use it to show the reason. */
   readonly control: ReactNode;
   /**
    * The dictation panel. Always returned (it renders nothing while closed) so
@@ -174,12 +172,10 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     draft,
     onDraftChange,
     settings,
-    captureHost,
     disabled,
     layout = 'compact',
     className,
     composerRef,
-    shortcutHost = null,
     now = () => performance.now(),
     clockIntervalMs = 250,
   } = props;
@@ -192,6 +188,13 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const nowRef = useRef(now);
   nowRef.current = now;
   const effectiveDisabled = Boolean(disabled || !settings.enabled);
+  const ambientShortcutHost = useMemo(
+    () =>
+      typeof window === 'undefined' || typeof document === 'undefined' ? null : browserShortcutHost(window, document),
+    [],
+  );
+  // Explicit null keeps static renders unbound; omission mounts the real host.
+  const shortcutHost = props.shortcutHost === undefined ? ambientShortcutHost : props.shortcutHost;
 
   /**
    * Panel-only UI reset. The hook already returns itself to idle after a
@@ -216,8 +219,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     draft,
     ...(props.selectionRef === undefined ? {} : { selectionRef: props.selectionRef }),
     settings,
-    captureHost,
-    ...(props.engine === undefined ? {} : { engine: props.engine }),
+    ...(props.recognition === undefined ? {} : { recognition: props.recognition }),
     ...(props.enhancementFetch === undefined ? {} : { enhancementFetch: props.enhancementFetch }),
     disabled: effectiveDisabled,
     onDraft: result => {
@@ -279,7 +281,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
 
   const stage = dictationStage({ phase, hasError, wasCapturing });
   const flowActive = !dictationTriggerStartsFresh({ phase, hasError, wasCapturing });
-  const enabledAndSupported = settings.enabled && dictation.supported;
+  const enabled = settings.enabled;
 
   // Wrap `start()` so a push-to-talk chord opens the panel before delegating to
   // the real capture start; the rest of the handle contract is preserved.
@@ -291,10 +293,10 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     handle: { phase, start: openAndRecord, stop: dictation.stop },
     composerRef: composerRef ?? shortcutComposerRef,
     host: shortcutHost,
-    disabled: effectiveDisabled || !enabledAndSupported,
+    disabled: effectiveDisabled || !dictation.supported,
   });
 
-  const control = enabledAndSupported ? (
+  const control = enabled ? (
     <Button
       type="button"
       variant="ghost"
@@ -304,11 +306,19 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
       aria-expanded={open}
       aria-pressed={dictation.recording}
       aria-keyshortcuts={dictationShortcutAria(settings.shortcut)}
-      aria-label={flowActive ? 'Show dictation recorder' : 'Dictate a message'}
+      aria-label={
+        flowActive
+          ? 'Show dictation recorder'
+          : dictation.supported
+            ? 'Dictate a message'
+            : 'Dictation unavailable in this browser'
+      }
       title={
         flowActive
           ? 'Show the active dictation recorder'
-          : `Dictate — ${dictationShortcutLabel(settings.shortcut)}. Your words go to your own daemon and land in your draft. Nothing is ever sent for you.`
+          : dictation.supported
+            ? `Dictate — ${dictationShortcutLabel(settings.shortcut)}. Recognition is handled by this browser and only updates your draft.`
+            : 'Dictation is unavailable here. Open this control for the browser-specific reason.'
       }
       onClick={openAndRecord}
     >
@@ -317,12 +327,12 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     </Button>
   ) : null;
 
-  const sheet = enabledAndSupported ? (
+  const sheet = enabled ? (
     <DictationSheet
       open={open}
       stage={stage}
       elapsedMs={elapsedMs}
-      inputMonitor={dictation.inputMonitor}
+      liveText={dictation.liveText}
       {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
       {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
       {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
@@ -333,13 +343,13 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     />
   ) : null;
 
-  return { supported: enabledAndSupported, control, sheet, handle, shortcut: settings.shortcut, stage };
+  return { supported: enabled && dictation.supported, control, sheet, handle, shortcut: settings.shortcut, stage };
 }
 
 /** The simple mounting form: mic button and its non-modal panel together. */
 export function DictationControl(props: DictationControlProps) {
-  const { supported, control, sheet } = useDictationBundle(props);
-  if (!supported) return null;
+  const { control, sheet } = useDictationBundle(props);
+  if (!props.settings.enabled) return null;
   return (
     <>
       {control}

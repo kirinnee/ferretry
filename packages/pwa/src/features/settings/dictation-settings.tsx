@@ -1,5 +1,5 @@
 /**
- * The dictation settings surface for ONE paired daemon.
+ * Browser-owned dictation settings.
  *
  * NO AUTOFOCUS anywhere, per this app's touch rules: opening a settings section
  * must not raise the keyboard on a phone. Every interactive target is at least
@@ -7,24 +7,17 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSettings.tsx`), and WHY.
  *
- *   1. IT IS ABOUT THE DAEMON, BECAUSE THAT IS WHERE SPEECH IS TRANSCRIBED.
- *      kteam's surface existed to make the BROWSER-LOCAL engine's costs visible
- *      before anyone committed to them: a ~700 MB per-device download, CPU WASM
- *      inference, WebKit's seven-day eviction, battery. None of that applies to
- *      a build with no browser-local engine (`local-engine.ts` and `ort-assets`
- *      are NOT PORTED — they need `onnxruntime-web`, a ~25 MB WASM asset and a
- *      bundler). Keeping those five disclosures would have been five statements
- *      about a mechanism that does not exist. What replaces them is the honest
- *      one: the recording goes to the daemon named at the top of this screen.
- *   2. THE MODEL READINESS SHOWN IS THE DAEMON'S OWN. kteam had two stages —
- *      the box fetching the browser weights, then each device copying them. Only
- *      the first half has meaning here, and it is the half that decides whether
- *      dictation works at all, so `daemonSttStatus` is read and
- *      `requestDaemonModelInstall` is offered when the daemon has no model. The
- *      "Prepare this device" half is gone with the engine it prepared.
- *   3. THE COST SUMMARY IS THE DAEMON'S OWN SENTENCE, rendered verbatim. The box
- *      knows the real numbers for the model it pinned; paraphrasing them here
- *      would be inventing them.
+ *   1. SPEECH RECOGNITION IS A BROWSER CAPABILITY. There is no model catalogue,
+ *      daemon readiness poll, installer, or per-device model download. The
+ *      standard/prefixed constructor and the known unusable iOS Home Screen
+ *      shell are read as data and rendered here.
+ *   2. PRIVACY COPY HAS TWO BOUNDARIES. Ferretry never uploads microphone audio
+ *      to its daemon. The Web Speech API is allowed to use a browser-vendor
+ *      online service, so this screen says that plainly instead of claiming all
+ *      target browsers recognise offline.
+ *   3. ENHANCEMENT IS SEPARATE. Local word correction stays in this browser;
+ *      optional Groq correction legitimately sends recognised TEXT through the
+ *      paired daemon that owns the live session and its credential.
  *
  * Everything else — the master switch, the push-to-talk picker, the enhancement
  * toggle and provider, the dictionary, the free-text context and its live
@@ -32,44 +25,33 @@
  * enhancer rather than about where audio goes.
  */
 
-import { Check, Download, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Check, CircleSlash2 } from 'lucide-react';
+import { useMemo } from 'react';
 import { cn } from '../../lib/class-names.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import {
-  daemonSttStatus,
-  type DaemonModelStatus,
-  type DaemonSttStatus,
-  type FetchLike,
-  requestDaemonModelInstall,
-} from '../../lib/stt/daemon-engine.ts';
+import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
 import {
   ENHANCEMENT_PROVIDERS,
   MAX_ENHANCEMENT_MODEL_CHARS,
   MAX_USER_CONTEXT_CHARS,
-  sttDictionary,
   type SttSettings,
   type SttSettingsPatch,
+  sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
-import { Button, Textarea } from '../../shell/primitives.tsx';
+import { Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
 
-/** Human bytes, one decimal, MB/GB only — the two units these numbers live in. */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB';
-  const mb = bytes / 1_000_000;
-  return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`;
-}
-
 export const DICTATION_SAFETY_NOTE =
-  'Your recording goes to this daemon and nowhere else. Stop transcribes it once, corrects it once, and inserts the result at your current caret. Nothing is ever sent for you.';
+  'Ferretry never sends microphone audio to your daemon. Stop settles the browser transcript, corrects it once, and inserts it at your current caret. Nothing is ever sent for you.';
 
-export const DAEMON_MODE_SUMMARY =
-  'Speech is transcribed by the daemon you are paired with — your own machine, not a third-party service. The recording is posted when you press Stop, transcribed, and discarded; nothing about it is stored in this browser.';
+export const BROWSER_MODE_SUMMARY =
+  'Speech recognition is handled by this browser. Microphone audio is never uploaded to Ferretry or your paired daemon.';
+
+export const BROWSER_SERVICE_DISCLOSURE =
+  'Depending on the browser and its settings, recognition may use the browser vendor’s online speech service and may not work offline. That service’s privacy policy applies.';
 
 export const DICTATION_DISABLED_EXPLANATION =
-  'Off means off: the microphone cannot start, no recording is captured, and nothing is posted to the daemon. Your dictionary and shortcut are kept, so turning dictation back on needs no reload.';
+  'Off means off: browser speech recognition cannot start. Your dictionary and shortcut are kept, so turning dictation back on needs no reload.';
 
 /**
  * Said plainly next to the enhancement toggle. The capitalised phrase is the
@@ -100,65 +82,18 @@ export const GROQ_ENHANCEMENT_EXPLANATION =
 export const USER_CONTEXT_EXPLANATION =
   'Paste anything: project names, people, a glossary, a paragraph about what you work on. Dictation picks out the distinctive words and fixes mishearings of them. Plain English words are ignored, and if a term is also in “Your words” above, that entry wins.';
 
-/**
- * TRUE when this daemon cannot transcribe anything yet, so the reader is told
- * before they press a microphone that produces nothing.
- *
- * An UNKNOWN status is deliberately NOT a refusal: a daemon built before this
- * feature answers 404 and tells us nothing about a model, and the microphone is
- * still worth offering — the transcribe call reports honestly if the route turns
- * out to be missing. Refusing on ignorance would break a working setup to
- * protect against a broken one.
- */
-export function needsDaemonModel(model: DaemonModelStatus | undefined): boolean {
-  return model !== undefined && model.state !== 'ready';
-}
-
-type StatusState = 'unknown' | 'checking' | 'ready' | 'missing';
-
 export interface DictationSettingsProps {
-  /** The paired daemon whose speech model this screen reports on. */
-  readonly daemon: DaemonConnection;
   readonly settings: SttSettings;
   update(patch: SttSettingsPatch): void;
   /** False once storage has refused a write, so the screen can say so. */
   readonly persisted: boolean;
-  /** Injected by tests and the visual harness; the browser's `fetch` otherwise. */
-  readonly fetchImpl?: FetchLike;
+  /** Injected by tests and visual fixtures; production detects this page. */
+  readonly recognitionSupport?: BrowserRecognitionSupport;
 }
 
-export function DictationSettings({ daemon, settings, update, persisted, fetchImpl }: DictationSettingsProps) {
-  const [status, setStatus] = useState<DaemonSttStatus | null>(null);
-  const [statusState, setStatusState] = useState<StatusState>('unknown');
-  const [installMessage, setInstallMessage] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setStatusState('checking');
-    const next = await daemonSttStatus(daemon, fetchImpl ? { fetchImpl } : {});
-    setStatus(next);
-    setStatusState(next.available ? 'ready' : 'missing');
-  }, [daemon, fetchImpl]);
-
-  // Re-runs whenever the paired daemon changes: one daemon's readiness must
-  // never be shown beside another daemon's name.
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  const model = status?.daemonModel;
-  const modelMissing = needsDaemonModel(model);
-
-  const install = useCallback(
-    (modelId: string) => {
-      setInstallMessage(null);
-      void requestDaemonModelInstall(daemon, modelId, fetchImpl ? { fetchImpl } : {}).then(outcome => {
-        if (outcome.message !== undefined) setInstallMessage(outcome.message);
-        if (outcome.started) void refresh();
-      });
-    },
-    [daemon, fetchImpl, refresh],
-  );
-
+export function DictationSettings({ settings, update, persisted, recognitionSupport }: DictationSettingsProps) {
+  const detectedSupport = useMemo(() => browserRecognitionProvider().support, []);
+  const support = recognitionSupport ?? detectedSupport;
   const dictionary = useMemo(() => sttDictionary(settings), [settings]);
   /**
    * A live echo of what the context field actually yields, so a reader can see
@@ -190,81 +125,37 @@ export function DictationSettings({ daemon, settings, update, persisted, fetchIm
 
       {settings.enabled ? (
         <>
-          {/* ---- one honest engine ---- */}
+          {/* ---- one honest browser capability ---- */}
           <section
-            aria-label="Where speech is transcribed"
-            className="flex flex-col gap-2 rounded-control border border-accent bg-accent-soft p-3"
+            aria-label="Browser dictation availability"
+            className={cn(
+              'flex flex-col gap-2 rounded-control border p-3',
+              support.available ? 'border-accent bg-accent-soft' : 'border-warn bg-warn-soft',
+            )}
           >
-            <h3 className="m-0 text-ui font-semibold text-accent">Transcribed by this daemon</h3>
-            <p className="m-0 text-meta leading-base text-fg">{DAEMON_MODE_SUMMARY}</p>
-            <p className="m-0 text-meta leading-base text-faint">
-              Browser-local transcription is not available in this build, so there is no per-device model download and
-              nothing to prepare.
+            <h3 className={cn('m-0 text-ui font-semibold', support.available ? 'text-accent' : 'text-warn')}>
+              {support.available ? 'Available in this browser' : 'Unavailable in this browser'}
+            </h3>
+            <p
+              className={cn(
+                'm-0 flex items-start gap-1 text-meta leading-base',
+                support.available ? 'text-ok' : 'text-warn',
+              )}
+              role="status"
+            >
+              {support.available ? (
+                <Check size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+              ) : (
+                <CircleSlash2 size={14} aria-hidden="true" className="mt-0.5 shrink-0" />
+              )}
+              <span>
+                {support.available
+                  ? `Ready — ${support.implementation === 'webkit' ? 'WebKit' : 'standard'} speech recognition is exposed on this page.`
+                  : support.reason}
+              </span>
             </p>
-          </section>
-
-          {/* ---- this daemon's readiness ---- */}
-          <section
-            aria-label="This daemon"
-            className="flex flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
-          >
-            <h3 className="m-0 text-ui font-semibold">This daemon</h3>
-            {statusState === 'checking' && (
-              <p className="m-0 flex items-center gap-1 text-meta text-faint" role="status">
-                <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" />
-                Asking the daemon what it can transcribe…
-              </p>
-            )}
-            {statusState === 'ready' && (
-              <p className="m-0 flex items-center gap-1 text-meta text-ok" role="status">
-                <Check size={14} aria-hidden="true" /> Ready — {status?.languages.join(', ') || 'English'}.
-              </p>
-            )}
-            {statusState === 'missing' && (
-              <p className="m-0 text-meta leading-base text-warn" role="status">
-                {status?.unavailableReason ?? 'This daemon cannot transcribe speech yet.'}
-              </p>
-            )}
-            {status?.streaming === false && (
-              <p className="m-0 text-meta leading-base text-faint">
-                This daemon does not claim live text: words appear once the recording is finished, not while you speak.
-              </p>
-            )}
-            {model !== undefined && (
-              <>
-                <p className="m-0 text-meta leading-base text-muted">{model.costs.summary}</p>
-                {modelMissing && (
-                  <div className="flex flex-col gap-2">
-                    <p className="m-0 text-meta leading-base text-warn">
-                      This daemon has no speech model yet. That is a one-time {formatBytes(model.costs.downloadBytes)}{' '}
-                      download onto the daemon, shared by every device you pair with it.
-                    </p>
-                    {model.install.phase === 'downloading' && (
-                      <p className="m-0 text-meta text-faint" role="status">
-                        Downloading on the daemon — {formatBytes(model.install.receivedBytes)} of{' '}
-                        {formatBytes(model.install.totalBytes)}.
-                      </p>
-                    )}
-                    {installMessage !== null && (
-                      <p className="m-0 text-meta leading-base text-warn">{installMessage}</p>
-                    )}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="primary"
-                      className="min-h-[44px] min-w-[44px] self-start"
-                      disabled={model.install.phase === 'downloading'}
-                      onClick={() => install(model.id)}
-                    >
-                      <Download size={14} aria-hidden="true" />
-                      <span className="ml-1">
-                        Download {model.label} on the daemon ({formatBytes(model.costs.downloadBytes)})
-                      </span>
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
+            <p className="m-0 text-meta leading-base text-fg">{BROWSER_MODE_SUMMARY}</p>
+            <p className="m-0 text-meta leading-base text-faint">{BROWSER_SERVICE_DISCLOSURE}</p>
           </section>
 
           {/* ---- push-to-talk shortcut ---- */}

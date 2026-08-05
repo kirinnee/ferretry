@@ -417,6 +417,20 @@ try {
             const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
             await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
             process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
+            // The live recognition states. Each card opens its own flow at mount
+            // against a scripted recognition object, so there is nothing to click
+            // and nothing to wait for beyond the stage the card settled into.
+            for (const [id, name] of [
+              ['harness-dictation-live', 'Dictation live recognition'],
+              ['harness-dictation-unavailable', 'Dictation unavailable'],
+              ['harness-dictation-permission-denied', 'Dictation permission denied'],
+            ] as const) {
+              const target = join(outDir, `${id.replace('harness-', '')}-${viewport.name}.png`);
+              const card = page.locator(`#${id}`);
+              await card.locator('[data-dictation-panel="non-modal"]').first().waitFor({ state: 'visible' });
+              await card.screenshot({ path: target });
+              process.stdout.write(`📸 ${name} -> ${target}\n`);
+            }
             const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
             await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
             process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);

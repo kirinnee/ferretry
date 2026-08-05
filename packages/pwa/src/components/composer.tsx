@@ -14,16 +14,19 @@ import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
+import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
+import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { useComposerAutocomplete } from './composer-autocomplete.ts';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
+import { DictationControl } from './dictation-control.tsx';
 
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
-  readonly api: Pick<IFyApiClient, 'send'>;
+  readonly api: Pick<IFyApiClient, 'send'> & Partial<Pick<IFyApiClient, 'history'>>;
   readonly busy?: boolean;
   readonly disabled?: boolean;
   readonly placeholder?: string;
@@ -36,6 +39,10 @@ export interface ComposerProps {
   readonly compact?: boolean;
   /** Browser-local bare Enter behaviour. null uses this device’s default. */
   readonly enterKeyPreference?: ComposerEnterKeyPreference | null;
+  /** Browser-local dictation settings. Absence leaves this optional slot empty. */
+  readonly dictationSettings?: SttSettings;
+  /** Test/visual seam; production feature-detects the ambient browser. */
+  readonly dictationRecognition?: BrowserRecognitionProvider;
 }
 
 /**
@@ -76,6 +83,8 @@ export function Composer({
   onSent,
   compact = false,
   enterKeyPreference = null,
+  dictationSettings,
+  dictationRecognition,
 }: ComposerProps) {
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
   const [draft, setDraft] = useState(() => draftStore.load(scope));
@@ -210,6 +219,19 @@ export function Composer({
     });
   };
 
+  const applyDictation = useCallback((result: { readonly text: string; readonly caret: number }): void => {
+    setDraft(result.text);
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (input === null) return;
+      try {
+        input.setSelectionRange(result.caret, result.caret);
+      } catch {
+        // The draft still landed; a detached textarea can refuse selection.
+      }
+    });
+  }, []);
+
   return (
     <form
       aria-describedby={hintId}
@@ -272,6 +294,21 @@ export function Composer({
           {busy ? 'Queue for the next turn' : composerEnterHint(bareEnterAction, inputModality.touchAffected)}
         </p>
         <ComposerQuota quota={quota} />
+        {dictationSettings ? (
+          <DictationControl
+            {...(typeof api.history === 'function' ? { api: api as Pick<IFyApiClient, 'history'> } : {})}
+            composerRef={inputRef}
+            daemon={daemon}
+            disabled={disabled || sending}
+            draft={draft}
+            layout={compact ? 'compact' : 'full'}
+            onDraftChange={applyDictation}
+            {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
+            selectionRef={inputRef}
+            sessionId={sessionId}
+            settings={dictationSettings}
+          />
+        ) : null}
         {inputModality.touchAffected && bareEnterAction === 'send' ? (
           <button type="button" onClick={insertNewline} disabled={disabled || sending}>
             New line

@@ -40,10 +40,11 @@ import { sameDaemonConnection } from '../daemon-connection.ts';
 import { daemonSessionScope } from '../daemon-scope.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
+import type { SttSettings } from '../stt/stt-settings.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'interrupt' | 'resume' | 'send' | 'stop'> &
-  Partial<Pick<IFyApiClient, 'runtime'>>;
+  Partial<Pick<IFyApiClient, 'history' | 'runtime'>>;
 
 /** One scoped cache is safe because every key carries its daemon id. Keeping it
  * outside the page also avoids re-reading a live account catalog whenever the
@@ -67,6 +68,8 @@ export interface SessionChatPageProps {
   readonly chatWidth?: ChatWidthPreference;
   /** Browser-local transcript composer key preference. */
   readonly composerEnterKey?: ComposerEnterKeyPreference | null;
+  /** Browser-local dictation settings; supplied by the application store. */
+  readonly dictationSettings?: SttSettings;
   readonly onBack: (daemonId: string) => void;
   readonly onSessionChange: (view: SessionView) => void;
   readonly onRefresh?: () => void;
@@ -251,6 +254,7 @@ export function SessionChatPage({
   refreshError = null,
   chatWidth = 'full',
   composerEnterKey,
+  dictationSettings,
   onBack,
   onSessionChange,
   onRefresh,
@@ -518,6 +522,7 @@ export function SessionChatPage({
                     api={client}
                     busy={busy}
                     compact={compact}
+                    {...(dictationSettings === undefined ? {} : { dictationSettings })}
                     enterKeyPreference={composerEnterKey}
                     daemon={connection}
                     disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}

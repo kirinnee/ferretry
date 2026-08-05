@@ -9,8 +9,8 @@ import type { WardenClientFactory } from '../../../../src/features/warden/warden
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import type { FetchLike } from '../../../../src/lib/stt/daemon-engine.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
+import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
 
@@ -19,8 +19,6 @@ const memoryStorage = (): ControlsStorage => {
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 };
 
-/** Dictation is not the subject of this suite and must never dial a daemon. */
-const offlineFetch: FetchLike = () => new Promise<Response>(() => undefined);
 const pendingProbe: DaemonReachabilityProbe = () => new Promise(() => undefined);
 const unavailableWardenClient: WardenClientFactory = async () =>
   Promise.reject(new Error('Warden unavailable in this test.'));
@@ -63,11 +61,12 @@ const page = (options: PageOptions = {}) => {
       connections={options.connections ?? [current]}
       controls={options.controls ?? new DaemonControlsStore(memoryStorage())}
       dictation={{
-        daemon: current,
         settings: DEFAULT_STT_SETTINGS,
         update: () => {},
         persisted: true,
-        fetchImpl: offlineFetch,
+        // Dictation is not the subject of this suite: pin detection rather
+        // than letting it read whatever the test DOM happens to expose.
+        recognitionSupport: UNSUPPORTED_RECOGNITION,
       }}
       probeDaemon={options.probe ?? pendingProbe}
       {...(options.carrier === undefined ? {} : { carrier: options.carrier })}
@@ -654,6 +653,16 @@ describe('daemon settings', () => {
     await settle();
     expect(reachability(view.container, 'daemon-alpha')).toBe('unreachable');
     expect(reads).toBe(2);
+    await view.unmount();
+  });
+
+  it('says so when the routed daemon is not in the pairing registry, rather than borrowing another', async () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#daemons');
+    const view = await mount(page({ current: alpha, connections: [beta] }));
+    const alert = must(view.container.querySelector<HTMLElement>('[role="alert"]'), 'the missing-daemon notice');
+    expect(alert.textContent).toContain('not present in the browser’s pairing registry');
+    // Showing beta's settings under alpha's route would be the wrong daemon.
+    expect(view.container.textContent).not.toContain('Alpha workstation');
     await view.unmount();
   });
 });

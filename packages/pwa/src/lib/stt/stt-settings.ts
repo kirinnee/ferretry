@@ -41,7 +41,7 @@ import {
   DEFAULT_DICTATION_SHORTCUT,
   type DictationShortcutBinding,
 } from '../../features/settings/dictation-shortcut.ts';
-import { MAX_USER_CONTEXT_CHARS, parseDictionary, type DictionaryParse } from './enhancement.ts';
+import { type DictionaryParse, MAX_USER_CONTEXT_CHARS, parseDictionary } from './enhancement.ts';
 
 export const STT_SETTINGS_KEY = 'fy-stt-v1';
 export const STT_SETTINGS_VERSION = 1;
@@ -71,8 +71,8 @@ export { MAX_USER_CONTEXT_CHARS };
 export interface SttSettings {
   readonly v: typeof STT_SETTINGS_VERSION;
   /**
-   * Master resource switch. False means capture cannot start and any resident
-   * local ONNX sessions are released.
+   * Master resource switch. False means browser speech recognition cannot
+   * start. The browser owns and releases its recognition service.
    */
   readonly enabled: boolean;
   /**

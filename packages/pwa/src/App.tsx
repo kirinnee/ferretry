@@ -33,8 +33,8 @@ import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.t
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
-import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
+import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
@@ -512,6 +512,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const layout = useLayoutMode();
+  const dictation = useSttSettings(store.stt);
   const { daemonId, sessionId } = scope;
   const subscribe = useCallback((listener: () => void) => store.fleet.subscribe(listener), [store.fleet]);
   const snapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
@@ -591,6 +592,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         <SessionChatPage
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
+          dictationSettings={dictation.settings}
           client={client}
           connection={connection}
           // Only THIS daemon's slice, and only once it has actually been read:
@@ -668,7 +670,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       daemonId={connection.daemonId}
       connections={connectionSnapshot.connections}
       controls={store.controls}
-      dictation={{ daemon: connection, ...dictation }}
+      dictation={dictation}
       probeDaemon={probeDaemon}
       readWardenStatus={readWardenStatus}
       daemonSettingsTabs={daemonSettingsTabs}

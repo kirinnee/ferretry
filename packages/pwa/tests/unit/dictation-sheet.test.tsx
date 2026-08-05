@@ -75,13 +75,16 @@ describe('dictationFailureCopy', () => {
     expect(dictationFailureCopy('capture-failed').title).toBe('Recording could not start');
   });
 
-  it('names each daemon refusal without blaming the device', () => {
-    expect(dictationFailureCopy('unauthorized').title).toContain('daemon refused');
-    expect(dictationFailureCopy('unavailable').hint).toContain('Install a speech model');
-    expect(dictationFailureCopy('busy').title).toContain('already transcribing');
-    expect(dictationFailureCopy('network').title).toContain('could not be reached');
+  it('names each browser refusal without inventing a daemon to blame', () => {
+    expect(dictationFailureCopy('recognition-unavailable').title).toBe('Dictation unavailable here');
+    expect(dictationFailureCopy('recognition-network').title).toContain('Browser speech service');
+    expect(dictationFailureCopy('recognition-failed').title).toBe('Browser recognition failed');
     expect(dictationFailureCopy('too-long').title).toBe('Recording too long');
     expect(dictationFailureCopy('bad-audio').title).toBe("Didn't catch that");
+    // The retired daemon vocabulary must not survive as unreachable copy.
+    for (const retired of ['unauthorized', 'unavailable', 'busy', 'network']) {
+      expect(dictationFailureCopy(retired).title).toBe('Dictation failed');
+    }
   });
 
   it('falls back to a plain headline for an unknown or absent code', () => {
@@ -96,15 +99,17 @@ describe('dictationStripStatus', () => {
   it('offers the standing hint while recording with nothing heard yet', () => {
     const status = dictationStripStatus('recording', '', undefined, failure);
     expect(status).toContain('press Stop');
-    expect(status).toContain('nothing is ever sent for you');
+    expect(status).toContain('only updates your draft');
   });
 
-  it('shows a caption verbatim when an engine produced one', () => {
+  it('shows a caption verbatim when the browser produced one', () => {
     expect(dictationStripStatus('recording', '  hello there  ', undefined, failure)).toBe('hello there');
   });
 
-  it('names the daemon while transcribing rather than claiming the device did it', () => {
-    expect(dictationStripStatus('transcribing', '', undefined, failure)).toContain('Transcribing on your daemon');
+  it('names the browser while finishing rather than claiming a daemon did it', () => {
+    const status = dictationStripStatus('transcribing', '', undefined, failure);
+    expect(status).toContain('Finishing in your browser');
+    expect(status).not.toContain('daemon');
     expect(dictationStripStatus('transcribing', 'half a sentence', undefined, failure)).toContain(
       'Last heard: half a sentence',
     );
@@ -121,8 +126,8 @@ describe('dictationStripStatus', () => {
     expect(dictationStripStatus('error', '', undefined, failure)).toBe('Dictation failed Try again.');
   });
 
-  it('says the microphone is opening while starting', () => {
-    expect(dictationStripStatus('starting', '', undefined, failure)).toContain('Opening the microphone');
+  it('says browser recognition is opening while starting', () => {
+    expect(dictationStripStatus('starting', '', undefined, failure)).toContain('Opening browser speech recognition');
   });
 });
 
@@ -222,7 +227,7 @@ describe('<DictationSheet>', () => {
     expect(live(view.container)).toBe('Recording');
 
     for (const [stage, expected] of [
-      ['transcribing', 'Transcribing on your daemon'],
+      ['transcribing', 'Finishing transcription in your browser'],
       ['empty', 'No speech was captured'],
       ['starting', 'Starting'],
     ] as const) {
@@ -285,12 +290,14 @@ describe('<DictationSheet>', () => {
     await view.unmount();
   });
 
-  it('states where the audio goes, in the panel description', async () => {
+  it('states both audio boundaries, in the panel description', async () => {
     const view = await mount(<DictationSheet {...sheetProps()} />);
     const panel = must(view.container.querySelector('[data-dictation-panel]'), 'the panel');
     const describedBy = must(panel.getAttribute('aria-describedby'), 'a description id');
     const description = must(view.container.querySelector(`#${CSS.escape(describedBy)}`), 'the description');
-    expect(description.textContent).toContain('your own paired daemon');
+    // What Ferretry promises, and the browser-vendor service it cannot promise for.
+    expect(description.textContent).toContain('never sends microphone audio to your daemon');
+    expect(description.textContent).toContain('own online speech service');
     expect(description.textContent).toContain('never sent automatically');
     await view.unmount();
   });

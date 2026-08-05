@@ -5,6 +5,7 @@ import {
   DEFAULT_DICTATION_SHORTCUT,
   DICTATION_SHORTCUT_HOLD_MS,
 } from '../../../src/features/settings/dictation-shortcut.ts';
+import type { DictationPhase } from '../../../src/hooks/use-dictation.ts';
 import {
   browserShortcutHost,
   isActiveShortcutComposer,
@@ -15,7 +16,6 @@ import {
   shortcutTargetAllowed,
   useDictationShortcut,
 } from '../../../src/hooks/use-dictation-shortcut.ts';
-import type { DictationPhase } from '../../../src/lib/stt/utterance.ts';
 import { render, run } from '../../support/react.ts';
 
 /** A window/document stand-in a test can fire without a DOM. */
