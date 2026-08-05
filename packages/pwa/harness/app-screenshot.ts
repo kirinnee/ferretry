@@ -56,6 +56,26 @@ const SCHEMES = ['light', 'dark'] as const;
 const PHONE = { width: 390, height: 844 } as const;
 
 /**
+ * WHAT A PHONE SAYS ABOUT ITSELF, which is the only thing `detectDeviceKind` reads.
+ *
+ * `isMobile` and `hasTouch` change the layout viewport, the pointer media query
+ * and the orientation — they do NOT change `navigator.userAgent`. Chromium keeps
+ * announcing itself as desktop Linux Chrome, `device-kind.ts` believes it (its
+ * unknown-case answer is `desktop`, deliberately), and every `-mobile` capture
+ * renders the DESKTOP flow at phone width. That is a screenshot that proves the
+ * opposite of what its name claims, and a whole unit's "verified on mobile"
+ * would inherit it.
+ *
+ * A literal string rather than `devices['Pixel 7']`: the registry entry also
+ * carries a `deviceScaleFactor` of 3, which would silently triple the pixel size
+ * of an already-reviewed capture set for no reason connected to device detection.
+ * This is a stock Android Chrome agent, which is what the `android` marker in
+ * `device-kind.ts` matches.
+ */
+const PHONE_USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36';
+
+/**
  * A phone, emulated rather than merely sized — used for the `-mobile` SETUP
  * captures only.
  *
@@ -67,11 +87,20 @@ const PHONE = { width: 390, height: 844 } as const;
  * different thing from a phone and is precisely the state the keyboard capture
  * must not be confused with.
  *
+ * The user agent is here for the same reason and is not decoration: the setup
+ * flow ASKS FEWER QUESTIONS on a phone, so a capture taken without it is a
+ * picture of the wrong journey. `expectDevice` below asserts the app agreed.
+ *
  * Deliberately NOT applied to the brand captures above. Those are the images that
  * were reviewed and merged; re-emulating them now would silently change an
  * already-approved review set for no reason connected to this change.
  */
-const PHONE_CONTEXT = { viewport: PHONE, isMobile: true, hasTouch: true } as const;
+const PHONE_CONTEXT = {
+  viewport: PHONE,
+  isMobile: true,
+  hasTouch: true,
+  userAgent: PHONE_USER_AGENT,
+} as const;
 
 /** The keyboard-open visual viewport height, an Android-plausible ~414px of chrome. */
 const KEYBOARD_VISUAL_HEIGHT = 430;
@@ -82,10 +111,12 @@ const MAGNIFY = 12;
 /** The setup screen's root, and the attribute that names what is on the glass. */
 const SETUP_ROOT = '[data-onboarding="setup"]';
 const setupStep = (step: string): string => `${SETUP_ROOT}[data-onboarding-screen="${step}"]`;
-/** The first question — who does the work — which belongs to no route yet. */
-const SETUP_WHO = `${SETUP_ROOT}[data-onboarding-screen="who"]`;
-/** The device question, one answer in: also no route yet, and a different screen. */
-const SETUP_CHOOSER = `${SETUP_ROOT}[data-onboarding-screen="choose"]`;
+/** The entry question — what the reader has — which every visit starts on. */
+const SETUP_ENTRY = setupStep('entry');
+/** Which computer runs the daemon. Only reached from an entry this device cannot settle. */
+const SETUP_TARGET = setupStep('target');
+/** Who installs it, which every daemon journey reaches. */
+const SETUP_DOER = setupStep('doer');
 
 /**
  * The pairing arrival used for the Done capture. A fabricated single-use code
@@ -455,7 +486,9 @@ try {
       process.stdout.write(
         '⏭️  SKIPPED every setup capture: this bundle serves no [data-onboarding="setup"] root at\n' +
           '    /setup. Expected on a branch without the onboarding stepper — but it is NOT a pass.\n' +
-          '    setup-<who|chooser|install|daemon|connect|reach-*|pair|brief|agent-pair|scan|done>-<mobile|desktop>\n' +
+          '    setup-<entry|target|doer|install|agents|daemon|connect|reach-*|pair|brief*|agent-pair*|elsewhere|\n' +
+          '    scan|done>-\n' +
+          '    <mobile|desktop>\n' +
           '    and setup-scan-keyboard-mobile\n' +
           '    were NOT produced.\n',
       );
@@ -470,12 +503,19 @@ try {
        * visit left it.
        */
       /*
-       * EVERY CAPTURE STARTS AT THE FIRST QUESTION, because every reader does.
-       * A journey names the DOER it answers first and, when that answer opens a
-       * second question, the device route it picks there — so a shot named
-       * `brief` proves that "an agent does it" really leads there, and one named
-       * `install` proves that "I do it myself" plus "first time setup" does. A
-       * seeded store would prove only that the components render.
+       * EVERY CAPTURE STARTS AT THE ENTRY QUESTION, because every reader does. A
+       * journey names the entry it answers, then the target when this device does
+       * not settle that itself, then the doer — so a shot named `install` proves
+       * that "first time" plus "I do it myself" really leads to commands, and one
+       * named `elsewhere` proves that "another computer" leads to a hand-off
+       * instead. A seeded store would prove only that the components render.
+       *
+       * THE SAME JOURNEY LIST IS WALKED ON BOTH DEVICES, AND THAT IS THE TEST.
+       * A phone is never asked which computer runs the daemon, so `target` is
+       * declared as what to press IF the question appears and the phone reaches
+       * the same doer question without it. A driver that hardcoded the question
+       * count would have to be told which device it was on, and then the captures
+       * could no longer disagree with the code.
        */
       /*
        * A CONNECTION IS ANSWERED, NOT ADVANCED PAST. The carrier step is a chooser
@@ -484,37 +524,113 @@ try {
        * that screen and every later capture times out — which is exactly how this
        * driver reported the split when it landed.
        */
+      /*
+       * A JOURNEY THAT ONLY A COMPUTER CAN WALK SAYS SO, and is skipped LOUDLY on
+       * the phone pass rather than driven until it times out.
+       *
+       * This is the whole point of the unit rather than a harness convenience: a
+       * phone cannot host a daemon, so `install`, `daemon`, `connect`, `local` and
+       * the offer to add a phone do not exist on one. Before the phone captures had
+       * a phone user agent they all "worked" at 390px, which is exactly the lie
+       * those images were telling. Narrow-width readings of those stages are still
+       * reviewed — `harness/screenshot.ts` renders the gallery at both viewports —
+       * because a 390px WINDOW on a computer is a real thing and a phone is not.
+       */
       const JOURNEYS = [
-        { name: 'install', doer: 'self', route: 'first-time', advances: 0, screen: 'install' },
-        { name: 'daemon', doer: 'self', route: 'first-time', advances: 1, screen: 'daemon' },
-        { name: 'connect', doer: 'self', route: 'first-time', advances: 2, screen: 'connect' },
+        { name: 'install', on: 'desktop', route: 'first-time', doer: 'self', advances: 0, screen: 'install' },
         /*
-         * `pair` — run `fy pair` somewhere else — belongs to the CLIENT route.
-         * It was pointed at first-time with a carrier answer, which since the
-         * same-machine collapse lands on `local` and waited thirty seconds for a
-         * step that route does not have.
+         * The step without which everything after it is theatre: Ferretry runs
+         * Claude Code and Codex and is neither, so a daemon with both missing
+         * starts perfectly and can run nothing.
          */
-        { name: 'pair', doer: 'self', route: 'add-client', advances: 0, screen: 'pair' },
-        { name: 'local', doer: 'self', route: 'first-time', advances: 2, screen: 'local', connection: 'direct' },
-        /* The agent route: one answer to the FIRST question, and no device question at all. */
-        { name: 'brief', doer: 'agent', advances: 0, screen: 'brief' },
-        { name: 'agent-pair', doer: 'agent', advances: 1, screen: 'agent-pair' },
+        { name: 'agents', on: 'desktop', route: 'first-time', doer: 'self', advances: 1, screen: 'agents' },
+        { name: 'daemon', on: 'desktop', route: 'first-time', doer: 'self', advances: 2, screen: 'daemon' },
+        { name: 'connect', on: 'desktop', route: 'first-time', doer: 'self', advances: 3, screen: 'connect' },
+        /*
+         * `pair` — run `fy pair` somewhere else — belongs to the pairing entry. It
+         * was pointed at first-time with a carrier answer, which since the
+         * same-machine collapse lands on `local` and waited thirty seconds for a
+         * step that journey does not have.
+         */
+        { name: 'pair', on: 'both', route: 'add-client', advances: 0, screen: 'pair' },
+        {
+          name: 'local',
+          on: 'desktop',
+          route: 'first-time',
+          doer: 'self',
+          advances: 3,
+          screen: 'local',
+          connection: 'direct',
+        },
+        /* An agent on this machine: the prompt, then a pairing that may already be done. */
+        { name: 'brief', on: 'desktop', route: 'first-time', doer: 'agent', advances: 0, screen: 'brief' },
+        { name: 'agent-pair', on: 'desktop', route: 'first-time', doer: 'agent', advances: 1, screen: 'agent-pair' },
+        /*
+         * An agent on ANOTHER machine, which is every phone's agent journey and a
+         * real one on a computer too. It carries the share affordance, because a
+         * clipboard does not reach the machine the agent is on.
+         */
+        {
+          name: 'brief-elsewhere',
+          on: 'both',
+          route: 'first-time',
+          doer: 'agent',
+          target: 'other',
+          advances: 0,
+          screen: 'brief',
+        },
+        {
+          name: 'agent-pair-elsewhere',
+          on: 'both',
+          route: 'first-time',
+          doer: 'agent',
+          target: 'other',
+          advances: 1,
+          screen: 'agent-pair',
+        },
+        /*
+         * THE WHOLE "ANOTHER COMPUTER, BY HAND" BRANCH, which is one screen. On a
+         * phone it is where "first time" lands with no question asked; on a
+         * computer it is reached by taking the escape from the assumption, which is
+         * why this journey presses it and therefore proves it is findable.
+         */
+        {
+          name: 'elsewhere',
+          on: 'both',
+          route: 'first-time',
+          doer: 'self',
+          target: 'other',
+          advances: 0,
+          screen: 'elsewhere',
+        },
         /* The scan half: a daemon already exists, so there is nothing to install. */
-        { name: 'scan', doer: 'self', route: 'add-client', advances: 1, screen: 'scan' },
+        { name: 'scan', on: 'both', route: 'add-client', advances: 1, screen: 'scan' },
       ] as const;
 
-      const toWho = async (page: Page): Promise<void> => {
+      const toEntry = async (page: Page): Promise<void> => {
         await open(page, '/setup');
-        await page.locator(SETUP_WHO).waitFor({ state: 'visible' });
+        await page.locator(SETUP_ENTRY).waitFor({ state: 'visible' });
       };
 
       const toStep = async (page: Page, journey: (typeof JOURNEYS)[number]): Promise<void> => {
-        await toWho(page);
-        await page.locator(`button[data-onboarding-doer="${journey.doer}"]`).click();
-        const route = 'route' in journey ? journey.route : undefined;
-        if (route !== undefined) {
-          await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
-          await page.locator(`button[data-onboarding-route="${route}"]`).click();
+        await toEntry(page);
+        await page.locator(`button[data-onboarding-route="${journey.route}"]`).click();
+        const doer = 'doer' in journey ? journey.doer : undefined;
+        if (doer !== undefined) {
+          /* Asked outright only when this device does not answer it by itself. */
+          const target = 'target' in journey ? journey.target : 'this';
+          if ((await page.locator(SETUP_TARGET).count()) > 0) {
+            await page.locator(`button[data-onboarding-target="${target}"]`).click();
+          }
+          await page.locator(SETUP_DOER).waitFor({ state: 'visible' });
+          /*
+           * On a computer the target was ASSUMED, so a journey that wants the
+           * other machine takes the escape this screen offers — the same control a
+           * reader would have to find. A phone is already there and offers none.
+           */
+          const wayOut = page.locator(`button[data-onboarding-switch-target="${target}"]`);
+          if ((await wayOut.count()) > 0) await wayOut.click();
+          await page.locator(`button[data-onboarding-doer="${doer}"]`).click();
         }
         for (let advance = 0; advance < journey.advances; advance += 1) {
           await page.locator('[data-onboarding-next]').first().click();
@@ -541,34 +657,93 @@ try {
       const contextFor = (viewport: (typeof VIEWPORTS)[number]): BrowserContextOptions =>
         viewport.name === 'mobile' ? PHONE_CONTEXT : { viewport: { width: viewport.width, height: viewport.height } };
 
-      // 1. BOTH QUESTIONS, AT BOTH VIEWPORTS. The first one is the screen
-      // everything else is reached through and the one the reader has to
-      // recognise themselves in within two seconds; the second is the one that
-      // only exists for a reader who is typing the commands themselves.
+      /**
+       * DID THE APP AGREE THAT THIS IS A PHONE?
+       *
+       * The whole point of the emulation above, checked rather than assumed. The
+       * setup root publishes what `detectDeviceKind` decided, so a capture named
+       * `-mobile` that rendered the desktop journey is caught here instead of
+       * being reviewed as evidence. Queued as a defect rather than thrown, so the
+       * wrong-journey image is still on disk for a human to look at.
+       */
+      const expectDevice = async (page: Page, viewport: (typeof VIEWPORTS)[number], name: string): Promise<void> => {
+        const seen = await page.locator(SETUP_ROOT).first().getAttribute('data-onboarding-device');
+        if (seen !== viewport.name) {
+          defects.push(`setup-${name}-${viewport.name} rendered as data-onboarding-device="${String(seen)}"`);
+        }
+      };
+
+      /*
+       * 1. EVERY QUESTION A READER CAN BE ASKED, AT BOTH VIEWPORTS.
+       *
+       * THE PHONE IS ASKED ONE FEWER, AND THESE ARE THE FRAMES THAT PROVE IT.
+       * `setup-doer-*` on a computer states an assumption with a way out of it;
+       * the same capture on a phone states a fact, because the hardware answered.
+       * `setup-target-*` exists on a computer only — a phone that was offered
+       * "this one" would be offered something it cannot do — so it is skipped
+       * loudly there rather than being driven into a question that never comes.
+       */
       for (const viewport of VIEWPORTS) {
         await capture(contextFor(viewport), async page => {
-          await toWho(page);
-          await shot(page, `setup-who-${viewport.name}`);
-          await page.locator('button[data-onboarding-doer="self"]').click();
-          await page.locator(SETUP_CHOOSER).waitFor({ state: 'visible' });
-          await shot(page, `setup-chooser-${viewport.name}`);
+          await toEntry(page);
+          await expectDevice(page, viewport, 'entry');
+          await shot(page, `setup-entry-${viewport.name}`);
+          /*
+           * THE COMMON PATH FIRST: nothing installed yet. On a computer this is
+           * the frame that carries the STATED ASSUMPTION and the way out of it; on
+           * a phone it is the same screen carrying the STATED FACT instead, which
+           * is the pair a reviewer has to see side by side.
+           */
+          await page.locator('button[data-onboarding-route="first-time"]').click();
+          await page.locator(SETUP_DOER).waitFor({ state: 'visible' });
+          await shot(page, `setup-doer-${viewport.name}`);
+        });
+
+        /*
+         * And the reader who is adding to a fleet, who IS asked which computer and
+         * therefore sees a receipt rather than an offer on the next screen. A phone
+         * is not asked even here, so that frame is skipped loudly.
+         */
+        await capture(contextFor(viewport), async page => {
+          await toEntry(page);
+          await page.locator('button[data-onboarding-route="add-daemon"]').click();
+          if ((await page.locator(SETUP_TARGET).count()) === 0) {
+            process.stdout.write(
+              `⏭️  setup-target-${viewport.name} and setup-doer-chosen-${viewport.name} not captured: this\n` +
+                '    device settles which computer runs the daemon without asking, which is the behaviour\n' +
+                '    under test rather than a gap.\n',
+            );
+            return;
+          }
+          await shot(page, `setup-target-${viewport.name}`);
+          await page.locator('button[data-onboarding-target="other"]').click();
+          await page.locator(SETUP_DOER).waitFor({ state: 'visible' });
+          await shot(page, `setup-doer-chosen-${viewport.name}`);
         });
       }
 
-      // 2. EVERY STEP OF EVERY ROUTE THE READER CLICKS TO, AT BOTH VIEWPORTS.
+      // 2. EVERY STEP OF EVERY JOURNEY THE READER CLICKS TO, AT BOTH VIEWPORTS.
       // `done` is not one of them: it is reached by a daemon answering, and is
       // captured below.
       for (const step of JOURNEYS) {
         for (const viewport of VIEWPORTS) {
+          if (step.on === 'desktop' && viewport.name !== 'desktop') {
+            process.stdout.write(
+              `⏭️  setup-${step.name}-${viewport.name} not captured: a phone cannot host a daemon, so this\n` +
+                '    stage does not exist on one. Its narrow-width reading is in harness/screenshot.ts.\n',
+            );
+            continue;
+          }
           await capture(contextFor(viewport), async page => {
             await toStep(page, step);
+            await expectDevice(page, viewport, step.name);
             await shot(page, `setup-${step.name}-${viewport.name}`);
           });
         }
       }
 
       /*
-       * 2b. THE CARRIER STEP'S THREE ANSWERS, at both widths.
+       * 2b. THE CARRIER STEP'S THREE ANSWERS.
        *
        * The recommended row reports a runtime fact — whether Ferretry's default
        * relay is advertising itself — so the three frames that matter are the
@@ -577,6 +752,11 @@ try {
        * origin; the third leaves that request UNROUTED, so this harness's
        * off-origin abort makes it fail exactly as an unreachable directory would.
        * Nothing is faked into the component.
+       *
+       * ON A COMPUTER ONLY, because the question belongs to the machine that is
+       * standing the daemon up and no phone ever is one. The narrow reading of this
+       * chooser still matters — a 390px window on a computer reaches it — and that
+       * is what the gallery in `harness/screenshot.ts` captures.
        */
       const RELAY_ANSWERS = [
         { name: 'available', body: JSON.stringify({ version: 1, relayUrl: 'https://relay.example.invalid' }) },
@@ -584,7 +764,7 @@ try {
         { name: 'undetermined', body: null },
       ] as const;
       for (const answer of RELAY_ANSWERS) {
-        for (const viewport of VIEWPORTS) {
+        for (const viewport of VIEWPORTS.filter(candidate => candidate.name === 'desktop')) {
           await capture(contextFor(viewport), async page => {
             if (answer.body !== null) {
               await page.route('**/v1/default-relay', async route => {

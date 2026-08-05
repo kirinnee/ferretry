@@ -14,7 +14,8 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
-  AGENT_SETUP_PROMPT,
+  AGENT_HARNESSES,
+  agentSetupPrompt,
   DAEMON_SERVING_OUTPUT,
   DAEMON_STATUS_COMMAND,
   PAIR_COMMAND,
@@ -23,9 +24,11 @@ import {
 } from '../../../src/features/onboarding/onboarding-model.ts';
 import {
   AgentPairStage,
+  AgentsStage,
   BriefStage,
   DaemonStage,
   DoneStage,
+  ElsewhereStage,
   InstallStage,
   PairStage,
   RelayAllowStage,
@@ -35,6 +38,9 @@ import {
   ScanStage,
 } from '../../../src/features/onboarding/onboarding-stages.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
+
+/** The bare setup page, which is what a reader can open on the other machine. */
+const PLAIN_URL = 'https://ferretry.example.invalid/setup';
 
 const click = async (target: Element): Promise<void> => {
   await interact(() => target.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -63,15 +69,17 @@ describe('the install stage', () => {
     const aside = asideOf(view.container);
     expect(aside.open).toBe(false);
     expect(aside.textContent).toContain(VERIFY_COMMAND);
-    // The agent path is a ROUTE now, so this step offers a way to change answer
-    // rather than a second copy of the prompt that route hands over.
+    // Who installs it is a QUESTION now, so this step offers a way to change the
+    // answer rather than a second copy of the prompt that answer hands over.
     expect(view.container.querySelectorAll('details')).toHaveLength(2);
     expect(view.container.querySelector('[data-onboarding-aside="Rather have an agent do it?"]')).not.toBeNull();
     expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).toBeNull();
+    // No escape from an assumption nobody made: this reader chose the machine.
+    expect(view.container.querySelector('[data-onboarding-other-machine]')).toBeNull();
     await view.unmount();
   });
 
-  it('changes answer to the agent route instead of restating it', async () => {
+  it('changes answer to an agent instead of restating what an agent would do', async () => {
     const switched: string[] = [];
     const view = await mount(
       <InstallStage write={async () => {}} channel="apt" onAgentInstead={() => switched.push('agent')} />,
@@ -79,6 +87,29 @@ describe('the install stage', () => {
 
     await click(must(view.container.querySelector('[data-onboarding-agent-instead]'), 'the change-answer control'));
     expect(switched).toEqual(['agent']);
+    await view.unmount();
+  });
+
+  it('offers a way out of an ASSUMED machine, from the screen the assumption is wrong on', async () => {
+    // A reader who did not read the screen before this is looking at commands for
+    // the wrong host. The way out has to be here, not only back there.
+    const switched: string[] = [];
+    const view = await mount(
+      <InstallStage
+        write={async () => {}}
+        channel="apt"
+        onAgentInstead={() => {}}
+        onOtherMachine={() => switched.push('other')}
+      />,
+    );
+
+    const aside = must(
+      view.container.querySelector<HTMLDetailsElement>('[data-onboarding-aside="Setting up a different machine?"]'),
+      'the machine escape',
+    );
+    expect(aside.open).toBe(false);
+    await click(must(view.container.querySelector('[data-onboarding-other-machine]'), 'the escape control'));
+    expect(switched).toEqual(['other']);
     await view.unmount();
   });
 
@@ -106,6 +137,61 @@ describe('the install stage', () => {
   });
 });
 
+describe('the agents stage', () => {
+  it('offers both harnesses and says one is enough', async () => {
+    // Ferretry RUNS Claude Code and Codex; it is not either of them. Two commands
+    // with no qualifier read as two requirements, so the bar is in words.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+
+    const blocks = [...view.container.querySelectorAll('[data-onboarding-harness]')];
+    expect(blocks.map(node => node.getAttribute('data-onboarding-harness'))).toEqual(['claude', 'codex']);
+    for (const harness of AGENT_HARNESSES) {
+      expect(
+        must(
+          blocks.find(node => node.textContent?.includes(harness.label)),
+          harness.label,
+        ).textContent,
+      ).toContain(harness.command);
+    }
+    expect(view.container.textContent).toContain('at least one');
+    expect(view.container.textContent).toContain('one is enough');
+    await view.unmount();
+  });
+
+  it('describes the check as what it proves, and no more', async () => {
+    // A version on stdout means the executable exists. It does not mean the reader
+    // is signed in, and a page that implied otherwise would be doing the
+    // damaged-state-as-empty-state thing with somebody's account.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+    const asides = [...view.container.querySelectorAll<HTMLDetailsElement>('details')];
+
+    expect(asides).toHaveLength(2);
+    for (const aside of asides) expect(aside.open).toBe(false);
+    const check = must(
+      view.container.querySelector('[data-onboarding-aside="Check one of them is there"]'),
+      'the check disclosure',
+    );
+    for (const harness of AGENT_HARNESSES) expect(check.textContent).toContain(harness.check);
+    expect(check.textContent).toContain('It does not mean you are signed in');
+    expect(check.textContent).toContain('Ferretry cannot do that for you');
+    await view.unmount();
+  });
+
+  it('names the vendors as the authority, because this repo cannot pin their commands', async () => {
+    // Unlike `INSTALL_CHANNELS`, which is asserted character-for-character against
+    // `INSTALLATION.md`, nothing here can prove a third-party command still works.
+    const view = await mount(<AgentsStage write={async () => {}} />);
+    const disclosure = must(
+      view.container.querySelector('[data-onboarding-aside="These are not ours"]'),
+      'the provenance disclosure',
+    );
+
+    expect(disclosure.textContent).toContain('their own documentation is the authority');
+    expect(disclosure.textContent).toContain('believe them over this page');
+    await view.unmount();
+  });
+});
+
 describe('the self-hosted relay steps', () => {
   it('keeps each deploy operation on its own stage', async () => {
     const fingerprint = await mount(<RelayFingerprintStage write={async () => {}} />);
@@ -129,12 +215,12 @@ describe('the self-hosted relay steps', () => {
 
 describe('the brief stage', () => {
   it('shows the whole prompt rather than asking for blind trust', async () => {
-    const view = await mount(<BriefStage write={async () => {}} />);
+    const view = await mount(<BriefStage write={async () => {}} target="this" plainUrl={PLAIN_URL} />);
     const prompt = must(view.container.querySelector('[data-onboarding-prompt]'), 'the prompt');
 
     // Not behind a disclosure: it is about to be handed something with a shell.
     expect(view.container.querySelector('details')).toBeNull();
-    expect(prompt.textContent).toBe(AGENT_SETUP_PROMPT);
+    expect(prompt.textContent).toBe(agentSetupPrompt('this'));
     // Scrolls in its own box, so a thirty-line prompt cannot push the next
     // action off a phone.
     expect(prompt.className).toContain('overflow-auto');
@@ -142,22 +228,106 @@ describe('the brief stage', () => {
     await view.unmount();
   });
 
-  it('says where the prompt goes, because that is the one way to get nothing from it', async () => {
-    const view = await mount(<BriefStage write={async () => {}} />);
+  it('says which computer the prompt goes on, because that is the one way to get nothing from it', async () => {
+    const here = await mount(<BriefStage write={async () => {}} target="this" plainUrl={PLAIN_URL} />);
+    expect(here.container.textContent).toContain('on this computer');
+    expect(here.container.textContent).toContain('not into anything on this page');
+    // The reader answered where they are, so the prompt names ONE pairing command.
+    expect(here.container.textContent).toContain(PAIR_OPEN_COMMAND);
+    // Nothing to send: the agent is on the machine holding this clipboard.
+    expect(here.container.querySelector('[data-onboarding-prompt-handoff]')).toBeNull();
+    await here.unmount();
 
-    // The work happens on ANOTHER machine, and the reader cannot be told that by
-    // the text they are pasting — they read this page, not the thing they paste.
-    expect(view.container.textContent).toContain('on the machine that will run your agents');
-    expect(view.container.textContent).toContain('not into anything on this page');
-    // And how the agent will report back, so nobody is left wondering.
-    expect(view.container.textContent).toContain(PAIR_COMMAND);
+    const elsewhere = await mount(<BriefStage write={async () => {}} target="other" plainUrl={PLAIN_URL} />);
+    expect(elsewhere.container.textContent).toContain('on that computer');
+    expect(elsewhere.container.textContent).toContain(PAIR_COMMAND);
+    await elsewhere.unmount();
+  });
+
+  it('sends the prompt to the other machine, because a clipboard does not reach it', async () => {
+    // The gap the previous release declared: "copy this" ended in a reader
+    // retyping thirty lines. There is no QR in this direction — nothing on a desk
+    // points a camera at a phone — so it is the OS share sheet and words.
+    const shared: unknown[] = [];
+    const view = await mount(
+      <BriefStage
+        write={async () => {}}
+        target="other"
+        plainUrl={PLAIN_URL}
+        share={async payload => {
+          shared.push(payload);
+        }}
+      />,
+    );
+
+    const handoff = must(view.container.querySelector('[data-onboarding-prompt-handoff]'), 'the prompt hand-off');
+    expect(handoff.textContent).toContain('does not reach it');
+    // And the alternative that needs no sending at all: the prompt is public and
+    // identical on every device, so opening this page over there is enough.
+    expect(handoff.textContent).toContain(PLAIN_URL);
+
+    await click(must(view.container.querySelector('[data-onboarding-share-prompt]'), 'the share control'));
+    expect(shared).toEqual([{ title: 'Ferretry setup prompt', text: agentSetupPrompt('other') }]);
+    await view.unmount();
+  });
+
+  it('draws no share control when this browser has no share sheet', async () => {
+    // A button that throws when pressed is worse than one that was never drawn;
+    // the copy button and the page address are still there.
+    const view = await mount(<BriefStage write={async () => {}} target="other" plainUrl={PLAIN_URL} />);
+    expect(view.container.querySelector('[data-onboarding-prompt-handoff]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding-share-prompt]')).toBeNull();
+    expect(view.container.querySelector('[data-onboarding-copy="Copy setup prompt"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('swallows a share the reader changed their mind about', async () => {
+    // Dismissing the sheet rejects with `AbortError`, and an unhandled rejection
+    // would be a console failure caused by somebody pressing Cancel.
+    const view = await mount(
+      <BriefStage
+        write={async () => {}}
+        target="other"
+        plainUrl={PLAIN_URL}
+        share={async () => {
+          throw new Error('AbortError');
+        }}
+      />,
+    );
+    await click(must(view.container.querySelector('[data-onboarding-share-prompt]'), 'the share control'));
+    await view.unmount();
+  });
+});
+
+describe('the elsewhere stage', () => {
+  it('teaches nothing, and says to open this page on the machine that matters', async () => {
+    // The recursion: that computer walks the same subflow answering "this one", so
+    // installation is taught in exactly one place and always about the machine the
+    // reader is sitting at.
+    const view = await mount(<ElsewhereStage handoff={<p>the hand-off panel</p>} onAddAsClient={() => {}} />);
+
+    expect(view.container.textContent).toContain('Open this page on the computer that will run your agents');
+    expect(view.container.querySelector('pre')).toBeNull();
+    expect(view.container.textContent).toContain('the hand-off panel');
+    await view.unmount();
+  });
+
+  it('offers the other thing the reader may have meant, one tap away', async () => {
+    const switched: string[] = [];
+    const view = await mount(
+      <ElsewhereStage handoff={<p>the hand-off panel</p>} onAddAsClient={() => switched.push('add-client')} />,
+    );
+
+    expect(asideOf(view.container).open).toBe(false);
+    await click(must(view.container.querySelector('[data-onboarding-add-client]'), 'the client control'));
+    expect(switched).toEqual(['add-client']);
     await view.unmount();
   });
 });
 
 describe('the agent pairing stage', () => {
   it('asks for no commands, because the reader never had the terminal', async () => {
-    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} device="mobile" />);
+    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} target="other" />);
 
     expect(view.container.querySelector('pre')).toBeNull();
     expect(must(view.container.querySelector('[data-onboarding-pairing]'), 'the pairing slot').textContent).toBe(
@@ -166,14 +336,15 @@ describe('the agent pairing stage', () => {
     // An expired code is the agent's to reproduce, not the reader's.
     expect(view.container.textContent).toContain('ask your agent to run');
     expect(view.container.textContent).toContain('single-use');
-    // On a phone, `fy pair --open` opened a browser on a machine the reader is
-    // not holding, so claiming they may already be connected would be a lie.
+    // When the daemon is elsewhere, `fy pair --open` opened a browser on a machine
+    // the reader is not sitting at, so claiming they may already be connected
+    // would be a lie — whether this device is a phone or a second computer.
     expect(view.container.querySelector('[data-onboarding-agent-opened]')).toBeNull();
     await view.unmount();
   });
 
-  it('tells a computer that the journey may already be finished in another tab', async () => {
-    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} device="desktop" />);
+  it('says the journey may already be finished in another tab, when the daemon is HERE', async () => {
+    const view = await mount(<AgentPairStage pairing={<p>the real pairing screen</p>} target="this" />);
 
     const opened = must(view.container.querySelector('[data-onboarding-agent-opened]'), 'the already-paired note');
     expect(opened.textContent).toContain(PAIR_OPEN_COMMAND);
