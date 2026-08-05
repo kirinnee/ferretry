@@ -746,10 +746,12 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
    browser end. **What is still missing around it:**
    - A `fy` verb to write the daemon's `relay` block — an operator edits
      `<state home>/config/daemon.json` today.
-   - **The three shapes this tunnel does not carry** (see §14): `/v1/events`, terminal streams, and
-     the byte-shaped dictation routes. The browser now REFUSES these on a relay carrier rather than
-     opening a socket at an address the relay exists because it cannot reach, so a relayed connection
-     is a working request/response surface with no live updates and says so.
+   - **The two shapes this tunnel does not carry** (see §14): `/v1/events` and terminal streams. The
+     browser now REFUSES these on a relay carrier rather than opening a socket at an address the relay
+     exists because it cannot reach, so a relayed connection is a working request/response surface
+     with no live updates and says so. (This list used to name a third shape, the byte-shaped
+     dictation routes. Recognition moved into the browser and those routes were deleted, so the
+     exclusion list got **shorter**, not longer.)
    - **The pairing exchange itself cannot be relayed, by construction.** A relayed session is opened
      with the device grant `POST /v1/pair` has not issued yet, so the first contact with a daemon is
      always direct. A phone that can never reach a daemon directly therefore cannot pair with it at
@@ -767,7 +769,11 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
      `attachment-source.ts`, `runtime-models.ts`, `stt/*`, `analytics-api.ts`) are still
      direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
      visible error, not a blank screen — but until the fetcher is threaded to them those surfaces
-     are unavailable over a relay.
+     are unavailable over a relay. `stt/*` stays on this list on purpose and for the ordinary reason:
+     it is now a single text-only route, `POST /v1/stt/enhance`, and
+     `packages/pwa/src/lib/stt/remote-enhancement.ts` still defaults its `fetchImpl` to the global
+     `fetch`. Threading the carrier-aware fetcher to it is a small, self-contained change and the only
+     thing standing between a relayed connection and remote transcript correction.
 4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
    `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
    carrier a live session won on, from `DaemonCarrierRouter.choice`, in Settings › Daemons. A
@@ -783,8 +789,8 @@ is where it is corrected.
 
 **Deploying a relay now gets you a remote connection**, for everything the tunnel carries: any
 request/response route, on any daemon whose fingerprint a browser pinned by pairing with it directly
-at least once. It does not get you live updates, terminal streams, dictation uploads, first-time
-pairing over the relay, or the feature surfaces listed in piece 3 above.
+at least once. It does not get you live updates, terminal streams, first-time pairing over the relay,
+or the feature surfaces listed in piece 3 above.
 The kill switch does not wait for them: `relayUrl: null` is enforced by this Worker at admission and
 on the live sweep, so disabling the hosted relay stops traffic regardless of what any client believes.
 
@@ -865,9 +871,8 @@ numbers order the wire; they do not order the work.
 
 ### What this tunnel does not carry
 
-The daemon's **protocol-switching** surfaces — `/v1/events`, terminal streams — and its
-**byte-shaped** dictation routes. One request and one answer is the wrong shape for a stream that
-keeps talking and for a multi-megabyte model download, so each needs an envelope of its own. §13
+The daemon's **protocol-switching** surfaces — `/v1/events` and terminal streams. One request and one
+answer is the wrong shape for a stream that keeps talking, so each needs an envelope of its own. §13
 records that gap rather than leaving a client to discover it as a socket that never opens.
 
 **A conforming client must refuse these on a relayed carrier rather than fall back to the daemon's own
@@ -876,6 +881,14 @@ socket opened there is a subscribed viewer receiving nothing, forever — the fa
 spends §7 and §9 avoiding, arriving through the front door instead. The browser's
 `packages/pwa/src/lib/event-transport.ts` refuses, and refuses BEFORE it spends a single-use event
 ticket the daemon would otherwise have burned for nothing.
+
+**This list no longer excludes dictation.** The daemon's byte-shaped speech routes — an audio upload
+and a multi-megabyte model download — are deleted, because recognition now happens in the browser.
+The only speech-to-text request a daemon answers is `POST /v1/stt/enhance`: an already-transcribed
+transcript in, a repaired transcript out, ordinary JSON both ways, which this tunnel carries like any
+other request/response route. No microphone audio crosses this tunnel, and none crosses the daemon
+boundary at all. What keeps that route unreachable over a relay today is not its shape but an
+unthreaded fetcher, which §13 piece 3 records.
 
 It also does not carry the **pairing exchange** — `POST /v1/pair` — and cannot: the session is opened
 with the device grant that exchange issues. §13 states the consequence.
