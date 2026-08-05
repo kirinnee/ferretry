@@ -47,12 +47,16 @@ content, including my own from the previous revision — one of which had alread
    by hand twelve times. Forcing them into the daemon model would be a false unification.
 5. **Authorization is two layers plus a category error, not three.** `RouteScope` welds credential
    class to arrival privilege into a total order that cannot express what #295 needed. §5.
-6. **The codebase conforms to `docs/standards/` well.** I measured it rather than assuming. The
-   patchwork the owner is complaining about is **not** doctrine drift — it is that **no doctrine article
-   says anything about two programs agreeing on one fact**, which is the failure that keeps shipping.
-   The deliverable therefore includes a new doctrine article. §7.
+6. **The doctrines are largely followed, and the drift is concentrated in `packages/pwa/src/lib`** — the
+   one package with no cross-process agreement problem at all. Measured over 634 files with the glob
+   stated so it is reproducible, after hadi caught my first sweep using a broken pathspec. **The
+   patchwork the owner is complaining about is not doctrine drift**: no doctrine article says anything
+   about two programs agreeing on one fact, which is the failure that keeps shipping. The deliverable
+   therefore includes a new doctrine article. §7.
 7. **The fix for a duplicated fact is sometimes to SPLIT it, not to collapse it.** temperance's
    `mayGrant`/`governed` case proves it. A refactor that only merges will over-merge. §4.5.
+8. **A pairing link must say who can redeem it, not merely exist.** The advertisement has three
+   answers, not two — cinthia caught my first draft contradicting itself and hadi confirmed it. §2.4.
 
 ---
 
@@ -193,8 +197,18 @@ export type AdvertisementRefusal = 'loopback-bind' | 'wildcard-bind' | 'no-port'
 
 export type Advertisement =
   /** An address a DIFFERENT device can dial. */
+  /** A different device can dial this. Mint the link and draw the QR. */
   | { readonly kind: 'address'; readonly url: string; readonly origin: 'operator' | 'derived' }
-  /** There is none, and this is why. Not an error — a loopback-only daemon is a working daemon. */
+  /**
+   * Correct for a browser ON this machine, dead off it. Mint the link and SAY SO.
+   *
+   * NOT a refusal. A loopback-only daemon is a working daemon and its address is genuinely right for
+   * the caller who can use it — one person, one laptop, a browser on `127.0.0.1` is the common case
+   * `docs/grants.md` is built around. What is wrong is handing that address to somebody who cannot
+   * use it WITHOUT SAYING SO.
+   */
+  | { readonly kind: 'local-only'; readonly url: string }
+  /** There is nothing to hand out at all. Refuse and name the fix. */
   | { readonly kind: 'none'; readonly refusal: AdvertisementRefusal };
 
 export function decideAdvertisement(input: {
@@ -211,41 +225,77 @@ Three rules, and the first is the one temperance warned about:
   a reverse proxy or a tunnel legitimately advertises an address it does not bind — that is precisely
   why `advertisesForeignAddress()` exists. Reachability must never be re-derived from
   `publicUrl !== bindUrl`; that reads a correct proxy deployment as broken.
-- **A loopback host derives no advertisement.** `isLoopbackHost` decides, from the single owner §5.4
-  creates.
-- **A wildcard host (`0.0.0.0`, `::`) derives no advertisement.** The daemon serves perfectly on it;
-  what is undefined is only which address to _hand out_.
+- **A loopback host is `local-only`.** `isLoopbackHost` decides, from the single owner §5.4 creates.
+- **A wildcard host (`0.0.0.0`, `::`) or a missing port is `none`.** The daemon serves perfectly on a
+  wildcard; what is undefined is only which address to _hand out_.
 
-### 2.5 Refusal at the mint, not at the boot
+**Why three answers and not two.** My first draft had two, and cinthia caught that it contradicted
+itself — hadi verified the contradiction in the document rather than taking either of our words for it.
+The two rules were "a loopback host derives no advertisement" and "minting refuses when there is no
+advertisement", whose composition refuses **every default single-machine install** — which is the exact
+outcome I had just rejected boot-refusal for, and which my own comment calling a loopback-only daemon "a
+working daemon" contradicts. Moving the refusal from boot to mint would not have saved the default
+install; it would only have changed when it broke.
 
-cinthia proposed refusing the boot. **I disagree, and only because they scoped it to the wildcard
-case.** Extended to loopback — which is where the owner's bug actually lives — a boot refusal would
-refuse **every default single-machine install**, and those work: a browser at `127.0.0.1` pairs fine,
-because for that browser the address is correct.
+It is also the asymmetry cinthia spotted in my own argument: §2.2 says the outbound value deserves the
+same distinction `ApiRequest.loopback` makes inbound. Inbound has local / remote / relayed. Two-way
+outbound was not that distinction carried through; three-way is.
 
-So the rule is:
+### 2.5 Say who can redeem it — refuse only when nobody can
 
-> **A daemon is not required to have an advertisement. Minting a link that needs one is what must
-> refuse — at the moment somebody asks, naming the exact fix.**
+The doctrine, sharpened by cinthia from what I first wrote:
 
-That is the doctrine this repo already applies to grants and did not apply here. frederick puts it
-best: the grant surface refuses to draw a widening switch a remote caller can never move, and pairing
-draws a QR that cannot be redeemed.
+> **Never mint a link without saying who can redeem it.**
 
-Concretely:
+That is strictly better than "never mint a link that cannot be redeemed", because it fixes the owner's
+blocker without over-refusing: the QR stops being silently dead and starts saying who it is for.
+frederick's framing of the underlying rule stands — the grant surface refuses to draw a widening switch
+a remote caller can never move, and pairing drew a QR that could not be redeemed.
 
-- `PairingCodeMintResponseSchema.daemonUrl` and `pairUrl` become **optional together**.
-- When absent, the response carries `refusal: AdvertisementRefusal`.
+Concretely, on `PairingCodeMintResponseSchema`:
+
+| advertisement | `daemonUrl` / `pairUrl` | what `fy pair` and the Add-a-device panel do                                                                                             |
+| ------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `address`     | present                 | draw the QR, as today                                                                                                                    |
+| `local-only`  | present                 | show the link, **do not draw a QR**, and say plainly that only a browser on this machine can redeem it — with the one-line fix beside it |
+| `none`        | absent, `refusal` set   | no link at all; state the refusal and the fix                                                                                            |
+
+- The response gains `reach: 'any-device' | 'local-only'`, present **iff** `daemonUrl` is, and
+  `refusal` present **iff** it is not.
 - The `superRefine` becomes: `pairUrl` present **iff** `daemonUrl` present, and when present the
-  fragment must match. frederick's invariant is kept and the missing one is added.
-- `fy pair` and the Add-a-device panel render the refusal and the fix — _"set `publicUrl` to the
-  address other devices reach this machine at, e.g. `http://192.168.1.10:7431`"_ — instead of an
-  undialable QR. frederick confirms the browser already has what it needs (`pairingSeedFromUrl` parses
-  `url=`, `pairingDaemonHost` extracts the host), so this is a few lines in one place.
+  fragment must match. **frederick's invariant is kept** — a link cannot disagree with the daemon it
+  names — and the missing one is added.
+- The fix sentence is the same in all three surfaces: _"set `publicUrl` to the address other devices
+  reach this machine at, e.g. `http://192.168.1.10:7431`"_. frederick confirms the browser already has
+  what it needs (`pairingSeedFromUrl` parses `url=`, `pairingDaemonHost` extracts the host), so this is
+  a few lines in one place.
 - **No new exit code.** cinthia flagged that `cli/src/lib/daemon/unit-file.ts:119` hardcodes
   `RestartPreventExitStatus=78 69` and launchd has no equivalent, so a third code needs both templates
-  changed together or a supervisor respawns forever. Refusing at the mint instead of the boot means
-  there is no third code at all. That is a second reason to prefer it.
+  changed together or a supervisor respawns forever. Deciding at the mint rather than at the boot means
+  there is no third code at all. That is the second reason to prefer it, and it survives the three-way.
+
+#### 2.5.1 The trap — do not condition the mint on the requester's carrier
+
+cinthia's warning, verbatim, because it belongs where somebody would reach for the shortcut:
+
+> **Do not condition the mint on the requester's own carrier.** `ApiRequest.loopback` tells you who is
+> MINTING, not who will REDEEM — and the common case is a person at the machine minting a code to scan
+> with their phone. The minter is loopback and the redeemer is not. That shortcut would re-mint exactly
+> the owner's dead QR and look correct in every local test.
+
+This is the single most likely wrong implementation of Wave 0, and it would pass every test written by
+somebody working on one machine. The advertisement is a property of the **daemon's configuration**, never
+of the request asking for it.
+
+#### 2.5.2 The pattern, for the fact-ownership article
+
+hadi noted it and it is worth carrying: I caught cinthia generalising a wildcard-only rule to loopback,
+and then made the same error in the opposite direction within the hour. Two people, same mistake, both
+directions.
+
+> **A rule derived from one member of a set must be re-tested against every other member before it
+> becomes the rule.** `host` has three interesting values — loopback, wildcard, a real address — and a
+> rule checked against one of them is a third of a rule.
 
 ### 2.6 The relay does not rescue this, and that is load-bearing
 
@@ -678,23 +728,59 @@ answers per connection. **Multiple relays do not weaken the rule — they instan
 
 ## 7. Doctrine conformance — measured, not assumed
 
-The owner asked for conformance to `docs/standards/`. I measured it across 478 `src/lib` files.
+The owner asked for conformance to `docs/standards/`. I measured it. **The file set is stated so this
+is reproducible rather than trusted** — my first attempt used a `**` git pathspec that silently matched
+only 479 of 634 files, excluding `fleet`, `protocol` and `relay` entirely and 76 of 84 `pwa` lib files.
+hadi spot-checked one number, it did not hold, and re-running found a second wrong one. The corrected
+sweep is:
 
-| doctrine                                                          | rule probed                              | result                                                                                                                                                                                            |
-| ----------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SOLID — zero private methods                                      | `private`/`#` members in `src/lib`       | **52 occurrences in 15 of 478 files.** Largely conformant; 3 files (`pwa/lib/stt/browser-recognition.ts` 19, `daemon/lib/relay/link.ts` 13) are worth a look, the rest are 2–3 in CLI controllers |
-| SOLID — no singletons                                             | `export const x = new …` in `src/lib`    | **zero.** Conformant                                                                                                                                                                              |
-| Datetime — never read the ambient clock in domain code            | `Date.now()` in `src/lib`                | **zero.** One argless `new Date()`. Conformant, and notably so                                                                                                                                    |
-| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                        |
-| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **5 files**, all `daemon/src/lib/session/*/settings.ts` plus `resume/types.ts`                                                                                                                    |
-| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                        |
-| Functional — railway over throwing                                | `throw new` in `src/lib`                 | 125 (daemon 85, cli 38, pwa 2). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary, and `ApiError` is one                                                 |
+```bash
+git ls-files "packages/*/src/lib/*" | grep '\.ts$' | grep -v tests    # 634 files, all six packages
+```
+
+| doctrine                                                          | rule probed                              | result on 634 files                                                                                                                                                                       |
+| ----------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SOLID — zero private methods                                      | `private`/`#` members                    | **159 occurrences in 38 files (6%).** Largely conformant; the concentration is `pwa/lib/stt/browser-recognition.ts` 19, `pwa/lib/relay-session.ts` 17, `daemon/lib/relay/link.ts` 13      |
+| SOLID — no singletons                                             | `export const x = new …`                 | **one**, `pwa/src/lib/drafts.ts:189` `documentDraftStore`. **A knowing, documented exception** — the composer needs a value at module load, before any React context exists. See below    |
+| Datetime — never read the ambient clock in domain code            | `Date.now()` / argless `new Date()`      | **9 reads, and every one is an injectable default** (8 default parameters in 6 `pwa/src/lib` files, plus `options.now ?? (() => new Date())`). **Zero required ambient reads.** See below |
+| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                |
+| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **6 files**: the four `daemon/src/lib/session/*/settings.ts`, `session/resume/types.ts`, `pwa/lib/account-picker-catalog.ts`                                                              |
+| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                |
+| Functional — railway over throwing                                | `throw new`                              | 165 (daemon 89, cli 38, pwa 29, fleet 8, protocol 1). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary and `ApiError` is one                    |
+
+**Two results deserve a sentence rather than a cell, because both are doctrine questions rather than
+defects — and the doctrine should answer them so nobody re-litigates them.**
+
+- **The clock.** Every read is a default parameter, so every call site can inject one and every one is
+  testable. But a default that reads the ambient clock is still an impure default, and it puts the
+  impurity in the module rather than at the composition root. `docs/standards/datetime/index.md` says
+  "never read the ambient clock in domain code. Take a clock as a dependency." An overridable default
+  _is_ a dependency and _also_ a read. **The doctrine must say which**, explicitly. My reading: it is
+  conformant, because the property the rule exists to protect — testability without freezing global
+  time — is fully present. hadi asked for the position to be stated rather than assumed, and this is it.
+- **The singleton.** `documentDraftStore` is the survivor of a real defect the `daemon-scope.sh`
+  `invalidate` pass caught: `DaemonDraftStore` used to be a module default inside `composer.tsx`, which
+  made it the one daemon-scoped store the connection registry could not reach, so unpairing left a
+  daemon's drafts in `localStorage` for the next pairing that minted the same id to read back. Moving it
+  here fixed that and left a documented module-level instance behind. It is in no allowlist, because
+  no gate asks. **"No Singletons" has no exception clause for a framework that needs a value at module
+  load** — so either the doctrine names that exception or the value moves into `createAppStore`. A
+  decision either way; not something to leave implicit.
 
 **The honest headline, and it is the answer to the owner's complaint:**
 
-> **The code conforms to the doctrines well. The patchwork is not doctrine drift.** It is that none of
-> the eight doctrine articles says anything about the failure that keeps shipping: **two programs
-> agreeing about one fact.**
+> **The doctrines are largely followed, and where they are not, the drift is concentrated in
+> `packages/pwa/src/lib`.** All 9 clock defaults, the one singleton, the two largest private-member
+> counts and all 12 hand-rolled parsers are there.
+>
+> **The patchwork the owner is complaining about is somewhere else entirely.** It is that none of the
+> eight doctrine articles says anything about the failure that keeps shipping: **two programs agreeing
+> about one fact.**
+
+That the two problems live in different places is what makes the argument strong rather than weak. The
+PWA's lib has style drift and **no** cross-process agreement problem — it talks to one reader. The
+daemon/protocol/CLI seam has near-perfect doctrine conformance and **every** agreement failure in §1.1.
+A refactor aimed only at doctrine conformance would tidy the PWA and fix none of the fourteen findings.
 
 `docs/standards/contracts/README.md` is the closest, and it frames itself as a _list of gates_ rather
 than a _principle_ — which is exactly why the principle was applied three times and then stopped. The
@@ -703,8 +789,15 @@ So the deliverable includes:
 
 **A new doctrine article: `docs/standards/fact-ownership/index.md`**, holding R1–R5 of §4, the
 soundness-vs-completeness rule, temperance's workaround diagnostic, the split-don't-over-merge
-anti-rule, and the input-domain rule from finding 8. Linked from `CLAUDE.md`'s doctrine table beside
-the other eight, because a rule that is not in the table is a rule nobody reads.
+anti-rule, the input-domain rule from finding 8, and the re-test rule from §2.5.2. Linked from
+`CLAUDE.md`'s doctrine table beside the other eight, because a rule that is not in the table is a rule
+nobody reads.
+
+Its worked examples should be the ones from this session where the author of a rule broke it, because a
+rule with that attached is harder to wave away: temperance argued for collapsing `mayGrant`/`governed`
+and supplied the diagnostic that proves they were wrong; cinthia and I made the
+generalise-from-one-member error in opposite directions within an hour; and this document itself got
+three things wrong (§11.1).
 
 ### 7.1 Two doctrine claims that are not true as written
 
@@ -765,12 +858,12 @@ Every step ships alone, reverts alone, and deletes something. No big-bang rewrit
 
 ### Wave 0 — the blocker (first, before anything else)
 
-| step   | does                                                                                                                                                                          | deletes                                        |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| **0a** | `decideAdvertisement` in `@ferretry/protocol` + `isLoopbackHost`/`isLoopbackPeer`/`isWildcardHost` moved there from `#301`'s `config.ts`                                      | the four loopback copies                       |
-| **0b** | the three `config.ts` derivation sites and `recordedDaemonAddress` read the one decision                                                                                      | `publicUrl ?? bindUrl` ×3                      |
-| **0c** | the mint response carries the advertisement or a refusal; `superRefine` becomes present-iff-present; `fy pair` and the Add-a-device panel render the fix instead of a dead QR | the undialable QR                              |
-| **0d** | `docs/pairing.md` states the constraint: **a daemon must never mint a pairing link naming an address the scanning device cannot reach**                                       | frederick's asserted-but-undeliverable journey |
+| step   | does                                                                                                                                                                                                                                                                          | deletes                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **0a** | `decideAdvertisement` in `@ferretry/protocol` + `isLoopbackHost`/`isLoopbackPeer`/`isWildcardHost` moved there from `#301`'s `config.ts`                                                                                                                                      | the four loopback copies                       |
+| **0b** | the three `config.ts` derivation sites and `recordedDaemonAddress` read the one decision                                                                                                                                                                                      | `publicUrl ?? bindUrl` ×3                      |
+| **0c** | the mint response carries `reach: 'any-device' \| 'local-only'` or a `refusal`; `superRefine` becomes present-iff-present; the three surfaces draw a QR, a said-so local link, or the fix — never a silent dead QR. **Do not condition on the requester's carrier (§2.5.1).** | the undialable QR                              |
+| **0d** | `docs/pairing.md` states the constraint: **never mint a link without saying who can redeem it**                                                                                                                                                                               | frederick's asserted-but-undeliverable journey |
 
 ### Wave 1 — detection (no behaviour change)
 
@@ -855,20 +948,46 @@ Verified against `origin/main` at **`52dc6a20`**, by content.
 | pairing publishes no carrier                   | `PairingResponseSchema` in `protocol/lib/pairing.ts`; `rg 'relayUrl\|rendezvous' packages/protocol/src/lib/*.ts` finds only a doc comment                                                  |
 | the inline authorization check                 | `mounts/session-attach.ts:45`                                                                                                                                                              |
 | 17 contracts run, 13 documented                | the `all` loop vs the README table, diffed with `comm`                                                                                                                                     |
-| doctrine probes                                | `git ls-files 'packages/*/src/lib/**/*.ts'` (478 files) piped to `rg`; counts in §7                                                                                                        |
+| doctrine probes                                | `git ls-files "packages/*/src/lib/*" \| grep '\.ts$' \| grep -v tests` — **634 files, all six packages** — piped to `rg`; counts in §7. Do **not** use a `**` pathspec; see below          |
+| both loopback domains are correct today        | temperance re-checked both: `bun-api-server.ts:92` includes the IPv4-mapped form and excludes `localhost`; `isLoopbackHost` is already named and single-sourced by #301                    |
 | no `/v1/config` route                          | 109 distinct `/v1` paths in `mounts/`, none matching `config\|settings\|daemon`                                                                                                            |
 
-**And the finding about this document.** Its previous revision asserted that the daemon does not read
-the hosted-relay advertisement. That was true at `5316ae4a` and **false six hours later**: `#301`
-(`fix(daemon): dial the advertised relay when none is configured`) landed it, symmetric with the PWA
-via `__FY_RELAY_DIRECTORY__` and pinned by `scripts/validate/relay-config.sh`. `#301` also introduced
-`isLoopbackHost`, which turns §5.4 from an invention into an extension.
+### 11.1 Three ways this document was wrong, and what each one teaches
 
-I found this only because CLAUDE.md changed under me and I re-checked. Two consequences worth carrying:
+Recorded rather than quietly corrected, because the document's whole argument is that silent
+disagreement is the enemy.
 
-1. **A design document that cites line numbers rots at the rate the repository moves.** Cite decisions
-   and file paths in the argument; keep line numbers in a verification appendix stamped with the SHA
-   they were checked at. This document now does that.
-2. **"Verify by content, not from a summary" applies to your own previous conclusions.** hadi hit the
-   same thing — their first grep for `reachableOffHost` missed it because they had not pulled. Two of
-   us, on the same day, wrong about `main` in the same way.
+**1. A claim that was true and then was not.** The previous revision asserted the daemon does not read
+the hosted-relay advertisement. True at `5316ae4a`, **false six hours later**: `#301` landed it,
+symmetric with the PWA via `__FY_RELAY_DIRECTORY__` and pinned by `scripts/validate/relay-config.sh`.
+`#301` also introduced `isLoopbackHost`, which turns §5.4 from an invention into an extension. I caught
+it only because `CLAUDE.md` changed under me. hadi hit the identical thing — their first grep for
+`reachableOffHost` missed it because they had not pulled.
+
+> **A design document that cites line numbers rots at the rate the repository moves.** Cite decisions
+> and file paths in the argument; keep line numbers in an appendix stamped with the SHA they were
+> checked at.
+
+**2. A measurement that was wrong because the file set was wrong.** §7 originally claimed "zero
+`Date.now()` in lib" and "zero singletons". Both were artefacts of
+`git ls-files "packages/*/src/lib/**/*.ts"`, which matched **479 of 634** files and silently dropped
+`fleet`, `protocol`, `relay` and 76 of 84 `pwa` lib files. The truth is 9 clock reads (all injectable
+defaults) and 1 documented singleton. hadi spot-checked the clock number before relaying it, it did not
+hold, and re-running the corrected sweep found the singleton too.
+
+> **A conformance claim is only as good as its stated file set.** The glob is now in the appendix so
+> the next reader can reproduce the numbers instead of trusting them. And a `**` git pathspec does not
+> mean what a shell glob means: `*` already crosses `/`, so `a/*/b/**/c` silently under-matches.
+
+This one matters most, because "the patchwork is not doctrine drift" is load-bearing for the owner's
+decision, and hadi was right that one wrong count in the evidence weakens an argument that deserves to
+be believed. The corrected numbers do not overturn the conclusion — they sharpen it, because the drift
+turns out to be concentrated in the one package with no agreement problem at all.
+
+**3. A finding I under-counted.** I first reported `pairing` as having no route demand. It has one;
+my pattern matched only inline literals and `mounts/pairing.ts` uses a named `PAIRING_DEMAND` constant.
+The surviving finding is the narrower one in §5.1.
+
+All three are the same failure the document is about, committed by the document: **a claim and the
+thing it describes, with nothing checking that they agree.** Three teammates checking my work is what
+caught them, which is the argument for the gates in §4 rather than against them.
