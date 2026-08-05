@@ -8,6 +8,7 @@ import {
 } from '../../src/components/rich-file-preview.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
 const daemon = daemonConnection({
@@ -17,10 +18,17 @@ const daemon = daemonConnection({
 });
 const scope = daemonSessionScope(daemon, 'session');
 const originalFetch = globalThis.fetch;
+let previewPayload: Record<string, string>;
+let previewFailure: Error | null;
+const previewFetch: DaemonFetch = async () => {
+  if (previewFailure) throw previewFailure;
+  return Response.json(previewPayload);
+};
 
 beforeEach(() => {
-  globalThis.fetch = (async () =>
-    Response.json({ path: 'report.html', base64: 'PGgxPnVudHJ1c3RlZDwvaDE+' })) as typeof fetch;
+  previewPayload = { path: 'report.html', base64: 'PGgxPnVudHJ1c3RlZDwvaDE+' };
+  previewFailure = null;
+  globalThis.fetch = previewFetch;
 });
 
 afterEach(() => {
@@ -57,6 +65,7 @@ describe('bounded CSV preview parsing', () => {
         ['Ada', 'one, two\nand three'],
       ],
       truncated: false,
+      malformed: false,
     });
   });
 
@@ -65,6 +74,17 @@ describe('bounded CSV preview parsing', () => {
     const parsed = parsePreviewCsv(rows);
     expect(parsed.rows).toHaveLength(400);
     expect(parsed.truncated).toBe(true);
+    expect(parsed.malformed).toBe(false);
+  });
+
+  it('marks an unclosed quoted cell as malformed instead of inventing a table', () => {
+    expect(parsePreviewCsv('name,note\nAda,"unfinished')).toMatchObject({
+      rows: [
+        ['name', 'note'],
+        ['Ada', 'unfinished'],
+      ],
+      malformed: true,
+    });
   });
 });
 
@@ -94,6 +114,34 @@ describe('rich preview containment', () => {
     } finally {
       URL.createObjectURL = create;
       URL.revokeObjectURL = revoke;
+    }
+  });
+
+  it('names a CSV that exceeds the table bound', async () => {
+    previewPayload = { path: 'large.csv', base64: btoa('x'.repeat(512 * 1024 + 1)) };
+    const view = await mount(<RichFilePreview daemon={daemon} scope={scope} path="large.csv" revision={1} />);
+    try {
+      await interact(async () => {
+        for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+      });
+      expect(view.container.textContent).toContain('CSV table previews stop at 512 KB');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('names an unavailable preview read instead of showing an empty document', async () => {
+    previewFailure = new TypeError('offline');
+    const view = await mount(<RichFilePreview daemon={daemon} scope={scope} path="report.html" revision={1} />);
+    try {
+      await interact(async () => {
+        for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
+      });
+      expect(must(view.container.querySelector('[role="alert"]'), 'unavailable preview alert').textContent).toContain(
+        'Could not load a safe preview: could not reach the daemon',
+      );
+    } finally {
+      await view.unmount();
     }
   });
 });

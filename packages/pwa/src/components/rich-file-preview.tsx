@@ -67,9 +67,12 @@ export const richFileMime = (path: string, kind: RichFileKind): string => {
   );
 };
 
-export const bytesFromBase64 = (value: string): Uint8Array => {
+export const bytesFromBase64 = (value: string): Uint8Array<ArrayBuffer> => {
   const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
+  // `BlobPart` deliberately excludes SharedArrayBuffer-backed views. Allocate
+  // this decoded document in an ordinary ArrayBuffer instead of casting away
+  // the distinction; a renderer must never smuggle a shared buffer to Blob.
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
 };
@@ -77,6 +80,8 @@ export const bytesFromBase64 = (value: string): Uint8Array => {
 export interface CsvTable {
   readonly rows: readonly (readonly string[])[];
   readonly truncated: boolean;
+  /** An unclosed quoted field has no honest table interpretation. */
+  readonly malformed: boolean;
 }
 
 /** A deliberately bounded RFC-4180-style reader. It supports quoted commas and
@@ -124,7 +129,7 @@ export const parsePreviewCsv = (text: string): CsvTable => {
     }
   }
   if (rows.length < CSV_PREVIEW_ROWS && (cell !== '' || row.length > 0 || text.endsWith(','))) pushRow();
-  return { rows, truncated };
+  return { rows, truncated, malformed: quoted };
 };
 
 const PreviewActions = ({ href, filename, canOpen }: { href: string; filename: string; canOpen: boolean }) => (
@@ -205,6 +210,12 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
         </div>
       );
     const table = parsePreviewCsv(new TextDecoder('utf-8', { fatal: false }).decode(bytes));
+    if (table.malformed)
+      return (
+        <div className="kt-fs-note" data-tone="warn" role="status">
+          This CSV has an unclosed quoted cell, so a table preview would be misleading. Use Raw or download it instead.
+        </div>
+      );
     return (
       <div className="kt-rich-file">
         <div className="kt-rich-file-table scroll-thin">
