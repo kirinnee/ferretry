@@ -66,6 +66,15 @@ export type FleetUsageSnapshot = z.infer<typeof FleetUsageSnapshotSchema>;
 export interface FleetUsageCollectorOptions {
   readonly concurrency?: number;
   readonly atLimitPercent?: number;
+  /**
+   * Which provider login an account shares, so accounts on one credential are probed **once**.
+   *
+   * Supplied by the caller because it is read from the declared configuration, not from the manifest —
+   * and deliberately not derived by comparing credentials, which would mean handling secrets to decide
+   * a grouping the author already wrote down. Omitted means one probe per account, which is only right
+   * when nothing is shared.
+   */
+  readonly identityOf?: (account: FleetManifestAccount) => string;
 }
 
 export interface FleetUsageClock {
@@ -159,6 +168,7 @@ export function isCorroboratedAuthRejection(verdicts: readonly (boolean | undefi
 export class FleetUsageCollector {
   private readonly concurrency: number;
   private readonly atLimitPercent: number;
+  private readonly identityOf: (account: FleetManifestAccount) => string;
 
   constructor(
     private readonly probe: FleetUsageProbe,
@@ -167,61 +177,116 @@ export class FleetUsageCollector {
   ) {
     this.concurrency = boundedConcurrency(options.concurrency);
     this.atLimitPercent = clampUsagePercent(options.atLimitPercent ?? 100) ?? 100;
+    // Without a grouping, every account is its own group — the previous behaviour exactly.
+    this.identityOf = options.identityOf ?? (account => account.id);
   }
 
+  /**
+   * One row per account, probing once per **credential** rather than once per account.
+   *
+   * Accounts that share a provider login share a quota, so asking about each of them separately asks
+   * the same question N times: thirty wrappers on six provider accounts made thirty provider calls,
+   * and on a rate-limited account those extra calls are the worst possible thing to spend. Each group
+   * is probed once through its lowest-id member and the reading is copied to its siblings.
+   *
+   * Grouping comes from the caller's `identityOf`, which reads the **declared** identity — no
+   * credential is hashed or compared to work out which accounts are the same account.
+   *
+   * An account the manifest declares unavailable is never probed and never a group's representative:
+   * it gets its own row from the declaration, so an unavailable lane cannot suppress its siblings.
+   */
   async collect(manifest: FleetManifest): Promise<FleetUsageSnapshot> {
     const accounts = [...manifest.accounts].sort((left, right) => left.id.localeCompare(right.id));
-    const rows = await boundedMap(accounts, this.concurrency, async account => await this.collectAccount(account));
+
+    const declared = new Map<string, string>();
+    const groups = new Map<string, FleetManifestAccount[]>();
+    for (const account of accounts) {
+      const unavailableReason = declaredUnavailableReason(account);
+      if (unavailableReason !== undefined) {
+        declared.set(account.id, unavailableReason);
+        continue;
+      }
+      const key = this.identityOf(account);
+      const existing = groups.get(key);
+      if (existing === undefined) groups.set(key, [account]);
+      else existing.push(account);
+    }
+
+    const keys = [...groups.keys()];
+    const probed = await boundedMap(keys, this.concurrency, async key => await this.#probe(groups.get(key) ?? []));
+    const readings = new Map(keys.map((key, index) => [key, probed[index]]));
+
+    const rows = accounts.map(account => {
+      const unavailableReason = declared.get(account.id);
+      if (unavailableReason !== undefined) return this.#unavailableRow(account, unavailableReason);
+      const reading = readings.get(this.identityOf(account));
+      return reading === undefined
+        ? this.#failedRow(account, 'usage probe failed')
+        : this.#row(account, reading);
+    });
+
     return FleetUsageSnapshotSchema.parse({ at: normalizeClock(this.clock.now()), accounts: rows });
   }
 
-  private async collectAccount(account: FleetManifestAccount): Promise<FleetUsage> {
-    const unavailableReason = declaredUnavailableReason(account);
-    if (unavailableReason !== undefined) {
-      return FleetUsageSchema.parse({
-        accountId: account.id,
-        kind: account.kind,
-        usageBased: false,
-        ok: false,
-        unavailable: true,
-        unavailableReason,
-        atLimit: false,
-      });
-    }
-
+  /** Probe one group through its representative. A throw becomes a failure, never a reading. */
+  async #probe(group: readonly FleetManifestAccount[]): Promise<FleetUsageProbeResult | string> {
+    const representative = group[0];
+    if (representative === undefined) return 'no account to probe';
     try {
-      const raw = FleetUsageProbeResultSchema.parse(await this.probe.probe(account));
-      const shortWindow = normalizeWindow(raw.shortWindow);
-      const longWindow = normalizeWindow(raw.longWindow);
-      const unavailable = raw.unavailable === true;
-      return FleetUsageSchema.parse({
-        accountId: account.id,
-        kind: account.kind,
-        ...(raw.provider === undefined ? {} : { provider: raw.provider }),
-        usageBased: raw.usageBased,
-        ok: raw.ok,
-        unavailable,
-        ...(raw.unavailableReason === undefined ? {} : { unavailableReason: raw.unavailableReason }),
-        ...(raw.authOk === undefined ? {} : { authOk: raw.authOk }),
-        ...(raw.error === undefined ? {} : { error: raw.error }),
-        ...(shortWindow === undefined ? {} : { shortWindow }),
-        ...(longWindow === undefined ? {} : { longWindow }),
-        // A failed transient probe must never block a consumer. Only a successful
-        // quota reading or a probe-proven unavailable state may set this true.
-        atLimit:
-          unavailable || (raw.ok && (raw.atLimit === true || isAtLimit(shortWindow, longWindow, this.atLimitPercent))),
-      });
+      return FleetUsageProbeResultSchema.parse(await this.probe.probe(representative));
     } catch (error) {
-      return FleetUsageSchema.parse({
-        accountId: account.id,
-        kind: account.kind,
-        usageBased: false,
-        ok: false,
-        unavailable: false,
-        error: errorMessage(error),
-        atLimit: false,
-      });
+      return errorMessage(error);
     }
+  }
+
+  #unavailableRow(account: FleetManifestAccount, unavailableReason: string): FleetUsage {
+    return FleetUsageSchema.parse({
+      accountId: account.id,
+      kind: account.kind,
+      usageBased: false,
+      ok: false,
+      unavailable: true,
+      unavailableReason,
+      atLimit: false,
+    });
+  }
+
+  #failedRow(account: FleetManifestAccount, error: string): FleetUsage {
+    return FleetUsageSchema.parse({
+      accountId: account.id,
+      kind: account.kind,
+      usageBased: false,
+      ok: false,
+      unavailable: false,
+      error,
+      atLimit: false,
+    });
+  }
+
+  /** Build one account's row from its group's reading. A reason string means the probe failed. */
+  #row(account: FleetManifestAccount, reading: FleetUsageProbeResult | string): FleetUsage {
+    if (typeof reading === 'string') return this.#failedRow(account, reading);
+    const shortWindow = normalizeWindow(reading.shortWindow);
+    const longWindow = normalizeWindow(reading.longWindow);
+    const unavailable = reading.unavailable === true;
+    return FleetUsageSchema.parse({
+      accountId: account.id,
+      kind: account.kind,
+      ...(reading.provider === undefined ? {} : { provider: reading.provider }),
+      usageBased: reading.usageBased,
+      ok: reading.ok,
+      unavailable,
+      ...(reading.unavailableReason === undefined ? {} : { unavailableReason: reading.unavailableReason }),
+      ...(reading.authOk === undefined ? {} : { authOk: reading.authOk }),
+      ...(reading.error === undefined ? {} : { error: reading.error }),
+      ...(shortWindow === undefined ? {} : { shortWindow }),
+      ...(longWindow === undefined ? {} : { longWindow }),
+      // A failed transient probe must never block a consumer. Only a successful
+      // quota reading or a probe-proven unavailable state may set this true.
+      atLimit:
+        unavailable ||
+        (reading.ok && (reading.atLimit === true || isAtLimit(shortWindow, longWindow, this.atLimitPercent))),
+    });
   }
 }
 
