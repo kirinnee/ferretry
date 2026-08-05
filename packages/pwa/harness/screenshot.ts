@@ -585,6 +585,39 @@ try {
             }
           };
 
+          /**
+           * Open one of the daemon's panels — the third and innermost level of
+           * Settings navigation, which the two presentations reach differently.
+           *
+           * A desktop reads the vertical rail beside the panel, which is a real
+           * tablist. A phone has no tablist at all: one trigger names the open
+           * panel and the app's shared BottomSheet lists the rest as ordinary
+           * navigation rows, deliberately without `role="tab"` — so asking for a
+           * tab there would find the hidden desktop rail and click nothing a
+           * reader can see.
+           */
+          const selectDaemonPanel = async (frame: Locator, label: string) => {
+            if (viewport.name === 'mobile') {
+              await frame.locator('[data-daemon-panel-trigger]').click();
+              const picker = page.getByRole('dialog', { name: 'Choose a panel' });
+              await picker.waitFor({ state: 'visible' });
+              await picker
+                .locator('[data-daemon-panel-choice]')
+                .filter({ has: page.getByText(label, { exact: true }) })
+                .click();
+              await picker.waitFor({ state: 'hidden' });
+              return;
+            }
+            await frame
+              .locator('[data-daemon-settings-tabs="desktop"]')
+              .getByRole('tab', { name: new RegExp(`^${label}`) })
+              .click();
+            // The rail's rows carry `transition-colors`, so a capture taken the
+            // instant a panel opens catches the row it left mid-fade and reads as
+            // two selected rows. Let the 150ms colour transition land first.
+            await page.waitForTimeout(200);
+          };
+
           if (viewport.name === 'mobile') {
             await settingsPage.locator('[data-daemon-subtab-trigger]').click();
             const daemonPicker = page.getByRole('dialog', { name: 'Choose a daemon' });
@@ -596,20 +629,56 @@ try {
             await daemonPicker.waitFor({ state: 'hidden' });
           }
 
-          const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
           const wardenFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
           await wardenFrame.scrollIntoViewIfNeeded();
+
+          // The fixture is only evidence about the real frame if it carries the
+          // panels the composition root supplies. It once carried six of the
+          // production eight, so the row that overflowed a desktop could not be
+          // seen here at all. Count the rail's rows, which exist in the document
+          // at both widths, rather than the sheet's, which are rendered only
+          // once that sheet has been opened.
+          const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
+          if (daemonPanels !== 8)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 8`);
+
+          if (viewport.name === 'mobile') {
+            // The level-three picker: the resting trigger that names the open
+            // panel, and the shared sheet it opens. Both are review states, and
+            // the sheet is a viewport shot because BottomSheet is fixed to the
+            // viewport rather than to the frame that opened it.
+            const panelPickerDismissedTarget = join(outDir, 'settings-daemon-panel-picker-dismissed-mobile.png');
+            await page.screenshot({ path: panelPickerDismissedTarget });
+            process.stdout.write(`📸 Settings daemon panel picker dismissed -> ${panelPickerDismissedTarget}\n`);
+
+            await wardenFrame.locator('[data-daemon-panel-trigger]').click();
+            const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
+            await panelPicker.waitFor({ state: 'visible' });
+            const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
+            if (openPanelChoices !== 8)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 8`);
+            const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
+            await page.screenshot({ path: panelPickerOpenTarget });
+            process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
+            await page.keyboard.press('Escape');
+            await panelPicker.waitFor({ state: 'hidden' });
+          }
+
+          const wardenFrameTarget = join(outDir, `settings-daemon-warden-${viewport.name}.png`);
           await page.screenshot({ path: wardenFrameTarget });
           process.stdout.write(`📸 Settings daemon Warden ${viewport.name} -> ${wardenFrameTarget}\n`);
 
+          // Every panel the daemon owns, in the order the frame lists them.
           for (const [label, slug, ready] of [
             ['Secrets', 'secrets', '[aria-label="Secrets unavailable"], [aria-label="Loading secrets"]'],
             ['Environment', 'environment', '#daemon-settings-tab-environment'],
+            ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+            ['Fleet', 'fleet', '[data-fleet-configuration]'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {
-            await wardenFrame.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
+            await selectDaemonPanel(wardenFrame, label);
             await wardenFrame.locator(ready).first().waitFor({ state: 'visible' });
             const target = join(outDir, `settings-daemon-${slug}-${viewport.name}.png`);
             await page.screenshot({ path: target });
@@ -628,7 +697,7 @@ try {
 
           await selectDaemon('Studio workstation');
           const currentFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
-          await currentFrame.getByRole('tab', { name: /^Host checks/ }).click();
+          await selectDaemonPanel(currentFrame, 'Host checks');
           const currentDaemon = currentFrame.locator('[data-daemon-host-checks="harness-daemon"]');
           await currentDaemon.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
           await currentDaemon.getByText('Manage daemon', { exact: true }).click();
@@ -654,10 +723,9 @@ try {
             await settingsPage.getByRole('button', { name: /^Daemons/ }).click();
           }
           await settingsPage.locator('[data-settings-section="daemons"]').waitFor({ state: 'visible' });
-          await settingsPage
-            .locator('[data-daemon-settings-frame="harness-daemon"]')
-            .getByRole('tab', { name: /^Host checks/ })
-            .click();
+          const oneDaemonFrame = settingsPage.locator('[data-daemon-settings-frame="harness-daemon"]');
+          await oneDaemonFrame.scrollIntoViewIfNeeded();
+          await selectDaemonPanel(oneDaemonFrame, 'Host checks');
           await settingsPage.locator('[data-daemon-reachability="reachable"]').waitFor({ state: 'visible' });
           const oneDaemonTabs = await settingsPage.locator('[data-daemon-subtab]').count();
           if (oneDaemonTabs !== 1)

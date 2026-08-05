@@ -12,6 +12,8 @@ import type {
   AnalyticsResponse,
   AttentionSnapshot,
   BrowserStatus,
+  CgroupConfigPatch,
+  CgroupConfigView,
   DoctorReport,
   LearningStatus,
   PinSnapshot,
@@ -95,7 +97,7 @@ import {
   type FleetLayerDraft,
 } from '../src/features/fleet/fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster } from '../src/features/fleet/fleet-change-review.tsx';
-import { FleetConfigurationSurface } from '../src/features/fleet/fleet-configuration-surface.tsx';
+import { FleetConfigurationSurface, fleetSettingsTab } from '../src/features/fleet/fleet-configuration-surface.tsx';
 import type { FleetReadState } from '../src/features/fleet/fleet-model.ts';
 import { FleetSurface } from '../src/features/fleet/fleet-surface.tsx';
 import { type RemoteLoginStep, RemoteLoginSurface } from '../src/features/fleet/remote-login-surface.tsx';
@@ -118,6 +120,8 @@ import { PinsTrigger } from '../src/features/pins/pins-trigger.tsx';
 import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
 import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { SessionSearchControl, SessionSearchProvider } from '../src/features/session-search/session-search.tsx';
+import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
+import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
 import { DictationSettings } from '../src/features/settings/dictation-settings.tsx';
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
@@ -778,6 +782,116 @@ function DictationFlowHarness({
 }
 
 /**
+ * The host this fixture's resource limits are computed against.
+ *
+ * `effective` is the pair of cgroup v2 values a daemon would actually write, so
+ * a harness that echoed the same strings back after an apply would show a cap
+ * nobody asked for. These are recomputed from the percentages the card sent
+ * against this one fixed host, which is what makes the Apply button reviewable.
+ */
+const HARNESS_CGROUP_HOST = { cpus: 8, memoryBytes: 34_359_738_368 } as const;
+
+const harnessCgroupQuota = (cpuPercent: number, memoryPercent: number) => ({
+  cpuQuota: `${HARNESS_CGROUP_HOST.cpus * cpuPercent * 1_000} 100000`,
+  memoryMax: String(Math.round((HARNESS_CGROUP_HOST.memoryBytes * memoryPercent) / 100)),
+});
+
+const harnessCgroupView = (config: CgroupConfigView['config']): CgroupConfigView => ({
+  config,
+  // This fixture host is Linux with cgroup v2, so the controls it renders are
+  // controls that would do something. The unsupported presentation is a real
+  // state, but it belongs to a platform this fixture is not pretending to be.
+  supported: true,
+  fleetSlice: 'fy.slice',
+  effective: {
+    cpus: HARNESS_CGROUP_HOST.cpus,
+    memoryBytes: HARNESS_CGROUP_HOST.memoryBytes,
+    fleet: harnessCgroupQuota(config.fleet.cpuPercent, config.fleet.memoryPercent),
+    perAgent: harnessCgroupQuota(config.perAgent.cpuPercent, config.perAgent.memoryPercent),
+  },
+  // Nothing is running under this fixture's slice, so there is no session whose
+  // restart a change would wait for and no half-applied host to report.
+  restartRequiredSessions: [],
+  warnings: [],
+});
+
+const HARNESS_CGROUP_CONFIG: CgroupConfigView['config'] = {
+  enabled: true,
+  fleet: { cpuPercent: 80, memoryPercent: 75 },
+  perAgent: { cpuPercent: 25, memoryPercent: 25 },
+};
+
+/**
+ * The in-memory cgroup daemon. State lives per client, so every capture starts
+ * from the declared configuration above rather than from whatever an earlier
+ * capture typed, and the patch is merged exactly as the partial protocol shape
+ * arrives.
+ */
+const harnessCgroupClient = async (connection: DaemonConnection) => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let config = HARNESS_CGROUP_CONFIG;
+  return {
+    cgroupConfig: async () => harnessCgroupView(config),
+    updateCgroupConfig: async (patch: CgroupConfigPatch) => {
+      config = {
+        enabled: patch.enabled ?? config.enabled,
+        fleet: { ...config.fleet, ...patch.fleet },
+        perAgent: { ...config.perAgent, ...patch.perAgent },
+      };
+      return harnessCgroupView(config);
+    },
+  };
+};
+
+/**
+ * The three panels the composition root supplies, in the order it supplies them.
+ *
+ * The fixture renders the production EIGHT — Warden, Secrets, Environment,
+ * Resource limits, Doctor, Fleet, Carrier, Host checks — because a fixture with
+ * fewer cannot show what eight of them do to the frame that lists them. Each one
+ * is the real surface behind a client that answers from memory: no leaf is faked
+ * and nothing here reaches the network, which the screenshot driver enforces by
+ * aborting every request that leaves the loopback origin.
+ *
+ * Declared once at module scope so the definitions (and therefore the `Surface`
+ * component identities) are stable across renders, instead of remounting every
+ * panel whenever this page's state changes.
+ */
+const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
+  {
+    id: 'resource-limits',
+    label: 'Resource limits',
+    description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+    // Wrapped, unlike production, only to inject the in-memory client: the
+    // default client would reach the daemon this fixture does not have.
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <CgroupConfigSurface connection={connection} createClient={harnessCgroupClient} />
+    ),
+  },
+  {
+    id: 'doctor',
+    label: 'Doctor',
+    description: 'Programs this daemon host needs, and what each absence breaks.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <DoctorSettings
+        connection={connection}
+        read={async target => {
+          if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+          return HARNESS_DOCTOR;
+        }}
+      />
+    ),
+  },
+  // The real definition the composition root mounts, given the same stub daemon
+  // the fleet cockpit frames use: one published fleet, staging allowed, applying
+  // only with approval.
+  fleetSettingsTab(async connection => {
+    if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+    return fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS);
+  }),
+];
+
+/**
  * The settings fixture is also mounted on a page of its own by
  * `?settings-harness=1`. That gives the screenshot driver the exact 390×844 and
  * 1440×900 responsive canvas instead of measuring a route-sized component
@@ -830,22 +944,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         return WARDEN;
       }}
       createWardenClient={HARNESS_WARDEN_CLIENT}
-      daemonSettingsTabs={[
-        {
-          id: 'doctor',
-          label: 'Doctor',
-          description: 'Programs this daemon host needs, and what each absence breaks.',
-          Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-            <DoctorSettings
-              connection={connection}
-              read={async target => {
-                if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-                return HARNESS_DOCTOR;
-              }}
-            />
-          ),
-        },
-      ]}
+      daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
         setConnections(current =>
