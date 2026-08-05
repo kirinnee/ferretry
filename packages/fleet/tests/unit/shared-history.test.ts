@@ -546,7 +546,8 @@ describe('SharedHistoryMigration', () => {
   it('should roll every completed rename back when a later link cannot be created', async () => {
     // Arrange
     const { files, subject } = seededMigration();
-    files.failures.set(`createSymbolicLink:${HOME_B}/projects`, new Error('link refused'));
+    // Fail after the prompt-history merge so its same-inode rewrite must be undone too.
+    files.failures.set(`createSymbolicLink:${HOME_B}/history.jsonl`, new Error('link refused'));
 
     // Act
     const promise = subject.materialize(request());

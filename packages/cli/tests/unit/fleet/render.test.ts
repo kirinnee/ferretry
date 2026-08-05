@@ -136,6 +136,63 @@ describe('apply plan rendering', () => {
     );
   });
 
+  it('should describe every history action and both Codex ownership transitions', () => {
+    // Arrange
+    const detailed = plan({
+      operations: [
+        {
+          kind: 'codex-sqlite-ownership',
+          path: '/homes/codex/config.toml',
+          markerPath: '/homes/codex/.ferretry-sqlite-home.json',
+          sqliteHome: '/state/fleet/shared/codex/sqlite',
+          enabled: true,
+        },
+        {
+          kind: 'codex-sqlite-ownership',
+          path: '/homes/old/config.toml',
+          markerPath: '/homes/old/.ferretry-sqlite-home.json',
+          sqliteHome: '/state/fleet/shared/codex/sqlite',
+          enabled: false,
+        },
+      ],
+      sharedHistory: [
+        {
+          kind: 'codex',
+          pool: '/state/fleet/shared/codex',
+          migrated: 2,
+          conflicts: 0,
+          links: 2,
+          changes: [
+            { kind: 'create-pooled-entry', path: '/pool/sessions', entryType: 'directory' },
+            { kind: 'move', source: '/home/sessions/a', destination: '/pool/sessions/a' },
+            {
+              kind: 'merge-jsonl',
+              source: '/home/history.jsonl',
+              destination: '/pool/history.jsonl',
+              sourcePreservedAt: '/pool/.migration-conflicts/a/history.jsonl',
+            },
+            { kind: 'link', path: '/home/sessions', target: '/pool/sessions' },
+            { kind: 'already-shared', path: '/other/sessions', target: '/pool/sessions' },
+          ],
+        },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(detailed);
+
+    // Assert
+    should(rendered).containEql('own sqlite_home=/state/fleet/shared/codex/sqlite');
+    should(rendered).containEql("restore/remove only Ferretry's owned sqlite_home");
+    should(rendered).containEql('create directory /pool/sessions');
+    should(rendered).containEql('rename /home/sessions/a → /pool/sessions/a');
+    should(rendered).containEql(
+      'merge /home/history.jsonl → /pool/history.jsonl; preserve source at /pool/.migration-conflicts/a/history.jsonl',
+    );
+    should(rendered).containEql('link /home/sessions → /pool/sessions');
+    should(rendered).containEql('keep shared link /other/sessions → /pool/sessions');
+  });
+
   it('should report what an apply actually did', () => {
     // Act
     const rendered = renderApplyResult(applyResult());
@@ -143,6 +200,29 @@ describe('apply plan rendering', () => {
     // Assert
     should(rendered).containEql('applied 1 account in 2 operations');
     should(rendered).not.containEql('pruned');
+  });
+
+  it('should report each harness pool an apply migrated', () => {
+    // Act
+    const rendered = renderApplyResult(
+      applyResult({
+        sharedHistory: [
+          {
+            kind: 'claude',
+            pool: '/state/fleet/shared/claude',
+            migrated: 3,
+            conflicts: 1,
+            links: 4,
+            changes: [],
+          },
+        ],
+      }),
+    );
+
+    // Assert
+    should(rendered).containEql(
+      'shared claude: 3 migrated entries, 1 collisions preserved, 4 links → /state/fleet/shared/claude',
+    );
   });
 
   it('should name every wrapper that was swept away', () => {
