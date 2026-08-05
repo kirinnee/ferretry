@@ -166,10 +166,12 @@ import { type Quota, QuotaReadout } from '../src/shell/quota-readout.tsx';
 import { RcBadge } from '../src/shell/rc-badge.tsx';
 import { SessionRowMenu } from '../src/shell/session-row-menu.tsx';
 import { SheetTabs } from '../src/shell/sheet-tabs.tsx';
+import { SidePaneWorkspace } from '../src/shell/side-pane.tsx';
 import { SidePaneResizeHandle } from '../src/shell/side-pane-resize-handle.tsx';
 import { SidePaneSearch } from '../src/shell/side-pane-search.tsx';
 import {
   getSidePaneTabDefinitions,
+  openSidePaneBrowserTab,
   openSidePaneFileTab,
   openSidePaneTab,
   readSidePaneTabsState,
@@ -1858,8 +1860,10 @@ const HARNESS_UNIFIED_BROWSER_DEPENDENCIES: UnifiedBrowserDependencies = {
  */
 const UNIFIED_PREVIEW_SCOPE = daemonSessionScope(daemon, 'harness-unified-preview');
 const UNIFIED_REMOTE_SCOPE = daemonSessionScope(daemon, 'harness-unified-remote');
+const FULL_VIEWPORT_BROWSER_SCOPE = daemonSessionScope(daemon, 'harness-browser-full-viewport');
 /** Seeded, not clicked: the real-engine card renders that engine on first paint. */
 rememberBrowserEngine(UNIFIED_REMOTE_SCOPE, 'remote');
+rememberBrowserEngine(FULL_VIEWPORT_BROWSER_SCOPE, 'remote');
 
 /** Deterministic device controls: never a real device's stored view state. */
 const memoryControlsStorage = (): ControlsStorage => {
@@ -4382,6 +4386,49 @@ function SessionWorkspaceHarness() {
   );
 }
 
+/**
+ * A full route, not a gallery card: the browser must be able to cover the app
+ * viewport, so this harness gives the real remote viewer the same standalone
+ * screen the production workspace receives. It deliberately opens a browser
+ * instance from the side-pane model rather than constructing a second layout.
+ */
+function BrowserFullViewportHarness() {
+  useAppViewport();
+  const presentation = useLayoutMode() === 'drawer' ? 'sheet' : 'pane';
+  useEffect(() => {
+    openSidePaneBrowserTab(FULL_VIEWPORT_BROWSER_SCOPE, null, { forceNew: true });
+  }, []);
+  return (
+    <div className="kt-shell flex flex-col overflow-hidden" id="harness-browser-full-viewport-page">
+      <SidePaneWorkspace
+        active
+        presentation={presentation}
+        scope={FULL_VIEWPORT_BROWSER_SCOPE}
+        renderSurface={({ isActive, onClose, presentation: surfacePresentation, tab, titleId }) =>
+          tab.instance?.kind === 'browser' ? (
+            <UnifiedBrowserSurface
+              daemon={daemon}
+              dependencies={HARNESS_UNIFIED_BROWSER_DEPENDENCIES}
+              isActive={isActive}
+              onClose={onClose}
+              presentation={surfacePresentation}
+              scope={FULL_VIEWPORT_BROWSER_SCOPE}
+              streamTicket="harness-ticket"
+              titleId={titleId}
+            />
+          ) : (
+            <p className="m-3 text-ui text-muted">This harness opens only the real browser instance.</p>
+          )
+        }
+      >
+        <main className="flex min-h-0 flex-1 items-center justify-center bg-surface-2 p-panel text-ui text-muted">
+          Session conversation remains behind the browser until it expands.
+        </main>
+      </SidePaneWorkspace>
+    </div>
+  );
+}
+
 /** Hash fragments that replace the whole gallery with one setup screen. */
 const ONBOARDING_FRAGMENTS: Readonly<Record<string, HarnessOnboardingScreen>> = {
   '#onboarding-install': 'install',
@@ -4398,6 +4445,8 @@ if (host) {
         <StandaloneSettingsPageHarness />
       ) : window.location.hash === '#session-workspace' ? (
         <SessionWorkspaceHarness />
+      ) : window.location.hash === '#browser-full-viewport' ? (
+        <BrowserFullViewportHarness />
       ) : screen === undefined ? (
         <Shell />
       ) : (

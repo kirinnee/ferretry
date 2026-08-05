@@ -14,6 +14,7 @@ import {
   openSidePaneTab,
   readSidePaneTabsState,
   resetSidePaneTabsStates,
+  setSidePaneFullViewport,
 } from '../../src/shell/side-pane-tab-model.ts';
 import { interact, mount, pressKey } from '../support/dom.ts';
 import { render, run } from '../support/react.ts';
@@ -311,5 +312,35 @@ describe('SidePaneWorkspace', () => {
     expect(view.container.querySelector('aside')?.getAttribute('aria-hidden')).toBe('true');
     expect(view.container.querySelector(`[data-tab="${browserId}"] [data-active="false"]`)).not.toBeNull();
     await view.unmount();
+  });
+
+  it('lets an active browser replace the viewport, with a visible phone-safe exit and Escape', async () => {
+    openSidePaneBrowserTab(scopeA, null, { forceNew: true });
+    const view = await mount(workspace(scopeA, 'sheet'));
+
+    await interact(() =>
+      (view.container.querySelector('[aria-label="Expand browser to fill the viewport"]') as HTMLButtonElement).click(),
+    );
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(true);
+    expect(view.container.querySelector('[data-bottom-sheet]')).toBeNull();
+    expect(view.container.querySelector('[aria-label="Exit full-screen browser"]')).not.toBeNull();
+    expect(view.container.querySelector('[role="tablist"]')).toBeNull();
+    expect(view.container.querySelector('aside')?.parentElement?.className).toContain('fixed');
+
+    await interact(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(false);
+    expect(view.container.querySelector('[data-bottom-sheet]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('scopes full viewport state to the daemon and refuses non-browser tabs', () => {
+    openSidePaneTab(scopeA, 'files');
+    setSidePaneFullViewport(scopeA, true);
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(false);
+
+    openSidePaneBrowserTab(scopeA, null, { forceNew: true });
+    setSidePaneFullViewport(scopeA, true);
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(true);
+    expect(readSidePaneTabsState(scopeB).fullViewport).toBe(false);
   });
 });

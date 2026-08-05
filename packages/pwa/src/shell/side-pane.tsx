@@ -12,6 +12,7 @@
  * shared BottomSheet with a tab switcher -- never a horizontal tab strip.
  */
 
+import { Maximize2, Minimize2 } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -35,6 +36,7 @@ import {
   SidePanePreferenceStore,
 } from '../lib/side-pane-preferences.ts';
 import { BottomSheet } from './bottom-sheet.tsx';
+import { Button } from './primitives.tsx';
 import { SidePaneResizeHandle } from './side-pane-resize-handle.tsx';
 import {
   activateSidePaneTab,
@@ -49,6 +51,7 @@ import {
   type SidePaneTabDefinition,
   type SidePaneTabId,
   type SidePaneTabPresentation,
+  setSidePaneFullViewport,
   sortSidePaneTabs,
   subscribeSidePaneTabRegistry,
   subscribeSidePaneTabsState,
@@ -69,6 +72,8 @@ export function SidePaneShell({
   onWidthPreview = IGNORE_RESIZE,
   onWidthCommit = IGNORE_RESIZE,
   hidden = false,
+  fullViewport = false,
+  onExitFullViewport,
   children,
 }: {
   readonly id: string;
@@ -79,16 +84,23 @@ export function SidePaneShell({
   readonly onWidthCommit?: (width: number) => void;
   /** Retained bodies stay mounted but are removed from layout, paint and tabs. */
   readonly hidden?: boolean;
+  /** Browser-only mode: this shell replaces the app viewport instead of a pane. */
+  readonly fullViewport?: boolean;
+  readonly onExitFullViewport?: () => void;
   readonly children: ReactNode;
 }) {
   const preferredWidth = clampSidePaneWidth(width);
   return (
     <div
       className={
-        hidden ? 'pointer-events-none invisible absolute w-0 overflow-hidden' : 'relative mb-2 min-h-0 shrink-0'
+        hidden
+          ? 'pointer-events-none invisible absolute w-0 overflow-hidden'
+          : fullViewport
+            ? 'fixed inset-0 z-[80] flex h-dvh w-screen min-h-0 flex-col bg-surface'
+            : 'relative mb-2 min-h-0 shrink-0'
       }
       style={
-        hidden
+        hidden || fullViewport
           ? undefined
           : {
               width: `${preferredWidth}px`,
@@ -97,7 +109,9 @@ export function SidePaneShell({
             }
       }
     >
-      {!hidden && <SidePaneResizeHandle width={preferredWidth} onPreview={onWidthPreview} onCommit={onWidthCommit} />}
+      {!hidden && !fullViewport && (
+        <SidePaneResizeHandle width={preferredWidth} onPreview={onWidthPreview} onCommit={onWidthCommit} />
+      )}
       <aside
         id={id}
         aria-labelledby={hidden ? undefined : titleId}
@@ -105,10 +119,33 @@ export function SidePaneShell({
         onKeyDown={event => {
           if (event.key !== 'Escape') return;
           event.stopPropagation();
-          onClose();
+          if (fullViewport) onExitFullViewport?.();
+          else onClose();
         }}
-        className="flex h-full min-h-0 w-full flex-col overflow-hidden rounded-panel border border-border bg-surface shadow-panel"
+        className={
+          fullViewport
+            ? 'flex h-full min-h-0 w-full flex-col overflow-hidden bg-surface'
+            : 'flex h-full min-h-0 w-full flex-col overflow-hidden rounded-panel border border-border bg-surface shadow-panel'
+        }
       >
+        {fullViewport && (
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-soft px-3 py-2 pt-[max(env(safe-area-inset-top),0.5rem)]">
+            <span className="min-w-0 truncate text-ui font-medium text-fg">Browser full screen</span>
+            <Button
+              autoFocus
+              type="button"
+              variant="outline"
+              onClick={onExitFullViewport}
+              className="min-h-[44px] shrink-0 justify-center gap-xs"
+              aria-keyshortcuts="Escape"
+              aria-label="Exit full-screen browser"
+              title="Exit full screen (Esc)"
+            >
+              <Minimize2 size={16} aria-hidden="true" />
+              Exit
+            </Button>
+          </header>
+        )}
         {children}
       </aside>
     </div>
@@ -122,6 +159,10 @@ export interface SidePaneSurfaceProps {
   readonly titleId: string;
   readonly onClose: () => void;
   readonly isActive: boolean;
+  /** True only while this browser instance owns the application viewport. */
+  readonly fullViewport: boolean;
+  readonly onEnterFullViewport: () => void;
+  readonly onExitFullViewport: () => void;
 }
 
 /** A narrow trigger contract for navigation chrome beside the workspace. */
@@ -133,6 +174,10 @@ export interface SidePaneHost {
   readonly close: () => void;
   /** The + picker path: a fresh browser page, or the owning file/terminal surface. */
   readonly openNewInstance: (kind: SidePaneInstanceKind) => void;
+  /** The active browser's full-viewport state and controls. */
+  readonly fullViewport: boolean;
+  readonly enterFullViewport: () => void;
+  readonly exitFullViewport: () => void;
 }
 
 const SidePaneContext = createContext<SidePaneHost | null>(null);
@@ -243,6 +288,25 @@ export function SidePaneWorkspace({
   const lastTabRef = useRef<SidePaneTabDefinition | null>(null);
   const resolvedActiveDef = state.active ? resolveSidePaneTab(scope, state.active) : undefined;
   const activeDef = resolvedActiveDef && shouldIncludeTab(resolvedActiveDef) ? resolvedActiveDef : undefined;
+  const browserActive = activeDef?.instance?.kind === 'browser';
+  const fullViewport = browserActive && state.fullViewport === true;
+  const enterFullViewport = useCallback(() => {
+    if (browserActive) setSidePaneFullViewport(scope, true);
+  }, [browserActive, scope]);
+  const exitFullViewport = useCallback(() => setSidePaneFullViewport(scope, false), [scope]);
+  useEffect(() => {
+    if (!fullViewport) return;
+    const exitOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      // Capture before the remote browser canvas can send Escape into the page:
+      // in full view it is the explicit way back to Ferretry.
+      event.preventDefault();
+      event.stopPropagation();
+      exitFullViewport();
+    };
+    document.addEventListener('keydown', exitOnEscape, true);
+    return () => document.removeEventListener('keydown', exitOnEscape, true);
+  }, [exitFullViewport, fullViewport]);
   useEffect(() => {
     // A deep link can reopen a retained instance before this host mounts. If
     // this workspace cannot render that definition, clear only its active
@@ -270,7 +334,17 @@ export function SidePaneWorkspace({
       {...(compact ? {} : { role: 'tabpanel', 'aria-labelledby': sidePaneTabId(paneId, tab.id) })}
       className="flex min-h-0 flex-1 flex-col"
     >
-      {renderSurface({ scope, tab, presentation, titleId, onClose: close, isActive: active && isCurrent })}
+      {renderSurface({
+        scope,
+        tab,
+        presentation,
+        titleId,
+        onClose: close,
+        isActive: active && isCurrent,
+        fullViewport,
+        onEnterFullViewport: enterFullViewport,
+        onExitFullViewport: exitFullViewport,
+      })}
     </div>
   );
   const retainedBodies = !compact
@@ -293,13 +367,22 @@ export function SidePaneWorkspace({
     : [];
   const ordinaryBody =
     displayDef && !(displayDef.retain && !compact) ? body(displayDef, state.active === displayDef.id) : undefined;
-  const host: SidePaneHost = { scope, presentation, open, close, openNewInstance };
+  const host: SidePaneHost = {
+    scope,
+    presentation,
+    open,
+    close,
+    openNewInstance,
+    fullViewport,
+    enterFullViewport,
+    exitFullViewport,
+  };
 
   return (
     <SidePaneContext.Provider value={host}>
       <div className="flex h-full min-h-0 min-w-0 w-full gap-2">
         <div className="min-h-0 min-w-0 flex-1">{children}</div>
-        {paneVisible && (
+        {(paneVisible || fullViewport) && (
           <SidePaneShell
             id={paneId}
             titleId={titleId}
@@ -308,8 +391,10 @@ export function SidePaneWorkspace({
             onWidthPreview={setPreviewWidth}
             onWidthCommit={commitWidth}
             hidden={!surfaceOpen}
+            fullViewport={fullViewport}
+            onExitFullViewport={exitFullViewport}
           >
-            {state.active && (
+            {state.active && !fullViewport && (
               <SidePaneTabs
                 paneId={paneId}
                 presentation="pane"
@@ -322,6 +407,21 @@ export function SidePaneWorkspace({
                 onNewInstance={openNewInstance}
               />
             )}
+            {browserActive && !fullViewport && (
+              <div className="flex shrink-0 justify-end border-b border-border-soft px-2 py-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={enterFullViewport}
+                  className="min-h-[44px] justify-center gap-xs px-2"
+                  aria-label="Expand browser to fill the viewport"
+                  title="Expand browser to full screen"
+                >
+                  <Maximize2 size={16} aria-hidden="true" />
+                  Full screen
+                </Button>
+              </div>
+            )}
             {ordinaryBody}
             {retainedBodies}
           </SidePaneShell>
@@ -329,7 +429,7 @@ export function SidePaneWorkspace({
         <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
           {state.active ? `Opened ${activeDef?.instance?.label ?? activeDef?.label ?? state.active}` : ''}
         </div>
-        {compact && displayDef && (
+        {compact && displayDef && !fullViewport && (
           <BottomSheet
             id={paneId}
             open={surfaceOpen}
@@ -351,6 +451,21 @@ export function SidePaneWorkspace({
               onRemove={id => removeSidePaneTab(scope, id)}
               onNewInstance={openNewInstance}
             />
+            {browserActive && (
+              <div className="flex shrink-0 justify-end border-b border-border-soft px-2 py-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={enterFullViewport}
+                  className="min-h-[44px] justify-center gap-xs px-2"
+                  aria-label="Expand browser to fill the viewport"
+                  title="Expand browser to full screen"
+                >
+                  <Maximize2 size={16} aria-hidden="true" />
+                  Full screen
+                </Button>
+              </div>
+            )}
             {ordinaryBody}
           </BottomSheet>
         )}

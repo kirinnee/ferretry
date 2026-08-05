@@ -867,6 +867,41 @@ try {
               `${workspacePaneTarget}\n`,
           );
 
+          // The real remote browser gets this route of its own so this is the
+          // production side-pane layout taking the whole screen, not a gallery
+          // card sized to look like one. The visible Exit control is the phone
+          // escape hatch; Escape then proves the keyboard route returns to the
+          // exact pane/sheet it started from.
+          const fullBrowserTarget = join(outDir, `${viewport.name}-browser-full-viewport.png`);
+          await page.goto(`${server.url}#browser-full-viewport`);
+          await page.reload();
+          await page.locator('#harness-browser-full-viewport-page').waitFor({ state: 'visible' });
+          await page.getByLabel('Expand browser to fill the viewport').click();
+          const exitBrowser = page.getByLabel('Exit full-screen browser');
+          await exitBrowser.waitFor({ state: 'visible' });
+          const fullBrowserGeometry = await exitBrowser.evaluate(button => {
+            const frame = button.closest('aside')?.parentElement;
+            const box = frame?.getBoundingClientRect();
+            return {
+              fixed: frame === null || frame === undefined ? false : getComputedStyle(frame).position === 'fixed',
+              width: box === undefined ? null : Math.round(box.width),
+              height: box === undefined ? null : Math.round(box.height),
+              viewportWidth: window.innerWidth,
+              viewportHeight: window.innerHeight,
+            };
+          });
+          if (
+            !fullBrowserGeometry.fixed ||
+            fullBrowserGeometry.width !== fullBrowserGeometry.viewportWidth ||
+            fullBrowserGeometry.height !== fullBrowserGeometry.viewportHeight
+          ) {
+            fail(`the full browser does not occupy the ${viewport.name} viewport`);
+          }
+          await page.screenshot({ path: fullBrowserTarget });
+          process.stdout.write(`📸 ${viewport.name} browser full viewport -> ${fullBrowserTarget}\n`);
+          await page.keyboard.press('Escape');
+          await page.getByLabel('Expand browser to fill the viewport').waitFor({ state: 'visible' });
+
           // The install stage on a page of its own, so the capture starts at
           // the real top of the screen rather than wherever the gallery's
           // scroller happened to clip it.
