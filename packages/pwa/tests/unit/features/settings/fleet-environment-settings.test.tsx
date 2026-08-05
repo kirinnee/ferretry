@@ -75,7 +75,7 @@ describe('FleetEnvironmentSettings', () => {
         'replace button',
       ).click(),
     );
-    expect(view.container.textContent).toContain('Target diff (3 changes)');
+    expect(view.container.textContent).toContain('Target diff (4 changes)');
     expect(view.container.textContent).toContain('removed REMOVE: gone → —');
 
     await selectValue(must(selects[1], 'profile selector'), 'other');
