@@ -32,7 +32,6 @@ import {
   classifyCredential,
   type FleetCredentialStore,
   type FleetIdentityMember,
-  failureMessage,
 } from '../lib/identity.ts';
 import type { HarnessKind } from '../lib/manifest.ts';
 
@@ -66,22 +65,35 @@ const DEFAULT_KEYCHAIN_TIMEOUT_MS = 5_000;
  *
  * The bound matters more than it looks: a locked keychain leaves `security` waiting on a GUI prompt
  * nobody is going to answer, and an unbounded read there hangs the whole fleet command.
+ *
+ * The deadline **returns** rather than only signalling the child, because killing it is not enough to
+ * unblock the read. Anything the child spawned inherits the same stdout pipe, so the pipe can stay open
+ * after the child is gone and a read waiting on end-of-stream would wait forever — which is exactly the
+ * hang the bound exists to prevent. So the timeout races the read and wins: the result is a failure, and
+ * the store reads a failure as unreadable rather than as a home with no credential.
  */
 export class SpawnCredentialCommand implements CredentialCommand {
   async run(command: readonly [string, ...string[]], timeoutMs: number): Promise<CredentialCommandResult> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const spawned = Bun.spawn({ cmd: [...command], stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });
-      const timer = setTimeout(() => spawned.kill(), timeoutMs);
-      try {
-        const [stdout, code] = await Promise.all([new Response(spawned.stdout).text(), spawned.exited]);
-        return { code, stdout };
-      } finally {
-        clearTimeout(timer);
-      }
+      const collected = Promise.all([new Response(spawned.stdout).text(), spawned.exited]).then(([stdout, code]) => ({
+        code,
+        stdout,
+      }));
+      const expired = new Promise<CredentialCommandResult>(resolve => {
+        timer = setTimeout(() => {
+          spawned.kill('SIGKILL');
+          resolve({ code: COMMAND_FAILED, stdout: '' });
+        }, timeoutMs);
+      });
+      return await Promise.race([collected, expired]);
     } catch {
       // A binary this host does not have, or output that could not be collected. Both are "no
       // usable answer", which the store reads as unreadable rather than as an empty home.
       return { code: COMMAND_FAILED, stdout: '' };
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
@@ -104,16 +116,20 @@ export interface PlatformCredentialStoreDeps {
 /** The `acct` attribute in `security find-generic-password` attribute output. */
 const KEYCHAIN_ACCOUNT_PATTERN = /"acct"<blob>="([^"]*)"/;
 
-/** Read a file as credential material, keeping absence and unreadability apart. */
-async function readFileMaterial(path: string, label: string): Promise<CredentialMaterial> {
+/**
+ * Read a file as credential material, keeping absence and unreadability apart.
+ *
+ * A file that is not there — and a path whose parent is not a directory, which `exists` also reports
+ * as absent — is a home with no credential. A file that is there but cannot be read throws, and the
+ * throw is deliberately not caught here: {@link FleetIdentityService} is the single place that turns an
+ * exception into an `unreadable` reading, and catching it twice would mean two definitions of what
+ * "could not be read" means.
+ */
+async function readFileMaterial(path: string): Promise<CredentialMaterial> {
   const file = Bun.file(path);
-  try {
-    if (!(await file.exists())) return { outcome: 'absent' };
-    const blob = (await file.text()).trim();
-    return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
-  } catch (error) {
-    return { outcome: 'unreadable', reason: failureMessage(error, `${label} could not be read`) };
-  }
+  if (!(await file.exists())) return { outcome: 'absent' };
+  const blob = (await file.text()).trim();
+  return blob.length === 0 ? { outcome: 'absent' } : { outcome: 'found', blob };
 }
 
 /** Write credential material with an owner-only mode, on a fresh file and on an existing one alike. */
@@ -123,7 +139,7 @@ async function writeCredentialFile(path: string, blob: string): Promise<void> {
 }
 
 async function readJsonObject(path: string): Promise<Record<string, unknown> | undefined> {
-  const material = await readFileMaterial(path, 'the file');
+  const material = await readFileMaterial(path);
   if (material.outcome !== 'found') return undefined;
   try {
     const parsed = JSON.parse(material.blob) as unknown;
@@ -176,22 +192,19 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   }
 
   async #material(kind: HarnessKind, member: FleetIdentityMember): Promise<CredentialMaterial> {
-    if (kind === 'codex') return await readFileMaterial(codexPath(member.home), 'the Codex credential');
+    if (kind === 'codex') return await readFileMaterial(codexPath(member.home));
     if (this.deps.platform !== 'darwin') {
-      return await readFileMaterial(claudeFilePath(member.home), 'the Claude credential');
+      return await readFileMaterial(claudeFilePath(member.home));
     }
     return await this.#readKeychain(member.home);
   }
 
   async #write(kind: HarnessKind, target: FleetIdentityMember, blob: string): Promise<CredentialCloneOutcome> {
     if (kind === 'claude' && this.deps.platform === 'darwin') return await this.#writeKeychain(target.home, blob);
-    const path = kind === 'codex' ? codexPath(target.home) : claudeFilePath(target.home);
-    try {
-      await writeCredentialFile(path, blob);
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, reason: failureMessage(error, 'the credential file could not be written') };
-    }
+    // A write that fails throws: the service turns that into a refusal with the underlying reason,
+    // and duplicating the conversion here would mean two definitions of a failed copy.
+    await writeCredentialFile(kind === 'codex' ? codexPath(target.home) : claudeFilePath(target.home), blob);
+    return { ok: true };
   }
 
   async #readKeychain(home: string): Promise<CredentialMaterial> {
