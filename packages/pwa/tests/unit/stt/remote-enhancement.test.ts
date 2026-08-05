@@ -1,8 +1,12 @@
 import { describe, it } from 'bun:test';
-import { MAX_STT_DICTIONARY_ENTRIES, SttEnhancementRequestSchema } from '@ferretry/protocol';
+import {
+  MAX_STT_DICTIONARY_ENTRIES,
+  MAX_STT_USER_CONTEXT_CHARS,
+  SttEnhancementRequestSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { MAX_DICTIONARY_TERMS } from '../../../src/lib/stt/enhancement.ts';
+import { MAX_DICTIONARY_TERMS, MAX_USER_CONTEXT_CHARS } from '../../../src/lib/stt/enhancement.ts';
 import {
   MAX_REMOTE_ENHANCEMENT_TEXT_CHARS,
   REMOTE_ENHANCEMENT_TIMEOUT_MS,
@@ -121,6 +125,38 @@ describe('requestRemoteEnhancement', () => {
     should(body.dictionary[MAX_STT_DICTIONARY_ENTRIES - 1]?.term).equal(`term-${MAX_STT_DICTIONARY_ENTRIES - 1}`);
     // The proof that matters: the daemon parses what was sent with THIS schema.
     should(SttEnhancementRequestSchema.safeParse(body).success).be.true();
+  });
+
+  it('sends a context the settings field accepted as the first characters this wire takes, and succeeds', async () => {
+    const { calls, fetchImpl } = recorder(() => json({ text: 'run kteam now' }));
+    // The settings field stores up to MAX_USER_CONTEXT_CHARS because local
+    // correction reads all of it. Posting all of it would make the daemon refuse
+    // the WHOLE request, so a context the UI called valid would silently cost the
+    // reader every remote correction until they shortened it by hand.
+    should(MAX_USER_CONTEXT_CHARS).be.above(MAX_STT_USER_CONTEXT_CHARS);
+    const userContext = 'u'.repeat(MAX_USER_CONTEXT_CHARS);
+
+    const result = await requestRemoteEnhancement(alpha, ask({ fetchImpl, userContext }));
+
+    should(result.text).equal('run kteam now');
+    const body = JSON.parse((calls[0] as Call).init.body as string) as { userContext: string };
+    should(body.userContext).have.length(MAX_STT_USER_CONTEXT_CHARS);
+    // The proof that matters: the daemon parses what was sent with THIS schema.
+    should(SttEnhancementRequestSchema.safeParse(body).success).be.true();
+  });
+
+  it('sends a context at the wire bound untouched, and one character past it clamped', async () => {
+    for (const length of [MAX_STT_USER_CONTEXT_CHARS, MAX_STT_USER_CONTEXT_CHARS + 1]) {
+      const { calls, fetchImpl } = recorder(() => json({ text: 'ok' }));
+      const userContext = 'c'.repeat(length);
+
+      await requestRemoteEnhancement(alpha, ask({ fetchImpl, userContext }));
+
+      const body = JSON.parse((calls[0] as Call).init.body as string) as { userContext: string };
+      should(body.userContext).equal(userContext.slice(0, MAX_STT_USER_CONTEXT_CHARS));
+      should(body.userContext).have.length(MAX_STT_USER_CONTEXT_CHARS);
+      should(SttEnhancementRequestSchema.safeParse(body).success).be.true();
+    }
   });
 
   it('does not open a request for text there is nothing to enhance in', async () => {

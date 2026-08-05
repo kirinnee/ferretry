@@ -158,7 +158,8 @@ describe('the mounted browser-login window', () => {
 
   it('should tell a per-session browser caller what is missing instead of answering unknown_route', async () => {
     // `fy browser open` is a shipped command. A 404 is indistinguishable from version skew; a 501
-    // naming the absent worker program and viewer host is something an operator can act on.
+    // naming what is genuinely absent — the composed per-session runtime and viewer host, not the
+    // worker program or its transport — is something an operator can act on.
     // Arrange
     const dispatcher = dispatcherFor(new FakeBrowserLogin());
 
@@ -176,6 +177,7 @@ describe('the mounted browser-login window', () => {
     // Assert
     should(read.status).equal(501);
     should(acted.status).equal(501);
-    should(String(acted.body)).match(/no browser worker program/);
+    should(String(acted.body)).match(/nothing composes them into the per-session runtime and viewer host/);
+    should(String(acted.body)).not.match(/no browser worker program/);
   });
 });

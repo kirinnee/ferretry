@@ -17,7 +17,9 @@
  *      target browsers recognise offline.
  *   3. ENHANCEMENT IS SEPARATE. Local word correction stays in this browser;
  *      optional Groq correction legitimately sends recognised TEXT through the
- *      paired daemon that owns the live session and its credential.
+ *      paired daemon that owns the live session and its credential. Either
+ *      provider first READS that session's recent messages for vocabulary, so
+ *      the local copy discloses that request rather than promising silence.
  *
  * Everything else — the master switch, the push-to-talk picker, the enhancement
  * toggle and provider, the dictionary, the free-text context and its live
@@ -69,7 +71,18 @@ export const ENHANCEMENT_TOGGLE_EXPLANATION =
  * Rendered under the toggle so the section explains itself.
  */
 export const ENHANCEMENT_SOURCES_EXPLANATION =
-  'It knows a word three ways, tried in this order: your words below (which always win), your context, and words used in the recent conversation. On-device correction runs instantly in this browser — no AI model, nothing sent anywhere. When it is not sure, it changes nothing.';
+  'It knows a word three ways, tried in this order: your words below (which always win), your context, and words used in the recent conversation. On-device correction runs instantly in this browser — no AI model, and your transcript, your words and your context are never uploaded. When it is not sure, it changes nothing.';
+
+/**
+ * The third vocabulary source is not in this browser, and the earlier copy
+ * claimed "nothing sent anywhere" as if it were. Every enabled correction —
+ * on-device included — first asks the paired daemon that holds this session for
+ * its recent messages, so this says so where the claim used to be. Reading
+ * history is what the whole app already does; what is worth stating is the part
+ * that stays here, and that dictation is not in that request.
+ */
+export const LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE =
+  'One request does leave this browser first: to know the words of your recent conversation, Ferretry asks the paired daemon holding this session for its latest messages. It waits only a moment and corrects without them if the daemon is slow. Nothing you dictated is part of that request.';
 
 export const GROQ_ENHANCEMENT_EXPLANATION =
   'Groq runs only after dictation stops. It is instructed to preserve your wording while correcting recognition errors, spelling, capitalization and punctuation. The daemon holds the Groq API key and sends Groq the raw transcript, your dictionary and bounded context; the key is never stored in this browser. A timeout or provider error keeps your raw words and shows the real reason instead of silently falling back.';
@@ -216,6 +229,7 @@ export function DictationSettings({ settings, update, persisted, recognitionSupp
                   <>
                     <p className="text-meta leading-base text-muted">{ENHANCEMENT_EXPLANATION}</p>
                     <p className="text-meta leading-base text-muted">{ENHANCEMENT_SOURCES_EXPLANATION}</p>
+                    <p className="text-meta leading-base text-faint">{LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE}</p>
                   </>
                 )}
               </div>

@@ -96,6 +96,26 @@ describe('stt schemas', () => {
     ).be.false();
   });
 
+  it('should publish the user-context bound clients have to clamp to', () => {
+    // Exported for the same reason as the dictionary bound: a client UI may
+    // accept a longer context than this wire does, and sending all of it would
+    // cost the reader the whole correction instead of the tail of their prose.
+    should(stt.MAX_STT_USER_CONTEXT_CHARS).equal(2_000);
+
+    should(
+      stt.SttEnhancementRequestSchema.safeParse({
+        ...minimalEnhancementRequest,
+        userContext: 'u'.repeat(stt.MAX_STT_USER_CONTEXT_CHARS),
+      }).success,
+    ).be.true();
+    should(
+      stt.SttEnhancementRequestSchema.safeParse({
+        ...minimalEnhancementRequest,
+        userContext: 'u'.repeat(stt.MAX_STT_USER_CONTEXT_CHARS + 1),
+      }).success,
+    ).be.false();
+  });
+
   it('should accept minimal and fully populated enhancement requests within their bounds', () => {
     // Arrange
     const maxima = {
@@ -103,7 +123,7 @@ describe('stt schemas', () => {
       provider: 'groq',
       model: 'm'.repeat(128),
       context: Array.from({ length: 10 }, (_unused, index) => `turn-${index}`),
-      userContext: 'u'.repeat(2_000),
+      userContext: 'u'.repeat(stt.MAX_STT_USER_CONTEXT_CHARS),
       dictionary: Array.from({ length: stt.MAX_STT_DICTIONARY_ENTRIES }, (_unused, index) => ({
         term: `term-${index}`,
       })),
@@ -168,7 +188,7 @@ describe('stt schemas', () => {
       {
         name: 'user context above the maximum',
         schema: stt.SttEnhancementRequestSchema,
-        value: { ...minimalEnhancementRequest, userContext: 'u'.repeat(2_001) },
+        value: { ...minimalEnhancementRequest, userContext: 'u'.repeat(stt.MAX_STT_USER_CONTEXT_CHARS + 1) },
       },
       {
         name: 'too many dictionary entries',
