@@ -414,8 +414,18 @@ export function SettingsPage({
     <main
       data-settings-scroller
       data-density={density}
+      // `relative` is not layout here — it is what keeps this page's own
+      // scrolling INSIDE this element. Half the controls below are `sr-only`
+      // radios, and `sr-only` is `position: absolute`: an absolutely positioned
+      // box is clipped by an ancestor's overflow only along its CONTAINING BLOCK
+      // chain, so with a static scrollport they escape it and land in the fixed
+      // `.kt-shell` instead. The shell then has scrollable overflow it must
+      // never have, and focusing any one of them — tapping a theme family, a
+      // chat width, a notification toggle — makes the browser scroll THE SHELL
+      // to reveal it. The app slides up out of the visual viewport with bare
+      // surface below it, and nothing can scroll a `position: fixed` box back.
       className={cn(
-        'scroll-thin h-full min-h-0 w-full overflow-y-auto overscroll-contain px-panel pb-4 [touch-action:pan-y]',
+        'scroll-thin relative h-full min-h-0 w-full overflow-y-auto overscroll-contain px-panel pb-4 [touch-action:pan-y]',
         className,
       )}
     >

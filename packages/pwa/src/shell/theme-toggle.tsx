@@ -190,10 +190,17 @@ export function ThemeSettings({ theme, constrained = false, listRef }: ThemeSett
         reports 0 there even though sequential focus skips it, which would let
         focus escape the dialog.
       */}
+      {/*
+        `relative` on both groups is LOAD-BEARING, not decoration — see the note
+        on the family list below. An option's radio is `sr-only`, which is
+        `position: absolute`; without a positioned group its containing block is
+        the fixed `.kt-shell`, and focusing it scrolls the whole app out of the
+        visual viewport.
+      */}
       <div
         role="radiogroup"
         aria-label="Colour mode"
-        className="mb-2 flex gap-1 rounded-control border border-border bg-surface-2 p-1"
+        className="relative mb-2 flex gap-1 rounded-control border border-border bg-surface-2 p-1"
       >
         {MODE_OPTIONS.map(({ id, label, Icon, hint }) => {
           const checked = mode === id;
@@ -231,7 +238,29 @@ export function ThemeSettings({ theme, constrained = false, listRef }: ThemeSett
         role="radiogroup"
         aria-label="Theme family"
         onKeyDown={onListKeyDown}
-        className={cn('flex flex-col gap-1.5', constrained && 'max-h-[min(60vh,420px)] overflow-y-auto scroll-thin')}
+        // `relative` IS THE FIX FOR "THE APP IS CUT IN HALF AFTER A THEME
+        // CHANGE", and it has to stay whether or not the list is constrained.
+        //
+        // Each option's radio is `sr-only`, and `sr-only` is `position:
+        // absolute`. An absolutely positioned box is clipped by an ancestor's
+        // overflow only along its CONTAINING BLOCK chain — so with a static
+        // group these radios skip this scrollport entirely and their containing
+        // block becomes the nearest positioned ancestor, which is the fixed
+        // `.kt-shell`. That has two consequences, and the second is the bug:
+        // the shell acquires scrollable overflow it must never have, and when a
+        // label click focuses one of these radios the browser's scroll-into-view
+        // scrolls THE SHELL to reveal it. The whole app slides up out of the
+        // visual viewport, leaving bare surface below, and nothing scrolls it
+        // back — the shell is `position: fixed` and no reader gesture reaches it.
+        //
+        // Positioning the group makes it the containing block, so the radios are
+        // clipped here, the shell keeps zero overflow, and the reveal lands on
+        // this scrollport where it belongs. `position: relative` on a static
+        // block box moves nothing, so the visual contract is untouched.
+        className={cn(
+          'relative flex flex-col gap-1.5',
+          constrained && 'max-h-[min(60vh,420px)] overflow-y-auto scroll-thin',
+        )}
       >
         {families.map(option => {
           const checked = option.id === family;
