@@ -894,9 +894,16 @@ type MigrationProgressState = z.infer<typeof migrationProgressSchema>['state'];
 /**
  * Everything a person needs to finish or undo an interrupted migration, by hand or by tool.
  *
- * `appliedActions` is a lower bound and `uncertainAction` is the honest gap: the cursor is written
- * after an action completes, so a crash between the two leaves one action that may be whole, half
- * done, or not started. Nothing here is deleted or repaired automatically.
+ * Exactly one state describes the filesystem well enough to be reversed mechanically. `applying`
+ * means the run was still going forward in journal order, so the journal's prefix is what is on
+ * disk: `appliedActions` is a lower bound and `uncertainAction` is the honest gap, because the
+ * cursor is written after an action completes and a crash between the two leaves one action that may
+ * be whole, half done, or not started.
+ *
+ * Every other state has no faithful list to hand out, for a different reason each time, so all three
+ * action arrays are empty and `recovery` says what may be done instead. Read `recovery` first; the
+ * arrays are for the one case that has them. Nothing here is deleted or repaired automatically, and
+ * the journal file on disk always holds the full action list for a person to read.
  */
 export interface SharedHistoryRecoveryEvidence {
   readonly journalPath: string;
@@ -907,24 +914,32 @@ export interface SharedHistoryRecoveryEvidence {
   /**
    * What a recovery tool is allowed to do with this, ahead of any list below.
    *
+   * `undo-applied-actions` is the only mechanical path and belongs to `applying` alone.
+   *
    * `none` means the filesystem is settled — everything landed, or everything came back out — and
    * the only outstanding work is deleting the two records. Replaying anything against a settled
-   * migration is how a recovery tool destroys a pool, so this field, not a message, is what a
-   * consumer branches on.
+   * migration is how a recovery tool destroys a pool.
+   *
+   * `manual-inspection` means a rollback ran and partly failed. Some undos succeeded and some did
+   * not, and which is which is not derivable from the cursor, so no ordered list here can be true.
+   * Reversing the journal's prefix would undo an undo. A person compares the journal against the
+   * pool; `rollbackFailures` says where to start looking.
+   *
+   * This field, not a message, is what a consumer branches on.
    */
-  readonly recovery: 'undo-applied-actions' | 'none';
+  readonly recovery: 'undo-applied-actions' | 'manual-inspection' | 'none';
   /**
    * How far the cursor got before the run stopped. History, not current state: after a settled
-   * rollback these actions were applied and then reversed, so the number says how much work was
-   * undone rather than how much is on disk.
+   * rollback these actions were applied and then reversed, and after a partial one some of them
+   * were, so the number says how much work the run had done rather than how much is on disk.
    */
   readonly completedAtLeast: number;
   readonly totalActions: number;
   /**
    * The actions that are on disk right now and would have to be reversed, in order.
    *
-   * Empty whenever `recovery` is `none`, including after a settled rollback, so that iterating it
-   * can never undo something twice. The journal file still holds the full list for a person to read.
+   * Populated only when `recovery` is `undo-applied-actions`; empty in every other state, so that
+   * iterating it can never undo something twice or undo something that was never done.
    */
   readonly appliedActions: readonly SharedHistoryAction[];
   readonly uncertainAction: SharedHistoryAction | undefined;
@@ -932,14 +947,23 @@ export interface SharedHistoryRecoveryEvidence {
   readonly rollbackFailures: readonly string[];
 }
 
+/** Only a run that was still going forward leaves a list anyone can replay. */
+function recoveryMode(state: MigrationProgressState): SharedHistoryRecoveryEvidence['recovery'] {
+  if (state === 'applying') return 'undo-applied-actions';
+  if (state === 'rollback-incomplete') return 'manual-inspection';
+  return 'none';
+}
+
 /**
  * What to tell the operator, which depends entirely on how far the migration got.
  *
- * Two states describe a settled filesystem and must never invite an undo. `complete` is work that
- * all landed and a cleanup that did not, so undoing it would destroy a migrated pool. `rolled-back`
- * is work that all came back out, so undoing it would reverse actions that are already reversed —
- * a second undo of a rename is a rename in the wrong direction. Only a state that stopped somewhere
- * uncertain gets the reverse-replay instruction.
+ * Three of the four states must never invite a reverse replay. `complete` is work that all landed
+ * and a cleanup that did not, so undoing it would destroy a migrated pool. `rolled-back` is work
+ * that all came back out, so undoing it would reverse actions that are already reversed — a second
+ * undo of a rename is a rename in the wrong direction. `rollback-incomplete` is the worst of the
+ * three to get wrong: some undos ran and some did not, nothing on disk says which, and the journal
+ * prefix that would look like the answer is the list of actions the rollback was TRYING to reverse.
+ * Only `applying` gets the reverse-replay instruction.
  */
 function recoveryMessage(evidence: SharedHistoryRecoveryEvidence): string {
   if (evidence.state === 'complete') {
@@ -948,13 +972,14 @@ function recoveryMessage(evidence: SharedHistoryRecoveryEvidence): string {
   if (evidence.state === 'rolled-back') {
     return `a failed shared-history migration was fully reversed but left its journal behind: ${evidence.journalPath}; the ${evidence.completedAtLeast} action(s) it had applied were all undone, so undo NOTHING — delete ${evidence.journalPath} and ${evidence.progressPath} and the next apply will start over`;
   }
+  if (evidence.state === 'rollback-incomplete') {
+    return `a failed shared-history migration could not be fully reversed and needs a person: ${evidence.journalPath}; of the ${evidence.completedAtLeast} action(s) it had applied, some were undone and some were not, and nothing on disk records which — so do NOT replay the journal, it lists what the rollback was trying to reverse. Read ${evidence.journalPath} against ${evidence.pool}, starting from what failed: ${evidence.rollbackFailures.join('; ')}. Put the account homes right by hand, then delete ${evidence.journalPath} and ${evidence.progressPath}`;
+  }
   const uncertain =
     evidence.uncertainAction === undefined
       ? ''
       : `, action ${evidence.completedAtLeast + 1} (${evidence.uncertainAction.kind}) may be half applied`;
-  const failures =
-    evidence.rollbackFailures.length === 0 ? '' : `; rollback failures: ${evidence.rollbackFailures.join('; ')}`;
-  return `unfinished shared-history migration journal requires recovery before retrying: ${evidence.journalPath}; state ${evidence.state}, at least ${evidence.completedAtLeast} of ${evidence.totalActions} actions applied${uncertain}${failures}; undo the applied actions in reverse, then remove ${evidence.journalPath} and ${evidence.progressPath}`;
+  return `unfinished shared-history migration journal requires recovery before retrying: ${evidence.journalPath}; state ${evidence.state}, at least ${evidence.completedAtLeast} of ${evidence.totalActions} actions applied${uncertain}; undo the applied actions in reverse, then remove ${evidence.journalPath} and ${evidence.progressPath}`;
 }
 
 /** A previous migration left a journal behind. Fail closed and hand the operator the evidence. */
@@ -1231,24 +1256,25 @@ export class SharedHistoryMigration {
     );
     const state = progress?.state ?? 'applying';
     const completedAtLeast = Math.min(progress?.completed ?? 0, journal.actions.length);
-    // Settled means the filesystem is where it is going to stay: every action landed, or every
-    // action came back out. Either way there is nothing to replay, and one predicate drives all four
-    // fields so a consumer cannot find a list to iterate that the `recovery` field said was empty —
-    // undoing a committed migration and undoing a rollback are both destructive. `completedAtLeast`
-    // stays as history, and the journal file still holds the actions for a person to read.
-    const settled = state === 'complete' || state === 'rolled-back';
+    // Only a run that was still going forward has a prefix that describes the disk. A settled state
+    // has nothing left to do, and a partial rollback has nothing anyone can order: some undos ran and
+    // some did not. One predicate drives all three arrays so a consumer cannot find a list to iterate
+    // that `recovery` said it should not — undoing a committed migration, undoing a completed
+    // rollback and undoing an undo are all destructive. `completedAtLeast` stays as history, and the
+    // journal file still holds every action for a person to read.
+    const replayable = state === 'applying';
     return {
       journalPath,
       progressPath,
       kind: journal.kind,
       pool: journal.pool,
       state,
-      recovery: settled ? 'none' : 'undo-applied-actions',
+      recovery: recoveryMode(state),
       completedAtLeast,
       totalActions: journal.actions.length,
-      appliedActions: settled ? [] : journal.actions.slice(0, completedAtLeast),
-      uncertainAction: settled ? undefined : journal.actions[completedAtLeast],
-      pendingActions: settled ? [] : journal.actions.slice(completedAtLeast + 1),
+      appliedActions: replayable ? journal.actions.slice(0, completedAtLeast) : [],
+      uncertainAction: replayable ? journal.actions[completedAtLeast] : undefined,
+      pendingActions: replayable ? journal.actions.slice(completedAtLeast + 1) : [],
       rollbackFailures: progress?.rollbackFailures ?? [],
     };
   }

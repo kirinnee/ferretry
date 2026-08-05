@@ -1135,6 +1135,41 @@ describe('SharedHistoryMigration', () => {
     });
   });
 
+  it('should hand a partly failed rollback to a person, with nothing anyone could replay', async () => {
+    // Arrange — some undos ran and some did not. Nothing on disk records which, and the journal
+    // prefix that looks like the answer is the list the rollback was trying to reverse, so replaying
+    // it would undo an undo.
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${HOME_A}/projects`, directory({ session: file('history', 1) }));
+    files.failures.set(`createSymbolicLink:${HOME_A}/sessions`, new Error('later link refused'));
+    files.failures.set(`move:${POOL}/projects->${HOME_A}/projects`, new Error('restore refused'));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    await subject.materialize(onlyA()).catch(() => undefined);
+    const evidence = await subject.inspectRecovery(onlyA());
+    const nextPreview = await subject.preview(onlyA()).catch(caught => caught);
+
+    // Assert — the state is manual-inspection only and every action array is empty.
+    should(evidence).match({
+      state: 'rollback-incomplete',
+      recovery: 'manual-inspection',
+      appliedActions: [],
+      uncertainAction: undefined,
+      pendingActions: [],
+      rollbackFailures: ['restore refused'],
+    });
+    // The cursor is still reported, as history rather than as a list of what is on disk.
+    should(evidence?.completedAtLeast).be.greaterThan(0);
+    should(evidence?.totalActions).be.greaterThan(evidence?.completedAtLeast ?? 0);
+    const message = (nextPreview as SharedHistoryRecoveryRequiredError).message;
+    should(nextPreview).be.instanceOf(SharedHistoryRecoveryRequiredError);
+    should(message).match(/could not be fully reversed and needs a person/u);
+    should(message).match(/do NOT replay the journal/u);
+    should(message).match(/starting from what failed: restore refused/u);
+    should(message).not.match(/undo the applied actions/u);
+  });
+
   it('should say a stuck crash record was fully reversed, never that it should be undone', async () => {
     // Arrange
     const files = new MemorySharedHistoryFileSystem();
