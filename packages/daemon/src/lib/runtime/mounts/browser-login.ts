@@ -47,10 +47,14 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * THE PER-SESSION BROWSER IS NOT SERVED, and it is mounted as a stated refusal rather than left off
  * the table for the same reason `/v1/learning/run` is: `fy browser open` is a shipped command, and a
  * 404 is indistinguishable from version skew while a 501 naming the missing piece is actionable. What
- * is missing is not a wiring. Automation needs the browser WORKER — a program this repository does
- * not contain; `packages/daemon/bin/` ships `stt-worker.ts` and nothing else — and a production
- * implementation of `BrowserViewerHost`, of which there is none. Both belong to the unit that ports
- * the browser session runtime.
+ * is missing is NOT the worker program: `packages/daemon/bin/browser-worker.ts` is the browser worker,
+ * and `bin/fyd.ts` already wires a `browserTransport` — `BrowserWorkerClient.connect` and
+ * `BrowserViewerStream.connect` — that can launch one and stream its frames. What is missing is the
+ * per-session runtime that would turn a session id into a launched worker and a production
+ * `BrowserViewerHost`: nothing builds that object, so `browserLoginRoutes` below is called, at its one
+ * call site in `mounts/index.ts`, with only the login window and never with the transport. Composing
+ * that runtime, and wiring it into this mount, belongs to the unit that ports the browser session
+ * runtime.
  */
 
 /** Every refusal the login domain raises, in the transport's own taxonomy. */
@@ -103,8 +107,8 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle): readonly ApiR
       handle: async context => await act(window, context),
     },
     {
-      // A stated refusal rather than a 404. See the header: what is missing is the browser worker
-      // program and a production `BrowserViewerHost`, neither of which exists in this repository.
+      // A stated refusal rather than a 404. See the header: the worker program and the transport both
+      // exist, but no per-session runtime composes them into something this mount can call.
       method: 'GET',
       path: '/v1/sessions/:sessionId/browser',
       scope: 'admin',

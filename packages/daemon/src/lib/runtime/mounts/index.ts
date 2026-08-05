@@ -1,6 +1,5 @@
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
-import { ApiRawDispatcher, type RawRoute } from '../../api/raw.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
@@ -40,7 +39,7 @@ import { type SessionSendSubsystem, sessionSendRoutes } from './session-send.ts'
 import { type SessionSignalSubsystem, sessionSignalRoutes } from './session-signal.ts';
 import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
 import { type SocketTicketSubsystem, socketTicketRoutes } from './socket-tickets.ts';
-import { type SttSubsystem, sttRawRoutes } from './stt.ts';
+import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes, terminalTicketRoutes } from './terminals.ts';
@@ -141,10 +140,10 @@ export interface MountedSubsystems {
   readonly learning: LearningSubsystem;
   /** The team recommender over the published fleet manifest and the operator's routing catalog. */
   readonly recommend: RecommendSubsystem;
-  /** Dictation: the Whisper worker, the model store, and the enhancement pass. Its routes are the
-   *  daemon's only BYTE-shaped ones, so they are served from the raw table rather than this one —
-   *  see `mounts/stt.ts`. */
-  readonly stt: SttSubsystem;
+  /** Dictation's one daemon-side half: the hosted-model pass that repairs a transcript. Recognition
+   *  happens in the browser, so what is left is the call the browser cannot make — it needs a
+   *  provider credential only this daemon holds. See `mounts/stt.ts`. */
+  readonly sttEnhancement: SttEnhancementSubsystem;
   /** One session's working tree, read-only and confined by descriptor: a listing, one file, the change
    *  list and one path's diff. The confinement is the feature — see `src/lib/session/filesystem`. */
   readonly sessionFilesystem: SessionFilesystem;
@@ -247,6 +246,11 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     ...nameRoutes(subsystems.names),
     ...learningRoutes(subsystems.learning),
     ...recommendRoutes(subsystems.recommend),
+    // Dictation enhancement is a fixed literal under `/v1/stt`, which no other subsystem uses, so it
+    // can neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
+    // surfaces rather than among the per-session ones because it belongs to the MACHINE: the
+    // credential it spends is the operator's, and no session owns a transcript.
+    ...sttEnhancementRoutes(subsystems.sttEnhancement),
     // The working-tree read registers last among the per-session subsystems: three of its four paths are
     // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
     // its one-segment `fs`, so nothing here can shadow or be shadowed.
@@ -305,22 +309,15 @@ export function createMountedSocketDispatcher(
   );
 }
 
-/**
- * Every route that reads and writes the transport's own bytes rather than an `ApiResponse`.
- *
- * A THIRD table for the same reason there is a second: the three answer different questions. An
- * `ApiRoute` returns a string body, a `SocketRoute` returns something that keeps talking, and a
- * `RawRoute` returns a response the daemon cannot express as a string at all. Dictation is the only
- * one today; it is the only mounted subsystem whose traffic is audio and model files.
- */
-export function mountedRawRoutes(subsystems: MountedSubsystems): readonly RawRoute[] {
-  return [...sttRawRoutes(subsystems.stt)];
-}
-
-/** The raw dispatcher the transport adapter serves, over the same credentials as the other two. */
-export function createMountedRawDispatcher(
-  base: DaemonApiDependencies,
-  subsystems: MountedSubsystems,
-): ApiRawDispatcher {
-  return new ApiRawDispatcher(new ApiRouter(mountedRawRoutes(subsystems)), base.credentials);
-}
+// THERE IS NO THIRD TABLE ANY MORE, and this note is here because its absence is a decision rather
+// than an omission. A raw route — one that answered with the transport's own `Response` because its
+// traffic could not be a string — existed for exactly one subsystem: the daemon's speech
+// recognition, which streamed audio in under a byte budget and served ranged model files out.
+// Recognition moved into the browser, its routes are gone, and the only survivor
+// (`POST /v1/stt/enhance`) is JSON in and JSON out, so it is an ordinary `ApiRoute` above.
+//
+// The seam was deleted with it rather than kept: a route table with no members is machinery that
+// looks like a capability, and this repository's own doctrine treats a constructed-but-uncalled
+// capability as a defect. Reviving it is a small, honest change — the git history holds the
+// dispatcher, the `ApiSurface` field and the adapter branch — and the subsystem that needs bytes
+// again should bring it back with its own first member.

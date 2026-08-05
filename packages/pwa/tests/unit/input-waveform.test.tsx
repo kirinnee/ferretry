@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
   browserWaveformRuntime,
+  type CaptureAnalyserTap,
+  type CaptureMonitor,
   displayLevel,
   InputWaveform,
   type InputWaveformRuntime,
   inputRms,
-  nextNoSignalReading,
   NO_SIGNAL_AFTER_MS,
+  nextNoSignalReading,
   paintInputLevel,
   startInputWaveform,
   waveformAnalyser,
-  type CaptureMonitor,
 } from '../../src/components/input-waveform.tsx';
-import type { CaptureAnalyserTap } from '../../src/lib/stt/audio-capture.ts';
 import { interact, mount, must } from '../support/dom.ts';
 
 interface PaintCall {

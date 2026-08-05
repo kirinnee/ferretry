@@ -43,8 +43,10 @@ every one of the ten branches in §2 is landed and deleted. Also on `main` now:
 is wrong. The daemon and CLI are substantially complete — the daemon binds, serves an authenticated
 API with /usage and /metrics, supervises sessions with a warden, and the CLI drives all of it.
 
-Remaining: the PWA (~4.8k of ~99k ported — the dominant cost from here), the ~30 unwired modules
-below, and the STT unit (see §12).
+Remaining: the PWA (~4.8k of ~99k ported — the dominant cost from here) and the ~30 unwired modules
+below. The STT unit is closed: recognition moved into the browser's own Web Speech API and the
+daemon's recogniser, model store and worker were deleted, leaving one text-only route
+(`POST /v1/stt/enhance`). See `docs/migration/surveys/tmux-browser-stt.md` §3.
 
 **Four gates now, not three:** `pre-commit run --all-files`, `task test`, **`task test:gate`**, and
 the snapshot publish. `task test` and `task test:coverage` both exit 0 while coverage is short —

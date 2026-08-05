@@ -674,6 +674,7 @@
   border: 1px solid var(--fy-border);
   border-radius: 12px;
   padding: 10px;
+  position: relative;
 }
 .fy-composer:focus-within {
   outline: 2px solid var(--fy-accent);

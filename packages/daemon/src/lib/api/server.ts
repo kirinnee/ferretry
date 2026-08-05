@@ -2,7 +2,6 @@ import type { MillisecondClockPort } from '../runtime/boot.ts';
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
 import { ApiDispatcher } from './dispatcher.ts';
-import type { ApiRawDispatcher } from './raw.ts';
 import type { ApiRoute } from './route.ts';
 import { ApiRouter } from './router.ts';
 import { healthRoutes } from './routes/health.ts';
@@ -37,19 +36,19 @@ export interface ApiServerHandle {
 }
 
 /**
- * Every part of the surface one adapter serves: request/response routes, protocol switches, and the
- * byte-shaped routes that own the transport's own request and response.
+ * Every part of the surface one adapter serves: request/response routes and protocol switches.
  *
  * They travel together because they share credentials and a peer. A dispatcher built from different
  * credentials than the HTTP one is a second, quieter authorization boundary, and the two would
  * drift.
+ *
+ * There was a THIRD member — routes that answered with the transport's own `Response` because their
+ * traffic could not be a string. The daemon's speech recognition was its only user; recognition
+ * moved into the browser and the seam went with it. See `runtime/mounts/index.ts` for the record.
  */
 export interface ApiSurface {
   readonly http: ApiDispatcher;
   readonly sockets: ApiSocketDispatcher;
-  /** Routes whose request or response cannot be a string — audio in, a ranged model file out. See
-   *  `api/raw.ts`. */
-  readonly raw: ApiRawDispatcher;
   /** Exact browser origins admitted by the transport-level CORS boundary. */
   readonly corsOrigins: readonly string[];
 }

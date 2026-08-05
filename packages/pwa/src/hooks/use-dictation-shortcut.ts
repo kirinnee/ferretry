@@ -19,7 +19,7 @@ import {
   matchesDictationShortcut,
   sameDictationShortcutTrigger,
 } from '../features/settings/dictation-shortcut.ts';
-import type { DictationPhase } from '../lib/stt/utterance.ts';
+import type { DictationPhase } from './use-dictation.ts';
 
 export interface ShortcutDictationHandle {
   readonly phase: DictationPhase;

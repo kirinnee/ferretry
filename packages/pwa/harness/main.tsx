@@ -27,7 +27,7 @@ import type {
 } from '@ferretry/protocol';
 import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
 import { chooseConnection } from '@ferretry/relay';
-import { Fragment, type ReactNode, useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   type AttachmentBlobLoader,
@@ -36,7 +36,7 @@ import {
 } from '../src/components/attachment-gallery.tsx';
 import { AttachmentUnlockPrompt } from '../src/components/attachment-unlock-prompt.tsx';
 import { Composer } from '../src/components/composer.tsx';
-import { DictationControl } from '../src/components/dictation-control.tsx';
+import { DictationControl, useDictationBundle } from '../src/components/dictation-control.tsx';
 import { DictationSheet, type DictationStage } from '../src/components/dictation-sheet.tsx';
 import { FileInstanceSurface } from '../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../src/components/files-tab.tsx';
@@ -146,8 +146,14 @@ import type { PairingArrival } from '../src/lib/pairing.ts';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../src/lib/projects-store.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { SIDE_PANE_DEFAULT_WIDTH } from '../src/lib/side-pane-preferences.ts';
-import type { CaptureHost } from '../src/lib/stt/audio-capture.ts';
-import type { FetchLike } from '../src/lib/stt/daemon-engine.ts';
+import {
+  BrowserRecognitionError,
+  type BrowserRecognitionProvider,
+  type BrowserRecognitionSupport,
+  type SpeechRecognitionErrorEventLike,
+  type SpeechRecognitionLike,
+  type SpeechRecognitionResultEventLike,
+} from '../src/lib/stt/browser-recognition.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../src/lib/usage-store.ts';
@@ -339,12 +345,6 @@ const HARNESS_SKILLS: SkillsCatalog = {
 };
 
 /**
- * The dictation fixtures. The harness never reaches the network, so the daemon's
- * speech status is answered here and the capture host is a silent stand-in: the
- * point of these cards is what the strip and the settings surface LOOK like, at
- * both widths, not whether a microphone exists in headless Chrome.
- */
-/**
  * A carrier a reader would actually want to see rendered: the RELAYED one.
  *
  * Direct is the boring case and the one every other harness screen already implies.
@@ -390,44 +390,197 @@ const harnessMonitor: CaptureMonitor = {
 };
 
 /**
- * A microphone that is asked for and never answers. Headless Chrome has no
- * device, and the point of the mic-button card is the button's two layouts, not
- * a capture: the panel's own card covers what recording looks like.
+ * The dictation fixtures.
+ *
+ * Speech recognition is a BROWSER capability here: nothing polls a daemon for a
+ * speech status, there is no model catalogue and no installer, so none of that is
+ * answered by the harness any more. What still has to be stood in for is the
+ * recognition object itself — headless Chrome has no microphone, and a screenshot
+ * run must not depend on a browser vendor's speech service being reachable.
+ *
+ * `harnessRecognitionProvider` is that stand-in and it is deliberately
+ * SYNCHRONOUS: support is handed in as data, and one scripted recognition either
+ * reports words the instant it starts or fires exactly one error event. Every
+ * card below therefore settles into its state during the same commit that starts
+ * it, which is what makes these stable shots at both required widths — no clock,
+ * no click, no awaited permission prompt.
  */
-const harnessCaptureHost: CaptureHost = {
-  openMicrophone: () => new Promise(() => undefined),
-  buildGraph: () => new Promise(() => undefined),
+interface HarnessRecognitionScript {
+  /** Words the engine reports the instant recognition starts. */
+  readonly heard?: readonly string[];
+  /** Fired instead of hearing anything, exactly as a real error event would be. */
+  readonly failWith?: SpeechRecognitionErrorEventLike;
+}
+
+class HarnessRecognition implements SpeechRecognitionLike {
+  continuous = false;
+  interimResults = false;
+  lang = 'en-US';
+  maxAlternatives = 1;
+  onstart: (() => void) | null = null;
+  onend: (() => void) | null = null;
+  onspeechstart: (() => void) | null = null;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null = null;
+  onnomatch: ((event: SpeechRecognitionResultEventLike) => void) | null = null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null = null;
+
+  readonly #script: HarnessRecognitionScript;
+
+  constructor(script: HarnessRecognitionScript) {
+    this.#script = script;
+  }
+
+  start(): void {
+    this.onstart?.();
+    if (this.#script.failWith !== undefined) {
+      this.onerror?.(this.#script.failWith);
+      return;
+    }
+    const heard = this.#script.heard ?? [];
+    if (heard.length === 0) return;
+    this.onspeechstart?.();
+    this.onresult?.({
+      resultIndex: 0,
+      results: heard.map(text => ({ 0: { transcript: text, confidence: 0.94 }, isFinal: true, length: 1 })),
+    });
+  }
+
+  /** Stop and Cancel both end the engine; the session decides what that means. */
+  stop(): void {
+    this.onend?.();
+  }
+
+  abort(): void {
+    this.onend?.();
+  }
+}
+
+const harnessRecognitionProvider = (
+  support: BrowserRecognitionSupport,
+  script: HarnessRecognitionScript = {},
+): BrowserRecognitionProvider => ({
+  support,
+  create: () => {
+    // The controller refuses before it ever asks an unavailable browser for a
+    // recognition object; this keeps the fake honest if that order ever changes.
+    if (!support.available) {
+      throw new BrowserRecognitionError('recognition-unavailable', support.reason ?? 'Dictation is unavailable here.');
+    }
+    return new HarnessRecognition(script);
+  },
+  // No visibility watch and no timers: a screenshot run must not be able to
+  // cancel a card by backgrounding the page, and the duration limit has nothing
+  // to measure against a synchronous engine.
   watchHidden: () => () => undefined,
+  setTimeout: () => 0,
+  clearTimeout: () => undefined,
+});
+
+const HARNESS_RECOGNITION_AVAILABLE: BrowserRecognitionSupport = {
+  available: true,
+  availability: 'available',
+  implementation: 'standard',
 };
 
-const harnessSttFetch: FetchLike = async url =>
-  url.includes('/v1/stt/status')
-    ? new Response(
-        JSON.stringify({
-          available: true,
-          streaming: false,
-          worker: { phase: 'ready', modelId: 'parakeet-tdt-0.6b' },
-          languages: ['en'],
-          models: {
-            daemon: {
-              id: 'parakeet-tdt-0.6b',
-              kind: 'daemon',
-              label: 'Parakeet TDT 0.6B',
-              state: 'ready',
-              languages: ['en'],
-              costs: {
-                downloadBytes: 652_000_000,
-                diskBytes: 652_000_000,
-                ramBytesApprox: 1_100_000_000,
-                summary: 'Parakeet TDT 0.6B — 652 MB on disk, about 1.1 GB of RAM while transcribing.',
-              },
-              install: { phase: 'ready', receivedBytes: 652_000_000, totalBytes: 652_000_000 },
-            },
-          },
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )
-    : new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } });
+/** Firefox with the preference off, or any engine without the constructor. */
+const HARNESS_RECOGNITION_UNSUPPORTED: BrowserRecognitionSupport = {
+  available: false,
+  availability: 'unsupported',
+  implementation: null,
+  reason: 'This browser does not support dictation for web apps.',
+};
+
+/** WebKit exposes the prefixed interface in an installed iOS app, then refuses it. */
+const HARNESS_RECOGNITION_IOS_HOME_SCREEN: BrowserRecognitionSupport = {
+  available: false,
+  availability: 'ios-home-screen',
+  implementation: 'webkit',
+  reason: 'Home Screen apps cannot use dictation on iPhone or iPad. Open Ferretry in Safari instead.',
+};
+
+/** Available and silent: the mic-button card is about the button's two layouts. */
+const harnessSilentRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_AVAILABLE);
+
+/** Available and hearing something — the read-only caption in its live state. */
+const harnessHearingRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_AVAILABLE, {
+  heard: ['Port the dictation panel', 'and keep the caption read-only.'],
+});
+
+const harnessUnsupportedRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_UNSUPPORTED);
+const harnessIosHomeScreenRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_IOS_HOME_SCREEN);
+
+/** The site is blocked: the browser refuses without asking the reader again. */
+const harnessBlockedRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_AVAILABLE, {
+  failWith: { error: 'not-allowed' },
+});
+
+/** The prompt was dismissed rather than answered — same code, different sentence. */
+const harnessDismissedRecognition = harnessRecognitionProvider(HARNESS_RECOGNITION_AVAILABLE, {
+  failWith: { error: 'not-allowed', message: 'The microphone prompt was dismissed without a choice.' },
+});
+
+/**
+ * A frozen elapsed clock. The first read starts the recording at zero and every
+ * later read reports the same 1:05, so an m:ss readout in a capture cannot drift
+ * between the phone and the desktop shot.
+ */
+const harnessElapsedClock = (): (() => number) => {
+  let started = false;
+  return () => {
+    if (!started) {
+      started = true;
+      return 0;
+    }
+    return 65_000;
+  };
+};
+
+/**
+ * One live dictation flow, opened by a mount-time gesture instead of a click.
+ *
+ * This is the shipped `useDictationBundle` state machine over a scripted
+ * recognition object, so the panel copy, the mic button's label and the stage
+ * colour are all derived the way a real session derives them. A hand-written
+ * stage could drift from the component; this cannot.
+ */
+function DictationFlowHarness({
+  label,
+  recognition,
+  settings,
+}: {
+  readonly label: string;
+  readonly recognition: BrowserRecognitionProvider;
+  readonly settings: SttSettings;
+}) {
+  const now = useMemo(harnessElapsedClock, []);
+  const { control, sheet, stage, handle } = useDictationBundle({
+    daemon,
+    draft: '',
+    onDraftChange: () => {},
+    settings,
+    recognition,
+    // A stacked review page must never bind the reader's push-to-talk chord.
+    shortcutHost: null,
+    now,
+    clockIntervalMs: 1_000,
+  });
+  const start = useRef(handle.start);
+  start.current = handle.start;
+  useEffect(() => start.current(), []);
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-dictation-stage={stage}>
+      <Label>{label}</Label>
+      {/* The panel is anchored above its composer, so each example needs its own
+          positioned box at the same width. Reserve the wrapped mobile error
+          strip's full height so it cannot paint over this fixture's label. */}
+      <div className="relative h-[144px] min-w-0">
+        <div className="absolute inset-x-0 top-[144px]">{sheet}</div>
+      </div>
+      <div className="flex items-center gap-2">{control}</div>
+    </div>
+  );
+}
 
 /**
  * The settings fixture is also mounted on a page of its own by
@@ -447,7 +600,6 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
   );
   const [activeDaemonId, setActiveDaemonId] = useState(daemon.daemonId);
   const [settings, setSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
-  const activeConnection = connections.find(connection => connection.daemonId === activeDaemonId) ?? daemon;
 
   const page = (
     <SettingsPage
@@ -455,11 +607,10 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
       connections={connections}
       controls={settingsControls}
       dictation={{
-        daemon: activeConnection,
         settings,
         update: patch => setSettings(current => ({ ...current, ...patch })),
         persisted: true,
-        fetchImpl: harnessSttFetch,
+        recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
       }}
       notifications={
         <NotificationSettingsView
@@ -3224,6 +3375,7 @@ function Shell() {
           <PanelBody className="flex flex-col gap-4">
             {(
               [
+                ['starting', undefined],
                 ['recording', undefined],
                 ['transcribing', undefined],
                 ['empty', undefined],
@@ -3265,11 +3417,76 @@ function Shell() {
                   draft=""
                   onDraftChange={() => {}}
                   settings={sttSettings}
-                  captureHost={harnessCaptureHost}
+                  recognition={harnessSilentRecognition}
                   layout={layout}
                 />
               </div>
             ))}
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      // The live counterpart to the static panel card above: a real session,
+      // recording, with the browser's own interim words in the caption.
+      label: 'Dictation live recognition',
+      render: () => (
+        <Card aria-label="Dictation live recognition" className="min-w-0" id="harness-dictation-live">
+          <PanelBody>
+            <DictationFlowHarness
+              label="Recording, browser caption"
+              recognition={harnessHearingRecognition}
+              settings={sttSettings}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      /**
+       * Recognition this browser cannot do at all. Both rows are refusals read
+       * from support DATA rather than from a failed attempt, and both keep the
+       * mic control visible on purpose: hiding it would make feature detection
+       * look like a broken click path.
+       */
+      label: 'Dictation unavailable',
+      render: () => (
+        <Card aria-label="Dictation unavailable" className="min-w-0" id="harness-dictation-unavailable">
+          <PanelBody className="flex flex-col gap-4">
+            <DictationFlowHarness
+              label="No speech recognition in this browser"
+              recognition={harnessUnsupportedRecognition}
+              settings={sttSettings}
+            />
+            <DictationFlowHarness
+              label="Installed iPhone or iPad Home Screen app"
+              recognition={harnessIosHomeScreenRecognition}
+              settings={sttSettings}
+            />
+          </PanelBody>
+        </Card>
+      ),
+    },
+    {
+      /**
+       * The microphone was asked for and refused. Recognition itself is
+       * available, so this is a different dead end from the card above: the hint
+       * points at the browser's site permission, not at the browser's engine.
+       */
+      label: 'Dictation permission denied',
+      render: () => (
+        <Card aria-label="Dictation permission denied" className="min-w-0" id="harness-dictation-permission-denied">
+          <PanelBody className="flex flex-col gap-4">
+            <DictationFlowHarness
+              label="Microphone blocked for this site"
+              recognition={harnessBlockedRecognition}
+              settings={sttSettings}
+            />
+            <DictationFlowHarness
+              label="Permission prompt dismissed"
+              recognition={harnessDismissedRecognition}
+              settings={sttSettings}
+            />
           </PanelBody>
         </Card>
       ),
@@ -3280,11 +3497,10 @@ function Shell() {
         <Card aria-label="Dictation settings" className="min-w-0" id="harness-dictation-settings">
           <PanelBody>
             <DictationSettings
-              daemon={daemon}
               settings={sttSettings}
               update={patch => setSttSettings(current => ({ ...current, ...patch }))}
               persisted
-              fetchImpl={harnessSttFetch}
+              recognitionSupport={HARNESS_RECOGNITION_AVAILABLE}
             />
           </PanelBody>
         </Card>

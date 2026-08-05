@@ -24,6 +24,7 @@ import {
   type SessionView,
   SessionViewSchema,
   SocketTicketResponseSchema,
+  type SttEnhancementResult,
   TerminalListViewSchema,
   TerminalViewSchema,
 } from '@ferretry/protocol';
@@ -529,27 +530,18 @@ class RecordingLoginRuntime implements BrowserLoginRuntime {
 }
 
 /**
- * A dictation surface that records what it was handed and answers from memory.
+ * A dictation enhancer that records what it was handed and answers from memory.
  *
- * It stands in for `SttService` for one reason: the real one spawns a Whisper worker and downloads
- * model files. Everything the mount is responsible for stays production — the route table, the
- * credentials, the dispatcher and the transport.
+ * It stands in for `SttEnhancementService` for one reason: the real one spends the operator's provider
+ * credential on an outbound call to a third party. Everything the mount is responsible for stays
+ * production — the route table, the credentials, the dispatcher and the transport.
  */
-class RecordingSttSurface {
-  readonly seen: string[] = [];
-  closed = 0;
+class RecordingSttEnhancer {
+  readonly seen: unknown[] = [];
 
-  async handle(request: Request): Promise<Response | undefined> {
-    const path = new URL(request.url).pathname;
-    this.seen.push(`${request.method} ${path}`);
-    if (path.endsWith('/transcribe')) {
-      return Response.json({ bytes: [...new Uint8Array(await request.arrayBuffer())] });
-    }
-    return Response.json({ available: false });
-  }
-
-  async close(): Promise<void> {
-    this.closed += 1;
+  async enhance(input: unknown): Promise<SttEnhancementResult> {
+    this.seen.push(input);
+    return { text: 'Ship the protocol package.', provider: 'groq', model: 'llama-3.1-8b-instant', latencyMs: 7 };
   }
 }
 
@@ -3151,20 +3143,21 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
-   * Dictation, driven through the production composition root over a real socket.
+   * Dictation enhancement, driven through the production composition root over a real socket.
    *
-   * The subsystem was CONSTRUCTED by the composition root and called by nothing for five wiring
-   * units: `fy stt status`, `models`, `install`, `transcribe` and `enhance` are shipped commands
-   * whose gateway spoke these exact paths to a daemon that answered `unknown_route`.
+   * ONE ROUTE IS LEFT. Recognition moved into the browser, so `/v1/stt/status`, `/v1/stt/models`,
+   * `/v1/stt/transcribe` and the model installs are gone from the daemon along with the byte-shaped
+   * table they needed. What survives is the exchange a public bundle cannot perform: repairing a
+   * transcript with a hosted chat model, which takes a provider credential only this daemon holds.
    *
-   * The SURFACE is substituted and everything else is real — the boot, the credentials, the raw
-   * route table, the dispatcher and the transport. It has to be: the production one spawns a Whisper
-   * worker that loads a multi-gigabyte model, and a test suite must never put that on the host. What
-   * is proved here is therefore the wiring the fake cannot fake — that a request reaches the surface
-   * at all, that the BYTES arrive unmangled, that the token is demanded, and that shutdown releases
-   * the worker.
+   * The ENHANCER is substituted and everything else is real — the boot, the credentials, the route
+   * table, the dispatcher and the transport. It has to be: the production one spends the operator's
+   * provider account on a call to a third party, which a test suite must never make. What is proved
+   * here is the wiring the fake cannot fake — that the request reaches the enhancer with its body
+   * intact, that the token is demanded, and that the deleted routes are genuinely gone rather than
+   * answering something.
    */
-  it('should reach the dictation surface with its bytes intact and release it on shutdown', async () => {
+  it('should reach the dictation enhancer and answer unknown_route for the deleted surface', async () => {
     // Arrange
     const home = await tempDirectory('fyd-stt');
     const port = await freeLoopbackPort();
@@ -3175,52 +3168,52 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
     });
-    const surface = new RecordingSttSurface();
-    const exit = start({ ...base, stt: surface }, cleanups);
+    const enhancer = new RecordingSttEnhancer();
+    const exit = start({ ...base, sttEnhancement: enhancer }, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
-    // A NUL and a lone 0xFF: neither survives a round trip through a string body, so decoding these
-    // back out is what proves the request reached the surface over the RAW seam rather than through
-    // `ApiRequest.text()`.
-    const audio = new Uint8Array([0x00, 0xff, 0x10, 0x00]);
+    const body = JSON.stringify({ text: 'ship the protocall package', provider: 'groq' });
 
     // Act
-    const status = await fetch(`http://127.0.0.1:${port}/v1/stt/status`, { headers });
-    const anonymous = await fetch(`http://127.0.0.1:${port}/v1/stt/status`);
-    const transcribed = await fetch(`http://127.0.0.1:${port}/v1/stt/transcribe`, {
+    const enhanced = await fetch(`http://127.0.0.1:${port}/v1/stt/enhance`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body,
+    });
+    const anonymous = await fetch(`http://127.0.0.1:${port}/v1/stt/enhance`, { method: 'POST', body });
+    // Recognition is the browser's now. Every path it used must be genuinely absent rather than
+    // answering a stale surface, which is what a client reads as version skew instead of as a move.
+    const removed = await Promise.all(
+      ['/v1/stt/status', '/v1/stt/models', '/v1/stt/models/base.en', '/stt-models/base.en/model.bin'].map(
+        async path => await fetch(`http://127.0.0.1:${port}${path}`, { headers }),
+      ),
+    );
+    const transcribe = await fetch(`http://127.0.0.1:${port}/v1/stt/transcribe`, {
       method: 'POST',
       headers: { ...headers, 'content-type': 'audio/L16; rate=16000; channels=1' },
-      body: audio,
+      body: new Uint8Array([0x00, 0xff, 0x10, 0x00]),
     });
-    // The public model-file prefix is deliberately NOT mounted: it exists to hand a browser the
-    // weights and nothing in this repository mints such a URL yet. It must fall through to the HTTP
-    // table rather than be served by a raw route nobody asked for.
-    const publicFile = await fetch(`http://127.0.0.1:${port}/stt-models/base.en/model.bin`, { headers });
     release();
     const code = await exit;
     await runCleanups(cleanups);
 
     // Assert
     should(code).equal(0);
-    // Reached: an unmounted surface answers `unknown_route`, not the surface's own body.
-    should(status.status).equal(200);
-    should((await status.json()) as { available: boolean }).have.property('available', false);
-    // The daemon version travels on a response the surface built for itself, like every other.
-    should(status.headers.get('x-ferretry-version')).equal(daemonVersion);
-    // The raw table is behind the SAME authorization boundary as the rest of the surface.
+    // Reached: an unmounted route answers `unknown_route`, not the enhancer's own result.
+    should(enhanced.status).equal(200);
+    should((await enhanced.json()) as { text: string }).have.property('text', 'Ship the protocol package.');
+    // The body arrived as the client sent it, and the daemon version travels like on every response.
+    should(enhancer.seen).deepEqual([{ text: 'ship the protocall package', provider: 'groq' }]);
+    should(enhanced.headers.get('x-ferretry-version')).equal(daemonVersion);
+    // `admin`, over the same authorization boundary as the rest of the surface: one call spends the
+    // operator's provider account.
     should(anonymous.status).equal(401);
-    should(transcribed.status).equal(200);
-    should((await transcribed.json()) as { bytes: number[] }).have.property('bytes', [0, 255, 16, 0]);
-    should(surface.seen).deepEqual(['GET /v1/stt/status', 'POST /v1/stt/transcribe']);
-    should(publicFile.status).equal(404);
-    should((await publicFile.json()) as { code: string }).have.property('code', 'unknown_route');
-    // The worker is released with the rest of the host acquisitions: a daemon that exited holding it
-    // would leave a process with a multi-gigabyte model loaded and nothing left to reap it.
-    should(surface.closed).equal(1);
+    should([...removed, transcribe].map(response => response.status)).deepEqual([404, 404, 404, 404, 404]);
+    should(((await transcribe.json()) as { code: string }).code).equal('unknown_route');
   });
 
   it('should release the home lock so a second boot of the same home succeeds', async () => {

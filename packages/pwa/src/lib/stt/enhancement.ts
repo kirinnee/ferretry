@@ -1,7 +1,8 @@
 /**
  * THE ENHANCER — deterministic, client-side, whole-word-only repair of a raw
- * transcript. Shared verbatim by the daemon engine and the browser engine, so
- * the two modes cannot drift into producing different text from the same audio.
+ * transcript. It runs after the browser's own `SpeechRecognition` has already
+ * produced text; there is no daemon-side recognition engine to share it with —
+ * `daemon-engine.ts` is gone — so this is the one place the repair happens.
  *
  * WHAT IT ACTUALLY FIXES, and why that is the whole ambition:
  *

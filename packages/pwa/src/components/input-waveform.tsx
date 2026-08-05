@@ -9,16 +9,30 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/InputWaveform.tsx`). There, the
  * analyser arrived as a real `AnalyserNode` because capture built its Web Audio
- * graph inline. Here capture's graph is a PORT (`lib/stt/audio-capture.ts`), so
+ * graph inline. Here the tap is a PORT declared below, so
  * `CaptureAnalyserTap.analyser` is `unknown` — anything at all. It is therefore
  * PARSED at this boundary rather than cast: `waveformAnalyser` returns null for
  * a tap that cannot answer `getFloatTimeDomainData`, and the component says the
  * meter is unavailable instead of throwing inside a rAF callback. That is the
  * one behavioural difference, and it only fires where kteam would have crashed.
+ *
+ * WHY THIS SOURCE OUTLIVES ITS PRODUCER. Browser SpeechRecognition owns its own
+ * microphone and exposes no amplitude stream, so nothing in production hands
+ * this component a tap today; opening a SECOND microphone purely to paint a
+ * meter beside browser-owned recognition would be a worse lie than showing no
+ * meter at all. The fidelity rules — the noise gate, the RMS mapping, the
+ * transition-only no-signal detector — are kept here, with their tests, for a
+ * future host that genuinely owns an audio graph.
  */
 
 import { useEffect, useRef } from 'react';
-import type { CaptureAnalyserTap } from '../lib/stt/audio-capture.ts';
+
+/** A visual-only branch off a recorder's already-running audio graph. */
+export interface CaptureAnalyserTap {
+  readonly analyser: unknown;
+  /** Disconnect this branch without touching the recorder or its tracks. */
+  disconnect(): void;
+}
 
 const INPUT_WAVEFORM_FPS = 20;
 export const NO_SIGNAL_AFTER_MS = 3_000;

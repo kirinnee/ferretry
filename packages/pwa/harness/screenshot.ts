@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Locator, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -140,6 +141,59 @@ function run(command: string, args: readonly string[]): void {
   const result = spawnSync(command, [...args], { cwd: packageDir, stdio: 'inherit' });
   if (result.error) fail(`${command} could not be started: ${result.error.message}`);
   if (result.status !== 0) fail(`${command} ${args.join(' ')} exited ${result.status}`);
+}
+
+/**
+ * DictationSheet renders its `[data-dictation-panel="non-modal"]` overlay
+ * absolutely positioned ABOVE its anchor, so it can paint outside the card's
+ * own bounding box without ever growing it — `card.screenshot()` clips the
+ * overlay away. Scroll the card into view, take the union of the card and
+ * every visible panel descendant's page bounding box, and clip a page
+ * screenshot to that union instead.
+ */
+async function screenshotDictationCard(page: Page, card: Locator, target: string): Promise<void> {
+  await card.scrollIntoViewIfNeeded();
+  const panels = card.locator('[data-dictation-panel="non-modal"]');
+
+  const measureUnion = async () => {
+    const cardBox = await card.boundingBox();
+    if (cardBox === null) fail(`${target}: dictation card has no bounding box`);
+    const panelCount = await panels.count();
+    if (panelCount === 0) fail(`${target}: no dictation panel found to union with the card`);
+    const boxes = [cardBox];
+    for (let index = 0; index < panelCount; index += 1) {
+      const panel = panels.nth(index);
+      if (!(await panel.isVisible())) continue;
+      const panelBox = await panel.boundingBox();
+      if (panelBox === null) fail(`${target}: visible dictation panel ${index} has no bounding box`);
+      boxes.push(panelBox);
+    }
+    return {
+      left: Math.min(...boxes.map(box => box.x)),
+      top: Math.min(...boxes.map(box => box.y)),
+      right: Math.max(...boxes.map(box => box.x + box.width)),
+      bottom: Math.max(...boxes.map(box => box.y + box.height)),
+    };
+  };
+
+  let union = await measureUnion();
+  if (union.top < 0) {
+    // The overlay renders above its anchor, so it can extend above the top of
+    // the viewport even once the card itself is scrolled into view. Scroll
+    // the extra distance and re-measure against the new scroll position.
+    await page.evaluate(deltaY => window.scrollBy(0, deltaY), union.top);
+    union = await measureUnion();
+  }
+
+  const viewport = page.viewportSize();
+  if (viewport === null) fail(`${target}: page has no viewport to clip against`);
+  const x = Math.max(0, Math.floor(union.left));
+  const y = Math.max(0, Math.floor(union.top));
+  const right = Math.min(viewport.width, Math.ceil(union.right));
+  const bottom = Math.min(viewport.height, Math.ceil(union.bottom));
+  if (right <= x || bottom <= y) fail(`${target}: clipped dictation capture collapsed to an empty rect`);
+
+  await page.screenshot({ path: target, clip: { x, y, width: right - x, height: bottom - y } });
 }
 
 mkdirSync(outDir, { recursive: true });
@@ -417,6 +471,20 @@ try {
             const dictationMicTarget = join(outDir, `dictation-mic-${viewport.name}.png`);
             await page.locator('#harness-dictation-mic').screenshot({ path: dictationMicTarget });
             process.stdout.write(`📸 Dictation mic button -> ${dictationMicTarget}\n`);
+            // The live recognition states. Each card opens its own flow at mount
+            // against a scripted recognition object, so there is nothing to click
+            // and nothing to wait for beyond the stage the card settled into.
+            for (const [id, name] of [
+              ['harness-dictation-live', 'Dictation live recognition'],
+              ['harness-dictation-unavailable', 'Dictation unavailable'],
+              ['harness-dictation-permission-denied', 'Dictation permission denied'],
+            ] as const) {
+              const target = join(outDir, `${id.replace('harness-', '')}-${viewport.name}.png`);
+              const card = page.locator(`#${id}`);
+              await card.locator('[data-dictation-panel="non-modal"]').first().waitFor({ state: 'visible' });
+              await screenshotDictationCard(page, card, target);
+              process.stdout.write(`📸 ${name} -> ${target}\n`);
+            }
             const notificationSettingsTarget = join(outDir, `notification-settings-${viewport.name}.png`);
             await page.getByLabel('Notification settings').first().screenshot({ path: notificationSettingsTarget });
             process.stdout.write(`📸 Notification settings -> ${notificationSettingsTarget}\n`);

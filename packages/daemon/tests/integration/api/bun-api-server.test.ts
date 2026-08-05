@@ -4,13 +4,11 @@ import { BunApiServer, toApiRequest } from '../../../src/adapters/api/index.ts';
 import {
   ApiDispatcher,
   ApiError,
-  ApiRawDispatcher,
   type ApiRoute,
   ApiRouter,
   type ApiServerHandle,
   ApiSocketDispatcher,
   jsonResponse,
-  type RawRoute,
   SOCKET_MAX_PENDING_FRAMES,
   type SocketDownstream,
   type SocketHandler,
@@ -39,11 +37,10 @@ afterEach(async () => {
   }
 });
 
-function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = [], raw: readonly RawRoute[] = []) {
+function surfaceOf(routes: readonly ApiRoute[], sockets: readonly SocketRoute[] = []) {
   return {
     http: new ApiDispatcher(new ApiRouter(routes), CREDENTIALS),
     sockets: new ApiSocketDispatcher(new ApiRouter(sockets), CREDENTIALS, NO_TICKETS),
-    raw: new ApiRawDispatcher(new ApiRouter(raw), CREDENTIALS),
     corsOrigins: ['https://ferretry.pages.dev'],
   };
 }

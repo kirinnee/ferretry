@@ -92,24 +92,13 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     should(actual.err).containEql('contradict each other');
   });
 
-  it('lists the dictation verbs in its help', async () => {
+  it('lists the dictation verb in its help', async () => {
     // Act
     const actual = await cli(['stt', '--help']);
 
     // Assert
     should(actual.code).equal(0);
-    for (const verb of ['status', 'models', 'install', 'transcribe', 'enhance']) {
-      should(actual.out).containEql(verb);
-    }
-  });
-
-  it('refuses audio it cannot decode before reading or uploading it', async () => {
-    // Act
-    const actual = await cli(['stt', 'transcribe', '/nonexistent/clip.mp3']);
-
-    // Assert
-    should(actual.code).not.equal(0);
-    should(actual.err).containEql('cannot tell how');
+    should(actual.out).containEql('enhance');
   });
 
   it('refuses an empty enhancement rather than paying a provider for nothing', async () => {

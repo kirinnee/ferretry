@@ -1,61 +1,49 @@
 /**
- * The dictation controller: one microphone, one transcript, and exactly one way
- * for text to leave it.
+ * Browser-side dictation: one recognition session, one transcript, and exactly
+ * one way for text to leave it.
  *
- * There is no `onSubmit`, no `onSend`, and no path anywhere in this file from
- * model output to a message being sent. `onDraft` is called once, after the
- * recording is finished and enhancement has run, with the COMPLETE next draft
- * and where the caret should sit.
+ * There is no `onSubmit`, no `onSend`, and no path from recognised words to a
+ * message being sent. `onDraft` is called once, after recognition finishes and
+ * optional correction has run, with the COMPLETE next draft and caret.
  *
- * TAP CONTROL. `start()` is called synchronously from the mic button so the
- * permission prompt is attributable to that gesture; `stop()` is the panel's
- * separate Stop action. A stop that arrives while permission is still pending is
- * remembered rather than ignored: when the stream finally opens it is finished
- * immediately, instead of turning on a recording nobody asked for.
+ * `start()` calls the browser's SpeechRecognition synchronously from the mic
+ * button. The browser owns the microphone and returns words directly; no audio
+ * buffer, recording, or recognition request is sent to a Ferretry daemon.
  *
- * EVERY ASYNC BOUNDARY CHECKS THE GENERATION. `UtteranceLatch` owns the one live
- * capture and the generation counter, so a 120-second limit and a pointer
- * release cannot both finish the same utterance, and a backgrounded recording
- * can publish nothing afterwards. Those races have their own tests in
- * `lib/stt/utterance.ts`; this hook is the React shell around them.
+ * Every async boundary checks a generation. A duration limit and Stop can race,
+ * a cancelled browser can deliver a late result, and enhancement can resolve
+ * after unmount. Only the first current owner can commit.
  *
- * WHAT CHANGED FROM kteam (`ui/src/hooks/useDictation.ts`).
- *
- *   1. IT IS DAEMON-BOUND. kteam reached for a module-level `api` singleton and
- *      a module-level settings store, so one daemon's history could season
- *      another daemon's transcript and a paired-daemon switch changed nothing.
- *      Here the connection, the API client, the settings and the capture host
- *      are all parameters. `daemonTranscribe` additionally refuses a session
- *      scope belonging to a different daemon, so a stale session id cannot post
- *      audio to the wrong box.
- *   2. THE ENGINE IS A PORT, AND THE SHIPPED ONE IS THE DAEMON. kteam ran
- *      browser-local Parakeet through `lib/stt/local-engine.ts` and a rolling
- *      `LocalAgreementTranscriber` preview. Neither is ported (they need
- *      `onnxruntime-web`, a ~25 MB WASM asset and a bundler — PR #126). So there
- *      is no live preview and no `pendingSegments`; `DictationEngine` is the
- *      seam a browser-local engine drops into, and `daemonDictationEngine` is
- *      what ships today.
- *   3. THE FINISH IS THE TESTED LIFECYCLE. `finishUtterance` already owns claim,
- *      flush, too-short rejection, transcribe, refine and commit, so this hook
- *      composes it rather than repeating it.
+ * The paired daemon remains explicit for two OPTIONAL text-only operations:
+ * recent conversation read as correction vocabulary, and Groq enhancement.
+ * Local correction never sends the transcript across that boundary, and audio
+ * cannot cross it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { IFyApiClient } from '@ferretry/protocol';
-import type { CaptureMonitor } from '../components/input-waveform.tsx';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionScope, type DaemonSessionScope } from '../lib/daemon-scope.ts';
-import { startCapture, type CaptureHost, type CaptureSession } from '../lib/stt/audio-capture.ts';
-import { captureErrorFrom } from '../lib/stt/capture-error.ts';
-import { daemonTranscribe, type FetchLike } from '../lib/stt/daemon-engine.ts';
+import {
+  type BrowserRecognitionProvider,
+  BrowserRecognitionSession,
+  type BrowserRecognitionSessionLike,
+  browserRecognitionErrorFrom,
+  browserRecognitionProvider,
+} from '../lib/stt/browser-recognition.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
-import { requestRemoteEnhancement, type RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
-import { sttDictionary, type SttSettings } from '../lib/stt/stt-settings.ts';
-import { finishUtterance, UtteranceLatch, type DictationPhase } from '../lib/stt/utterance.ts';
+import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
+import { type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 
-export type { DictationPhase };
+/**
+ * What the panel shows and what the push-to-talk shortcut reads.
+ *
+ * Owned here rather than by the recognition port: `transcribing` covers the
+ * enhancement round trip this hook runs after the browser has settled its
+ * words, which the port itself knows nothing about.
+ */
+export type DictationPhase = 'idle' | 'requesting' | 'recording' | 'transcribing' | 'error';
 
 export interface DictationError {
   readonly code: string;
@@ -67,32 +55,16 @@ export interface DictationDraftResult {
   readonly text: string;
   /** Where the caret should sit afterwards. */
   readonly caret: number;
-  /**
-   * A non-fatal post-transcription failure. `text` already contains the raw
-   * words; the panel stays open only to show the real provider reason.
-   */
+  /** Raw words already landed; only optional correction failed. */
   readonly enhancementError?: DictationError;
 }
 
 /**
- * How an utterance becomes words. One method, so a browser-local engine can
- * replace the daemon without this hook learning anything about either.
- */
-export interface DictationEngine {
-  transcribe(samples: Float32Array, signal: AbortSignal): Promise<string>;
-}
-
-/**
  * How many events to ask for when mining vocabulary. Larger than the 5–10
- * messages actually used, because a session ledger is full of tool calls and
- * thinking blocks and only a fraction of any window is user or assistant text.
+ * messages actually used because most ledger records are tools or thinking.
  */
 export const CONTEXT_FETCH_LIMIT = 60;
-/**
- * Context improves correction but must never become the slow part of stop. The
- * daemon is usually on the same machine, so a quarter second is enough for a
- * healthy answer; after that enhancement continues with the dictionary alone.
- */
+/** Context is a nicety and cannot become the slow part of Stop. */
 export const CONTEXT_FETCH_TIMEOUT_MS = 250;
 export const MIN_CONTEXT_MESSAGES = 5;
 export const MAX_CONTEXT_MESSAGES = 10;
@@ -116,19 +88,12 @@ export async function withinContextFetchBudget<T>(
   }
 }
 
-/** The shape this hook reads off a ledger event. Structural, so it needs no schema. */
 interface ContextRecordLike {
   readonly type?: unknown;
   readonly data?: unknown;
 }
 
-/**
- * The last 5–10 user and assistant TEXT messages, oldest first.
- *
- * Tool calls, tool results, thinking and reasoning are excluded on purpose:
- * they are full of paths, JSON and identifiers that would flood the fuzzy
- * vocabulary with near-misses for ordinary words.
- */
+/** Last 5–10 user/assistant text messages, oldest first. */
 export function extractContextMessages(records: readonly ContextRecordLike[] | undefined): string[] {
   if (!Array.isArray(records)) return [];
   const texts: string[] = [];
@@ -142,18 +107,12 @@ export function extractContextMessages(records: readonly ContextRecordLike[] | u
   return texts.slice(-MAX_CONTEXT_MESSAGES);
 }
 
-/**
- * True when there is enough recent conversation to be worth mining. Below the
- * floor the enhancer still runs — the dictionary alone is useful — it simply has
- * no conversational vocabulary to work with. Mining two messages would build a
- * fuzzy vocabulary out of whatever happened to be said first, which is exactly
- * the sparse-evidence guess this feature abstains from everywhere else.
- */
+/** Sparse context is weaker evidence than the dictionary alone. */
 export function hasUsableContext(messages: readonly string[]): boolean {
   return messages.length >= MIN_CONTEXT_MESSAGES;
 }
 
-/** Codes carried by a `RemoteEnhancementError`, namespaced so the panel can tell them apart. */
+/** Namespace remote correction failures away from recognition failures. */
 export const enhancementErrorFrom = (failure: unknown): DictationError => {
   const code = (failure as { code?: unknown } | null)?.code;
   return {
@@ -163,147 +122,99 @@ export const enhancementErrorFrom = (failure: unknown): DictationError => {
   };
 };
 
-/**
- * The shipped engine: post the utterance to ONE paired daemon.
- *
- * The scope is passed through so `daemonTranscribe` can refuse a session that
- * belongs to a different daemon rather than silently posting here.
- */
-export const daemonDictationEngine = (
-  daemon: DaemonConnection,
-  scope?: DaemonSessionScope,
-  fetchImpl?: FetchLike,
-): DictationEngine => ({
-  transcribe: async (samples, signal) => {
-    const transcript = await daemonTranscribe(daemon, {
-      samples,
-      signal,
-      ...(scope ? { scope } : {}),
-      ...(fetchImpl ? { fetchImpl } : {}),
-    });
-    return transcript.text;
-  },
-});
-
 export interface UseDictationOptions {
-  /** The paired daemon this dictation belongs to. Nothing here is ambient. */
+  /** Used only by optional context/Groq enhancement. Audio never reaches it. */
   readonly daemon: DaemonConnection;
   /** Used only to mine enhancement vocabulary. Dictation works without it. */
   readonly sessionId?: string;
-  /**
-   * This daemon's own client. Supplied by the host for the same reason the
-   * composer's is: there is no bundled origin, token or singleton daemon.
-   */
+  /** This daemon's own client, used only for that bounded vocabulary read. */
   readonly api?: Pick<IFyApiClient, 'history'>;
-  /**
-   * The current draft, read at COMMIT time rather than captured at start, so
-   * text typed during the utterance is not thrown away.
-   */
+  /** Read at commit time so typing during recognition is preserved. */
   readonly draft: string;
-  /**
-   * The live textarea, for the caret. Optional: without it the transcript is
-   * appended at the end, which is the right fallback rather than an error.
-   */
+  /** Without a live selection, recognised words append at the end. */
   readonly selectionRef?: { readonly current: SelectionLike | null };
   onDraft(result: DictationDraftResult): void;
-  /** The reader's device-lifetime dictation settings. */
   readonly settings: SttSettings;
-  /**
-   * The microphone. `null` means this browser has no microphone API at all, in
-   * which case the control is HIDDEN rather than disabled: the capability is
-   * absent (an insecure context), not refused, and a disabled button would imply
-   * "not right now".
-   */
-  readonly captureHost: CaptureHost | null;
-  /** Defaults to the daemon engine bound to `daemon` and this session's scope. */
-  readonly engine?: DictationEngine;
-  /**
-   * The transport used for remote (Groq) enhancement, which goes to this same
-   * daemon. Defaults to the browser's `fetch`; injected by tests so no suite
-   * reaches the network, exactly as every other module under `lib/stt` allows.
-   */
+  /** Browser recognition and visibility surface; injected by tests/harness. */
+  readonly recognition?: BrowserRecognitionProvider;
+  /** Optional text-only correction transport through the paired daemon. */
   readonly enhancementFetch?: RemoteEnhancementFetch;
   readonly disabled?: boolean;
 }
 
 export interface DictationHandle {
-  /** False when this browser cannot record at all. Render nothing. */
+  /** False when recognition is unavailable here. The control still says so. */
   readonly supported: boolean;
   readonly phase: DictationPhase;
-  /** True while the microphone is actually open. Drives `aria-pressed`. */
   readonly recording: boolean;
-  /** A read-only analyser factory over the recorder's own audio graph. */
-  readonly inputMonitor: CaptureMonitor | null;
+  /** Browser interim/final words. Read-only preview; never the output seam. */
+  readonly liveText: string;
   readonly error: DictationError | null;
-  /** True while a transcript is being produced, for the status line. */
   readonly busy: boolean;
-  /** Call SYNCHRONOUSLY from a pointerdown or keydown handler. */
+  /** Call synchronously from the reader gesture. */
   start(): void;
-  /** Call from pointerup or keyup. Safe at any phase. */
   stop(): void;
-  /** Throw away whatever is in flight. Safe at any phase. */
   cancel(): void;
   dismissError(): void;
 }
 
 export function useDictation(options: UseDictationOptions): DictationHandle {
-  const { daemon, sessionId, settings, captureHost } = options;
-  const disabled = Boolean(options.disabled || !settings.enabled);
-  const supported = captureHost !== null;
+  const disabled = Boolean(options.disabled || !options.settings.enabled);
+  const ambientRecognition = useMemo(() => browserRecognitionProvider(), []);
+  const recognition = options.recognition ?? ambientRecognition;
+  const supported = recognition.support.available;
 
   const [phase, setPhase] = useState<DictationPhase>('idle');
   const [error, setError] = useState<DictationError | null>(null);
-  // One transition when capture opens and one when it closes. The waveform
-  // itself never updates React state; it paints its canvas behind a ref.
-  const [inputMonitor, setInputMonitor] = useState<CaptureMonitor | null>(null);
+  const [liveText, setLiveText] = useState('');
 
-  // Refs, not state, for everything the async paths read: state would be a stale
-  // closure by the time a transcription or a history lookup resolves.
-  const latchRef = useRef<UtteranceLatch | null>(null);
-  latchRef.current ??= new UtteranceLatch();
-  const latch = latchRef.current;
-
-  const releaseRequested = useRef(false);
+  // Refs, not state: recognition and enhancement continuations outlive the
+  // render that started them.
+  const generationRef = useRef(0);
+  const liveSessionRef = useRef<BrowserRecognitionSessionLike | null>(null);
+  const finishingSessionRef = useRef<BrowserRecognitionSessionLike | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
   const optionsRef = useRef(options);
+  const recognitionRef = useRef(recognition);
   optionsRef.current = options;
+  recognitionRef.current = recognition;
 
-  const scope = useMemo(
-    () => (sessionId === undefined || sessionId === '' ? undefined : daemonSessionScope(daemon, sessionId)),
-    [daemon, sessionId],
-  );
-  const defaultEngine = useMemo(() => daemonDictationEngine(daemon, scope), [daemon, scope]);
-  const engine = options.engine ?? defaultEngine;
-  const engineRef = useRef(engine);
-  engineRef.current = engine;
+  const isCurrent = useCallback((token: number): boolean => generationRef.current === token, []);
 
-  /**
-   * Drop the current utterance entirely. Invalidating the generation first is
-   * what suppresses any continuation already in flight — important during
-   * unmount, where even a harmless setState is teardown work React should never
-   * receive.
-   */
-  const teardown = useCallback(() => {
-    latch.cancel();
+  /** Cancel every owner and return the next generation token. */
+  const invalidate = useCallback((): number => {
+    generationRef.current += 1;
+    const live = liveSessionRef.current;
+    const finishing = finishingSessionRef.current;
+    liveSessionRef.current = null;
+    finishingSessionRef.current = null;
+    try {
+      live?.cancel();
+    } catch {
+      // Already ended.
+    }
+    if (finishing !== live) {
+      try {
+        finishing?.cancel();
+      } catch {
+        // Already ended.
+      }
+    }
     controllerRef.current?.abort();
     controllerRef.current = null;
-    releaseRequested.current = false;
-  }, [latch]);
+    return generationRef.current;
+  }, []);
 
-  // Unmount and disable must both release the microphone. A recording indicator
-  // that outlives the component is the fastest way to lose a reader's trust.
-  useEffect(() => () => teardown(), [teardown]);
+  // Unmount releases the browser microphone and suppresses every continuation.
+  useEffect(() => () => void invalidate(), [invalidate]);
 
   useEffect(() => {
     if (!disabled) return;
-    // kteam also released ~1 GB of resident ONNX sessions here. There is no
-    // browser-local engine to unload in this build, so turning dictation off is
-    // exactly "close the microphone and forget the utterance".
-    teardown();
-    setInputMonitor(null);
+    invalidate();
+    setLiveText('');
     setError(null);
     setPhase('idle');
-  }, [disabled, teardown]);
+  }, [disabled, invalidate]);
 
   const commit = useCallback((transcript: string, enhancementError?: DictationError) => {
     const spoken = transcript.trim();
@@ -315,7 +226,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     current.onDraft({ ...result, ...(enhancementError ? { enhancementError } : {}) });
   }, []);
 
-  /** Recent conversation for the enhancer, or nothing at all. Never an error. */
+  /** Recent conversation for the enhancer, or nothing. Never an error. */
   const readContext = useCallback(async (): Promise<string[]> => {
     const current = optionsRef.current;
     if (current.sessionId === undefined || current.api === undefined) return [];
@@ -326,20 +237,11 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       const recent = extractContextMessages(events);
       return hasUsableContext(recent) ? recent : [];
     } catch {
-      // Enhancement context is a nicety. A failed history read must never cost
-      // the reader their transcript, so it degrades to the dictionary alone
-      // rather than surfacing an error.
       return [];
     }
   }, []);
 
-  /**
-   * Correct the raw words, or return them untouched.
-   *
-   * Records a non-fatal provider failure in `enhancementFailure` instead of
-   * throwing: the raw transcript is still going into the draft, and the panel
-   * shows the real reason afterwards.
-   */
+  /** Correct the raw words or return them untouched. */
   const enhanceTranscript = useCallback(
     async (raw: string, token: number, onFailure: (failure: DictationError) => void): Promise<string> => {
       const current = optionsRef.current;
@@ -347,7 +249,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       if (!active.enhancement) return raw;
       const { entries } = sttDictionary(active);
       const context = await readContext();
-      if (!latch.isCurrent(token)) return raw;
+      if (!isCurrent(token)) return raw;
 
       if (active.enhancementProvider === 'groq') {
         try {
@@ -364,7 +266,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           });
           return result.text;
         } catch (failure) {
-          if (!latch.isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
+          if (!isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
           onFailure(enhancementErrorFrom(failure));
           return raw;
         }
@@ -372,123 +274,150 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
       const candidate = enhance({ text: raw, dictionary: entries, context, userContext: active.userContext });
       if (candidate.text === raw) return raw;
-      // THE VERIFIER IS NOT OPTIONAL AND NOT ADVISORY. If it refuses — for any
-      // reason — the reader gets the engine's own words, unmodified. Enhancement
-      // can improve a transcript; it can never cost one.
+      // Enhancement can improve recognition, never cost the original words.
       return verifyWordOnly(raw, candidate.text).ok ? candidate.text : raw;
     },
-    [latch, readContext],
+    [isCurrent, readContext],
   );
 
-  /**
-   * Claim and finish this generation exactly once. `finishUtterance` owns the
-   * claim, the flush, the too-short rejection and the ordering; this supplies
-   * the ports and then reports an enhancement failure the lifecycle has no
-   * vocabulary for.
-   */
+  /** Claim and finish this generation exactly once. */
   const finish = useCallback(
-    async (token: number): Promise<void> => {
+    async (token: number, session: BrowserRecognitionSessionLike): Promise<void> => {
+      if (!isCurrent(token) || liveSessionRef.current !== session) return;
+      liveSessionRef.current = null;
+      finishingSessionRef.current = session;
+      setPhase('transcribing');
+
       let enhancementFailure: DictationError | null = null;
-      setInputMonitor(null);
-      await finishUtterance(token, {
-        latch,
-        transcribe: (samples, signal) => engineRef.current.transcribe(samples, signal),
-        refine: raw =>
-          enhanceTranscript(raw, token, failure => {
-            enhancementFailure = failure;
-          }),
-        commit: text => commit(text, enhancementFailure ?? undefined),
-        setPhase,
-        setError,
-        onController: controller => {
-          controllerRef.current = controller;
-        },
-      });
-      // `finishUtterance` has no notion of "it worked, but the correction did
-      // not", so the panel is told here — after the raw words have landed.
-      if (enhancementFailure !== null && latch.isCurrent(token)) {
-        setError(enhancementFailure);
-        setPhase('error');
+      try {
+        const raw = await session.finish();
+        if (!isCurrent(token)) return;
+        if (raw.trim().length === 0) {
+          setLiveText('');
+          setPhase('idle');
+          return;
+        }
+
+        controllerRef.current = new AbortController();
+        const text = await enhanceTranscript(raw, token, failure => {
+          enhancementFailure = failure;
+        });
+        if (!isCurrent(token)) return;
+        commit(text, enhancementFailure ?? undefined);
+        if (enhancementFailure !== null) {
+          setError(enhancementFailure);
+          setPhase('error');
+        } else {
+          setLiveText('');
+          setPhase('idle');
+        }
+      } catch (failure) {
+        if (!isCurrent(token)) return;
+        const recognitionFailure = browserRecognitionErrorFrom(failure);
+        if (recognitionFailure.code === 'aborted') {
+          setLiveText('');
+          // The recognition session also reports its terminal error through
+          // `onFailure` before rejecting `finish()`. Cancellation is not a
+          // failed take, so clear that earlier write as part of the same
+          // transition back to idle.
+          setError(null);
+          setPhase('idle');
+        } else {
+          setError({ code: recognitionFailure.code, message: recognitionFailure.message });
+          setPhase('error');
+        }
+      } finally {
+        if (finishingSessionRef.current === session) finishingSessionRef.current = null;
+        if (isCurrent(token)) controllerRef.current = null;
       }
     },
-    [commit, enhanceTranscript, latch],
+    [commit, enhanceTranscript, isCurrent],
   );
 
   const start = useCallback(() => {
-    const host = optionsRef.current.captureHost;
-    if (host === null || disabled) return;
-    if (phase === 'requesting' || phase === 'recording') return;
+    if (disabled || phase === 'requesting' || phase === 'recording') return;
 
-    const token = latch.begin();
-    controllerRef.current?.abort();
-    controllerRef.current = null;
-    releaseRequested.current = false;
-    setInputMonitor(null);
+    const provider = recognitionRef.current;
+    const token = invalidate();
+    setLiveText('');
     setError(null);
     setPhase('requesting');
 
-    // NO await between here and `startCapture` — the permission prompt has to be
-    // attributable to the gesture that called us.
-    startCapture(host, {
-      onLimit: () => void finish(token),
-      onAbort: () => {
-        // The tab went to the background and the microphone closed underneath
-        // us. Treat it as a cancellation: invalidate the generation so nothing
-        // in flight can commit, and return the control to idle — otherwise the
-        // button stays pressed-looking and the next `start()` is refused for an
-        // utterance that no longer exists.
-        if (!latch.abort(token)) return;
-        releaseRequested.current = false;
-        setInputMonitor(null);
-        setError(null);
-        setPhase('idle');
-      },
-    })
-      .then((active: CaptureSession) => {
-        // `attach` refuses a stale token, which is the case where a cancel or a
-        // background abort landed while the permission prompt was still up.
-        if (!latch.attach(token, active)) {
-          active.cancel();
-          return;
-        }
-        if (releaseRequested.current) {
-          // The reader let go while the permission prompt was still up. Honour
-          // the release rather than starting a recording nobody asked for.
-          releaseRequested.current = false;
-          void finish(token);
-          return;
-        }
-        setInputMonitor(active);
-        setPhase('recording');
-      })
-      .catch((failure: unknown) => {
-        if (!latch.isCurrent(token)) return;
-        const captureFailure = captureErrorFrom(failure);
-        setInputMonitor(null);
-        setError({ code: captureFailure.code, message: captureFailure.message });
-        setPhase('error');
+    if (!provider.support.available) {
+      setError({
+        code: 'recognition-unavailable',
+        message: provider.support.reason ?? 'Dictation is unavailable in this browser.',
       });
-  }, [disabled, finish, latch, phase]);
-
-  const stop = useCallback(() => {
-    if (latch.liveCapture === null) {
-      // Either the device has not opened yet — remember the release rather than
-      // ignoring it — or something else already claimed this utterance (the
-      // 120-second limit, a cancel, a background abort), in which case there is
-      // nothing here to finish.
-      if (phase === 'requesting') releaseRequested.current = true;
+      setPhase('error');
       return;
     }
-    if (phase !== 'recording' && phase !== 'requesting') return;
-    void finish(latch.generation);
-  }, [finish, latch, phase]);
+
+    let session: BrowserRecognitionSession | null = null;
+    try {
+      session = new BrowserRecognitionSession(provider, {
+        onStart: () => {
+          if (isCurrent(token)) setPhase('recording');
+        },
+        onTranscript: text => {
+          if (isCurrent(token)) setLiveText(text);
+        },
+        onFailure: failure => {
+          if (!isCurrent(token)) return;
+          if (liveSessionRef.current === session) liveSessionRef.current = null;
+          // A cancellation is not a failed take, WHENEVER it arrives. The
+          // engine can report `aborted` while recognition is still open — a
+          // second recognizer taking the microphone, or the browser abandoning
+          // the session — and that has to land where a reader-initiated cancel
+          // lands: idle, no error, nothing to dismiss. The `finish()` catch
+          // below already does this for the abort that arrives after Stop;
+          // without the same rule here the two identical situations differed
+          // only by timing, and the earlier one showed a generic "Dictation
+          // failed" for a take nobody failed. This coupling is also why
+          // `dictationFailureCopy` deliberately has no `aborted` case.
+          if (failure.code === 'aborted') {
+            setLiveText('');
+            setError(null);
+            setPhase('idle');
+            return;
+          }
+          setError({ code: failure.code, message: failure.message });
+          setPhase('error');
+        },
+        onAbort: () => {
+          if (!isCurrent(token)) return;
+          invalidate();
+          setLiveText('');
+          setError(null);
+          setPhase('idle');
+        },
+        onLimit: () => {
+          if (session !== null) void finish(token, session);
+        },
+      });
+      liveSessionRef.current = session;
+      // NO await above this call: permission stays attributable to the gesture.
+      session.start();
+    } catch (failure) {
+      if (!isCurrent(token)) return;
+      if (liveSessionRef.current === session) liveSessionRef.current = null;
+      const recognitionFailure = browserRecognitionErrorFrom(failure);
+      setError({ code: recognitionFailure.code, message: recognitionFailure.message });
+      setPhase('error');
+    }
+  }, [disabled, finish, invalidate, isCurrent, phase]);
+
+  const stop = useCallback(() => {
+    const session = liveSessionRef.current;
+    if (session === null || (phase !== 'recording' && phase !== 'requesting')) return;
+    void finish(generationRef.current, session);
+  }, [finish, phase]);
 
   const cancel = useCallback(() => {
-    teardown();
-    setInputMonitor(null);
+    invalidate();
+    setLiveText('');
     setError(null);
     setPhase('idle');
-  }, [teardown]);
+  }, [invalidate]);
 
   const dismissError = useCallback(() => {
     setError(null);
@@ -499,7 +428,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     supported,
     phase,
     recording: phase === 'recording',
-    inputMonitor,
+    liveText,
     busy: phase === 'transcribing',
     error,
     start,

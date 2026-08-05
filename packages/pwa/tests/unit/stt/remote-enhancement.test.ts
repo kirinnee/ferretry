@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
+import { MAX_STT_DICTIONARY_ENTRIES, SttEnhancementRequestSchema } from '@ferretry/protocol';
 import should from 'should';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { MAX_DICTIONARY_TERMS } from '../../../src/lib/stt/enhancement.ts';
 import {
   MAX_REMOTE_ENHANCEMENT_TEXT_CHARS,
   REMOTE_ENHANCEMENT_TIMEOUT_MS,
@@ -97,6 +99,28 @@ describe('requestRemoteEnhancement', () => {
     should(body.dictionary).deepEqual([{ term: 'kteam', aliases: ['kteem'] }]);
     should(Object.keys(body)).not.containEql('apiKey');
     should(Object.keys(body)).not.containEql('token');
+  });
+
+  it('sends a large local dictionary as the first entries this wire accepts, and succeeds', async () => {
+    const { calls, fetchImpl } = recorder(() => json({ text: 'run kteam now' }));
+    // A reader is allowed a bigger vocabulary than the wire takes: the local
+    // deterministic enhancer uses all of it. Sending all of it would make the
+    // daemon refuse the WHOLE request, so every correction would be lost.
+    should(MAX_DICTIONARY_TERMS).be.above(MAX_STT_DICTIONARY_ENTRIES);
+    const dictionary = Array.from({ length: MAX_DICTIONARY_TERMS }, (_unused, index) => ({
+      term: `term-${index}`,
+      aliases: [],
+    }));
+
+    const result = await requestRemoteEnhancement(alpha, ask({ fetchImpl, dictionary }));
+
+    should(result.text).equal('run kteam now');
+    const body = JSON.parse((calls[0] as Call).init.body as string) as { dictionary: { term: string }[] };
+    should(body.dictionary).have.length(MAX_STT_DICTIONARY_ENTRIES);
+    should(body.dictionary[0]?.term).equal('term-0');
+    should(body.dictionary[MAX_STT_DICTIONARY_ENTRIES - 1]?.term).equal(`term-${MAX_STT_DICTIONARY_ENTRIES - 1}`);
+    // The proof that matters: the daemon parses what was sent with THIS schema.
+    should(SttEnhancementRequestSchema.safeParse(body).success).be.true();
   });
 
   it('does not open a request for text there is nothing to enhance in', async () => {

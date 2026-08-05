@@ -158,16 +158,6 @@ export class BunApiServer implements ApiServerPort {
             ? undefined
             : respond(toResponse(errorResponse(400, 'the websocket upgrade failed', 'upgrade_failed')));
         if (upgrade?.outcome === 'refused') return respond(toResponse(upgrade.response));
-        // The byte-shaped routes are offered the request BEFORE the string-bodied ones, and are
-        // handed the transport request itself: an audio body must never be buffered into an
-        // `ApiRequest.text()` on its way to a subsystem whose whole job is to refuse it unread when
-        // it is too long. `claims` keeps the offer to paths this table actually owns, so a path it
-        // does not claim reaches the HTTP dispatcher under ITS rules, public ones included.
-        if (surface.raw.claims(apiRequest)) {
-          const raw = await surface.raw.serve(apiRequest, request);
-          if (raw.kind === 'served') return respond(raw.response);
-          if (raw.kind === 'refused') return respond(toResponse(raw.response));
-        }
         return respond(toResponse(await surface.http.dispatch(apiRequest)));
       },
       websocket: {
