@@ -1,8 +1,9 @@
 import type { ConnectionChoice } from '@ferretry/relay';
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 
-import type { DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import { SettingsPage } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
@@ -598,6 +599,27 @@ describe('daemon settings', () => {
     await settle();
     expect(reachability(view.container, 'daemon-alpha')).toBe('reachable');
     newHealth.resolve({});
+    await view.unmount();
+  });
+
+  it('fails closed before a rotated pairing can publish new health evidence', async () => {
+    const rotated = daemon('daemon-alpha', 'https://alpha.example.test', 'alpha-rotated', 'Alpha workstation');
+    const RepairedHostChecks = () => {
+      const [connection, setConnection] = useState<DaemonConnectionRecord>(alpha);
+      useLayoutEffect(() => setConnection(rotated), []);
+      return (
+        <DaemonHostChecks
+          connection={connection}
+          probeDaemon={pendingProbe}
+          onRenameDaemon={() => {}}
+          onRemoveDaemon={() => {}}
+        />
+      );
+    };
+
+    const view = await mount(<RepairedHostChecks />);
+
+    expect(reachability(view.container, 'daemon-alpha')).toBe('checking');
     await view.unmount();
   });
 
