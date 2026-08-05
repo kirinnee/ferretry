@@ -524,6 +524,12 @@ try {
           const themeCatalogueTarget = join(outDir, `theme-catalogue-${viewport.name}.png`);
           await settingsPage.locator('[data-settings-section="appearance"]').screenshot({ path: themeCatalogueTarget });
           process.stdout.write(`📸 Theme catalogue ${viewport.name} -> ${themeCatalogueTarget}\n`);
+          for (const family of ['phosphor', 'blueprint', 'broadsheet', 'wayfinding', 'ledger', 'ma']) {
+            const card = settingsPage.locator(`[data-family="${family}"]`).locator('..').locator('..');
+            const target = join(outDir, `theme-${family}-${viewport.name}.png`);
+            await card.screenshot({ path: target });
+            process.stdout.write(`📸 Theme ${family} ${viewport.name} -> ${target}\n`);
+          }
 
           if (viewport.name === 'mobile') {
             // Closed and open are both review states. The latter is a viewport
