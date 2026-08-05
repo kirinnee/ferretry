@@ -1,7 +1,13 @@
 #!/usr/bin/env bun
 import { homedir } from 'node:os';
-import { FleetPlan, FleetUsageCollector } from '@ferretry/fleet';
-import { FileFleetConfigSource, FileFleetProvisioner } from '@ferretry/fleet/adapters';
+import { FleetLoginService, FleetPlan, FleetUsageCollector, requiresProviderLogin } from '@ferretry/fleet';
+import {
+  FileFleetConfigSource,
+  FileFleetProvisioner,
+  ProcessFleetLoginPort,
+  readFleetWrapperScript,
+  spawnFleetLoginProcess,
+} from '@ferretry/fleet/adapters';
 import type { AnalyticsResponse, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
@@ -491,7 +497,26 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     },
     // Writes are bounded to the fleet directory: nothing outside it is ever created or pruned.
     applier: new FileFleetProvisioner([layout.fleetDirectory]),
-    usage: new FleetUsageCollector(new UnprovisionedUsageProbe(), new SystemUsageClock()),
+    // Built per invocation from the loaded configuration, so `usage.concurrency` and
+    // `usage.atLimitPercent` are honoured instead of parsed and dropped.
+    usage: {
+      forConfig: config =>
+        new FleetUsageCollector(new UnprovisionedUsageProbe(), new SystemUsageClock(), {
+          concurrency: config.usage.concurrency,
+          atLimitPercent: config.usage.atLimitPercent,
+        }),
+    },
+    logins: {
+      forConfig: config =>
+        new FleetLoginService(
+          new ProcessFleetLoginPort(
+            spawnFleetLoginProcess,
+            world.environment,
+            requiresProviderLogin(config),
+            readFleetWrapperScript,
+          ),
+        ),
+    },
     clock: new SystemFleetClock(),
     recommendations: new ProtocolRecommendationGateway(client),
     out: world.io,

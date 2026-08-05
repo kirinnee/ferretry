@@ -6,6 +6,7 @@ import should from 'should';
 import {
   type FleetLoginSpawn,
   ProcessFleetLoginPort,
+  readFleetWrapperScript,
   spawnFleetLoginProcess,
 } from '../../src/adapters/process-login.ts';
 import type { FleetManifestAccount } from '../../src/lib/manifest.ts';
@@ -31,7 +32,13 @@ describe('ProcessFleetLoginPort', () => {
       calls.push({ command, cwd: options.cwd });
       return { exited: Promise.resolve(0) };
     };
-    const subject = new ProcessFleetLoginPort(spawn, { FY_TEST_TOKEN: 'placeholder' }, () => true, '/tmp/fy-test');
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      { FY_TEST_TOKEN: 'placeholder' },
+      () => true,
+      () => Promise.resolve(undefined),
+      '/tmp/fy-test',
+    );
     const target = account('claude');
 
     // Act
@@ -49,7 +56,12 @@ describe('ProcessFleetLoginPort', () => {
       commands.push([...command]);
       return { exited: Promise.resolve(7) };
     };
-    const subject = new ProcessFleetLoginPort(spawn, {}, () => true);
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      {},
+      () => true,
+      () => Promise.resolve(undefined),
+    );
     const target = account('codex');
 
     // Act
@@ -67,7 +79,12 @@ describe('ProcessFleetLoginPort', () => {
       spawned = true;
       return { exited: Promise.resolve(0) };
     };
-    const subject = new ProcessFleetLoginPort(spawn, {}, () => false);
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      {},
+      () => false,
+      () => Promise.resolve(undefined),
+    );
 
     // Act
     const actual = await subject.login(account('claude'));
@@ -75,6 +92,108 @@ describe('ProcessFleetLoginPort', () => {
     // Assert
     should(spawned).be.false();
     should(actual).deepEqual({ status: 'not-required' });
+  });
+
+  it("should strip the caller's provider credentials so a login cannot use the wrong account", async () => {
+    // Arrange — the environment an agent session running `fy fleet login` would actually carry.
+    let environment: Readonly<Record<string, string | undefined>> = {};
+    const spawn: FleetLoginSpawn = (_command, options) => {
+      environment = options.environment;
+      return { exited: Promise.resolve(0) };
+    };
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      {
+        ANTHROPIC_API_KEY: 'placeholder-caller-key',
+        ANTHROPIC_BASE_URL: 'https://example.invalid',
+        CLAUDE_CONFIG_DIR: '/somebody/elses/home',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'placeholder-model',
+        PATH: '/usr/bin',
+      },
+      () => true,
+      () => Promise.resolve(undefined),
+    );
+
+    // Act
+    await subject.login(account('claude'));
+
+    // Assert
+    should(environment).deepEqual({ PATH: '/usr/bin' });
+  });
+
+  it('should preserve a variable the account’s own wrapper reads from the environment', async () => {
+    // Arrange
+    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-login-wrapper-'));
+    const wrapper = path.join(directory, 'fy-claude-work');
+    await Bun.write(
+      wrapper,
+      ['#!/bin/sh', 'export ANTHROPIC_AUTH_TOKEN="${FY_TEST_TOKEN}"', "export OPENAI_API_KEY='literal'", ''].join('\n'),
+    );
+
+    let environment: Readonly<Record<string, string | undefined>> = {};
+    const spawn: FleetLoginSpawn = (_command, options) => {
+      environment = options.environment;
+      return { exited: Promise.resolve(0) };
+    };
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      { FY_TEST_TOKEN: 'placeholder', OPENAI_API_KEY: 'placeholder-caller-key' },
+      () => true,
+      readFleetWrapperScript,
+    );
+
+    try {
+      // Act — the wrapper references FY_TEST_TOKEN, which is not harness state and survives anyway;
+      // OPENAI_API_KEY is exported as a literal, so the caller's copy is still stripped.
+      await subject.login({ ...account('claude'), wrapper });
+
+      // Assert
+      should(environment).deepEqual({ FY_TEST_TOKEN: 'placeholder' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('should preserve nothing when the wrapper cannot be read', async () => {
+    // Arrange
+    let environment: Readonly<Record<string, string | undefined>> = {};
+    const spawn: FleetLoginSpawn = (_command, options) => {
+      environment = options.environment;
+      return { exited: Promise.resolve(0) };
+    };
+    const subject = new ProcessFleetLoginPort(
+      spawn,
+      { OPENAI_API_KEY: 'placeholder-caller-key', HOME: '/home/somebody' },
+      () => true,
+      readFleetWrapperScript,
+    );
+
+    // Act — the wrapper path does not exist, so its intentions are unknown.
+    await subject.login({ ...account('claude'), wrapper: path.join(tmpdir(), 'fy-fleet-absent-wrapper') });
+
+    // Assert
+    should(environment).deepEqual({ HOME: '/home/somebody' });
+  });
+});
+
+describe('readFleetWrapperScript', () => {
+  it('should read a wrapper that exists and answer nothing for one that does not', async () => {
+    // Arrange
+    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-wrapper-source-'));
+    const wrapper = path.join(directory, 'fy-claude-work');
+    await Bun.write(wrapper, '#!/bin/sh\nexec claude "$@"\n');
+
+    try {
+      // Act
+      const present = await readFleetWrapperScript(wrapper);
+      const absent = await readFleetWrapperScript(path.join(directory, 'nothing-here'));
+
+      // Assert
+      should(present).equal('#!/bin/sh\nexec claude "$@"\n');
+      should(absent).be.undefined();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

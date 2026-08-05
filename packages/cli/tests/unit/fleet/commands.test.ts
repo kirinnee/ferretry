@@ -7,6 +7,7 @@ import {
   CapturingOutput,
   FrozenClock,
   RecordingApplier,
+  RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingUsageCollector,
@@ -18,6 +19,7 @@ function run(argv: string[]) {
   const applier = new RecordingApplier();
   const recommendations = new RecordingRecommendationGateway();
   const usage = new RecordingUsageCollector();
+  const logins = new RecordingLoginService();
   const out = new CapturingOutput();
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
@@ -29,12 +31,13 @@ function run(argv: string[]) {
       planner: new RecordingPlanner(),
       applier,
       usage,
+      logins,
       clock: new FrozenClock(),
       recommendations,
       out,
     }),
   );
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), applier, recommendations, usage, out };
+  return { parsed: program.parseAsync(['node', 'fy', ...argv]), applier, recommendations, usage, logins, out };
 }
 
 describe('fleet command surface', () => {
@@ -115,5 +118,36 @@ describe('fleet command surface', () => {
   it('should refuse a recommendation with no task', async () => {
     // Arrange + Act + Assert
     await should(run(['fleet', 'recommend']).parsed).be.rejected();
+  });
+});
+
+describe('fleet login', () => {
+  it('should log every account in when no id is given', async () => {
+    // Arrange + Act
+    const { parsed, logins, out } = run(['fleet', 'login']);
+    await parsed;
+
+    // Assert
+    should(logins.requests).have.length(1);
+    should(logins.requests[0]?.accountIds).be.undefined();
+    should(out.text).containEql('logged in');
+  });
+
+  it('should pass the named account ids through verbatim', async () => {
+    // Arrange + Act
+    const { parsed, logins } = run(['fleet', 'login', 'one', 'two']);
+    await parsed;
+
+    // Assert — ids are opaque; nothing here parses one.
+    should(logins.requests[0]?.accountIds).deepEqual(['one', 'two']);
+  });
+
+  it('should honour --json', async () => {
+    // Arrange + Act
+    const { parsed, out } = run(['fleet', 'login', '--json']);
+    await parsed;
+
+    // Assert
+    should(JSON.parse(out.text)).have.length(1);
   });
 });

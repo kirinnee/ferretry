@@ -1,4 +1,11 @@
-import type { FleetApplyPlan, FleetApplyResult, FleetConfig, FleetManifest, FleetUsageSnapshot } from '@ferretry/fleet';
+import type {
+  FleetApplyPlan,
+  FleetApplyResult,
+  FleetConfig,
+  FleetLoginResult,
+  FleetManifest,
+  FleetUsageSnapshot,
+} from '@ferretry/fleet';
 import type { IFyApiClient } from '@ferretry/protocol';
 import type { RecommendationRequest, TeamRecommendation } from './wire.ts';
 
@@ -32,9 +39,35 @@ export interface IFleetApplier {
   apply(plan: FleetApplyPlan): Promise<FleetApplyResult>;
 }
 
-/** Probing every account's quota. Satisfied by `@ferretry/fleet`'s usage collector. */
+/**
+ * Probing every account's quota.
+ *
+ * Built per invocation from the loaded configuration rather than once at composition time: the
+ * collector's thresholds are configuration (`usage.concurrency`, `usage.atLimitPercent`), and a
+ * collector constructed before the configuration was read could only ever use the defaults — which
+ * is exactly what it did, so a declared `atLimitPercent: 90` silently behaved as 100.
+ */
+export interface IFleetUsageCollectorFactory {
+  forConfig(config: FleetConfig): IFleetUsageCollector;
+}
+
 export interface IFleetUsageCollector {
   collect(manifest: FleetManifest): Promise<FleetUsageSnapshot>;
+}
+
+/**
+ * Logging every selected account in. Satisfied by `@ferretry/fleet`'s login service.
+ *
+ * Also built per invocation: which accounts even *have* a provider login is declared in the
+ * configuration (`auth`), not published in the manifest, so the service cannot be assembled before
+ * the configuration has been read.
+ */
+export interface IFleetLoginServiceFactory {
+  forConfig(config: FleetConfig): IFleetLoginService;
+}
+
+export interface IFleetLoginService {
+  login(manifest: FleetManifest, accountIds?: readonly string[]): Promise<readonly FleetLoginResult[]>;
 }
 
 /** Reading the wall clock, injected so a plan's `generatedAt` is deterministic in a test. */

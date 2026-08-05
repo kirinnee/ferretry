@@ -2,6 +2,7 @@ import type {
   FleetApplyPlan,
   FleetApplyResult,
   FleetConfig,
+  FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
   FleetUsage,
@@ -11,10 +12,13 @@ import type {
   IFleetApplier,
   IFleetClock,
   IFleetConfigSource,
+  IFleetLoginService,
+  IFleetLoginServiceFactory,
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
   IFleetUsageCollector,
+  IFleetUsageCollectorFactory,
   IRecommendationGateway,
 } from '../../../src/lib/fleet/ports';
 import type { RecommendationRequest, TeamRecommendation } from '../../../src/lib/fleet/wire';
@@ -169,15 +173,47 @@ export class RecordingApplier implements IFleetApplier {
   }
 }
 
-/** A collector recording the manifest it was asked about. */
-export class RecordingUsageCollector implements IFleetUsageCollector {
+/**
+ * A collector recording the manifest it was asked about, and the configuration it was built from.
+ *
+ * It is its own factory: the controller builds a collector per invocation so `usage.concurrency` and
+ * `usage.atLimitPercent` are honoured, and `configs` is how a test proves the configuration reached
+ * it rather than being parsed and dropped.
+ */
+export class RecordingUsageCollector implements IFleetUsageCollector, IFleetUsageCollectorFactory {
   readonly collected: FleetManifest[] = [];
+  readonly configs: FleetConfig[] = [];
 
   constructor(private readonly snapshot: FleetUsageSnapshot = usageSnapshot()) {}
+
+  forConfig(config: FleetConfig): IFleetUsageCollector {
+    this.configs.push(config);
+    return this;
+  }
 
   collect(manifest: FleetManifest): Promise<FleetUsageSnapshot> {
     this.collected.push(manifest);
     return Promise.resolve(this.snapshot);
+  }
+}
+
+/** A login service recording the manifest and the selection it was handed. */
+export class RecordingLoginService implements IFleetLoginService, IFleetLoginServiceFactory {
+  readonly configs: FleetConfig[] = [];
+  readonly requests: Array<{ manifest: FleetManifest; accountIds: readonly string[] | undefined }> = [];
+
+  constructor(
+    private readonly results: readonly FleetLoginResult[] = [{ accountId: ACCOUNT_ID, status: 'logged-in' }],
+  ) {}
+
+  forConfig(config: FleetConfig): IFleetLoginService {
+    this.configs.push(config);
+    return this;
+  }
+
+  login(manifest: FleetManifest, accountIds?: readonly string[]): Promise<readonly FleetLoginResult[]> {
+    this.requests.push({ manifest, accountIds });
+    return Promise.resolve(this.results);
   }
 }
 

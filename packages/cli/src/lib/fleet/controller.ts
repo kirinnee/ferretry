@@ -3,13 +3,21 @@ import type {
   IFleetApplier,
   IFleetClock,
   IFleetConfigSource,
+  IFleetLoginServiceFactory,
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
-  IFleetUsageCollector,
+  IFleetUsageCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
-import { renderApplyPlan, renderApplyResult, renderManifest, renderRecommendation, renderUsage } from './render.ts';
+import {
+  renderApplyPlan,
+  renderApplyResult,
+  renderLoginResults,
+  renderManifest,
+  renderRecommendation,
+  renderUsage,
+} from './render.ts';
 
 /** Options every fleet command accepts. */
 export interface FleetCommandOptions {
@@ -34,7 +42,8 @@ export interface FleetControllerDeps {
   readonly manifests: IFleetManifestSource;
   readonly planner: IFleetPlanner;
   readonly applier: IFleetApplier;
-  readonly usage: IFleetUsageCollector;
+  readonly usage: IFleetUsageCollectorFactory;
+  readonly logins: IFleetLoginServiceFactory;
   readonly clock: IFleetClock;
   readonly recommendations: IRecommendationGateway;
   readonly out: IFleetOutput;
@@ -81,12 +90,31 @@ export class FleetController {
    * longer existed.
    */
   async usage(options: FleetCommandOptions): Promise<void> {
-    const snapshot = await this.deps.usage.collect(await this.#manifest());
+    const collector = this.deps.usage.forConfig(await this.deps.config.load());
+    const snapshot = await collector.collect(await this.#manifest());
     const exhausted = snapshot.accounts.filter(account => account.atLimit);
     if (options.json !== true && exhausted.length === snapshot.accounts.length && exhausted.length > 0) {
       this.deps.out.warn('Every account is at its limit — nothing can be launched until a window resets.');
     }
     this.#report(snapshot, options, () => renderUsage(snapshot));
+  }
+
+  /**
+   * Logs the named accounts in, or every account when none are named.
+   *
+   * One account at a time and in the foreground, because a provider login is a browser approval a
+   * human performs — parallelising it would open several at once and race for the same terminal.
+   * An account the manifest declares unavailable is reported as such rather than launched.
+   *
+   * This is *not* kteam's fleet login: it does not group an account's wrappers by the provider
+   * account behind them, nor clone one credential across them, so an operator with four wrappers on
+   * one account still approves four times. The fleet survey under `docs/migration/surveys/` carries the row.
+   */
+  async login(accountIds: readonly string[], options: FleetCommandOptions): Promise<void> {
+    const manifest = await this.#manifest();
+    const logins = this.deps.logins.forConfig(await this.deps.config.load());
+    const results = await logins.login(manifest, accountIds.length === 0 ? undefined : accountIds);
+    this.#report(results, options, () => renderLoginResults(results));
   }
 
   async recommend(words: readonly string[], options: FleetRecommendOptions): Promise<void> {

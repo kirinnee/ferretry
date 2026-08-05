@@ -4,6 +4,8 @@ import {
   renderAccount,
   renderApplyPlan,
   renderApplyResult,
+  renderLoginResults,
+  renderLoginRow,
   renderManifest,
   renderRecommendation,
   renderUsage,
@@ -212,5 +214,48 @@ describe('recommendation rendering', () => {
     should(renderRecommendation(recommendation({ warnings: ['quota was not probed'] }))).containEql(
       '! quota was not probed',
     );
+  });
+});
+
+describe('renderLoginResults', () => {
+  it('should say so plainly when there is nothing to log in', () => {
+    // Act
+    const actual = renderLoginResults([]);
+
+    // Assert
+    should(actual).equal('No accounts to log in.');
+  });
+
+  it('should name every outcome, so a skip never reads as a success', () => {
+    // Act
+    const actual = renderLoginResults([
+      { accountId: 'a', status: 'logged-in' },
+      { accountId: 'b', status: 'not-required' },
+      { accountId: 'c', status: 'unavailable', message: 'pool down' },
+      { accountId: 'd', status: 'failed', message: 'login process exited with code 7' },
+    ]);
+
+    // Assert
+    should(actual).containEql('4 accounts, 1 failed');
+    should(actual).containEql('a  logged in');
+    should(actual).containEql('b  no login needed');
+    should(actual).containEql('c  skipped, the manifest declares it unavailable — pool down');
+    should(actual).containEql('d  FAILED — login process exited with code 7');
+  });
+
+  it('should count no failures when every account succeeded', () => {
+    // Act
+    const actual = renderLoginResults([{ accountId: 'a', status: 'logged-in' }]);
+
+    // Assert
+    should(actual).startWith('1 account\n');
+  });
+
+  it('should render an unavailable account with no stated reason', () => {
+    // Act
+    const actual = renderLoginRow({ accountId: 'a', status: 'unavailable' });
+
+    // Assert
+    should(actual).equal('  a  skipped, the manifest declares it unavailable');
   });
 });

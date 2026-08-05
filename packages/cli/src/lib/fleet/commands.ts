@@ -57,6 +57,22 @@ export function registerFleetCommands(program: Command, controller: FleetControl
 
   scoped(
     fleet
+      .command('login')
+      .description('run each account’s provider login, one at a time')
+      .argument('[accountId...]', 'only these accounts, by id; default is every account')
+      .addHelpText(
+        'after',
+        '\nAccounts are logged in one at a time because each is a browser approval a human performs.\n' +
+          'An account whose wrapper reads a secret from the environment still gets it; every other\n' +
+          'provider variable is stripped, so a login run from inside an agent session cannot\n' +
+          'authenticate against that session’s account instead of this one.',
+      ),
+  ).action(async (accountIds: string[], _flags: unknown, command: Command) => {
+    await controller.login(accountIds, merged(command));
+  });
+
+  scoped(
+    fleet
       .command('recommend')
       .description('which agents suit a piece of work, with the alternatives and what was skipped')
       .argument('<task...>', 'what needs doing')

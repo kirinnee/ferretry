@@ -2,10 +2,12 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { FleetController, type FleetControllerDeps } from '../../../src/lib/fleet/controller';
 import {
+  ACCOUNT_ID,
   CapturingOutput,
   FrozenClock,
   GENERATED_AT,
   RecordingApplier,
+  RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
   RecordingUsageCollector,
@@ -27,6 +29,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     planner: new RecordingPlanner(),
     applier: new RecordingApplier(),
     usage: new RecordingUsageCollector(),
+    logins: new RecordingLoginService(),
     clock: new FrozenClock(),
     recommendations: new RecordingRecommendationGateway(),
     out,
@@ -267,5 +270,93 @@ describe('recommending a team', () => {
 
     // Assert
     should(JSON.parse(out.text)).have.property('roles');
+  });
+});
+
+describe('logging accounts in', () => {
+  it('should log every account in when none is named', async () => {
+    // Arrange
+    const logins = new RecordingLoginService();
+    const { subject, out } = controller({ logins });
+
+    // Act
+    await subject.login([], {});
+
+    // Assert
+    should(logins.requests).have.length(1);
+    should(logins.requests[0]?.accountIds).be.undefined();
+    should(out.text).containEql('logged in');
+  });
+
+  it('should pass only the named accounts through', async () => {
+    // Arrange
+    const logins = new RecordingLoginService();
+    const { subject } = controller({ logins });
+
+    // Act
+    await subject.login([ACCOUNT_ID], {});
+
+    // Assert
+    should(logins.requests[0]?.accountIds).deepEqual([ACCOUNT_ID]);
+  });
+
+  it('should build the login service from the loaded configuration', async () => {
+    // Arrange — which accounts have a provider login is declared in configuration, not the manifest.
+    const logins = new RecordingLoginService();
+    const { subject } = controller({ logins });
+
+    // Act
+    await subject.login([], {});
+
+    // Assert
+    should(logins.configs).have.length(1);
+  });
+
+  it('should refuse to log in before the fleet has ever been applied', async () => {
+    // Arrange
+    const { subject } = controller({ manifests: new StubManifestSource(null) });
+
+    // Act + Assert
+    await should(subject.login([], {})).be.rejectedWith(/run "fy fleet apply" first/u);
+  });
+
+  it('should report a failure rather than letting it read as a quiet success', async () => {
+    // Arrange
+    const logins = new RecordingLoginService([
+      { accountId: ACCOUNT_ID, status: 'failed', message: 'login process exited with code 7' },
+    ]);
+    const { subject, out } = controller({ logins });
+
+    // Act
+    await subject.login([], {});
+
+    // Assert
+    should(out.text).containEql('1 failed');
+    should(out.text).containEql('FAILED');
+  });
+
+  it('should print the payload under --json', async () => {
+    // Arrange
+    const { subject, out } = controller({ logins: new RecordingLoginService() });
+
+    // Act
+    await subject.login([], { json: true });
+
+    // Assert
+    should(JSON.parse(out.text)).have.length(1);
+  });
+});
+
+describe('honouring the configured usage thresholds', () => {
+  it('should build the collector from the loaded configuration rather than a default', async () => {
+    // Arrange — a declared atLimitPercent used to be parsed and dropped.
+    const usage = new RecordingUsageCollector();
+    const { subject } = controller({ usage });
+
+    // Act
+    await subject.usage({});
+
+    // Assert
+    should(usage.configs).have.length(1);
   });
 });
