@@ -88,6 +88,13 @@ so it is worth saying out loud why it needs no exception to the permissive defau
 - **Revoking is on the `use` axis, deliberately.** Ending a code and ending a device's access are both
   _exercising_ pairing rather than changing how the host behaves. Putting either behind `configure`
   would add a gate between a person and a stolen phone at the one moment it matters.
+- **Revoke the stolen device FIRST, then switch `pairing` off.** The two acts carry the same demand, so
+  turning the capability off away from the machine also refuses `DELETE /v1/pair/devices/:deviceId` — and
+  turning it back on is a local act. Reaching for the coarse switch first therefore locks you out of the
+  remedy until you are at the machine. Nothing is unsafe when that happens (the thief cannot mint either,
+  and everything is recoverable on the host), but the order matters and is stated here rather than
+  discovered. Splitting revoke onto its own axis would fix the sequence by making revoking harder than
+  granting, which is the trade this whole section refuses.
 
 ## Permissive by default; the password is the layer
 

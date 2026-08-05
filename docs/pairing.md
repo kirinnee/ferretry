@@ -88,6 +88,10 @@ Two different things are revocable and they are not the same act:
   and works again after a restart. There is no `await` between the two, so no request can authenticate
   against a credential the daemon has already promised to forget.
 
+**Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
+carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
+the revoke — and turning it back on is a local act. See [grants.md](grants.md).
+
 Revoking the credential **you are currently using** is legitimate — handing a laptop back is exactly that
 — so it is offered rather than blocked. What is not acceptable is being surprised by it, which is why each
 row states what its revoke will do before the press.

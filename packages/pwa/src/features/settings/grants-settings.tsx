@@ -427,7 +427,10 @@ export function GrantsCard({
       {/* No posture prop: the list reads it from `mayGrant` on the capabilities, which is the daemon's
           own `!governed`. Passing a second copy of the same fact would give the two a chance to
           disagree, and neither is ever derived from this page's address. */}
-      <CapabilityList connection={connection} capabilities={view.capabilities} />
+      {/* `governed` is PASSED, not inferred. The daemon now answers it on the view, and letting the list
+          fall back to `mayGrant` unanimity here would be the second derivation of one fact that the field
+          exists to remove — harmless while `mayGrant` is `!governed`, wrong the moment it is not. */}
+      <CapabilityList connection={connection} capabilities={view.capabilities} governed={view.governed} />
       <section className="kt-panel flex min-w-0 flex-col gap-2 p-panel">
         <div className="flex flex-wrap items-center gap-2">
           <h3 id={headingId} className="m-0 flex items-center gap-1.5 text-title font-semibold text-fg">

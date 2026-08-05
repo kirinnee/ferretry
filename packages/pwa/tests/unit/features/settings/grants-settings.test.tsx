@@ -148,9 +148,11 @@ describe('GrantsCard', () => {
   });
 
   /**
-   * The capability list sits above the switches and takes its posture from `mayGrant` on the
-   * capabilities — the daemon's own `!governed`. This pins that the surface passes the daemon's answer
-   * through rather than deriving it from the page it happens to be rendered on.
+   * The capability list sits above the switches and takes its posture from `GrantsView.governed` — the
+   * daemon's own `isGovernedCaller(request.loopback)`, PASSED rather than inferred. This pins that the
+   * surface hands the daemon's answer through rather than deriving it from the page it is rendered on, or
+   * from `mayGrant` unanimity a second time. Both fixtures move `mayGrant` with `governed`, because the
+   * daemon does: they are one fact, and a fixture where they disagree is a daemon that cannot exist.
    */
   it('shows the capability list the posture the daemon’s own answer implies', () => {
     const posture = (renderer: ReactTestRenderer): unknown =>
@@ -161,7 +163,10 @@ describe('GrantsCard', () => {
     const remote = render(
       <GrantsCard
         connection={connection()}
-        view={view({ capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: false })) })}
+        view={view({
+          governed: true,
+          capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: false })),
+        })}
         nowMs={NOW}
         onChange={() => {}}
         onUnlock={() => {}}
@@ -172,7 +177,10 @@ describe('GrantsCard', () => {
     const local = render(
       <GrantsCard
         connection={connection()}
-        view={view({ capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: true })) })}
+        view={view({
+          governed: false,
+          capabilities: DAEMON_CAPABILITIES.map(capability => entry({ capability, mayGrant: true })),
+        })}
         nowMs={NOW}
         onChange={() => {}}
         onUnlock={() => {}}
