@@ -187,7 +187,6 @@ export * from '../shell/stop-actions.ts';
 export * from '../shell/task-name.ts';
 export * from '../shell/theme-toggle.tsx';
 export * from '../shell/view-tabs.tsx';
-export * from '../worklets/pcm16-worklet.ts';
 export * from './agent-references.ts';
 export * from './api-client.ts';
 export * from './attachment-blob-cache.ts';
