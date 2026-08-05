@@ -13,6 +13,12 @@ Contracts exist for facts that are true across several files at once — a name 
 five places, a plugin order that must not change, a checksum step that must not disappear. If an
 invariant fits in one file, a type or a test is the better home for it.
 
+`conflict-markers.sh` is the one that is about EVERY file rather than a relationship between several,
+and it earns its place for the reason above turned inside out: no type and no test can own it, because
+the artefact it refuses is not code. `docs/grants.md` reached `main` carrying three markers behind
+eleven green checks — one of them rewritten by treefmt into valid Markdown, so the formatter had
+laundered a defect into something every gate was right to pass.
+
 ## Validators
 
 | Script                        | Runs as                                  | Enforces                                                 |
@@ -20,6 +26,7 @@ invariant fits in one file, a type or a test is the better home for it.
 | `cli-contracts.sh`            | `a-cli-contracts`                        | the ten workspace/CLI/release contracts below            |
 | `action-pins.sh`              | `a-action-pins-trusted`, `…-non-trusted` | GitHub Action pinning policy                             |
 | `commit-msg.sh`               | `a-commit-msg` (`commit-msg` stage)      | conventional commit subjects                             |
+| `conflict-markers.sh`         | `a-conflict-markers`                     | no conflict marker survives, raw or Markdown-laundered   |
 | `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                       |
 | `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code contains no legacy state identifiers/paths  |
 | `composition-reachability.sh` | `a-composition-reachability`             | production modules are used by their composition root    |

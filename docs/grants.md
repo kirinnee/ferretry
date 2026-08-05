@@ -1,4 +1,4 @@
-| the change record | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |# Capability grants — what a caller who is not on this host may do
+# Capability grants — what a caller who is not on this host may do
 
 Read this before describing what grants protect against, because the useful property is narrower
 than the name suggests.
@@ -56,14 +56,21 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 attention, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
-<<<<<<< HEAD
-
 ## Permissive by default; LOCALITY is the layer
 
 Both axes default to **enabled** for every capability. The dangerous act is structurally
 unavailable to a remote caller, so starting open costs much less than it would otherwise, and starting
 closed would make a fresh remote session useless until somebody walked to the machine.
-=======
+
+**The primary security layer is locality, not the password.** A remote caller can never turn a
+capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
+operator who wants one.
+
+**What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
+_grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is
+arbitrary code on the host; `fleet.use` composes changes that write executables. A paired device is
+trusted with those by default — so **pairing**, not this layer, is where that decision is actually
+made.
 
 ### `pairing` is the one that produces credentials
 
@@ -137,21 +144,18 @@ second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `
 there". That mistake was made while writing this section, and it would have cited a non-existent command as
 evidence for a rule. A doc arguing from a command nobody can run is worse than no doc.
 
-## Permissive by default; the password is the layer
+That is one of three tools this feature caught giving a confident wrong answer, and the shape is worth
+carrying: **a tool answering is not a tool agreeing.**
 
-Both axes default to **enabled** for all six. The product should let a person do as much as possible
-from the UI, and the security model is something a cautious operator turns **on** rather than a wall
-everyone starts behind.
+| tool                       | the question you asked    | the question it answered                            |
+| -------------------------- | ------------------------- | --------------------------------------------------- |
+| `rg -r`                    | does this string appear?  | here is every hit, rewritten (`--replace`)          |
+| `git branch -r --contains` | did this content ship?    | is this SHA an ancestor? (never, after a squash)    |
+| `treefmt`                  | is this file well formed? | it is now — a conflict marker became valid Markdown |
 
-**The primary security layer is locality, not the password.** A remote caller can never turn a
-capability on. The operator password is a _second, optional_ lock over remote **configure**, for an
-operator who wants one.
-
-**What this does not reduce, stated rather than discovered:** locality bounds what a remote caller may
-_grant_, and says nothing about what an already-granted capability may _do_. `terminal.use` is
-arbitrary code on the host; `fleet.use` composes changes that write executables. A paired device is
-trusted with those by default — so **pairing**, not this layer, is where that decision is actually
-made.
+The third is the one that needed a gate rather than a note, because nothing was mis-read: every check was
+right about the artefact it was handed, and the formatter had changed the artefact. See
+`scripts/validate/conflict-markers.sh`, which knows the laundered shape as well as the raw one.
 
 ## The operator password
 
@@ -211,16 +215,16 @@ Permissive **defaults** settle what an operator's _silence_ meant. They say noth
 
 ## Where it lives
 
-| thing                      | path                                                         |
-| -------------------------- | ------------------------------------------------------------ |
-| the wire contract          | `packages/protocol/src/lib/grants.ts`                        |
-| the decision               | `packages/daemon/src/lib/grants/`                            |
-| the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts` |
-| the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`           |
-| the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`               |
-| the password verifier      | `<FY_HOME>/state/operator-password.json` (mode 0600)         |
-| the change record          | `<FY_HOME>/state/grant-audit.jsonl`                          |
-| the command line           | `fy daemon config`, `fy daemon password`                     |
+| thing                      | path                                                                    |
+| -------------------------- | ----------------------------------------------------------------------- |
+| the wire contract          | `packages/protocol/src/lib/grants.ts`                                   |
+| the decision               | `packages/daemon/src/lib/grants/`                                       |
+| the authorization boundary | `packages/daemon/src/lib/api/capability.ts`, `dispatcher.ts`            |
+| the routes                 | `packages/daemon/src/lib/runtime/mounts/grants.ts`                      |
+| the grants themselves      | `<FY_HOME>/config/daemon.json`, under `grants`                          |
+| the password verifier      | `<FY_HOME>/state/operator-password.json` (mode 0600)                    |
+| the change record          | `<FY_HOME>/state/grant-audit.jsonl`, read by `fy daemon config history` |
+| the command line           | `fy daemon config`, `fy daemon password`                                |
 
 `fyd --print-config` reports every capability with its **origin** — `default` or `config file` — the
 same provenance treatment every other value gets, because a person reading a permission report is
