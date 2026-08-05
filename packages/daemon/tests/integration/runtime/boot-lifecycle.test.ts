@@ -2719,12 +2719,10 @@ describe('daemon boot lifecycle', () => {
     const home = await tempDirectory('fyd-names');
     const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
-    let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
-      await new Promise<void>(resolve => {
-        release = resolve;
-      });
-    });
+    // `/healthz` only proves the socket is live. It can answer before boot reaches `untilShutdown`,
+    // so install the shutdown latch before starting instead of racing a late `release` assignment.
+    const shutdown = Promise.withResolvers<void>();
+    const world = await worldAt(home, port, () => shutdown.promise);
     await seedSession(home, new Date().toISOString());
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -2738,7 +2736,7 @@ describe('daemon boot lifecycle', () => {
     const answered = await fetch(`http://127.0.0.1:${port}/v1/names?count=8`, { headers });
     const names = NameSuggestionsSchema.parse(await answered.json());
     const refused = await fetch(`http://127.0.0.1:${port}/v1/names?count=0`, { headers });
-    release();
+    shutdown.resolve();
     const code = await exit;
     await runCleanups(cleanups);
 
