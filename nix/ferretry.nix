@@ -58,8 +58,8 @@ let
         # Derive every scoped link from package.json's workspaces. Linking the full workspace is a
         # deliberate superset of the direct dependency list, so transitive imports cannot require a
         # second hand-maintained edit when a package or dependency edge is added.
-        ./scripts/validate/nix-workspace-links.sh link node_modules
-        ./scripts/validate/nix-workspace-links.sh check node_modules
+        ${pkgs.bash}/bin/bash ./scripts/validate/nix-workspace-links.sh link node_modules
+        ${pkgs.bash}/bin/bash ./scripts/validate/nix-workspace-links.sh check node_modules
         bun build ${entry} --compile --outfile ${pname}
       '';
       installPhase = ''
