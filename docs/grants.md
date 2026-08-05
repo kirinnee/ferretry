@@ -128,6 +128,12 @@ So when a seventh capability is added, ask in this order:
 A capability whose coarse switch disables its own remedy is not a flaw to be gated away. It is a one-way
 door, and a one-way door has to be **labelled on the side somebody approaches it from.**
 
+Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
+second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
+`rg -rn "adopt" src` prints every hit with `adopt` rewritten to `n`, which reads as "the command is not
+there". That mistake was made while writing this section, and it would have cited a non-existent command as
+evidence for a rule. A doc arguing from a command nobody can run is worse than no doc.
+
 ## Permissive by default; the password is the layer
 
 Both axes default to **enabled** for all six. The product should let a person do as much as possible
