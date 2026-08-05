@@ -202,24 +202,58 @@ export class CapabilityGrantService implements CapabilityGuard {
   /**
    * Records a change to the grants themselves.
    *
-   * TWO GATES, AND THEY ARE NOT THE SAME GATE.
+   * ## WIDENING AND NARROWING ARE NOT THE SAME ACT, AND THEY ARE NOT GATED THE SAME WAY
    *
-   * The FIRST is the grant: changing capability X's own grant is a `configure` act on X, so a governed
-   * caller must already hold `configure` for every capability the patch names. That is what stops the
-   * layer being self-defeating — a UI that may not configure the warden may not grant itself
-   * permission to. The host's own command line is ungoverned and skips it.
+   * Turning an axis ON hands a remote caller more than it had. Turning one OFF is what somebody does
+   * during an incident, and a password prompt between a person and shutting a door is a liability —
+   * so revoking is never harder than granting, and a patch that only narrows is never gated by the
+   * password or by the lockout.
    *
-   * The SECOND is the password, and it applies to WIDENING ONLY, on every path including the host's.
-   * Turning an axis on is the one change that hands a remote browser more than it had. Turning one off
-   * is what somebody does in an incident, and a password prompt between a person and shutting a door
-   * is a liability, so a patch that only narrows is never gated — by the password or by the lockout.
+   * ## WIDENING
+   *
+   * With an operator password set, widening needs a valid unlock on EVERY path, the host's own command
+   * line included: proving the password is what says an operator meant this, and that is the one claim
+   * a grant change actually rests on.
+   *
+   * With NO password set, widening is a host act. A machine with no password has no way for a remote
+   * caller to prove operator intent, so a browser that could turn a capability back on would defeat
+   * the coarse switch entirely — the refusal names both remedies, doing it at the host or setting a
+   * password so it can be done from anywhere.
+   *
+   * ## NARROWING
+   *
+   * A governed caller that has NOT proved the password must already hold `configure` on every
+   * capability it names. That is what stops the layer being self-defeating: a UI the operator has
+   * excluded from warden configuration cannot quietly rewrite the warden grant. A caller that HAS
+   * proved the password is the operator, so the per-capability gate has nothing left to add.
    */
   async patch(patch: GrantsPatch, presentation: CapabilityPresentation): Promise<GrantsView> {
     const current = this.grants;
     if (current === undefined)
       throw new GrantError('unavailable', 'this daemon could not read its capability grants, so it will not change them');
     const evaluation = this.evaluate(presentation);
-    if (evaluation.governed) {
+    const next = applyGrantPatch(current, patch);
+    const widened = widenedBy(current, next);
+    if (widened.length > 0) {
+      if (this.passwordSet) {
+        if (evaluation.rateLimited)
+          throw new GrantError(
+            'forbidden',
+            `too many wrong operator passwords have been tried, so this daemon is not checking any more of them for now; ${widened.join(', ')} cannot be granted until the lockout passes`,
+          );
+        if (!evaluation.unlockHeld)
+          throw new GrantError(
+            'forbidden',
+            `granting ${widened.join(', ')} needs the operator password on this machine; revoking never does`,
+          );
+      } else if (evaluation.governed) {
+        throw new GrantError(
+          'forbidden',
+          `granting ${widened.join(', ')} is done on the host, because this machine has no operator password for a remote caller to prove; run \`${this.deps.clientName} daemon config\` there, or set a password with \`${this.deps.clientName} daemon password set\` so it can be granted from anywhere`,
+        );
+      }
+    }
+    if (evaluation.governed && !evaluation.unlockHeld) {
       for (const capability of patchedCapabilities(patch)) {
         // The grant alone, deliberately NOT `decideCapability(configure)`: that would demand an unlock
         // for a change that only revokes, and revoking must never be harder than granting.
@@ -230,21 +264,6 @@ export class CapabilityGrantService implements CapabilityGuard {
             `the operator of this machine has not granted the UI permission to change the ${capability} grant`,
           );
       }
-    }
-    const next = applyGrantPatch(current, patch);
-    const widened = widenedBy(current, next);
-    if (widened.length > 0 && this.passwordSet) {
-      const now = this.deps.clock.nowMs();
-      if (isUnlockLocked(this.attempts, now))
-        throw new GrantError(
-          'forbidden',
-          `too many wrong operator passwords have been tried, so this daemon is not checking any more of them for now; ${widened.join(', ')} cannot be granted until the lockout passes`,
-        );
-      if (!evaluation.unlockHeld)
-        throw new GrantError(
-          'forbidden',
-          `granting ${widened.join(', ')} needs the operator password on this machine; revoking never does`,
-        );
     }
     const changes = grantChanges(current, next);
     await this.deps.document.write(next);

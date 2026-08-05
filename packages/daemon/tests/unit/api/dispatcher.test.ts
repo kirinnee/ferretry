@@ -5,6 +5,7 @@ import {
   ApiError,
   type ApiRoute,
   ApiRouter,
+  type CapabilityGuard,
   CLIENT_HEADER,
   jsonResponse,
   type RouteScope,
@@ -354,5 +355,122 @@ describe('ApiDispatcher error handling', () => {
 
     // Assert
     should(response.headers.get('cache-control')).equal('no-store');
+  });
+});
+
+describe('the operator grant layer', () => {
+  /** A route that names a capability, so the guard is consulted for it. */
+  const governed = (): ApiRoute => ({
+    method: 'GET',
+    path: '/v1/fleet/plan',
+    scope: 'admin',
+    capability: { capability: 'fleet', axis: 'use' },
+    handle: async () => jsonResponse({ plan: [] }),
+  });
+
+  const guard = (allowed: boolean): CapabilityGuard => ({
+    decide: () => ({ allowed, refusal: allowed ? 'granted' : 'not-granted' }),
+    explain: () => 'the operator of this machine has not granted the UI the use of the agent fleet',
+  });
+
+  it('should refuse a governed route when no guard was wired at all', async () => {
+    // A route that names a capability and a dispatcher built without a guard is a WIRING MISTAKE, and
+    // the safe reading of "nobody can tell me whether this is allowed" is that it is not. Serving it
+    // would be the damaged-state-as-empty-state defect this product has already been bitten by.
+    // Arrange
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials);
+
+    // Act
+    const answered = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
+
+    // Assert
+    should(answered.status).equal(403);
+    should(JSON.parse(answered.body)).have.property('code', 'grant_undetermined');
+  });
+
+  it('should ask the guard only AFTER authentication and the route scope have both passed', async () => {
+    // The order is the invariant. By the time a grant is consulted the request is one this daemon
+    // WOULD have served, so the only thing the grant can do is decline it — which is what makes "a
+    // grant only ever narrows" a property of the code rather than a promise in a document.
+    // Arrange — a guard that would allow anything, in front of a route the caller cannot reach.
+    const asked: string[] = [];
+    const recording: CapabilityGuard = {
+      decide: demand => {
+        asked.push(demand.capability);
+        return { allowed: true, refusal: 'granted' };
+      },
+      explain: () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
+
+    // Act — anonymous, so authentication refuses before anything else runs.
+    const anonymous = await dispatcher.dispatch(request({ path: '/v1/fleet/plan' }));
+
+    // Assert — the guard was never consulted, and a permissive one cannot rescue the request.
+    should(anonymous.status).equal(401);
+    should(asked).be.empty();
+  });
+
+  it('should refuse a governed route with the guard’s own sentence and a reason code', async () => {
+    // A denial that says only "forbidden" is the dead end this exists to remove: the reason code lets
+    // a client tell "the operator said no" from "you need to unlock" without parsing prose.
+    // Arrange
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, guard(false));
+
+    // Act
+    const answered = await dispatcher.dispatch(request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }));
+
+    // Assert
+    should(answered.status).equal(403);
+    should(JSON.parse(answered.body)).containDeep({ code: 'grant_not_granted' });
+    should(answered.body).match(/has not granted the UI the use of the agent fleet/u);
+  });
+
+  it('should leave an ungoverned route untouched by the grant layer', async () => {
+    // Most of the daemon's surface lives inside its own state home and is not one of the five things
+    // an operator is asked about. A grant list that grew to cover every route would be a second copy
+    // of the route table.
+    // Arrange
+    const ungoverned: ApiRoute = {
+      method: 'GET',
+      path: '/v1/sessions',
+      scope: 'admin',
+      handle: async () => jsonResponse([]),
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([ungoverned]), credentials, guard(false));
+
+    // Act
+    const answered = await dispatcher.dispatch(request({ path: '/v1/sessions', headers: { authorization: 'Bearer admin-secret' } }));
+
+    // Assert
+    should(answered.status).equal(200);
+  });
+
+  it('should hand the guard the transport’s loopback answer and the unlock header', async () => {
+    // NEITHER IS SELF-REPORTED IN A WAY THAT MATTERS: `loopback` is the transport's own account of
+    // where the socket came from — a relayed hop is never loopback — and the unlock is a value this
+    // daemon minted itself.
+    // Arrange
+    const seen: { loopback?: boolean; unlock?: string }[] = [];
+    const recording: CapabilityGuard = {
+      decide: (_demand, presentation) => {
+        seen.push({ loopback: presentation.loopback, unlock: presentation.unlock });
+        return { allowed: true, refusal: 'granted' };
+      },
+      explain: () => undefined,
+    };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, recording);
+
+    // Act
+    await dispatcher.dispatch(
+      request({
+        path: '/v1/fleet/plan',
+        headers: { authorization: 'Bearer admin-secret', 'x-ferretry-operator-unlock': 'fy_unlock_abc' },
+        loopback: true,
+      }),
+    );
+
+    // Assert
+    should(seen).deepEqual([{ loopback: true, unlock: 'fy_unlock_abc' }]);
   });
 });
