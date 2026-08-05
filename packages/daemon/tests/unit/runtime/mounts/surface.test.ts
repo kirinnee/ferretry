@@ -121,6 +121,50 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined },
+  foreignHistory: {
+    list: async () => ({
+      conversations: [
+        {
+          id: 'imported-one',
+          harness: 'claude' as const,
+          title: 'Fixture imported transcript',
+          source: '/fixture/claude/projects/project/one.jsonl',
+          eventCount: 5,
+          readOnly: true as const,
+        },
+      ],
+      skipped: [
+        {
+          harness: 'codex' as const,
+          source: '/fixture/codex/sessions/one.jsonl',
+          reason: 'invalid-json',
+        },
+        {
+          harness: 'codex' as const,
+          source: '/fixture/codex/sessions/two.jsonl',
+          reason: 'invalid-json',
+        },
+      ],
+    }),
+    get: async id =>
+      id === 'imported-one'
+        ? ({
+            id,
+            harness: 'claude',
+            title: 'Fixture imported transcript',
+            source: '/fixture/claude/projects/project/one.jsonl',
+            eventCount: 5,
+            readOnly: true,
+            events: [
+              { kind: 'message', role: 'user', text: 'record identifier', recordId: 'record' },
+              { kind: 'message', role: 'assistant', text: 'item identifier', itemId: 'item' },
+              { kind: 'message', role: 'system', text: 'message identifier', messageId: 'message' },
+              { kind: 'message', role: 'tool', text: 'must not be exposed' },
+              { kind: 'notice' },
+            ],
+          } as never)
+        : undefined,
+  },
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -252,6 +296,10 @@ describe('the mounted daemon surface', () => {
       // one at all.
       'POST /v1/fleet/proposals/:proposalId/authorize',
       'POST /v1/fleet/proposals/:proposalId/apply',
+      // Imported harness history is deliberately not a session route: it can be read but has no
+      // daemon journal, lifecycle, pane, or resume/send control.
+      'GET /v1/imports/history',
+      'GET /v1/imports/history/:importId',
       'GET /v1/gc',
       'POST /v1/gc',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
@@ -395,6 +443,13 @@ describe('the mounted daemon surface', () => {
     const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
     const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
+    const importedHistory = await dispatcher.dispatch(request({ path: '/v1/imports/history', headers: human }));
+    const importedConversation = await dispatcher.dispatch(
+      request({ path: '/v1/imports/history/imported-one', headers: human }),
+    );
+    const missingImportedConversation = await dispatcher.dispatch(
+      request({ path: '/v1/imports/history/not-found', headers: human }),
+    );
     const terminals = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/terminals', headers: human }));
     const learning = await dispatcher.dispatch(request({ path: '/v1/learning/status', headers: human }));
     // The login window, over the same dispatcher: the route `fy browser login` and the PWA's banner
@@ -435,6 +490,8 @@ describe('the mounted daemon surface', () => {
       request({ path: '/v1/sessions/s1/attach', headers: human, loopback: true }),
     );
     const remoteAttach = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attach', headers: human }));
+    const importedHistoryBody = importedHistory.body;
+    const importedConversationBody = importedConversation.body;
 
     // Assert
     should(health.status).equal(200);
@@ -455,6 +512,13 @@ describe('the mounted daemon surface', () => {
     should(tasks.status).equal(200);
     should(fleet.status).equal(200);
     should(analytics.status).equal(200);
+    should(importedHistory.status).equal(200);
+    should(importedConversation.status).equal(200);
+    should(missingImportedConversation.status).equal(404);
+    should(importedHistoryBody).containEql('"count":2');
+    should(importedHistoryBody).not.containEql('/fixture/');
+    should(importedConversationBody).containEql('record identifier');
+    should(importedConversationBody).not.containEql('must not be exposed');
     should(terminals.status).equal(200);
     should(learning.status).equal(200);
     should(login.status).equal(200);

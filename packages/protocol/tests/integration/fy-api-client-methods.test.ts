@@ -47,6 +47,18 @@ const SNAPSHOT_TEXT = 'pane line one\npane line two';
 const LOG_TEXT = 'turn 1 log output';
 const WARDEN_REPORT = '# Warden report\n\nVerdict: LEAVE\n';
 const NAME_SUGGESTIONS = ['Fix Transcript Scrolling', 'Port Protocol Client', 'Cover Typed Methods'];
+const FOREIGN_HISTORY = { conversations: [], skipped: [] };
+const FOREIGN_CONVERSATION = {
+  conversation: {
+    id: 'import-1',
+    harness: 'claude',
+    title: 'Imported read-only conversation',
+    eventCount: 2,
+    startedAt: '2026-08-05T00:00:00.000Z',
+    readOnly: true,
+  },
+  messages: [{ id: 'record-1', role: 'user', text: 'A real imported message.' }],
+};
 
 const sessionResponse = (): Response => jsonResponse(sessionView);
 
@@ -199,6 +211,22 @@ const CASES: readonly MethodCase[] = [
     path: '/v1/analytics?q=status%3Arunning+%26live',
     response: () => jsonResponse(analyticsResponse),
     expected: analyticsResponse,
+  },
+  {
+    name: 'foreignHistory',
+    invoke: client => client.foreignHistory(),
+    verb: 'GET',
+    path: '/v1/imports/history',
+    response: () => jsonResponse(FOREIGN_HISTORY),
+    expected: FOREIGN_HISTORY,
+  },
+  {
+    name: 'foreignHistoryConversation with a percent-encoded id',
+    invoke: client => client.foreignHistoryConversation('import 1/a'),
+    verb: 'GET',
+    path: '/v1/imports/history/import%201%2Fa',
+    response: () => jsonResponse(FOREIGN_CONVERSATION),
+    expected: FOREIGN_CONVERSATION,
   },
   {
     name: 'scratchPlan with the default limit',

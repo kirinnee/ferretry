@@ -8,12 +8,28 @@
  * destination is built from the supplied daemon id.
  */
 
+import {
+  Archive,
+  ChevronsRight,
+  Cpu,
+  Plus,
+  Radio,
+  Settings,
+  ShieldCheck,
+  SlidersHorizontal,
+  User,
+  Users,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { cn } from '../lib/class-names.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { daemonNewSessionPath, daemonSettingsPath, daemonWardenPath } from '../lib/pages/routes.ts';
-import { useLayoutMode } from '../hooks/use-layout-mode.ts';
-import { ChevronsRight, Cpu, Plus, Radio, Settings, ShieldCheck, SlidersHorizontal, User, Users } from 'lucide-react';
+import {
+  daemonImportedHistoryPath,
+  daemonNewSessionPath,
+  daemonSettingsPath,
+  daemonWardenPath,
+} from '../lib/pages/routes.ts';
 import { RouteLink } from './route-link.tsx';
 
 export type FleetModeFilter = 'all' | 'auto' | 'interactive';
@@ -140,6 +156,15 @@ export function FleetNavigationRail({
         className="kt-btn h-[44px] w-[44px] justify-center !px-0"
       >
         <ShieldCheck size={14} aria-hidden="true" />
+      </RouteLink>
+      <RouteLink
+        to={daemonImportedHistoryPath(daemon)}
+        {...(onNavigate ? { onNavigate } : {})}
+        aria-label="Open imported history"
+        title="Imported history"
+        className="kt-btn h-[44px] w-[44px] justify-center !px-0"
+      >
+        <Archive size={14} aria-hidden="true" />
       </RouteLink>
       <RouteLink
         to={daemonSettingsPath(daemon)}

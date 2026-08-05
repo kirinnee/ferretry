@@ -50,6 +50,7 @@ describe('PageHost', () => {
       Warden: daemonPage('warden'),
       Analytics: daemonPage('analytics'),
       Learning: daemonPage('learning'),
+      ImportedHistory: daemonPage('imported-history'),
     };
     const paths = [
       '/d/daemon-a',
@@ -60,6 +61,7 @@ describe('PageHost', () => {
       '/d/daemon-a/warden',
       '/d/daemon-a/analytics',
       '/d/daemon-a/learning',
+      '/d/daemon-a/history',
     ];
 
     // Act
@@ -77,6 +79,7 @@ describe('PageHost', () => {
       '<div data-page="warden">warden</div>',
       '<div data-page="analytics">analytics</div>',
       '<div data-page="learning">learning</div>',
+      '<div data-page="imported-history">imported-history</div>',
     ]);
     should(received).have.length(paths.length);
     for (const actual of received) should(actual).equal(connection);
@@ -100,6 +103,7 @@ describe('PageHost', () => {
       Warden: unusedDaemonPage,
       Analytics: unusedDaemonPage,
       Learning: unusedDaemonPage,
+      ImportedHistory: unusedDaemonPage,
     };
 
     // Act
@@ -133,6 +137,7 @@ describe('PageHost', () => {
       Warden: daemonPage,
       Analytics: daemonPage,
       Learning: daemonPage,
+      ImportedHistory: daemonPage,
     };
 
     // Act
