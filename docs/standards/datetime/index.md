@@ -209,7 +209,9 @@ timezone been copied onto each `Schedule`, the same move would be a migration.
 4. **Separate storage from display.** Store the instant; convert at the moment of rendering, never
    before.
 5. **Never read the ambient clock in domain code.** Take a clock as a dependency — that is what
-   makes the behaviour testable. See [Testing Conventions](../testing/index.md).
+   makes the behaviour testable. A default parameter or a defaulted constructor option counts as
+   taking it as a dependency; a read inside a body does not. See
+   [The ambient clock](#1-the-ambient-clock) and [Testing Conventions](../testing/index.md).
 
 ---
 
@@ -236,6 +238,57 @@ class Session {
   }
 }
 ```
+
+#### An overridable default IS a dependency
+
+**Settled: a default parameter that reads the ambient clock is conformant.** The question is real —
+`now = Date.now()` is a dependency _and_ a read, and the rule above could be read either way — so
+this is the answer, and it is not to be re-litigated per pull request.
+
+```typescript
+// RIGHT - the read is in the SIGNATURE. Every caller can override it; the tests do.
+export const relativeTime = (at: number, now = Date.now()): string => { … };
+
+// RIGHT - the same thing for a service: a defaulted option, visible in the constructor.
+constructor(options: SessionAttachmentOptions) {
+  this.now = options.now ?? (() => new Date());
+}
+
+// WRONG - the read is in a BODY. No call site can override it; no test can freeze it.
+formatAge(at: number): string {
+  return humanise(Date.now() - at);
+}
+```
+
+Three conditions, all of them:
+
+1. **The read is at the signature** — a default parameter, or a `??` fallback on a constructor
+   option. Never inside a body, and never behind a branch.
+2. **Every call site can override it**, and at least one test does. If no test injects a clock, the
+   default is not a dependency; it is an ambient read with a decoration.
+3. **The value is local to this program.** The moment a second program must agree with this one about
+   what time it is, the clock stops being a dependency and becomes a fact with an owner — see
+   [Fact Ownership](../fact-ownership/index.md).
+
+The honest cost, stated so the trade is visible: an overridable default puts the impurity in the
+module rather than at the composition root, which is one step worse than a fully injected clock. It
+is accepted because the property this rule exists to protect — behaviour that can be tested without
+freezing global time — is completely present, while the alternative threads a clock port through
+every pure formatting helper in the bundle and buys nothing testable that the default does not
+already give.
+
+**How a violation is detected.** No gate covers this; the probe is manual, and it is stated here so
+two runs of it are the same measurement:
+
+```bash
+# every ambient clock read in domain code across all six packages
+git ls-files "packages/*/src/lib/*" | grep '\.ts$' | grep -v tests \
+  | xargs rg -n 'Date\.now\(\)|new Date\(\)'
+```
+
+Every line it returns must be a signature default. On `00b733d0` it returns nine, and all nine are —
+eight default parameters and one defaulted constructor option. A line that is neither is the `WRONG`
+case at the top of this section, and it moves.
 
 ### 2. Local time where an instant was meant
 
@@ -333,7 +386,8 @@ Storing UTC buys:
 
 - [ ] An Instant type, not a local datetime
 - [ ] Stored in UTC, ISO 8601
-- [ ] Read from an injected clock, never the ambient one
+- [ ] Read from an injected clock, never the ambient one — a signature default counts, a body read
+      does not
 - [ ] Converted to a local timezone only at render time
 
 **Dates (birthdays, due dates):**
@@ -372,3 +426,5 @@ Storing UTC buys:
 - [Data Validation](../validation/index.md) — parsing date, time, and duration inputs
 - [Testing Conventions](../testing/index.md) — why the clock is injected
 - [Functional Practices](../functional-practices/index.md) — keeping domain logic free of ambient state
+- [Fact Ownership](../fact-ownership/index.md) — when a time two programs must agree on stops being a
+  local dependency

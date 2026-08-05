@@ -27,6 +27,7 @@ This file is a pure index — the linked documents own their subjects.
 | [Three-Layer Architecture](docs/standards/three-layer-architecture/index.md)     | `src/lib` / `src/adapters` / `bin` seams and ports  |
 | [Stateless OOP with DI](docs/standards/stateless-oop-di/index.md)                | Constructor injection, no hidden state              |
 | [Architecture](docs/standards/architecture/index.md)                             | Two-name model, package layout, repo-wide machinery |
+| [Fact Ownership](docs/standards/fact-ownership/index.md)                         | One fact, one owner, when two programs must agree   |
 | [Validation](docs/standards/validation/index.md)                                 | Parse-don't-validate at boundaries (zod)            |
 | [Datetime](docs/standards/datetime/index.md)                                     | Instants, timezones, durations                      |
 | [Utilities](docs/standards/utilities/index.md)                                   | Shared helpers and what belongs in one              |

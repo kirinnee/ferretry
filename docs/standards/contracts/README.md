@@ -13,6 +13,11 @@ Contracts exist for facts that are true across several files at once — a name 
 five places, a plugin order that must not change, a checksum step that must not disappear. If an
 invariant fits in one file, a type or a test is the better home for it.
 
+This page is the list of gates. The rule they enforce — where a fact two programs must agree on is
+allowed to be defined, and why a second definition fails silently — is
+[Fact Ownership](../fact-ownership/index.md). Read that first when deciding whether a new invariant
+deserves a contract at all.
+
 `conflict-markers.sh` is the one that is about EVERY file rather than a relationship between several,
 and it earns its place for the reason above turned inside out: no type and no test can own it, because
 the artefact it refuses is not code. `docs/grants.md` reached `main` carrying three markers behind
