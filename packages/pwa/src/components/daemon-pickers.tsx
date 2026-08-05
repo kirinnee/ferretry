@@ -144,6 +144,25 @@ export const projectFieldOptions = (catalog: ProjectPickerCatalog): readonly Pro
 };
 
 /**
+ * One half's sentence, or `null` when that half has nothing to apologise for.
+ *
+ * Written once and called twice so the registry and the session list cannot
+ * drift into answering the question differently — they are the same question
+ * about two independent reads, and the only thing that differs is the words.
+ *
+ * `retained` is the ROW SHAPE, never the verdict: it picks between the two
+ * sentences and has no vote on whether there is one. Reading it as the verdict
+ * is precisely the bug this signature is shaped to make unwriteable.
+ */
+const halfRefusal = (
+  status: DaemonProjectsSlice['status'] | DaemonFleetSlice['status'],
+  error: string | null,
+  retained: boolean,
+  missing: string,
+  stale: string,
+): string | null => (status === 'error' ? (error ?? (retained ? stale : missing)) : null);
+
+/**
  * The project side of the same table, with one case accounts do not have:
  * HALF THE CATALOGUE CAN FAIL ON ITS OWN.
  *
@@ -157,6 +176,32 @@ export const projectFieldOptions = (catalog: ProjectPickerCatalog): readonly Pro
  * warning. The one thing that never happens is a recent folder being described
  * as registered: they are separate members of a union, and only the registered
  * branch can carry a registry id at all.
+ *
+ * WHAT DECIDES IS THE STATUS, AND ONLY THE STATUS — the same question
+ * `accountFieldSource` above asks. Absent rows cannot answer it: `projects: null`
+ * is equally the reading for a read still in flight and one that refused, and the
+ * two reads settle independently, so the window where one has answered and the
+ * other has not is what every first paint of this field looks like. Warning there
+ * would tell a reader their host refused something it is at that moment busy
+ * answering — the same "absence of evidence read as evidence" this whole module
+ * exists to refuse, merely pointed the other way.
+ *
+ * PRESENT ROWS CANNOT ANSWER IT EITHER, which is the mirror trap and the easier
+ * one to walk into. Both stores deliberately keep their last good answer through
+ * a failed refresh — `projects-store.ts:149-155` and `fleet-store.ts` both say so
+ * in as many words — so a half can hold real rows AND have refused, and reading
+ * only the rows would offer folders from before the outage looking exactly like
+ * folders from a second ago. Any `error` status earns a sentence; the rows stay
+ * either way.
+ *
+ * THE ROW SHAPE ONLY CHOOSES THE WORDS. A half that failed with nothing cached
+ * is MISSING and its sentence says which folders are consequently absent; a half
+ * that failed over rows it had already proved is STALE and its sentence says the
+ * rows on screen may be out of date. Saying "only recently used folders are
+ * listed" over a list that is showing registered ones would be false in exactly
+ * the way this function exists to avoid. The daemon's own words replace both
+ * whenever it supplied any. When both halves refused the registry's sentence is
+ * the one shown, unchanged from before.
  */
 export const projectFieldSource = (
   projects: DaemonProjectsSlice,
@@ -169,12 +214,21 @@ export const projectFieldSource = (
       ? { kind: 'failed', reason: reason ?? 'this daemon’s folders could not be read' }
       : { kind: 'loading' };
   }
-  const partial =
-    projects.projects === null
-      ? (projects.error ?? 'the registered projects could not be read — only recently used folders are listed')
-      : fleet.sessions === null
-        ? (fleet.error ?? 'the session list could not be read — only registered projects are listed')
-        : null;
+  const registryRefusal = halfRefusal(
+    projects.status,
+    projects.error,
+    projects.projects !== null,
+    'the registered projects could not be read — only recently used folders are listed',
+    'the registered projects could not be refreshed — the folders listed may be out of date',
+  );
+  const sessionsRefusal = halfRefusal(
+    fleet.status,
+    fleet.error,
+    fleet.sessions !== null,
+    'the session list could not be read — only registered projects are listed',
+    'the session list could not be refreshed — the recently used folders may be out of date',
+  );
+  const partial = registryRefusal ?? sessionsRefusal;
   return { kind: 'ready', options, ...(partial === null ? {} : { staleReason: partial }) };
 };
 
@@ -465,13 +519,34 @@ export interface ProjectPickerFieldProps extends DaemonPickerFieldProps {
   readonly source: PickerSource<ProjectFieldOption>;
 }
 
+/**
+ * WHAT AN EMPTY FOLDER LIST SAYS — ONCE, FOR BOTH CHANNELS.
+ *
+ * The control's own default sentence is "Nothing is published to choose from",
+ * which is true of a host and useless about folders: it does not say that TWO
+ * separate things came back empty, and a reader who cannot see the panel is the
+ * one who most needs to be told that neither the registry nor the session list
+ * had anything, so typing a path is the whole job rather than a workaround.
+ *
+ * `emptyNotice` and `emptyStatus` are a pair on purpose — `picker-combobox.tsx`
+ * says so where it declares them — and the account field honours that pairing
+ * through `accountEmptyCopy`. Accounts need two DIFFERENT sentences because a
+ * migration filters the roster and the spoken half has to admit the filter.
+ * Nothing filters folders, so the honest spoken sentence is the visible one, and
+ * it is written once here rather than twice at the call site: two literals that
+ * must agree are two literals that eventually will not.
+ */
+const PROJECT_EMPTY_COPY =
+  'This daemon registers no projects, and no session has used a folder yet. Type a path instead.';
+
 export function ProjectPickerField({ source, ...field }: ProjectPickerFieldProps): ReactNode {
   return (
     <PickerCombobox
       describedBy={field.describedBy}
       id={field.id}
       label={field.label}
-      emptyNotice="This daemon registers no projects, and no session has used a folder yet. Type a path instead."
+      emptyNotice={PROJECT_EMPTY_COPY}
+      emptyStatus={PROJECT_EMPTY_COPY}
       onValueChange={field.onValueChange}
       placeholder={field.placeholder}
       renderOption={ProjectPickerRow}

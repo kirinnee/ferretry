@@ -340,7 +340,7 @@ describe('projectFieldSource', () => {
   });
 
   it('names the missing half itself when the failed read said nothing', () => {
-    const source = projectFieldSource(projectsSlice({ projects: null }), fleetSlice(), []);
+    const source = projectFieldSource(projectsSlice({ projects: null, status: 'error' }), fleetSlice(), []);
 
     expect(source).toMatchObject({
       kind: 'ready',
@@ -348,13 +348,90 @@ describe('projectFieldSource', () => {
     });
   });
 
-  it('warns the other way round when only the session list is missing', () => {
-    expect(projectFieldSource(projectsSlice(), fleetSlice({ sessions: null }), [])).toMatchObject({
+  it('warns the other way round when only the session list failed', () => {
+    expect(projectFieldSource(projectsSlice(), fleetSlice({ sessions: null, status: 'error' }), [])).toMatchObject({
       staleReason: 'the session list could not be read — only registered projects are listed',
     });
     expect(
-      projectFieldSource(projectsSlice(), fleetSlice({ sessions: null, error: 'the fleet read timed out' }), []),
+      projectFieldSource(
+        projectsSlice(),
+        fleetSlice({ sessions: null, status: 'error', error: 'the fleet read timed out' }),
+        [],
+      ),
     ).toMatchObject({ staleReason: 'the fleet read timed out' });
+  });
+
+  /**
+   * The two reads settle independently, so one of them having answered while the
+   * other has not is what EVERY first paint of this field looks like. Warning
+   * there would tell a reader the host refused something it is at that moment
+   * busy answering — and the sentence would clear itself a moment later, which
+   * is how a reader learns to disbelieve the warning that matters.
+   */
+  it('stays silent while the session list is still being read, registry first', () => {
+    for (const status of ['idle', 'loading'] as const) {
+      expect(projectFieldSource(projectsSlice(), fleetSlice({ sessions: null, status }), [])).toEqual({
+        kind: 'ready',
+        options: [],
+      });
+    }
+  });
+
+  it('stays silent while the registry is still being read, session list first', () => {
+    for (const status of ['idle', 'loading'] as const) {
+      expect(projectFieldSource(projectsSlice({ projects: null, status }), fleetSlice(), [])).toEqual({
+        kind: 'ready',
+        options: [],
+      });
+    }
+  });
+
+  /**
+   * BOTH STORES KEEP THEIR LAST GOOD ANSWER THROUGH A FAILED REFRESH, on purpose
+   * — blanking it would turn "we could not reach the host" into "the host has
+   * nothing". So a half can hold real rows and still have refused, and the rows
+   * alone cannot say which. Reading only the rows shows folders from before the
+   * outage with nothing saying they are old.
+   */
+  it('warns when the registry failed over rows it had already proved', () => {
+    expect(
+      projectFieldSource(projectsSlice({ projects: [ferretry], status: 'error' }), fleetSlice(), []),
+    ).toMatchObject({
+      kind: 'ready',
+      staleReason: 'the registered projects could not be refreshed — the folders listed may be out of date',
+    });
+  });
+
+  it('warns when the session list failed over sessions it had already proved', () => {
+    expect(
+      projectFieldSource(projectsSlice(), fleetSlice({ sessions: [sessionView('s1')], status: 'error' }), []),
+    ).toMatchObject({
+      kind: 'ready',
+      staleReason: 'the session list could not be refreshed — the recently used folders may be out of date',
+    });
+  });
+
+  /** The row shape picks the WORDS; the daemon's own sentence still replaces both. */
+  it('prefers the daemon’s own words over either fallback, retained or missing', () => {
+    expect(
+      projectFieldSource(
+        projectsSlice({ projects: [ferretry], status: 'error', error: 'the registry is damaged' }),
+        fleetSlice(),
+        [],
+      ),
+    ).toMatchObject({ staleReason: 'the registry is damaged' });
+  });
+
+  /** A pending RETRY does not make the previous failure untrue: the slice keeps
+   *  its error through the next `loading`, and only the settled status decides. */
+  it('keeps warning about a half that failed even though the rows beside it arrived', () => {
+    expect(
+      projectFieldSource(
+        projectsSlice({ projects: null, status: 'error', error: 'projects are admin-only' }),
+        fleetSlice({ sessions: null, status: 'loading', error: 'the fleet read timed out' }),
+        [],
+      ),
+    ).toMatchObject({ staleReason: 'projects are admin-only' });
   });
 
   it('adds no warning when both halves were read', () => {
@@ -884,6 +961,51 @@ describe('ProjectPickerField', () => {
     expect(input().getAttribute('aria-describedby')).toBe('fy-test-cwd-help');
     expect(input().getAttribute('placeholder')).toBe('/absolute/path');
     expect(input().id).toBe('fy-test-cwd');
+  });
+
+  /**
+   * The SPOKEN half of the same fact. Left unpaired, the panel says two things
+   * came back empty while the live region says the generic "Nothing is published
+   * to choose from" — so the reader who cannot see the panel is the only one not
+   * told what "nothing" was about.
+   */
+  it('speaks the same folder sentence it shows, rather than the generic one', async () => {
+    await show(
+      <ProjectPickerField
+        id="fy-test-cwd"
+        label="Project"
+        onValueChange={() => undefined}
+        source={{ kind: 'ready', options: [] }}
+        value=""
+      />,
+    );
+    await openList();
+
+    const spoken = must(find('[role="status"]'), 'the live region').textContent;
+    expect(spoken).toBe(
+      'This daemon registers no projects, and no session has used a folder yet. Type a path instead.',
+    );
+    expect(spoken).toBe(panelText());
+    expect(spoken).not.toContain('Nothing is published');
+  });
+
+  /** The stale strip is appended to the override, never swallowed by it. */
+  it('keeps the staleness warning audible beside its own empty sentence', async () => {
+    await show(
+      <ProjectPickerField
+        id="fy-test-cwd"
+        label="Project"
+        onValueChange={() => undefined}
+        source={{ kind: 'ready', options: [], staleReason: 'the registry is damaged' }}
+        value=""
+      />,
+    );
+    await openList();
+
+    expect(must(find('[role="status"]'), 'the live region').textContent).toBe(
+      'This daemon registers no projects, and no session has used a folder yet. Type a path instead.' +
+        ' These choices may be out of date.',
+    );
   });
 });
 
