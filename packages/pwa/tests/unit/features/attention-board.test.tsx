@@ -9,6 +9,7 @@ import {
   attentionReference,
   collapsesByDefault,
   describeResponse,
+  resolutionBadge,
 } from '../../../src/features/attention/attention-board.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../../support/dom.ts';
@@ -48,6 +49,15 @@ const snapshot = (overrides: Partial<AttentionSnapshot> = {}): AttentionSnapshot
 });
 
 describe('AttentionBoard', () => {
+  it('distinguishes who dismissed an item from who answered or cleared it', () => {
+    expect(resolutionBadge('agent', 'zoe', 'dismissed').label).toBe('dismissed by agent zoe');
+    expect(resolutionBadge('agent', null, 'done').label).toBe('retracted by agent (unnamed)');
+    expect(resolutionBadge('human', null, 'dismissed').label).toBe('dismissed by you');
+    expect(resolutionBadge('human', null, 'done').label).toBe('done by you');
+    expect(resolutionBadge('daemon', null, 'dismissed').label).toBe('dismissed by the daemon');
+    expect(resolutionBadge('daemon', null, 'done').label).toBe('cleared by the daemon');
+  });
+
   it('renders the oldest item as a rail-led ledger and routes the permission answer', async () => {
     const calls: unknown[][] = [];
     const { container } = await mount(

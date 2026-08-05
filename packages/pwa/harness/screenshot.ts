@@ -487,7 +487,9 @@ try {
           // a tall viewport to capture the full, real phone-width board.
           const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
-          await page.getByLabel('Attention ledger').screenshot({ path: attentionTarget });
+          const attention = page.getByLabel('Attention ledger');
+          await attention.getByText('Resolution audit', { exact: true }).click();
+          await attention.screenshot({ path: attentionTarget });
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
           process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);

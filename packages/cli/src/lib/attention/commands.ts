@@ -28,6 +28,9 @@ const ASK_KINDS = `--kind says what the human DOES:
   review       say the answer is good, or ask for a clarification
   open         write a full answer (the default)`;
 
+const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
+A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
+
 /** Add the shared flags every attention verb carries. */
 function scoped(command: Command): Command {
   return command.option(SESSION_FLAG, SESSION_HELP).option(JSON_FLAG, JSON_HELP);
@@ -101,7 +104,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .command('dismiss')
       .description('dismiss an item without answering it — recorded with who dismissed it')
       .argument('<id>', 'the attention reference, like !A3')
-      .option('-n, --note <text>', 'a note recorded with the dismissal'),
+      .option('-n, --note <text>', 'a note recorded with the dismissal')
+      .addHelpText('after', `\n${DISMISS_POLICY}`),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.dismiss(id, merged<AttentionResolveOptions>(command));
   });
