@@ -54,13 +54,17 @@ export class FileFleetProvisioner implements FleetProvisioner {
     };
   }
 
+  /**
+   * A root is inside itself. `path.relative(root, root)` is the empty string, so requiring a
+   * non-empty result rejected the one directory every first run has to create — the fleet root — and
+   * `fy fleet init` followed by `fy fleet apply` failed on any fresh host, even with `agents: []`.
+   * The empty string satisfies every escape test below on its own; only the length check excluded it.
+   */
   private assertWritablePath(target: string): void {
     const resolved = path.resolve(target);
     const allowed = this.allowedRoots.some(root => {
       const relative = path.relative(root, resolved);
-      return (
-        relative.length > 0 && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)
-      );
+      return !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
     });
     if (!allowed) {
       throw new Error(`refusing to write outside configured fleet roots: ${target}`);
