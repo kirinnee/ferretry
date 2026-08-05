@@ -61,11 +61,12 @@ export interface PushServiceOptions {
  *
  * ## WHAT THIS DOES NOT DO — DECLARED, NOT DISCOVERED
  *
- * - **Nothing raises a notification yet.** `notify` is reachable, exercised and correct, but the only
- *   production caller is `register`'s own enrolment confirmation. A durable attention item, a session
- *   that failed and the agent-callable direct notification each need a presenter that decides WHEN to
- *   speak, and that decision is owned by the notification unit rather than smuggled in here — a
- *   status watcher wired up as a substitute would duplicate the harnesses' own notifications.
+ * - **Nothing raises a notification yet.** `notify` is the one delivery path and it IS called in
+ *   production — by `register`, to confirm an enrolment — but no EVENT reaches it. A durable attention
+ *   item, a session that failed and the agent-callable direct notification each need a presenter that
+ *   decides WHEN to speak, and that decision is owned by the notification unit rather than smuggled in
+ *   here: a status watcher wired up as a substitute would duplicate the harnesses' own notifications.
+ *   Until such a presenter exists, `to` is always a single freshly enrolled device.
  * - **The browser has no service worker.** Enrolment, storage, delivery and revocation are all real on
  *   this side; the client cannot yet subscribe or display anything, because no worker is registered.
  *   Nothing here is blocked on that — an endpoint is validated against its push service, not against
@@ -99,6 +100,13 @@ export class PushService {
    * never be reached at this address again; storing it anyway would report a capability the daemon
    * does not have. Any OTHER delivery failure keeps the enrolment — a timeout says something about the
    * network, not about the endpoint.
+   *
+   * The confirmation goes through `notify`, and the refusal is read from whether the enrolment SURVIVED
+   * it. That is deliberate on both counts. One delivery path means the daemon has one place that knows
+   * how to reach a browser and one place that decides an endpoint is dead, rather than a second opinion
+   * here about the same transport facts. And `notify` already forgets an endpoint reported as gone — so
+   * "the row is no longer there" IS this daemon's own answer to whether the browser can be reached, and
+   * re-deriving it from the outcome would be that answer written down twice.
    */
   async register(deviceId: string, request: RegisterPushDeviceRequest): Promise<PushDeviceView> {
     const at = this.options.clock.now();
@@ -123,14 +131,9 @@ export class PushService {
     // rather than persisted and then failed on the way out.
     const view = pushDeviceView(record);
     await this.options.store.save(record);
-    const outcome = await this.options.transport.deliver({
-      subscription: record.subscription,
-      payload: JSON.stringify(enrolmentConfirmation(record.deviceName)),
-    });
-    if (outcome === 'expired') {
-      await this.options.store.forget([record.id]);
+    await this.notify({ payload: enrolmentConfirmation(record.deviceName) }, [record.id]);
+    if (!(await this.options.store.list()).some(entry => entry.id === record.id))
       throw new PushError('invalid', 'the push service has already discarded this subscription');
-    }
     return view;
   }
 
