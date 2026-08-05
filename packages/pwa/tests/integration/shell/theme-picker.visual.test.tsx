@@ -88,7 +88,10 @@ function OriginalSwatch({ theme: swatch, current }: { theme: string; current: bo
       className={`block min-w-0 flex-1 rounded-sm${current ? ' ring-2 ring-accent ring-offset-1 ring-offset-surface' : ''}`}
     >
       <span className="kt-swatch" data-swatch={swatch} aria-hidden="true">
-        <span className="kt-swatch-face">Aa</span>
+        <span className="kt-swatch-mini">
+          <span className="kt-swatch-header">Aa</span>
+          <span className="kt-swatch-row"><i /><i /><i /></span>
+        </span>
         <i className="kt-swatch-accent" />
         <i className="kt-swatch-signal" />
       </span>
