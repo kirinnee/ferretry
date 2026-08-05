@@ -16,6 +16,7 @@ export * from './attention/index.ts';
 export * from './browser/control/index.ts';
 export * from './browser/transport/index.ts';
 export * from './core/index.ts';
+export * from './fleet-refresh/index.ts';
 export * from './instant.ts';
 export * from './journal.ts';
 export * from './json.ts';
