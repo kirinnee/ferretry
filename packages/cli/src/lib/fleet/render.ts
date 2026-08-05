@@ -15,6 +15,7 @@ import type {
   SharedHistoryChange,
   SharedHistoryPreview,
 } from '@ferretry/fleet';
+import type { FleetApprovalMint } from '@ferretry/protocol';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
 const INDENT = '    ';
@@ -435,4 +436,35 @@ export function renderRecommendation(recommendation: TeamRecommendation): string
   }
   sections.push(...recommendation.warnings.map(warning => `  ! ${warning}`));
   return sections.join('\n');
+}
+
+/**
+ * The approval screen: the one place an approval code is ever printed.
+ *
+ * NOTHING HERE IS EVER WRITTEN ANYWHERE ELSE — the same rule the pairing screen states. The code
+ * lives in this string, on this screen, for its two minutes. It is not logged, not persisted, not
+ * passed as an argument to anything, and there is no machine-readable rendering of it, because a
+ * code a script can read is a code no human approved.
+ *
+ * It says WHAT is being approved and not only that something is, because the whole point of the
+ * detour through a terminal is that the person holding this host can check the change is the one
+ * they expect before handing the browser the authority to make it. `summary` is server-derived and
+ * influenced by an account name, so it is interpolated as plain text and never as markup.
+ *
+ * The re-mint line is here because it is the one surprise in the flow: running this twice is not
+ * idempotent from the browser's side — the second code silently replaces the first.
+ */
+export function renderFleetApproval(mint: FleetApprovalMint): string {
+  return [
+    `Approval code for proposal ${mint.proposalId}`,
+    '',
+    `${INDENT}${mint.code}`,
+    '',
+    `  change   ${mint.mutation} — ${mint.summary}`,
+    `  expires  in ${plural(mint.ttlSeconds, 'second')}, at ${mint.expiresAt}`,
+    `  limits   single use · ${plural(mint.maxAttempts, 'attempt')} before that proposal refuses them all`,
+    '',
+    'Type it into the Fleet tab that is waiting for it. It approves this one change and nothing else,',
+    'and it expires by itself. Running this command again mints a new code and stops this one working.',
+  ].join('\n');
 }

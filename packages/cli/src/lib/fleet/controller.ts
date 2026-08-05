@@ -1,6 +1,7 @@
 import { type FleetIdentity, type FleetManifest, selectIdentities } from '@ferretry/fleet';
 import type {
   IFleetApplier,
+  IFleetAuthorizationGateway,
   IFleetClock,
   IFleetConfigSource,
   IFleetHealthCollectorFactory,
@@ -16,6 +17,7 @@ import type {
 import {
   renderApplyPlan,
   renderApplyResult,
+  renderFleetApproval,
   renderHealth,
   renderIdentityStatus,
   renderLoginResults,
@@ -64,6 +66,8 @@ export interface FleetControllerDeps {
   readonly logins: IFleetLoginService;
   readonly clock: IFleetClock;
   readonly recommendations: IRecommendationGateway;
+  /** Required, not optional: four construction sites is cheaper than a runtime absence check. */
+  readonly authorizations: IFleetAuthorizationGateway;
   readonly out: IFleetOutput;
 }
 
@@ -71,8 +75,10 @@ export interface FleetControllerDeps {
  * Drives `fy fleet …`.
  *
  * Provisioning is a local operation: the fleet is directories, wrappers and settings on this host,
- * and the daemon is not involved. Only `recommend` crosses to the daemon, because deciding which
- * agent should do a piece of work needs the routing catalog the daemon owns.
+ * and for most of these verbs the daemon is not involved. Two of them cross to it. `recommend` does
+ * because deciding which agent should do a piece of work needs the routing catalog the daemon owns.
+ * `authorize` does because a change proposed in a paired browser can only be approved by whoever
+ * holds this host's credential, and this terminal is where that person is.
  */
 export class FleetController {
   constructor(private readonly deps: FleetControllerDeps) {}
@@ -172,6 +178,34 @@ export class FleetController {
     if (task === '') throw new Error('describe the task: fy fleet recommend "<what needs doing>"');
     const recommendation = await this.deps.recommendations.recommend({ task, usage: options.usage !== false });
     this.#report(recommendation, options, () => renderRecommendation(recommendation));
+  }
+
+  /**
+   * Approves exactly one change a paired browser has proposed.
+   *
+   * The device boundary this closes is deliberate: a browser that paired once may inspect this
+   * daemon and may build a write-free proposal, but pairing is not host authority and never becomes
+   * it. So the authority is given here, one change at a time, as a short-lived single-use code bound
+   * to one proposal — and the credential that mints it is this host's, which never leaves this
+   * machine and is never printed.
+   *
+   * `--json` IS REFUSED RATHER THAN INHERITED, and refused loudly rather than ignored. The flag is
+   * declared on the `fleet` group, so it reaches every verb whether or not the verb wants it, and
+   * `#report` would faithfully serialize a live bearer secret into something a pipe can capture and
+   * a script can spend. That would delete the property the whole detour exists for: the code is the
+   * evidence that a human on this host looked at the change and said yes. Ignoring the flag silently
+   * would be worse than refusing it — a pipeline would read a human screen as JSON and misparse it —
+   * so this says what it will not do and why.
+   */
+  async authorize(proposalId: string, options: FleetCommandOptions): Promise<void> {
+    if (options.json === true) {
+      throw new Error(
+        'fy fleet authorize has no --json: an approval code is a bearer secret for the couple of minutes it lives, ' +
+          'and a machine-readable mint is one a script can spend without the human this approval exists to ask',
+      );
+    }
+    const mint = await this.deps.authorizations.authorize(proposalId);
+    this.deps.out.success(renderFleetApproval(mint));
   }
 
   /** The provider logins this host has, joined from the declared configuration and the manifest. */

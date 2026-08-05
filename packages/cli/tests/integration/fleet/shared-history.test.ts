@@ -10,6 +10,7 @@ import { resolveFleetLayout } from '../../../src/lib/fleet/layout.ts';
 import {
   CapturingOutput,
   FrozenClock,
+  RecordingAuthorizationGateway,
   RecordingIdentitySource,
   RecordingLoginService,
   RecordingRecommendationGateway,
@@ -92,6 +93,7 @@ describe('CLI shared-history apply', () => {
       logins: new RecordingLoginService(),
       clock: new FrozenClock('2027-01-15T08:00:00.000Z'),
       recommendations: new RecordingRecommendationGateway(),
+      authorizations: new RecordingAuthorizationGateway(),
       out: output,
     });
     const pool = path.join(layout.fleetDirectory, 'shared', 'claude');

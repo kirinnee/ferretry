@@ -13,8 +13,9 @@ const JSON_HELP = 'print the payload instead of the human rendering';
 const OVERVIEW = `The fleet is the set of agent accounts this host can run: one home, one wrapper
 and one settings layer each, all generated from a single declared configuration.
 
-"apply" is idempotent — run it whenever the configuration changes. Nothing here
-talks to the daemon except "recommend", which needs the routing catalog.`;
+"apply" is idempotent — run it whenever the configuration changes. Almost none of
+this leaves the host: only "recommend", which needs the routing catalog, and
+"authorize", which approves a change proposed in a browser, talk to the daemon.`;
 
 /** Add the shared flags every fleet verb carries. */
 function scoped(command: Command): Command {
@@ -113,4 +114,26 @@ export function registerFleetCommands(program: Command, controller: FleetControl
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.recommend(words, merged<FleetRecommendOptions>(command));
   });
+
+  // Deliberately NOT `scoped()`: this verb refuses `--json`, so advertising the flag on it would
+  // promise something it declines to do. The group still carries the flag, and the controller
+  // answers `fy fleet --json authorize …` by saying why it will not.
+  fleet
+    .command('authorize')
+    .description('approve one change the Fleet tab proposed, by minting the code it is waiting for')
+    .argument('<proposalId>', 'the proposal the browser is showing')
+    .addHelpText(
+      'after',
+      '\nA browser paired with this daemon may look at the fleet and may draft a change, seeing exactly\n' +
+        'what it would write — but it may not make one. Pairing is not authority over the host, and it\n' +
+        'never becomes it. This is where that authority is given, one change at a time.\n\n' +
+        'It prints a short-lived, single-use code bound to that one proposal, which the person types\n' +
+        'back into the tab. The code approves nothing else, expires by itself, and running this again\n' +
+        'replaces it — so the first code stops working.\n\n' +
+        'There is no --json. A code a script can read is a code no human approved, and the point of\n' +
+        'coming to this terminal is that someone holding this host looked at the change and agreed.',
+    )
+    .action(async (proposalId: string, _flags: unknown, command: Command) => {
+      await controller.authorize(proposalId, merged(command));
+    });
 }

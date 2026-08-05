@@ -5,6 +5,8 @@ import {
   renderAccount,
   renderApplyPlan,
   renderApplyResult,
+  renderFleetApproval,
+  renderHealth,
   renderIdentityStatus,
   renderLoginResults,
   renderLoginRow,
@@ -13,13 +15,14 @@ import {
   renderScaffoldResult,
   renderUsage,
   renderUsageRow,
-  renderHealth,
 } from '../../../src/lib/fleet/render';
 import {
   ACCOUNT_ID,
   account,
   applyResult,
+  approvalMint,
   manifest,
+  PROPOSAL_ID,
   plan,
   recommendation,
   scaffoldResult,
@@ -934,5 +937,72 @@ describe('renderScaffoldResult', () => {
 
     // Assert
     should(actual).containEql('prepared the fleet in its directory');
+  });
+});
+
+describe('rendering a fleet approval', () => {
+  it('should show the code, the proposal it belongs to, and what it approves', () => {
+    // Act
+    const actual = renderFleetApproval(approvalMint());
+
+    // Assert — a person typing this into a browser must be able to confirm it is the change
+    // they expect, so the label and the summary travel with the code.
+    should(actual).containEql('7F3K-M9QW');
+    should(actual).containEql(PROPOSAL_ID);
+    should(actual).containEql('create-account — add claude-auto-loge');
+  });
+
+  it('should say when it dies, how many tries it allows, and that it is single use', () => {
+    // Act
+    const actual = renderFleetApproval(approvalMint());
+
+    // Assert
+    should(actual).containEql('in 120 seconds');
+    should(actual).containEql('2026-08-05T12:34:56.000Z');
+    should(actual).containEql('single use');
+    should(actual).containEql('5 attempts');
+  });
+
+  it('should warn that re-running replaces the code', () => {
+    // Act — the one surprise in the flow: a second mint silently kills the first
+    const actual = renderFleetApproval(approvalMint());
+
+    // Assert
+    should(actual).containEql('stops this one working');
+  });
+
+  it('should read singular when the daemon bounds it to one of each', () => {
+    // Act
+    const actual = renderFleetApproval(approvalMint({ ttlSeconds: 1, maxAttempts: 1 }));
+
+    // Assert
+    should(actual).containEql('in 1 second,');
+    should(actual).containEql('1 attempt ');
+  });
+
+  it('should print a summary verbatim rather than interpreting it', () => {
+    // Act — attacker-influenced through the account name, so it is text and never markup
+    const actual = renderFleetApproval(approvalMint({ summary: 'change claude-<ops> & co' }));
+
+    // Assert
+    should(actual).containEql('change claude-<ops> & co');
+  });
+
+  it('should print a mutation label it has never seen rather than hiding it', () => {
+    // Act — a daemon that learns a fourth mutation must widen what this says, not blank it
+    const actual = renderFleetApproval(approvalMint({ mutation: 'retire-account' }));
+
+    // Assert
+    should(actual).containEql('retire-account — add claude-auto-loge');
+  });
+
+  it('should carry no credential of any kind', () => {
+    // Act
+    const actual = renderFleetApproval(approvalMint());
+
+    // Assert — the daemon's admin bearer is what minted this; it may never appear beside it
+    should(actual.toLowerCase()).not.containEql('token');
+    should(actual.toLowerCase()).not.containEql('bearer');
+    should(actual.toLowerCase()).not.containEql('authorization:');
   });
 });

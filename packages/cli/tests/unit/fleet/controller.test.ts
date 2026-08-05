@@ -3,13 +3,16 @@ import should from 'should';
 import { FleetController, type FleetControllerDeps } from '../../../src/lib/fleet/controller';
 import {
   ACCOUNT_ID,
+  approvalMint,
   CapturingOutput,
   FrozenClock,
   GENERATED_AT,
   IDENTITY_KEY,
+  PROPOSAL_ID,
   RecordingApplier,
-  RecordingIdentitySource,
+  RecordingAuthorizationGateway,
   RecordingHealthCollector,
+  RecordingIdentitySource,
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
@@ -38,6 +41,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
     logins: new RecordingLoginService(),
     clock: new FrozenClock(),
     recommendations: new RecordingRecommendationGateway(),
+    authorizations: new RecordingAuthorizationGateway(),
     out,
     ...overrides,
   };
@@ -487,5 +491,70 @@ describe('preparing a fresh host', () => {
 
     // Assert
     should(JSON.parse(out.text)).have.property('pathEntry');
+  });
+});
+
+describe('approving one proposed fleet change', () => {
+  it('should ask the daemon about exactly the proposal it was given', async () => {
+    // Arrange
+    const authorizations = new RecordingAuthorizationGateway();
+    const { subject } = controller({ authorizations });
+
+    // Act
+    await subject.authorize(PROPOSAL_ID, {});
+
+    // Assert
+    should(authorizations.proposalIds).eql([PROPOSAL_ID]);
+  });
+
+  it('should print the code, what it approves, and when it dies', async () => {
+    // Arrange
+    const { subject, out } = controller({ authorizations: new RecordingAuthorizationGateway() });
+
+    // Act
+    await subject.authorize(PROPOSAL_ID, {});
+
+    // Assert
+    should(out.text).containEql('7F3K-M9QW');
+    should(out.text).containEql('create-account — add claude-auto-loge');
+    should(out.text).containEql('2026-08-05T12:34:56.000Z');
+    should(out.warnings).be.empty();
+  });
+
+  it('should refuse --json rather than serialize a live bearer secret', async () => {
+    // Arrange — the flag is declared on the group, so it reaches this verb whether or not it wants it
+    const authorizations = new RecordingAuthorizationGateway();
+    const { subject, out } = controller({ authorizations });
+
+    // Act + Assert
+    await should(subject.authorize(PROPOSAL_ID, { json: true })).be.rejectedWith(/has no --json/u);
+    // Refused BEFORE the mint: a code that was never minted is a code that cannot leak.
+    should(authorizations.proposalIds).be.empty();
+    should(out.lines).be.empty();
+  });
+
+  it('should let a daemon refusal reach the operator unchanged', async () => {
+    // Arrange — the daemon says the proposal timed out; rounding that off to "unknown" would send
+    // someone hunting for a typo in a correct id.
+    const refusal = new Error('fleet proposal expired before it was authorized');
+    const { subject, out } = controller({ authorizations: new RecordingAuthorizationGateway(refusal) });
+
+    // Act + Assert
+    await should(subject.authorize(PROPOSAL_ID, {})).be.rejectedWith(/expired/u);
+    should(out.lines).be.empty();
+  });
+
+  it('should print a summary as text, never as something a terminal would act on', async () => {
+    // Arrange — the account name is the attacker-influenced part of a server-derived line
+    const summary = 'add claude-<b>ops</b> & co';
+    const { subject, out } = controller({
+      authorizations: new RecordingAuthorizationGateway(approvalMint({ summary })),
+    });
+
+    // Act
+    await subject.authorize(PROPOSAL_ID, {});
+
+    // Assert
+    should(out.text).containEql(summary);
   });
 });
