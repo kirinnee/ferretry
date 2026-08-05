@@ -702,7 +702,7 @@ request goes through the router, which attempts direct first and falls back auto
 `RendezvousDurableObject` and the daemon's real `RelayLink` together and asserts the rendezvous saw
 neither a payload nor the device token.
 
-Two properties of that client are worth stating here because they are contract, not implementation:
+Four properties of that client are worth stating here because they are contract, not implementation:
 
 - **The carrier is chosen by trying it, not by a health check.** The first request is attempted over
   direct, and only a TRANSPORT failure moves on. A daemon that answered `503` is reachable and saying
@@ -710,9 +710,22 @@ Two properties of that client are worth stating here because they are contract, 
 - **Discovery is re-read every load and never restored from storage.** A hosted address kept in
   browser storage would be a browser `relayUrl: null` does not reach. An address its owner supplied
   themselves has no runtime source and is persisted; Ferretry's hosted one is not.
+- **A refused carrier says why, and `0` is never a close code.** A browser withholds the cause of a
+  WebSocket failure, but not whether the HANDSHAKE COMPLETED — and that distinction is the whole
+  answer, because this Worker deliberately accepts an upgrade it means to refuse so it can state a
+  reason in a close frame (`refusalUpgrade`). A socket that failed BEFORE opening therefore did not
+  reach a conforming rendezvous at all, and is reported as `1006` with that said in words and the
+  rendezvous origin named. The daemon fingerprint is not named: it addresses the rendezvous and
+  belongs on a pairing screen, not in text a reader may paste into an issue.
+- **A round of carrier failures belongs to the request that made it.** The carrier that WON is
+  remembered for the life of the connection, so a browser on the network the relay exists for does
+  not pay a failed direct connection per call. A round in which NOTHING worked is not remembered:
+  it served no request, so there is no answer to keep, and a later request re-probes. Accumulating
+  refusals on shared per-daemon state instead both duplicated the disclosure under the concurrent
+  requests of an ordinary page load and made a transient failure permanent until a re-pair.
 
-Five named pieces. PR #202 provides the first two, the third is now built on both ends, and the rest
-is outstanding:
+Five named pieces. PR #202 provides the first two, the third is now built on both ends with the
+declared gaps below, the fourth is on screen, and the fifth is outstanding:
 
 1. **A build-time discovery origin in the PWA** — provided by #202. The relay lives on its own
    hostname, so the
@@ -743,16 +756,22 @@ is outstanding:
      all. Closing that needs an out-of-band enrolment path this protocol does not have, and inventing
      one under the tunnel would mean a rendezvous carrying an unauthenticated exchange.
    - **Not every browser call site is routed yet.** The composition root hands the carrier-aware
-     fetcher to everything it already injects one into — the projects, usage and push ports. The
-     feature modules that default their `fetcher` parameter to the global `fetch`
-     (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`, `web-terminals.ts`,
-     `remote-browser.ts`, `skills-api.ts`, `files-api.ts`, `attachment-source.ts`,
-     `runtime-models.ts`, `stt/*`, `analytics-api.ts`) are still direct-only. They FAIL rather than
-     mislead — a request to an unreachable daemon address is a visible error, not a blank screen —
-     but until the fetcher is threaded to them those surfaces are unavailable over a relay.
-4. **Active-carrier disclosure on screen**, rendering `chooseConnection().reason` and the
-   `describeConnectionMethod` observer list for whichever carrier a live session won on. The router
-   holds that answer (`DaemonCarrierRouter.choice`); rendering it is outstanding.
+     fetcher to everything it already injects one into — the projects, usage and push ports, and now
+     the TYPED API CLIENT, whose transport used to dial the daemon's own address itself. That last
+     one was not only unrouted, it was actively misleading: the Settings reachability probe is a
+     typed-client call, so a green `Reachable` pill could sit beside a Carrier panel saying nothing
+     worked, and a daemon reachable only through the relay was reported down by a probe that never
+     tried the relay. The feature modules that default their `fetcher` parameter to `browserFetch`
+     — the direct network — (`learning-api.ts`, `attention-client.ts`, `pin-client.ts`,
+     `web-terminals.ts`, `remote-browser.ts`, `skills-api.ts`, `files-api.ts`,
+     `attachment-source.ts`, `runtime-models.ts`, `stt/*`, `analytics-api.ts`) are still
+     direct-only. They FAIL rather than mislead — a request to an unreachable daemon address is a
+     visible error, not a blank screen — but until the fetcher is threaded to them those surfaces
+     are unavailable over a relay.
+4. **Active-carrier disclosure on screen** — DONE. `ActiveCarrierCard` renders
+   `chooseConnection().reason` and the `describeConnectionMethod` observer list for whichever
+   carrier a live session won on, from `DaemonCarrierRouter.choice`, in Settings › Daemons. A
+   carrier nothing has measured yet says so rather than defaulting to "direct".
 5. **Removal of the interim carrier chooser and self-hosting setup route.** The current PWA still
    renders `onboarding-connection-chooser.tsx`, offers `own-relay`, and routes it through
    `SELF_HOSTED_RELAY_STEPS`. The conforming flow uses the automatic order above and leaves
