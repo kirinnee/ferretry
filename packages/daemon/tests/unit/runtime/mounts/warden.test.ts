@@ -1,5 +1,10 @@
 import { describe, it } from 'bun:test';
-import { WardenConfigViewSchema, WardenRunViewSchema, WardenStatusViewSchema } from '@ferretry/protocol';
+import {
+  WardenConfigViewSchema,
+  WardenRunViewSchema,
+  WardenStatusViewSchema,
+  WardenVerdictsViewSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
@@ -55,6 +60,39 @@ describe('reading the warden status', () => {
 
     // Assert
     should(routes.every(route => route.noStore === true)).be.true();
+  });
+});
+
+describe('reading concise warden reports', () => {
+  it('should serve the report index to a live warden without granting a write', async () => {
+    const response = await dispatcher().dispatch(get('/v1/warden/verdicts', warden));
+
+    should(response.status).equal(200);
+    should(() => WardenVerdictsViewSchema.parse(JSON.parse(response.body))).not.throw();
+  });
+
+  it('should keep reports warden-readable but refuse missing and foreign paths alike', async () => {
+    const subject = new FakeWarden();
+    const missing = await dispatcher(subject).dispatch(
+      request({
+        method: 'GET',
+        path: '/v1/warden/report',
+        query: [['path', '/state/warden/reports/missing.md']],
+        headers: warden,
+      }),
+    );
+    const foreign = await dispatcher(subject).dispatch(
+      request({ method: 'GET', path: '/v1/warden/report', query: [['path', '/etc/passwd']], headers: warden }),
+    );
+
+    should(missing.status).equal(404);
+    should(foreign.status).equal(404);
+  });
+
+  it('should reject an omitted report path instead of treating it as empty evidence', async () => {
+    const response = await dispatcher().dispatch(get('/v1/warden/report', warden));
+
+    should(response.status).equal(400);
   });
 });
 

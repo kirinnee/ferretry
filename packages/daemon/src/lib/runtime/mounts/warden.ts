@@ -4,11 +4,12 @@ import {
   type WardenConfigView,
   type WardenRunView,
   type WardenStatusView,
+  type WardenVerdictsView,
 } from '@ferretry/protocol';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import type { ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
+import { queryValue, type ApiResponse } from '../../api/http.ts';
+import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
@@ -68,6 +69,12 @@ export class WardenError extends Error {
  */
 export interface WardenSubsystem {
   status(): Promise<WardenStatusView>;
+  /** An empty index means this daemon has no reports. Read failures are
+   * propagated so the PWA can call evidence unavailable rather than clean. */
+  verdicts(): Promise<Readonly<WardenVerdictsView>>;
+  /** Full evidence for a report index row. Missing and out-of-scope paths share
+   * one result so the endpoint cannot disclose arbitrary filesystem state. */
+  report(reportPath: string): Promise<string | undefined>;
   /** One sweep. `force` is the operator's `--spawn`: it bypasses the enabled flag, the spawn gap and
    *  the fingerprint suppression, and never the concurrency cap or account eligibility. */
   run(force: boolean): Promise<WardenRunView>;
@@ -121,6 +128,15 @@ async function patchConfig(subsystem: WardenSubsystem, context: RouteContext): P
   return jsonResponse(await subsystem.updateConfig(patch).catch(refuse));
 }
 
+async function report(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const reportPath = queryValue(context.request, 'path');
+  if (reportPath === undefined || reportPath.trim() === '')
+    throw new ApiError(400, 'a warden report path is required', 'invalid_request');
+  const body = await subsystem.report(reportPath).catch(refuse);
+  if (body === undefined) throw new ApiError(404, 'warden report not found', 'warden_report_not_found');
+  return textResponse(body);
+}
+
 /**
  * Every path is under `/v1/warden`, which no other subsystem uses, so this table can neither shadow
  * nor be shadowed. All three are fixed literals, so their registration order among themselves cannot
@@ -138,6 +154,20 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       scope: 'warden',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.status().catch(refuse)),
+    },
+    {
+      method: 'GET',
+      path: '/v1/warden/verdicts',
+      scope: 'warden',
+      noStore: true,
+      handle: async () => jsonResponse(await subsystem.verdicts().catch(refuse)),
+    },
+    {
+      method: 'GET',
+      path: '/v1/warden/report',
+      scope: 'warden',
+      noStore: true,
+      handle: async context => await report(subsystem, context),
     },
     {
       method: 'POST',

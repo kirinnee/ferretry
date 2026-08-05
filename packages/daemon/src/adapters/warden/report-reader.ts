@@ -1,3 +1,4 @@
+import { dirname, resolve } from 'node:path';
 import {
   attachSpawnProvenance,
   DEFAULT_VERDICT_LIMIT,
@@ -43,6 +44,16 @@ export class WardenReportReader {
     const content = await this.files.readText(reportPath);
     if (content === undefined) return undefined;
     return mergeWardenReportProvenance(content, await this.readProvenance(reportPath));
+  }
+
+  /** Read one exact report from this daemon's evidence directory. A verdict row
+   * may carry a path, but this read surface must never become an arbitrary-file
+   * oracle for a paired browser. */
+  async readReportAt(reportPath: string): Promise<string | undefined> {
+    const reports = resolve(this.reportsDirectory);
+    const candidate = resolve(reportPath);
+    if (dirname(candidate) !== reports || !candidate.endsWith('.md')) return undefined;
+    return await this.readReport(candidate);
   }
 
   /** The most recent verdicts across every report in the directory. */

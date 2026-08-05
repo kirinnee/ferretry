@@ -22,6 +22,7 @@ import {
   type WardenConfigView,
   type WardenRunView,
   type WardenStatusView,
+  type WardenVerdictsView,
 } from '@ferretry/protocol';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
@@ -1356,6 +1357,16 @@ export class FakeWarden implements WardenSubsystem {
     // No `lastSweepAt`: "nothing has run yet" is a distinct answer from "a sweep found nothing", and
     // the fixture defaults to the one that claims less.
     return { config: defaultWardenConfig, anomalies: [], fingerprint: '', failover: FAKE_FAILOVER };
+  }
+
+  async verdicts(): Promise<WardenVerdictsView> {
+    if (this.failure !== undefined) throw this.failure;
+    return [];
+  }
+
+  async report(_reportPath: string): Promise<string | undefined> {
+    if (this.failure !== undefined) throw this.failure;
+    return undefined;
   }
 
   async run(force: boolean): Promise<WardenRunView> {

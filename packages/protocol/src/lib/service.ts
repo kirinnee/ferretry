@@ -269,6 +269,54 @@ export const WardenStatusViewSchema = z.object({
 });
 export type WardenStatusView = z.infer<typeof WardenStatusViewSchema>;
 
+/** A concise, scan-friendly index of warden reports. The full LLM-authored
+ * evidence remains reachable through the report route; this does not duplicate
+ * or replace it. */
+export const WardenVerdictKindSchema = z.enum(['killed', 'revived', 'nudged', 'cleared', 'needs_human', 'unknown']);
+export type WardenVerdictKind = z.infer<typeof WardenVerdictKindSchema>;
+
+export const WardenRecommendedActionSchema = z.enum(['nudge', 'stop', 'resume', 'restart', 'migrate', 'leave']);
+export type WardenRecommendedAction = z.infer<typeof WardenRecommendedActionSchema>;
+
+export const WardenRecommendationSchema = z.object({
+  action: WardenRecommendedActionSchema,
+  reason: z.string(),
+  agent: z.string().min(1).optional(),
+});
+export type WardenRecommendation = z.infer<typeof WardenRecommendationSchema>;
+
+/** Daemon-owned provenance, copied only from a validated report sidecar. */
+export const WardenVerdictSpawnSchema = z.object({
+  agent: z.string().min(1),
+  model: z.string().min(1),
+  modelSource: z.enum(['harness', 'agent', 'configured', 'unknown']),
+  harness: z.enum(['claude', 'codex']),
+  failedOver: z.boolean(),
+  policy: WardenFailoverPolicySchema,
+  selection: z.enum(['preferred', 'failover', 'rotation']),
+  configuredFirst: z.string().min(1),
+  skipped: z.record(z.string(), z.string()),
+});
+export type WardenVerdictSpawn = z.infer<typeof WardenVerdictSpawnSchema>;
+
+export const WardenVerdictSchema = z.object({
+  at: InstantSchema,
+  targetSession: z.string().min(1).optional(),
+  teammate: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
+  anomalyKind: WardenAnomalyKindSchema.optional(),
+  verdict: WardenVerdictKindSchema,
+  explicitNeedsHuman: z.boolean().optional(),
+  recommendation: WardenRecommendationSchema.optional(),
+  reason: z.string().min(1).optional(),
+  reportPath: z.string().min(1),
+  spawn: WardenVerdictSpawnSchema.optional(),
+});
+export type WardenVerdict = z.infer<typeof WardenVerdictSchema>;
+
+export const WardenVerdictsViewSchema = z.array(WardenVerdictSchema);
+export type WardenVerdictsView = z.infer<typeof WardenVerdictsViewSchema>;
+
 export const WardenRunViewSchema = z.object({
   sweptAt: InstantSchema,
   anomalies: z.array(WardenAnomalySchema),

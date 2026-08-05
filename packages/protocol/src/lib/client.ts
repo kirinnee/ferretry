@@ -15,6 +15,7 @@ import type {
   WardenConfigView,
   WardenRunView,
   WardenStatusView,
+  WardenVerdictsView,
 } from './service.ts';
 import type {
   FyEvent,
@@ -63,6 +64,8 @@ export interface IFyApiClient {
   request<T>(path: string, schema: z.ZodType<T>, init?: RequestInit, timeoutMs?: number): Promise<T>;
   health(): Promise<HealthView>;
   wardenStatus(): Promise<WardenStatusView>;
+  wardenVerdicts(): Promise<WardenVerdictsView>;
+  wardenReport(reportPath: string): Promise<string>;
   wardenRun(spawn?: boolean): Promise<WardenRunView>;
   wardenConfig(): Promise<WardenConfigView>;
   updateWardenConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
