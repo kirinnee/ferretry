@@ -96,10 +96,10 @@ export interface AccountInventoryPort {
 /**
  * What a boot or a `--check` says about a manifest it could not read.
  *
- * It states the consequence as well as the cause, because the two readings of the same file are
- * exactly what made the original defect so confusing: `fy fleet ls` will list these accounts happily
- * while this daemon refuses every start, and a reader who is not told that will trust the half that
- * agrees with them.
+ * It states the CONSEQUENCE as well as the cause. A diagnosis on its own leaves a reader deciding
+ * for themselves how much still works, and the defect this replaces is the proof of how badly that
+ * goes: told only that no account was published, the owner had every reason to believe their fleet
+ * was the problem rather than the reader in front of them.
  */
 export function fleetManifestRefusal(error: FleetManifestUnreadableError, clientName: string): string {
   return `${error.message}. Every session start will be refused until it is repaired — run \`${clientName} fleet apply\` to republish it, or remove the file if this host has no fleet.`;
