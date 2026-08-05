@@ -37,9 +37,18 @@ export type StateHomeClaim =
 /**
  * Raised when the client will not write into a directory, naming why and what it found.
  *
- * The refusal has to carry the entries: "this is not a Ferretry home" is unfalsifiable to a person
- * looking at a path they believe is theirs, and the entries are what let them see in one line that
- * they pointed `FY_HOME` at their documents folder.
+ * TWO SITUATIONS, TWO SENTENCES, because one sentence cannot honestly serve both.
+ *
+ * When the directory holds entries we do not recognise, naming them is the whole value: "this is not
+ * a Ferretry home" is unfalsifiable to somebody looking at a path they believe is theirs, and the
+ * names are what let them see in one line that they pointed `FY_HOME` at their documents folder.
+ *
+ * When it holds ONLY things Ferretry writes, the opposite is true and the same sentence would be
+ * actively wrong — it would say "this may not be a Ferretry state home" while listing nothing
+ * suspicious, because there is nothing suspicious. This is not the rare branch either: it is exactly
+ * the state the unclaimed-provisioning defect leaves behind, so it is what every owner upgrading from
+ * a release before the claim reads FIRST. They are told the truth instead — everything here is ours,
+ * only the marker is missing — which makes the repair that follows read as the obvious next step.
  *
  * `repairCommand` is `undefined` when the refusal came FROM that command. Advice a person has just
  * followed is worse than no advice — it reads as a loop, and it implies a second attempt would work
@@ -54,18 +63,32 @@ export class StateHomeClaimRefusedError extends Error {
   ) {
     super(
       decision.reason === 'missing-marker'
-        ? `refusing to write into ${home}: it already holds ${describe(unexpectedEntries)} and carries no ` +
-            `${LAYOUT_VERSION_FILENAME} marker, so this may not be a Ferretry state home. ` +
-            (repairCommand === undefined
-              ? 'Point FY_HOME at the state home you meant, or remove those entries if this really is one'
-              : `If it is one, run \`${repairCommand}\` to inspect it and claim it; ` +
-                'otherwise point FY_HOME somewhere else')
+        ? `refusing to write into ${home}: ${describeFinding(unexpectedEntries)}. ${remedy(repairCommand, unexpectedEntries)}`
         : `refusing to write into ${home}: its ${LAYOUT_VERSION_FILENAME} says ` +
             `${JSON.stringify(decision.found)} but this release creates and serves layout ` +
             `${String(decision.expected)}`,
     );
     this.name = 'StateHomeClaimRefusedError';
   }
+}
+
+/** What was actually found, stated so that the sentence is true of the directory in front of you. */
+function describeFinding(unexpected: readonly string[]): string {
+  return unexpected.length === 0
+    ? `everything in it is a Ferretry directory, but it carries no ${LAYOUT_VERSION_FILENAME} marker, ` +
+        'so it was provisioned by a release that did not claim it'
+    : `it already holds ${describe(unexpected)} and carries no ${LAYOUT_VERSION_FILENAME} marker, ` +
+        'so this may not be a Ferretry state home';
+}
+
+/** What to do about it, which differs by who is asking and by what was found. */
+function remedy(repairCommand: string | undefined, unexpected: readonly string[]): string {
+  if (repairCommand === undefined) {
+    return 'Point FY_HOME at the state home you meant, or remove those entries if this really is one';
+  }
+  return unexpected.length === 0
+    ? `Run \`${repairCommand}\` to claim it`
+    : `If it is one, run \`${repairCommand}\` to inspect it and claim it; otherwise point FY_HOME somewhere else`;
 }
 
 /** A short, readable account of what was found, so a refusal is checkable at a glance. */

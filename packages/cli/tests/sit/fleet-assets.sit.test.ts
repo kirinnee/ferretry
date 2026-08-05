@@ -67,9 +67,15 @@ describe(`fleet default assets (SIT, ${useInProcess ? 'in-process' : 'compiled b
   });
 
   it('should prefer Claude when the host can launch both harnesses', async () => {
-    const stateHome = await mkdtemp(path.join(tmpdir(), 'fy-fleet-detected-account-sit-'));
-    const harnessBin = path.join(stateHome, 'harness-bin');
-    temporaryDirectories.push(stateHome);
+    // The fake harnesses live OUTSIDE the state home, and that is a requirement rather than tidiness.
+    // They are about `PATH`, not about Ferretry state, and a `bin/` of somebody else's executables
+    // sitting in an unmarked `FY_HOME` is exactly what the layout claim refuses — correctly, since it
+    // cannot tell that directory apart from a stranger's. Parking them inside used to work only
+    // because nothing checked; `fy fleet init` now claims the home before it writes anything.
+    const root = await mkdtemp(path.join(tmpdir(), 'fy-fleet-detected-account-sit-'));
+    temporaryDirectories.push(root);
+    const stateHome = path.join(root, 'state');
+    const harnessBin = path.join(root, 'harness-bin');
     await mkdir(harnessBin);
     for (const harness of ['claude', 'codex']) {
       const executable = path.join(harnessBin, harness);

@@ -91,6 +91,42 @@ describe('claiming a state home before writing into it', () => {
     should(store.writes).be.empty();
   });
 
+  it('should tell an upgrading owner the truth: everything here is ours, only the marker is missing', async () => {
+    // Arrange — THE MOST COMMON REFUSAL, not an edge case: `fleet` and `logs` are both entries we
+    // write, so a home left by the unclaimed-provisioning defect has NO unexpected entries. This is
+    // the message every owner upgrading from a release before the claim reads first.
+    const { claims } = service(directories('fleet', 'logs'));
+
+    // Act
+    const failure = (await claims.claim(HOME).catch((error: unknown) => error)) as Error;
+
+    // Assert — it must not claim the directory looks suspicious while naming nothing suspicious, and
+    // it must not render a gap where a list would have gone.
+    should(failure.message).equal(
+      `refusing to write into ${HOME}: everything in it is a Ferretry directory, but it carries no ` +
+        'layout-version marker, so it was provisioned by a release that did not claim it. ' +
+        'Run `fy daemon adopt` to claim it',
+    );
+    should(failure.message).not.match(/ {2}/u);
+    should(failure.message).not.containEql('may not be a Ferretry state home');
+  });
+
+  it('should say the opposite when it really did find something that is not ours', async () => {
+    // Arrange — the other branch, stated in full so the two sentences cannot drift into each other.
+    const { claims } = service([...directories('Documents'), ...files('notes.txt')]);
+
+    // Act
+    const failure = (await claims.claim(HOME).catch((error: unknown) => error)) as Error;
+
+    // Assert
+    should(failure.message).equal(
+      `refusing to write into ${HOME}: it already holds Documents, notes.txt and carries no ` +
+        'layout-version marker, so this may not be a Ferretry state home. If it is one, run ' +
+        '`fy daemon adopt` to inspect it and claim it; otherwise point FY_HOME somewhere else',
+    );
+    should(failure.message).not.match(/ {2}/u);
+  });
+
   it('should not mistake a FILE named logs for the log directory', async () => {
     // Arrange — a file of that name is not something either writer produces, so it is foreign state.
     const { claims } = service(files('logs'));
