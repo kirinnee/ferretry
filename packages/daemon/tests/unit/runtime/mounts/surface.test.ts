@@ -113,6 +113,20 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   sessionControl: new FakeSessionControl(),
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
+  sessionAttachments: {
+    upload: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    download: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    unlock: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    lock: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionSignal: new FakeSessionSignal(),
   // The declared-wait loop serves no route, so it contributes nothing to the table below. It is a
   // mounted subsystem because a background loop the daemon never constructs is the same absent
@@ -218,6 +232,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/signal',
       'POST /v1/sessions/:sessionId/send',
       'POST /v1/sessions/:sessionId/interrupt',
+      'POST /v1/sessions/:sessionId/attachments',
+      'GET /v1/sessions/:sessionId/attachments/:attachmentId',
+      'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
+      'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'GET /v1/sessions/:sessionId/pins',

@@ -13,6 +13,7 @@ import {
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
 import {
+  AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
   type CgroupConfigPatch,
@@ -600,14 +601,19 @@ export class FyApiClient implements IFyApiClient {
       blob = file;
       resolvedFilename = filename ?? (file instanceof File ? file.name : 'attachment');
     }
-    const form = new FormData();
-    // A File part carries its own name, and some runtimes let it win over FormData's filename
-    // argument — wrapping makes the resolved filename authoritative everywhere.
-    form.set('file', new File([blob], NonEmptyValueSchema.parse(resolvedFilename), { type: blob.type }));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = '';
+    for (let offset = 0; offset < bytes.byteLength; offset += 32_768) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
+    }
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/attachments`,
       AttachmentViewSchema,
-      { method: 'POST', body: form },
+      jsonRequest('POST', AttachmentUploadRequestSchema, {
+        filename: NonEmptyValueSchema.parse(resolvedFilename),
+        mime: blob.type || 'application/octet-stream',
+        base64: btoa(binary),
+      }),
     );
   }
 

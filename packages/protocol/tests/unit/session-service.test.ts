@@ -231,6 +231,17 @@ const serviceCases: SchemaCase[] = [
   { name: 'usage account', schema: service.UsageAccountViewSchema, value: usageFeedView.accounts[0] },
   { name: 'usage feed', schema: service.UsageFeedViewSchema, value: usageFeedView },
   { name: 'attachment', schema: service.AttachmentViewSchema, value: attachmentView },
+  {
+    name: 'attachment upload request',
+    schema: service.AttachmentUploadRequestSchema,
+    value: { filename: 'report.pdf', mime: 'application/pdf', base64: 'JVBERi0=' },
+  },
+  { name: 'attachment unlock request', schema: service.AttachmentUnlockRequestSchema, value: { password: 'use-once' } },
+  {
+    name: 'attachment download',
+    schema: service.AttachmentDownloadSchema,
+    value: { attachment: attachmentView, base64: 'JVBERi0=' },
+  },
   { name: 'scratch entry', schema: service.ScratchEntrySchema, value: scratchPlanView.entries[0] },
   { name: 'scratch plan', schema: service.ScratchPlanViewSchema, value: scratchPlanView },
   { name: 'scratch plans', schema: service.ScratchPlanListSchema, value: [scratchPlanView] },

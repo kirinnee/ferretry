@@ -13,12 +13,12 @@ import {
   peerPreamble,
   queuedPayloadInstruction,
   routeSend,
-  shouldPressStopKey,
   type SendPaneObservation,
   SendRefused,
   type SendTarget,
   SendUnavailable,
   sendPayload,
+  shouldPressStopKey,
   turnInstruction,
 } from '../../../../src/lib/session/send/index.ts';
 
@@ -62,10 +62,8 @@ describe('authorizeSend', () => {
     });
   });
 
-  it('refuses attachment ids rather than dropping the file silently', () => {
-    should(() => authorizeSend(target(), ['attachment-1'])).throw(SendRefused, {
-      message: /attachments are not served/u,
-    });
+  it('allows attachment ids once the durable attachment routes are mounted', () => {
+    should(() => authorizeSend(target(), ['attachment-1'])).not.throw();
   });
 });
 
