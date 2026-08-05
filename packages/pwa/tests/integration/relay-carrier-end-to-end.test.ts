@@ -26,12 +26,21 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
 import { RelayLink } from '../../../daemon/src/lib/relay/link.ts';
-import { type RelayEnvironment, RendezvousDurableObject, WebCryptoRelayCrypto } from '../../../relay/src/adapters/index.ts';
+import {
+  type RelayEnvironment,
+  RendezvousDurableObject,
+  WebCryptoRelayCrypto,
+} from '../../../relay/src/adapters/index.ts';
 import { daemonIdFromPublicKey, RELAY_CLOSE_CODES, utf8Text } from '../../../relay/src/lib/index.ts';
 import { newDaemonIdentity } from '../../../relay/tests/support/identities.ts';
 import { FakeObjectState, type FakeSocket, testRuntime } from '../../../relay/tests/support/workers-fakes.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { type RelayCarrierSocket, openRelaySession, relayResponse, relayTunnelRequest } from '../../src/lib/relay-carrier.ts';
+import {
+  type RelayCarrierSocket,
+  openRelaySession,
+  relayResponse,
+  relayTunnelRequest,
+} from '../../src/lib/relay-carrier.ts';
 import { type RelayClientSession, RelaySessionError } from '../../src/lib/relay-session.ts';
 
 const HOST = 'relay.example';
@@ -75,7 +84,10 @@ class RelayBridge {
   }
 
   /** Bring the daemon in first: §9 refuses a client at a rendezvous no daemon holds. */
-  async admitDaemon(identity: Awaited<ReturnType<typeof newDaemonIdentity>>, dispatch: RelayApiDispatch): Promise<void> {
+  async admitDaemon(
+    identity: Awaited<ReturnType<typeof newDaemonIdentity>>,
+    dispatch: RelayApiDispatch,
+  ): Promise<void> {
     await this.rendezvous.fetch(
       new Request(`${RELAY_URL}/v1/rendezvous/${identity.daemonId}/daemon`, { headers: { Upgrade: 'websocket' } }),
     );
@@ -187,11 +199,13 @@ class RelayBridge {
 
 type RelayApiDispatch = (request: ApiRequest) => Promise<ApiResponse>;
 
-const answered = (body: string): RelayApiDispatch => async () => ({
-  status: 200,
-  headers: headersFrom({ 'content-type': 'application/json' }),
-  body,
-});
+const answered =
+  (body: string): RelayApiDispatch =>
+  async () => ({
+    status: 200,
+    headers: headersFrom({ 'content-type': 'application/json' }),
+    body,
+  });
 
 /** Everything the rendezvous handled, as one searchable string. */
 const carrierSaw = (bridge: RelayBridge): string =>
@@ -265,12 +279,13 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     // the carrier is behaving perfectly. The browser pinned somebody else.
     await bridge.admitDaemon(impostor, answered('never reached'));
 
-    const daemon = daemonConnection({
-      daemonId: impostor.daemonId,
+    // The browser pinned `identity`; the carrier hands it `impostor`. That is a
+    // misrouted session, which is exactly the case the fingerprint check exists for.
+    const pinnedElsewhere = daemonConnection({
+      daemonId: identity.daemonId,
       baseUrl: DAEMON_URL,
       deviceToken: DEVICE_TOKEN,
     });
-    const pinnedElsewhere = { ...daemon, daemonId: identity.daemonId };
 
     await should(
       openRelaySession({
