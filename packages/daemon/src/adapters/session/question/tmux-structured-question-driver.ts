@@ -1,7 +1,14 @@
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import type { StructuredQuestionDriver } from '../../../lib/session/question/service.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import type { TmuxController } from '../../../lib/tmux/controller.ts';
+import type { PaneState } from '../../../lib/tmux/contracts.ts';
+
+/** The narrow pane seam the structured answer driver needs from tmux. */
+export interface StructuredQuestionPane {
+  state(session: string): Promise<PaneState>;
+  sendKey(session: string, key: string): Promise<void>;
+  paste(session: string, text: string): Promise<void>;
+}
 
 export class StructuredQuestionDriveError extends Error {
   constructor(message: string) {
@@ -32,7 +39,7 @@ function visibleQuestion(pane: string, question: PendingQuestion['questions'][nu
 /** Drives only a positively bound visible selector and waits for it to advance. */
 export class TmuxStructuredQuestionDriver implements StructuredQuestionDriver {
   constructor(
-    private readonly tmux: TmuxController,
+    private readonly tmux: StructuredQuestionPane,
     private readonly session: (id: SessionId) => Promise<string>,
     private readonly sleep: (milliseconds: number) => Promise<void>,
     private readonly polls = 12,

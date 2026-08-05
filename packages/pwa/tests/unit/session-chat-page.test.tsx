@@ -538,13 +538,18 @@ describe('SessionChatPage', () => {
       },
     });
     const calls: string[] = [];
+    const published: SessionView[] = [];
+    let refreshed = 0;
     const page = renderSessionChatPage(
       <SessionChatPage
         client={client(calls, pending)}
         connection={alpha}
         entries={[]}
         onBack={() => undefined}
-        onSessionChange={() => undefined}
+        onRefresh={() => {
+          refreshed += 1;
+        }}
+        onSessionChange={view => published.push(view)}
         presentation="pane"
         session={pending}
       />,
@@ -555,13 +560,35 @@ describe('SessionChatPage', () => {
       expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
       expect(page.root.findAllByProps({ className: 'fy-composer' })).toHaveLength(0);
       expect(page.root.findAllByProps({ 'data-question-unavailable': '' })).toHaveLength(0);
+      const form = page.root.findByType(QuestionForm);
+      await form.props.api.answer(
+        alpha,
+        'shared',
+        'ask-1',
+        ['Yes'],
+        undefined,
+        undefined,
+        [{ kind: 'selection', labels: ['Yes'] }],
+        'answer-1',
+      );
+      expect(calls).toEqual(['answer:ask-1']);
+      expect(published).toEqual([pending]);
+      expect(refreshed).toBe(1);
+      await expect(
+        form.props.api.answer(
+          daemonConnection({ daemonId: 'other', baseUrl: 'https://other.example.test', deviceToken: 'other-token' }),
+          'shared',
+          'ask-1',
+          ['Yes'],
+        ),
+      ).rejects.toThrow('different daemon pairing');
 
       // Interrupt is the one action that CAN clear the turn, so it stays live.
       await runAsync(async () => {
         buttonNamed(page.root, 'Interrupt turn').props.onClick();
         await Promise.resolve();
       });
-      expect(calls).toEqual(['interrupt:shared']);
+      expect(calls).toEqual(['answer:ask-1', 'interrupt:shared']);
 
       // A status with no validated payload is damaged evidence, not a reason to
       // invent a form or send an unbound answer.
