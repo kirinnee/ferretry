@@ -28,6 +28,7 @@ import type {
   SignalKind,
   SignalOptions,
   StartSessionRequestInput,
+  StructuredQuestionAnswer,
 } from './session.ts';
 import type { VersionSkew } from './version-skew.ts';
 
@@ -84,7 +85,15 @@ export interface IFyApiClient {
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
   start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
   send(id: string, input: SendRequest): Promise<SendResult>;
-  answer(id: string, toolUseId: string, labels: string[], other?: string, responses?: string[]): Promise<SessionView>;
+  answer(
+    id: string,
+    toolUseId: string,
+    labels: string[],
+    other?: string,
+    responses?: string[],
+    answers?: StructuredQuestionAnswer[],
+    requestId?: string,
+  ): Promise<SessionView>;
   interrupt(id: string): Promise<SessionView>;
   stop(id: string, reason?: string): Promise<SessionView>;
   resume(id: string, message?: string): Promise<SessionView>;

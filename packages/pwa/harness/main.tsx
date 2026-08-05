@@ -4914,6 +4914,7 @@ const WORKSPACE_ENTRIES: readonly TranscriptEntry[] = [
  * stub that casts stops being evidence the moment the contract moves.
  */
 const WORKSPACE_CLIENT: SessionChatClient = {
+  answer: async () => WORKSPACE_SESSION,
   interrupt: async () => WORKSPACE_SESSION,
   resume: async () => WORKSPACE_SESSION,
   send: async () => ({ ...WORKSPACE_SESSION, disposition: 'queued' }) as never,

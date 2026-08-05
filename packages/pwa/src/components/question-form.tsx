@@ -1,4 +1,4 @@
-import type { PendingQuestion } from '@ferretry/protocol';
+import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 
@@ -11,6 +11,8 @@ export interface QuestionAnswerApi {
     labels: readonly string[],
     other?: string,
     responses?: readonly string[],
+    answers?: readonly StructuredQuestionAnswer[],
+    requestId?: string,
   ): Promise<unknown>;
 }
 
@@ -72,8 +74,9 @@ const updateOther = (state: AnswerState, index: number, value: string): AnswerSt
 /**
  * Daemon-bound structured answer form. A multi-question request is paged only
  * on compact layouts, but both presentations share one answer state and one
- * submit path. In particular, multi-question requests are radio choices: the
- * daemon protocol accepts exactly one response per question.
+ * submit path. Every question keeps its own selection cardinality; the ordered
+ * `answers` payload preserves all labels even when a multi-question set embeds
+ * a multi-select question.
  */
 export function QuestionForm({ api, daemon, sessionId, question, compact = false, onAnswered }: QuestionFormProps) {
   const formId = useId();
@@ -101,6 +104,12 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
     setSubmitting(true);
     setError(null);
     try {
+      const structuredAnswers: StructuredQuestionAnswer[] = question.questions.map((_, index) =>
+        answers.otherSelected[index]
+          ? { kind: 'other', text: (answers.others[index] ?? '').trim() }
+          : { kind: 'selection', labels: [...(answers.picks[index] ?? [])] },
+      );
+      const requestId = `question:${daemon.daemonId}:${sessionId}:${question.toolUseId}`;
       if (question.questions.length === 1) {
         await api.answer(
           daemon,
@@ -108,12 +117,15 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
           question.toolUseId,
           answers.picks[0] ?? [],
           answers.otherSelected[0] ? (answers.others[0] ?? '').trim() : undefined,
+          undefined,
+          structuredAnswers,
+          requestId,
         );
       } else {
         const responses = question.questions.map((_, index) =>
           answers.otherSelected[index] ? (answers.others[index] ?? '').trim() : (answers.picks[index]?.[0] ?? ''),
         );
-        await api.answer(daemon, sessionId, question.toolUseId, [], undefined, responses);
+        await api.answer(daemon, sessionId, question.toolUseId, [], undefined, responses, structuredAnswers, requestId);
       }
       onAnswered?.();
     } catch (cause) {
@@ -132,7 +144,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
       {visible.map(index => {
         const item = question.questions[index];
         if (!item) return null;
-        const multiple = question.questions.length === 1 && item.multiSelect === true;
+        const multiple = item.multiSelect === true;
         const other = answers.otherSelected[index] ?? false;
         return (
           <fieldset className="fy-question" key={`${question.toolUseId}:${index}`}>

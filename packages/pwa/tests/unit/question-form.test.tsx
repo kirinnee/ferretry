@@ -7,7 +7,7 @@ const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.inv
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.invalid', deviceToken: 'token-b' });
 
 describe('QuestionForm', () => {
-  test('pages a multi-question phone form, preserves answers, and submits one daemon-bound response per question', async () => {
+  test('pages a multi-question phone form and preserves every embedded multi-select label', async () => {
     const calls: unknown[][] = [];
     const form = render(
       <QuestionForm
@@ -25,8 +25,9 @@ describe('QuestionForm', () => {
       />,
     );
     expect(form.root.findAllByType('fieldset')).toHaveLength(1);
-    expect(form.root.findAllByType('input').every(input => input.props.type === 'radio')).toBe(true);
+    expect(form.root.findAllByType('input').every(input => input.props.type === 'checkbox')).toBe(true);
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
+    run(() => form.root.findAllByType('input')[1]?.props.onChange());
     run(() => form.root.findByProps({ children: 'Next' }).props.onClick());
     expect(form.root.findAll(item => item.children.join('') === 'Question 2 of 2')).toHaveLength(1);
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
@@ -34,7 +35,21 @@ describe('QuestionForm', () => {
       form.root.findByProps({ children: 'Submit answers' }).props.onClick();
       await Promise.resolve();
     });
-    expect(calls).toEqual([[daemonA, 'same-session', 'ask-1', [], undefined, ['North', 'Ship now']]]);
+    expect(calls).toEqual([
+      [
+        daemonA,
+        'same-session',
+        'ask-1',
+        [],
+        undefined,
+        ['North', 'Ship now'],
+        [
+          { kind: 'selection', labels: ['North', 'South'] },
+          { kind: 'selection', labels: ['Ship now'] },
+        ],
+        'question:daemon-a:same-session:ask-1',
+      ],
+    ]);
   });
 
   test('uses checkboxes only for a single multi-select question and keeps same session ids isolated by daemon', async () => {
@@ -69,7 +84,18 @@ describe('QuestionForm', () => {
       form.root.findByType('button').props.onClick();
       await Promise.resolve();
     });
-    expect(calls).toEqual([[daemonB, 'same-session', 'ask-b', ['One'], undefined]]);
+    expect(calls).toEqual([
+      [
+        daemonB,
+        'same-session',
+        'ask-b',
+        ['One'],
+        undefined,
+        undefined,
+        [{ kind: 'selection', labels: ['One'] }],
+        'question:daemon-b:same-session:ask-b',
+      ],
+    ]);
   });
 
   test('keeps the form usable after a failed response', async () => {
@@ -117,6 +143,17 @@ describe('QuestionForm', () => {
       form.root.findByType('button').props.onClick();
       await Promise.resolve();
     });
-    expect(calls).toEqual([[daemonA, 'other-session', 'other', [], 'A freeform response']]);
+    expect(calls).toEqual([
+      [
+        daemonA,
+        'other-session',
+        'other',
+        [],
+        'A freeform response',
+        undefined,
+        [{ kind: 'other', text: 'A freeform response' }],
+        'question:daemon-a:other-session:other',
+      ],
+    ]);
   });
 });

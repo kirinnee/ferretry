@@ -6,6 +6,7 @@ import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
+import { QuestionForm, type QuestionAnswerApi } from '../../components/question-form.tsx';
 import {
   type ReferenceSurface,
   ReferenceSurfaceProvider,
@@ -43,7 +44,7 @@ import type { TranscriptEntry } from '../session-screens.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
-export type SessionChatClient = Pick<IFyApiClient, 'interrupt' | 'resume' | 'send' | 'stop'> &
+export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
   Partial<Pick<IFyApiClient, 'history' | 'runtime'>>;
 
 /** One scoped cache is safe because every key carries its daemon id. Keeping it
@@ -314,6 +315,26 @@ export function SessionChatPage({
     },
     [connection, onRefresh, onSessionChange, session.config.id],
   );
+  const questionApi = useMemo<QuestionAnswerApi>(
+    () => ({
+      answer: async (daemon, sessionId, toolUseId, labels, other, responses, answers, requestId) => {
+        if (!sameDaemonConnection(daemon, connection))
+          throw new Error('the structured answer belongs to a different daemon pairing');
+        const view = await client.answer(
+          sessionId,
+          toolUseId,
+          [...labels],
+          other,
+          responses === undefined ? undefined : [...responses],
+          answers === undefined ? undefined : [...answers],
+          requestId,
+        );
+        publish(view);
+        return view;
+      },
+    }),
+    [client, connection, publish],
+  );
 
   const runAction = async (action: SessionAction): Promise<void> => {
     if (action === 'migrate') {
@@ -470,13 +491,19 @@ export function SessionChatPage({
               <Transcript busy={busy} daemonId={connection.daemonId} entries={entries} sessionId={session.config.id} />
             </div>
             <div className="shrink-0 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" data-session-input="">
-              {awaitingAnswer ? (
-                /* THE ANSWER ROUTE IS NOT MOUNTED on this daemon, so no form here
-                 could submit. Rendering one anyway would be a control that looks
-                 live, takes a choice, and throws — so the state says what it is
-                 and points at the one action that DOES work. Interrupt stays
-                 reachable: in the row on a desktop, in Session Details on a
-                 phone. */
+              {question !== null && canControl ? (
+                <QuestionForm
+                  api={questionApi}
+                  compact={compact}
+                  daemon={connection}
+                  key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+                  question={question}
+                  sessionId={session.config.id}
+                />
+              ) : awaitingAnswer ? (
+                /* Status without a validated payload is damaged or incomplete
+                 evidence, never an empty question. Keep the recovery action
+                 visible, but do not invent options or send an unbound answer. */
                 <section
                   aria-label="Structured question"
                   className="fy-question-form"
@@ -484,8 +511,8 @@ export function SessionChatPage({
                   role="status"
                 >
                   <p className="m-0">
-                    This session is waiting on a structured question. This build cannot answer one — the paired daemon
-                    does not serve the answer route — so the question can only be cleared by interrupting the turn.
+                    This session reports a structured question, but its complete validated prompt is unavailable. No
+                    answer can be sent safely; refresh the session or interrupt the turn to abandon it.
                   </p>
                 </section>
               ) : (

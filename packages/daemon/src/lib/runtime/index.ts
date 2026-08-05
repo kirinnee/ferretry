@@ -14,6 +14,7 @@ export * from './mounts/pins.ts';
 export * from './mounts/recommend.ts';
 export * from './mounts/scratch-gc.ts';
 export * from './mounts/secrets.ts';
+export * from './mounts/session-answer.ts';
 export * from './mounts/session-attach.ts';
 export * from './mounts/session-control.ts';
 export * from './mounts/session-filesystem.ts';

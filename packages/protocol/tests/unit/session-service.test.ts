@@ -145,9 +145,22 @@ const sessionCases: SchemaCase[] = [
   },
   { name: 'send request', schema: session.SendRequestSchema, value: { message: 'Continue' } },
   {
+    name: 'structured question answer',
+    schema: session.StructuredQuestionAnswerSchema,
+    value: { kind: 'selection', labels: ['Yes', 'Also yes'] },
+  },
+  {
     name: 'answer request',
     schema: session.AnswerSessionRequestSchema,
-    value: { toolUseId: 'tool-1', labels: ['Yes'] },
+    value: {
+      toolUseId: 'tool-1',
+      labels: [],
+      responses: ['Yes', 'Later'],
+      answers: [
+        { kind: 'selection', labels: ['Yes', 'Also yes'] },
+        { kind: 'other', text: 'Later' },
+      ],
+    },
   },
   { name: 'interrupt request', schema: session.InterruptSessionRequestSchema, value: { toolUseId: 'tool-1' } },
   { name: 'stop request', schema: session.StopSessionRequestSchema, value: { reason: 'done' } },

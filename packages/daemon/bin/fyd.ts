@@ -8,6 +8,7 @@ import {
   type LearningConfig,
   type MigrateSessionRequest,
   type RegisterProjectRequest,
+  type SessionConfig,
   SessionConfigSchema,
   SessionStateSchema,
   type SessionView,
@@ -118,6 +119,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
+import { TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -282,6 +284,7 @@ import {
   parseWardenConfigPatch,
   planInitialAttachments,
   portCandidates,
+  projectStructuredQuestion,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RecommendError,
@@ -316,6 +319,8 @@ import {
   SelfRestartCoordinator,
   SendPending,
   SendRefused,
+  SessionAnswerError,
+  type SessionAnswerSubsystem,
   SessionAttachmentError,
   SessionAttachmentStore,
   SessionAttachService,
@@ -354,11 +359,14 @@ import {
   SignalRefused,
   type SocketTicketBroker,
   SocketTicketRegistry,
+  StructuredQuestionRefused,
+  StructuredQuestionService,
   SttEnhancementService,
   type SttEnhancementSubsystem,
   searchTranscript,
   selectableAutoAccounts,
   sessionHealthSettingsAt,
+  structuredQuestionStatePatch,
   type TaskAssigneeCandidate,
   type TaskBoardSubsystem,
   type TaskBoardTaskActionAuthorizer,
@@ -931,12 +939,17 @@ async function assigneeCandidates(storage: DaemonStorage): Promise<readonly Task
  * parsed id, so a path-unsafe reference is refused in the reader's own taxonomy before it can become
  * a filesystem path.
  */
-function createSessionDirectorySubsystem(paths: FoundationPaths, storage: DaemonStorage): SessionDirectorySubsystem {
+function createSessionDirectorySubsystem(
+  paths: FoundationPaths,
+  storage: DaemonStorage,
+  project?: (id: SessionId, config: SessionConfig) => Promise<void>,
+): SessionDirectorySubsystem {
   /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
   const view = async (id: SessionId): Promise<SessionView | undefined> => {
-    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
+    const rawConfig = await storage.readConfig(id);
     const config = SessionConfigSchema.safeParse(rawConfig);
-    const state = SessionStateSchema.safeParse(rawState);
+    if (config.success) await project?.(id, config.data);
+    const state = SessionStateSchema.safeParse(await storage.readState(id));
     if (!config.success || !state.success) return undefined;
     return { config: config.data, state: state.data, directory: createSessionPaths(paths, id).directory };
   };
@@ -1563,6 +1576,97 @@ function createSessionSendSubsystem(
       const id = require(reference);
       await service.interrupt(id).catch((error: unknown) => sendRefusal(error));
       return await view(id, 'was interrupted');
+    },
+  };
+}
+
+/**
+ * The structured-answer half of the live session surface.  A response is not
+ * considered delivered when tmux accepted keys: the driver returns only after
+ * the bound menu visibly advanced, and only then does this write clear the
+ * exact pending tool id.  Broken state therefore refuses rather than becoming
+ * an absent question or a blind keystroke.
+ */
+function createSessionAnswerSubsystem(
+  storage: DaemonStorage,
+  sessions: SessionDirectorySubsystem,
+  tmux: TmuxController,
+): SessionAnswerSubsystem {
+  const settled = new Map<string, SessionView>();
+  const require = (reference: string): SessionId => {
+    const id = tryParseSessionId(reference);
+    if (id === undefined)
+      throw new SessionAnswerError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+    if (storage.findSession(id) === undefined) throw new SessionAnswerError('not_found', `no session ${reference}`);
+    return id;
+  };
+  const service = new StructuredQuestionService(
+    {
+      pending: async id => {
+        const state = SessionStateSchema.safeParse(await storage.readState(id));
+        if (!state.success)
+          throw new SessionAnswerError(
+            'failed',
+            `session ${id} state is unreadable; it cannot be treated as no question`,
+          );
+        return state.data.pendingQuestion ?? undefined;
+      },
+      answered: async (id, toolUseId, answers, confirmation) => {
+        await storage.updateState(id, current => {
+          const parsed = SessionStateSchema.safeParse(current);
+          if (!parsed.success)
+            throw new SessionAnswerError('failed', `session ${id} state became unreadable while confirming the answer`);
+          if (parsed.data.pendingQuestion?.toolUseId !== toolUseId)
+            throw new SessionAnswerError('refused', `question ${toolUseId} is no longer pending; it was not cleared`);
+          const next: Record<string, unknown> = {
+            ...(current as Record<string, unknown>),
+            status: 'running',
+            lastAnsweredQuestionToolUseId: toolUseId,
+          };
+          delete next.pendingQuestion;
+          return next as typeof current;
+        });
+        await storage.append(id, 'interaction.answer', {
+          toolUseId,
+          confirmation: confirmation.confirmedBy,
+          answerCount: answers.length,
+        });
+      },
+    },
+    new TmuxStructuredQuestionDriver(
+      tmux,
+      async id => SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
+      milliseconds => Bun.sleep(milliseconds),
+    ),
+  );
+  return {
+    answer: async (reference, request) => {
+      const id = require(reference);
+      const key = `${id}:${request.requestId}`;
+      const already = settled.get(key);
+      if (already !== undefined) return already;
+      await service
+        .answer({
+          id,
+          toolUseId: request.toolUseId,
+          labels: request.labels,
+          ...(request.other === undefined ? {} : { other: request.other }),
+          ...(request.responses === undefined ? {} : { responses: request.responses }),
+          ...(request.answers === undefined ? {} : { answers: request.answers }),
+        })
+        .catch(error => {
+          if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
+          if (error instanceof SessionAnswerError) throw error;
+          throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));
+        });
+      const view = await sessions.get(id).catch(() => undefined);
+      if (view === undefined)
+        throw new SessionAnswerError(
+          'failed',
+          `session ${id} answer was confirmed but its updated documents are unreadable`,
+        );
+      settled.set(key, view);
+      return view;
     },
   };
 }
@@ -3434,7 +3538,27 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     ) => {
       // ONE reader for both halves of the session surface: what a start answers with must be the same
       // view the list and the single read serve, parsed by the same schemas from the same documents.
-      const sessions = createSessionDirectorySubsystem(paths, storage);
+      const projectQuestionState = async (id: SessionId): Promise<void> => {
+        const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
+        // A transcript that cannot be proved belongs to this session is not a
+        // benign empty transcript.  Leave the durable state untouched: its own
+        // parser will make a damaged session read fail rather than inventing an
+        // answerable absence from missing evidence.
+        if (transcript.kind !== 'read') return;
+        const current = SessionStateSchema.safeParse(await storage.readState(id));
+        if (!current.success) return;
+        const patch = structuredQuestionStatePatch(current.data, projectStructuredQuestion(transcript.events));
+        if (Object.keys(patch).length === 0) return;
+        await storage.updateState(id, raw => {
+          const verified = SessionStateSchema.safeParse(raw);
+          if (!verified.success) return raw;
+          const next = { ...(raw as Record<string, unknown>), ...patch };
+          if (patch.pendingQuestion === undefined) delete next.pendingQuestion;
+          if (patch.needsHumanKind === undefined) delete next.needsHumanKind;
+          return next as typeof raw;
+        });
+      };
+      const sessions = createSessionDirectorySubsystem(paths, storage, projectQuestionState);
       // Originals are keyed by this daemon's durable pairing identity even
       // inside its private state home. A plaintext unlock is deliberately not a
       // storage operation: it remains in the store's process-local cache only.
@@ -3695,6 +3819,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         sessionControl,
         sessionResume: createSessionResumeSubsystem(storage, sessions, resume),
         sessionSend: createSessionSendSubsystem(storage, sessions, sends),
+        sessionAnswer: createSessionAnswerSubsystem(storage, sessions, launchTmux),
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         // The record lives in this daemon's own state home, beside the lock and the index it was
