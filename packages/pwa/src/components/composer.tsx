@@ -234,13 +234,16 @@ export function Composer({
             syncHighlight(input);
           }}
           onKeyDown={event => {
-            // The popover is what makes a completion real. Enter and Tab reach
-            // the controller only while a row is BOTH rendered and selected, so
-            // a list that is loading, empty or entirely refused can never eat a
-            // send — every other key still belongs to the open list.
+            // Arbitration order is deliberate: a visible, selected completion
+            // gets Enter/Tab first; an empty, loading or refused list cannot
+            // consume either key. Everything else (Escape and arrow navigation)
+            // still belongs to the open list before Enter reaches this reader's
+            // configured send/newline behaviour.
             const completionKey = event.key === 'Enter' || event.key === 'Tab';
-            const acceptable = autocomplete.open && autocomplete.activeIndex >= 0;
-            if ((!completionKey || acceptable) && autocomplete.handleKeyDown(event)) return;
+            const hasAcceptableCompletion = autocomplete.open && autocomplete.activeIndex >= 0;
+            if (completionKey) {
+              if (hasAcceptableCompletion && autocomplete.handleKeyDown(event)) return;
+            } else if (autocomplete.handleKeyDown(event)) return;
             if (event.key !== 'Enter' || (event.nativeEvent as { isComposing?: boolean }).isComposing) return;
             const action = composerEnterAction(enterKeyPreference, readInputModality().enterSends);
             const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
