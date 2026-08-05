@@ -13,7 +13,7 @@
 import { Download, ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { fsApi } from './files-api.ts';
 import { useFsResource } from './files-resource.ts';
 
@@ -132,8 +132,13 @@ export const parsePreviewCsv = (text: string): CsvTable => {
   return { rows, truncated, malformed: quoted };
 };
 
+/**
+ * No `aria-label` on the wrapper: a plain `div` has no role that supports one, and the links inside
+ * already carry their own accessible names. Labelling the wrapper would add a name most readers
+ * never announce.
+ */
 const PreviewActions = ({ href, filename, canOpen }: { href: string; filename: string; canOpen: boolean }) => (
-  <div className="kt-rich-file-actions" aria-label="File preview actions">
+  <div className="kt-rich-file-actions">
     {canOpen && (
       <a className="kt-btn kt-btn--sm" href={href} target="_blank" rel="noopener noreferrer">
         <ExternalLink size={14} aria-hidden="true" />
@@ -221,6 +226,10 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
         <div className="kt-rich-file-table scroll-thin">
           <table>
             <tbody>
+              {/* Position IS the identity here. A CSV row has no stable key, and this table is
+                  rendered once from a parsed snapshot — it is never reordered, filtered or appended
+                  to, so the reconciliation bug the rule guards against cannot occur. */}
+              {/* biome-ignore-start lint/suspicious/noArrayIndexKey: a parsed CSV grid is positional and never reordered */}
               {table.rows.map((row, rowIndex) => (
                 <tr key={rowIndex}>
                   {row.map((cell, columnIndex) =>
@@ -228,6 +237,7 @@ export const RichFilePreview = ({ daemon, scope, path, revision }: RichFilePrevi
                   )}
                 </tr>
               ))}
+              {/* biome-ignore-end lint/suspicious/noArrayIndexKey: a parsed CSV grid is positional and never reordered */}
             </tbody>
           </table>
         </div>

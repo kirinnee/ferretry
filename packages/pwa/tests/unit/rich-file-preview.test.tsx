@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
-  RichFilePreview,
   bytesFromBase64,
   parsePreviewCsv,
+  RichFilePreview,
   richFileKind,
   richFileMime,
 } from '../../src/components/rich-file-preview.tsx';
