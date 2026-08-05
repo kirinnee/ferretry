@@ -14,9 +14,10 @@ import {
   BOARD_CAPABILITY_VARIABLE,
   BOARD_INVITATION_CAPABILITY_VARIABLE,
   childGrantRequester,
+  taskBoardTaskActionAuthorizer,
   taskBoardRoutes,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
-import { isTaskBoardError, type TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
+import { isTaskBoardError, TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { boardSession, CREDENTIALS, FakeTaskBoards, human } from './support.ts';
 
@@ -675,6 +676,39 @@ describe('the task board membership mount', () => {
     should(body.creator.allowedActions).containEql('mark_done');
     should(body.coordinator.allowedActions).not.containEql('mark_done');
     should(world.state.boards).have.length(1);
+  });
+
+  it('should authorize mark_done only for the exact granted session and never around unavailable board state', async () => {
+    // Arrange
+    const world = new FakeTaskBoards(FLEET);
+    const created = await post(
+      world,
+      '/create',
+      { creatorSessionId: 'root', coordinatorSessionId: 'coordinator', creatorMarkDone: true },
+      operator(world),
+    );
+    should(created.status).equal(201);
+    const authorize = taskBoardTaskActionAuthorizer(world).authorize;
+    const creatorCapability = world.capabilityFor('root');
+    const coordinatorCapability = world.capabilityFor('coordinator');
+    should(creatorCapability).be.a.String();
+    should(coordinatorCapability).be.a.String();
+
+    // Assert — a valid membership without this exact action is not enough.
+    await authorize({ targetSessionId: 'root', capability: creatorCapability!, action: 'mark_done' });
+    await should(
+      authorize({ targetSessionId: 'root', capability: coordinatorCapability!, action: 'mark_done' }),
+    ).be.rejectedWith(TaskBoardError);
+
+    // A damaged authorization read is unavailable, not an implicit permission.
+    Object.assign(world.repository, {
+      snapshot: async () => {
+        throw new TaskBoardError('unavailable', 'task-board state is unreadable');
+      },
+    });
+    await should(
+      authorize({ targetSessionId: 'root', capability: creatorCapability!, action: 'mark_done' }),
+    ).be.rejectedWith(TaskBoardError);
   });
 
   it('should refuse a relinquish that presents no capability', async () => {

@@ -694,6 +694,30 @@ describe('the task board mount', () => {
       should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
       should(calls).deepEqual([{ targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' }]);
     });
+
+    it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {
+      // Arrange — no fallback to the task route is allowed when the permission
+      // source is unavailable: that would turn damaged board state into a grant.
+      const { dispatch } = await withTask();
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const response = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
+        ),
+      );
+
+      // Assert
+      should(response.status).equal(503);
+      should(jsonBody(response)).have.property('code', 'unavailable');
+    });
   });
 
   describe('failures that are not the client', () => {
