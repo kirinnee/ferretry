@@ -9,6 +9,7 @@ import { FilesTab } from '../../src/components/files-tab.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { RenameSheet } from '../../src/components/rename-sheet.tsx';
+import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionTerminalSurface } from '../../src/components/session-terminal-surface.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
@@ -129,6 +130,58 @@ describe('SessionChatPage', () => {
       const runtime = page.root.findByType(ComposerRuntime);
       expect(runtime.props.view.config.id).toBe('shared');
       expect(runtime.props.canControl).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('fences a composer runtime command to its live daemon and publishes its returned observation', async () => {
+    const next = sessionView('shared', { state: { observedModel: 'gpt-5.6-sol' } });
+    const calls: Array<{ id: string; command: unknown; requestId: string | undefined }> = [];
+    const published: SessionView[] = [];
+    const runtimeClient: SessionChatClient = {
+      ...client([], next),
+      runtime: async (id, command, requestId) => {
+        calls.push({ id, command, requestId });
+        return next;
+      },
+    };
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={runtimeClient}
+        connection={alpha}
+        entries={[]}
+        onBack={() => undefined}
+        onSessionChange={view => published.push(view)}
+        presentation="pane"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      const composerRuntime = page.root.findByType(ComposerRuntime);
+      const modelControls = composerRuntime.props.renderModelControls({
+        open: true,
+        onClose: () => undefined,
+        onClaudeEffortSent: () => undefined,
+        onSwitchFailed: () => undefined,
+        onSwitchSubmitted: () => undefined,
+      }) as ReactElement<ComponentProps<typeof RuntimeModelControls>>;
+
+      await runAsync(() =>
+        modelControls.props.api.runtime(alpha, 'shared', { action: 'model' }, 'runtime-observation'),
+      );
+      expect(calls).toEqual([{ id: 'shared', command: { action: 'model' }, requestId: 'runtime-observation' }]);
+      expect(published).toEqual([next]);
+
+      await expect(
+        modelControls.props.api.runtime(
+          daemonConnection({ daemonId: 'beta', baseUrl: 'https://beta.example.test', deviceToken: 'beta-token' }),
+          'shared',
+          { action: 'model' },
+          'foreign-runtime',
+        ),
+      ).rejects.toThrow('runtime control belongs to a session that is no longer active');
+      expect(calls).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }
