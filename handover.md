@@ -197,5 +197,15 @@ Prevent repeated breakage in everyday development.
 |  ID | Todo | Feature                             | Definition of done                                                                              | 🔒 Hard | ↔ Soft  |
 | --: | :--: | ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------- | ------- |
 |   3 |  ☐   | **Fix gitlint in worktrees**        | Make commit linting work reliably inside mandatory Git worktrees.                               | —       | #4, #31 |
-|   4 |  ☐   | **Stop hiding untracked files**     | Always show untracked files so new callees cannot disappear from reviews or commits.            | —       | #3, #31 |
+|   4 |  ☑   | **Stop hiding untracked files**     | Always show untracked files so new callees cannot disappear from reviews or commits.            | —       | #3, #31 |
 |   5 |  ☐   | **Land Tasks pane performance fix** | Make Tasks load quickly by eliminating sequential task-file reads; record before/after timings. | —       | #35     |
+
+**#4 is complete.** This ports kteam's `src/git.ts` `gitChanges` behaviour into Ferretry's shared
+Git runner: `packages/daemon/src/adapters/git/runner.ts` pins
+`status.showUntrackedFiles=all`, so every daemon filesystem status read includes individual
+untracked files even when local or global Git configuration says `no`. Its regression coverage is
+`packages/daemon/tests/integration/session/filesystem/runner-session-git.test.ts`. The worktree
+status reader independently passes `--untracked-files=all` in
+`packages/daemon/src/adapters/worktrees/git-gateway.ts`, and the daemon-scoped PWA changes request
+in `packages/pwa/src/components/files-api.ts` uses the shared `browserFetch` transport without
+filtering `??` rows; `packages/pwa/tests/unit/files-api.test.ts` keeps that final path covered.
