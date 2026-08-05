@@ -10,7 +10,7 @@ import { SessionDetails } from '../../src/components/session-details.tsx';
 import { SessionHeader } from '../../src/components/session-header.tsx';
 import { SessionList } from '../../src/components/session-list.tsx';
 import { StatusMark, statusMark } from '../../src/components/status-mark.tsx';
-import { Transcript } from '../../src/components/transcript.tsx';
+import { quotableTranscriptSelectionText, Transcript } from '../../src/components/transcript.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -71,6 +71,106 @@ const findText = (node: ReactTestInstance, text: string): ReactTestInstance[] =>
   node.findAll(item => item.children.includes(text));
 
 describe('session screen components', () => {
+  test('quotes only a non-empty selection that belongs to the transcript', () => {
+    const inside = {} as Node;
+    const outside = {} as Node;
+    const selection = (text: string, anchorNode: Node | null, focusNode: Node | null, collapsed = false) => ({
+      isCollapsed: collapsed,
+      rangeCount: 1,
+      anchorNode,
+      focusNode,
+      toString: () => text,
+    });
+    const contains = (node: Node | null) => node === inside;
+
+    expect(quotableTranscriptSelectionText(null, contains)).toBe('');
+    expect(quotableTranscriptSelectionText(selection('selected', outside, outside), contains)).toBe('');
+    expect(quotableTranscriptSelectionText(selection('  selected  ', inside, outside), contains)).toBe('selected');
+    expect(quotableTranscriptSelectionText(selection('selected', inside, inside, true), contains)).toBe('');
+  });
+
+  test('keeps a touch transcript selection native but opens Quote for a mouse selection', () => {
+    const inside = {} as Node;
+    const viewport = {
+      scrollHeight: 900,
+      scrollTop: 700,
+      clientHeight: 200,
+      contains: (node: Node) => node === inside,
+    };
+    const selection = {
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: inside,
+      focusNode: inside,
+      toString: () => 'Selected transcript prose',
+    };
+    const previousWindow = globalThis.window;
+    const previousDocument = globalThis.document;
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: {
+        getSelection: () => selection,
+        innerHeight: 844,
+        innerWidth: 390,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      },
+    });
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        activeElement: null,
+        addEventListener: () => {},
+        contains: () => false,
+        removeEventListener: () => {},
+      },
+    });
+
+    try {
+      const transcript = render(<Transcript daemonId="daemon-a" entries={[]} sessionId="same-id" />, {
+        createNodeMock: element => {
+          const props = element.props as { role?: string };
+          return element.type === 'div' && props.role === 'log' ? viewport : null;
+        },
+      });
+      const log = transcript.root.findByProps({ role: 'log' });
+      let nativePrevented = false;
+      run(() => {
+        log.props.onTouchStartCapture();
+        log.props.onContextMenu({
+          clientX: 24,
+          clientY: 36,
+          currentTarget: {} as HTMLDivElement,
+          nativeEvent: {},
+          preventDefault: () => {
+            nativePrevented = true;
+          },
+        });
+      });
+      expect(nativePrevented).toBeFalse();
+
+      let menuPrevented = false;
+      run(() => {
+        log.props.onPointerDownCapture({ pointerType: 'mouse' });
+        log.props.onContextMenu({
+          clientX: 24,
+          clientY: 36,
+          currentTarget: {} as HTMLDivElement,
+          nativeEvent: { pointerType: 'mouse' },
+          preventDefault: () => {
+            menuPrevented = true;
+          },
+        });
+      });
+      expect(menuPrevented).toBeTrue();
+      expect(findText(transcript.root, 'Quote in composer')).toHaveLength(1);
+      run(() => transcript.root.findByProps({ role: 'menuitem' }).props.onClick());
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow });
+      Object.defineProperty(globalThis, 'document', { configurable: true, value: previousDocument });
+    }
+  });
+
   test('formats session state and elapsed time for every visible range', () => {
     expect(isTerminalSessionStatus('completed')).toBe(true);
     expect(isTerminalSessionStatus('running')).toBe(false);
