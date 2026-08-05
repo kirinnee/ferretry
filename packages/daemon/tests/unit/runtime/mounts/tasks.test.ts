@@ -398,6 +398,41 @@ describe('the task board mount', () => {
   });
 
   describe('listing the whole fleet', () => {
+    it('should read independent fleet boards in bounded parallel batches', async () => {
+      // The old route awaited each board in this loop. Each board is an independent atomic
+      // snapshot, so the kteam port may overlap them, but must not open one descriptor per board
+      // without a bound on a long-lived daemon.
+      const sessionIds = Array.from({ length: 96 }, (_unused, index) => `s${index}`);
+      let inFlight = 0;
+      let peakInFlight = 0;
+      const boards = Object.fromEntries(
+        sessionIds.map(sessionId => {
+          const board = new FakeTaskBoard(sessionId);
+          const list = board.list.bind(board);
+          board.list = async () => {
+            inFlight += 1;
+            peakInFlight = Math.max(peakInFlight, inFlight);
+            try {
+              await Bun.sleep(8);
+              return await list();
+            } finally {
+              inFlight -= 1;
+            }
+          };
+          return [sessionId, board];
+        }),
+      );
+      const dispatch = dispatcher({ boards, sessionIds });
+
+      // Act
+      const response = await dispatch.dispatch(request({ path: '/v1/tasks', headers: human }));
+
+      // Assert — this proves both halves of the port: no serial per-board await, and no unbounded
+      // descriptor fan-out beyond the source implementation's 64-board safety ceiling.
+      should(response.status).equal(200);
+      should(peakInFlight).equal(64);
+    });
+
     it('should read every session board and keep each row scoped to its own session', async () => {
       // Arrange
       const boards = { s1: new FakeTaskBoard('s1'), s2: new FakeTaskBoard('s2') };
