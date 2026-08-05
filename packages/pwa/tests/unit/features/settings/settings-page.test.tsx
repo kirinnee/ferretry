@@ -269,6 +269,29 @@ describe('SettingsPage controls and daemon-qualified links', () => {
     run(() => view.unmount());
   });
 
+  it('mounts the same daemon’s Secrets tab when the reader selects it', () => {
+    // Arrange — the tab is the only way the secret surface is reachable, so a tab that renders
+    // nothing is a capability the product does not have.
+    const current = daemon('daemon beta', 'https://beta.example.test', 'secret');
+    const view = render(page({ current, connections: [current], calls: calls() }));
+    selectDesktopSection(view, 'daemons');
+    const frame = view.root.findByProps({ 'data-daemon-settings-frame': 'daemon beta' });
+
+    // Act
+    run(() => frame.findByProps({ role: 'tab', 'aria-controls': 'daemon-settings-tab-secrets' }).props.onClick());
+
+    // Assert — without a client the surface states that it could not read, which is exactly what it
+    // must do rather than rendering an empty store.
+    expect(frame.findByProps({ role: 'tab', 'aria-selected': true }).props['aria-controls']).toBe(
+      'daemon-settings-tab-secrets',
+    );
+    expect(
+      frame.findAllByProps({ 'aria-label': 'Loading secrets' }).length +
+        frame.findAllByProps({ 'aria-label': 'Secrets unavailable' }).length,
+    ).toBeGreaterThan(0);
+    run(() => view.unmount());
+  });
+
   it('leaves text-scale choices visible but disabled when percentage adjustment is unsupported', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
     Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });

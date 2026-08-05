@@ -396,3 +396,59 @@ describe('the command surface', () => {
     expect(set?.registeredArguments.map(argument => argument.name())).toEqual(['name']);
   });
 });
+
+describe('the registered verbs actually run', () => {
+  /** Drives the real commander program, so a verb that is declared and wired to nothing fails here
+   *  rather than at a person's terminal. */
+  async function parse(gateway: FakeGateway, out: RecordingOutput, argv: readonly string[]): Promise<void> {
+    const program = new Command();
+    program.exitOverride();
+    registerSecretCommands(program, controller(gateway, out));
+    await program.parseAsync(['node', 'fy', 'secret', ...argv]);
+  }
+
+  it('lists', async () => {
+    // Arrange
+    const out = new RecordingOutput();
+
+    // Act
+    await parse(new FakeGateway(), out, ['ls']);
+
+    // Assert
+    expect(out.messages[0]).toContain('No secrets on this daemon');
+  });
+
+  it('sets from stdin', async () => {
+    // Arrange
+    const gateway = new FakeGateway();
+
+    // Act
+    await parse(gateway, new RecordingOutput(), ['set', 'TOKEN']);
+
+    // Assert
+    expect(gateway.stored).toEqual(['TOKEN', 'sk-live-0123456789']);
+  });
+
+  it('removes', async () => {
+    // Arrange
+    const gateway = new FakeGateway();
+
+    // Act
+    await parse(gateway, new RecordingOutput(), ['rm', 'TOKEN']);
+
+    // Assert
+    expect(gateway.removed).toBe('TOKEN');
+  });
+
+  it('uses, passing the name and the command through', async () => {
+    // Arrange
+    const gateway = new FakeGateway();
+
+    // Act
+    await parse(gateway, new RecordingOutput(), ['use', '--with', 'TOKEN', '--', 'curl', 'https://example.test']);
+
+    // Assert
+    expect(gateway.used?.secrets).toEqual(['TOKEN']);
+    expect(gateway.used?.command).toEqual(['curl', 'https://example.test']);
+  });
+});

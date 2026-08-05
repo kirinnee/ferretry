@@ -167,9 +167,7 @@ describe('a real child holding a secret', () => {
     const uses = await service('use-truncate');
 
     // Act — more than the 256 KiB ceiling.
-    const result = await uses.run(
-      request({ command: ['sh', '-c', 'i=0; while [ $i -lt 40000 ]; do echo aaaaaaaaaa; i=$((i+1)); done'] }),
-    );
+    const result = await uses.run(request({ command: ['sh', '-c', 'yes 0123456789abcdef | head -c 400000'] }));
 
     // Assert
     should(result.truncated).be.true();

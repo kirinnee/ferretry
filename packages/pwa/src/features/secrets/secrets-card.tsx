@@ -171,7 +171,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
       <WriteFailure error={error} />
 
       <form className="flex min-w-0 flex-col gap-2" onSubmit={submit} aria-label="Add or replace a secret">
-        <div className="flex min-w-0 flex-wrap items-end gap-2">
+        <div className="flex min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-end">
           <label className="flex min-w-0 flex-1 flex-col gap-1 text-ui text-muted" htmlFor={nameId}>
             Name
             <input
@@ -197,7 +197,7 @@ export function SecretsCard({ list, busy = null, error = null, onPut, onRemove }
               onChange={event => setValue(event.target.value)}
             />
           </label>
-          <button type="submit" className="kt-btn min-h-[44px]" data-variant="primary" disabled={!ready}>
+          <button type="submit" className="kt-btn min-h-[44px] justify-center" data-variant="primary" disabled={!ready}>
             <Plus size={14} aria-hidden="true" /> {busy === null ? 'Save' : 'Saving…'}
           </button>
         </div>

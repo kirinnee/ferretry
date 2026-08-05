@@ -535,6 +535,18 @@ try {
           const wardenStripTarget = join(outDir, `warden-strip-${viewport.name}.png`);
           await page.locator('[data-harness="warden-strip"]').screenshot({ path: wardenStripTarget });
           process.stdout.write(`📸 Warden strip -> ${wardenStripTarget}\n`);
+          // The secret store, in the three states a person actually meets: one that exists
+          // (masked, with a configured reference that does not resolve), a damaged store that says
+          // so rather than reporting empty, and a read this browser could not make.
+          for (const [name, selector] of [
+            [`secrets`, `[data-harness="secrets-card"]`],
+            [`secrets-damaged`, `[data-harness="secrets-damaged"]`],
+            [`secrets-unreachable`, `[data-harness="secrets-unreachable"]`],
+          ] as const) {
+            const target = join(outDir, `${name}-${viewport.name}.png`);
+            await page.locator(selector).screenshot({ path: target });
+            process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
+          }
           const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
           await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
           process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);

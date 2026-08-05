@@ -15,6 +15,7 @@ import type {
   LearningStatus,
   PinSnapshot,
   ProposalView,
+  SecretList,
   SessionView,
   TaskLive,
   TaskStatus,
@@ -23,6 +24,7 @@ import type {
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
+import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -110,6 +112,8 @@ import { TaskName } from '../src/features/tasks/task-name.tsx';
 import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
 import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
 import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
+import { SecretsCard } from '../src/features/secrets/secrets-card.tsx';
+import { SecretsSurface } from '../src/features/secrets/secrets-surface.tsx';
 import { WardenAttention } from '../src/features/warden/warden-attention.tsx';
 import { type WardenClientFactory, WardenConfigCard } from '../src/features/warden/warden-config-card.tsx';
 import { WardenStrip } from '../src/features/warden/warden-strip.tsx';
@@ -712,6 +716,36 @@ const WARDEN_CONFIG: WardenConfigView = {
   config: WARDEN.config,
   accounts: WARDEN.config.accounts,
   warnings: ['Account order takes effect on the next sweep.'],
+};
+
+/**
+ * The secret store as the screen meets it.
+ *
+ * The values are absent from this fixture because they are absent from the wire: the daemon serves
+ * no route that returns one, so there is nothing for a harness to invent. What a review is looking
+ * at is a name, an instant, a mask, and a configured reference that does not resolve.
+ */
+const SECRETS_READY: SecretList = {
+  v: SECRET_SCHEMA_VERSION,
+  health: 'ready',
+  secrets: [
+    { name: 'ANTHROPIC_API_KEY', createdAt: '2026-03-02T09:00:00.000Z', updatedAt: '2026-03-02T09:00:00.000Z' },
+    { name: 'GITHUB_TOKEN', createdAt: '2026-01-11T09:00:00.000Z', updatedAt: '2026-07-28T16:20:00.000Z' },
+  ],
+  references: [
+    { name: 'ANTHROPIC_API_KEY', origin: 'config/daemon.json → secretEnvironment.AUTH', resolved: true },
+    { name: 'STRIPE_KEY', origin: 'config/daemon.json → secretEnvironment.BILLING', resolved: false },
+  ],
+};
+
+/** Damaged is its own state, never an empty list. */
+const SECRETS_DAMAGED: SecretList = {
+  v: SECRET_SCHEMA_VERSION,
+  health: 'damaged',
+  diagnosis:
+    'this daemon holds sealed secrets and the key that opens them is gone; restore the key file or delete the vault and set the secrets again',
+  secrets: [],
+  references: [{ name: 'ANTHROPIC_API_KEY', origin: 'config/daemon.json → secretEnvironment.AUTH', resolved: false }],
 };
 
 /** The settings harness owns its Warden fixture too: no visual review should
@@ -3778,6 +3812,41 @@ function Shell() {
             titleId="harness-unified-browser-real-title"
           />
         </section>
+      ),
+    },
+    {
+      // The secret store as a person actually meets it: one secret that exists, one configured
+      // reference this daemon cannot resolve, and the masked value that is the ONLY thing there is.
+      // The card carries the honest sentence on screen — "agents cannot see these" would be false.
+      label: 'Secrets',
+      render: () => (
+        <div data-harness="secrets-card">
+          <SecretsCard list={SECRETS_READY} onPut={() => {}} onRemove={() => {}} />
+        </div>
+      ),
+    },
+    {
+      // Damaged is NOT empty. A store that cannot be opened says so and warns against writing over
+      // entries that are still on disk — the failure this migration has now shipped three times.
+      label: 'Secrets — damaged store',
+      render: () => (
+        <div data-harness="secrets-damaged">
+          <SecretsCard list={SECRETS_DAMAGED} onPut={() => {}} onRemove={() => {}} />
+        </div>
+      ),
+    },
+    {
+      // A read this browser could not make is a stated refusal, never "no secrets".
+      label: 'Secrets — unreadable',
+      render: () => (
+        <div data-harness="secrets-unreachable">
+          <SecretsSurface
+            connection={daemon}
+            createClient={async () => {
+              throw new Error('this daemon did not answer');
+            }}
+          />
+        </div>
       ),
     },
   ];
