@@ -20,10 +20,19 @@ const scope = daemonSessionScope(daemon, 'session');
 const originalFetch = globalThis.fetch;
 let previewPayload: Record<string, string>;
 let previewFailure: Error | null;
-const previewFetch: DaemonFetch = async () => {
-  if (previewFailure) throw previewFailure;
-  return Response.json(previewPayload);
-};
+/**
+ * Patching the global is deliberate: the component reaches the network through `browserFetch`, which
+ * calls `globalThis.fetch`, so this exercises the real binding rather than an injected seam that
+ * cannot reproduce a receiver bug. `preconnect` is carried over from the real builtin instead of
+ * being cast away — the runtime's `fetch` genuinely has it, and a cast would only hide that.
+ */
+const previewFetch: typeof fetch = Object.assign(
+  (async () => {
+    if (previewFailure) throw previewFailure;
+    return Response.json(previewPayload);
+  }) satisfies DaemonFetch,
+  { preconnect: originalFetch.preconnect },
+);
 
 beforeEach(() => {
   previewPayload = { path: 'report.html', base64: 'PGgxPnVudHJ1c3RlZDwvaDE+' };
