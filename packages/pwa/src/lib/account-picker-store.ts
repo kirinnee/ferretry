@@ -1,26 +1,34 @@
 /**
  * THE PICKABLE ACCOUNT ROSTER, ONE SLICE PER PAIRED DAEMON.
  *
- * Account wrappers, quota and health all belong to the host that reported
+ * Account wrappers and explicit health checks belong to the host that reported
  * them. A wrapper name is not globally meaningful, so this store has no
  * daemon-free read and fences every in-flight request across unpair/re-pair.
  *
- * The three endpoint reads settle inside `readAccountPickerCatalog`: an
- * unreadable manifest remains `accounts: null`, while an honest empty manifest
- * remains `accounts: []`. A failed refresh never replaces a previously proved
- * catalog with a fabricated empty one; the slice keeps its last answer and
- * reports the transport failure separately.
+ * Automatic hydration reads only the manifest. Quota comes from the existing
+ * cached usage store, and health is checked only after a deliberate action.
+ * A failed read never replaces a previously proved catalog with a fabricated
+ * empty one; the slice keeps its last answer and reports the failure.
  */
 
-import type { AccountPickerCatalog } from '../components/picker-catalog.ts';
-import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
+import type {
+  AccountPickerCatalog,
+  AccountPickerHealthCatalog,
+  PickerAccountHealth,
+} from './account-picker-catalog.ts';
+import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 
 export type AccountPickerLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface DaemonAccountPickerSlice {
+  /** Opaque connection generation; never derived from a credential. */
+  readonly generation: number;
   readonly catalog: AccountPickerCatalog | null;
   readonly status: AccountPickerLoadStatus;
   readonly error: string | null;
+  readonly health: ReadonlyMap<string, PickerAccountHealth> | null;
+  readonly healthStatus: AccountPickerLoadStatus;
+  readonly healthError: string | null;
 }
 
 export interface AccountPickerSnapshot {
@@ -29,27 +37,35 @@ export interface AccountPickerSnapshot {
 
 export interface DaemonAccountPickerPort {
   catalog(daemon: DaemonConnection): Promise<AccountPickerCatalog>;
+  health(daemon: DaemonConnection): Promise<AccountPickerHealthCatalog>;
 }
 
 const IDLE_SLICE: DaemonAccountPickerSlice = Object.freeze({
+  generation: 0,
   catalog: null,
   status: 'idle' as const,
   error: null,
+  health: null,
+  healthStatus: 'idle' as const,
+  healthError: null,
 });
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
 interface AccountPickerEntry {
   readonly daemonId: DaemonId;
-  readonly baseUrl: string;
-  readonly deviceToken: string;
-  request: Promise<AccountPickerCatalog> | null;
+  readonly connection: DaemonConnection;
+  readonly generation: number;
+  catalogAttempted: boolean;
+  catalogRequest: Promise<AccountPickerCatalog> | null;
+  healthRequest: Promise<AccountPickerHealthCatalog> | null;
 }
 
 export class DaemonAccountPickerStore {
   readonly #port: DaemonAccountPickerPort;
   readonly #entries = new Map<DaemonId, AccountPickerEntry>();
   readonly #listeners = new Set<() => void>();
+  #issuedGeneration = 0;
   #snapshot: AccountPickerSnapshot = { daemons: new Map() };
 
   constructor(port: DaemonAccountPickerPort) {
@@ -68,14 +84,12 @@ export class DaemonAccountPickerStore {
     return this.#snapshot.daemons.get(daemonId) ?? IDLE_SLICE;
   }
 
-  /**
-   * Read through the live pairing generation. Calling this while rendering a
-   * newly paired connection drops evidence read with the credential it
-   * replaced before React can paint it under the new connection.
-   */
+  /** A pure connection-aware read; another pairing's generation is unread. */
   sliceFor(daemon: DaemonConnection): DaemonAccountPickerSlice {
-    this.#entryFor(daemon);
-    return this.slice(daemon.daemonId);
+    const entry = this.#entries.get(daemon.daemonId);
+    if (entry === undefined || !sameDaemonConnection(entry.connection, daemon)) return IDLE_SLICE;
+    const slice = this.slice(daemon.daemonId);
+    return slice.generation === entry.generation ? slice : IDLE_SLICE;
   }
 
   /**
@@ -84,25 +98,76 @@ export class DaemonAccountPickerStore {
    */
   hydrate(daemon: DaemonConnection): Promise<AccountPickerCatalog> {
     const entry = this.#entryFor(daemon);
-    if (entry.request !== null) return entry.request;
+    if (entry.catalogRequest !== null) return entry.catalogRequest;
+    const slice = this.sliceFor(daemon);
+    if (slice.catalog !== null) return Promise.resolve(slice.catalog);
+    if (entry.catalogAttempted) {
+      return Promise.reject(new Error(slice.error ?? 'the account roster could not be read'));
+    }
 
-    this.#patch(daemon.daemonId, { status: 'loading' });
+    return this.#readCatalog(entry);
+  }
+
+  /** Deliberately retry the cheap manifest read while retaining last-good rows. */
+  refresh(daemon: DaemonConnection): Promise<AccountPickerCatalog> {
+    const entry = this.#entryFor(daemon);
+    if (entry.catalogRequest !== null) return entry.catalogRequest;
+    return this.#readCatalog(entry);
+  }
+
+  #readCatalog(entry: AccountPickerEntry): Promise<AccountPickerCatalog> {
+    entry.catalogAttempted = true;
+
+    this.#patch(entry, { status: 'loading', error: null });
     const request = this.#port
-      .catalog(daemon)
+      .catalog(entry.connection)
       .then(
         catalog => {
-          if (this.#isCurrent(entry)) this.#patch(entry.daemonId, { catalog, status: 'ready', error: null });
+          if (this.#isCurrent(entry)) this.#patch(entry, { catalog, status: 'ready', error: null });
           return catalog;
         },
         (reason: unknown) => {
-          if (this.#isCurrent(entry)) this.#patch(entry.daemonId, { status: 'error', error: failureMessage(reason) });
+          if (this.#isCurrent(entry)) this.#patch(entry, { status: 'error', error: failureMessage(reason) });
           throw reason;
         },
       )
       .finally(() => {
-        entry.request = null;
+        if (entry.catalogRequest === request) entry.catalogRequest = null;
       });
-    entry.request = request;
+    entry.catalogRequest = request;
+    return request;
+  }
+
+  /** Run the live wrapper check only after an explicit reader action. */
+  checkHealth(daemon: DaemonConnection): Promise<AccountPickerHealthCatalog> {
+    const entry = this.#entryFor(daemon);
+    if (entry.healthRequest !== null) return entry.healthRequest;
+
+    this.#patch(entry, { healthStatus: 'loading', healthError: null });
+    const request = this.#port
+      .health(daemon)
+      .then(
+        result => {
+          if (this.#isCurrent(entry)) {
+            this.#patch(entry, {
+              health: result.health,
+              healthStatus: result.error === null ? 'ready' : 'error',
+              healthError: result.error,
+            });
+          }
+          return result;
+        },
+        (reason: unknown) => {
+          if (this.#isCurrent(entry)) {
+            this.#patch(entry, { healthStatus: 'error', healthError: failureMessage(reason) });
+          }
+          throw reason;
+        },
+      )
+      .finally(() => {
+        entry.healthRequest = null;
+      });
+    entry.healthRequest = request;
     return request;
   }
 
@@ -120,15 +185,15 @@ export class DaemonAccountPickerStore {
 
   #entryFor(daemon: DaemonConnection): AccountPickerEntry {
     const existing = this.#entries.get(daemon.daemonId);
-    if (existing?.baseUrl === daemon.baseUrl && existing.deviceToken === daemon.deviceToken) return existing;
+    if (existing !== undefined && sameDaemonConnection(existing.connection, daemon)) return existing;
 
-    const slices = new Map(this.#snapshot.daemons);
-    if (slices.delete(daemon.daemonId)) this.#snapshot = { daemons: slices };
     const entry: AccountPickerEntry = {
       daemonId: daemon.daemonId,
-      baseUrl: daemon.baseUrl,
-      deviceToken: daemon.deviceToken,
-      request: null,
+      connection: daemon,
+      generation: this.#mintGeneration(),
+      catalogAttempted: false,
+      catalogRequest: null,
+      healthRequest: null,
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
@@ -138,11 +203,18 @@ export class DaemonAccountPickerStore {
     return this.#entries.get(entry.daemonId) === entry;
   }
 
-  #patch(daemonId: DaemonId, patch: Partial<DaemonAccountPickerSlice>): void {
+  #patch(entry: AccountPickerEntry, patch: Partial<DaemonAccountPickerSlice>): void {
     const daemons = new Map(this.#snapshot.daemons);
-    daemons.set(daemonId, { ...this.slice(daemonId), ...patch });
+    const current = this.slice(entry.daemonId);
+    const base = current.generation === entry.generation ? current : { ...IDLE_SLICE, generation: entry.generation };
+    daemons.set(entry.daemonId, { ...base, ...patch, generation: entry.generation });
     this.#snapshot = { daemons };
     this.#publish();
+  }
+
+  #mintGeneration(): number {
+    this.#issuedGeneration += 1;
+    return this.#issuedGeneration;
   }
 
   #publish(): void {

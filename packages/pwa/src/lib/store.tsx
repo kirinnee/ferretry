@@ -11,12 +11,12 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { readAccountPickerCatalog } from '../components/picker-catalog.ts';
 import {
   bundledRelayDirectory,
   type HostedRelayFallback,
   readHostedRelayFallback,
 } from '../features/onboarding/hosted-relay.ts';
+import { readAccountPickerCatalog, readAccountPickerHealth } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import {
@@ -287,6 +287,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const projects = new DaemonProjectsStore(daemonProjectsPort(carried));
   const accountPicker = new DaemonAccountPickerStore({
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
+    health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
   });
   const usage = new DaemonUsageStore(daemonUsagePort(carried));
   const browserStorage = browserControlsStorage() ?? null;

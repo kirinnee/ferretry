@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-
-import type { AccountPickerCatalog } from '../../src/components/picker-catalog.ts';
 import { useAccountPickerSlice } from '../../src/hooks/use-account-picker.ts';
+import type { AccountPickerCatalog, AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../support/dom.ts';
@@ -18,17 +17,26 @@ const workstation = daemonConnection({
 });
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
-  accounts: [],
-  accountsError: wrapper,
-  usage: new Map(),
-  usageError: null,
-  health: new Map(),
-  healthError: null,
+  accounts: [
+    {
+      id: '11111111-1111-4111-8111-111111111111',
+      kind: 'claude',
+      mode: 'auto',
+      wrapper,
+      home: `/accounts/${wrapper}`,
+      displayName: wrapper,
+      defaultModel: 'opus',
+      models: [{ id: 'opus', available: true }],
+      available: true,
+      unavailableReason: null,
+    },
+  ],
 });
+const noHealth: AccountPickerHealthCatalog = { health: new Map(), error: null };
 
 function Status({ store, daemon }: { readonly store: DaemonAccountPickerStore; readonly daemon: typeof laptop }) {
   const slice = useAccountPickerSlice(store, daemon);
-  return <output>{`${slice.status}:${slice.catalog?.accountsError ?? slice.error ?? '—'}`}</output>;
+  return <output>{`${slice.status}:${slice.catalog?.accounts[0]?.wrapper ?? slice.error ?? '—'}`}</output>;
 }
 
 describe('useAccountPickerSlice', () => {
@@ -39,6 +47,7 @@ describe('useAccountPickerSlice', () => {
         reads.push(daemon.daemonId);
         return catalog(daemon.daemonId);
       },
+      health: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('ready:daemon/laptop');
@@ -49,14 +58,21 @@ describe('useAccountPickerSlice', () => {
     await mounted.unmount();
   });
 
-  it('renders a failed read as state instead of throwing from the component', async () => {
+  it('renders a failed read as state and does not retry an equivalent connection automatically', async () => {
+    let reads = 0;
     const store = new DaemonAccountPickerStore({
       catalog: async () => {
+        reads += 1;
         throw new Error('fleet unavailable');
       },
+      health: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('error:fleet unavailable');
+
+    await mounted.render(<Status store={store} daemon={{ ...laptop }} />);
+    expect(mounted.container.textContent).toBe('error:fleet unavailable');
+    expect(reads).toBe(1);
     await mounted.unmount();
   });
 
@@ -71,6 +87,7 @@ describe('useAccountPickerSlice', () => {
         reads += 1;
         return reads === 1 ? catalog('first pairing') : await pending;
       },
+      health: async () => noHealth,
     });
     const mounted = await mount(<Status store={store} daemon={laptop} />);
     expect(mounted.container.textContent).toBe('ready:first pairing');
@@ -86,6 +103,23 @@ describe('useAccountPickerSlice', () => {
       await Promise.resolve();
     });
     expect(mounted.container.textContent).toBe('ready:replacement pairing');
+    await mounted.unmount();
+  });
+
+  it('reuses a settled roster when a parent rebuilds an equivalent connection object', async () => {
+    let reads = 0;
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => {
+        reads += 1;
+        return catalog('stable pairing');
+      },
+      health: async () => noHealth,
+    });
+    const mounted = await mount(<Status store={store} daemon={laptop} />);
+    await mounted.render(<Status store={store} daemon={{ ...laptop }} />);
+
+    expect(mounted.container.textContent).toBe('ready:stable pairing');
+    expect(reads).toBe(1);
     await mounted.unmount();
   });
 });
