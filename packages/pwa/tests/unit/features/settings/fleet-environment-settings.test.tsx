@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
+import { DaemonSettingsFrame } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import { FleetEnvironmentSettings } from '../../../../src/features/settings/fleet-environment-settings.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
+import { render, run } from '../../../support/react.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -48,6 +50,30 @@ afterEach(() => {
 });
 
 describe('FleetEnvironmentSettings', () => {
+  it('mounts the portable environment panel from the daemon settings frame', () => {
+    globalThis.fetch = (async () => response({ profiles: { portable: {} } })) as unknown as typeof fetch;
+    const view = render(
+      <DaemonSettingsFrame
+        connection={alpha}
+        connections={[alpha]}
+        name="Alpha"
+        readWardenStatus={async () => Promise.reject(new Error('unavailable'))}
+        createWardenClient={async () => Promise.reject(new Error('unavailable'))}
+      />,
+    );
+
+    const environment = must(
+      view.root
+        .findAllByProps({ role: 'tab' })
+        .find(tab => tab.props['aria-controls'] === 'daemon-settings-tab-environment'),
+      'environment tab',
+    );
+    run(() => environment.props.onClick());
+
+    expect(view.root.findByProps({ id: 'daemon-settings-tab-environment' }).props['aria-label']).toBe('Environment');
+    run(() => view.unmount());
+  });
+
   it('previews a source profile, changes copy semantics, and applies an edited safe environment', async () => {
     const calls: Array<{ readonly url: URL; readonly init?: RequestInit }> = [];
     const target = { profiles: { portable: { KEEP: 'target', CHANGE: 'old', REMOVE: 'gone' }, other: {} } };
