@@ -375,8 +375,6 @@ interface CarrierEntry {
   readonly connection: DaemonConnection;
   choice: ConnectionChoice | undefined;
   session: Promise<RelayClientSession> | undefined;
-  /** Carriers already tried and refused, so the disclosure can name each one. */
-  readonly skipped: ConnectionProbe[];
 }
 
 const transportFailure = (reason: unknown): string => {
@@ -486,26 +484,47 @@ export class DaemonCarrierRouter {
    * One request, over the first carrier that carries it.
    *
    * Direct is attempted first — every time, on a fresh connection — and only a
-   * TRANSPORT failure moves on. Once a carrier has answered, it keeps the traffic
-   * for the life of this connection.
+   * TRANSPORT failure moves on. Once a carrier has ANSWERED, it keeps the traffic
+   * for the life of this connection: that is the `ok === true` short-circuit, and it
+   * is what stops a browser on the network the relay exists for paying a failed
+   * direct connection on every single call.
+   *
+   * A ROUND OF FAILURES IS NOT REMEMBERED, and this used to be two bugs at once. The
+   * refused carriers were accumulated on the shared entry rather than kept to the
+   * request that tried them, so:
+   *
+   * - Concurrent requests — which is every app load — each appended their own copy,
+   *   and the disclosure listed `Direct` twice and `Hosted relay` twice for one
+   *   daemon. A reader seeing a carrier named four times reasonably concludes the
+   *   screen is broken, which is a bad way to learn their firewall changed.
+   * - A daemon that had failed on every carrier once could never be retried. The loop
+   *   skipped everything already on the list, so the entry was poisoned for the life
+   *   of the pairing: coming back onto the right network, or the relay coming back
+   *   up, changed nothing until a re-pair. A transient failure presented as a
+   *   permanent one.
+   *
+   * So the probe list is a LOCAL, and it lives exactly as long as the attempt that
+   * built it. Nothing is lost by that: a round in which no carrier worked served no
+   * request, so there is no answer to keep and re-probing next time is the only
+   * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
     const entry = this.#entry(daemon);
     const chosen = entry.choice;
     if (chosen?.ok === true) return await this.#over(entry, chosen.method, url, init);
 
+    const probes: ConnectionProbe[] = [];
     for (const method of daemonCarriers(daemon)) {
-      if (entry.skipped.some(probe => sameMethod(probe.method, method))) continue;
       try {
         const response = await this.#over(entry, method, url, init);
-        this.#decide(entry, [...entry.skipped, { method, reachable: true }]);
+        this.#decide(entry, [...probes, { method, reachable: true }]);
         return response;
       } catch (reason) {
         if (reason instanceof RelayAnswerError) throw reason.cause;
-        entry.skipped.push({ method, reachable: false, detail: transportFailure(reason) });
+        probes.push({ method, reachable: false, detail: transportFailure(reason) });
       }
     }
-    this.#decide(entry, entry.skipped);
+    this.#decide(entry, probes);
     throw new Error(entry.choice?.reason ?? 'no carrier is configured for this daemon');
   }
 
@@ -513,7 +532,7 @@ export class DaemonCarrierRouter {
     const current = this.#entries.get(daemon.daemonId);
     if (current !== undefined && sameDaemonConnection(current.connection, daemon)) return current;
     if (current !== undefined) this.clearDaemon(daemon.daemonId);
-    const entry: CarrierEntry = { connection: daemon, choice: undefined, session: undefined, skipped: [] };
+    const entry: CarrierEntry = { connection: daemon, choice: undefined, session: undefined };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
   }
@@ -585,8 +604,3 @@ class RelayAnswerError extends Error {
     this.name = 'RelayAnswerError';
   }
 }
-
-const sameMethod = (left: ConnectionMethod, right: ConnectionMethod): boolean =>
-  left.kind === right.kind &&
-  (left.kind === 'direct' ? left.daemonUrl : left.relayUrl) ===
-    (right.kind === 'direct' ? right.daemonUrl : right.relayUrl);

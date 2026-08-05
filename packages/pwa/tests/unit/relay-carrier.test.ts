@@ -433,6 +433,67 @@ describe('the carrier router', () => {
     should(router.choice(daemon.daemonId)?.ok).be.false();
   });
 
+  /**
+   * The disclosure a reader actually saw named `Direct` twice and `Hosted relay`
+   * twice for one daemon. Refused carriers were accumulated on the shared entry
+   * rather than kept to the attempt that made them, and an app load issues several
+   * daemon-bound requests at once — so each one appended its own copy.
+   */
+  it('should name each carrier once when several requests fail at the same time', async () => {
+    const { router, daemon } = await routerFor({
+      relay: RELAY,
+      answer: { rejectDevice: true },
+      network: async () => {
+        throw new TypeError('Failed to fetch');
+      },
+    });
+    const attempts = ['/v1/projects', '/v1/usage', '/v1/sessions'].map(path =>
+      router.fetch(`${DAEMON_URL}${path}`).then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    await Promise.all(attempts);
+
+    const choice = router.choice(daemon.daemonId);
+    should(choice?.ok).be.false();
+    should(choice?.passedOver.map(skip => skip.method.kind)).eql(['direct', 'relay']);
+  });
+
+  /**
+   * A round in which nothing worked used to poison the entry for the life of the
+   * pairing: every later request found both carriers already on the refused list,
+   * skipped the loop entirely and threw without trying anything. Coming back onto
+   * the network the daemon is on changed nothing, and neither did the relay coming
+   * back up — the reader had to re-pair to recover from a transient failure.
+   */
+  it('should try again after a round in which no carrier worked', async () => {
+    let reachable = false;
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceToken: DEVICE_TOKEN,
+    });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      dial: autoDial(identity, {}).dial,
+      heartbeat: () => () => undefined,
+      network: async () => {
+        if (!reachable) throw new TypeError('Failed to fetch');
+        return new Response('back', { status: 200 });
+      },
+    });
+    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+
+    await should(router.fetch(`${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
+    should(router.choice(daemon.daemonId)?.ok).be.false();
+
+    reachable = true;
+    should(await (await router.fetch(`${DAEMON_URL}/v1/projects`)).text()).equal('back');
+    should(router.choice(daemon.daemonId)?.ok).be.true();
+  });
+
   it('should not try another carrier once the daemon itself has answered', async () => {
     const { router } = await routerFor({
       relay: RELAY,
