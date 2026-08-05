@@ -127,4 +127,27 @@ describe('SessionAttachmentStore', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it('zeros and forgets every unlocked copy for a released session', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-attachments-'));
+    try {
+      const store = new SessionAttachmentStore({
+        root,
+        daemonId: 'daemon-a',
+        decrypt: async () => plaintext.slice(),
+      });
+      const uploaded = await store.upload('session-a', {
+        filename: 'private.pdf',
+        mime: 'application/pdf',
+        bytes: encryptedPdf,
+      });
+      await store.unlock('session-a', uploaded.id, 'correct password');
+
+      store.releaseSession('session-a');
+
+      should((await store.download('session-a', uploaded.id)).attachment.encrypted?.locked).be.true();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
