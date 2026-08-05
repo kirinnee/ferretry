@@ -10,7 +10,9 @@ let
 
   bunDeps = pkgs.stdenvNoCC.mkDerivation {
     pname = "ferretry-bun-deps";
-    version = releaseVersion;
+    # This fixed-output derivation's name is part of its cache identity. Keep it paired with the
+    # pinned outputHash; release-facing fy/fyd metadata derives from VERSION below.
+    version = "0.106.1";
     inherit src;
 
     nativeBuildInputs = [ pkgs.bun ];
