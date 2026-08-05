@@ -639,6 +639,10 @@ describe('MigrateSheet account picker', () => {
     return node;
   };
 
+  /** What the MODEL box offers — never what it holds. */
+  const datalist = (): readonly (string | null)[] =>
+    [...container().querySelectorAll('datalist option')].map(option => option.getAttribute('value'));
+
   /** Focus is what reveals the list, exactly as a reader's tap or Tab does. */
   const openRoster = async (): Promise<void> => {
     await interact(() => combobox().focus());
@@ -838,8 +842,7 @@ describe('MigrateSheet account picker', () => {
     await chooseRow(0);
 
     expect(modelField().value).toBe('');
-    const offered = [...container().querySelectorAll('datalist option')].map(option => option.getAttribute('value'));
-    expect(offered).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol']);
+    expect(datalist()).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol']);
 
     await submitForm();
     await pressControl('Relaunch on selected runtime');
@@ -864,7 +867,38 @@ describe('MigrateSheet account picker', () => {
     await chooseRow(0);
     await typeWrapper('codex-auto-elsewhere');
 
-    expect([...container().querySelectorAll('datalist option')]).toHaveLength(0);
+    expect(datalist()).toEqual([]);
+  });
+
+  it('drops the chosen account’s suggestions when the same daemon id is re-paired underneath', async () => {
+    // The leak this pins: a re-pair keeps `daemonId`, the session and the typed
+    // wrapper, so the reset effect correctly does not fire — while everything
+    // the browser proved about the host has expired. The roster is fenced off by
+    // `sameDaemonConnection`; the suggestions taken off one of its rows must go
+    // with it, rather than describing the new pairing on the old one's word.
+    const blank = source('stopped');
+    const view = { ...blank, config: { ...blank.config, model: '', modelHint: '' } } as SessionView;
+    const store = new DaemonAccountPickerStore(roster().port);
+    const usage = quotaStore();
+    await showSheet(<MigrateSheet {...props({ accountPicker: store, usage, view })} />);
+    await openRoster();
+    await typeWrapper('atomi');
+    await chooseRow(0);
+
+    expect(datalist()).toEqual(['gpt-5.6-terra', 'gpt-5.6-sol']);
+
+    const rotated = daemonConnection({
+      daemonId: daemonA.daemonId,
+      baseUrl: daemonA.baseUrl,
+      deviceToken: 'token-a-rotated',
+    });
+    await must(live, 'a mounted migrate sheet').render(
+      <MigrateSheet {...props({ accountPicker: store, connection: rotated, usage, view })} />,
+    );
+
+    // Nothing else moved: same session, same typed wrapper, no new choice made.
+    expect(combobox().value).toBe('codex-auto-atomi');
+    expect(datalist()).toEqual([]);
   });
 
   it('runs the expensive host probe only when the check is pressed, never on open', async () => {

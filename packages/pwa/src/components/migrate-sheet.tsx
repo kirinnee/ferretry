@@ -22,7 +22,7 @@ import {
 } from 'react';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { daemonApiClient } from '../lib/api-client.ts';
-import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
@@ -114,6 +114,45 @@ const NO_MODELS: readonly string[] = Object.freeze([]);
 const NO_USAGE_ROWS: readonly AccountUsageRow[] = Object.freeze([]);
 const UNREAD_USAGE: DaemonUsageSlice = Object.freeze({ feed: null, status: 'idle' as const, error: null });
 
+/** A chosen row, and the pairing it was chosen on. Never one without the other. */
+interface ChosenAccount {
+  readonly connection: DaemonConnection;
+  readonly account: AccountPickerOption;
+}
+
+/**
+ * THE ONE THING A CHOSEN ACCOUNT MAY DO TO THE MODEL BOX: SUGGEST.
+ *
+ * It may not write. Blank means "this account's own default", the daemon
+ * resolves that itself, and typing the default in would turn it into a pin the
+ * reader never asked for.
+ *
+ * Two facts have to agree before a single model is offered, and the wrapper name
+ * is NOT one of them on its own:
+ *
+ *   1. THE SAME PAIRING. A `DaemonId` survives an unpair/re-pair, which makes it
+ *      the right cache key and the wrong liveness token. The roster this choice
+ *      came from is already fenced off by `sameDaemonConnection` the moment the
+ *      pairing changes, so suggestions that outlived it would be the previous
+ *      host's evidence presented as this one's — while the wrapper text, the
+ *      daemon id and the session id all still look identical.
+ *   2. THE SAME TEXT. In a control whose typed value is its output, a reader who
+ *      typed over the wrapper has changed the answer, and the account they chose
+ *      before no longer describes the session about to be relaunched.
+ *
+ * Unavailable models are left out for a third reason: the manifest has already
+ * said they cannot serve. `new-session-page.tsx` states the same rule for the
+ * same reasons; a third surface needing it is the moment it earns its own module.
+ */
+const chosenAccountModels = (
+  chosen: ChosenAccount | null,
+  connection: DaemonConnection,
+  agent: string,
+): readonly string[] =>
+  chosen === null || !sameDaemonConnection(chosen.connection, connection) || chosen.account.wrapper !== agent.trim()
+    ? NO_MODELS
+    : chosen.account.models.filter(model => model.available).map(model => model.id);
+
 interface CachedAccountUsage {
   readonly rows: readonly AccountUsageRow[];
   /** Why the quota beside the rows is missing or stale. Never fails the roster. */
@@ -184,12 +223,11 @@ export function MigrateSheet({
   const [agent, setAgent] = useState(config.agent);
   const [model, setModel] = useState(currentModel);
   /**
-   * What the MODEL field offers after an account was chosen — suggestions only.
-   * The chosen account's own default is deliberately absent from every write
-   * path: blank already means "that account's default", and writing the string
-   * would turn a default into a pin nobody asked for.
+   * The row a reader chose, WITH the pairing it was chosen on, because that pair
+   * is the only thing that can prove the choice still describes this daemon.
+   * What it is allowed to affect is `chosenAccountModels` and nothing else.
    */
-  const [accountModels, setAccountModels] = useState<readonly string[]>(NO_MODELS);
+  const [chosenAccount, setChosenAccount] = useState<ChosenAccount | null>(null);
   const [phase, setPhase] = useState<MigrationPhase>('form');
   const [failure, setFailure] = useState<MigrationFailure | null>(null);
   const [downgradeAcknowledged, setDowngradeAcknowledged] = useState(false);
@@ -212,7 +250,7 @@ export function MigrateSheet({
     setPhase('form');
     setFailure(null);
     setDowngradeAcknowledged(false);
-    setAccountModels(NO_MODELS);
+    setChosenAccount(null);
     submitLock.current = false;
     requestIdentity.current = null;
   }, [open, connection.daemonId, scope.daemonId, scope.sessionId, config.id]);
@@ -231,8 +269,13 @@ export function MigrateSheet({
   // just given this daemon's word for; the current model's own variants stay,
   // because moving account and keeping the window is the common migration.
   const suggestions = useMemo(
-    () => [...new Set([...accountModels, ...migrationModelSuggestions(currentModel)])],
-    [accountModels, currentModel],
+    () => [
+      ...new Set([
+        ...chosenAccountModels(chosenAccount, connection, agent),
+        ...migrationModelSuggestions(currentModel),
+      ]),
+    ],
+    [chosenAccount, connection, agent, currentModel],
   );
   const caution = migrationRoutingCaution(agent);
   const terminal = TERMINAL_STATUSES.has(state.status);
@@ -241,10 +284,9 @@ export function MigrateSheet({
 
   const editAgent = (next: string): void => {
     setAgent(next);
-    // Typed-over: whatever account the suggestions came from is no longer the
-    // one in the box, and a stale suggestion list is a claim about the wrong
-    // account. A chosen row re-populates it immediately afterwards.
-    setAccountModels(NO_MODELS);
+    // The chosen row is deliberately NOT cleared here: `chosenAccountModels`
+    // already refuses to offer it once the text disagrees, and clearing it would
+    // additionally lose the choice when a reader types the same wrapper back.
     setFailure(null);
     setDowngradeAcknowledged(false);
     setPhase('form');
@@ -253,10 +295,11 @@ export function MigrateSheet({
   /**
    * A chosen row, AFTER `editAgent` has already committed its wrapper — the
    * control writes the value and then reports the option, so this only ever
-   * adds what the value alone cannot carry.
+   * records what the value alone cannot carry: which option it was, and which
+   * pairing said so.
    */
   const chooseAccount = (account: AccountPickerOption): void => {
-    setAccountModels(account.models.filter(entry => entry.available).map(entry => entry.id));
+    setChosenAccount({ account, connection });
   };
 
   const editModel = (next: string): void => {
