@@ -400,11 +400,8 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
     this.#stopTimer = this.#provider.setTimeout(
       () => {
         if (this.#state !== 'finishing') return;
-        try {
-          this.#recognition.abort();
-        } catch {
-          // The timeout failure below is the useful fact.
-        }
+        // `#fail` owns releasing the engine, so the unsettled Stop is closed
+        // by the same code path as every other terminal failure.
         this.#fail(
           new BrowserRecognitionError('recognition-failed', 'The browser did not finish speech recognition in time.'),
         );
@@ -534,6 +531,19 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
     if (this.#state === 'failed' || this.#state === 'finished' || this.#state === 'cancelled') return;
     this.#state = 'failed';
     this.#clearTimers();
+    // Web Speech imposes no order between `error` and `end`, so a terminal
+    // error can arrive after the `end` that already opened the next mobile
+    // cycle. Failing without releasing the engine would leave a live
+    // microphone with no owner while the reader is told recognition stopped.
+    // The state above is already terminal, so the `aborted` callbacks this
+    // triggers are refused by `#onError` and `#onEnd`: they can neither
+    // replace this failure nor restart another cycle. Both event orders
+    // therefore end in the same place.
+    try {
+      this.#recognition.abort();
+    } catch {
+      // An already-ended engine has nothing left to release.
+    }
     this.#rejectFinish?.(failure);
     this.#resolveFinish = null;
     this.#rejectFinish = null;
