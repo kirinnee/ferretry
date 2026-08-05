@@ -6,7 +6,7 @@ title: One fact, one owner — the refactor plan of record
 # One fact, one owner
 
 **Status: proposal, and the plan of record for the halt. Nothing here is built.**
-**Verified against `origin/main` at `52dc6a20` (`release: 0.160.1`).**
+**Verified against `origin/main` at `00b733d0`.** Nothing this document cites changed between `52dc6a20` and `00b733d0`, checked by diffing every file it names.
 
 Development is halted. Every feature unit has stopped: push (#302, open, green), the pairing UI
 follow-up (#300, open), the wildcard-advertisement fix. This document is the only workstream.
@@ -27,7 +27,7 @@ and the second:
 > also i WANT to support multiple relay type! please ensure that works.
 
 Six teammates contributed verified findings while halted: hadi, mika, cinthia, temperance, frederick.
-Their evidence is folded in and attributed. Every claim below was re-checked against `52dc6a20` by
+Their evidence is folded in and attributed. Every claim below was re-checked against `00b733d0` by
 content, including my own from the previous revision — one of which had already been fixed. See §11.
 
 ---
@@ -72,33 +72,51 @@ The repository already knows this. `docs/standards/contracts/README.md` says of 
 "Every one of them passed its own tests, because each writer owned its own fixture." The insight is
 correct and its application stopped at three contracts.
 
-### 1.1 The survey — fourteen instances
+### 1.1 The survey — sixteen instances, twelve of them live
 
-| #   | The fact                                | Definition A                              | Definition B                                                 | Status                         |
-| --- | --------------------------------------- | ----------------------------------------- | ------------------------------------------------------------ | ------------------------------ |
-| 0   | **the address another device may dial** | `publicUrl ?? bindUrl` (a default)        | `reachableOffHost` (a predicate); pairing consults neither   | **LIVE — the owner's blocker** |
-| 1   | the fleet manifest's shape              | `@ferretry/fleet` `FleetManifestSchema`   | a second schema in `daemon/lib/core/inventory.ts`            | fixed (#288)                   |
-| 2   | when a state home may be used           | the daemon                                | three CLI write paths                                        | fixed (#293)                   |
-| 3   | the six capabilities                    | `DAEMON_CAPABILITIES`                     | `CapabilityGrantsDocumentSchema` spells all six again        | **live**                       |
-| 4   | the push surface                        | `protocol/lib/push.ts` + PWA enrolment    | no daemon route exists                                       | **live** (#302 halted)         |
-| 5   | the pairing route table                 | the code                                  | my own summary of it, which was wrong                        | **live** (no gate)             |
-| 6   | the hosted relay's address              | PWA reads the advertisement               | daemon did not                                               | **fixed (#301)** — see §11     |
-| 7   | "may this caller do this thing"         | `RouteScope`                              | `TokenClass`, `CapabilityGrants`, **and an inline check**    | **live**                       |
-| 8   | **"is this loopback"**                  | five predicates in four packages          | no two of the first three agree on membership                | **live**                       |
-| 9   | the set of client settings              | `SETTINGS_DEFINITIONS` (8 rows)           | 12 independent `localStorage` modules                        | **live**                       |
-| 10  | the notification kinds                  | `PushNotificationKindSchema`              | `NOTIFICATION_KINDS` in the PWA                              | **live**                       |
-| 11  | the contract registry                   | the `all` loop in `cli-contracts.sh` (17) | the table in `docs/standards/contracts/README.md` (13)       | **live**                       |
-| 12  | the grants doctrine                     | §"LOCALITY is the layer"                  | §"the password is the layer" — same file                     | fixed in #300 (halted)         |
-| 13  | the word "capability"                   | 6 governed capabilities                   | `['daemon-api']` in pairing; unhonoured config keys in fleet | **live**                       |
-| 14  | **"this code is reached"**              | `composition-reachability` (module)       | `composition-invocation` (field) — neither sees a **method** | **live**                       |
+| #   | The fact                                | Definition A                              | Definition B                                                       | Status                         |
+| --- | --------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ | ------------------------------ |
+| 0   | **the address another device may dial** | `publicUrl ?? bindUrl` (a default)        | `reachableOffHost` (a predicate); pairing consults neither         | **LIVE — the owner's blocker** |
+| 1   | the fleet manifest's shape              | `@ferretry/fleet` `FleetManifestSchema`   | a second schema in `daemon/lib/core/inventory.ts`                  | fixed (#288)                   |
+| 2   | when a state home may be used           | the daemon                                | three CLI write paths                                              | fixed (#293)                   |
+| 3   | the six capabilities                    | `DAEMON_CAPABILITIES`                     | `CapabilityGrantsDocumentSchema` spells all six again              | **live**                       |
+| 4   | the push surface                        | `protocol/lib/push.ts` + PWA enrolment    | no daemon route exists                                             | **live** (#302 halted)         |
+| 5   | the pairing route table                 | the code                                  | my own summary of it, which was wrong                              | **live** (no gate)             |
+| 6   | the hosted relay's address              | PWA reads the advertisement               | daemon did not                                                     | **fixed (#301)** — see §11     |
+| 7   | "may this caller do this thing"         | `RouteScope`                              | `TokenClass`, `CapabilityGrants`, **and an inline check**          | **live**                       |
+| 8   | **"is this loopback"**                  | five predicates in four packages          | no two of the first three agree on membership                      | **live**                       |
+| 9   | the set of client settings              | `SETTINGS_DEFINITIONS` (8 rows)           | 12 independent `localStorage` modules                              | **live**                       |
+| 10  | the notification kinds                  | `PushNotificationKindSchema`              | `NOTIFICATION_KINDS` in the PWA                                    | **live**                       |
+| 11  | the contract registry                   | the `all` loop in `cli-contracts.sh` (17) | the table in `docs/standards/contracts/README.md` (13)             | **live**                       |
+| 12  | the grants doctrine                     | §"LOCALITY is the layer"                  | §"the password is the layer" — same file                           | fixed in #300 (halted)         |
+| 13  | the word "capability"                   | 6 governed capabilities                   | `['daemon-api']` in pairing; unhonoured config keys in fleet       | **live**                       |
+| 14  | **"this code is reached"**              | `composition-reachability` (module)       | `composition-invocation` (field) — neither sees a **method**       | **live**                       |
+| 15  | **"is authorization enforced here"**    | the guard the dispatcher was built with   | `undetermined` at runtime — the same code a corrupt document gives | **live**                       |
 
-Findings 0, 8 and 14 are new since the previous revision. Findings 6 and 12 were fixed _during_ this
+Sixteen instances; **twelve are live**. Findings 0, 8, 14 and 15 are new since the previous revision. Findings 6 and 12 were fixed _during_ this
 session, which is itself evidence (§11).
+
+**Finding 15, because it is short and it is the model's own rule turned on the model's own subsystem.**
+temperance brought it against code they wrote. `CapabilityGuard` is **optional** on both dispatchers —
+`api/dispatcher.ts:54` and `:155`, `api/socket.ts:145` — so "this daemon has no authorization guard" is
+a _representable state_, and the only thing between a wiring mistake and an unenforced authorization
+layer is a runtime refusal nobody sees until a remote caller hits it. Worse, that refusal is
+`undetermined`, which is **the same code a genuinely damaged grant document produces**: a wiring mistake
+and a corrupted document are indistinguishable to whoever reads it.
+
+The tell is one line above, in the same constructor: `tickets: SocketTicketRedeemer` is **required**, with
+a comment saying why — _"an optional dependency is how that capability would go quietly missing again, in
+a daemon that still looked correctly wired."_ Same file, same reasoning available, opposite decision.
+
+Fix: make it required, and have the two tables that name no capability pass a guard that says so
+explicitly. **That turns a silent omission into a named decision**, which is §4 in one sentence. It also
+splits one symptom back into two causes, which is §4.5's anti-rule applied in the direction that adds a
+distinction rather than removing one.
 
 ### 1.2 Finding 8 — the predicate the whole security model rests on has five definitions
 
 `docs/grants.md` says loopback is the entire basis of the authorization model. Here is that predicate,
-on `52dc6a20`:
+on `00b733d0`:
 
 | #   | site                                                       | membership                            | input domain                   |
 | --- | ---------------------------------------------------------- | ------------------------------------- | ------------------------------ |
@@ -728,25 +746,37 @@ answers per connection. **Multiple relays do not weaken the rule — they instan
 
 ## 7. Doctrine conformance — measured, not assumed
 
-The owner asked for conformance to `docs/standards/`. I measured it. **The file set is stated so this
-is reproducible rather than trusted** — my first attempt used a `**` git pathspec that silently matched
-only 479 of 634 files, excluding `fleet`, `protocol` and `relay` entirely and 76 of 84 `pwa` lib files.
-hadi spot-checked one number, it did not hold, and re-running found a second wrong one. The corrected
-sweep is:
+The owner asked for conformance to `docs/standards/`. I measured it. **Both the file set and every
+pattern are stated, because two rounds of review found the measurement wrong before they found anything
+wrong with the code.** The file set:
 
 ```bash
 git ls-files "packages/*/src/lib/*" | grep '\.ts$' | grep -v tests    # 634 files, all six packages
 ```
 
-| doctrine                                                          | rule probed                              | result on 634 files                                                                                                                                                                       |
-| ----------------------------------------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SOLID — zero private methods                                      | `private`/`#` members                    | **159 occurrences in 38 files (6%).** Largely conformant; the concentration is `pwa/lib/stt/browser-recognition.ts` 19, `pwa/lib/relay-session.ts` 17, `daemon/lib/relay/link.ts` 13      |
-| SOLID — no singletons                                             | `export const x = new …`                 | **one**, `pwa/src/lib/drafts.ts:189` `documentDraftStore`. **A knowing, documented exception** — the composer needs a value at module load, before any React context exists. See below    |
-| Datetime — never read the ambient clock in domain code            | `Date.now()` / argless `new Date()`      | **9 reads, and every one is an injectable default** (8 default parameters in 6 `pwa/src/lib` files, plus `options.now ?? (() => new Date())`). **Zero required ambient reads.** See below |
-| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                |
-| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **6 files**: the four `daemon/src/lib/session/*/settings.ts`, `session/resume/types.ts`, `pwa/lib/account-picker-catalog.ts`                                                              |
-| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                |
-| Functional — railway over throwing                                | `throw new`                              | 165 (daemon 89, cli 38, pwa 29, fleet 8, protocol 1). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary and `ApiError` is one                    |
+and the two patterns that needed pinning:
+
+```bash
+# private members — DECLARATIONS ONLY. `^\s+(private|#)[a-zA-Z]` looks right and is not: `private`
+# is followed by a SPACE, so that pattern silently counts only `#name` fields and misses every
+# TypeScript `private` modifier. 159 vs 718.
+rg -c '^\s*(private\s|(readonly\s+)?#[A-Za-z])'
+
+# module-level singletons — tolerate a type annotation, then exclude value-object constructors.
+# `^export const [a-zA-Z]+ = new ` misses `export const X: ReadonlySet<T> = new Set(…)` twice over:
+# the annotation, and the underscore in a SCREAMING_SNAKE name.
+rg -n '^export const [A-Za-z_][A-Za-z0-9_]*(: [^=]+)? = new ' | grep -vE '= *new (Set|Map|WeakMap|WeakSet|RegExp|Date|URL)\b'
+```
+
+| doctrine                                                          | rule probed                              | result on 634 files                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SOLID — zero private methods                                      | declarations, pinned above               | **718 declarations in 117 of 634 files (18%).** Real, broad drift against the corollary — and **not `pwa`-concentrated**: the largest single file is `daemon/lib/runtime/mounts/fleet.ts` (28), then `pwa/lib/stt/browser-recognition.ts` (24), `daemon/lib/session/events/service.ts` (22). See below |
+| SOLID — no singletons                                             | pinned above                             | **one**, `pwa/src/lib/drafts.ts:189` `documentDraftStore`. Seven others match before the value-object exclusion; all are frozen `new Set(…)` collections. **A knowing, documented exception** — the composer needs a value at module load, before any React context exists. See below                  |
+| Datetime — never read the ambient clock in domain code            | `Date.now()` / argless `new Date()`      | **9 reads, and every one is an injectable default** (8 default parameters in 6 `pwa/src/lib` files, plus `options.now ?? (() => new Date())`). **Zero required ambient reads.** See below                                                                                                              |
+| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                                                                                                                             |
+| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **6 files**: the four `daemon/src/lib/session/*/settings.ts`, `session/resume/types.ts`, `pwa/lib/account-picker-catalog.ts`                                                                                                                                                                           |
+| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                                                                                                                             |
+| Functional — railway over throwing                                | `throw new`                              | 165 (daemon 89, cli 38, pwa 29, fleet 8, protocol 1). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary and `ApiError` is one                                                                                                                                 |
 
 **Two results deserve a sentence rather than a cell, because both are doctrine questions rather than
 defects — and the doctrine should answer them so nobody re-litigates them.**
@@ -769,18 +799,29 @@ defects — and the doctrine should answer them so nobody re-litigates them.**
 
 **The honest headline, and it is the answer to the owner's complaint:**
 
-> **The doctrines are largely followed, and where they are not, the drift is concentrated in
-> `packages/pwa/src/lib`.** All 9 clock defaults, the one singleton, the two largest private-member
-> counts and all 12 hand-rolled parsers are there.
+> **There are two separate drifts, and only one of them is what the owner is complaining about.**
 >
-> **The patchwork the owner is complaining about is somewhere else entirely.** It is that none of the
-> eight doctrine articles says anything about the failure that keeps shipping: **two programs agreeing
-> about one fact.**
+> **Drift A — mechanism, and it IS `pwa/src/lib`-shaped.** All 12 hand-rolled parsers, all 9 clock
+> defaults and the one singleton are there. Every item is a _bypass of a mechanism the package already
+> has_ — zod is a direct dependency used in three files.
+>
+> **Drift B — the private-method corollary, and it is repo-wide.** 718 declarations in 117 files, led by
+> a daemon mount. This is a genuine doctrine question, not sloppiness in one package.
+>
+> **Neither is the patchwork.** That is a third thing: **none of the eight doctrine articles says
+> anything about two programs agreeing on one fact**, which is the failure in all sixteen findings.
 
-That the two problems live in different places is what makes the argument strong rather than weak. The
-PWA's lib has style drift and **no** cross-process agreement problem — it talks to one reader. The
-daemon/protocol/CLI seam has near-perfect doctrine conformance and **every** agreement failure in §1.1.
-A refactor aimed only at doctrine conformance would tidy the PWA and fix none of the fourteen findings.
+I originally claimed the drift was concentrated in `pwa/src/lib` and that this made the argument
+stronger. **The corrected private-member count removes that claim** — 117 files led by
+`daemon/lib/runtime/mounts/fleet.ts` is not a `pwa` story. cinthia measured three files where their
+count was higher than mine and reasonably concluded the direction favoured me; across the corpus it does
+not. Recorded because it cuts against my own tidier version.
+
+What survives untouched is the load-bearing part, and it is worth saying which numbers it rests on:
+**none of them.** "No doctrine covers agreement between two programs" is a claim about what the eight
+articles contain, checkable by reading them, and no conformance count moves it. The sixteen findings in
+§1.1 are each verified individually. A refactor aimed only at doctrine conformance would clean up Drift A
+and Drift B and fix **none** of the sixteen — that is the argument, and it needs no concentration claim.
 
 `docs/standards/contracts/README.md` is the closest, and it frames itself as a _list of gates_ rather
 than a _principle_ — which is exactly why the principle was applied three times and then stopped. The
@@ -834,21 +875,22 @@ conformance claim in this refactor should be believed.
 
 A cleanup that only adds has failed. Everything below stops existing.
 
-| deleted                                                                        | where                                                                                                 | replaced by                                           |
-| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| the inline loopback check                                                      | `mounts/session-attach.ts:45` and its bespoke `attach_not_local`                                      | `privilegedOnly: true` on the route                   |
-| `RouteScope` and the `scope` field                                             | `api/route.ts`, 109 route declarations                                                                | `minimum` + `privilegedOnly`                          |
-| four loopback predicates                                                       | `bun-api-server.ts:92`, `relay/connection.ts:52`, `pwa/hosted-relay.ts:121`, `protocol/address.ts:18` | `isLoopbackHost` / `isLoopbackPeer` in the protocol   |
-| the "TypeScript does not catch it" comment                                     | `runtime/config.ts`                                                                                   | the `satisfies` mapped type, which does               |
-| `publicUrl ?? bindUrl` at three sites                                          | `config.ts:315`, `:343`, `:397`                                                                       | `decideAdvertisement`                                 |
-| the unvalidated client derivation                                              | `protocol/address.ts:60` `recordedDaemonAddress`                                                      | the same decision, one owner                          |
-| twelve hand-rolled parsers, twelve `browserStorage()` copies, ~9 store classes | `pwa/src/lib/*`                                                                                       | one `BrowserDocument<T>`                              |
-| the implicit 8-row ↔ 12-module mapping                                         | `settings-catalog.ts` + storage modules                                                               | catalog rows owning their document                    |
-| the merge conflict and one of two contradictory paragraphs                     | `docs/grants.md`                                                                                      | #300, folded in                                       |
-| "the ten workspace/CLI/release contracts"                                      | `docs/standards/contracts/README.md`                                                                  | the real count, gated                                 |
-| the singular `relay` block and `host`/`port` top-level keys                    | `config.ts`                                                                                           | `carriers`                                            |
-| "an operator edits `config/daemon.json` today"                                 | `docs/relay-protocol.md` §13                                                                          | `fy daemon carrier add \| ls \| rm`                   |
-| three hardcoded counts                                                         | `provenance.test.ts` capability lists, `pwa/harness/screenshot.ts` `!== 10`                           | derived from the enums that already exist (frederick) |
+| deleted                                                                        | where                                                                                                 | replaced by                                                                                    |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| the inline loopback check                                                      | `mounts/session-attach.ts:45` and its bespoke `attach_not_local`                                      | `privilegedOnly: true` on the route                                                            |
+| `RouteScope` and the `scope` field                                             | `api/route.ts`, 109 route declarations                                                                | `minimum` + `privilegedOnly`                                                                   |
+| the **optional** `CapabilityGuard`                                             | `api/dispatcher.ts:54`, `:155`, `api/socket.ts:145`                                                   | a required guard; the two capability-free tables pass one that says so explicitly (finding 15) |
+| four loopback predicates                                                       | `bun-api-server.ts:92`, `relay/connection.ts:52`, `pwa/hosted-relay.ts:121`, `protocol/address.ts:18` | `isLoopbackHost` / `isLoopbackPeer` in the protocol                                            |
+| the "TypeScript does not catch it" comment                                     | `runtime/config.ts`                                                                                   | the `satisfies` mapped type, which does                                                        |
+| `publicUrl ?? bindUrl` at three sites                                          | `config.ts:315`, `:343`, `:397`                                                                       | `decideAdvertisement`                                                                          |
+| the unvalidated client derivation                                              | `protocol/address.ts:60` `recordedDaemonAddress`                                                      | the same decision, one owner                                                                   |
+| twelve hand-rolled parsers, twelve `browserStorage()` copies, ~9 store classes | `pwa/src/lib/*`                                                                                       | one `BrowserDocument<T>`                                                                       |
+| the implicit 8-row ↔ 12-module mapping                                         | `settings-catalog.ts` + storage modules                                                               | catalog rows owning their document                                                             |
+| the merge conflict and one of two contradictory paragraphs                     | `docs/grants.md`                                                                                      | #300, folded in                                                                                |
+| "the ten workspace/CLI/release contracts"                                      | `docs/standards/contracts/README.md`                                                                  | the real count, gated                                                                          |
+| the singular `relay` block and `host`/`port` top-level keys                    | `config.ts`                                                                                           | `carriers`                                                                                     |
+| "an operator edits `config/daemon.json` today"                                 | `docs/relay-protocol.md` §13                                                                          | `fy daemon carrier add \| ls \| rm`                                                            |
+| three hardcoded counts                                                         | `provenance.test.ts` capability lists, `pwa/harness/screenshot.ts` `!== 10`                           | derived from the enums that already exist (frederick)                                          |
 
 ---
 
@@ -877,15 +919,21 @@ client-prerequisite limit written into the gate's own docs.
 generalise `unimplementedCapabilities` (R3) so an accepted-but-unhonoured schema prints itself, which
 makes finding #4 visible until #302 lands.
 
-### Wave 3 — the authorization collapse (three commits)
+### Wave 3 — the authorization collapse (four commits)
 
 **3a** add `minimum` + `privilegedOnly` **alongside** `scope`, derive `scope` from them, and one test
 asserts the derivation over the whole 109-route table — zero runtime change, trivially revertible ·
 **3b** move `session-attach`'s inline check onto its route (and `/v1/grants/password`, if the owner
-approves §5.3) · **3c** the dispatcher reads the new fields; **`RouteScope` is deleted.**
+approves §5.3) · **3c** the dispatcher reads the new fields; **`RouteScope` is deleted** · **3d** make
+`CapabilityGuard` **required** on both dispatchers, with the two capability-free tables passing an
+explicit no-governed-routes guard (finding 15).
 
 3a is the trick that keeps this from being patchwork: two representations coexist for exactly one
 commit, with a test proving they agree, and then the old one is gone.
+
+3d is small and goes last in this wave deliberately: once every route declares `minimum` and
+`privilegedOnly`, "does this table name a capability" is answerable from the table itself, so the
+explicit guard is a one-line construction rather than a judgement call at each call site.
 
 ### Wave 4 — carriers, including multi-relay
 
@@ -936,7 +984,7 @@ If a step above appears to touch one of these, the step is wrong.
 
 ## 11. Verification, and a finding about this document
 
-Verified against `origin/main` at **`52dc6a20`**, by content.
+Verified against `origin/main` at **`00b733d0`**, by content. cinthia independently reproduced the §7 sweep at the same commit.
 
 | claim                                          | how                                                                                                                                                                                        |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -978,6 +1026,27 @@ hold, and re-running the corrected sweep found the singleton too.
 > **A conformance claim is only as good as its stated file set.** The glob is now in the appendix so
 > the next reader can reproduce the numbers instead of trusting them. And a `**` git pathspec does not
 > mean what a shell glob means: `*` already crosses `/`, so `a/*/b/**/c` silently under-matches.
+
+**2b. And the same lesson, one level down, inside the fix for it.** cinthia re-ran the corrected sweep
+and found that stating the file set was not enough: **both remaining patterns were also wrong, and both
+in the same direction.**
+
+- `^\s+(private|#)[a-zA-Z]` looks like it counts private members. `private` is followed by a **space**,
+  so it counts only `#name` fields and misses every TypeScript `private` modifier: **159 rather than
+  718**, 38 files rather than 117. This one changed a conclusion — see §7.
+- `^export const [a-zA-Z]+ = new ` misses `export const X: ReadonlySet<T> = new Set(…)` twice over: the
+  type annotation, and the underscore in a `SCREAMING_SNAKE` name. It returned 1, which happened to be
+  the right answer for the wrong reason — a genuine stateful singleton declared with an annotation
+  would have been invisible to it.
+
+cinthia framed the second as over-matching that needed an exclusion; it is actually **under**-matching
+that needed annotation tolerance _and_ an exclusion, so the judgement ("frozen collections are value
+objects, not services") becomes stated rather than accidental.
+
+> **Every silent failure in this document's own measurements was an UNDER-match, and an under-match reads
+> as compliance.** A pathspec that dropped three packages, a pattern that dropped a keyword, a pattern
+> that dropped an annotation. State the file set _and_ the pattern, and treat any zero or any
+> suspiciously-clean count as a bug in the probe until the per-package breakdown says otherwise.
 
 This one matters most, because "the patchwork is not doctrine drift" is load-bearing for the owner's
 decision, and hadi was right that one wrong count in the evidence weakens an argument that deserves to
