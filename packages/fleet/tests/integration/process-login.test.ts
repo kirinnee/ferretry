@@ -1,231 +1,285 @@
-import { describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+/**
+ * The login port with a recorded spawn and a real filesystem.
+ *
+ * No test launches a harness, opens a browser, or reads the invoking user's homes: the spawn is a seam
+ * and every wrapper it is pointed at lives in a temporary directory this test created.
+ */
+import { afterEach, describe, it } from 'bun:test';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import {
+  type FleetBinaryLookup,
   type FleetLoginSpawn,
   ProcessFleetLoginPort,
   readFleetWrapperScript,
   spawnFleetLoginProcess,
+  whichHarnessBinary,
 } from '../../src/adapters/process-login.ts';
-import type { FleetManifestAccount } from '../../src/lib/manifest.ts';
+import type { FleetLoginTarget } from '../../src/lib/login.ts';
 
-const account = (kind: FleetManifestAccount['kind']): FleetManifestAccount => ({
-  id: kind === 'claude' ? '00000000-0000-4000-8000-000000000001' : '00000000-0000-4000-8000-000000000002',
-  kind,
-  mode: 'auto',
-  wrapper: `/tmp/fy-test/bin/alias-${kind}-with-hyphens`,
-  home: `/tmp/fy-test/homes/${kind}`,
-  displayName: `Placeholder ${kind}`,
-  defaultModel: 'model-one',
-  models: [{ id: 'model-one', displayName: 'Model One', available: true }],
-  available: true,
-  unavailableReason: null,
+const temporaryDirectories: string[] = [];
+
+async function temporaryDirectory(): Promise<string> {
+  const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-login-test-'));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
+const target = (overrides: Partial<FleetLoginTarget> = {}): FleetLoginTarget => ({
+  accountId: '00000000-0000-4000-8000-000000000001',
+  kind: 'claude',
+  wrapper: '/absent/bin/alias-claude-with-hyphens',
+  home: '/absent/homes/claude',
+  ...overrides,
+});
+
+interface Recorded {
+  readonly command: readonly string[];
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly cwd?: string;
+}
+
+/** A spawn that records instead of launching anything. */
+const recorder =
+  (calls: Recorded[], code = 0): FleetLoginSpawn =>
+  (command, options) => {
+    calls.push({
+      command,
+      environment: options.environment,
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    });
+    return { exited: Promise.resolve(code) };
+  };
+
+const neverInstalled: FleetBinaryLookup = () => undefined;
+
+/** A wrapper on disk, so the port takes its "the wrapper exists" branch honestly. */
+async function wrapperFile(script = '#!/bin/sh\nexec true "$@"\n'): Promise<string> {
+  const directory = await temporaryDirectory();
+  const wrapper = path.join(directory, 'alias-claude-with-hyphens');
+  await writeFile(wrapper, script);
+  return wrapper;
+}
+
 describe('ProcessFleetLoginPort', () => {
-  it('should execute the manifest wrapper attribute without parsing its filename', async () => {
+  it('should launch the wrapper the manifest published, without parsing its filename', async () => {
     // Arrange
-    const calls: Array<{ command: readonly string[]; cwd?: string }> = [];
-    const spawn: FleetLoginSpawn = (command, options) => {
-      calls.push({ command, cwd: options.cwd });
-      return { exited: Promise.resolve(0) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      { FY_TEST_TOKEN: 'placeholder' },
-      () => true,
-      () => Promise.resolve(undefined),
-      '/tmp/fy-test',
-    );
-    const target = account('claude');
+    const calls: Recorded[] = [];
+    const wrapper = await wrapperFile();
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: { FY_TEST_TOKEN: 'placeholder' },
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+      cwd: '/absent/cwd',
+    });
 
     // Act
-    const actual = await subject.login(target);
+    const actual = await subject.login(target({ wrapper }));
 
     // Assert
-    should(calls).deepEqual([{ command: [target.wrapper, '/login'], cwd: '/tmp/fy-test' }]);
     should(actual).deepEqual({ status: 'logged-in' });
+    should(calls).have.length(1);
+    should(calls[0]?.command).deepEqual([wrapper, '/login']);
+    should(calls[0]?.cwd).equal('/absent/cwd');
   });
 
-  it('should use the Codex login subcommand and report a non-zero exit', async () => {
+  it('should use the harness-appropriate login argument', async () => {
     // Arrange
-    const commands: string[][] = [];
-    const spawn: FleetLoginSpawn = command => {
-      commands.push([...command]);
-      return { exited: Promise.resolve(7) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      {},
-      () => true,
-      () => Promise.resolve(undefined),
-    );
-    const target = account('codex');
+    const calls: Recorded[] = [];
+    const wrapper = await wrapperFile();
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: {},
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
 
     // Act
-    const actual = await subject.login(target);
+    await subject.login(target({ wrapper, kind: 'codex' }));
 
     // Assert
-    should(commands).deepEqual([[target.wrapper, 'login']]);
-    should(actual).deepEqual({ status: 'failed', message: 'login process exited with code 7' });
+    should(calls[0]?.command).deepEqual([wrapper, 'login']);
+    should(calls[0]?.cwd).be.undefined();
   });
 
-  it('should skip accounts whose configured authentication does not require login', async () => {
-    // Arrange
-    let spawned = false;
-    const spawn: FleetLoginSpawn = () => {
-      spawned = true;
-      return { exited: Promise.resolve(0) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      {},
-      () => false,
-      () => Promise.resolve(undefined),
-    );
-
-    // Act
-    const actual = await subject.login(account('claude'));
-
-    // Assert
-    should(spawned).be.false();
-    should(actual).deepEqual({ status: 'not-required' });
-  });
-
-  it("should strip the caller's provider credentials so a login cannot use the wrong account", async () => {
-    // Arrange — the environment an agent session running `fy fleet login` would actually carry.
-    let environment: Readonly<Record<string, string | undefined>> = {};
-    const spawn: FleetLoginSpawn = (_command, options) => {
-      environment = options.environment;
-      return { exited: Promise.resolve(0) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      {
+  it('should strip the caller’s provider credentials before launching', async () => {
+    // Arrange — running a login inside an agent session used to authenticate that session's account.
+    const calls: Recorded[] = [];
+    const wrapper = await wrapperFile();
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: {
         ANTHROPIC_API_KEY: 'placeholder-caller-key',
         ANTHROPIC_BASE_URL: 'https://example.invalid',
-        CLAUDE_CONFIG_DIR: '/somebody/elses/home',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'placeholder-model',
+        CLAUDE_CONFIG_DIR: '/absent/other-home',
         PATH: '/usr/bin',
       },
-      () => true,
-      () => Promise.resolve(undefined),
-    );
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
 
     // Act
-    await subject.login(account('claude'));
+    await subject.login(target({ wrapper }));
 
     // Assert
-    should(environment).deepEqual({ PATH: '/usr/bin' });
+    should(calls[0]?.environment).deepEqual({ PATH: '/usr/bin' });
   });
 
-  it('should preserve a variable the account’s own wrapper reads from the environment', async () => {
-    // Arrange
-    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-login-wrapper-'));
-    const wrapper = path.join(directory, 'fy-claude-work');
-    await Bun.write(
-      wrapper,
-      ['#!/bin/sh', 'export ANTHROPIC_AUTH_TOKEN="${FY_TEST_TOKEN}"', "export OPENAI_API_KEY='literal'", ''].join('\n'),
-    );
+  it('should preserve a variable the wrapper deliberately reads from its surroundings', async () => {
+    // Arrange — `env: { OPENAI_API_KEY: "$OPENAI_API_KEY" }` is a supported, documented shape.
+    const calls: Recorded[] = [];
+    const wrapper = await wrapperFile('#!/bin/sh\nexport OPENAI_API_KEY="${OPENAI_API_KEY}"\nexec true "$@"\n');
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: { OPENAI_API_KEY: 'placeholder-secret', ANTHROPIC_API_KEY: 'placeholder-caller-key' },
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
 
-    let environment: Readonly<Record<string, string | undefined>> = {};
-    const spawn: FleetLoginSpawn = (_command, options) => {
-      environment = options.environment;
-      return { exited: Promise.resolve(0) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      { FY_TEST_TOKEN: 'placeholder', OPENAI_API_KEY: 'placeholder-caller-key' },
-      () => true,
-      readFleetWrapperScript,
-    );
+    // Act
+    await subject.login(target({ wrapper }));
 
-    try {
-      // Act — the wrapper references FY_TEST_TOKEN, which is not harness state and survives anyway;
-      // OPENAI_API_KEY is exported as a literal, so the caller's copy is still stripped.
-      await subject.login({ ...account('claude'), wrapper });
-
-      // Assert
-      should(environment).deepEqual({ FY_TEST_TOKEN: 'placeholder' });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    // Assert — removing it would break the very account the caller is trying to fix.
+    should(calls[0]?.environment).deepEqual({ OPENAI_API_KEY: 'placeholder-secret' });
   });
 
-  it('should preserve nothing when the wrapper cannot be read', async () => {
-    // Arrange
-    let environment: Readonly<Record<string, string | undefined>> = {};
-    const spawn: FleetLoginSpawn = (_command, options) => {
-      environment = options.environment;
-      return { exited: Promise.resolve(0) };
-    };
-    const subject = new ProcessFleetLoginPort(
-      spawn,
-      { OPENAI_API_KEY: 'placeholder-caller-key', HOME: '/home/somebody' },
-      () => true,
-      readFleetWrapperScript,
-    );
+  it('should fall back to the harness CLI on a host where the wrapper was never generated', async () => {
+    // Arrange — a fresh machine is exactly when somebody needs to log in.
+    const calls: Recorded[] = [];
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: { ANTHROPIC_API_KEY: 'placeholder-caller-key', PATH: '/usr/bin' },
+      readWrapper: readFleetWrapperScript,
+      which: binary => (binary === 'claude' ? '/absent/local/bin/claude' : undefined),
+    });
 
-    // Act — the wrapper path does not exist, so its intentions are unknown.
-    await subject.login({ ...account('claude'), wrapper: path.join(tmpdir(), 'fy-fleet-absent-wrapper') });
+    // Act
+    const actual = await subject.login(target());
+
+    // Assert — a bare CLI references nothing, so nothing inherited is preserved for it.
+    should(actual).deepEqual({ status: 'logged-in' });
+    should(calls[0]?.command).deepEqual(['/absent/local/bin/claude', '/login']);
+    should(calls[0]?.environment).deepEqual({ PATH: '/usr/bin' });
+  });
+
+  it('should look up the CLI matching the harness, not a fixed one', async () => {
+    // Arrange
+    const requested: string[] = [];
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder([]),
+      environment: {},
+      readWrapper: readFleetWrapperScript,
+      which: binary => {
+        requested.push(binary);
+        return '/absent/local/bin/codex';
+      },
+    });
+
+    // Act
+    await subject.login(target({ kind: 'codex' }));
 
     // Assert
-    should(environment).deepEqual({ HOME: '/home/somebody' });
+    should(requested).deepEqual(['codex']);
+  });
+
+  it('should say which of the two is missing when the host has neither', async () => {
+    // Arrange
+    const calls: Recorded[] = [];
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder(calls),
+      environment: {},
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
+
+    // Act
+    const actual = await subject.login(target({ kind: 'codex' }));
+
+    // Assert — an actionable message beats an exit code.
+    should(calls).deepEqual([]);
+    should(actual.status).equal('failed');
+    should(actual)
+      .have.property('message')
+      .match(/"codex" CLI is on this host/u);
+    should(actual)
+      .have.property('message')
+      .match(/fy fleet apply/u);
+  });
+
+  it('should report a non-zero exit as a failure naming the code', async () => {
+    // Arrange
+    const wrapper = await wrapperFile();
+    const subject = new ProcessFleetLoginPort({
+      spawn: recorder([], 7),
+      environment: {},
+      readWrapper: readFleetWrapperScript,
+      which: neverInstalled,
+    });
+
+    // Act
+    const actual = await subject.login(target({ wrapper }));
+
+    // Assert
+    should(actual).deepEqual({ status: 'failed', message: 'login process exited with code 7' });
   });
 });
 
 describe('readFleetWrapperScript', () => {
-  it('should read a wrapper that exists and answer nothing for one that does not', async () => {
+  it('should read a wrapper that is there', async () => {
     // Arrange
-    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-wrapper-source-'));
-    const wrapper = path.join(directory, 'fy-claude-work');
-    await Bun.write(wrapper, '#!/bin/sh\nexec claude "$@"\n');
+    const wrapper = await wrapperFile('#!/bin/sh\nexport A="${B}"\n');
 
-    try {
-      // Act
-      const present = await readFleetWrapperScript(wrapper);
-      const absent = await readFleetWrapperScript(path.join(directory, 'nothing-here'));
+    // Act / Assert
+    should(await readFleetWrapperScript(wrapper)).equal('#!/bin/sh\nexport A="${B}"\n');
+  });
 
-      // Assert
-      should(present).equal('#!/bin/sh\nexec claude "$@"\n');
-      should(absent).be.undefined();
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+  it('should yield nothing for a wrapper that is absent', async () => {
+    should(await readFleetWrapperScript(path.join(await temporaryDirectory(), 'absent'))).be.undefined();
+  });
+});
+
+describe('whichHarnessBinary', () => {
+  it('should find a binary this host has', () => {
+    should(whichHarnessBinary('sh')).be.a.String();
+  });
+
+  it('should yield nothing for a binary this host does not have', () => {
+    should(whichHarnessBinary('definitely-not-installed-fy-test')).be.undefined();
   });
 });
 
 describe('spawnFleetLoginProcess', () => {
-  it('should run the given command and resolve its exit code', async () => {
-    // Arrange — a trivial local shell, never a harness and never a real provider.
-    const command = ['/bin/sh', '-c', 'exit 0'];
+  it('should run a real command and report its exit code', async () => {
+    // Arrange
+    const shell = Bun.which('sh') ?? '/bin/sh';
 
     // Act
-    const actual = await spawnFleetLoginProcess(command, { environment: { FY_TEST_TOKEN: 'placeholder' } }).exited;
+    const started = spawnFleetLoginProcess([shell, '-c', 'exit 3'], { environment: { PATH: '/usr/bin' } });
 
     // Assert
-    should(actual).equal(0);
+    should(await started.exited).equal(3);
   });
 
-  it('should surface a non-zero exit and honour the working directory', async () => {
+  it('should run inside a supplied working directory', async () => {
     // Arrange
-    const directory = await mkdtemp(path.join(tmpdir(), 'fy-fleet-login-test-'));
-    const marker = path.join(directory, 'ran-here');
+    const directory = await temporaryDirectory();
+    const shell = Bun.which('sh') ?? '/bin/sh';
 
-    try {
-      // Act
-      const actual = await spawnFleetLoginProcess(['/bin/sh', '-c', 'touch ran-here; exit 5'], {
-        environment: {},
-        cwd: directory,
-      }).exited;
+    // Act — the marker can only appear if the working directory was honoured.
+    const started = spawnFleetLoginProcess([shell, '-c', ': > marker'], {
+      environment: { PATH: '/usr/bin:/bin' },
+      cwd: directory,
+    });
+    await started.exited;
 
-      // Assert
-      should(actual).equal(5);
-      should(await Bun.file(marker).exists()).be.true();
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+    // Assert
+    should(await Bun.file(path.join(directory, 'marker')).exists()).be.true();
   });
 });

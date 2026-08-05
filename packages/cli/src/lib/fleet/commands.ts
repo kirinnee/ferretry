@@ -1,5 +1,11 @@
 import type { Command } from 'commander';
-import type { FleetApplyOptions, FleetCommandOptions, FleetController, FleetRecommendOptions } from './controller.ts';
+import type {
+  FleetApplyOptions,
+  FleetCommandOptions,
+  FleetController,
+  FleetLoginOptions,
+  FleetRecommendOptions,
+} from './controller.ts';
 
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the payload instead of the human rendering';
@@ -72,17 +78,25 @@ export function registerFleetCommands(program: Command, controller: FleetControl
   scoped(
     fleet
       .command('login')
-      .description('run each account’s provider login, one at a time')
-      .argument('[accountId...]', 'only these accounts, by id; default is every account')
+      .description('copy each provider login across the accounts that share it, then ask only for what is missing')
+      .argument('[accountId...]', 'only the identities these accounts belong to; default is every identity')
+      .option('--status', 'report what credential each home holds and change nothing')
+      .option('--sync-only', 'copy credentials across identities but never ask for a browser approval')
       .addHelpText(
         'after',
-        '\nAccounts are logged in one at a time because each is a browser approval a human performs.\n' +
+        '\nEvery lane of one provider account keeps its own credential copy, so most of this is copying:\n' +
+          'the freshest credential in an identity is cloned onto the siblings that need one, and only an\n' +
+          'identity with no usable credential anywhere costs a human an approval. Naming one account\n' +
+          'therefore selects its whole identity — the credential is shared, so half an identity is not a\n' +
+          'thing you can log in.\n\n' +
+          'A home whose credential could not be read is reported, never overwritten and never taken as\n' +
+          'empty: that is the difference between "nobody is logged in" and "I could not tell".\n\n' +
           'An account whose wrapper reads a secret from the environment still gets it; every other\n' +
           'provider variable is stripped, so a login run from inside an agent session cannot\n' +
           'authenticate against that session’s account instead of this one.',
       ),
   ).action(async (accountIds: string[], _flags: unknown, command: Command) => {
-    await controller.login(accountIds, merged(command));
+    await controller.login(accountIds, merged<FleetLoginOptions>(command));
   });
 
   scoped(
