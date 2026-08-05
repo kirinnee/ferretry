@@ -1,3 +1,20 @@
+/**
+ * ONE REQUEST SHAPE, WHICHEVER CARRIER TAKES IT.
+ *
+ * Everything here still builds a request against the daemon's OWN address, and that
+ * stays true on a relay: `docs/relay-protocol.md` §14 says a relayed request carries
+ * the daemon's own raw pathname, nothing normalises it, and it reaches exactly the
+ * route table a direct request reaches. So the URL below is either dialled (direct)
+ * or read apart into a §14 record by `relay-carrier.ts` — and because it is the same
+ * URL either way, there is no second request surface to keep in step.
+ *
+ * The bearer header attached here is DROPPED by that translation, deliberately. §14
+ * refuses a relayed request that carries its own `authorization`: the credential is
+ * the device grant that opened the session, and it is the same token, so dropping it
+ * removes a duplicate rather than a credential. Attaching it here anyway is what
+ * keeps the direct path — the common one — free of a carrier-shaped special case.
+ */
+
 import type { DaemonConnection } from './daemon-connection.ts';
 
 const requirePath = (value: string): string => {
@@ -32,6 +49,11 @@ export const daemonRequest = (daemon: DaemonConnection, path: string, init: Requ
  * Produces an event endpoint using a short-lived ticket.  The device token is
  * intentionally absent: browsers cannot send WS headers and a durable token
  * in a query string would leak into logs.
+ *
+ * THIS ONE IS DIRECT-ONLY, and it is the exception the relay protocol names rather
+ * than an oversight: §14 does not carry a protocol-switching surface, so a relayed
+ * connection has no event stream at all. `event-transport.ts` refuses on a relay
+ * carrier instead of handing this URL to a socket that would open on nothing.
  */
 export const daemonEventUrl = (daemon: DaemonConnection, ticket: string): string => {
   if (ticket.trim() === '') throw new Error('websocket ticket must not be empty');

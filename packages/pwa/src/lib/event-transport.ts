@@ -1,6 +1,39 @@
 import { type IFyEventTransport, SocketTicketResponseSchema } from '@ferretry/protocol';
+import type { ConnectionMethod } from '@ferretry/relay';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonEventUrl, daemonRequest, daemonUrl } from './daemon-transport.ts';
+
+/**
+ * WHICH CARRIER IS LIVE, ASKED RATHER THAN ASSUMED.
+ *
+ * A stream is the one thing a relayed session CANNOT carry, so this transport has
+ * to know. `undefined` means "nothing has decided yet", which is read as direct —
+ * the carrier this URL builder has always described.
+ */
+export type ActiveCarrier = () => ConnectionMethod | undefined;
+
+/**
+ * THE EVENT STREAM DOES NOT GO THROUGH A RELAY, AND SAYS SO.
+ *
+ * `docs/relay-protocol.md` §14 states it outright: the tunnel above the channel
+ * carries one request and one answer, and the daemon's PROTOCOL-SWITCHING surfaces
+ * — `/v1/events`, terminal streams — are not that shape. Each needs an envelope of
+ * its own, and neither end has one yet.
+ *
+ * So on a relayed carrier this refuses instead of building a `wss://` URL against
+ * the daemon's own address. That address is precisely the one the relay exists
+ * because the browser cannot reach, so the socket would open on nothing: a live
+ * session, a subscribed viewer, and no events, forever. §13 records the gap; this
+ * is the code that will not paper over it.
+ */
+export const RELAY_STREAM_UNSUPPORTED =
+  'the live event stream cannot travel over a relay yet: §14 of the relay protocol carries one request and one ' +
+  'answer per record, and a stream needs an envelope neither end has built. This daemon is reachable only through ' +
+  'a relay right now, so its live updates are unavailable — everything else still works.';
+
+const refuseRelayedStream = (carrier: ConnectionMethod | undefined): void => {
+  if (carrier?.kind === 'relay') throw new Error(RELAY_STREAM_UNSUPPORTED);
+};
 
 /** Obtains a short-lived, single-use event ticket for one paired daemon. */
 export type DaemonEventTicketIssuer = (daemon: DaemonConnection) => Promise<string>;
@@ -12,7 +45,11 @@ export type DaemonEventTicketIssuer = (daemon: DaemonConnection) => Promise<stri
 export const daemonEventTicket = async (
   daemon: DaemonConnection,
   send: (url: string, init: RequestInit) => Promise<Response> = (url, init) => fetch(url, init),
+  carrier: ActiveCarrier = () => undefined,
 ): Promise<string> => {
+  // Refused before the ticket is minted, not after. A single-use ticket spent on a
+  // socket that cannot open is a ticket the daemon has burned for nothing.
+  refuseRelayedStream(carrier());
   const { url, init } = daemonRequest(daemon, '/v1/events/ticket', { method: 'POST' });
   const response = await send(url, init);
   if (!response.ok) throw new Error(`daemon refused an event ticket: ${response.status}`);
@@ -57,6 +94,7 @@ export class DaemonEventTransport implements IFyEventTransport {
     private readonly daemon: DaemonConnection,
     private readonly issueTicket: DaemonEventTicketIssuer,
     private readonly socket: DaemonEventSocketFactory = browserSocket,
+    private readonly carrier: ActiveCarrier = () => undefined,
   ) {}
 
   async stream(input: {
@@ -67,6 +105,10 @@ export class DaemonEventTransport implements IFyEventTransport {
   }): Promise<void> {
     const aborted = (): boolean => input.signal?.aborted === true;
     if (aborted()) return;
+    // Thrown rather than resolved. A stream that returns quietly is indistinguishable
+    // from one that ended, and a viewer would sit on a screen that never updates and
+    // never explains itself.
+    refuseRelayedStream(this.carrier());
     const ticket = await this.issueTicket(this.daemon);
     if (aborted()) return;
     const url = eventUrl(this.daemon, input.url, ticket);
