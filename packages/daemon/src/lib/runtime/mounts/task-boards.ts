@@ -334,21 +334,6 @@ async function membership(subsystem: MountedTaskBoards, context: RouteContext): 
 async function create(subsystem: MountedTaskBoards, context: RouteContext): Promise<ApiResponse> {
   await requireOperator(subsystem, context.request);
   const request = await parseBody(context.request, TaskBoardCreateRequestSchema);
-  // `creatorMarkDone` CANNOT BE HONOURED, and finding out why is what mounting this surface was for.
-  // The creation reducer adds `mark_done` to the creator's `top_agent` actions, and the protocol's own
-  // membership projection refuses that membership: `TASK_BOARD_ROLE_ACTIONS` grants `mark_done` to NO
-  // role at all, so `TaskBoardMembershipSchema` rejects every board created with this flag — the CLI
-  // would refuse the very response it asked for. Serving it means deciding which role may mark a task
-  // done, which is an authorization question the protocol has not answered, and `fy task-board
-  // mark-done` has no reducer behind it either. Refusing here is the fail-closed statement of a
-  // half-ported feature rather than a guess at the missing half.
-  if (request.creatorMarkDone === true) {
-    throw new ApiError(
-      501,
-      'creatorMarkDone is not mounted: no task-board role permits the mark_done action, so the membership it would create is one the protocol refuses to serve',
-      'mark_done_not_mounted',
-    );
-  }
   const at = subsystem.now();
   const creatorCapability = subsystem.issuer.capability();
   const coordinatorCapability = subsystem.issuer.capability();

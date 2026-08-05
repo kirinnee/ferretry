@@ -657,7 +657,7 @@ describe('the task board membership mount', () => {
     should((await get(world, '/membership', peer(capability))).status).equal(403);
   });
 
-  it('should refuse creatorMarkDone rather than create a membership the protocol will not serve', async () => {
+  it('should issue mark_done only on the creator’s explicit top-agent grant', async () => {
     // Arrange
     const world = new FakeTaskBoards(FLEET);
 
@@ -669,11 +669,12 @@ describe('the task board membership mount', () => {
       operator(world),
     );
 
-    // Assert — no role in `TASK_BOARD_ROLE_ACTIONS` permits `mark_done`, so the membership the
-    // reducer would build fails `TaskBoardMembershipSchema`: the CLI would refuse its own response.
-    should(response.status).equal(501);
-    should(jsonBody(response)).have.property('code', 'mark_done_not_mounted');
-    should(world.state.boards).be.empty();
+    // Assert — this is a grant capability, not a UI permission. The coordinator does not inherit it.
+    const body = TaskBoardCreateResponseSchema.parse(jsonBody(response));
+    should(response.status).equal(201);
+    should(body.creator.allowedActions).containEql('mark_done');
+    should(body.coordinator.allowedActions).not.containEql('mark_done');
+    should(world.state.boards).have.length(1);
   });
 
   it('should refuse a relinquish that presents no capability', async () => {
