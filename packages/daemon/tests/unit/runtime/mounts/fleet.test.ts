@@ -6,6 +6,7 @@ import { type FleetApplyPlan, FleetConfigSchema, FleetManifestSchema, FleetUsage
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
@@ -28,7 +29,12 @@ async function fixture(): Promise<FleetFixture> {
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
   const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
-  const subsystem = createDaemonFleetSubsystem({ paths, userHome, clock: { now: () => GENERATED_AT_MS } });
+  const subsystem = createDaemonFleetSubsystem({
+    paths,
+    userHome,
+    clock: { now: () => GENERATED_AT_MS },
+    files: new StateFileSystem(paths),
+  });
   const credentials = {
     ...CREDENTIALS,
     devices: { identify: (token: string) => (token === 'paired-device' ? 'device-1' : undefined) },
@@ -41,6 +47,11 @@ afterEach(async () => {
 });
 
 const configYaml = `
+profiles:
+  portable:
+    env:
+      LOG_LEVEL: debug
+      FEATURE_MODE: safe
 agents:
   - name: work
     kind: claude
@@ -68,6 +79,95 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 describe('the daemon fleet mount', () => {
+  it('should preview and atomically apply only portable profile environment, with explicit merge and replace', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const before = await subject.dispatcher.dispatch(request({ path: '/v1/fleet/environment', headers: human }));
+    const merged = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({ profile: 'portable', mode: 'merge', environment: { LOG_LEVEL: 'trace', RETRIES: '3' } }),
+      }),
+    );
+    const replaced = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({ profile: 'portable', mode: 'replace', environment: { RETRIES: '5' } }),
+      }),
+    );
+
+    // Assert — merge overwrites source collisions and keeps target-only keys; replace removes them.
+    should(JSON.parse(before.body)).deepEqual({ profiles: { portable: { LOG_LEVEL: 'debug', FEATURE_MODE: 'safe' } } });
+    should(JSON.parse(merged.body)).deepEqual({
+      profiles: { portable: { LOG_LEVEL: 'trace', FEATURE_MODE: 'safe', RETRIES: '3' } },
+    });
+    should(JSON.parse(replaced.body)).deepEqual({ profiles: { portable: { RETRIES: '5' } } });
+    const written = FleetConfigSchema.parse(
+      Bun.YAML.parse(await readFile(join(subject.paths.fleet, 'config.yaml'), 'utf8')),
+    );
+    should(written.profiles.portable?.env).deepEqual({ RETRIES: '5' });
+  });
+
+  it('should refuse credentials and machine-bound values instead of treating them as portable configuration', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const credential = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({
+          profile: 'portable',
+          mode: 'merge',
+          environment: { ANTHROPIC_API_KEY: 'not-a-real-key' },
+        }),
+      }),
+    );
+    const path = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: human,
+        body: JSON.stringify({ profile: 'portable', mode: 'merge', environment: { CACHE_DIR: '/host-only' } }),
+      }),
+    );
+
+    // Assert
+    should(credential.status).equal(409);
+    should(JSON.parse(credential.body)).have.property('code', 'fleet_environment_refused');
+    should(path.status).equal(409);
+    should(JSON.parse(path.body)).have.property('code', 'fleet_environment_refused');
+  });
+
+  it('should require a host-admin credential before changing profile environment', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const response = await subject.dispatcher.dispatch(
+      request({
+        method: 'PUT',
+        path: '/v1/fleet/environment',
+        headers: { authorization: 'Bearer paired-device', 'x-ferretry-client': 'ui' },
+        body: JSON.stringify({ profile: 'portable', mode: 'replace', environment: {} }),
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+  });
+
   it('should require operator authority and never let a paired device provision', async () => {
     // Arrange
     const subject = await fixture();
