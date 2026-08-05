@@ -61,6 +61,7 @@ import {
   FileSecretKey,
   FleetUsageSource,
   foreignHistoryRoots,
+  HostedRelayDirectory,
   HttpUsageSource,
   JournalGrantAudit,
   KeyedSerialExecutor,
@@ -281,8 +282,12 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  chooseRelayCarrierSource,
+  describeAbsentRelayCarrier,
   describeGrantPosture,
+  describeRelayCarrierPosture,
   NO_PASSWORD_DISCLOSURE,
+  PAIRING_IS_ALWAYS_DIRECT,
   type OperatorPasswordPort,
   normalizeCallsign,
   type ObservedSession,
@@ -305,7 +310,10 @@ import {
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
+  type RelayCarrierSource,
   type RelayDeviceDirectory,
+  type RelayDirectoryPort,
+  RELAY_DIRECTORY_NOT_ASKED,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -320,6 +328,7 @@ import {
   refuseOccupiedAddress,
   refuseUnbindableAddress,
   relaunchCommand,
+  relayCarrierRemedy,
   renderConfiguration,
   renderDoctorReport,
   renderHarnessPreflight,
@@ -702,7 +711,24 @@ export interface DaemonWorld {
     config: DaemonConfig,
     dispatch: RelayApiDispatch,
     devices: RelayDeviceDirectory,
-  ) => Promise<{ readonly carrier: BunRelayCarrier } | { readonly refusal: string }>;
+    /**
+     * The relay directory, passed IN rather than captured, for the same reason the terminal runtime
+     * is: a factory that closed over the world field would keep the production reader no matter what
+     * a test substituted, and the seam would be a lie.
+     */
+    directory: RelayDirectoryPort,
+  ) => Promise<
+    { readonly carrier: BunRelayCarrier; readonly source: RelayCarrierSource } | { readonly refusal: string }
+  >;
+  /**
+   * WHERE THE CARRIER COMES FROM WHEN NOBODY CONFIGURED ONE — one HTTP read, once per boot.
+   *
+   * A world FIELD rather than a private of the factory above because `--check` asks it too, and
+   * because it is the one collaborator in this subsystem that talks to a service off this machine:
+   * a test substitutes it and keeps the choice, the carrier and the notices exactly as production
+   * builds them.
+   */
+  readonly relayDirectory: RelayDirectoryPort;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -3576,7 +3602,8 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
     createSocketTickets: () => new SocketTicketRegistry({ now: () => Date.now() }, new NodeSocketTicketSecrets()),
-    createRelayCarrier: async (config, dispatch, devices) => {
+    relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
+    createRelayCarrier: async (config, dispatch, devices, directory) => {
       // The key is the one PAIRING minted, read through the path both subsystems now share. A relay
       // identity of its own would carry a different fingerprint from the one in the pairing QR, and
       // every paired browser pins that one — so it would refuse the handshake, correctly, forever.
@@ -3586,9 +3613,22 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         new WebCryptoRelayIdentityKeys(),
       );
       if (!identity.ok) return { refusal: identity.reason };
+      /**
+       * DIRECT FIRST, THEN THE ADVERTISED CARRIER — the fallback the browser half already had.
+       *
+       * The directory is asked ONLY when this daemon has no relay block of its own. An operator who
+       * wrote one chose it, including choosing to switch it off, and a discovery read that could
+       * override that would turn an emergency stop into a suggestion. It is also a network read
+       * nobody asked for.
+       */
+      const source = chooseRelayCarrierSource(
+        config.relay,
+        config.relay === undefined ? await directory.read() : RELAY_DIRECTORY_NOT_ASKED,
+      );
       return {
+        source,
         carrier: new BunRelayCarrier({
-          config: config.relay,
+          config: source.kind === 'direct-only' ? undefined : source.config,
           crypto: new WebCryptoRelayCrypto(),
           identity: identity.identity,
           dispatch,
@@ -4306,15 +4346,27 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * this daemon could not dial, and the sentence is what stops "no relay configured" from looking
    * exactly like "the relay is broken" — the two are indistinguishable from outside without it.
    */
-  const relay = await world.createRelayCarrier(config, request => dispatcher.dispatch(request), {
-    identifyDevice: token => pairing.credentials.identify(token),
-  });
+  const relay = await world.createRelayCarrier(
+    config,
+    request => dispatcher.dispatch(request),
+    { identifyDevice: token => pairing.credentials.identify(token) },
+    world.relayDirectory,
+  );
   if ('carrier' in relay) {
     relay.carrier.start();
     cleanups.push(() => relay.carrier.stop());
     const status = relay.carrier.status();
-    if (status.phase === 'none') world.notices.state(`no relay carrier — ${status.detail ?? 'no reason reported'}`);
-    else world.notices.step('dialling the relay', status.relayUrl);
+    if (status.phase === 'none') {
+      // THREE LINES, NOT ONE. The old notice stated a reason and stopped, which told somebody whose
+      // phone could not reach this daemon nothing they could act on.
+      for (const line of describeAbsentRelayCarrier({
+        source: relay.source,
+        carrierDetail: status.detail,
+        configFile: world.config.path,
+        host: config.host,
+      }))
+        world.notices.state(line);
+    } else world.notices.step('dialling the relay', status.relayUrl);
   } else {
     world.notices.state(`no relay carrier — ${relay.refusal}`);
   }
@@ -4539,10 +4591,31 @@ export async function checkConfiguration(world: DaemonWorld): Promise<number> {
    * IT READS, IT DOES NOT CREATE. `passwordSet` is one existence check through the same verifier
    * port the grant service uses, so a query stays a query and there is no second source to drift.
    */
+  /**
+   * THE CARRIER POSTURE, BEFORE THE ADDRESS AND BEFORE THE GRANTS.
+   *
+   * THIS IS THE COMMAND THE OWNER REACHES FOR WHEN SOMETHING IS WRONG, and "can anything off this
+   * machine reach it at all" is the first thing that matters — a bound address a phone cannot get to
+   * is not a working daemon. It reads the directory exactly as a boot would, which is what makes the
+   * answer the real one rather than a guess about what a boot might decide; that is one outbound
+   * request, which is the same latitude this command already takes when it probes an address.
+   *
+   * It does not change the exit code. A direct-only daemon starts perfectly.
+   */
+  const carrier = chooseRelayCarrierSource(
+    config.relay,
+    config.relay === undefined ? await world.relayDirectory.read() : RELAY_DIRECTORY_NOT_ASKED,
+  );
+  say(describeRelayCarrierPosture(carrier, world.config.path));
+  say(`             ${PAIRING_IS_ALWAYS_DIRECT}`);
+  if (carrier.kind === 'direct-only' || !carrier.config.enabled) {
+    for (const line of relayCarrierRemedy(carrier, world.config.path, config.host)) say(`             ! ${line}`);
+  }
   for (const line of describeGrantPosture({
     config,
     passwordSet: await world.operatorPassword.isSet().catch(() => false),
     clientName: CLIENT_NAME,
+    carrier,
   }))
     say(line);
   const doctorExitCode = doctor.ready ? 0 : 1;

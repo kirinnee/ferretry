@@ -126,6 +126,42 @@ done
 rg -qF -- "https://$(jq -r '.name' "${hosted_config}").\$worker_subdomain.workers.dev" "${workflow}" ||
   fail "${workflow} derives an origin that does not match the Worker name in ${hosted_config}"
 
+# ─── both ends must read the SAME advertisement, from the same path ───────────────────────────
+#
+# A session crosses a relay only if BOTH ends are on it. Three modules now spell the discovery path:
+# the Worker that serves the document, the browser that reads it, and the daemon that reads it to
+# decide whether it dials anything at all. A daemon that discovered nothing while a browser reported
+# the relay as healthy is precisely the shape of failure this product has already shipped, and the
+# path drifting by one character is enough to cause it.
+public_path="$(pinned_path HOSTED_RELAY_PUBLIC_PATH)"
+for reader in \
+  "packages/pwa/src/features/onboarding/hosted-relay.ts" \
+  "packages/daemon/src/lib/relay/discovery.ts"; do
+  rg -qF -- "'${public_path}'" "${reader}" ||
+    fail "${reader} does not read the advertisement from ${public_path}, the path ${control} serves"
+done
+
+# ─── the daemon half must actually be given a directory to ask ────────────────────────────────
+#
+# The daemon binds loopback and is reachable from another device only over a rendezvous it dialled
+# outbound. It has nothing to dial until a directory names one, so a release that ships the binary
+# without the discovery origin ships a daemon nobody can reach — silently, and with every test
+# passing. Three links in that chain, each asserted where it is written.
+daemon_environment="packages/daemon/src/adapters/system/runtime-environment.ts"
+compile="scripts/release/compile.sh"
+cd_workflow=".github/workflows/cd.yaml"
+rg -qF -- '__FY_RELAY_DIRECTORY__' "${daemon_environment}" ||
+  fail "${daemon_environment} no longer reads the compiled relay directory origin"
+rg -qF -- '__FY_RELAY_DIRECTORY__' "${compile}" ||
+  fail "${compile} no longer bakes the relay directory origin into the daemon binary"
+rg -qF -- 'relay-directory-origin.sh --require' "${cd_workflow}" ||
+  fail "${cd_workflow} must resolve the relay directory origin, and must fail rather than ship without one"
+# The origin is a SERVICE address resolved at build time; a carrier address compiled into either end
+# would put the half of this contract that must stay runtime into a release.
+if rg -qF -- 'workers.dev' "${daemon_environment}"; then
+  fail "${daemon_environment} names a relay hostname; the build carries a directory origin, never a carrier"
+fi
+
 # ─── the strict configuration document, proved by running the real projections ────────────────
 
 # These three strings are the jq programs the workflow executes. They are asserted to be present in

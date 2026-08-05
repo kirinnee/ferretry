@@ -44,10 +44,12 @@ import {
   EXIT_ADDRESS_CONFLICT,
   EXIT_ALREADY_RUNNING,
   MigrationPreflight,
+  NO_RELAY_DIRECTORY,
   type PaneObservation,
   type ProcessInventoryPort,
   type ProcessObservation,
   parseSessionId,
+  type RelayAdvertisement,
   type ResumeLauncher,
   SESSION_ID_VARIABLE,
   sessionPaneEnvironment,
@@ -3541,5 +3543,153 @@ describe('daemon boot lifecycle', () => {
     // The state home and the address it serves are named, not merely implied.
     should(said.steps.join('\n')).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
     should(said.steps.join('\n')).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(port)}`, 'u'));
+  });
+
+  /**
+   * THE CARRIER A FRESH INSTALL ACTUALLY GETS.
+   *
+   * The defect: the daemon dialled a rendezvous only when `config/daemon.json` carried a `relay`
+   * block, and nothing has ever written one. So `fyd` bound loopback, dialled nowhere, and printed
+   * one clause about it — leaving a daemon that no device but this one could reach, which is
+   * indistinguishable from the owner's side from pairing being broken.
+   *
+   * These run through the REAL composition root: the real `start`, the real carrier, the real
+   * notices. Only the directory read is substituted, at the seam the world exposes for exactly that,
+   * because it is the one collaborator that talks to a service off this machine.
+   */
+  describe('the relay carrier a boot resolves', () => {
+    it('should dial the carrier the directory advertises when this daemon configured none', async () => {
+      // Arrange: a home with no `relay` block — which is every home, since nothing writes one — and
+      // a directory advertising a rendezvous. The address is a port nothing is listening on: the
+      // assertion is that the daemon DIALS it, and a real rendezvous is `bun-relay-carrier.test.ts`.
+      const home = await tempDirectory('fyd-relay-discovered');
+      const port = await freeLoopbackPort();
+      const relayPort = await freeLoopbackPort();
+      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, port, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => ({ kind: 'available', relayUrl }) },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — the daemon dialled, at the advertised address, addressed by its own fingerprint.
+      should(code).equal(0);
+      should(said.steps.join('\n')).match(
+        new RegExp(
+          `dialling the relay — ws://127\\.0\\.0\\.1:${String(relayPort)}/v1/rendezvous/fy_daemon_[^/]+/daemon`,
+          'u',
+        ),
+      );
+      // AND SAID NOTHING ABOUT BEING DIRECT-ONLY, which is the sentence this whole change removes
+      // from a fresh install's boot.
+      should(said.stated.filter(message => message.startsWith('no relay carrier'))).be.empty();
+    });
+
+    it('should say the consequence and the remedy when it discovers nothing, not only the reason', async () => {
+      // Arrange: a build with no directory to ask, which is a real deployment state.
+      const home = await tempDirectory('fyd-relay-none');
+      const port = await freeLoopbackPort();
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = {
+        ...(await worldAt(home, port, async () => await stopped)),
+        notices: said.port,
+        relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — a daemon still starts perfectly without a carrier. What it may not do is know it is
+      // unreachable and print one clause about it.
+      should(code).equal(0);
+      const notice = said.stated.filter(message => /relay|pair/u.test(message));
+      should(notice).have.length(4);
+      should(notice[0]).match(/^no relay carrier — no relay could be discovered/u);
+      // A LOOPBACK BIND WITH NO CARRIER IS THE WORST CASE, and the notice says the whole of it:
+      // pairing is always direct, so this daemon cannot be paired with from another device at all
+      // — a remedy that named only the relay would leave the reader exactly as stuck.
+      should(notice[1]).match(/bound to 127\.0\.0\.1 and dials no relay/u);
+      should(notice[1]).match(/nothing can pair with it either/u);
+      should(notice[2]).match(/^to pair: set "host" in/u);
+      should(notice[2]).containEql(join(home, 'config', 'daemon.json'));
+      should(notice[3]).match(/relay directory again/u);
+    });
+
+    it('should leave a relay the operator switched off switched off, whatever is advertised', async () => {
+      // Arrange: an emergency stop somebody typed, and a directory that would happily override it.
+      const home = await tempDirectory('fyd-relay-off');
+      const port = await freeLoopbackPort();
+      await seedHome(home, port);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'https://mine.example', enabled: false } }),
+        { mode: 0o600 },
+      );
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const asked: number[] = [];
+      const world = {
+        ...buildWorld(),
+        notices: said.port,
+        untilShutdown: async () => await stopped,
+        relayDirectory: {
+          read: async (): Promise<RelayAdvertisement> => {
+            asked.push(1);
+            return { kind: 'available', relayUrl: 'https://hosted.example' };
+          },
+        },
+      };
+
+      // Act
+      const booting = start(world, cleanups);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+
+      // Assert — nothing was dialled, the directory was not even ASKED, and the sentence names the
+      // operator's own address rather than the one that was advertised.
+      should(code).equal(0);
+      should(asked).be.empty();
+      should(said.steps.filter(step => step.startsWith('dialling the relay'))).be.empty();
+      const notice = said.stated.filter(message => /relay|pair/u.test(message));
+      should(notice[0]).match(/^no relay carrier — the configured relay https:\/\/mine\.example is switched off/u);
+      should(notice[3]).match(/correct it or remove it/u);
+    });
   });
 });

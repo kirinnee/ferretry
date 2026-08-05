@@ -687,11 +687,30 @@ Discovery is supplied by [PR #202](https://github.com/kirinnee/ferretry/pull/202
 parses this advertisement from its own build-time `FY_RELAY_DIRECTORY_ORIGIN`, so a browser can learn
 the relay address and whether the operator has switched it off. What that does not do is use it.
 
+**Both ends discover it now, and that asymmetry was a shipped defect.** A session crosses a relay
+only if BOTH ends are on it, and until `packages/daemon/src/lib/relay/discovery.ts` existed only the
+browser half read this advertisement: `decideRelayCarrier` answered "no relay is configured" whenever
+the daemon document had no `relay` block, and **nothing has ever written one**. So a fresh install
+bound loopback, dialled nowhere, and was reachable from no device but its own host — which is
+indistinguishable, from the owner's side, from pairing being broken. The daemon now reads this same
+document, from the same path, and dials whatever it names. Its discovery origin is compiled in by
+`scripts/release/compile.sh` as `__FY_RELAY_DIRECTORY__`, resolved by the same
+`scripts/ci/relay-directory-origin.sh` the Pages build uses so the two halves cannot be pointed at
+different directories, and overridable at runtime with `FY_RELAY_DIRECTORY_ORIGIN`. It is an ORIGIN,
+never a carrier: no relay address is compiled into either end.
+
+An explicit `relay` block **wins and is never overwritten** — the directory is not even asked when
+one is present, so `enabled: false` stays off rather than being helpfully re-enabled. Every failure
+to discover narrows to direct-only, and the boot trail plus `fyd --check` state the consequence and
+the remedy rather than one bare clause; `--check` names the posture in one line: direct-only, hosted,
+or self-hosted, and which.
+
 **`fyd` now dials and carries a session.** `packages/daemon/src/lib/relay` is the daemon half of this
 protocol — the claim signed with the key pairing already minted, the per-session handshake, the record
 layer, the credit window, and the §14 tunnel that turns a relayed request into the same `ApiRequest`
-the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket and its
-liveness, and the `relay` block of the daemon configuration document is where an operator points it.
+the bound address serves. `packages/daemon/src/adapters/relay` is the outbound socket, its liveness,
+and the one HTTP read of the advertisement above; the `relay` block of the daemon configuration
+document is where an operator overrides all of it.
 
 **The browser now can.** `packages/pwa/src/lib/relay-session.ts` is the client half of §6, §7, §8 and
 §14 — the handshake against the fingerprint pairing pinned, the record layer, the credit window and the
@@ -727,17 +746,28 @@ Four properties of that client are worth stating here because they are contract,
 Five named pieces. PR #202 provides the first two, the third is now built on both ends with the
 declared gaps below, the fourth is on screen, and the fifth is outstanding:
 
-1. **A build-time discovery origin in the PWA** — provided by #202. The relay lives on its own
+1. **A build-time discovery origin on BOTH ends** — the PWA's from #202, the daemon's from
+   `scripts/release/compile.sh`. The relay lives on its own
    hostname, so the
    browser cannot resolve the advertisement from its own origin. A **relative `/v1/default-relay` is
    wrong**, and Cloudflare Pages stays a static bundle — no Function, no proxy — so the origin is
    compiled into the PWA build as `FY_RELAY_DIRECTORY_ORIGIN`, supplied by the Pages workflow from
    the same repository variable the relay's own deploy uses, and shipping no directory rather than
    guessing when unset. It is a _service_ address, not a user address: it identifies the relay,
-   never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over.
-2. **A fetch-and-parse step** — also provided by #202 — that reads the advertisement through
+   never a daemon or a person, and is unrelated to the daemon URLs a pairing hands over. The daemon
+   carries the same value as `__FY_RELAY_DIRECTORY__`, resolved by the same script from the same
+   inputs in `.github/workflows/cd.yaml`, and overridable at runtime by `FY_RELAY_DIRECTORY_ORIGIN`
+   for a build that never had one. `scripts/validate/relay-config.sh` pins the discovery path all
+   three modules spell, and pins that release chain, because two halves pointed at different
+   directories carry nothing and nothing else in CI would notice.
+2. **A fetch-and-parse step on BOTH ends** — the PWA's from #202, the daemon's in
+   `packages/daemon/src/lib/relay/discovery.ts` and `src/adapters/relay/hosted-relay-directory.ts` —
+   that reads the advertisement through
    `HostedRelayAdvertisementSchema` and turns it into a carrier with `hostedRelayConnection`,
-   treating `relayUrl: null` and any failure as "no hosted carrier".
+   treating `relayUrl: null` and any failure as "no hosted carrier". On the daemon the advertised
+   address becomes a `relay` block through the same schema an operator's document uses, so a
+   discovered carrier and a configured one cannot acquire different redial cadences; a configured
+   block short-circuits the read entirely.
 3. **A relay-capable transport on both ends** — **built.** `packages/daemon/src/lib/relay` dials out,
    signs its claim with the identity pairing minted (the same key, deliberately: a second one would
    carry a fingerprint no paired browser has pinned), runs a session per client and dispatches §14
@@ -745,7 +775,8 @@ declared gaps below, the fourth is on screen, and the fifth is outstanding:
    points it at an address. `packages/pwa/src/lib/relay-session.ts` and `relay-carrier.ts` are the
    browser end. **What is still missing around it:**
    - A `fy` verb to write the daemon's `relay` block — an operator edits
-     `<state home>/config/daemon.json` today.
+     `<state home>/config/daemon.json` today. That block is now an OVERRIDE rather than the only way
+     to get a carrier: without one the daemon takes whichever relay this section advertises.
    - **The two shapes this tunnel does not carry** (see §14): `/v1/events` and terminal streams. The
      browser now REFUSES these on a relay carrier rather than opening a socket at an address the relay
      exists because it cannot reach, so a relayed connection is a working request/response surface

@@ -1,8 +1,9 @@
 import { CAPABILITY_AXES, DAEMON_CAPABILITIES } from '@ferretry/protocol';
 import { NO_PASSWORD_DISCLOSURE } from '../grants/policy.ts';
+import { dialledRelayUrl, type RelayCarrierSource } from '../relay/discovery.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
-import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
+import { advertisesForeignAddress, type DaemonConfig, isLoopbackHost } from './config.ts';
 
 /**
  * Where one effective value came from.
@@ -160,13 +161,24 @@ function describeGrants(report: ConfigurationReport): readonly ResolvedValue[] {
  * from anywhere the moment a relay is configured and enabled. A posture that looked only at `host`
  * would tell somebody running the hosted relay that nothing could reach them.
  */
-export function reachableOffHost(config: DaemonConfig): { readonly reachable: boolean; readonly how: string } {
-  const relay = config.relay;
+export function reachableOffHost(
+  config: DaemonConfig,
+  /**
+   * The carrier this daemon would actually dial, when the caller has resolved one.
+   *
+   * IT IS NOT ALWAYS THE CONFIGURED BLOCK. A daemon with no `relay` block falls back to whatever the
+   * relay directory advertises, so reading only the document would tell somebody carried by the
+   * hosted relay that nothing on earth could reach them — and would then suppress every grant line
+   * on that basis. Absent, this reads the document alone, which is the answer for a caller that has
+   * not asked the directory.
+   */
+  carrier?: RelayCarrierSource,
+): { readonly reachable: boolean; readonly how: string } {
+  const dialled = carrier === undefined ? undefined : dialledRelayUrl(carrier);
+  if (dialled !== undefined) return { reachable: true, how: `the relay at ${dialled}` };
+  const relay = carrier === undefined ? config.relay : undefined;
   if (relay !== undefined && relay.enabled) return { reachable: true, how: `the relay at ${relay.url}` };
-  // Exactly the spellings that name this machine to itself. Anything else — a LAN address, a public
-  // one, or the `0.0.0.0` wildcard — accepts connections from off the host.
-  const loopback = new Set(['127.0.0.1', '::1', 'localhost', '[::1]']);
-  if (loopback.has(config.host)) return { reachable: false, how: `host ${config.host}, no relay` };
+  if (isLoopbackHost(config.host)) return { reachable: false, how: `host ${config.host}, no relay` };
   return { reachable: true, how: `host ${config.host}` };
 }
 
@@ -185,8 +197,10 @@ export function describeGrantPosture(input: {
   readonly config: DaemonConfig;
   readonly passwordSet: boolean;
   readonly clientName: string;
+  /** The carrier that was actually resolved, so a discovered relay counts as a way in. */
+  readonly carrier?: RelayCarrierSource;
 }): readonly string[] {
-  const reach = reachableOffHost(input.config);
+  const reach = reachableOffHost(input.config, input.carrier);
   if (!reach.reachable)
     return [`grants       nothing off this host can reach this daemon (${reach.how}), so no grant applies today`];
   const used = DAEMON_CAPABILITIES.filter(capability => input.config.grants[capability]?.use === true);
