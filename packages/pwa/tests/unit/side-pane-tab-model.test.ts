@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   activateSidePaneTab,
   type BrowserDestination,
@@ -22,8 +24,8 @@ import {
   resetSidePaneTabRegistry,
   resetSidePaneTabsStates,
   resolveSidePaneTab,
-  setSidePaneInstanceLabel,
   SIDE_PANE_BUILT_IN_TABS,
+  setSidePaneInstanceLabel,
   sidePaneInstanceTabId,
   sortSidePaneTabs,
   subscribeSidePaneInstanceClose,
@@ -31,8 +33,6 @@ import {
   subscribeSidePaneTabsState,
   writeSidePaneTabsState,
 } from '../../src/shell/side-pane-tab-model.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceToken: 'a-token' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceToken: 'b-token' });
@@ -154,7 +154,7 @@ describe('pins and attention are not side-pane tabs', () => {
 
 describe('registry', () => {
   it('exposes the built-ins by id and in strip order', () => {
-    expect(getSidePaneTabDefinition('lineage')?.shortLabel).toBe('Tree');
+    expect(getSidePaneTabDefinition('lineage')?.shortLabel).toBe('Lineage');
     expect(getSidePaneTabDefinition('nope')).toBeUndefined();
     expect(getSidePaneTabDefinitions().map(def => def.id)).toEqual([
       'tasks',

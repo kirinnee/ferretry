@@ -24,7 +24,7 @@
  *              session must come back to the tabs it had.
  *
  * Every session starts with the human's chosen default strip: tasks, skills,
- * tree (lineage), mcp and cost (analytics) — all singletons, all utility tabs.
+ * lineage, mcp and cost (analytics) — all singletons, all utility tabs.
  * Files, browser pages and terminals join the strip as INSTANCE tabs when
  * something opens them.
  *
@@ -168,7 +168,7 @@ export interface SidePaneTabDefinition {
   readonly id: SidePaneTabId;
   /** Full accessible name ("Lineage"; a file's full path). */
   readonly label: string;
-  /** Compact strip name ("Tree"; a file's basename); the full label stays the
+  /** Compact strip name ("Lineage"; a file's basename); the full label stays the
    *  accessible name. */
   readonly shortLabel: string;
   /** Sheet dismiss label. */
@@ -198,7 +198,7 @@ export interface SidePaneTabDefinition {
 //
 // Array order is the HISTORICAL surface key order (the bento launcher preserves
 // it); `order` is the STRIP order, which follows the human's default-tab
-// listing MINUS pins and needs: tasks, skills, tree, mcp, cost — then the
+// listing MINUS pins and needs: tasks, skills, lineage, mcp, cost — then the
 // on-demand catalogue entries web, files, terminals. The two `order` values the
 // removed tabs held (10 and 60) are deliberately left as gaps rather than
 // renumbered, so a strip persisted by an earlier build sorts unchanged.
@@ -252,7 +252,7 @@ export const SIDE_PANE_BUILT_IN_TABS: readonly SidePaneTabDefinition[] = [
   {
     id: 'lineage',
     label: 'Lineage',
-    shortLabel: 'Tree',
+    shortLabel: 'Lineage',
     closeLabel: 'Close lineage',
     icon: 'lineage',
     order: 40,

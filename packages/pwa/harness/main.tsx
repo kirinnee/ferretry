@@ -619,7 +619,7 @@ const MARK_SESSIONS: readonly (readonly [string, SessionView])[] = [
   ['failed', { ...harnessSession, state: { ...harnessSession.state, status: 'failed' } } as SessionView],
 ];
 
-/** A local family keeps the Tree card readable at both required widths. */
+/** A local family keeps the Lineage card readable at both required widths. */
 const LINEAGE_SESSIONS: readonly SessionView[] = [
   {
     ...harnessSession,
@@ -636,7 +636,7 @@ const LINEAGE_SESSIONS: readonly SessionView[] = [
       ...harnessSession.config,
       id: 'lineage-child',
       teammate: 'Mira',
-      name: 'Render the Lineage tree',
+      name: 'Render Lineage',
       parent: 'harness-session',
     },
     state: { ...harnessSession.state, id: 'lineage-child', status: 'completed' },
@@ -2959,9 +2959,9 @@ function Shell() {
       ),
     },
     {
-      label: 'Lineage tree',
+      label: 'Lineage',
       render: () => (
-        <section aria-label="Lineage tree preview" className="min-h-[360px]" id="harness-lineage">
+        <section aria-label="Lineage preview" className="min-h-[360px]" id="harness-lineage">
           <Card className="h-full overflow-hidden">
             <LineageSurfaceContent daemonId={daemon.daemonId} sessionId="harness-session" sessions={LINEAGE_SESSIONS} />
           </Card>

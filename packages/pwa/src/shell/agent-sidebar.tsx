@@ -52,7 +52,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { ChevronsLeft, Cpu, Plus, Settings, ShieldCheck, User, Users, X } from 'lucide-react';
+import { ChevronsLeft, Cpu, Plus, User, Users, X } from 'lucide-react';
 import { type ReactNode, useRef } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
@@ -61,7 +61,7 @@ import type { ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { ModeCounts, SessionGroup } from '../lib/fleet-grouping.ts';
 import type { LineageIndex } from '../lib/lineage.ts';
-import { daemonNewSessionPath, daemonSettingsPath, daemonWardenPath } from '../lib/pages/routes.ts';
+import { daemonNewSessionPath } from '../lib/pages/routes.ts';
 import { drawerFocusPolicy, pinScopedFirst } from './agent-sidebar-model.ts';
 import { type AttentionCountFor, GroupBlock } from './agent-sidebar-rows.tsx';
 import { FleetFilters, type FleetFilterValues } from './fleet-filters.tsx';
@@ -80,39 +80,6 @@ const modeIcon = (mode: ModeFilter): ReactNode => {
   if (mode === 'interactive') return <User className="shrink-0" size={10} />;
   return null;
 };
-
-/** The two destinations a narrow drawer cannot reach through the rail. */
-export function NarrowDestinations({
-  daemonId,
-  onNavigate,
-}: {
-  readonly daemonId: DaemonId;
-  readonly onNavigate: () => void;
-}) {
-  return (
-    <nav
-      aria-label="Destinations"
-      className="grid shrink-0 grid-cols-2 gap-sm border-border-soft border-b px-cell-x pb-2"
-    >
-      <RouteLink
-        className="kt-btn min-h-[44px] justify-center gap-xs"
-        onNavigate={onNavigate}
-        to={daemonWardenPath(daemonId)}
-      >
-        <ShieldCheck aria-hidden="true" size={14} />
-        Warden
-      </RouteLink>
-      <RouteLink
-        className="kt-btn min-h-[44px] justify-center gap-xs"
-        onNavigate={onNavigate}
-        to={daemonSettingsPath(daemonId)}
-      >
-        <Settings aria-hidden="true" size={14} />
-        Settings
-      </RouteLink>
-    </nav>
-  );
-}
 
 /** Everything about one daemon's fleet the sidebar draws, already derived. */
 export interface SidebarFleet {
@@ -307,7 +274,6 @@ export function AgentSidebar({
               <X size={14} />
             </button>
           </div>
-          <NarrowDestinations daemonId={body.daemonId} onNavigate={onCloseDrawer} />
           <SidebarBody {...body} autoFocusSearch={focusPolicy.searchAutoFocus} coarse onNavigate={onCloseDrawer} />
         </aside>
         {layers}

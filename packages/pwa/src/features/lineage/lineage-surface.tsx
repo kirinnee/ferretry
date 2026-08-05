@@ -1,29 +1,30 @@
-/** The focused session's local lineage, rendered for the Tree side-pane tab. */
-import { useMemo, useState } from 'react';
+/** The focused session's local lineage, rendered for the Lineage side-pane tab. */
+
 import type { SessionStatus, SessionView } from '@ferretry/protocol';
+import { useMemo, useState } from 'react';
 
 import { useFleetView } from '../../hooks/use-fleet-view.ts';
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonFleetStore } from '../../lib/fleet-store.ts';
 import { lineageIndent, lineageLabel, MAX_INDENT_DEPTH } from '../../lib/lineage.ts';
 import { daemonSessionPath } from '../../lib/pages/routes.ts';
-import { cn } from '../../lib/class-names.ts';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { StatusMark, statusMark } from '../../shell/status-mark.tsx';
 import { LineageName } from './lineage-name.tsx';
 import {
   buildLineageSurfaceModel,
+  type FilteredLineageRow,
   filterLineageRows,
+  type LineageSurfaceModel,
+  type LineageSurfaceParent,
   lineageFilterSummary,
   orderedStatuses,
   statusCounts,
   surfaceRows,
   toggleLineageStatusFilter,
-  type FilteredLineageRow,
-  type LineageSurfaceModel,
-  type LineageSurfaceParent,
 } from './lineage-surface-model.ts';
 
 const statusLabel = (status: SessionStatus): string => status.replaceAll('_', ' ');
@@ -148,7 +149,11 @@ function SessionLineageLink({
       )}
       <StatusMark view={view} size={8} className="relative z-[2]" />
       {compressedDepth && (
-        <span aria-hidden="true" className="mono shrink-0 text-2xs text-faint" title={`Tree level ${displayDepth + 1}`}>
+        <span
+          aria-hidden="true"
+          className="mono shrink-0 text-2xs text-faint"
+          title={`Lineage level ${displayDepth + 1}`}
+        >
           ›{displayDepth}
         </span>
       )}
@@ -193,7 +198,7 @@ function LineageTreeRows({
   readonly descendantDepth?: number;
 }) {
   return (
-    <ul className="m-0 list-none p-0" aria-label={depth === 0 ? 'Session lineage tree' : undefined}>
+    <ul className="m-0 list-none p-0" aria-label={depth === 0 ? 'Session lineage' : undefined}>
       {rows.map((filtered, index) => {
         const { view, children, matchesFilter } = filtered;
         const role = roleFor(view, model);
@@ -361,9 +366,9 @@ function LineageSurfaceBody({
         )}
       </div>
 
-      <section aria-label="Session lineage tree" className="pt-2">
+      <section aria-label="Session lineage" className="pt-2">
         <div className="mb-xs flex items-baseline justify-between gap-sm">
-          <h3 className="kt-label m-0">Lineage tree</h3>
+          <h3 className="kt-label m-0">Lineage</h3>
           <span className="mono shrink-0 text-2xs text-faint">
             {model.descendantCount} {model.descendantCount === 1 ? 'descendant' : 'descendants'}
           </span>

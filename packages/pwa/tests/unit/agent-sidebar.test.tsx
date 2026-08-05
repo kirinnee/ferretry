@@ -5,7 +5,6 @@ import type { SessionGroup } from '../../src/lib/fleet-grouping.ts';
 import { buildLineage } from '../../src/lib/lineage.ts';
 import {
   AgentSidebar,
-  NarrowDestinations,
   SIDEBAR_EXPANDED_WIDTH,
   SIDEBAR_RAIL_WIDTH,
   SidebarBody,
@@ -57,27 +56,6 @@ const bodyProps = (fleet: SidebarFleet, overrides: Record<string, unknown> = {})
   onFilterChange: () => undefined,
   onFocusFolder: () => undefined,
   ...overrides,
-});
-
-describe('NarrowDestinations', () => {
-  test('routes both destinations through the daemon the drawer is showing', async () => {
-    const screen = await mount(<NarrowDestinations daemonId={alpha} onNavigate={() => undefined} />);
-    const links = [...screen.container.querySelectorAll('a')].map(anchor => anchor.getAttribute('href'));
-    expect(links).toEqual(['/d/alpha/warden', '/d/alpha/settings']);
-    await screen.unmount();
-  });
-
-  test('shuts the drawer that is covering the destination', async () => {
-    const closed: string[] = [];
-    const screen = await mount(<NarrowDestinations daemonId={alpha} onNavigate={() => closed.push('closed')} />);
-    await interact(() =>
-      must(screen.container.querySelector('a'), 'the Warden link').dispatchEvent(
-        new MouseEvent('click', { bubbles: true, cancelable: true }),
-      ),
-    );
-    expect(closed).toEqual(['closed']);
-    await screen.unmount();
-  });
 });
 
 describe('SidebarBody', () => {
@@ -223,7 +201,9 @@ describe('AgentSidebar', () => {
     expect(dialog.getAttribute('aria-label')).toBe('Fleet sessions');
     // Both the scrim and the header carry the same labelled dismissal.
     expect(dialog.querySelectorAll('[aria-label="Close the fleet sidebar"]').length).toBe(2);
-    expect(dialog.querySelector('nav[aria-label="Destinations"]')).not.toBeNull();
+    expect(dialog.querySelector('nav[aria-label="Destinations"]')).toBeNull();
+    expect(dialog.textContent).not.toContain('Warden');
+    expect(dialog.textContent).not.toContain('Settings');
 
     await interact(() => pressKey(dialog, 'Escape'));
     expect(closed).toEqual(['closed']);
