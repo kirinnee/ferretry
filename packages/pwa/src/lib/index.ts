@@ -57,6 +57,7 @@ export * from '../features/browser/remote-browser-pane.tsx';
 export * from '../features/browser/remote-browser-viewer.tsx';
 export * from '../features/browser/unified-browser-model.ts';
 export * from '../features/browser/unified-browser-surface.tsx';
+export * from '../features/carrier/active-carrier-card.tsx';
 export * from '../features/learning/learning-header.tsx';
 export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
 export {
@@ -110,6 +111,7 @@ export * from '../features/warden/warden-config-card.tsx';
 export * from '../features/warden/warden-status-model.ts';
 export * from '../features/warden/warden-strip.tsx';
 export * from '../features/warden/warden-verdicts.tsx';
+export * from '../hooks/use-active-carrier.ts';
 export * from '../hooks/use-app-viewport.ts';
 export * from '../hooks/use-attention.ts';
 export * from '../hooks/use-dashboard-view.ts';

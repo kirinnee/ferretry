@@ -36,6 +36,7 @@ import { SettingsPage } from './features/settings/settings-page.tsx';
 import { WardenAttention } from './features/warden/warden-attention.tsx';
 import { WardenConfigSurface } from './features/warden/warden-config-card.tsx';
 import { WardenStrip } from './features/warden/warden-strip.tsx';
+import { useActiveCarrier } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import {
@@ -627,6 +628,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   const connectionSnapshot = useConnectionSnapshot();
   const { navigate } = useRouter();
   const dictation = useSttSettings(store.stt);
+  const carrier = useActiveCarrier(store.carrier, connection.daemonId);
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
   const probeDaemon = useCallback(
     async (daemon: DaemonConnection) => {
@@ -657,6 +659,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         navigate(fallback === null ? connectionPickerPath() : `${daemonSettingsPath(fallback)}#daemons`);
       }}
       onAddDaemon={() => navigate(connectionPickerPath())}
+      carrier={carrier}
+      relayAdvertised={connection.relay !== undefined}
       notifications={
         <NotificationSettingsView
           permission={notifications.permission}
