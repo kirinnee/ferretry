@@ -1763,6 +1763,21 @@
   --pad-row-y: 12px;
   --gap-md: 20px;
 }
+
+/* Family colour ramps are deliberately local: structure is inherited above,
+   while each named world gets its own readable ground and signal. */
+:root[data-theme='phosphor-dark'], [data-swatch='phosphor-dark'] { --bg:#06100a; --surface:#0a1a10; --surface-2:#102517; --fg:#baffc9; --muted:#78b98a; --border:#28623a; --accent:#57f287; --accent-rgb:87 242 135; --accent-fg:#041008; --accent-soft:#123d20; --accent-border:#2c8447; }
+:root[data-theme='phosphor-light'], [data-swatch='phosphor-light'] { --bg:#eef9ed; --surface:#f9fff7; --surface-2:#e1f2df; --fg:#12391e; --muted:#386b45; --border:#8fbe96; --accent:#16733b; --accent-rgb:22 115 59; --accent-fg:#fff; --accent-soft:#d7f0d9; --accent-border:#69a878; }
+:root[data-theme='blueprint-dark'], [data-swatch='blueprint-dark'] { --bg:#061b36; --surface:#08264a; --surface-2:#0b315f; --fg:#e5f7ff; --muted:#a9d6e8; --border:#39799e; --accent:#72e3ff; --accent-rgb:114 227 255; --accent-fg:#062039; --accent-soft:#10496c; --accent-border:#49a9c8; }
+:root[data-theme='blueprint-light'], [data-swatch='blueprint-light'] { --bg:#dff4fb; --surface:#f7fdff; --surface-2:#c9eaf5; --fg:#07324a; --muted:#286078; --border:#78b9d0; --accent:#006b93; --accent-rgb:0 107 147; --accent-fg:#fff; --accent-soft:#c7ebf7; --accent-border:#4c9dbc; }
+:root[data-theme='broadsheet-light'], [data-swatch='broadsheet-light'] { --bg:#f3eddf; --surface:#fffdf6; --surface-2:#ebe1cf; --fg:#252017; --muted:#685f51; --border:#b9ac97; --accent:#9a311c; --accent-rgb:154 49 28; --accent-fg:#fff; --accent-soft:#f4d9cf; --accent-border:#c98573; }
+:root[data-theme='broadsheet-dark'], [data-swatch='broadsheet-dark'] { --bg:#1d1a16; --surface:#28231d; --surface-2:#372f26; --fg:#f5ecd9; --muted:#c5b79f; --border:#766955; --accent:#ef946d; --accent-rgb:239 148 109; --accent-fg:#2a120b; --accent-soft:#553022; --accent-border:#9e5d46; }
+:root[data-theme^='wayfinding-'], [data-swatch^='wayfinding-'] { --accent:#0057b8; --accent-rgb:0 87 184; --accent-fg:#fff; --accent-soft:#d7e8ff; --accent-border:#4789d3; }
+:root[data-theme='wayfinding-dark'], [data-swatch='wayfinding-dark'] { --bg:#111b27; --surface:#182638; --surface-2:#22354c; --fg:#f4f7fa; --muted:#b8c5d2; --border:#607890; --accent:#58a6ff; --accent-rgb:88 166 255; --accent-fg:#071b32; --accent-soft:#153b69; --accent-border:#397fc6; }
+:root[data-theme^='ledger-'], [data-swatch^='ledger-'] { --accent:#176a45; --accent-rgb:23 106 69; --accent-fg:#fff; --accent-soft:#d6eadc; --accent-border:#75ab86; }
+:root[data-theme='ledger-dark'], [data-swatch='ledger-dark'] { --bg:#10251b; --surface:#173322; --surface-2:#21452d; --fg:#e8f7e9; --muted:#b0cfb5; --border:#547d5e; --accent:#78d68b; --accent-rgb:120 214 139; --accent-fg:#0b2414; --accent-soft:#214b2b; --accent-border:#4f9a60; }
+:root[data-theme^='ma-'], [data-swatch^='ma-'] { --accent:#a33b56; --accent-rgb:163 59 86; --accent-fg:#fff; --accent-soft:#f5dce3; --accent-border:#d090a1; }
+:root[data-theme='ma-dark'], [data-swatch='ma-dark'] { --bg:#191617; --surface:#211d1f; --surface-2:#2d2729; --fg:#f7f0f2; --muted:#cababe; --border:#705e63; --accent:#ef9aae; --accent-rgb:239 154 174; --accent-fg:#35121c; --accent-soft:#4d2933; --accent-border:#9d5b6c; }
 :root[data-theme$='-dark'],
 [data-swatch$='-dark'] {
   color-scheme: dark;
