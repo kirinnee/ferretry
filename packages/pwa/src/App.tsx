@@ -34,6 +34,7 @@ import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.t
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
+import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -53,7 +54,7 @@ import {
 import { useServiceWorkerUpdate } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
-import { sameDaemonConnection, type DaemonConnection, type DaemonId } from './lib/daemon-connection.ts';
+import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './lib/daemon-connection.ts';
 import { daemonSessionScope } from './lib/daemon-scope.ts';
 import type {
   NotificationPermissionState,
@@ -652,6 +653,14 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   );
   const daemonSettingsTabs = useMemo(
     () => [
+      {
+        id: 'resource-limits',
+        label: 'Resource limits',
+        description: 'Linux CPU and RAM caps for this daemon’s managed fleet.',
+        Surface: ({ connection: activeConnection }: { readonly connection: DaemonConnection }) => (
+          <CgroupConfigSurface connection={activeConnection} />
+        ),
+      },
       {
         id: 'doctor',
         label: 'Doctor',
