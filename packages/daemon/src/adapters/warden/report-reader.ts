@@ -1,3 +1,4 @@
+import { dirname, resolve } from 'node:path';
 import {
   attachSpawnProvenance,
   DEFAULT_VERDICT_LIMIT,
@@ -45,6 +46,16 @@ export class WardenReportReader {
     return mergeWardenReportProvenance(content, await this.readProvenance(reportPath));
   }
 
+  /** Read one exact report from this daemon's evidence directory. A verdict row
+   * may carry a path, but this read surface must never become an arbitrary-file
+   * oracle for a paired browser. */
+  async readReportAt(reportPath: string): Promise<string | undefined> {
+    const reports = resolve(this.reportsDirectory);
+    const candidate = resolve(reportPath);
+    if (dirname(candidate) !== reports || !candidate.endsWith('.md')) return undefined;
+    return await this.readReport(candidate);
+  }
+
   /** The most recent verdicts across every report in the directory. */
   async readVerdicts(
     limit = DEFAULT_VERDICT_LIMIT,
@@ -59,6 +70,10 @@ export class WardenReportReader {
         ? undefined
         : ({ path: candidate.path, mtimeMs: candidate.mtimeMs, content } satisfies WardenReportFile);
     });
+    // A candidate that cannot be read is evidence we cannot safely summarize.
+    // The mounted route turns this into an unavailable index, rather than a
+    // deceptively quiet empty history.
+    if (loaded.some(file => file === undefined)) throw new Error('a Warden report could not be read');
     const reports = loaded.filter((file): file is WardenReportFile => file !== undefined);
 
     const provenance = new Map<string, WardenSpawnProvenance>();

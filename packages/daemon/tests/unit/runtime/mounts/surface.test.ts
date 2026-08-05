@@ -272,6 +272,8 @@ describe('the mounted daemon surface', () => {
       // subsystem also owns the sweep TIMER — a supervision loop with no route would be invisible to
       // the reachability gate, which is how a background subsystem ships unmounted.
       'GET /v1/warden/status',
+      'GET /v1/warden/verdicts',
+      'GET /v1/warden/report',
       'POST /v1/warden/run',
       'GET /v1/warden/config',
       'PATCH /v1/warden/config',

@@ -172,6 +172,24 @@ const anomaly = {
   detail: 'tokens stopped',
 };
 
+const wardenVerdict = {
+  at: INSTANT,
+  verdict: 'needs_human',
+  reportPath: '/state/reports/warden-1.md',
+  recommendation: { action: 'nudge', reason: 'The session has stalled.', agent: 'warden' },
+  spawn: {
+    agent: 'warden',
+    model: 'gpt-5',
+    modelSource: 'configured',
+    harness: 'codex',
+    failedOver: false,
+    policy: 'fallback',
+    selection: 'preferred',
+    configuredFirst: 'warden',
+    skipped: {},
+  },
+};
+
 const serviceCases: SchemaCase[] = [
   { name: 'health', schema: service.HealthViewSchema, value: healthView },
   { name: 'cgroup limit', schema: service.CgroupLimitSchema, value: { cpuPercent: 50, memoryPercent: 50 } },
@@ -202,6 +220,12 @@ const serviceCases: SchemaCase[] = [
   },
   { name: 'warden config view', schema: service.WardenConfigViewSchema, value: wardenConfigView },
   { name: 'warden status', schema: service.WardenStatusViewSchema, value: wardenStatusView },
+  { name: 'warden verdict kind', schema: service.WardenVerdictKindSchema, value: 'needs_human' },
+  { name: 'warden recommended action', schema: service.WardenRecommendedActionSchema, value: 'nudge' },
+  { name: 'warden recommendation', schema: service.WardenRecommendationSchema, value: wardenVerdict.recommendation },
+  { name: 'warden verdict spawn', schema: service.WardenVerdictSpawnSchema, value: wardenVerdict.spawn },
+  { name: 'warden verdict', schema: service.WardenVerdictSchema, value: wardenVerdict },
+  { name: 'warden verdicts', schema: service.WardenVerdictsViewSchema, value: [wardenVerdict] },
   { name: 'warden run', schema: service.WardenRunViewSchema, value: wardenRunView },
   { name: 'warden run request', schema: service.WardenRunRequestSchema, value: { spawn: true } },
   { name: 'usage account', schema: service.UsageAccountViewSchema, value: usageFeedView.accounts[0] },

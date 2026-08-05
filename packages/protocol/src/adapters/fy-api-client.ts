@@ -42,6 +42,8 @@ import {
   WardenRunViewSchema,
   type WardenStatusView,
   WardenStatusViewSchema,
+  type WardenVerdictsView,
+  WardenVerdictsViewSchema,
 } from '../lib/service.ts';
 import {
   AnswerSessionRequestSchema,
@@ -334,6 +336,14 @@ export class FyApiClient implements IFyApiClient {
 
   wardenStatus(): Promise<WardenStatusView> {
     return this.request('/v1/warden/status', WardenStatusViewSchema);
+  }
+
+  wardenVerdicts(): Promise<WardenVerdictsView> {
+    return this.request('/v1/warden/verdicts', WardenVerdictsViewSchema);
+  }
+
+  wardenReport(reportPath: string): Promise<string> {
+    return this.request(`/v1/warden/report?path=${encodeURIComponent(reportPath)}`, z.string());
   }
 
   wardenRun(spawn = false): Promise<WardenRunView> {

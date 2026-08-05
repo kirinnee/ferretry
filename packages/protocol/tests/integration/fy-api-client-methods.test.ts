@@ -42,6 +42,7 @@ interface MethodCase {
 const SESSION_ID = 'session-1';
 const SNAPSHOT_TEXT = 'pane line one\npane line two';
 const LOG_TEXT = 'turn 1 log output';
+const WARDEN_REPORT = '# Warden report\n\nVerdict: LEAVE\n';
 const NAME_SUGGESTIONS = ['Fix Transcript Scrolling', 'Port Protocol Client', 'Cover Typed Methods'];
 
 const sessionResponse = (): Response => jsonResponse(sessionView);
@@ -62,6 +63,22 @@ const CASES: readonly MethodCase[] = [
     path: '/v1/warden/status',
     response: () => jsonResponse(wardenStatusView),
     expected: wardenStatusView,
+  },
+  {
+    name: 'wardenVerdicts',
+    invoke: client => client.wardenVerdicts(),
+    verb: 'GET',
+    path: '/v1/warden/verdicts',
+    response: () => jsonResponse([]),
+    expected: [],
+  },
+  {
+    name: 'wardenReport',
+    invoke: client => client.wardenReport('/state/warden/reports/report 1.md'),
+    verb: 'GET',
+    path: '/v1/warden/report?path=%2Fstate%2Fwarden%2Freports%2Freport%201.md',
+    response: () => textResponse(WARDEN_REPORT),
+    expected: WARDEN_REPORT,
   },
   {
     name: 'wardenRun without a spawn',

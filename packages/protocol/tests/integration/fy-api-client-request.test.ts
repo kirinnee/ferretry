@@ -51,8 +51,10 @@ describe('FyApiClient construction and generic requests', () => {
       'upload',
       'usage',
       'wardenConfig',
+      'wardenReport',
       'wardenRun',
       'wardenStatus',
+      'wardenVerdicts',
     ];
 
     // Act

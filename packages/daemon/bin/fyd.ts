@@ -1776,6 +1776,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   );
   return {
     status: async () => await service.status(),
+    verdicts: async () => await parts.reportsReader.readVerdicts(),
+    report: async (reportPath: string) => await parts.reportsReader.readReportAt(reportPath),
     run: async (force: boolean) => await loop.run(force),
     config: async () => await service.view(),
     updateConfig: async (patch: unknown) => await service.updateConfig(parseWardenConfigPatch(patch)),
