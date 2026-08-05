@@ -65,9 +65,9 @@ const FleetEnvironmentUpdateSchema = z
   })
   .readonly();
 
-export type FleetEnvironmentUpdate = z.output<typeof FleetEnvironmentUpdateSchema>;
+type FleetEnvironmentUpdate = z.output<typeof FleetEnvironmentUpdateSchema>;
 
-export interface FleetEnvironmentView {
+interface FleetEnvironmentView {
   readonly profiles: Readonly<Record<string, Readonly<Record<string, string>>>>;
 }
 

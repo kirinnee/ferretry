@@ -37,13 +37,13 @@ function changes(
   before: Readonly<Record<string, string>>,
   after: Readonly<Record<string, string>>,
 ): EnvironmentChange[] {
-  return [...new Set([...Object.keys(before), ...Object.keys(after)])].sort().flatMap(key => {
-    if (!(key in before)) return [{ key, kind: 'added' as const, after: after[key] }];
-    if (!(key in after)) return [{ key, kind: 'removed' as const, before: before[key] }];
-    return before[key] === after[key]
-      ? []
-      : [{ key, kind: 'changed' as const, before: before[key], after: after[key] }];
-  });
+  const result: EnvironmentChange[] = [];
+  for (const key of [...new Set([...Object.keys(before), ...Object.keys(after)])].sort()) {
+    if (!(key in before)) result.push({ key, kind: 'added', after: after[key] });
+    else if (!(key in after)) result.push({ key, kind: 'removed', before: before[key] });
+    else if (before[key] !== after[key]) result.push({ key, kind: 'changed', before: before[key], after: after[key] });
+  }
+  return result;
 }
 
 export interface FleetEnvironmentSettingsProps {
@@ -149,7 +149,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           >
             {connections.map(candidate => (
               <option key={String(candidate.daemonId)} value={String(candidate.daemonId)}>
-                {candidate.label}
+                {String(candidate.daemonId)}
               </option>
             ))}
           </select>
@@ -171,7 +171,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
           </select>
         </label>
       </div>
-      <div className="flex flex-wrap gap-2" aria-label="Copy semantics">
+      <fieldset className="flex flex-wrap gap-2" aria-label="Copy semantics">
         {(['merge', 'replace'] as const).map(candidate => (
           <button
             key={candidate}
@@ -183,7 +183,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
             {candidate === 'merge' ? 'Merge safely' : 'Replace target'}
           </button>
         ))}
-      </div>
+      </fieldset>
       <label className="text-ui text-muted">
         Environment entries
         <textarea
@@ -204,7 +204,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
         </p>
       ) : null}
       {target && source ? (
-        <div className="rounded-control border border-border-soft bg-surface-2 p-3" aria-label="Configuration diff">
+        <section className="rounded-control border border-border-soft bg-surface-2 p-3" aria-label="Configuration diff">
           <p className="m-0 text-ui font-semibold text-fg">Target diff ({diff.length} changes)</p>
           {diff.length === 0 ? (
             <p className="mb-0 mt-1 text-ui text-muted">No configuration change to apply.</p>
@@ -218,7 +218,7 @@ export function FleetEnvironmentSettings({ connection, connections }: FleetEnvir
               ))}
             </ul>
           )}
-        </div>
+        </section>
       ) : null}
       <button
         type="button"
