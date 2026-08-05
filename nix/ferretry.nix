@@ -46,9 +46,14 @@ let
         ln -s ${bunDeps}/node_modules/.bun/qrcode-terminal@0.12.0/node_modules/qrcode-terminal node_modules/qrcode-terminal
         ln -s ${bunDeps}/node_modules/.bun/smol-toml@1.7.1/node_modules/smol-toml node_modules/smol-toml
         ln -s ${bunDeps}/node_modules/.bun/zod@4.4.3/node_modules/zod node_modules/zod
+        # Every workspace package a compiled binary imports has to be linked here by hand, so adding
+        # one to `packages/` is not enough — `fyd` gained `@ferretry/relay` with the relay transport
+        # and this list did not, which broke `nix shell github:kirinnee/ferretry` outright while CI
+        # stayed green: CI runs `bun install` over the real workspace and never exercises this tree.
         mkdir -p node_modules/@ferretry
         ln -s "$PWD/packages/fleet" node_modules/@ferretry/fleet
         ln -s "$PWD/packages/protocol" node_modules/@ferretry/protocol
+        ln -s "$PWD/packages/relay" node_modules/@ferretry/relay
         bun build ${entry} --compile --outfile ${pname}
       '';
       installPhase = ''
