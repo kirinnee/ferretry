@@ -1,13 +1,17 @@
 ---
 id: one-fact-one-owner
-title: One fact, one owner — configuration, capabilities and authorization as one model
+title: One fact, one owner — the refactor plan of record
 ---
 
 # One fact, one owner
 
-**Status: proposal. Nothing here is built. The owner agrees the model first.**
+**Status: proposal, and the plan of record for the halt. Nothing here is built.**
+**Verified against `origin/main` at `52dc6a20` (`release: 0.160.1`).**
 
-This answers the owner's instruction:
+Development is halted. Every feature unit has stopped: push (#302, open, green), the pairing UI
+follow-up (#300, open), the wildcard-advertisement fix. This document is the only workstream.
+
+It answers the owner's two instructions. The first:
 
 > relook at the WHOLE thing and make sure its all generalize, unfied and not too complicated, not
 > patchwork over patchwork over patchwork.
@@ -15,150 +19,338 @@ This answers the owner's instruction:
 > there should be a standard model/framework (daemon settings, client settings, capabilities), all
 > these should be an overarching framework, and NOT patch work -- thats a big leading to bugs
 
-He is right about the diagnosis, and the survey found more instances than the seven he noticed. He is
-also right in a way that makes the fix **smaller** than a new framework: three of the four mechanisms
-this needs already exist in the repository, each applied in exactly one place. The proposal is to
-apply them everywhere and gate the application — not to invent an abstraction.
+and the second:
 
-## The four verdicts, up front
+> please halt all development, and fix up everything (do a full refactor and clean up, conform to all
+> the doctrines first ok?)
+>
+> also i WANT to support multiple relay type! please ensure that works.
 
-1. **Daemon settings and capabilities are one surface, not two.** `grants` is a field of
-   `config/daemon.json`. It is the only field of that document that has been given a complete
-   lifecycle. The unification is to give the other nine fields the same lifecycle.
-2. **Client settings are genuinely a different thing.** Different owner, different trust, no
-   cross-process agreement. Forcing them into the daemon model would be a false unification. What they
-   share with it is a _mechanism_, currently written out by hand twelve times.
-3. **Authorization is not three layers. It is two layers and a category error.** `RouteScope` welds
-   _credential class_ to _arrival privilege_ into one total order. No total order over two independent
-   axes can express what #295 needed, which is why a route had to be moved between tiers. Split them
-   and there are two layers with clean authorship: the daemon's contract, and the operator's overlay.
-4. **Multiple relays are not worth their cost today, and I am arguing the owner out of the list.**
-   hadi's correction is decisive and I verified it. `PairingResponseSchema`
-   (`packages/protocol/src/lib/pairing.ts:57`) carries `deviceToken`, `daemonId`, `daemonName` and
-   `capabilities` — and no carrier at all. Nothing in `packages/protocol/src/lib/` publishes a relay
-   address to a client. Both ends must independently pick the same rendezvous, so a daemon on relay A
-   and a browser discovering relay B never meet. Multi-relay needs a new wire field, a client
-   try-order and a defined disagreement behaviour. **But the shape should be a list from day one**, so
-   that work is additive rather than a breaking change — see §4.4.
+Six teammates contributed verified findings while halted: hadi, mika, cinthia, temperance, frederick.
+Their evidence is folded in and attributed. Every claim below was re-checked against `52dc6a20` by
+content, including my own from the previous revision — one of which had already been fixed. See §11.
 
-The load-bearing idea the owner and hadi both reached for survives, in its sharpened form:
-**reachability and privilege are different axes.** They are already separate in the _authorization_
-code and welded in the _configuration_. That is where the fix belongs.
+---
+
+## 0. Verdicts
+
+1. **The dead QR is the top priority and it is one line.** `publicUrl: value.publicUrl ?? bindUrl`
+   (`daemon/src/lib/runtime/config.ts:315`). The default bind is loopback, so **the default
+   configuration mints `url=http://127.0.0.1:7431/`** and on the phone that address is the phone. No
+   misconfiguration required. §2.
+2. **Multiple relay carriers: the owner has decided, and it is specified in §6.** I argued against it
+   and was overruled. My argument is preserved verbatim as the recorded cost of the decision (§6.1),
+   because that is what hadi asked for and because the cost is the work.
+3. **Daemon settings and capabilities are one surface.** `grants` is one field of
+   `config/daemon.json` and the only one with a complete lifecycle. Give the other nine the same one.
+4. **Client settings are genuinely a different model** sharing only a mechanism, currently written out
+   by hand twelve times. Forcing them into the daemon model would be a false unification.
+5. **Authorization is two layers plus a category error, not three.** `RouteScope` welds credential
+   class to arrival privilege into a total order that cannot express what #295 needed. §5.
+6. **The codebase conforms to `docs/standards/` well.** I measured it rather than assuming. The
+   patchwork the owner is complaining about is **not** doctrine drift — it is that **no doctrine article
+   says anything about two programs agreeing on one fact**, which is the failure that keeps shipping.
+   The deliverable therefore includes a new doctrine article. §7.
+7. **The fix for a duplicated fact is sometimes to SPLIT it, not to collapse it.** temperance's
+   `mayGrant`/`governed` case proves it. A refactor that only merges will over-merge. §4.5.
 
 ---
 
 ## 1. The defect, stated once
 
-Every serious failure in the survey has the same shape:
-
 > **One fact, two definitions, and no mechanism that can notice they disagree.**
 
 Both halves pass their own tests, because each half owns its own fixture. The failure is always silent
-and always reads as a benign empty case — no accounts, no notifications, no relay, no permission.
+and always reads as a benign empty case — no accounts, no notifications, no relay, no permission, no
+working QR.
 
-The repository already says this, in `docs/standards/contracts/README.md:61-74`, about the state home:
+The repository already knows this. `docs/standards/contracts/README.md` says of the state home:
 "Every one of them passed its own tests, because each writer owned its own fixture." The insight is
 correct and its application stopped at three contracts.
 
-### 1.1 The survey
+### 1.1 The survey — fourteen instances
 
-The owner's seven, verified against `origin/main` by content, plus what a deliberate sweep added.
-Verification method for each claim is in the appendix.
+| #   | The fact                                | Definition A                              | Definition B                                                 | Status                         |
+| --- | --------------------------------------- | ----------------------------------------- | ------------------------------------------------------------ | ------------------------------ |
+| 0   | **the address another device may dial** | `publicUrl ?? bindUrl` (a default)        | `reachableOffHost` (a predicate); pairing consults neither   | **LIVE — the owner's blocker** |
+| 1   | the fleet manifest's shape              | `@ferretry/fleet` `FleetManifestSchema`   | a second schema in `daemon/lib/core/inventory.ts`            | fixed (#288)                   |
+| 2   | when a state home may be used           | the daemon                                | three CLI write paths                                        | fixed (#293)                   |
+| 3   | the six capabilities                    | `DAEMON_CAPABILITIES`                     | `CapabilityGrantsDocumentSchema` spells all six again        | **live**                       |
+| 4   | the push surface                        | `protocol/lib/push.ts` + PWA enrolment    | no daemon route exists                                       | **live** (#302 halted)         |
+| 5   | the pairing route table                 | the code                                  | my own summary of it, which was wrong                        | **live** (no gate)             |
+| 6   | the hosted relay's address              | PWA reads the advertisement               | daemon did not                                               | **fixed (#301)** — see §11     |
+| 7   | "may this caller do this thing"         | `RouteScope`                              | `TokenClass`, `CapabilityGrants`, **and an inline check**    | **live**                       |
+| 8   | **"is this loopback"**                  | five predicates in four packages          | no two of the first three agree on membership                | **live**                       |
+| 9   | the set of client settings              | `SETTINGS_DEFINITIONS` (8 rows)           | 12 independent `localStorage` modules                        | **live**                       |
+| 10  | the notification kinds                  | `PushNotificationKindSchema`              | `NOTIFICATION_KINDS` in the PWA                              | **live**                       |
+| 11  | the contract registry                   | the `all` loop in `cli-contracts.sh` (17) | the table in `docs/standards/contracts/README.md` (13)       | **live**                       |
+| 12  | the grants doctrine                     | §"LOCALITY is the layer"                  | §"the password is the layer" — same file                     | fixed in #300 (halted)         |
+| 13  | the word "capability"                   | 6 governed capabilities                   | `['daemon-api']` in pairing; unhonoured config keys in fleet | **live**                       |
+| 14  | **"this code is reached"**              | `composition-reachability` (module)       | `composition-invocation` (field) — neither sees a **method** | **live**                       |
 
-| #   | The fact                        | Definition A                              | Definition B                                                      | Status                        |
-| --- | ------------------------------- | ----------------------------------------- | ----------------------------------------------------------------- | ----------------------------- |
-| 1   | the fleet manifest's shape      | `@ferretry/fleet` `FleetManifestSchema`   | a second schema in `daemon/lib/core/inventory.ts`                 | **fixed** (#288)              |
-| 2   | when a state home may be used   | the daemon                                | three CLI write paths                                             | **fixed** (#293)              |
-| 3   | the six capabilities            | `DAEMON_CAPABILITIES`                     | `CapabilityGrantsDocumentSchema` spells all six again             | **live**                      |
-| 4   | the push surface                | `protocol/lib/push.ts` + PWA enrolment    | no daemon route exists                                            | **live** (mika landing a fix) |
-| 5   | the pairing route table         | the code                                  | my own summary of it                                              | **live** (no gate)            |
-| 6   | the hosted relay's address      | PWA reads a runtime advertisement         | daemon needs an operator to hand-type the same string             | **live**                      |
-| 7   | "may this caller do this thing" | `RouteScope`                              | `TokenClass`, `CapabilityGrants`, **and an inline handler check** | **live**                      |
-| 8   | **the set of client settings**  | `SETTINGS_DEFINITIONS` (8 rows)           | 12 independent `localStorage` modules                             | **live**                      |
-| 9   | **the notification kinds**      | `PushNotificationKindSchema` (protocol)   | `NOTIFICATION_KINDS` in the PWA                                   | **live**                      |
-| 10  | **the contract registry**       | the `all` loop in `cli-contracts.sh` (17) | the table in `docs/standards/contracts/README.md` (13)            | **live**                      |
-| 11  | **the grants doctrine**         | `docs/grants.md` §"LOCALITY is the layer" | `docs/grants.md` §"the password is the layer" — same file         | **live, corrupt**             |
-| 12  | **the word "capability"**       | 6 governed capabilities                   | `['daemon-api']` in pairing; unimplemented config keys in fleet   | **live**                      |
+Findings 0, 8 and 14 are new since the previous revision. Findings 6 and 12 were fixed _during_ this
+session, which is itself evidence (§11).
 
-#### 1.2 The one that should end the argument
+### 1.2 Finding 8 — the predicate the whole security model rests on has five definitions
 
-`docs/grants.md` **on `origin/main` right now** contains an unresolved merge conflict. Not a stale
-paragraph — the markers are in the file:
+`docs/grants.md` says loopback is the entire basis of the authorization model. Here is that predicate,
+on `52dc6a20`:
 
-- line 1 is a table row fused onto the `# Capability grants` heading, so the document has no H1;
-- line 59 is `<<<<<<< HEAD`, line 66 is `=======`;
-- line 143 is `> > > > > > > 141154ed (feat(pwa): add a device to one daemon from the browser)`.
+| #   | site                                                       | membership                            | input domain                   |
+| --- | ---------------------------------------------------------- | ------------------------------------- | ------------------------------ |
+| 1   | `daemon/src/lib/runtime/config.ts:19` `LOOPBACK_HOSTS`     | `127.0.0.1` `::1` `localhost` `[::1]` | a configured **host spelling** |
+| 2   | `daemon/src/adapters/api/bun-api-server.ts:92` `LOOPBACK`  | `127.0.0.1` `::1` `::ffff:127.0.0.1`  | a socket's **peer address**    |
+| 3   | `relay/src/lib/connection.ts:52` (inline)                  | `localhost` `127.0.0.1` `[::1]`       | a **URL hostname**             |
+| 4   | `pwa/src/features/onboarding/hosted-relay.ts:121` (inline) | `localhost` `127.0.0.1` `[::1]`       | a **URL hostname**             |
+| 5   | `protocol/src/lib/address.ts:18` `LOOPBACK`                | `127.0.0.1`                           | the **default host**           |
 
-That third line is the part worth pausing on. `treefmt` reformatted `>>>>>>> 141154ed` into a **valid
-Markdown blockquote**, and every gate in the repository passed it. The result is that the document
-defining the authorization model carries two contradictory claims two lines apart:
+No two of 1–3 agree. Sites 3 and 4 are character-for-character identical **across a package boundary**
+— and `packages/pwa` already depends on `@ferretry/relay`, so the copy is avoidable today.
+
+**And each one is individually correct.** That is the important part, and it is why this survived
+review. Site 2 must include `::ffff:127.0.0.1`, because that is what a dual-stack Bun socket actually
+reports, and must exclude `localhost`, because a peer address is never a name. Site 1 must include
+`localhost`, because an operator writes names. The two are right _because their input domains differ_
+— and nothing in the code says so. There is no shared owner, and no name that tells a reader which
+domain they are in.
+
+So the fix is not "somebody was sloppy". It is:
+
+> **One fact with two legitimate input domains needs two named functions, not five anonymous sets.**
+
+`#301` already got halfway there by introducing `isLoopbackHost()` beside site 1. §5.4 finishes it.
+
+---
+
+## 2. The blocker: the advertised address
+
+### 2.1 What happens
 
 ```
-## Permissive by default; the password is the layer          ← line 137 (heading)
-...
-**The primary security layer is locality, not the password.** ← line 145
+https://ferretry.pages.dev/pair#v1;url=http%3A%2F%2F127.0.0.1%3A7431%2F;code=R5MT-2TZZ;fp=fy_daemon_…
 ```
 
-A doctrine document that contradicts itself is the same failure mode as two enumerations, and it is
-worse, because it is what the next teammate reads before they write code. mika is resolving it in the
-push PR. **The repair is not the fix. The absence of any gate over `docs/` is the fix.**
+The owner scans this. The PWA opens on the phone, parses `url=`, and dials the **phone's own
+loopback**. Nothing happens, and nothing says why.
 
-#### 1.3 The one that shows the enumeration problem is not about capabilities
+The chain, every link verified:
 
-`scripts/validate/cli-contracts.sh` runs 17 contracts. `docs/standards/contracts/README.md`
-documents 13 and its prose says "the ten workspace/CLI/release contracts below". Undocumented:
-`daemon-default-address`, `nix-packages`, `release-daemon`, `released-version`. Three validator
-scripts (`pages-config.sh`, `relay-config.sh`, `typecheck.sh`) have no row in the validators table.
+1. `config.ts:315` — `publicUrl: value.publicUrl ?? bindUrl`
+2. `bindUrl = daemonAddress(host, port)`, and `host` defaults to `127.0.0.1` (`config.ts:219`)
+3. `bin/fyd.ts:3571` — `daemonUrl: config.publicUrl` is handed to `PairingService`
+4. `pairing/service.ts:393` — `url.hash = \`v1;url=${encodeURIComponent(daemonUrl)};…\``
+5. no loopback check exists anywhere on the path — frederick checked all three renderers
+   (`cli/src/lib/pair/render.ts`, `controller.ts`, `daemon/src/lib/pairing/service.ts`, and the PWA
+   Add-a-device panel) and found none.
 
-The registry of the mechanism that prevents enumeration drift has enumeration drift. That is not
-irony; it is the strongest available evidence that this class of bug is structural rather than a
-matter of care.
+**The default configuration cannot deliver the journey `docs/pairing.md` describes.** frederick, who
+wrote that document this week, states the miss plainly: it declares six GAPs and none of them is _the
+defaults cannot produce this at all_. A document internally consistent and still wrong about the
+product.
 
-### 1.4 Three before/after cases, since two are already right
+### 2.2 Why this is exactly the thesis
 
-**#288 — the manifest. Fixed correctly, and it is the template.**
+`publicUrl` is **two facts in one field**: _where I listen_ and _where I can be reached_. The `??` is
+the weld. The docblock five lines above it even separates the two meanings — "`publicUrl` is what this
+daemon is REACHED at" — and then defaults one to the other.
 
-_Before:_ `daemon/lib/core/inventory.ts` declared its own manifest schema requiring an `agent` field
-the provisioner never wrote. Every real manifest parsed as an empty fleet while `fy fleet ls` listed
-the accounts from the same bytes.
+mika's framing is the best one and I am adopting it:
 
-_After:_ the daemon imports `FleetManifestSchema` from `@ferretry/fleet` and derives `agent` from
-`wrapper` via `wrapperName()`. There is now nothing on disk a manifest could contradict, because the
-second declaration does not exist. `FleetManifestUnreadableError` distinguishes _absent_ (legitimate)
-from _present and unparseable_ (damage).
+> The grant layer already separates _how a request arrived_ from _what address is written down_:
+> `ApiRequest.loopback` is carrier-derived and `tunnelApiRequest` forces it `false`. **The pairing link
+> is that same distinction applied to an OUTBOUND value instead of an inbound one** — and it was never
+> made.
 
-**#293 — the state home. Fixed correctly, and it is the rule.**
+So this is not a new idea. It is a proven principle applied to the one direction nobody applied it to.
 
-_Before:_ the decision "may this directory be used" lived in the daemon. Three CLI paths created
-state in a home without claiming it, manufacturing exactly the arrangement the daemon refuses —
-permanently.
+### 2.3 The blast radius — four derivation sites, two packages
 
-_After:_ `packages/protocol/src/lib/state-home-layout.ts` holds the **decision** (`decideLayout`), not
-merely the version number. Both writers call the same pure function.
-`cli-contracts.sh state-home-layout-claim` forbids either package from spelling the marker filename.
+cinthia mapped this before halting and I re-verified all four:
 
-The comment in that file is the rule this document generalises:
+1. `config.ts:315` — the load path. **The default case, which is the owner's bug.**
+2. `config.ts:343` — `configuredAt()`, the port-move path.
+3. `config.ts:397` — `overriddenBy()`, the `--host`/`--port` path.
+4. `protocol/src/lib/address.ts:60` — `recordedDaemonAddress()`, the **client** side, which reads
+   `host`+`port` out of the document verbatim with no validation, substituting `127.0.0.1` when `host`
+   is absent. Different package, different coverage ledger — it will not fall out of a daemon-side fix.
 
-> So the DECISION lives here, not merely the version number. A client that wrote the marker under its
-> own rule would be free to adopt a directory that is genuinely somebody else's.
+Plus the wildcard variant: `host: '0.0.0.0'` derives `http://0.0.0.0:7431`, and reverting `host`
+afterwards silently invalidates every link minted while it was set.
 
-**#3 — the capabilities. Live, and the compiler can fix it.**
+### 2.4 The fix: one owner, in the protocol, as a decision
 
-_Before (today):_ `DAEMON_CAPABILITIES` is the source. `CapabilityGrantsSchema` and `GrantsPatchSchema`
-derive from it — correctly, with `Object.fromEntries(DAEMON_CAPABILITIES.map(…))`. But
-`CapabilityGrantsDocumentSchema` in `daemon/src/lib/runtime/config.ts:188-202` spells all six keys
-out, and its own comment admits the consequence:
+The one owner must sit **above** the pairing service, because frederick verified that the protocol
+_enforces_ the weld and it cannot be worked around downstream:
+`PairingCodeMintResponseSchema.superRefine` refuses any response whose `pairUrl` fragment is not
+exactly `url=<daemonUrl>;code=…;fp=<daemonId>`. That is the right invariant — a link must not disagree
+with the daemon it names — and it means no layer below the config can advertise a different address.
 
-> a capability missing from this object is refused when an operator writes it AND absent from what
-> `readGrants` returns, while `CapabilityGrants` says it is there. TypeScript does not catch the
-> second — a strict object widens on the way out.
-
-A teammate hit exactly this. **The comment is right that `strictObject` does not catch it and wrong
-that TypeScript cannot.** `satisfies` over a mapped type does:
+New module, `packages/protocol/src/lib/advertisement.ts`, following the `state-home-layout.ts` shape
+exactly: the **decision**, pure and total, in the one package all three consumers already depend on.
 
 ```ts
-// Every capability must have a key here, and the compiler says so. The literal keys are kept, so
-// the parsed type stays exact — which was the whole reason for spelling them out.
+export type AdvertisementRefusal = 'loopback-bind' | 'wildcard-bind' | 'no-port';
+
+export type Advertisement =
+  /** An address a DIFFERENT device can dial. */
+  | { readonly kind: 'address'; readonly url: string; readonly origin: 'operator' | 'derived' }
+  /** There is none, and this is why. Not an error — a loopback-only daemon is a working daemon. */
+  | { readonly kind: 'none'; readonly refusal: AdvertisementRefusal };
+
+export function decideAdvertisement(input: {
+  /** An operator's own `publicUrl`. ALWAYS wins, never second-guessed — see below. */
+  readonly operatorPublicUrl?: string;
+  readonly host: string;
+  readonly port?: number;
+}): Advertisement;
+```
+
+Three rules, and the first is the one temperance warned about:
+
+- **An operator-set `publicUrl` always wins and is never validated against the bind.** A daemon behind
+  a reverse proxy or a tunnel legitimately advertises an address it does not bind — that is precisely
+  why `advertisesForeignAddress()` exists. Reachability must never be re-derived from
+  `publicUrl !== bindUrl`; that reads a correct proxy deployment as broken.
+- **A loopback host derives no advertisement.** `isLoopbackHost` decides, from the single owner §5.4
+  creates.
+- **A wildcard host (`0.0.0.0`, `::`) derives no advertisement.** The daemon serves perfectly on it;
+  what is undefined is only which address to _hand out_.
+
+### 2.5 Refusal at the mint, not at the boot
+
+cinthia proposed refusing the boot. **I disagree, and only because they scoped it to the wildcard
+case.** Extended to loopback — which is where the owner's bug actually lives — a boot refusal would
+refuse **every default single-machine install**, and those work: a browser at `127.0.0.1` pairs fine,
+because for that browser the address is correct.
+
+So the rule is:
+
+> **A daemon is not required to have an advertisement. Minting a link that needs one is what must
+> refuse — at the moment somebody asks, naming the exact fix.**
+
+That is the doctrine this repo already applies to grants and did not apply here. frederick puts it
+best: the grant surface refuses to draw a widening switch a remote caller can never move, and pairing
+draws a QR that cannot be redeemed.
+
+Concretely:
+
+- `PairingCodeMintResponseSchema.daemonUrl` and `pairUrl` become **optional together**.
+- When absent, the response carries `refusal: AdvertisementRefusal`.
+- The `superRefine` becomes: `pairUrl` present **iff** `daemonUrl` present, and when present the
+  fragment must match. frederick's invariant is kept and the missing one is added.
+- `fy pair` and the Add-a-device panel render the refusal and the fix — _"set `publicUrl` to the
+  address other devices reach this machine at, e.g. `http://192.168.1.10:7431`"_ — instead of an
+  undialable QR. frederick confirms the browser already has what it needs (`pairingSeedFromUrl` parses
+  `url=`, `pairingDaemonHost` extracts the host), so this is a few lines in one place.
+- **No new exit code.** cinthia flagged that `cli/src/lib/daemon/unit-file.ts:119` hardcodes
+  `RestartPreventExitStatus=78 69` and launchd has no equivalent, so a third code needs both templates
+  changed together or a supervisor respawns forever. Refusing at the mint instead of the boot means
+  there is no third code at all. That is a second reason to prefer it.
+
+### 2.6 The relay does not rescue this, and that is load-bearing
+
+cinthia's constraint, from the relay unit they shipped:
+
+> **PAIRING CAN NEVER BE RELAYED.** A relayed session is opened with the device grant `POST /v1/pair`
+> has not issued yet, so first contact is always direct.
+
+So `reachableOffHost` and `decideAdvertisement` answer **different questions** and must stay separate:
+
+| question                                                     | who asks                    | does a relay count?            |
+| ------------------------------------------------------------ | --------------------------- | ------------------------------ |
+| can anything off this host reach me at all?                  | `fyd --check` grant posture | **yes** — the daemon dials out |
+| can a device dial me directly, right now, for first contact? | the pairing mint            | **no** — never                 |
+
+temperance offered to join them and I am declining the join. This is §4.5's rule in action: **two facts
+sharing one sub-fact**. Single-source the sub-fact (`isLoopbackHost`), keep the two questions distinct.
+Merging them would make the pairing mint accept a relay that cannot carry it.
+
+---
+
+## 3. The three surfaces, as one model
+
+### 3.1 Daemon settings and grants are one surface
+
+`grants` is **one of ten fields** in `DaemonConfigDocumentSchema`, and the only one with a protocol
+schema, a route, a CLI verb, an audit journal, a provenance column, an in-memory enforcement cache and
+a fail-closed refresh. The other nine have a schema, a first-boot writer, and `--print-config`. There
+is **no `/v1/config` route of any kind** — I checked all 109 daemon route paths.
+
+The naming has already collided: **`fy daemon config` does not configure the daemon.** It is mounted
+from `cli/src/lib/grants/commands.ts:28` and reads "read and change what a caller NOT on this host may
+do". Somebody typing `fy daemon config set port 7500` finds a command with exactly that name doing
+something else.
+
+> **Every field of the daemon configuration document gets the lifecycle `grants` already has, or a
+> written statement that it does not and why.**
+
+A contract, satisfiable field by field, shippable incrementally.
+
+### 3.2 Client settings are NOT the same thing
+
+Four load-bearing differences: no second party must agree; the authority rules invert (the reader owns
+their theme, nothing may narrow it); the persistence is untrustworthy by nature, so "damaged state is
+not empty state" is doctrine for the daemon and _wrong_ for a browser preference; and the blast radius
+is a text scale rather than a security event.
+
+But the _mechanism_ is duplicated twelve times — `drafts` · `connections` · `controls` ·
+`theme-preferences` · `side-pane-preferences` · `md-compose` · `notification-preferences` ·
+`push-enrolment` · `stt/stt-settings` · `store.tsx` · `onboarding-progress` · `setup-handoff` — each
+with its own `fy-…-vN` key, its own `browserStorage()` with its own `try/catch`, its own field-by-field
+`typeof` parser, and mostly its own store class with `#listeners`/`snapshot()`/`subscribe`.
+
+They do not even agree on behaviour: `parseThemePreference` falls back **per field** so one corrupt
+value does not reset the others; `parseSidePanePreferences` resets **everything** on a version
+mismatch. Two answers to "what did a partially-bad document mean", neither chosen.
+
+And `zod` is already a direct dependency of `packages/pwa`, used in **three** files. Twelve hand-rolled
+parsers are twelve bypasses of the repo's own [Validation](../standards/validation/index.md) standard,
+in the package that already has the dependency.
+
+Proposal: one `BrowserDocument<T>` — one storage port, one `try/catch`, one zod parse, one subscribable
+snapshot, one decision about partial damage — and the catalog row owns its document, collapsing the
+8-row and 12-module enumerations into one. **A shared mechanism with an unshared model.**
+
+### 3.3 What all three genuinely share
+
+Not a schema, not a reader, not a scope. This:
+
+> **For any effective value, a reader can ask five questions and get an answer: what is it, who chose
+> it, where is it written, who may change it, and what happens when it cannot be read.**
+
+| obligation          | daemon settings        | grants           | client settings        |
+| ------------------- | ---------------------- | ---------------- | ---------------------- |
+| what is it          | `--print-config`       | `GET /v1/grants` | the control renders it |
+| who chose it        | ✅                     | ✅ `origin`      | ❌                     |
+| where is it written | ✅                     | ✅               | ❌                     |
+| who may change it   | ⚠️ nobody, via any API | ✅               | ✅ the reader          |
+| unreadable ⇒ what   | ✅ boot refuses        | ✅ deny loudly   | ❌ silent default      |
+
+The framework the owner asked for is this table with no ✗ in it. Finite, checkable, independently
+shippable.
+
+---
+
+## 4. Where a fact is allowed to be defined
+
+### 4.1 The rule
+
+**R1 — Definition.** Any fact two independently-deployable programs must agree on is defined **once**,
+in `@ferretry/protocol`, as a **decision** — a parser or a function that answers the question — never a
+constant each side interprets under its own rule. `state-home-layout.ts` is the worked example; §2.4
+is the next application.
+
+**R2 — Derivation.** A second enumeration of a protocol-owned set must be **derived** from it. Where a
+literal spelling is needed for type exactness, it must be proved **exhaustive** by the compiler, never
+merely **sound**.
+
+> `strictObject` and `as const satisfies readonly T[]` prove **soundness** (no wrong member). They do
+> not prove **completeness** (no missing member) — and completeness is the failure that ships.
+
+Both live instances are compiler-fixable with no gate at all:
+
+```ts
+// CapabilityGrantsDocumentSchema — a seventh capability becomes a COMPILE ERROR here.
 const CAPABILITY_GRANT_FIELDS = {
   fleet: grantSchemaFor('fleet'),
   terminal: grantSchemaFor('terminal'),
@@ -167,212 +359,13 @@ const CAPABILITY_GRANT_FIELDS = {
   warden: grantSchemaFor('warden'),
   pairing: grantSchemaFor('pairing'),
 } as const satisfies { readonly [K in DaemonCapability]: ReturnType<typeof grantSchemaFor> };
-
-export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).prefault({});
 ```
 
-_After:_ a seventh capability is a **compile error** in this file. The apologetic comment is deleted.
-No gate, no shell script, no reviewer.
-
-**The general principle this exposes** — and it is the most reusable result in the document:
-
-> `strictObject` and `satisfies readonly T[]` prove **soundness** (no wrong member). They do not prove
-> **completeness** (no missing member). Every fact in this codebase that is "a set spelled twice" is
-> currently protected by a soundness check and unprotected against the failure that actually happens.
-
-`NOTIFICATION_KINDS` in `pwa/src/lib/notification-preferences.ts:23` is the same bug wearing the same
-disguise:
-
-```ts
-export const NOTIFICATION_KINDS = [
-  'attention',
-  'question',
-  'failed',
-  'completed',
-] as const satisfies readonly PushNotificationKind[];
-```
-
-Add a fifth kind to `PushNotificationKindSchema` and this list stays valid and silently short — the
-PWA renders four toggles for five kinds and the fifth is unconfigurable. Fix, same shape:
-
-```ts
-// A key map, so the compiler demands every kind; the array is derived, not authored.
-const NOTIFICATION_KIND_ORDER = {
-  attention: 0,
-  question: 1,
-  failed: 2,
-  completed: 3,
-} as const satisfies Record<PushNotificationKind, number>;
-export const NOTIFICATION_KINDS = Object.keys(NOTIFICATION_KIND_ORDER).sort(
-  (a, b) => NOTIFICATION_KIND_ORDER[a] - NOTIFICATION_KIND_ORDER[b],
-) as readonly PushNotificationKind[];
-```
-
-**Two of the twelve findings are compiler-preventable and neither needs a gate.** Reach for the
-compiler first; a shell contract is for facts that cross a boundary the compiler cannot see.
-
----
-
-## 2. The three surfaces, as one model
-
-### 2.1 What is actually there
-
-|               | **daemon settings**                  | **capabilities (grants)**                          | **client settings**              |
-| ------------- | ------------------------------------ | -------------------------------------------------- | -------------------------------- |
-| where         | `<FY_HOME>/config/daemon.json`       | the `grants` key of that same file                 | ~12 `localStorage` keys          |
-| owner         | the machine's operator               | the machine's operator                             | the person holding the browser   |
-| schema        | `DaemonConfigDocumentSchema` (zod)   | `CapabilityGrantsDocumentSchema` (zod)             | 12 hand-rolled `typeof` parsers  |
-| defaults      | per field, in the schema             | `DEFAULT_CAPABILITY_GRANTS`                        | per module, per field            |
-| read path     | `DaemonConfigStore.load()`           | `GrantDocumentPort.read()` + in-memory cache       | a bespoke store class per key    |
-| write path    | first boot only, plus `record(port)` | `POST /v1/grants`, `fy daemon config set`          | a setter per store               |
-| provenance    | `--print-config` origin              | `CapabilityGrantView.origin`                       | none                             |
-| audit         | none                                 | `state/grant-audit.jsonl` + `GET /v1/grants/audit` | none                             |
-| damaged state | boot refuses                         | `undetermined` → deny, loudly                      | falls back to defaults, silently |
-| scoping       | one daemon                           | one daemon                                         | 10 global, 2 per-daemon          |
-
-Reading that table sideways is the answer.
-
-### 2.2 Verdict: daemon settings and grants are one surface
-
-`grants` is not a third thing. It is **one of ten fields** in `DaemonConfigDocumentSchema`, and it is
-the only one that has a schema in `@ferretry/protocol`, a route, a CLI verb, an audit journal, a
-provenance column, an in-memory enforcement cache and a fail-closed refresh.
-
-The other nine — `host`, `port`, `publicUrl`, `corsOrigins`, `secretsFile`, `healthIntervalSeconds`,
-`transcriptReconcileSeconds`, `usage`, `relay`, `analyticsPricing`, `projectRoots`,
-`secretEnvironment` — have a schema, a first-boot writer and `--print-config`. **There is no route and
-no command that changes any of them.** I checked all 109 daemon route paths: there is no `/v1/config`
-of any kind. The relay documentation says so in as many words (`docs/relay-protocol.md`, §13: "A `fy`
-verb to write the daemon's `relay` block — an operator edits `<state home>/config/daemon.json`
-today").
-
-And the naming has already collided: **`fy daemon config` does not configure the daemon.** It is
-mounted from `packages/cli/src/lib/grants/commands.ts:28` and its description is "read and change what
-a caller NOT on this host may do". Somebody typing `fy daemon config set port 7500` finds a command
-with exactly that name that does something else.
-
-So the unification for these two is not a new abstraction. It is:
-
-> **Every field of the daemon configuration document gets the lifecycle `grants` already has, or an
-> explicit written statement that it does not and why.**
-
-That is a _contract_, satisfiable field by field, shippable incrementally, and it names the work
-instead of describing it.
-
-### 2.3 Verdict: client settings are NOT the same thing — and forcing them would be worse
-
-The temptation is to say "settings are settings" and put a `clientSettings` object in the protocol.
-Do not. Four differences are load-bearing:
-
-1. **No second party must agree.** The defining property of daemon settings is that a _client_ and a
-   _daemon_ have to read one fact the same way. A browser's text scale has exactly one reader. The
-   entire reason `@ferretry/protocol` exists does not apply.
-2. **The owner is different, so the authority rules invert.** The operator owns daemon settings and a
-   remote caller may only narrow them. The reader owns their own theme and nothing may narrow it.
-3. **The persistence is untrustworthy by nature.** `localStorage` can be absent (private mode),
-   cleared without notice, or written by another tab. Daemon configuration is a file whose absence is
-   a fact and whose corruption refuses a boot. "Damaged state is not empty state" is doctrine for the
-   daemon and is _wrong_ for a browser preference — a cleared `fy-theme-v1` genuinely is a reader with
-   no preference.
-4. **Blast radius.** A wrong grant is a security event. A wrong text scale is a wrong text scale.
-
-But the _mechanism_ is duplicated twelve times, and that is the real defect here. Every one of these
-modules independently implements the same four things:
-
-`drafts.ts` · `connections.ts` · `controls.ts` · `theme-preferences.ts` ·
-`side-pane-preferences.ts` · `md-compose.ts` · `notification-preferences.ts` ·
-`push-enrolment.ts` · `stt/stt-settings.ts` · `store.tsx` ·
-`features/onboarding/onboarding-progress.ts` · `features/onboarding/setup-handoff.ts`
-
-Each has: its own `fy-…-vN` key, its own `browserStorage()` with its own `try/catch`, its own
-field-by-field `typeof` parser, and (for most) its own store class with `#listeners`, `snapshot()` and
-`subscribe`. They do not even agree on behaviour: `parseThemePreference` falls back **per field** so
-one corrupt value does not reset the others, while `parseSidePanePreferences` resets **everything** on
-a version mismatch. Two answers to "what does a partially-bad document mean", in two files, neither
-wrong, neither chosen.
-
-And `zod` is already a direct dependency of `packages/pwa` — used in exactly three files
-(`relay-session.ts`, `account-picker-catalog.ts`, `features/fleet/fleet-api.ts`). The repository's own
-[Validation](../standards/validation/index.md) standard is parse-don't-validate with zod. Twelve
-hand-rolled parsers are twelve bypasses of the house rule, in the package that has the dependency
-installed.
-
-Finally, the catalog drift (finding #8): `SETTINGS_DEFINITIONS` in
-`features/settings/settings-catalog.ts` enumerates 8 user-visible settings for the page and the
-command palette. The storage modules enumerate 12 documents. The mapping between them is implicit and
-lives in nobody's head twice: `text-size` and `theme` are both inside `fy-theme-v1`; `density` and
-`chat-width` are both inside `fy-controls-v1`; `composer-enter-key` has no storage module of its own
-at all. Add a setting and forget the catalog row, and the palette cannot find it — no test fails.
-
-**Proposal: one `BrowserDocument<T>` in `packages/pwa/src/lib`, and the catalog owns the mapping.**
-
-```ts
-// One storage port, one try/catch, one zod parse, one subscribable snapshot, one place where
-// "what does a partially-bad document mean" is decided. Not shared with the daemon: the answer
-// there is "refuse the boot", and it must stay different.
-export class BrowserDocument<T> {
-  constructor(
-    readonly key: string, // the sole owner of one `fy-…-vN` key
-    private readonly schema: ZodType<T>,
-    private readonly fallback: () => T,
-    storage: WebStorage | undefined = browserStorage(),
-  ) {}
-  snapshot(): T;
-  subscribe(l: () => void): () => void;
-  commit(next: T): T;
-  adopt(raw: string | null): T;
-}
-```
-
-and each setting row declares its document, so the two enumerations become one:
-
-```ts
-{ id: 'theme', label: 'Theme', document: themeDocument, keywords: [...] }
-```
-
-This is a _shared mechanism with an unshared model_, which is the honest answer the brief asked for.
-
-### 2.4 What all three genuinely share
-
-Not a schema. Not a reader. Not a scope. This:
-
-> **For any effective value, a reader can ask five questions and get an answer: what is it, who chose
-> it, where is it written, who may change it, and what happens when it cannot be read.**
-
-Call it the **provenance obligation**. It is the one thing all three surfaces are the same kind of
-thing with respect to, and it is exactly where they currently differ:
-
-| obligation          | daemon settings                    | grants                                  | client settings          |
-| ------------------- | ---------------------------------- | --------------------------------------- | ------------------------ |
-| what is it          | `--print-config`                   | `GET /v1/grants`                        | the control renders it   |
-| who chose it        | ✅ `portIsRecorded`, origin column | ✅ `origin: 'default' \| 'config file'` | ❌                       |
-| where is it written | ✅ `DaemonConfigStore.path`        | ✅ `docs/grants.md` table               | ❌                       |
-| who may change it   | ⚠️ nobody, via any API             | ✅ the whole grant model                | ✅ trivially, the reader |
-| unreadable ⇒ what   | ✅ boot refuses                    | ✅ `undetermined`, deny                 | ❌ silent default        |
-
-The framework the owner asked for is this table with no ✗ in it. That is a finite, checkable amount of
-work, and each cell is independently shippable.
-
----
-
-## 3. Where a fact is allowed to be defined
-
-### 3.1 The rule, in four clauses
-
-**R1 — Definition.** Any fact that two independently-deployable programs must agree on is defined
-**once**, in `@ferretry/protocol`, as a **decision** — a parser or a function that answers the
-question — never as a constant each side interprets under its own rule.
-
-> This is not new. It is what made #293's fix correct rather than a relocation, and
-> `state-home-layout.ts` is the worked example. The rule is only being _named_ here.
-
-**R2 — Derivation.** A second enumeration of a protocol-owned set must be **derived** from it. Where a
-literal spelling is required for type exactness, the spelling must be proved **exhaustive** by the
-compiler (`as const satisfies { readonly [K in Union]: … }`), never merely proved **sound**.
+The apologetic four-line comment at `config.ts` claiming TypeScript cannot catch this is wrong, and it
+gets deleted. `NOTIFICATION_KINDS` takes the same treatment via a key map with the array derived.
 
 **R3 — Honesty about the unhonoured.** A schema may accept a key this build does not honour, but it
-must **say so out loud, mechanically**. This is not an invention either:
-`packages/fleet/src/lib/capabilities.ts` already does it —
+must **say so mechanically**. `packages/fleet/src/lib/capabilities.ts` already does exactly this —
 `unimplementedCapabilities(config)` compares each entry against the schema's own default and refuses
 `fy fleet apply` with the list. Its docblock states the principle better than I can:
 
@@ -380,121 +373,114 @@ must **say so out loud, mechanically**. This is not an invention either:
 > could be told to pool its sessions across accounts, apply cleanly, and pool nothing, with no line of
 > output saying so.
 
-**That mechanism, generalised, is the fix for findings #4 and #6.** `protocol/lib/push.ts` is a schema
-the build does not honour. The `relay` block's hosted asymmetry is a capability the daemon half does
-not have. Both would be one row in a list and one line of output.
+Generalised, that mechanism is the fix for finding #4: `protocol/lib/push.ts` is a schema the build
+does not honour, and it would have been one row in a list and one line of output.
 
-**R4 — Detection.** A fact R1–R3 cannot make compiler-visible gets a contract in `scripts/validate/`,
-and the contract registry is itself gated.
+**R4 — Prefer a total record to a partial one at a boundary.** mika's finding.
+`PushPreferencesSchema` is `z.record(PushNotificationKindSchema, z.boolean())`, which in zod v4 demands
+every enum member — and mika had written a fail-open policy, with a paragraph explaining it, for a
+state the schema had already made unrepresentable. Same shape as `CapabilityGrantsSchema` requiring all
+six. **A boundary schema that forces every member deletes a class of "what did silence mean" logic
+downstream, and the domain must not re-litigate it.**
 
-### 3.2 The gates, concretely
+**R5 — Detection.** What R1–R4 cannot make compiler-visible gets a contract, and the contract registry
+is itself gated.
 
-Four new contracts, ordered by value. Each follows the house pattern in
-`docs/standards/contracts/README.md:199-213`: one name, one branch, derive identifiers, assert on
-structure, prove it fires on a planted violation.
+### 4.2 `route-agreement` — approved in principle, and here is the design
 
-#### `route-agreement` — the highest-value gate in this document
+**Fails when a client asks for a path the daemon does not serve, or serves with a different verb.**
 
-**Fails when a client asks for a path the daemon does not serve, or serves it with a different verb.**
+Closes finding #4 (`/v1/push/*` called since it landed, served by nothing) and finding #5 (I told a
+teammate `DELETE /v1/pair/code/:pairingId` existed because I had seen the path; it was `GET`).
 
-This closes finding #4 (`/v1/push/*` called by the PWA, served by nothing) and finding #5 (I told a
-teammate `DELETE /v1/pair/code/:pairingId` existed because I had seen the path; it was `GET`, and there
-was no revoke at all) with one mechanism.
+Following `daemon-scope.ts` and `composition-reachability.ts` — a real lexical pass in TypeScript with
+comments and string bodies handled first, not a grep:
 
-Shape, following `daemon-scope.ts` and `composition-reachability.ts` — a real lexical pass in
-TypeScript, not a grep, with comments and string bodies handled first:
+1. extract every `{ method, path }` from `daemon/src/lib/runtime/mounts/**`;
+2. extract every quoted `/v1/…` literal with its adjacent verb from `pwa/src` and `cli/src`;
+3. a client path matches when a route pattern matches it, treating `${…}` or a segment after a literal
+   prefix as satisfying a `:param`;
+4. **report both directions** — a client path with no route is a shipped 404; a route nothing reaches
+   is dead or undocumented and costs an allowlist line with a reason.
 
-1. Extract every `{ method, path, scope }` triple from `packages/daemon/src/lib/runtime/mounts/**`.
-2. Extract every quoted `/v1/…` path literal, with its adjacent `method:`/verb, from
-   `packages/pwa/src` and `packages/cli/src`.
-3. A client path matches when a route pattern matches it, treating a `${…}` interpolation or a path
-   segment after a literal prefix as satisfying a `:param`.
-4. Report both directions: a **client path with no route** is a shipped 404; a **route no client and
-   no CLI reaches** is either dead or an undocumented surface, and gets an allowlist line with a
-   reason.
+**Seed the allowlist from `main`** so the existing drift is visible rather than absorbed — mika's
+explicit request, and the repo's established pattern (the list can only shrink).
 
-Honest limitation, stated rather than discovered: a path assembled from a variable the pass cannot
-follow demands an allowlist line rather than being assumed benign — the same fail-closed-about-itself
-rule `daemon-scope.sh` already applies. Seed the allowlist from today's real gaps so it can only
-shrink.
+**mika's second clause, which changes the gate's honest claim.** `packages/pwa` has **no service
+worker**, so even with the daemon routes live, `pushManager.subscribe` cannot be reached in a real
+browser. A route-agreement gate proves the two **ends** of a call agree; it cannot prove the client is
+**capable** of making it. So the doctrine needs a second clause about client runtime prerequisites, or
+a unit ships a validated wire that nothing can dial. The gate's own documentation must state this limit
+rather than let "route agreement passed" read as "the feature works".
 
-#### `docs-integrity` — the one that would have caught the live corruption
+### 4.3 `docs-integrity`
 
-**Fails when any tracked file contains a merge conflict marker, in any of its formatted disguises.**
-
-The `>>>>>>>` in `docs/grants.md` survived because `treefmt` turned it into a valid Markdown
-blockquote. A gate that only looks for the raw form will miss the next one the same way.
+**Fails on a merge conflict marker in any tracked file, in any formatted disguise.** The `>>>>>>>` in
+`docs/grants.md` survived because `treefmt` rewrote it into a **valid Markdown blockquote**; a gate that
+only matches the raw form misses the next one identically.
 
 ```bash
-# Every disguise: the raw markers, and the blockquote treefmt rewrites `>>>>>>>` into.
 markers='^(<{7}|={7}|>{7})( |$)|^(> ){7}[0-9a-f]{7,}'
-set +e
-hits="$(git grep -nE "${markers}" -- . ':!scripts/validate/*')"
-status=$?
-set -e
-[ "${status}" -eq 0 ] && printf '❌ merge conflict markers in tracked files:\n%s\n' "${hits}" >&2 && exit 1
-[ "${status}" -gt 1 ] && echo "❌ failed to scan for conflict markers" >&2 && exit "${status}"
 ```
 
-Wire it with `files: '.*'`. It is the cheapest contract in the repository and it is currently missing
-while a corrupted doctrine document sits on `main`.
+Wire it with `files: '.*'`. It is the cheapest contract in the repository. #300 already carries the
+resolution and a gate; fold that PR in rather than duplicating it.
 
-#### `contract-registry` — so the registry cannot drift again
+### 4.4 `contract-registry`
 
-**Fails when the `all` loop, the README table and the pre-commit wiring disagree.**
+**Fails when the `all` loop, the README table and the pre-commit wiring disagree.** Today: 17 contracts
+run, 13 documented, prose says "ten"; undocumented are `daemon-default-address`, `nix-packages`,
+`release-daemon`, `released-version`; and `pages-config.sh`, `relay-config.sh`, `typecheck.sh` have no
+row. The registry of the mechanism that prevents enumeration drift has enumeration drift.
 
-```
-for each contract in the `all` loop:      it has a row in the README table
-for each row in the README table:         it is in the `all` loop
-for each scripts/validate/*.sh:           it is named in the README AND reachable from
-                                          nix/pre-commit.nix or scripts/ci/*.sh
-```
+### 4.5 The diagnostic, and the anti-rule
 
-Today this fails on four undocumented contracts and three undocumented scripts. Fixing it is a
-documentation commit; the gate is what stops the fifth.
+temperance's contribution, and it is the most important guard on this whole refactor:
 
-#### `settings-catalog` — client-side, one enumeration
+> **A workaround being necessary is the signal that one fact is missing an owner.**
 
-**Fails when a `BrowserDocument` exists that no catalog row names, or a catalog row names none.** Only
-needed once §2.3 lands; before that there is nothing to hold together.
+They reached it the hard way. `mayGrant` and `governed` looked like two spellings of one fact; they
+argued against adding the second and were wrong. The tell was that a workaround — deriving posture from
+per-capability unanimity — was _needed_. The resolution was **not** to delete one, but to make them
+answer different questions: _may this caller widen THIS capability_ versus _where did this caller come
+from_.
 
-### 3.3 What we should NOT gate
+> **Anti-rule: the fix for a duplicated fact is sometimes to SPLIT it correctly rather than to collapse
+> it.** A refactor measured by "how many things did we merge" will over-merge and produce a worse
+> system than the patchwork.
 
-A gate is not free. `docs/standards/contracts/README.md:12-14` already says it: "If an invariant fits
-in one file, a type or a test is the better home for it." Two applications of that:
+§2.6 declines a join on exactly this ground. §5.4 splits one predicate into two.
 
-- **No `capability-enumeration` gate.** The `satisfies`-over-mapped-type fix in §1.4 makes it a
-  compile error. A gate would be a second mechanism protecting a fact the compiler already protects.
-- **No gate over what a grant _means_.** Three of the existing contracts grep doc comments, and it has
-  already bitten: the word "process" in a `src/lib` doc comment fails the `arch` contract, and the
-  `no-legacy-state` gate fails on the legacy daemon's name appearing in any comment under
-  `packages/`. That teaches authors to delete explanations, which is the opposite of what this
-  codebase needs. Prefer structural questions over lexical ones — which is what `daemon-scope.ts`
-  already does deliberately.
+### 4.6 What we should NOT gate
+
+`docs/standards/contracts/README.md` already says it: "If an invariant fits in one file, a type or a
+test is the better home for it."
+
+- **No `capability-enumeration` gate.** §4.1's `satisfies` fix makes it a compile error.
+- **No gate over what a grant _means_.** Three existing contracts grep doc comments and it has already
+  bitten — the word "process" in a `src/lib` comment fails the `arch` contract. That teaches authors to
+  delete explanations, which is the opposite of what this codebase needs.
 
 ---
 
-## 4. The authorization model, collapsed
+## 5. Authorization, collapsed
 
-### 4.1 Four mechanisms today, not three
+### 5.1 Four mechanisms, not three
 
-The brief named three. There are four, and the fourth is the most telling.
+| mechanism           | where                         | how it is actually used                                                     |
+| ------------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `TokenClass`        | `api/actor.ts`                | `admin` · `warden` · `device`                                               |
+| `RouteScope`        | `api/route.ts`                | of 109 routes: ~101 `admin`, 4 `warden`, 2 `public`, **2 `host`**           |
+| `CapabilityGrants`  | `protocol/lib/grants.ts`      | 6 × 2; **8 of 12 axes are demanded by a route**                             |
+| **an inline check** | `mounts/session-attach.ts:45` | `if (!context.request.loopback) throw ApiError(403, …, 'attach_not_local')` |
 
-| mechanism           | where                         | what it answers                                    | how many values, and how used                                                                       |
-| ------------------- | ----------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `TokenClass`        | `api/actor.ts:43`             | which secret authenticated                         | `admin` · `warden` · `device`                                                                       |
-| `RouteScope`        | `api/route.ts:20`             | which class may reach this route                   | `public`·`warden`·`admin`·`host`; of 109 routes: ~101 `admin`, 4 `warden`, 2 `public`, **2 `host`** |
-| `CapabilityGrants`  | `protocol/lib/grants.ts`      | what the operator agreed a non-local caller may do | 6 × 2; **8 of 12 axes are demanded by a route**                                                     |
-| **an inline check** | `mounts/session-attach.ts:45` | is this caller on the machine                      | `if (!context.request.loopback) throw ApiError(403, …, 'attach_not_local')`                         |
+The fourth row is the smell in its purest form. Locality is expressed **three ways**: `scope: 'host'`
+(really "admin token only"), a capability demand whose grant applies only to non-loopback callers, and
+a bare `if` inside a handler with its own status code — invisible to the route table, invisible to
+`GrantsView`, so the UI cannot explain it before somebody clicks. `docs/grants.md` is explicit that a
+greyed control with nothing beside it is the dead end the grant model exists to remove.
 
-That fourth row is the smell in its purest form. Locality is expressed **three different ways**:
-`scope: 'host'` (which is really "admin token only"), a `capability` demand whose grant only applies
-to non-loopback callers, and a bare `if` inside a handler with its own status code — invisible to the
-route table, invisible to `GrantsView`, and therefore impossible for the UI to explain before somebody
-clicks. `docs/grants.md` is explicit that a greyed control with nothing beside it is the dead end the
-whole grant model exists to remove, and here is a route that produces exactly that.
-
-### 4.2 The category error
+### 5.2 The category error
 
 `RouteScope` is a **total order over two independent axes**:
 
@@ -505,354 +491,384 @@ whole grant model exists to remove, and here is a route that produces exactly th
 | `admin`  | operator-class     | no                          |
 | `host`   | operator-class     | **yes, by proxy**           |
 
-`host` means "`tokenClass === 'admin'`", i.e. "the caller could read the admin token file", which is
-used as a _stand-in_ for "the caller is on the machine". It is a sound stand-in today — a relayed
-request always carries a device token (`tunnelApiRequest` attaches one and nothing else), so the two
-answers coincide. But it is still a proxy, and the proxy has already produced one wrong answer:
+`host` means `tokenClass === 'admin'`, used as a stand-in for "on the machine". It is a _sound_ proxy
+today — a relayed request always carries a device token — but it is still a proxy, and it has already
+produced one wrong answer:
 
 > `POST /v1/pair/code` used to be `host`-scoped … So the UI could not add a second device even while
-> running _on_ the machine, and "add a device" had no home outside a terminal.
-> — `docs/grants.md`, on the #295 change
+> running _on_ the machine, and "add a device" had no home outside a terminal. — `docs/grants.md`
 
-That is not a mis-tiering. **No total order over two independent axes can express "operator
-credential, any arrival", which is what the pairing UI needed.** The tier had to be abandoned because
-the type was wrong, and a `capability` demand was recruited to carry the locality half.
+**No total order over two independent axes can express "operator credential, any arrival"**, which is
+what the pairing UI needed. The tier was abandoned because the type was wrong.
 
-Meanwhile the _real_ locality signal already exists and is already correct:
-`ApiRequest.loopback`, carrier-derived — set from the socket's real remote address by
-`toApiRequest` (`adapters/api/bun-api-server.ts:398`, against `LOOPBACK = {'127.0.0.1','::1','::ffff:127.0.0.1'}`)
-and hard-coded to `false` by `tunnelApiRequest` (`lib/relay/tunnel.ts`). This is the part of the design
-that is unambiguously right and must survive untouched.
-
-### 4.3 The proposal: three questions, no tiers
-
-Every request is authorized by a triple. Each element answers a question no other element can, and
-each has exactly one authority:
-
-| element        | question                                       | decided by                    | forgeable |
-| -------------- | ---------------------------------------------- | ----------------------------- | --------- |
-| **arrival**    | how did this get here, and is that privileged? | the carrier that accepted it  | no        |
-| **credential** | who is asking, with what class of authority?   | the token registry            | no        |
-| **demand**     | what is this route asking to do?               | the route, declared beside it | n/a       |
-
-A route declares two independent facts instead of one tier:
+### 5.3 The proposal
 
 ```ts
 export interface ScopedRoute extends RoutePattern {
-  /** The least authority a credential must carry. Replaces the ordering half of RouteScope. */
   readonly minimum: 'none' | 'authenticated' | 'operator';
-  /** Set when this route may only be served to a privileged arrival. Replaces `scope: 'host'` AND
-   *  every inline loopback check. Declared, so a UI can be TOLD before somebody clicks. */
+  /** Replaces `scope: 'host'` AND every inline loopback check. Declared, so a UI can be TOLD. */
   readonly privilegedOnly?: true;
-  /** Unchanged: what the OPERATOR must additionally have agreed to. */
-  readonly capability?: CapabilityDemand;
+  readonly capability?: CapabilityDemand; // unchanged
 }
 ```
 
-and one rule composes them, replacing all four mechanisms:
-
 ```
-serve iff
-      credential.class satisfies route.minimum
-  and (route.privilegedOnly !== true or arrival.privileged)
-  and (arrival.privileged or grantsAllow(route.capability))
+serve iff  credential.class satisfies route.minimum
+       and (route.privilegedOnly !== true or arrival.privileged)
+       and (arrival.privileged or grantsAllow(route.capability))
 ```
 
-**What collapses:**
+- `RouteScope` is **deleted**. `public`→`none`; `warden`→`authenticated`; `admin`→`operator`;
+  `host`→`operator` + `privilegedOnly`. The pair that could not be expressed now can.
+- The inline check in `session-attach.ts` is **deleted** and becomes `privilegedOnly: true`.
+- `TokenClass` **unchanged** — it owns "which secret authenticated" and nothing else can answer it.
+- `CapabilityGrants` **unchanged in meaning** — it owns what the **operator** decided, as distinct from
+  what a **developer** decided. Merging an operator's decision into a developer's would be the false
+  unification here, and I decline it.
 
-- `RouteScope` is **deleted**. `public` → `minimum: 'none'`. `warden` → `minimum: 'authenticated'`.
-  `admin` → `minimum: 'operator'`. `host` → `minimum: 'operator', privilegedOnly: true`. Four values
-  become two orthogonal fields, and the pair that could not be expressed —
-  `minimum: 'operator'` with no privilege requirement — is now expressible, which is precisely what
-  #295 needed.
-- The inline check in `session-attach.ts` is **deleted** and becomes `privilegedOnly: true` on its
-  route. This is the only behaviour-visible consequence: the refusal moves from a bespoke
-  `attach_not_local` to the boundary's own answer, and the route becomes visible to any surface that
-  reads the route table.
-- `TokenClass` is **unchanged**. It owns one thing exclusively — which secret authenticated — and
-  nothing else can answer it.
-- `CapabilityGrants` is **unchanged in meaning**. It owns one thing exclusively: what the **operator**
-  decided, as distinct from what a **developer** decided. Merging an operator's decision into a
-  developer's would be the false unification here, and I am declining it explicitly.
+**Declared behaviour change, for the owner to approve explicitly rather than as a side effect:**
+`POST /v1/grants/password` becomes `minimum: 'operator', privilegedOnly: true`. Today it is
+`scope: 'host'`, which is admin-token-only and _not_ loopback-only. Not a live hole; it becomes a
+stated guarantee instead of a coincidence.
 
-So the answer to "collapse three layers or justify three" is neither: **it is two layers plus a
-category error plus an undeclared fourth mechanism.** Fix the type, delete the inline check, and there
-are two layers with clean authorship.
+**The owner's law survives.** "local turns things on; remote may configure or narrow, never widen":
+"local" becomes "arrived on a privileged carrier" — the same boolean, better named. The widen refusal
+in `CapabilityGrantService.patch` depends on patch _content_, not on the route, so it stays where it
+is, untouched.
 
-**Deliberately declared behaviour change, for the owner to approve.** `POST /v1/grants/password`
-becomes `minimum: 'operator', privilegedOnly: true`. Today it is `scope: 'host'`, which is
-admin-token-only and _not_ loopback-only. This is not a live hole — a remote browser holds a device
-token — but it becomes a stated guarantee instead of a coincidence. Say yes or no to this one
-explicitly; it should not arrive as a side effect.
+### 5.4 One owner for "is this loopback" — two functions, not one
 
-**The owner's law survives, and gets stronger.** `local turns things on; remote may configure or
-narrow but never widen`:
+Finding 8's resolution. In `@ferretry/protocol`:
 
-- "local" becomes "arrived on a privileged carrier", which is the same boolean, differently named.
-- `CapabilityGrantService.patch`'s widen refusal is untouched: it depends on the patch _content_, not
-  on the route, so it stays where it is.
-- Grants are consulted only when the arrival is not privileged. Unchanged.
-- It gets stronger only in that `privilegedOnly` is now _declarable_, so a route that needs locality
-  says so in the table rather than in a handler.
+```ts
+/** A host SPELLING, as an operator writes one: names included. */
+export function isLoopbackHost(host: string): boolean;
+/** A socket's PEER ADDRESS, as a transport reports one: IPv4-mapped IPv6 included, names never. */
+export function isLoopbackPeer(address: string): boolean;
+/** A bind that names every interface, so no advertisement can be derived from it. */
+export function isWildcardHost(host: string): boolean;
+```
 
-### 4.4 The carrier set — what survives, and what I am arguing against
+Two functions because the input domains genuinely differ — which is why the five sets differed, and why
+each was locally right. Naming both makes using the wrong one impossible.
 
-The owner's input, via hadi:
+`#301` already introduced `isLoopbackHost` beside `LOOPBACK_HOSTS` in `config.ts`. **The model exists;
+it is in the wrong package and four places bypass it.** Move it to `@ferretry/protocol`, add
+`isLoopbackPeer` for the transport's domain, and delete the four copies. Pin it with a contract in the
+shape `daemon-default-address` already uses: no production file outside the owner may spell
+`'127.0.0.1'`.
 
-> same daemon should be able to be exposed direct + multiple relays, no? that will allow many type of
-> connection (localhost is privileged connection)
+---
 
-**"localhost is privileged" is not up for evaluation.** It merged in #289/#292 and is a constraint this
-design preserves. Everything below is about the _set_.
+## 6. Multiple relay carriers — the owner's requirement, specified
 
-#### (a) Does a carrier set subsume `RouteScope`'s `host` tier?
+The owner wants this. It is a requirement, not an option. §6.1 records the cost, because hadi asked
+that my argument be preserved as the cost of the decision rather than deleted; §6.2 onward is the work.
 
-Yes — and §4.3 reaches the same conclusion independently, which is a good sign. `host` becomes
-"requires a privileged arrival". Agreed.
+### 6.1 The recorded cost (my argument, preserved)
 
-#### (b) Does `loopback` become a property of the carrier? Almost — and the correction matters
+`PairingResponseSchema` (`protocol/lib/pairing.ts`) carries `deviceToken`, `daemonId`, `daemonName` and
+`capabilities` — **and no carrier at all**. Grepping all of `packages/protocol/src/lib/` finds no wire
+shape that publishes a relay address to a client. `PairingCodeMintResponseSchema` publishes exactly one
+carrier — `daemonUrl`, the direct address.
 
-**Trust is a property of the ARRIVAL, not of the carrier.** A single bound socket on `0.0.0.0` accepts
-_both_ privileged and governed arrivals: `loopback: remoteAddress !== undefined && LOOPBACK.has(remoteAddress)`
-is evaluated per connection. A per-_carrier_ trust level would therefore be **wrong** for the direct
-carrier — it would have to be either "privileged", handing the LAN the machine, or "governed", locking
-the owner out of their own laptop.
+So a client discovers a rendezvous **independently**, from its own build-time discovery origin, and the
+two ends meet only by coincidence of picking the same one. A daemon on relay A and a browser
+discovering relay B never meet. **Redundancy does not fall out.** It costs a new wire field, a client
+try-order, a disagreement rule, and a compatibility story. That was the argument against; it is now
+the specification.
 
-The correct generalisation is one sentence:
-
-> **Each carrier is the sole authority for the privilege of the arrivals it accepts.** A relay carrier
-> answers `false` unconditionally. A bound-socket carrier answers per connection, from the socket's
-> real remote address.
-
-This keeps hadi's non-negotiable intact **verbatim**: `tunnelApiRequest` still hard-codes
-`loopback: false`, so the #289 test that builds a relayed request presenting `host: '127.0.0.1'`,
-`x-forwarded-for: 127.0.0.1`, `origin: http://localhost:7432` and `?token=anything` still asserts
-`loopback === false` and `governed === true`, with no change to the test or to the function under
-test. The field need not even change shape — only its documentation changes from "is the peer on
-loopback" to "did this arrive privileged, as the carrier decided". That is a rename-and-generalise,
-not a rewrite, which is the whole point of a migration that is not itself patchwork.
-
-#### (c) One privilege level, or several? **An honest binary. I am rejecting the gradient.**
-
-- The only decision privilege makes is _may this caller widen_ — a one-way door, which is binary.
-- LAN vs self-hosted relay vs hosted relay differ in **who might be listening** and **what the carrier
-  can carry** — not in **what authority the caller has**. Authority is already answered by credential
-  - grants. Modelling confidentiality as authority is how you get a fifth mechanism.
-- A gradient needs an ordering and there is none. Is a self-hosted relay on a VPS more or less trusted
-  than a LAN bind in a coffee shop? The question has no repo-wide answer, so any number we pick is a
-  fiction some deployment contradicts. hadi is right that a false gradient is worse than an honest
-  binary.
-
-**A direct LAN arrival is GOVERNED, not privileged.** The entire justification for exempting loopback
-is "somebody at the machine already has the machine", which is false of a LAN peer. This is also
-already the shipped behaviour — `LOOPBACK` is three exact addresses — so it is a confirmation, not a
-change.
-
-Carriers _do_ differ, in ways that must be modelled as **capabilities, not trust**:
-
-| carrier attribute      | what it is for                          | why it is not trust                                      |
-| ---------------------- | --------------------------------------- | -------------------------------------------------------- |
-| `opensInboundSocket`   | the **cost** of adding this carrier     | a bound socket is attack surface; a dialled relay is not |
-| `carriesStreams`       | `/v1/events` and terminal streams (§14) | a capability the tunnel lacks, not a permission          |
-| `canCarryFirstContact` | pairing needs direct first contact      | determines whether this carrier can enrol a device       |
-| `observers`            | feeds `describeConnectionMethod`        | disclosure, already rendered                             |
-| `privilegeOfArrivals`  | `'per-peer'` \| `'never'`               | the only one that touches authorization                  |
-
-#### (d) Attack surface, and the safe default
-
-Agreed with hadi's instinct: the default list is **loopback bind + the hosted relay**, with a
-non-loopback bind strictly opt-in. Two additions.
-
-**The list is not homogeneous, and the model must not pretend it is.** A relay entry is a _dial-out_;
-a bind entry is a _listen_. A UI or CLI that renders them as two identical rows makes "expose more"
-the easy default, which is exactly the failure hadi flagged. So the shape is a **discriminated union**,
-not a list of uniform records, and the `bind` variant carries the consequence in its own name:
+### 6.2 Configuration: a bounded discriminated union
 
 ```jsonc
 "carriers": [
-  { "kind": "bind",  "host": "127.0.0.1", "port": 7431 },       // listens — attack surface
-  { "kind": "relay", "url": "wss://…",    "enabled": true }     // dials out — no inbound socket
+  { "kind": "bind",  "host": "127.0.0.1", "port": 7431 },        // LISTENS — attack surface
+  { "kind": "relay", "source": "discovery" },                     // the hosted default, resolved at runtime
+  { "kind": "relay", "url": "wss://my-relay.example", "enabled": true }
 ]
 ```
 
-**And a real bug falls out of writing it this way.** Today `host`/`port` control _both_ what the daemon
-listens on _and_, by derivation, what it advertises: `bindUrl = daemonAddress(host, port)` and
-`publicUrl = value.publicUrl ?? bindUrl` (`runtime/config.ts:293-304`). So an operator following the
-LAN-bind-to-pair workaround by setting `host: '0.0.0.0'` **also changes what every pairing link says**
-— and `daemonAddress` returns `http://0.0.0.0:7431`, which is not an address any client can reach.
-Unless they _also_ set `publicUrl`, the workaround mints unusable pairing links, and reverting `host`
-silently invalidates any link minted while it was on.
+- **at most one `bind`.** A daemon has one listening socket; more is a different feature.
+- **at most four `relay` entries.** Bounded so "expose more" is not free. Each is a **dial-out**, so it
+  adds no inbound surface — which is why the cap can be generous while `bind` stays at one.
+- **the list is a discriminated union, not uniform records.** A UI or CLI that renders a listen and a
+  dial-out as two identical rows makes exposure the easy default. The `kind` carries the consequence.
+- `{ kind: 'relay', source: 'discovery' }` makes the hosted default **an ordinary entry** rather than a
+  special case, which subsumes the discovery-versus-configured-block branching that exists today.
+  `config/daemon.json`'s explicit block keeps winning: an operator's entry is never overwritten.
+- `host`/`port`/`relay` remain readable as the **legacy spelling** of a one-bind, one-relay list,
+  normalised on read. **Nothing derived is persisted** — the existing rule, respected.
 
-That is the concrete payoff of hadi's sharpened idea, and it is worth stating plainly:
+### 6.3 The wire field
 
-> **Reachability and privilege are not the axes that are welded. They are already separate in the
-> authorization code.** What is welded is **reachability and advertisement**, in one `host` field. A
-> carrier list separates them because a carrier has its own reachable address, and `publicUrl` stops
-> being a derivation of "the one bind".
+The daemon publishes its carrier set to the device at the one moment guaranteed to be direct —
+redemption:
 
-#### (e) Multiple relays: **not now, and the shape should still be a list**
+```ts
+export const DaemonCarrierSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('direct'), url: z.url() }),
+  z.strictObject({ kind: z.literal('relay'),  url: SocketEndpointSchema }),
+]);
 
-hadi's correction is right and decisive. I verified it: `PairingResponseSchema` carries no carrier, and
-`grep`ping all of `packages/protocol/src/lib/` finds no wire shape that publishes a relay address to a
-client. `PairingCodeMintResponseSchema` publishes exactly one carrier — `daemonUrl`, the direct address
-— and no relay. So a client discovers a rendezvous _independently_, from the build-time discovery
-origin, and both ends meet only by coincidence of picking the same one.
+// PairingResponseSchema gains:
+carriers: z.array(DaemonCarrierSchema).max(8).readonly().default([]),
+```
 
-Multi-relay therefore costs: a new wire field carrying the daemon's carrier set, a client try-order, a
-defined behaviour when the two disagree, and a story for how a browser learns a _self-hosted_ relay it
-was never told about. **That is more surface than redundancy is worth today**, when the single hosted
-relay does not yet carry live updates or terminal streams and the daemon cannot even find it
-automatically (finding #6). Redundancy does not "fall out"; I am recording it as a cost, and
-recommending against building it now.
+On `PairingResponse` rather than only on the mint response, because the mint response is read by the
+**host** UI and the redemption response is read by the **device**, which is who needs it. Plus
+`GET /v1/carriers` (`minimum: 'authenticated'`) so a paired device can refresh without re-pairing.
 
-What I _do_ recommend: **ship the list shape with a bounded length, and populate it with at most one
-relay.** A `carriers` array whose relay entries are capped at one today is a schema that grows without
-a breaking change; a singular `relay` block is one that cannot. The cost of the list shape is a
-`superRefine` and a sentence; the cost of getting there later from a singular block is a config
-migration on every installed machine.
+**A relay URL is not a secret**, so publishing it to a device it has already been authorised to pair
+with discloses nothing the rendezvous does not already know. The daemon **fingerprint** stays out of
+anything a reader might paste into an issue — the existing rule, preserved.
 
-#### (f) So how much of the carrier idea is worth building?
+### 6.4 Older client, newer daemon
 
-Ranked, and the top item carries most of the value:
+This needs stating because it is a real trap. `PairingResponseSchema` is a `strictObject`, so an older
+client parsing a newer daemon's response **fails on the unknown key**. Adding a field to a
+device-facing response is therefore a breaking change, not an additive one.
 
-1. **Separate advertisement from bind** — fixes the `0.0.0.0` pairing-link bug and makes a LAN carrier
-   something you _enable_ rather than a field edit you must remember to revert. **Build this.**
-2. **`Arrival`, replacing `loopback`'s documentation** — makes "each carrier decides the privilege of
-   its own arrivals" the stated rule. Nearly free; the code already behaves this way. **Build this.**
-3. **`carriers` as a bounded discriminated union in the config document**, legacy keys normalised into
-   it. **Build this**, one relay entry maximum.
-4. **The daemon reads the hosted advertisement** (finding #6) — the missing half of an existing
-   contract, and the thing that makes "direct + hosted relay" a default rather than a manual step.
-   **Build this.**
-5. **Multiple simultaneous relays.** **Do not build.** Costed above; revisit when the wire carries a
-   carrier set for its own reasons.
+The repository already has the mechanism: `packages/protocol/src/lib/version-skew.ts`. The rule belongs
+there, written down:
+
+> **A key added to a device-facing `strictObject` ships in the same release as the client that reads
+> it, or it is a breaking change.** The pairing fragment is already versioned (`v1;…`); a second version
+> is the escape hatch if one is ever needed.
+
+Recommendation: land it now, while the population of paired devices is small enough that "same release"
+is achievable, and record the rule so the next such field is not an outage.
+
+### 6.5 Client try-order — deterministic, and not a health check
+
+The existing contract in `docs/relay-protocol.md` §13 is preserved verbatim: _the carrier is chosen by
+trying it, not by a health check._
+
+1. every `direct` carrier, **in the order the daemon published them**;
+2. then each `relay`, in published order;
+3. only a **transport** failure advances. A `503` is an answer — the daemon is reachable and saying so
+   — and stops the walk;
+4. the winner is remembered for the life of the connection. **A round in which nothing worked is not
+   remembered** — it served no request, so there is no answer to keep.
+
+**Published order is the daemon's preference, which is the operator's**, and that is the right
+authority. No client-side scoring and no latency race: a race makes the choice nondeterministic and
+unexplainable, and `ActiveCarrierCard` has to be able to say _why_ a carrier won.
+
+### 6.6 The disagreement rule
+
+One sentence: **the daemon is authoritative; the client's copy is a cache.**
+
+| disagreement                                  | behaviour                                                                                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| daemon dropped a relay the client still holds | the handshake finds no daemon at that rendezvous; the client advances. Not an error — a miss. The stale entry is pruned on the next successful connection.    |
+| daemon added a relay the client lacks         | the client never tries it. Fixed by refreshing from `GET /v1/carriers` after any successful connection and **replacing** the stored set.                      |
+| nothing published is reachable                | report every attempt with its cause, name the rendezvous origins tried, do not name the fingerprint. `0` is never a close code. Existing contract, preserved. |
+
+### 6.7 What multi-relay unlocks, honestly
+
+Once the wire field exists the benefit is real and larger than redundancy: a self-hosted relay for a
+LAN plus the hosted one for elsewhere; and — with §2's advertisement split — a **direct LAN carrier up
+alongside the relays**, which is what pairing needs, since pairing can never be relayed. That last one
+is the strongest argument for the owner's instruction and it is worth recording as the reason.
+
+Privilege stays **binary**, per §5. A relay carrier answers `false` unconditionally; a bound socket
+answers per connection. **Multiple relays do not weaken the rule — they instantiate it N times.**
 
 ---
 
-## 5. Migration
+## 7. Doctrine conformance — measured, not assumed
 
-Sequenced so every step ships alone, reverts alone, and deletes something. Nothing here is a rewrite.
+The owner asked for conformance to `docs/standards/`. I measured it across 478 `src/lib` files.
 
-### Wave A — detection first (no behaviour change, immediate value)
+| doctrine                                                          | rule probed                              | result                                                                                                                                                                                            |
+| ----------------------------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SOLID — zero private methods                                      | `private`/`#` members in `src/lib`       | **52 occurrences in 15 of 478 files.** Largely conformant; 3 files (`pwa/lib/stt/browser-recognition.ts` 19, `daemon/lib/relay/link.ts` 13) are worth a look, the rest are 2–3 in CLI controllers |
+| SOLID — no singletons                                             | `export const x = new …` in `src/lib`    | **zero.** Conformant                                                                                                                                                                              |
+| Datetime — never read the ambient clock in domain code            | `Date.now()` in `src/lib`                | **zero.** One argless `new Date()`. Conformant, and notably so                                                                                                                                    |
+| Three-layer — no adapter imports from `src/lib`                   | already gated by `cli-contracts.sh arch` | Conformant by construction                                                                                                                                                                        |
+| Validation — never write the interface **and** the schema by hand | both for one name in one file            | **5 files**, all `daemon/src/lib/session/*/settings.ts` plus `resume/types.ts`                                                                                                                    |
+| Validation — parse-don't-validate at boundaries                   | zod at raw-input boundaries in the PWA   | **12 hand-rolled parsers.** The largest single drift; §3.2                                                                                                                                        |
+| Functional — railway over throwing                                | `throw new` in `src/lib`                 | 125 (daemon 85, cli 38, pwa 2). Needs a per-case read, not a number — the doctrine permits throwing at a terminal boundary, and `ApiError` is one                                                 |
 
-| step   | does                                                                                 | deletes                                                                                                   |
-| ------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| **A1** | `docs-integrity` contract; repair `docs/grants.md`                                   | the merge conflict, the fused H1, and **one of the two contradictory paragraphs** — the owner picks which |
-| **A2** | `contract-registry` contract; document the 4 missing contracts and 3 missing scripts | the "ten workspace/CLI/release contracts" sentence                                                        |
-| **A3** | `route-agreement` contract, allowlist seeded from today's gaps                       | nothing yet — it _reports_ #4 and #5 rather than fixing them                                              |
+**The honest headline, and it is the answer to the owner's complaint:**
 
-A1 is a one-hour change that closes a live corruption on `main`. It goes first.
+> **The code conforms to the doctrines well. The patchwork is not doctrine drift.** It is that none of
+> the eight doctrine articles says anything about the failure that keeps shipping: **two programs
+> agreeing about one fact.**
 
-### Wave B — the compiler, before any more gates
+`docs/standards/contracts/README.md` is the closest, and it frames itself as a _list of gates_ rather
+than a _principle_ — which is exactly why the principle was applied three times and then stopped. The
+owner asked for an overarching framework. In this repository, doctrine is how a framework is expressed.
+So the deliverable includes:
 
-| step   | does                                                                                                                                     | deletes                                                                                                              |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **B1** | exhaustive key maps for `CapabilityGrantsDocumentSchema` and `NOTIFICATION_KINDS`                                                        | the four-line comment at `runtime/config.ts:196-199` admitting TypeScript does not catch it                          |
-| **B2** | generalise `unimplementedCapabilities` (R3): one list per package of "accepted, not honoured", surfaced by `fyd --check` and `fy doctor` | the silent gap between `protocol/lib/push.ts` and no push mount — it becomes a printed line until mika's routes land |
+**A new doctrine article: `docs/standards/fact-ownership/index.md`**, holding R1–R5 of §4, the
+soundness-vs-completeness rule, temperance's workaround diagnostic, the split-don't-over-merge
+anti-rule, and the input-domain rule from finding 8. Linked from `CLAUDE.md`'s doctrine table beside
+the other eight, because a rule that is not in the table is a rule nobody reads.
 
-### Wave C — the authorization collapse (three commits, behaviour-preserving)
+### 7.1 Two doctrine claims that are not true as written
 
-| step   | does                                                                                                                                                              | deletes                                                                                                       |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **C1** | add `minimum` + `privilegedOnly` to `ScopedRoute` **alongside** `scope`; derive `scope` from them; one test asserts the derivation over the whole 109-route table | nothing — this commit changes no runtime behaviour and is trivially revertible                                |
-| **C2** | move `session-attach`'s inline check onto its route as `privilegedOnly: true`                                                                                     | the `if (!context.request.loopback)` at `mounts/session-attach.ts:45` and its bespoke `attach_not_local` path |
-| **C3** | switch the dispatcher to read `minimum`/`privilegedOnly`                                                                                                          | **`RouteScope` and the `scope` field, entirely**                                                              |
+Both from mika, and both change what a doctrine may honestly say.
 
-C1 is the whole trick: two representations coexist for exactly one commit, with a test proving they
-agree, and then the old one is deleted. That is how this stops being patchwork — the old shape does not
-survive the migration.
+1. **"Reachability is the proof" is true only at the coarsest granularity.** `PushService.notify` —
+   the fan-out consulting each device's preferences and pruning dead endpoints — had **no production
+   caller**, because `register` called the transport directly. Every gate passed: the module was
+   reachable through its _other_ methods. `reachability-allowlist.txt` already records the sibling case
+   (`SessionResumeService` was an uncalled factory for four units). **Three instances, three
+   granularities: unreachable module, uncalled factory, uncalled method.**
 
-`POST /v1/grants/password` gaining `privilegedOnly: true` lands in C2 **only if the owner says yes**.
+   > **Built, tested, 100% covered and dead survives every gate this repository has.**
 
-### Wave D — carriers
+   State the limit in the doctrine, and assess whether a method-level pass is feasible. hadi calls this
+   the single most important item in their message and I agree.
 
-| step   | does                                                                                                                                                                                                    | deletes                                                                                     |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| **D1** | `carriers` parsed alongside `host`/`port`/`relay`, legacy normalised into it; `publicUrl` derived per carrier rather than from "the one bind"; `Arrival` documented as the generalisation of `loopback` | nothing yet                                                                                 |
-| **D2** | the daemon reads the hosted advertisement through `HostedRelayAdvertisementSchema` — the same schema and discovery origin the PWA uses                                                                  | the asymmetry in finding #6                                                                 |
-| **D3** | `fy daemon carrier add \| ls \| rm`; rename `fy daemon config` → `fy daemon grants`, keeping the old spelling as an alias                                                                               | the "an operator edits `config/daemon.json` today" sentence in `docs/relay-protocol.md` §13 |
-| **D4** | remove the legacy `host` / `port` / `relay` top-level keys                                                                                                                                              | **the old spelling**                                                                        |
+2. **"Check the wire, not the schema" needs a second clause.** `packages/pwa` has no service worker, so
+   push cannot be dialled in a real browser even with the routes live. A gate that proves two ends
+   agree cannot prove the client is capable of the call. §4.2.
 
-### Wave E — client settings
+### 7.2 The toolchain finding — explicitly not mine to fix
 
-| step   | does                                                                                                                                                                        | deletes                                                                   |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **E1** | `BrowserDocument<T>` in `pwa/src/lib`; migrate two documents onto it (`theme-preferences`, `side-pane-preferences`) and **decide once** what a partially-bad document means | two hand-rolled parsers, two `browserStorage()` copies, two store classes |
-| **E2** | migrate the remaining ten                                                                                                                                                   | ten more of each                                                          |
-| **E3** | catalog rows own their document; `settings-catalog` contract                                                                                                                | the implicit mapping between 8 catalog rows and 12 storage keys           |
+`git commit` printed `Passed` for all fourteen hooks and created nothing: pre-commit is installed in
+migration mode against the shared `.git`. **A green hook run is not evidence that a commit happened**,
+and the workaround everybody reaches for is `--no-verify`, which makes CI the only real gate. The fix is
+a one-line `pre-commit install -f` against a repository a dozen live agents are committing into. hadi
+is putting it to the owner. I am not touching it, and I note it here only because it affects how any
+conformance claim in this refactor should be believed.
 
-Wave E is the largest and the least urgent. It is a correctness-of-mechanism cleanup, not a bug fix,
-and it should not block Waves A–D.
+---
 
-### 5.1 What I would NOT change, and why
+## 8. Deletions
 
-Explicitly preserved. If a step above appears to touch one of these, the step is wrong.
+A cleanup that only adds has failed. Everything below stops existing.
 
-- **Carrier-derived privilege.** Never re-derived from a peer address, a `Host` header or a URL. The
-  #289 policy test must pass **unmodified**; `tunnelApiRequest` keeps its unconditional `false`.
-- **The secret store's use-never-read contract.** No getter, no route, no report. Nothing in this
-  document goes near it, and the operator password verifier stays out of `config/daemon.json` for the
-  same reason.
-- **Fail-closed doctrine.** `undetermined` ⇒ deny. A route naming a capability served by a guardless
-  dispatcher ⇒ deny. A refresh that fails clears the answer rather than keeping a stale one. A
-  document that cannot be parsed refuses the boot. Damaged state is never empty state.
-- **Permissive defaults with the operator password as an opt-in layer.** The product's principle is
-  that a person does as much as possible from the UI. Nothing here starts anybody behind a wall.
+| deleted                                                                        | where                                                                                                 | replaced by                                           |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| the inline loopback check                                                      | `mounts/session-attach.ts:45` and its bespoke `attach_not_local`                                      | `privilegedOnly: true` on the route                   |
+| `RouteScope` and the `scope` field                                             | `api/route.ts`, 109 route declarations                                                                | `minimum` + `privilegedOnly`                          |
+| four loopback predicates                                                       | `bun-api-server.ts:92`, `relay/connection.ts:52`, `pwa/hosted-relay.ts:121`, `protocol/address.ts:18` | `isLoopbackHost` / `isLoopbackPeer` in the protocol   |
+| the "TypeScript does not catch it" comment                                     | `runtime/config.ts`                                                                                   | the `satisfies` mapped type, which does               |
+| `publicUrl ?? bindUrl` at three sites                                          | `config.ts:315`, `:343`, `:397`                                                                       | `decideAdvertisement`                                 |
+| the unvalidated client derivation                                              | `protocol/address.ts:60` `recordedDaemonAddress`                                                      | the same decision, one owner                          |
+| twelve hand-rolled parsers, twelve `browserStorage()` copies, ~9 store classes | `pwa/src/lib/*`                                                                                       | one `BrowserDocument<T>`                              |
+| the implicit 8-row ↔ 12-module mapping                                         | `settings-catalog.ts` + storage modules                                                               | catalog rows owning their document                    |
+| the merge conflict and one of two contradictory paragraphs                     | `docs/grants.md`                                                                                      | #300, folded in                                       |
+| "the ten workspace/CLI/release contracts"                                      | `docs/standards/contracts/README.md`                                                                  | the real count, gated                                 |
+| the singular `relay` block and `host`/`port` top-level keys                    | `config.ts`                                                                                           | `carriers`                                            |
+| "an operator edits `config/daemon.json` today"                                 | `docs/relay-protocol.md` §13                                                                          | `fy daemon carrier add \| ls \| rm`                   |
+| three hardcoded counts                                                         | `provenance.test.ts` capability lists, `pwa/harness/screenshot.ts` `!== 10`                           | derived from the enums that already exist (frederick) |
+
+---
+
+## 9. The migration sequence
+
+Every step ships alone, reverts alone, and deletes something. No big-bang rewrite.
+
+### Wave 0 — the blocker (first, before anything else)
+
+| step   | does                                                                                                                                                                          | deletes                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **0a** | `decideAdvertisement` in `@ferretry/protocol` + `isLoopbackHost`/`isLoopbackPeer`/`isWildcardHost` moved there from `#301`'s `config.ts`                                      | the four loopback copies                       |
+| **0b** | the three `config.ts` derivation sites and `recordedDaemonAddress` read the one decision                                                                                      | `publicUrl ?? bindUrl` ×3                      |
+| **0c** | the mint response carries the advertisement or a refusal; `superRefine` becomes present-iff-present; `fy pair` and the Add-a-device panel render the fix instead of a dead QR | the undialable QR                              |
+| **0d** | `docs/pairing.md` states the constraint: **a daemon must never mint a pairing link naming an address the scanning device cannot reach**                                       | frederick's asserted-but-undeliverable journey |
+
+### Wave 1 — detection (no behaviour change)
+
+**1a** fold in #300 (`docs-integrity` + the conflict resolution) · **1b** `contract-registry` and the
+four undocumented contracts · **1c** `route-agreement`, allowlist seeded from `main`, with mika's
+client-prerequisite limit written into the gate's own docs.
+
+### Wave 2 — the compiler, before more gates
+
+**2a** exhaustive key maps for `CapabilityGrantsDocumentSchema` and `NOTIFICATION_KINDS` · **2b**
+generalise `unimplementedCapabilities` (R3) so an accepted-but-unhonoured schema prints itself, which
+makes finding #4 visible until #302 lands.
+
+### Wave 3 — the authorization collapse (three commits)
+
+**3a** add `minimum` + `privilegedOnly` **alongside** `scope`, derive `scope` from them, and one test
+asserts the derivation over the whole 109-route table — zero runtime change, trivially revertible ·
+**3b** move `session-attach`'s inline check onto its route (and `/v1/grants/password`, if the owner
+approves §5.3) · **3c** the dispatcher reads the new fields; **`RouteScope` is deleted.**
+
+3a is the trick that keeps this from being patchwork: two representations coexist for exactly one
+commit, with a test proving they agree, and then the old one is gone.
+
+### Wave 4 — carriers, including multi-relay
+
+**4a** `carriers` parsed alongside the legacy keys, normalised on read; `Arrival` documented as the
+generalisation of `loopback`; N relay links instead of one · **4b** the wire field on
+`PairingResponse` + `GET /v1/carriers` + the `version-skew` rule · **4c** client try-order and the
+disagreement rule · **4d** `fy daemon carrier add|ls|rm`; `fy daemon grants` with `fy daemon config`
+kept as an alias · **4e** remove the legacy `host`/`port`/`relay` keys.
+
+### Wave 5 — the doctrine article and client settings
+
+**5a** `docs/standards/fact-ownership/index.md`, linked from `CLAUDE.md`; the two doctrine limits from
+§7.1 written down · **5b** `BrowserDocument<T>` + two documents migrated, deciding once what partial
+damage means · **5c** the remaining ten · **5d** catalog rows own their documents + the
+`settings-catalog` contract.
+
+Wave 5b–d is the largest and least urgent. It must not block Waves 0–4.
+
+---
+
+## 10. Preserved invariants
+
+If a step above appears to touch one of these, the step is wrong.
+
+- **Carrier-derived privilege.** Never re-derived from a peer address, a `Host` header or a URL.
+  `tunnelApiRequest` keeps hardcoding `loopback: false`, and the #289 policy test — which builds a
+  relayed request presenting every loopback-looking signal it can — must pass **unmodified**.
+- **The secret store's use-never-read contract.** No getter, no route, no report. The operator password
+  verifier stays out of `config/daemon.json`.
+- **Fail-closed everywhere.** `undetermined` ⇒ deny. A capability route on a guardless dispatcher ⇒
+  deny. A failed refresh clears the answer rather than keeping a stale one. An unparseable document
+  refuses the boot. Damaged state is never empty state.
+- **Permissive defaults with the operator password as the opt-in layer.**
 - **The widen/narrow asymmetry and the one-way door**, including `mayGrant` on the wire so a UI warns
   _before_ the door closes, and revoking never being harder than granting.
-- **The capability list closed at six.** It must not grow to mirror the route table; a second copy of
-  the route table is how the two stop agreeing. mika's decision to serve push under
-  `{ capability: 'pairing', axis: 'use' }` rather than adding a seventh is **correct under this model**
-  and should land as written.
-- **`TokenClass`.** Three values, one job, untouched.
-- **Nothing derived is ever persisted** (`runtime/config.ts:204-215`). The `carriers` work must respect
-  this: a normalised legacy document is derived on read, not written back.
+- **The capability list stays closed at six.** It must not grow to mirror the route table. mika's
+  decision to serve push under `{ capability: 'pairing', axis: 'use' }` rather than adding a seventh is
+  **correct under this model** and #302 should land as written.
+- **`TokenClass`** — three values, one job, untouched.
+- **Nothing derived is ever persisted.**
+- **An operator's `publicUrl` is never second-guessed** — `advertisesForeignAddress` exists because a
+  proxy deployment is legitimate.
+- **Pairing is never relayed**, and the carrier chosen by trying rather than by a health check.
 - **The two-name model, `@ferretry/protocol` as the single source, and every existing contract.**
-- **Client settings staying browser-local.** No `clientSettings` object in the protocol. No sync.
-
-### 5.2 What this does not fix
-
-Stated so it is not discovered:
-
-- Finding #12 — "capability" meaning three unrelated things (`DAEMON_CAPABILITIES`; pairing's
-  `['daemon-api']`; fleet's unhonoured-config list) is a ubiquitous-language problem. Renaming two of
-  them is cheap and touches a lot of files; I have not sequenced it and would do it opportunistically,
-  not as a wave.
-- The four grant axes with no host-changing route (`terminal`/`browser`/`filesystem`/`pairing`
-  `configure`) are already a **declared GAP** in `docs/grants.md`. This model does not close them and
-  does not need to — but it does suggest the axis is not uniformly meaningful, which is worth revisiting
-  when the fifth subsystem grows a host setting.
-- Relay streams and first-contact-over-relay are §13 gaps and stay gaps.
+- **Client settings stay browser-local.** No `clientSettings` in the protocol, no sync.
 
 ---
 
-## Appendix — how each claim was verified
+## 11. Verification, and a finding about this document
 
-Every claim was checked against `origin/main` **by content**, not by SHA, and not from a summary.
+Verified against `origin/main` at **`52dc6a20`**, by content.
 
-| claim                                          | verification                                                                                                                                                                                                                                           |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `docs/grants.md` carries live conflict markers | `git show origin/main:docs/grants.md \| grep -n '^<<<<<<<\|^======='` → lines 59, 66; `grep -n '^> > > > > > >'` → line 143                                                                                                                            |
-| the `>>>>>>>` became a blockquote              | line 143 reads `> > > > > > > 141154ed (feat(pwa): add a device to one daemon from the browser)`                                                                                                                                                       |
-| the doc contradicts itself                     | heading at 137 vs bold claim at 145, same file                                                                                                                                                                                                         |
-| no `/v1/config` route exists                   | `rg -o "path: '/v1/(config\|settings\|daemon)[^']*'" packages/daemon/src/lib/runtime/mounts/` → no matches; 109 distinct `/v1` paths total                                                                                                             |
-| `fy daemon config` is grants-only              | `packages/cli/src/lib/grants/commands.ts:28`, description "read and change what a caller NOT on this host may do"                                                                                                                                      |
-| the daemon serves no push route                | `git grep -l 'v1/push' origin/main -- packages/daemon` → nothing; the PWA calls `/v1/push/vapid` and `/v1/push/subscriptions` at `pwa/src/lib/push-subscriptions.ts:106,113,129`                                                                       |
-| 17 contracts run, 13 documented                | the `all` loop in `cli-contracts.sh:22` vs the README table; diffed with `comm`                                                                                                                                                                        |
-| `pairing` IS demanded by a route               | `PAIRING_DEMAND` at `mounts/pairing.ts:90` — my first grep missed it because it is a named constant, not an inline literal                                                                                                                             |
-| 8 of 12 capability axes are demanded           | `rg -o "capability: '…', axis: '…'"` over `packages/daemon/src`, deduplicated                                                                                                                                                                          |
-| an inline loopback check exists                | `mounts/session-attach.ts:45`                                                                                                                                                                                                                          |
-| `loopback` is per-peer on a bound socket       | `toApiRequest` at `adapters/api/bun-api-server.ts:398`; `LOOPBACK` at `:92`                                                                                                                                                                            |
-| a relayed hop is never loopback                | `tunnelApiRequest` in `lib/relay/tunnel.ts`; asserted by `tests/unit/grants/policy.test.ts:49-71`                                                                                                                                                      |
-| the pairing response carries no carrier        | `PairingResponseSchema` at `protocol/lib/pairing.ts:57`; `rg 'relayUrl\|rendezvous' packages/protocol/src/lib/*.ts` finds only a doc comment                                                                                                           |
-| the daemon does not read the advertisement     | `HostedRelayAdvertisementSchema` in `packages/relay/src/lib/hosted.ts:85`; read by `pwa/src/features/onboarding/hosted-relay.ts`; `DaemonRelayConfigSchema` requires an operator-supplied `url` and its docblock says there is deliberately no default |
-| `publicUrl` follows `bindUrl`                  | `runtime/config.ts:293-304`; `daemonAddress` at `protocol/lib/address.ts:42` returns `http://${host}:${port}`                                                                                                                                          |
-| 12 `localStorage` documents, 8 catalog rows    | `rg -l localStorage packages/pwa/src`; `SETTINGS_DEFINITIONS` in `features/settings/settings-catalog.ts:41`                                                                                                                                            |
-| the PWA has zod and barely uses it             | `packages/pwa/package.json` dependency `zod 4.4.3`; `rg -c 'from .zod.' packages/pwa/src` → 3 files                                                                                                                                                    |
-| `satisfies` does not prove completeness        | `NOTIFICATION_KINDS` at `pwa/src/lib/notification-preferences.ts:23`; the admission at `daemon/src/lib/runtime/config.ts:196-199`                                                                                                                      |
-| "capability" has three meanings                | `protocol/lib/grants.ts:86`; `pairing/service.ts:201` (`['daemon-api']`); `packages/fleet/src/lib/capabilities.ts`                                                                                                                                     |
+| claim                                          | how                                                                                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the default mints a loopback pairing link      | `config.ts:315` `publicUrl: value.publicUrl ?? bindUrl`; `config.ts:219` host default; `bin/fyd.ts:3571` `daemonUrl: config.publicUrl`; `pairing/service.ts:393` embeds it in the fragment |
+| no loopback check anywhere on that path        | frederick checked three renderers; I re-grepped `packages/daemon/src/lib/pairing/` for `loopback\|127.0.0.1\|unreachable` — no matches                                                     |
+| four derivation sites                          | `config.ts:315`, `:343`, `:397`; `protocol/address.ts:60`                                                                                                                                  |
+| five loopback predicates                       | `config.ts:19`, `bun-api-server.ts:92`, `relay/connection.ts:52`, `pwa/hosted-relay.ts:121`, `protocol/address.ts:18`                                                                      |
+| `reachableOffHost` exists and counts the relay | `provenance.ts:164`, and it now takes a `RelayCarrierSource` so a discovered relay counts                                                                                                  |
+| pairing publishes no carrier                   | `PairingResponseSchema` in `protocol/lib/pairing.ts`; `rg 'relayUrl\|rendezvous' packages/protocol/src/lib/*.ts` finds only a doc comment                                                  |
+| the inline authorization check                 | `mounts/session-attach.ts:45`                                                                                                                                                              |
+| 17 contracts run, 13 documented                | the `all` loop vs the README table, diffed with `comm`                                                                                                                                     |
+| doctrine probes                                | `git ls-files 'packages/*/src/lib/**/*.ts'` (478 files) piped to `rg`; counts in §7                                                                                                        |
+| no `/v1/config` route                          | 109 distinct `/v1` paths in `mounts/`, none matching `config\|settings\|daemon`                                                                                                            |
 
-One correction to my own earlier reading, recorded rather than quietly dropped: I first counted
-`pairing` as having no route demand at all. It has one; my grep pattern only matched inline literals
-and `mounts/pairing.ts` uses a named `PAIRING_DEMAND` constant. The finding that survives is narrower
-and is the one stated in §4.1.
+**And the finding about this document.** Its previous revision asserted that the daemon does not read
+the hosted-relay advertisement. That was true at `5316ae4a` and **false six hours later**: `#301`
+(`fix(daemon): dial the advertised relay when none is configured`) landed it, symmetric with the PWA
+via `__FY_RELAY_DIRECTORY__` and pinned by `scripts/validate/relay-config.sh`. `#301` also introduced
+`isLoopbackHost`, which turns §5.4 from an invention into an extension.
+
+I found this only because CLAUDE.md changed under me and I re-checked. Two consequences worth carrying:
+
+1. **A design document that cites line numbers rots at the rate the repository moves.** Cite decisions
+   and file paths in the argument; keep line numbers in a verification appendix stamped with the SHA
+   they were checked at. This document now does that.
+2. **"Verify by content, not from a summary" applies to your own previous conclusions.** hadi hit the
+   same thing — their first grep for `reachableOffHost` missed it because they had not pulled. Two of
+   us, on the same day, wrong about `main` in the same way.
