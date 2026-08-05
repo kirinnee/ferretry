@@ -10,6 +10,7 @@ import {
   ENHANCEMENT_SOURCES_EXPLANATION,
   ENHANCEMENT_TOGGLE_EXPLANATION,
   GROQ_ENHANCEMENT_EXPLANATION,
+  LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
   USER_CONTEXT_EXPLANATION,
 } from '../../../../src/features/settings/dictation-settings.tsx';
 import type { BrowserRecognitionSupport } from '../../../../src/lib/stt/browser-recognition.ts';
@@ -128,6 +129,7 @@ describe('<DictationSettings>', () => {
       ENHANCEMENT_TOGGLE_EXPLANATION,
       ENHANCEMENT_EXPLANATION,
       ENHANCEMENT_SOURCES_EXPLANATION,
+      LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE,
       USER_CONTEXT_EXPLANATION,
     ]) {
       expect(view.container.textContent).toContain(copy);
@@ -138,6 +140,35 @@ describe('<DictationSettings>', () => {
       <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' } })} />,
     );
     expect(view.container.textContent).toContain(GROQ_ENHANCEMENT_EXPLANATION);
+    await view.unmount();
+  });
+
+  /**
+   * The on-device provider used to promise "nothing sent anywhere", while every
+   * enabled correction first reads the session's recent messages from the paired
+   * daemon. The screen has to name what stays here AND that request, because a
+   * disclosure that overstates the boundary is the same defect as none at all.
+   */
+  it('discloses the history read instead of promising the local provider sends nothing', async () => {
+    const view = await mount(<DictationSettings {...settingsProps()} />);
+    const text = view.container.textContent ?? '';
+
+    expect(text).not.toContain('nothing sent anywhere');
+    // What genuinely stays in this browser, named as the narrower claim it is.
+    expect(text).toContain('no AI model, and your transcript, your words and your context are never uploaded');
+    // And the one request that does leave, with its budget and its contents.
+    expect(text).toContain('One request does leave this browser first');
+    expect(text).toContain('asks the paired daemon holding this session for its latest messages');
+    expect(text).toContain('corrects without them if the daemon is slow');
+    expect(text).toContain('Nothing you dictated is part of that request');
+
+    // Groq's own paragraph already accounts for the transcript leaving, so the
+    // local-only disclosure is not repeated there.
+    await view.render(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enhancementProvider: 'groq' } })} />,
+    );
+    expect(view.container.textContent).not.toContain(LOCAL_ENHANCEMENT_HISTORY_DISCLOSURE);
+    expect(view.container.textContent).toContain('sends Groq the raw transcript');
     await view.unmount();
   });
 
