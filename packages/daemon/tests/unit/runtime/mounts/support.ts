@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { SecretName } from '@ferretry/protocol';
 import {
+  type CapabilityGrants,
   type CreateTerminalRequest,
+  DAEMON_CAPABILITIES,
   type LearningConfig,
   PIN_SCHEMA_VERSION,
   type Pin,
   type PinSnapshot,
+  type SecretName,
   type SendResult,
   SessionConfigSchema,
   SessionStateSchema,
@@ -31,6 +33,7 @@ import {
   rebuildAnalyticsSessionIndex,
 } from '../../../../src/lib/analytics/session-record.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
+import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
   type AttentionLedger,
@@ -49,6 +52,7 @@ import {
   type RoutingCatalogPort,
   TeamAdvisor,
 } from '../../../../src/lib/core/index.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import type {
   LearningState,
   LearningStorePort,
@@ -82,7 +86,6 @@ import {
 import { SessionSignalError, type SessionSignalSubsystem } from '../../../../src/lib/runtime/mounts/session-signal.ts';
 import { type SessionDirectorySubsystem, SessionReadError } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
-import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
 import type {
   TaskBoardSubsystem,
   TaskBoardTaskActionAuthorizer,
@@ -117,6 +120,7 @@ import {
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
+import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
 import type { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import {
   EMPTY_TASK_BOARD_REPOSITORY_STATE,
@@ -1548,3 +1552,70 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
     }),
   };
 }
+
+/** What a grant fixture starts from: the recorded decision, and whether a password is set. */
+export interface GrantWorld {
+  readonly grants?: CapabilityGrants;
+  readonly password?: string;
+  /** Set to make the document unreadable, so a fixture can prove the fail-closed reading. */
+  readonly broken?: boolean;
+  readonly nowMs?: number;
+}
+
+/**
+ * The REAL grant subsystem over in-memory ports.
+ *
+ * Real rather than a stub, because the thing worth proving is that the route table and the
+ * authorization boundary consult the SAME object — a fake guard beside a fake report would pass a
+ * surface test while the daemon enforced nothing.
+ */
+export function grantSubsystem(world: GrantWorld = {}): CapabilityGrantService {
+  let recorded = world.grants ?? DEFAULT_CAPABILITY_GRANTS;
+  let stored = world.password;
+  let minted = 0;
+  return new CapabilityGrantService({
+    document: {
+      read: async () => {
+        if (world.broken === true) throw new Error('the grant document could not be read');
+        return recorded;
+      },
+      written: async () => (world.grants === undefined ? [] : DAEMON_CAPABILITIES),
+      write: async next => {
+        recorded = next;
+      },
+    },
+    passwords: {
+      isSet: async () => stored !== undefined,
+      set: async password => {
+        stored = password;
+      },
+      clear: async () => {
+        stored = undefined;
+      },
+      verify: async candidate => stored !== undefined && candidate === stored,
+    },
+    tokens: {
+      mint: () => {
+        minted += 1;
+        return `fy_unlock_${String(minted).padStart(22, 'a')}`;
+      },
+    },
+    clock: { nowMs: () => world.nowMs ?? 1_700_000_000_000 },
+    audit: { record: async () => undefined },
+    clientName: 'fy',
+  });
+}
+
+/**
+ * A guard that permits every capability.
+ *
+ * Each mount test below is about ONE subsystem's routes; what the operator agreed to is a separate
+ * subject with its own tests. Passing this makes a test say "the operator has agreed to this" out
+ * loud rather than leaving the guard absent — which is NOT the same thing, because an absent guard
+ * is a refusal, and a mount test that passed by accident of failing closed would prove nothing at
+ * all about the mount.
+ */
+export const GRANTED: CapabilityGuard = {
+  decide: () => ({ allowed: true, refusal: 'granted' }),
+  explain: () => undefined,
+};

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import { BrowserLoginStatusSchema } from '@ferretry/protocol';
 import should from 'should';
-import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import { BrowserControlError } from '../../../../src/lib/browser/control/index.ts';
 import { browserLoginRoutes } from '../../../../src/lib/runtime/mounts/browser-login.ts';
 import { request } from '../../api/support.ts';
-import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, human } from './support.ts';
+import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, GRANTED, human } from './support.ts';
 
 /**
  * The human browser-login route, over a window with no host behind it.
@@ -20,7 +20,7 @@ import { BrokenBrowserLogin, CREDENTIALS, FakeBrowserLogin, human } from './supp
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 const dispatcherFor = (window: FakeBrowserLogin | BrokenBrowserLogin): ApiDispatcher =>
-  new ApiDispatcher(new ApiRouter(browserLoginRoutes(window)), CREDENTIALS);
+  new ApiDispatcher(new ApiRouter(browserLoginRoutes(window)), CREDENTIALS, GRANTED);
 
 const post = (body: unknown) =>
   request({ method: 'POST', path: '/v1/browser/login', headers: human, body: JSON.stringify(body) });

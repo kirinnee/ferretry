@@ -45,6 +45,25 @@ export interface FoundationPaths {
    * must sign with the very same key or every paired browser computes a mismatch.
    */
   readonly daemonIdentity: string;
+  /**
+   * The operator password's VERIFIER — an argon2id digest and nothing else.
+   *
+   * ITS OWN FILE, and under `state` rather than `config`, for two reasons that both matter. A
+   * verifier is not a setting an operator edits, so it does not belong in a document they open; and
+   * `config/daemon.json` is the file that gets copied into backups, dotfile repositories and screen
+   * shares, which is exactly the journey a password verifier should not make. It is written mode 0600
+   * for the same reason the vault key is, and the grants it gates stay in the configuration document
+   * where `--print-config` can report them with their provenance.
+   */
+  readonly operatorPassword: string;
+  /**
+   * Where a change to the grants is written down, one JSON line per change.
+   *
+   * IN THE STATE HOME, so it is keyed by daemon by construction — a state home has exactly one owner,
+   * and one daemon's record can therefore never be read as another's. It holds actors and axes, never
+   * a token and never anything about the password.
+   */
+  readonly grantAudit: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -78,6 +97,8 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     sessions: join(state, 'sessions'),
     temporary: join(state, 'tmp'),
     daemonIdentity: join(state, 'daemon-identity.json'),
+    operatorPassword: join(state, 'operator-password.json'),
+    grantAudit: join(state, 'grant-audit.jsonl'),
   };
 }
 

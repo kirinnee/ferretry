@@ -1016,6 +1016,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/accounts',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       // Held to the same shared contract the preview's manifest is, so the roster a client compares
       // a proposal against and the roster inside that proposal are described by one schema.
@@ -1026,6 +1027,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/config',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.config()),
     },
@@ -1033,6 +1035,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/environment',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.environment()),
     },
@@ -1040,6 +1043,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'PUT',
       path: '/v1/fleet/environment',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => {
         if (context.credential?.tokenClass === 'device')
@@ -1053,6 +1057,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/plan',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.plan()),
     },
@@ -1060,6 +1065,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/usage',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.usage()),
     },
@@ -1067,6 +1073,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/health',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respond(() => subsystem.health()),
     },
@@ -1074,6 +1081,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/fleet/apply',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => {
         if (context.credential?.tokenClass === 'device') {
@@ -1086,6 +1094,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/permissions',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async context =>
         await respondWith(FleetPermissionsSchema, async () => subsystem.permissions(context.credential?.tokenClass)),
@@ -1094,6 +1103,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/assets',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await respondWith(FleetAssetIndexSchema, () => subsystem.assets()),
     },
@@ -1101,6 +1111,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/assets/:assetPath',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async context =>
         await respondWith(FleetAssetDocumentSchema, () =>
@@ -1119,6 +1130,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/fleet/proposals',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async context =>
         await respondWith(
@@ -1133,6 +1145,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/fleet/proposals/:proposalId',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async context =>
         await respondWith(FleetProposalViewSchema, () =>
@@ -1153,6 +1166,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/authorize',
       scope: 'host',
+      capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
         await respondWith(FleetApprovalMintPolicySchema, () =>
@@ -1169,6 +1183,7 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/apply',
       scope: 'admin',
+      capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => {
         const body = (await parseOptionalBody(context.request, FleetProposalApplyRequestSchema)) ?? {};

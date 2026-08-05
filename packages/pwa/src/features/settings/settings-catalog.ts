@@ -214,6 +214,41 @@ export interface SettingsLinkDefinition {
 
 export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
   {
+    /**
+     * The panel a refused control sends somebody to, reachable by the words they would actually type.
+     *
+     * "Permission", "password" and "locked" are in the keyword list because that is what a person
+     * searches for after meeting a disabled control — not "grant", which is this project's own word
+     * for it. A palette that only matched the internal noun would leave the explanation unfindable
+     * by everybody who most needs it.
+     */
+    id: 'grants',
+    label: 'What devices may do',
+    description:
+      'Per-capability limits for callers that are not on the machine, why a control is refused, and the operator password that gates turning one back on. Daemon-wide — opens this daemon’s settings.',
+    href: daemon => `${daemonSettingsPath(daemon)}#daemons`,
+    keywords: [
+      'grant',
+      'grants',
+      'permission',
+      'permissions',
+      'capability',
+      'capabilities',
+      'operator password',
+      'password',
+      'unlock',
+      'locked',
+      'refused',
+      'forbidden',
+      'read only',
+      'security',
+      'remote',
+      'paired device',
+      'allow',
+      'restrict',
+    ],
+  },
+  {
     id: 'warden',
     label: 'Warden',
     description:

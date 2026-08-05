@@ -1,8 +1,8 @@
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, queryValue, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { FsError, MAX_FILE_BYTES, type FsErrorCode, type SessionFilesystem } from '../../session/filesystem/index.ts';
+import { FsError, type FsErrorCode, MAX_FILE_BYTES, type SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /**
@@ -167,6 +167,7 @@ export function sessionFilesystemRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/file',
       scope: 'admin',
+      capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await file(filesystem, sessions, context),
     },
@@ -174,6 +175,7 @@ export function sessionFilesystemRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/changes',
       scope: 'admin',
+      capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await changes(filesystem, sessions, context),
     },
@@ -181,6 +183,7 @@ export function sessionFilesystemRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs/diff',
       scope: 'admin',
+      capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await diff(filesystem, sessions, context),
     },
@@ -188,6 +191,7 @@ export function sessionFilesystemRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/fs',
       scope: 'admin',
+      capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => await list(filesystem, sessions, context),
     },

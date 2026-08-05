@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { grantRefusalNotice } from '../lib/grants.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
 import { browserFetch, DaemonResponseError, type DaemonFetch } from '../lib/runtime-models.ts';
 import { baseName, isOpenableName, isOpenablePath, parentRel } from './files-model.ts';
@@ -232,8 +233,25 @@ export const isUnknownRoute = (error: unknown): boolean =>
  */
 export const isUnsupported = (error: unknown): boolean =>
   error instanceof DaemonResponseError && error.code === 'unsupported';
-export const describeFsError = (error: unknown): string =>
-  error instanceof TypeError ? 'could not reach the daemon' : error instanceof Error ? error.message : String(error);
+/**
+ * The sentence a failed file read shows.
+ *
+ * A GRANT REFUSAL IS WORDED AS ONE. The daemon's own 403 message already names the next step, and the
+ * guidance sentence in front of it says which of the three refusals this is — the operator switched
+ * `filesystem` off, the operator password is needed, or the daemon cannot read its own decision. A
+ * pane that showed only "HTTP 403" would send a person to look at the network for a limit somebody
+ * chose on purpose.
+ */
+export const describeFsError = (error: unknown): string => {
+  const grant = grantRefusalNotice(error);
+  if (grant !== null)
+    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  return error instanceof TypeError
+    ? 'could not reach the daemon'
+    : error instanceof Error
+      ? error.message
+      : String(error);
+};
 
 /**
  * `absent` is an older daemon with no such route; `unsupported` is a daemon that HAS the route and

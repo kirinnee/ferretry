@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { SocketTicketRegistry } from '../../../../src/lib/api/socket-ticket.ts';
+import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -31,6 +32,7 @@ import {
   FakeTerminals,
   FakeWarden,
   fleetEventSubsystem,
+  grantSubsystem,
   healthSubsystem,
   human,
   learningSubsystem,
@@ -206,6 +208,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ),
   sessionAttach: attachSubsystem(),
   fleetEvents: fleetEventSubsystem(),
+  grants: grantSubsystem(),
   socketTickets: new SocketTicketRegistry({ now: () => 1_000 }, { ticket: () => `fy_ticket_${'t'.repeat(43)}` }),
 });
 
@@ -223,6 +226,12 @@ describe('the mounted daemon surface', () => {
       'POST /v1/pair',
       'POST /v1/pair/code',
       'GET /v1/pair/code/:pairingId',
+      // The grant surface. NOTE WHAT IS ABSENT: no route returns the operator password, its hash or
+      // its length — `GET /v1/grants` answers with booleans and reasons, and this list is the proof.
+      'GET /v1/grants',
+      'POST /v1/grants/unlock',
+      'PATCH /v1/grants',
+      'PUT /v1/grants/password',
       'GET /v1/health',
       'GET /v1/doctor',
       'GET /v1/fleet/accounts',
@@ -364,7 +373,12 @@ describe('the mounted daemon surface', () => {
 
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {
     // Arrange
-    const dispatcher = createMountedDispatcher(base, subsystems());
+    // REFRESHED FIRST, exactly as the composition root does before it binds an address. A service
+    // that has never read its document enforces `undetermined` — denied — on every governed route,
+    // which is the correct fail-closed reading and not the state a serving daemon is ever in.
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
 
     // Act
     const health = await dispatcher.dispatch(request({ path: '/healthz' }));
@@ -507,7 +521,9 @@ describe('the mounted daemon surface', () => {
     // Two dispatchers, one credential set. A socket dispatcher built from different credentials would
     // be a second, quieter authorization boundary, and the two would drift.
     // Arrange
-    const dispatcher = createMountedSocketDispatcher(base, subsystems());
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedSocketDispatcher(base, mounted);
     const path = '/v1/sessions/s1/terminals/0123456789ab/stream';
 
     // Act
@@ -525,5 +541,35 @@ describe('the mounted daemon surface', () => {
     // The terminal does not exist in this fixture, which still proves the route is mounted, reached,
     // and that existence is decided BEFORE any protocol switch.
     should(authorized.outcome === 'refused' ? authorized.response.status : 0).equal(404);
+  });
+
+  it('should refuse a terminal SOCKET the operator has not granted', async () => {
+    // THE HOLE THIS CLOSES. A socket table that skipped the grant check would have the daemon refuse
+    // to CREATE a terminal an operator had denied and then hand a browser the socket that drives one.
+    // Both tables go through the one authorization boundary, so there is one answer rather than two.
+    // Arrange
+    const mounted = {
+      ...subsystems(),
+      grants: grantSubsystem({ grants: { ...DEFAULT_CAPABILITY_GRANTS, terminal: { use: false, configure: false } } }),
+    };
+    await mounted.grants.refresh();
+    const sockets = createMountedSocketDispatcher(base, mounted);
+    const http = createMountedDispatcher(base, mounted);
+    const path = '/v1/sessions/s1/terminals/0123456789ab/stream';
+
+    // Act — a caller that did NOT arrive over loopback, which is the only caller grants govern.
+    const upgrade = await sockets.upgrade(request({ path, headers: human, loopback: false }));
+    const created = await http.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/terminals', headers: human, loopback: false }),
+    );
+
+    // Assert — the same refusal on both, and it names the next step rather than saying "forbidden".
+    should(upgrade.outcome === 'refused' ? upgrade.response.status : 0).equal(403);
+    should(created.status).equal(403);
+    should(created.body).match(/has not granted the UI the use of session terminals/u);
+
+    // And a LOOPBACK caller is unaffected: somebody at the machine already has the machine.
+    const local = await sockets.upgrade(request({ path, headers: human, loopback: true }));
+    should(local.outcome === 'refused' ? local.response.status : 0).equal(404);
   });
 });

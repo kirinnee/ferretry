@@ -13,7 +13,7 @@ import {
   textFile,
   treeOf,
 } from '../../session/filesystem/support.ts';
-import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
+import { CREDENTIALS, GRANTED, human, sessionDirectory, sessionView } from './support.ts';
 
 /**
  * The HTTP shape of the working-tree read.
@@ -31,7 +31,7 @@ const wardenToken = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry
 function fixture(root: FakeRootOptions = {}, git: SessionGitScript = {}) {
   const filesystem = new SessionFilesystem(new FakeRootPinner(root), new FakeSessionGit(git));
   const routes = sessionFilesystemRoutes(filesystem, sessionDirectory([sessionView('s1')]));
-  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS);
+  const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
 }
@@ -46,7 +46,7 @@ describe('the working-tree listing route', () => {
       new SessionFilesystem(pinner, new FakeSessionGit()),
       sessionDirectory([sessionView('s1')]),
     );
-    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS);
+    const dispatch = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, GRANTED);
 
     // Act
     const response = await dispatch.dispatch(request({ path: '/v1/sessions/s1/fs', headers: human }));

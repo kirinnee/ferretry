@@ -1,4 +1,5 @@
 import type { ApiActor } from './actor.ts';
+import type { CapabilityDemand } from './capability.ts';
 import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
 import type { AuthenticatedCredential } from './socket-ticket.ts';
 
@@ -54,6 +55,23 @@ export interface RoutePattern {
  *  by both tables, so one authorization boundary serves both and neither can drift. */
 export interface ScopedRoute extends RoutePattern {
   readonly scope: RouteScope;
+  /**
+   * What the OPERATOR must additionally have agreed to, when this route is one of the five things
+   * they are asked about.
+   *
+   * A SECOND, NARROWER QUESTION stacked on `scope`, never a replacement for it. `scope` is the
+   * daemon's own contract about which credential class may reach a route; this is the machine
+   * owner's answer to "and of those, which have I agreed the UI may do?". The scope check runs first
+   * and a demand is consulted only after it passes, so a grant can only ever remove authority — never
+   * hand a credential something its class was refused.
+   *
+   * ABSENT MEANS UNGOVERNED, NOT UNGUARDED. Most of the daemon's surface — sessions, tasks,
+   * attention, pins — lives inside its own state home and is not one of the five capabilities an
+   * operator is asked about; a grant list that grew to cover every route would be a second copy of
+   * the route table, and a second copy is how the two stop agreeing. What is NOT optional is the
+   * answer: a route that names a capability cannot be served by a dispatcher with no guard.
+   */
+  readonly capability?: CapabilityDemand;
 }
 
 export interface ApiRoute extends ScopedRoute {

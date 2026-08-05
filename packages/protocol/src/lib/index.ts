@@ -10,6 +10,7 @@ export * from './common.ts';
 export * from './doctor.ts';
 export * from './fleet-authorization.ts';
 export * from './fleet-changes.ts';
+export * from './grants.ts';
 export * from './learning.ts';
 export * from './pairing.ts';
 export * from './pins.ts';

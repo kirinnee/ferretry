@@ -12,9 +12,13 @@ import type {
   AnalyticsResponse,
   AttentionSnapshot,
   BrowserStatus,
+  CapabilityGrantView,
   CgroupConfigPatch,
   CgroupConfigView,
+  DaemonCapability,
   DoctorReport,
+  GrantRefusal,
+  GrantsView,
   LearningStatus,
   PinSnapshot,
   ProposalView,
@@ -27,7 +31,7 @@ import type {
   WardenConfigView,
   WardenStatusView,
 } from '@ferretry/protocol';
-import { SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
+import { DAEMON_CAPABILITIES, SECRET_SCHEMA_VERSION } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -126,6 +130,8 @@ import { DictationSettings } from '../src/features/settings/dictation-settings.t
 import { DEFAULT_DICTATION_SHORTCUT } from '../src/features/settings/dictation-shortcut.ts';
 import { DictationShortcutPicker } from '../src/features/settings/dictation-shortcut-picker.tsx';
 import { DoctorSettings } from '../src/features/settings/doctor-settings.tsx';
+import type { GrantClient } from '../src/features/settings/grants-api.ts';
+import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
@@ -989,6 +995,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         return WARDEN;
       }}
       createWardenClient={HARNESS_WARDEN_CLIENT}
+      createGrantClient={HARNESS_GRANT_CLIENT}
       daemonSettingsTabs={HARNESS_DAEMON_SETTINGS_TABS}
       onSelectDaemon={setActiveDaemonId}
       onRenameDaemon={(daemonId, label) =>
@@ -1334,6 +1341,116 @@ const SECRETS_DAMAGED: SecretList = {
     'this daemon holds sealed secrets and the key that opens them is gone; restore the key file or delete the vault and set the secrets again',
   secrets: [],
   references: [{ name: 'ANTHROPIC_API_KEY', origin: 'config/daemon.json → secretEnvironment.AUTH', resolved: false }],
+};
+
+/**
+ * The grant fixtures, as a PAIRED REMOTE browser sees them.
+ *
+ * A loopback caller reads five allowed rows and has nothing to review, so the interesting states are
+ * all on this side of the boundary: a capability the operator switched off, a `configure` axis behind
+ * the operator password, and a machine with no password at all — where every configure reason comes
+ * back `ungated` and the disclosure is the whole point of the screen.
+ */
+const grantEntry = (
+  capability: DaemonCapability,
+  granted: { use: boolean; configure: boolean },
+  useRefusal: GrantRefusal,
+  configureRefusal: GrantRefusal,
+  origin: 'default' | 'config file' = 'default',
+): CapabilityGrantView => ({
+  capability,
+  use: useRefusal === 'granted' || useRefusal === 'ungated',
+  configure: configureRefusal === 'granted' || configureRefusal === 'ungated',
+  granted,
+  useRefusal,
+  configureRefusal,
+  origin,
+});
+
+const on = { use: true, configure: true };
+
+/** Frozen, so an unlock countdown renders the same number in every capture. */
+const HARNESS_GRANT_NOW_MS = Date.parse('2026-01-01T00:00:00.000Z');
+
+/** A cautious operator: a password is set, so every configure axis is behind an unlock. */
+const HARNESS_GRANTS_LOCKED: GrantsView = {
+  capabilities: [
+    grantEntry('fleet', on, 'granted', 'locked'),
+    grantEntry('terminal', { use: false, configure: false }, 'not-granted', 'not-granted', 'config file'),
+    grantEntry('browser', on, 'granted', 'locked'),
+    grantEntry('filesystem', on, 'granted', 'locked', 'config file'),
+    grantEntry('warden', { use: true, configure: false }, 'granted', 'not-granted', 'config file'),
+  ],
+  passwordSet: true,
+  unlocked: false,
+  attemptsRemaining: 5,
+};
+
+/** The permissive default: nothing is standing behind the configure controls, and the screen says so. */
+const HARNESS_GRANTS_UNGATED: GrantsView = {
+  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'ungated')),
+  passwordSet: false,
+  unlocked: false,
+};
+
+/** Five wrong passwords: the daemon has stopped checking, so no prompt is offered at all. */
+const HARNESS_GRANTS_RATE_LIMITED: GrantsView = {
+  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'granted', 'rate-limited')),
+  passwordSet: true,
+  unlocked: false,
+  attemptsRemaining: 0,
+  lockedUntil: '2026-01-01T00:15:00.000Z',
+};
+
+/** A daemon that cannot read its own grant document: denied, loudly, and not shown as permissive. */
+const HARNESS_GRANTS_UNDETERMINED: GrantsView = {
+  capabilities: DAEMON_CAPABILITIES.map(capability => grantEntry(capability, on, 'undetermined', 'undetermined')),
+  passwordSet: true,
+  unlocked: false,
+};
+
+/**
+ * The grant client the settings harness mounts.
+ *
+ * The unreachable pairing THROWS, so the "limits unavailable" panel is reviewable: a failed read must
+ * never render as five allowed rows, and that is exactly the state a screenshot has to prove.
+ */
+const HARNESS_GRANT_CLIENT: GrantClientFactory = async connection => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let view = HARNESS_GRANTS_LOCKED;
+  return {
+    request: (async (path: string, _schema: unknown, init?: RequestInit) => {
+      if (path.endsWith('/unlock')) {
+        const password = String(JSON.parse(String(init?.body)).password);
+        // One password works, so the unlock path and the wrong-password path are both reviewable by
+        // hand when this harness is served rather than screenshotted.
+        if (password !== 'ferretry-operator')
+          throw new FyHttpError(
+            'that is not this machine’s operator password; 4 attempts remaining before this daemon stops checking',
+            401,
+            'grant_wrong_password',
+          );
+        view = { ...view, unlocked: true, capabilities: HARNESS_GRANTS_UNGATED.capabilities, passwordSet: true };
+        return { token: 'fy_unlock_harnessharnessharness1', expiresAt: '2026-01-01T00:05:00.000Z', ttlSeconds: 300 };
+      }
+      if (init?.method === 'PATCH') {
+        const patch = JSON.parse(String(init.body)) as Partial<Record<DaemonCapability, Partial<typeof on>>>;
+        view = {
+          ...view,
+          capabilities: view.capabilities.map(entry => {
+            const change = patch[entry.capability];
+            if (change === undefined) return entry;
+            const granted = {
+              use: change.use ?? entry.granted.use,
+              configure: change.configure ?? entry.granted.configure,
+            };
+            return { ...entry, granted, origin: 'config file' as const };
+          }),
+        };
+      }
+      return view;
+    }) as GrantClient['request'],
+  };
 };
 
 /** The settings harness owns its Warden fixture too: no visual review should
@@ -4703,6 +4820,86 @@ function Shell() {
       render: () => (
         <div data-harness="secrets-unreachable">
           <SecretsSurface
+            connection={daemon}
+            createClient={async () => {
+              throw new Error('this daemon did not answer');
+            }}
+          />
+        </div>
+      ),
+    },
+    {
+      // A cautious operator's machine: `terminal` switched off entirely, `warden` readable but not
+      // configurable, and every other configure axis behind the operator password. Each disabled
+      // control carries its own reason — that is the whole unit, in one frame.
+      label: 'Capability limits — password set',
+      render: () => (
+        <div data-harness="grants-locked">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_LOCKED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            onChange={() => {}}
+            onUnlock={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // The permissive default, and the sentence that is owed exactly once: nothing is standing
+      // behind these configure controls. It is stated where the controls are, not as a modal.
+      label: 'Capability limits — nothing behind them',
+      render: () => (
+        <div data-harness="grants-ungated">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_UNGATED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            onChange={() => {}}
+            onUnlock={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // Five wrong passwords. No prompt is offered at all — one here would invite five more guesses
+      // at a daemon that has already stopped listening — and the deadline is on screen instead.
+      label: 'Capability limits — locked out',
+      render: () => (
+        <div data-harness="grants-rate-limited">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_RATE_LIMITED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            unlockFailure={{ message: 'too many wrong operator passwords', retryable: false, attemptsRemaining: 0 }}
+            onChange={() => {}}
+            onUnlock={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // A daemon that cannot read its own grant document. Denied loudly, and NOT rendered as
+      // permissive: damaged state is not empty state, and unknown is never permitted.
+      label: 'Capability limits — daemon cannot say',
+      render: () => (
+        <div data-harness="grants-undetermined">
+          <GrantsCard
+            connection={daemon}
+            view={HARNESS_GRANTS_UNDETERMINED}
+            nowMs={HARNESS_GRANT_NOW_MS}
+            onChange={() => {}}
+            onUnlock={() => {}}
+          />
+        </div>
+      ),
+    },
+    {
+      // A read this browser could not make is a stated refusal, never five allowed rows.
+      label: 'Capability limits — unreadable',
+      render: () => (
+        <div data-harness="grants-unreachable">
+          <GrantsSurface
             connection={daemon}
             createClient={async () => {
               throw new Error('this daemon did not answer');

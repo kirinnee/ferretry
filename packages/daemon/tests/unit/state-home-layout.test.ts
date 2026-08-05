@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  analyticsIndexFiles,
   CURRENT_LAYOUT_VERSION,
   createFoundationPaths,
   createSessionPaths,
@@ -8,7 +9,6 @@ import {
   decideLayout,
   decideSessionMarker,
   InvalidStateHomeError,
-  analyticsIndexFiles,
   indexFiles,
   isPathInside,
   parseSessionId,
@@ -95,6 +95,14 @@ describe('foundation paths', () => {
       // the same one. A second identity would carry a second fingerprint, and every paired browser
       // pins the first.
       daemonIdentity: '/tmp/fy-home/state/daemon-identity.json',
+      // Under `state`, deliberately NOT under `config`: the configuration document is the file that
+      // travels into backups, dotfile repositories and screen shares, and a password verifier must
+      // not make that journey. The grants it gates DO live in the configuration document, where
+      // `--print-config` can report them with their provenance.
+      operatorPassword: '/tmp/fy-home/state/operator-password.json',
+      // Keyed by daemon by construction: a state home has exactly one owner, so one daemon's record
+      // of who changed which grant can never be read as another's.
+      grantAudit: '/tmp/fy-home/state/grant-audit.jsonl',
     });
     should(requiredLayoutDirectories(actual)).deepEqual([
       '/tmp/fy-home',

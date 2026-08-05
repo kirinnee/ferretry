@@ -31,6 +31,7 @@ import type {
   FleetRefusalView,
   FleetWriteOperation,
 } from './fleet-api.ts';
+import type { GrantRefusalNotice } from '../../lib/grants.ts';
 import type { FleetHarnessKind, FleetHarnessView } from './fleet-model.ts';
 
 /** A read that either produced evidence or produced a stated refusal. There is no third answer. */
@@ -49,7 +50,12 @@ export type FleetInventory =
   | { readonly kind: 'uninitialized'; readonly detail: string }
   | { readonly kind: 'not-applied'; readonly detail: string }
   | { readonly kind: 'damaged'; readonly detail: string }
-  | { readonly kind: 'forbidden'; readonly detail: string }
+  /**
+   * The read was refused. `grant` is present when the OPERATOR refused it rather than the credential
+   * class — three different situations a person acts on differently, which a single "may not read the
+   * fleet" sentence collapses into a dead end.
+   */
+  | { readonly kind: 'forbidden'; readonly detail: string; readonly grant?: GrantRefusalNotice }
   | { readonly kind: 'unreachable'; readonly detail: string };
 
 export const classifyInventory = (
@@ -58,7 +64,12 @@ export const classifyInventory = (
 ): FleetInventory => {
   if (manifest.ok) return { kind: 'live', manifest: manifest.value };
   const refusal = manifest.refusal;
-  if (refusal.kind === 'forbidden') return { kind: 'forbidden', detail: refusal.detail };
+  if (refusal.kind === 'forbidden')
+    return {
+      kind: 'forbidden',
+      detail: refusal.detail,
+      ...(refusal.grant === undefined ? {} : { grant: refusal.grant }),
+    };
   if (refusal.kind === 'unreachable') return { kind: 'unreachable', detail: refusal.detail };
   if (refusal.kind !== 'not-applied') return { kind: 'damaged', detail: refusal.detail };
   // The manifest is absent. Whether that is a first run or an unapplied edit is the config's answer.

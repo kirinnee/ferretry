@@ -644,8 +644,8 @@ try {
           // at both widths, rather than the sheet's, which are rendered only
           // once that sheet has been opened.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 8)
-            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 8`);
+          if (daemonPanels !== 9)
+            fail(`settings fixture rendered ${daemonPanels} daemon panels instead of the production 9`);
 
           if (viewport.name === 'mobile') {
             // The level-three picker: the resting trigger that names the open
@@ -660,8 +660,8 @@ try {
             const panelPicker = page.getByRole('dialog', { name: 'Choose a panel' });
             await panelPicker.waitFor({ state: 'visible' });
             const openPanelChoices = await panelPicker.locator('[data-daemon-panel-choice]').count();
-            if (openPanelChoices !== 8)
-              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 8`);
+            if (openPanelChoices !== 9)
+              fail(`the daemon panel sheet listed ${openPanelChoices} panels instead of the production 9`);
             const panelPickerOpenTarget = join(outDir, 'settings-daemon-panel-picker-open-mobile.png');
             await page.screenshot({ path: panelPickerOpenTarget });
             process.stdout.write(`📸 Settings daemon panel picker open -> ${panelPickerOpenTarget}\n`);
@@ -681,6 +681,9 @@ try {
             // "Reading…" or "Failed to fetch" would be a regression to review,
             // not a state to accept.
             ['Secrets', 'secrets', '[data-testid="secrets-card"]'],
+            // The live panel, inside the frame, because that is where a reader meets it. The gallery
+            // cards prove the individual states; this proves it is reachable and fits both widths.
+            ['What devices may do', 'grants', '[data-grant-surface="harness-daemon"]'],
             ['Environment', 'environment', '[aria-label="Target environment entries"]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
@@ -831,6 +834,36 @@ try {
             await page.locator(selector).screenshot({ path: target });
             process.stdout.write(`📸 Secrets ${name} ${viewport.name} -> ${target}\n`);
           }
+          // The operator's limits, in the five states a paired browser actually meets. Every one of
+          // them is a frame where a control is refused, so every one has to show the reason beside it
+          // — that is the thing being reviewed, not the switches.
+          //
+          // A TALL VIEWPORT IS BORROWED, for the reason the attention ledger borrows one: five
+          // capabilities × two axes × a reason under each is far taller than a phone, and Chrome may
+          // cull unpainted rows during an element screenshot. Captured at 390 wide and 844 high, the
+          // card came out clipped at the second row and the desktop shot stitched the NEXT card's
+          // content under this one's name — an element capture that is confidently wrong rather than
+          // obviously short, which is the worse of the two failures.
+          await page.setViewportSize({ width: viewport.width, height: 4_000 });
+          for (const [name, selector] of [
+            [`grants-locked`, `[data-harness="grants-locked"]`],
+            [`grants-ungated`, `[data-harness="grants-ungated"]`],
+            [`grants-rate-limited`, `[data-harness="grants-rate-limited"]`],
+            [`grants-undetermined`, `[data-harness="grants-undetermined"]`],
+            [`grants-unreachable`, `[data-harness="grants-unreachable"]`],
+          ] as const) {
+            const frame = page.locator(selector);
+            await frame.scrollIntoViewIfNeeded();
+            // Settled content, not a spinner: every one of these frames is rendered from a fixture, so
+            // a capture still showing "Reading…" would be a regression to review rather than a state.
+            await frame.locator('[data-grant-surface], [aria-label="Capability grants unavailable"]').first().waitFor({
+              state: 'visible',
+            });
+            const target = join(outDir, `${name}-${viewport.name}.png`);
+            await frame.screenshot({ path: target });
+            process.stdout.write(`📸 Capability limits ${name} ${viewport.name} -> ${target}\n`);
+          }
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
           const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
           await page.locator('[data-task-graph]').screenshot({ path: taskDagTarget });
           process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);

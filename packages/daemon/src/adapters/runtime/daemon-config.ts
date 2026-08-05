@@ -1,11 +1,34 @@
+import { type CapabilityGrants, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   defaultDaemonConfigDocument,
-  parseDaemonConfig,
   type FileSystemPort,
   type FoundationPaths,
+  parseDaemonConfig,
 } from '../../lib/index.ts';
+
+/**
+ * A configuration document this daemon will not act on, named so a person can go and fix it.
+ *
+ * IT EXISTS BECAUSE REFUSING IS ONLY HALF THE CONTRACT. A malformed document already stopped the
+ * daemon — the schema is strict and nothing falls back to a default — but what reached the operator
+ * was a raw validation dump with no file path in it, which is the "non-zero exit that explains
+ * nothing" this package has already corrected once for occupied addresses. The cause travels intact
+ * underneath, because the field name in it is the actual answer.
+ */
+export class DaemonConfigDocumentError extends Error {
+  constructor(
+    readonly path: string,
+    cause: unknown,
+  ) {
+    super(
+      `${path} could not be read as a configuration document, so this daemon will not act on it: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    this.name = 'DaemonConfigDocumentError';
+    this.cause = cause;
+  }
+}
 
 /** Durable daemon configuration adapter; the state filesystem keeps the document private and atomic. */
 export class FileDaemonConfig {
@@ -43,8 +66,8 @@ export class FileDaemonConfig {
   async peek(): Promise<{ readonly document: Record<string, unknown> | undefined; readonly config: DaemonConfig }> {
     const text = await this.files.readText(this.paths.daemonConfig);
     if (text === undefined) return { document: undefined, config: parseDaemonConfig({}) };
-    const document = JSON.parse(text) as Record<string, unknown>;
-    return { document, config: parseDaemonConfig(document) };
+    const document = this.parsed(text) as Record<string, unknown>;
+    return { document, config: this.configured(document) };
   }
 
   async load(): Promise<DaemonConfig> {
@@ -54,7 +77,7 @@ export class FileDaemonConfig {
       await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify(document, null, 2)}\n`);
       return parseDaemonConfig(document);
     }
-    return parseDaemonConfig(JSON.parse(text));
+    return this.configured(this.parsed(text));
   }
 
   /**
@@ -72,7 +95,81 @@ export class FileDaemonConfig {
    */
   async record(port: number): Promise<void> {
     const text = await this.files.readText(this.paths.daemonConfig);
-    const document = DaemonConfigDocumentSchema.parse(text === undefined ? {} : JSON.parse(text));
+    const document = this.document(text);
     await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, port }, null, 2)}\n`);
+  }
+
+  /**
+   * What this machine has agreed a non-loopback caller may do.
+   *
+   * A DOCUMENT WITH NO `grants` KEY IS A COMPLETE ANSWER, not a missing one: the schema fills every
+   * axis with the product default, so an operator who has never thought about this gets the permissive
+   * behaviour the product promises. A document whose `grants` key is WRONG — an unknown capability, a
+   * string where a boolean belongs — throws, and the subsystem above turns that into denied rather
+   * than into a guess. Silence and damage are different things.
+   */
+  async readGrants(): Promise<CapabilityGrants> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    return this.document(text).grants;
+  }
+
+  /**
+   * Which capabilities the operator actually NAMED in the document.
+   *
+   * Read from the RAW document rather than the parsed one, because parsing has already replaced every
+   * omission with a default — and an operator may legitimately write a value identical to one. So
+   * provenance cannot be recovered by comparison; it has to be read from what is on disk. It is the
+   * same distinction `--print-config` exists to draw for every other value.
+   */
+  async writtenGrants(): Promise<readonly DaemonCapability[]> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    if (text === undefined) return [];
+    const written = (this.parsed(text) as { readonly grants?: Record<string, unknown> | null }).grants;
+    if (written === undefined || written === null) return [];
+    return DAEMON_CAPABILITIES.filter(capability => written[capability] !== undefined);
+  }
+
+  /**
+   * Records a change to the grants.
+   *
+   * The document is RE-READ and exactly one key rewritten, for the reason `record` does the same: an
+   * operator's own fields must survive a write this daemon makes, and rewriting from a parsed
+   * configuration would persist derived addresses that then stop tracking what they were derived from.
+   */
+  async writeGrants(grants: CapabilityGrants): Promise<void> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    const document = this.document(text);
+    await this.files.writeTextAtomic(this.paths.daemonConfig, `${JSON.stringify({ ...document, grants }, null, 2)}\n`);
+  }
+
+  /**
+   * Every read of this file goes through these three, so a malformed document is refused with the
+   * SAME sentence wherever it is met — the boot, the two queries, and the grant surface.
+   *
+   * The JSON parse and the schema parse are both wrapped, because they fail for the same reason from
+   * an operator's point of view: the file they edited is not one this daemon can act on. Splitting
+   * them would give the same mistake two different faces.
+   */
+  private parsed(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new DaemonConfigDocumentError(this.paths.daemonConfig, error);
+    }
+  }
+
+  private document(text: string | undefined): ReturnType<typeof DaemonConfigDocumentSchema.parse> {
+    const raw = text === undefined ? {} : this.parsed(text);
+    const parsed = DaemonConfigDocumentSchema.safeParse(raw);
+    if (!parsed.success) throw new DaemonConfigDocumentError(this.paths.daemonConfig, parsed.error);
+    return parsed.data;
+  }
+
+  private configured(document: unknown): DaemonConfig {
+    try {
+      return parseDaemonConfig(document);
+    } catch (error) {
+      throw new DaemonConfigDocumentError(this.paths.daemonConfig, error);
+    }
   }
 }

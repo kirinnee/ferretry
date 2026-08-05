@@ -1,5 +1,6 @@
 import { resolveApiActor } from './actor.ts';
 import { type ApiCredentials, authenticate, bearerToken } from './authentication.ts';
+import { type CapabilityGuard, grantRefusalCode } from './capability.ts';
 import { ApiError } from './error.ts';
 import { type ApiRequest, type ApiResponse, headerValue, queryValue } from './http.ts';
 import { errorResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
@@ -15,6 +16,9 @@ export const CLIENT_HEADER = 'x-ferretry-client';
 /** Query parameter carrying a token for WebSocket upgrades, which cannot set headers. Honoured for
  *  loopback peers only. */
 export const TOKEN_QUERY_PARAMETER = 'token';
+/** The unlock a `configure`-axis caller presents. A header, never a query parameter: a URL reaches
+ *  every proxy's access log, and an unlock in a log outlives its five minutes. */
+export const OPERATOR_UNLOCK_HEADER = 'x-ferretry-operator-unlock';
 
 /** What the authorization boundary decided about one request. */
 export type RouteAuthorization<TRoute extends ScopedRoute> =
@@ -47,6 +51,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   credentials: ApiCredentials,
   request: ApiRequest,
   tickets?: SocketTicketRedeemer,
+  guard?: CapabilityGuard,
 ): RouteAuthorization<TRoute> {
   const lookup = router.lookup(request.method, request.path);
   if (lookup.kind === 'matched' && lookup.route.scope === 'public')
@@ -99,6 +104,40 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     sessionId: headerValue(request, SESSION_ID_HEADER),
     client: headerValue(request, CLIENT_HEADER),
   });
+  /**
+   * The OPERATOR's answer, asked last and able only to take away.
+   *
+   * The order is the substance. Authentication has already happened, the route's own scope has
+   * already been enforced, and the actor has already been derived from evidence the caller cannot
+   * forge — so by the time a grant is consulted the request is one this daemon WOULD have served, and
+   * the only thing this can do is decline it. That is the invariant, made structural: there is no
+   * branch here that produces `authorized` for a request the code above refused.
+   *
+   * IT FAILS CLOSED ON A MISSING GUARD. A route that names a capability and a dispatcher that was
+   * built without a guard is a wiring mistake, and the safe reading of "nobody can tell me whether
+   * this is allowed" is that it is not. Serving it would be the exact damaged-state-as-empty-state
+   * defect this product has already been bitten by three times.
+   */
+  const demand = lookup.route.capability;
+  if (demand !== undefined) {
+    const decision = guard?.decide(demand, {
+      // The TRANSPORT's answer, never a header's. A relayed hop terminates on this very host, so
+      // anything derived from an address would read as local and hand a remote caller the machine.
+      loopback: request.loopback,
+      actor,
+      unlock: headerValue(request, OPERATOR_UNLOCK_HEADER),
+    }) ?? { allowed: false, refusal: 'undetermined' as const };
+    if (!decision.allowed)
+      return {
+        kind: 'refused',
+        response: errorResponse(
+          403,
+          guard?.explain(demand, decision.refusal) ??
+            `this daemon cannot say whether the UI may use ${demand.capability}, so it is refusing`,
+          grantRefusalCode(decision.refusal),
+        ),
+      };
+  }
   return {
     kind: 'authorized',
     route: lookup.route,
@@ -111,10 +150,13 @@ export class ApiDispatcher {
   constructor(
     private readonly router: ApiRouter,
     private readonly credentials: ApiCredentials,
+    /** The operator's per-capability decision. Absent only in tables that name no capability — a
+     *  governed route reached through a guardless dispatcher is refused, never served. */
+    private readonly guard?: CapabilityGuard,
   ) {}
 
   async dispatch(request: ApiRequest): Promise<ApiResponse> {
-    const authorized = authorizeRequest(this.router, this.credentials, request);
+    const authorized = authorizeRequest(this.router, this.credentials, request, undefined, this.guard);
     if (authorized.kind === 'unrouted') return unknownRouteResponse(request.method, request.path);
     if (authorized.kind === 'refused') return authorized.response;
     return await run(authorized.route, authorized.context);

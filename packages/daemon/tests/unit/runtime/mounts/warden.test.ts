@@ -10,7 +10,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { WardenError, wardenRoutes } from '../../../../src/lib/runtime/mounts/warden.ts';
 import { request } from '../../api/support.ts';
-import { CREDENTIALS, FakeWarden, human } from './support.ts';
+import { CREDENTIALS, FakeWarden, GRANTED, human } from './support.ts';
 
 /**
  * Fleet supervision, over the real dispatcher and the real credentials.
@@ -24,7 +24,7 @@ import { CREDENTIALS, FakeWarden, human } from './support.ts';
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 function dispatcher(subsystem = new FakeWarden()): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(wardenRoutes(subsystem)), CREDENTIALS);
+  return new ApiDispatcher(new ApiRouter(wardenRoutes(subsystem)), CREDENTIALS, GRANTED);
 }
 
 const get = (path: string, headers: Readonly<Record<string, string>> = human) =>

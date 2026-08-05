@@ -1,14 +1,14 @@
 import {
   WardenConfigPatchSchema,
-  WardenRunRequestSchema,
   type WardenConfigView,
+  WardenRunRequestSchema,
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { queryValue, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, queryValue } from '../../api/http.ts';
 import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
@@ -152,6 +152,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/warden/status',
       scope: 'warden',
+      capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async () => jsonResponse(await subsystem.status().catch(refuse)),
     },
@@ -159,6 +160,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/warden/verdicts',
       scope: 'warden',
+      capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async () => jsonResponse(await subsystem.verdicts().catch(refuse)),
     },
@@ -166,6 +168,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/warden/report',
       scope: 'warden',
+      capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await report(subsystem, context),
     },
@@ -173,6 +176,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/warden/run',
       scope: 'admin',
+      capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await run(subsystem, context),
     },
@@ -180,6 +184,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/warden/config',
       scope: 'admin',
+      capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async () => jsonResponse(await subsystem.config().catch(refuse)),
     },
@@ -187,6 +192,7 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/warden/config',
       scope: 'admin',
+      capability: { capability: 'warden', axis: 'configure' },
       noStore: true,
       handle: async context => await patchConfig(subsystem, context),
     },

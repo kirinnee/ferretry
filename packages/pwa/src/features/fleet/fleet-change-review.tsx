@@ -180,6 +180,17 @@ export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalV
           <code className="ml-auto font-mono text-meta text-err">{refusal.code}</code>
         )}
       </div>
+      {/* The OPERATOR's reason first, in prose, because it is the one a person can act on: it says
+          whether a capability was switched off, whether the password is needed, or whether the daemon
+          has lost its own decision. The daemon's own sentence stays below it, whole. */}
+      {refusal.grant === undefined ? null : (
+        <p
+          className="m-0 mt-2 text-ui font-semibold leading-base text-err"
+          data-fleet-refusal-grant={refusal.grant.refusal}
+        >
+          {refusal.grant.guidance.explanation}
+        </p>
+      )}
       <pre className="m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-meta leading-base text-err">
         {refusal.detail}
       </pre>

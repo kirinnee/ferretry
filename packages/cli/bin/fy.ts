@@ -48,6 +48,7 @@ import { FileDaemonSnapshotStore } from '../src/adapters/daemon/snapshot-store';
 import { SystemFleetClock } from '../src/adapters/fleet/clock';
 import { FileFleetManifestSource } from '../src/adapters/fleet/manifest-file';
 import { SystemUsageClock } from '../src/adapters/fleet/usage-probe';
+import { StdinOperatorPassword } from '../src/adapters/grants/stdin-operator-password';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
@@ -84,6 +85,9 @@ import { registerFleetCommands } from '../src/lib/fleet/commands';
 import { FleetController } from '../src/lib/fleet/controller';
 import { ProtocolFleetAuthorizationGateway, ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { defaultConfigPath, resolveFleetLayout } from '../src/lib/fleet/layout';
+import { registerGrantCommands } from '../src/lib/grants/commands';
+import { GrantController } from '../src/lib/grants/controller';
+import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
@@ -509,6 +513,20 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // The daemon group is the one group that does NOT take the shared client: it manages a local
   // process, and it must answer "is the daemon up?" on a host that has no token yet.
   ({ program, world }) => registerDaemonCommands(program, () => buildDaemonController(world.environment, world.io)),
+  // The grant verbs mount onto the group above and DO take the shared client, because unlike every
+  // other daemon verb they change what the daemon serves rather than whether it is running. They are
+  // registered after it for that reason: the group has to exist before verbs can be added to it.
+  ({ program, world, client }) =>
+    registerGrantCommands(
+      program,
+      () =>
+        new GrantController({
+          gateway: new ProtocolGrantGateway(client),
+          passwords: new StdinOperatorPassword(),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
   // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is
   // mostly a QR, and tinting the one image the onboarding depends on is a risk with nothing to gain.
   ({ program, world, client }) =>
