@@ -22,6 +22,16 @@ set -euo pipefail
 # formatter that repairs invalid content into valid content defeats a check that only knows what the
 # author typed, and the doc that argues against stacked contradictions is the doc it happened in.
 #
+# ## DO NOT SIMPLIFY THE PATTERN LIST. MEASURED AGAINST THE SHIPPED FILE:
+#
+#   grep the marker somebody REPORTS   (raw '>>>>>>>')         0 of 3 artefacts
+#   grep all three raw markers                                 2 of 3 — misses the laundered one
+#   this list                                                  3 of 3
+#
+# The laundered patterns are not belt-and-braces on top of the raw ones. In a repository that formats
+# every file on commit they are the ONLY thing that still matches, so a raw-marker-only gate is not
+# partial cover — it is no cover for the artefact most likely to survive review.
+#
 # ## WHAT IT REFUSES
 #
 # Raw markers at the start of a line, in any tracked file, and the Markdown-laundered blockquote form
