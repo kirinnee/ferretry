@@ -60,6 +60,7 @@ export * from '../features/browser/unified-browser-surface.tsx';
 export * from '../features/carrier/active-carrier-card.tsx';
 export * from '../features/fleet/fleet-model.ts';
 export * from '../features/fleet/fleet-surface.tsx';
+export * from '../features/fleet/remote-login-surface.tsx';
 export * from '../features/learning/learning-header.tsx';
 export type { LearningPageProps, LearningReviewProps, LearningStrength } from '../features/learning/learning-page.tsx';
 export {
