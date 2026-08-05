@@ -12,7 +12,7 @@
  */
 
 import { FileText, FlaskConical, KeyRound, Lock, Plus, Sparkles, Trash2, Wrench } from 'lucide-react';
-import { useId } from 'react';
+import { type RefObject, useId, useRef } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { derivedWrapper, draftModels, type FleetAccountDraft, type FleetLayerDraft } from './fleet-change-model.ts';
 import { type FleetHarnessKind, fleetHarnessLabel } from './fleet-model.ts';
@@ -67,6 +67,19 @@ export interface FleetLayerFieldsProps {
  * link, so a relative path inside the tree is the whole of what a browser is allowed to name.
  */
 export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFieldsProps) {
+  /**
+   * Removing a row unmounts the button that was clicked, so the browser drops focus to `<body>` and a
+   * keyboard reader loses the form entirely. Each list keeps a ref to its own "Add" control — the one
+   * element in that list that every removal leaves standing — and hands focus there. It is also what a
+   * person reaches for next: the reason to delete a row is usually to add a different one.
+   */
+  const addSkillRef = useRef<HTMLButtonElement>(null);
+  const addVariableRef = useRef<HTMLButtonElement>(null);
+  const removed = (next: FleetLayerDraft, anchor: RefObject<HTMLButtonElement | null>): void => {
+    onChange(next);
+    // After the render that removed the row, not before it.
+    queueMicrotask(() => anchor.current?.focus());
+  };
   // Instance-scoped ids. Two of these mount together in the harness gallery, and duplicate ids break
   // `<label for>`: clicking one form's label focused the other form's input.
   const uid = useId();
@@ -175,7 +188,9 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
                   data-variant="danger"
                   disabled={disabled}
                   aria-label={`Remove skill document ${index + 1}`}
-                  onClick={() => onChange({ ...layer, skills: layer.skills.filter((_, at) => at !== index) })}
+                  onClick={() =>
+                    removed({ ...layer, skills: layer.skills.filter((_, at) => at !== index) }, addSkillRef)
+                  }
                 >
                   <Trash2 size={14} aria-hidden="true" />
                 </button>
@@ -202,6 +217,7 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
           ))}
         </ul>
         <button
+          ref={addSkillRef}
           type="button"
           className="kt-btn kt-btn--sm mt-3"
           disabled={disabled}
@@ -283,7 +299,7 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
                 data-variant="danger"
                 disabled={disabled}
                 aria-label={`Remove environment variable ${index + 1}`}
-                onClick={() => onChange({ ...layer, env: layer.env.filter((_, at) => at !== index) })}
+                onClick={() => removed({ ...layer, env: layer.env.filter((_, at) => at !== index) }, addVariableRef)}
               >
                 <Trash2 size={14} aria-hidden="true" />
               </button>
@@ -291,6 +307,7 @@ export function FleetLayerFields({ layer, onChange, disabled }: FleetLayerFields
           ))}
         </ul>
         <button
+          ref={addVariableRef}
           type="button"
           className="kt-btn kt-btn--sm mt-3"
           disabled={disabled}
@@ -329,6 +346,14 @@ export interface FleetAccountFormProps {
   readonly onCancel: () => void;
   readonly problems: readonly string[];
   readonly disabled: boolean;
+  /**
+   * The asset listing this form needs before it can judge a path is still in flight.
+   *
+   * A new account writes asset text, so the form cannot be used until the daemon has said what is already
+   * in the tree — and on a relayed connection that is a visible wait. Saying so is the difference between
+   * a form that is loading and a form that is broken.
+   */
+  readonly loading: boolean;
   /** The harness `defaultFleetHarness` picked from positive evidence, when there is any. */
   readonly suggestion: FleetHarnessKind | undefined;
   /** Lanes this fleet declares. An account can only be added to one that exists. */
@@ -344,6 +369,7 @@ export function FleetAccountForm({
   onCancel,
   problems,
   disabled,
+  loading,
   suggestion,
   variants,
 }: FleetAccountFormProps) {
@@ -355,6 +381,7 @@ export function FleetAccountForm({
     <form
       data-fleet-account-form=""
       aria-labelledby={id('-account-form-heading')}
+      aria-busy={loading}
       onSubmit={event => {
         event.preventDefault();
         onSubmit();
@@ -369,6 +396,11 @@ export function FleetAccountForm({
           and authorize the change.
         </p>
       </div>
+      {loading ? (
+        <p className="m-0 px-panel py-3 text-ui text-faint" data-fleet-account-loading="">
+          Reading what is already in the asset tree…
+        </p>
+      ) : null}
 
       <section className={SECTION}>
         <fieldset className="m-0 border-0 p-0" aria-label="Harness">
@@ -392,7 +424,9 @@ export function FleetAccountForm({
               >
                 <input
                   type="radio"
-                  name="fleet-harness"
+                  // Instance-scoped like every other identifier in these forms: two co-existing account
+                  // forms would otherwise silently share one radio group.
+                  name={id('-harness')}
                   className="sr-only"
                   value={harness}
                   checked={draft.harness === harness}
@@ -559,6 +593,10 @@ export function FleetLayerForm({
     <form
       data-fleet-layer-form={wrapper}
       aria-labelledby={id('-layer-form-heading')}
+      // The same truth the sentence below states, in the attribute assistive technology reads. Both forms
+      // carry it, because a person told "reading the assets…" by one and nothing by the other is being
+      // told the second one is broken.
+      aria-busy={loading}
       onSubmit={event => {
         event.preventDefault();
         onSubmit();

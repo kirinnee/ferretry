@@ -1198,6 +1198,19 @@ body {
   color: var(--accent);
 }
 
+/* A `.kt-tab` LABEL wrapping its own radio, which is how the fleet harness chooser is built.
+   `sr-only` clips the input to a 1px box, so the browser paints the real `:focus-visible` ring on
+   something nobody can see — WCAG 2.4.7, operable but not locatable. `.kt-tab`'s own
+   `outline: var(--outline-always)` cannot cover it: that token resolves to `none` in every family
+   except High Contrast. So the ring is drawn from the focus tokens directly, which every theme
+   defines, and it is keyed off the INPUT's `:focus-visible` so a mouse click does not draw it.
+   `:focus-within` would; `:has(> input:focus-visible)` is the precise form. Precedent for the shape:
+   `.kt-chrome:focus-within` above. */
+.kt-tab:has(> input:focus-visible) {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
 /* ---- details-sheet tab strip --------------------------------------------
    The `⋯` sheet's tabs, as REAL tabs rather than a row of buttons. The reader's
    complaint was that they read as buttons and that the strip scrolled sideways;

@@ -26,6 +26,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react';
+import { useId } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import type { FleetApplyOutcome, FleetManifestAccountView, FleetProposalView, FleetRefusalView } from './fleet-api.ts';
@@ -85,16 +86,19 @@ export function FleetLiveRoster({
   readonly onEdit: (account: FleetManifestAccountView) => void;
   readonly editable: boolean;
 }) {
+  // Instance-local: a page may hold more than one cockpit, so a roster may appear more than once.
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
   return (
     <section
       className="kt-panel overflow-hidden border-l-4 border-l-border-strong"
       data-fleet-side="live"
-      aria-labelledby="fleet-live-heading"
+      aria-labelledby={id('-live-heading')}
     >
       <header className="border-b border-border-soft bg-surface-2 px-panel py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <ServerCog size={16} className="shrink-0 text-fg-soft" aria-hidden="true" />
-          <h2 id="fleet-live-heading" className="m-0 text-title font-semibold text-fg">
+          <h2 id={id('-live-heading')} className="m-0 text-title font-semibold text-fg">
             Live host
           </h2>
           <span className="kt-badge ml-auto">{accounts.length} published</span>
@@ -153,6 +157,14 @@ function RosterDiffRows({ rows }: { readonly rows: readonly FleetRosterRow[] }) 
   );
 }
 
+/** What each kind of failure IS, in the words a person can act on. `malformed` is not a refusal. */
+const REFUSAL_HEADLINE: Readonly<Partial<Record<FleetRefusalView['kind'], string>>> = {
+  forbidden: 'This daemon refused the change',
+  // The daemon answered; the answer did not match the contract. Calling that "the daemon refused" would
+  // send a person looking for a permission or a policy that does not exist.
+  malformed: 'This daemon answered something this browser cannot read',
+};
+
 /** The daemon's refusal, whole. Multiline by design: the second line is usually the actionable one. */
 export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalView }) {
   return (
@@ -163,7 +175,7 @@ export function FleetRefusalAlert({ refusal }: { readonly refusal: FleetRefusalV
     >
       <div className="flex items-center gap-2 text-ui font-semibold text-err">
         <CircleAlert size={15} aria-hidden="true" />
-        {refusal.kind === 'forbidden' ? 'This daemon refused the change' : 'The daemon refused'}
+        {REFUSAL_HEADLINE[refusal.kind] ?? 'The daemon refused'}
         {refusal.code === undefined ? null : (
           <code className="ml-auto font-mono text-meta text-err">{refusal.code}</code>
         )}
@@ -211,6 +223,9 @@ export function FleetChangeReview({
   busy,
   refusal,
 }: FleetChangeReviewProps) {
+  // Instance-local for the same reason as the roster above.
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
   const preview = proposal.preview;
   const ledger = preview.kind === 'apply' ? operationLedger(preview.plan.operations) : [];
   const rows = preview.kind === 'apply' ? rosterDiff(live, preview.plan.manifest.accounts) : [];
@@ -222,13 +237,13 @@ export function FleetChangeReview({
       className="kt-panel overflow-hidden border-l-4 border-l-accent"
       data-fleet-side="proposed"
       data-fleet-proposal-id={proposal.id}
-      aria-labelledby="fleet-change-heading"
+      aria-labelledby={id('-change-heading')}
       aria-busy={busy}
     >
       <header className="border-b border-border-soft bg-surface-2 px-panel py-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <ClipboardList size={16} className="shrink-0 text-accent" aria-hidden="true" />
-          <h2 id="fleet-change-heading" className="m-0 text-title font-semibold text-fg">
+          <h2 id={id('-change-heading')} className="m-0 text-title font-semibold text-fg">
             Staged change
           </h2>
           <span className="kt-badge ml-auto" data-tone={proposal.state === 'pending' ? 'accent' : 'warn'}>
@@ -249,8 +264,8 @@ export function FleetChangeReview({
       </header>
 
       {preview.kind === 'initialize' ? (
-        <section className="px-panel py-3" aria-labelledby="fleet-scaffold-heading">
-          <h3 id="fleet-scaffold-heading" className="m-0 text-ui font-semibold text-fg">
+        <section className="px-panel py-3" aria-labelledby={id('-scaffold-heading')}>
+          <h3 id={id('-scaffold-heading')} className="m-0 text-ui font-semibold text-fg">
             First run
           </h3>
           <p className="m-0 mt-1 text-meta leading-base text-muted">
@@ -278,20 +293,20 @@ export function FleetChangeReview({
         </section>
       ) : (
         <>
-          <section className="border-b border-border-soft" aria-labelledby="fleet-proposed-roster-heading">
+          <section className="border-b border-border-soft" aria-labelledby={id('-proposed-roster-heading')}>
             <div className="flex min-w-0 items-center gap-2 px-panel py-2">
               <ArrowRight size={14} className="shrink-0 text-accent" aria-hidden="true" />
-              <h3 id="fleet-proposed-roster-heading" className="m-0 text-ui font-semibold text-fg">
+              <h3 id={id('-proposed-roster-heading')} className="m-0 text-ui font-semibold text-fg">
                 Host after this change
               </h3>
             </div>
             <RosterDiffRows rows={rows} />
           </section>
 
-          <section aria-labelledby="fleet-ledger-heading">
+          <section aria-labelledby={id('-ledger-heading')}>
             <div className="flex min-w-0 items-center gap-2 border-b border-border-soft px-panel py-2">
               <ListOrdered size={14} className="shrink-0 text-accent" aria-hidden="true" />
-              <h3 id="fleet-ledger-heading" className="m-0 text-ui font-semibold text-fg">
+              <h3 id={id('-ledger-heading')} className="m-0 text-ui font-semibold text-fg">
                 Operation ledger
               </h3>
               <span className="kt-badge ml-auto">{ledger.length} operations</span>
@@ -352,10 +367,10 @@ export function FleetChangeReview({
       )}
 
       {preview.documents.length === 0 ? null : (
-        <section className="border-t border-border-soft" aria-labelledby="fleet-documents-heading">
+        <section className="border-t border-border-soft" aria-labelledby={id('-documents-heading')}>
           <div className="flex min-w-0 items-center gap-2 px-panel py-2">
             <FileCog size={14} className="shrink-0 text-accent" aria-hidden="true" />
-            <h3 id="fleet-documents-heading" className="m-0 text-ui font-semibold text-fg">
+            <h3 id={id('-documents-heading')} className="m-0 text-ui font-semibold text-fg">
               Files written outside the plan
             </h3>
             <span className="kt-badge ml-auto">{preview.documents.length} documents</span>
@@ -397,7 +412,7 @@ export function FleetChangeReview({
 
       <section
         className="border-t border-border-soft bg-surface-2 px-panel py-3"
-        aria-labelledby="fleet-authority-heading"
+        aria-labelledby={id('-authority-heading')}
       >
         <div className="flex min-w-0 items-center gap-2">
           {authority === 'direct' ? (
@@ -405,7 +420,7 @@ export function FleetChangeReview({
           ) : (
             <Lock size={15} className="shrink-0 text-accent" aria-hidden="true" />
           )}
-          <h3 id="fleet-authority-heading" className="m-0 text-ui font-semibold text-fg">
+          <h3 id={id('-authority-heading')} className="m-0 text-ui font-semibold text-fg">
             Host authority
           </h3>
         </div>
@@ -432,11 +447,11 @@ export function FleetChangeReview({
             <pre className="kt-code-block m-0 mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-code">
               {command}
             </pre>
-            <label className="kt-label mb-1 mt-3 block" htmlFor="fleet-approval-code">
+            <label className="kt-label mb-1 mt-3 block" htmlFor={id('-approval-code')}>
               Approval code
             </label>
             <input
-              id="fleet-approval-code"
+              id={id('-approval-code')}
               className="kt-input font-mono uppercase"
               value={code}
               disabled={busy}
@@ -524,6 +539,8 @@ const OUTCOME_TONE = {
  * look at them.
  */
 export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutcome }) {
+  // Instance-local: the harness states frame renders several surfaces, each of which may hold a report.
+  const heading = useId();
   const summary = outcomeSummary(outcome);
   const Icon = OUTCOME_ICON[summary.tone];
   // Residue rather than failure, and reported wherever it appears: it blocks the NEXT apply.
@@ -532,12 +549,11 @@ export function FleetApplyReport({ outcome }: { readonly outcome: FleetApplyOutc
     <section
       className={cn('rounded-panel border p-panel', OUTCOME_TONE[summary.tone])}
       data-fleet-outcome={outcome.outcome}
-      aria-labelledby="fleet-outcome-heading"
-      tabIndex={-1}
+      aria-labelledby={heading}
     >
       <div className="flex min-w-0 items-center gap-2">
         <Icon size={16} className="shrink-0" aria-hidden="true" />
-        <h2 id="fleet-outcome-heading" className="m-0 text-title font-semibold">
+        <h2 id={heading} className="m-0 text-title font-semibold">
           {summary.title}
         </h2>
       </div>

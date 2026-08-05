@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { fleetAssetRefProblem } from '@ferretry/protocol';
 import type { FleetRefusalKind } from '../../../../src/features/fleet/fleet-api.ts';
 import {
   accountProblems,
@@ -8,6 +9,7 @@ import {
   CHANGE_LIMITS,
   classifyInventory,
   createAccountProposal,
+  currentUnreadable,
   declaredLayer,
   derivedWrapper,
   draftModels,
@@ -28,6 +30,7 @@ import {
   rosterDiff,
   selectLayerAssets,
   unreadableAssetProblems,
+  unseenAssets,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
 import { defaultFleetHarness } from '../../../../src/features/fleet/fleet-model.ts';
 import {
@@ -532,8 +535,8 @@ describe('the assets one layer references', () => {
       'skills/a',
     );
     expect(selection.unreadable).toEqual([
-      { path: 'skills/a/huge.md', reason: 'over the limit' },
-      { path: 'skills/a/odd.md', reason: 'not editable text' },
+      { scope: 'file', path: 'skills/a/huge.md', reason: 'over the limit' },
+      { scope: 'file', path: 'skills/a/odd.md', reason: 'not editable text' },
     ]);
   });
 
@@ -545,6 +548,7 @@ describe('the assets one layer references', () => {
     );
     expect(truncated.readable).toEqual(['skills/a/one.md']);
     expect(truncated.unreadable[0]).toEqual({
+      scope: 'tree',
       path: 'skills/a',
       reason: 'the daemon stopped walking the asset tree at a bound, so this list is not all of it',
     });
@@ -553,16 +557,109 @@ describe('the assets one layer references', () => {
     expect(noDirectory.unreadable[0]?.path).toBe('fleet/assets');
   });
 
+  it('drops a file blocker the draft no longer names, and keeps a truncated walk whatever is typed', () => {
+    const entries = [
+      { scope: 'file' as const, path: 'instructions/huge.md', reason: 'over the limit' },
+      { scope: 'file' as const, path: 'skills/a/huge.md', reason: 'over the limit' },
+      { scope: 'tree' as const, path: 'skills/a', reason: 'the walk stopped at a bound' },
+    ];
+    const naming: FleetLayerDraft = {
+      ...emptyLayerDraft(),
+      instructions: { path: 'instructions/huge.md', text: '' },
+      skillsDirectory: 'skills/a',
+      skills: [{ id: '1', path: 'skills/a/huge.md', text: '' }],
+    };
+    expect(currentUnreadable(entries, naming)).toEqual(entries);
+
+    // Clearing the instructions path means `editLayerPatch` sends `memory: null` and `assetEdits`
+    // carries nothing for it, so there is no longer anything to overwrite — and nothing to warn about.
+    const cleared = currentUnreadable(entries, { ...naming, instructions: { path: '', text: '' } });
+    expect(cleared.map(entry => entry.path)).toEqual(['skills/a/huge.md', 'skills/a']);
+
+    // Deleting the skill ROW is not enough while the directory is still declared: the directory hands
+    // over contents the browser never saw, and the row was never there to delete in the first place.
+    const withoutRow = currentUnreadable(entries, { ...naming, skills: [] });
+    expect(withoutRow.map(entry => entry.path)).toEqual(['instructions/huge.md', 'skills/a/huge.md', 'skills/a']);
+
+    // Clearing the DIRECTORY does clear the file blocker under it. The tree entry survives regardless.
+    const withoutDirectory = currentUnreadable(entries, { ...naming, skillsDirectory: '', skills: [] });
+    expect(withoutDirectory.map(entry => entry.path)).toEqual(['instructions/huge.md', 'skills/a']);
+
+    // And an empty draft still cannot clear the tree entry: an unenumerated directory is not a file
+    // anybody can stop naming.
+    expect(currentUnreadable(entries, emptyLayerDraft()).map(entry => entry.scope)).toEqual(['tree']);
+  });
+
+  it('blocks a path the draft newly names that already exists and was never loaded', () => {
+    // The load: `instructions/a.md` was referenced, so only it was read. `b.md` is there, unread.
+    const knowledge = {
+      listed: ['instructions/a.md', 'instructions/b.md', 'skills/a/one.md'],
+      loaded: ['instructions/a.md'],
+    };
+    const editing: FleetLayerDraft = {
+      ...emptyLayerDraft(),
+      instructions: { path: 'instructions/a.md', text: 'AAA' },
+    };
+    expect(unseenAssets(editing, knowledge)).toEqual([]);
+
+    // RED before this existed: retargeting sent `{path: "instructions/b.md", content: "AAA"}` — a.md's
+    // text written over a document nobody here has seen.
+    const retargeted = { ...editing, instructions: { path: 'instructions/b.md', text: 'AAA' } };
+    expect(unseenAssets(retargeted, knowledge)).toEqual([
+      {
+        scope: 'file',
+        path: 'instructions/b.md',
+        reason: 'this editor has not loaded the document already at that path',
+      },
+    ]);
+    // And it goes through the SAME filter as a load-time blocker, so it clears itself the moment the
+    // draft stops naming that path.
+    expect(currentUnreadable(unseenAssets(retargeted, knowledge), editing)).toEqual([]);
+
+    // A new skill row naming an existing document used to send `content: ''` for it.
+    const newRow = {
+      ...editing,
+      skillsDirectory: 'skills/a',
+      skills: [{ id: '1', path: 'skills/a/one.md', text: '' }],
+    };
+    expect(unseenAssets(newRow, knowledge).map(entry => entry.path)).toEqual(['skills/a/one.md']);
+
+    // A path the index does NOT list is a document being created. Nothing to overwrite, so nothing to
+    // block: this is the whole reason the check is keyed to the listing rather than to `loaded` alone.
+    const creating = { ...editing, instructions: { path: 'instructions/new.md', text: 'NEW' } };
+    expect(unseenAssets(creating, knowledge)).toEqual([]);
+    // Nor does an empty box count as naming something.
+    expect(unseenAssets(emptyLayerDraft(), knowledge)).toEqual([]);
+  });
+
+  it('speaks once per path when load-time and draft-time evidence reach the same file', () => {
+    const layer: FleetLayerDraft = {
+      ...emptyLayerDraft(),
+      instructions: { path: 'instructions/huge.md', text: '' },
+    };
+    const knowledge = { listed: ['instructions/huge.md'], loaded: [] };
+    // The index called it unreadable AND the draft names a document this editor never loaded. Both are
+    // true; the daemon's own reason is the useful one, and two sentences about one file is noise.
+    const spoken = currentUnreadable(
+      [
+        { scope: 'file' as const, path: 'instructions/huge.md', reason: 'over the limit' },
+        ...unseenAssets(layer, knowledge),
+      ],
+      layer,
+    );
+    expect(spoken).toEqual([{ scope: 'file', path: 'instructions/huge.md', reason: 'over the limit' }]);
+  });
+
   it('says why an unreadable asset stops a change rather than merely mentioning it', () => {
-    expect(unreadableAssetProblems([{ path: 'skills/a/huge.md', reason: 'over the limit' }])).toEqual([
+    expect(unreadableAssetProblems([{ scope: 'file', path: 'skills/a/huge.md', reason: 'over the limit' }])).toEqual([
       '"skills/a/huge.md" could not be read (over the limit), so staging a change would overwrite text this browser never saw',
     ]);
     expect(unreadableAssetProblems([])).toHaveLength(0);
   });
 });
 
-describe('asset path bounds, mirrored from the daemon', () => {
-  it('refuses every shape the daemon refuses, and accepts a relative one', () => {
+describe('the shared asset grammar, labelled for the field it was typed into', () => {
+  it('refuses every shape the shared grammar refuses, and accepts a relative one', () => {
     expect(assetPathProblem('instructions/studio.md', 'p')).toBeNull();
     expect(assetPathProblem('x'.repeat(201), 'p')).toContain('longer than 200');
     expect(assetPathProblem('a\\b', 'p')).toContain('"/" separators');
@@ -574,6 +671,34 @@ describe('asset path bounds, mirrored from the daemon', () => {
     expect(assetPathProblem('a/./b', 'p')).toContain('path traversal');
     expect(assetPathProblem('../../.ssh/authorized_keys', 'p')).toContain('path traversal');
     expect(assetPathProblem('a/ b', 'p')).toContain('whitespace');
+  });
+
+  it('refuses the three shapes the hand-copied grammar used to let through', () => {
+    // A home alias is expanded by the fleet, so it leaves the asset tree. The browser used to accept
+    // both spellings and let the person find out on submit.
+    expect(assetPathProblem('~/notes.md', 'the instructions path')).toBe(
+      'the instructions path must be relative to the asset directory, not to a home',
+    );
+    expect(assetPathProblem('$HOME/notes.md', 'the skills directory')).toBe(
+      'the skills directory must be relative to the asset directory, not to a home',
+    );
+    // A FORMAT control (\p{Cf}) rather than a C0 control: invisible, and it makes a path print as
+    // something other than what it opens. The old copy only checked \p{Cc}.
+    const formatControl = String.fromCodePoint(0x200e);
+    expect(assetPathProblem(`instructions/${formatControl}studio.md`, 'p')).toContain('control characters');
+  });
+
+  it('says what a home alias is NOT: only the two spellings the fleet expands', () => {
+    // `~kirin/notes` and `$EDITOR/x` are expanded by nobody, so they stay inside the tree and refusing
+    // them would be a rule about a danger that is not there. This is the shared grammar's decision, and
+    // pinning it here is what tells us if the browser ever drifts from it again.
+    expect(assetPathProblem('~kirin/notes.md', 'p')).toBeNull();
+    expect(assetPathProblem('$EDITOR/x.md', 'p')).toBeNull();
+  });
+
+  it('adds only the label, so the shared reason reaches the screen verbatim', () => {
+    const path = '../escape.md';
+    expect(assetPathProblem(path, 'the instructions path')).toBe(`the instructions path ${fleetAssetRefProblem(path)}`);
   });
 });
 
@@ -616,6 +741,71 @@ describe('layer problems', () => {
       'the skill path "../out.md" contains a path traversal segment',
       '"../out.md" is not inside the skills directory "skills/a"',
     ]);
+  });
+
+  it('refuses two texts written to one path, whichever rows carry them', () => {
+    // Two skill rows on one document. `assetEdits` sent both and the last one won, so the review showed
+    // two texts for one path with nothing saying which would survive.
+    expect(
+      layerProblems(
+        layer({
+          skillsDirectory: 'skills/a',
+          skills: [
+            { id: '1', path: 'skills/a/one.md', text: 'first' },
+            { id: '2', path: 'skills/a/one.md', text: 'second' },
+          ],
+        }),
+      ),
+    ).toEqual(['"skills/a/one.md" is written twice by this change; one path carries one text']);
+
+    // The instructions file named again as a skill document is the same collision across two fields.
+    expect(
+      layerProblems(
+        layer({
+          instructions: { path: 'instructions/a.md', text: 'from the instructions box' },
+          skillsDirectory: 'instructions',
+          skills: [{ id: '1', path: 'instructions/a.md', text: 'from a skill row' }],
+        }),
+      ),
+    ).toEqual(['"instructions/a.md" is written twice by this change; one path carries one text']);
+
+    // Said once per colliding path, not once per row.
+    expect(
+      layerProblems(
+        layer({
+          skillsDirectory: 'skills/a',
+          skills: [
+            { id: '1', path: 'skills/a/one.md', text: 'a' },
+            { id: '2', path: 'skills/a/one.md', text: 'b' },
+            { id: '3', path: 'skills/a/one.md', text: 'c' },
+          ],
+        }),
+      ),
+    ).toHaveLength(1);
+
+    // Distinct paths are the ordinary case, and two EMPTY rows are already reported as missing paths.
+    expect(
+      layerProblems(
+        layer({
+          skillsDirectory: 'skills/a',
+          skills: [
+            { id: '1', path: 'skills/a/one.md', text: 'a' },
+            { id: '2', path: 'skills/a/two.md', text: 'b' },
+          ],
+        }),
+      ),
+    ).toHaveLength(0);
+    expect(
+      layerProblems(
+        layer({
+          skillsDirectory: 'skills/a',
+          skills: [
+            { id: '1', path: '', text: '' },
+            { id: '2', path: '', text: '' },
+          ],
+        }),
+      ),
+    ).toEqual(['every skill document needs a path', 'every skill document needs a path']);
   });
 
   it('refuses settings that are not a JSON object', () => {

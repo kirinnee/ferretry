@@ -28,8 +28,8 @@ import {
 } from './fleet-support.ts';
 
 const noop = (): void => undefined;
-const accounts = (list: readonly ReturnType<typeof account>[]) =>
-  list as unknown as readonly FleetManifestAccountView[];
+/** `account()` already returns the shared shape, so this is a name rather than a conversion. */
+const accounts = (list: readonly FleetManifestAccountView[]): readonly FleetManifestAccountView[] => list;
 
 describe('the live roster', () => {
   it('renders a published manifest and offers each account its own layer', async () => {
@@ -112,7 +112,7 @@ describe('the staged change', () => {
     } = {},
   ) => {
     const calls = { applied: 0, rechecked: 0, discarded: 0, code: '' };
-    const view = (overrides.proposal ?? (proposal() as unknown as FleetProposalView)) as FleetProposalView;
+    const view = overrides.proposal ?? proposal();
     const mounted = await mount(
       <FleetChangeReview
         proposal={view}
@@ -169,7 +169,7 @@ describe('the staged change', () => {
         plan: plan([account({ displayName: 'Renamed' }), account({ id: accountId(4), wrapper: 'claude-new' })]),
         documents: [{ path: '/fleet/config.yaml', bytes: 512 }],
       },
-    }) as unknown as FleetProposalView;
+    });
     const harness = await reviewHarness({ proposal: changed });
     const marks = [...harness.container.querySelectorAll('[data-fleet-roster-change]')].map(row =>
       row.getAttribute('data-fleet-roster-change'),
@@ -189,7 +189,7 @@ describe('the staged change', () => {
   });
 
   it('shows the first-run scaffold instead of a plan when there is nothing to plan from', async () => {
-    const harness = await reviewHarness({ proposal: scaffoldProposal() as unknown as FleetProposalView });
+    const harness = await reviewHarness({ proposal: scaffoldProposal() });
     expect(harness.container.textContent).toContain('First run');
     expect(harness.container.textContent).toContain('/home/pilot/.ferretry/fleet/bin');
     expect(harness.container.textContent).toContain('config.yaml');
@@ -217,7 +217,7 @@ describe('the staged change', () => {
   it('applies once a code is typed, and reports an outstanding approval', async () => {
     const outstanding = proposal({
       approval: { outstanding: true, expiresAt: '2026-08-05T06:02:00.000Z' },
-    }) as unknown as FleetProposalView;
+    });
     const harness = await reviewHarness({ proposal: outstanding, code: '7F3K-M9QW' });
     expect(harness.container.textContent).toContain(
       `An approval is outstanding until ${absoluteTime('2026-08-05T06:02:00.000Z')}.`,
@@ -248,7 +248,7 @@ describe('the staged change', () => {
     expect(pick(harness.container, '[data-fleet-side="proposed"]').getAttribute('aria-busy')).toBe('true');
     await harness.unmount();
 
-    const consumed = await reviewHarness({ proposal: proposal({ state: 'consumed' }) as unknown as FleetProposalView });
+    const consumed = await reviewHarness({ proposal: proposal({ state: 'consumed' }) });
     expect(consumed.container.textContent).toContain('consumed');
     await consumed.unmount();
   });
@@ -256,7 +256,7 @@ describe('the staged change', () => {
   it('renders a refusal inside the review it belongs to', async () => {
     const mounted = await mount(
       <FleetChangeReview
-        proposal={proposal() as unknown as FleetProposalView}
+        proposal={proposal()}
         live={[]}
         authority="direct"
         command="fy fleet authorize x"
@@ -279,7 +279,7 @@ describe('the staged change', () => {
     const bare = proposal({
       assetEdits: [],
       preview: { kind: 'apply', plan: { ...plan(), sharedHistory: [] }, documents: [] },
-    }) as unknown as FleetProposalView;
+    });
     const harness = await reviewHarness({ proposal: bare });
     expect(harness.container.querySelector('[data-fleet-asset-edits]')).toBeNull();
     expect(harness.container.querySelector('[data-fleet-documents]')).toBeNull();
@@ -319,7 +319,7 @@ describe('the apply report', () => {
         accountCount: 2,
         operationCount: 9,
         manifestPath: '/home/pilot/.ferretry/fleet/manifest.json',
-        manifest: manifest() as never,
+        manifest: manifest(),
         prunedWrappers: [],
         sharedHistory: [],
       },

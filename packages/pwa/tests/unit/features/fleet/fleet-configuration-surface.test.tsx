@@ -112,7 +112,8 @@ describe('reading one daemon fleet', () => {
     expect(absent(surface.container, '[data-fleet-state]')).toBe(true);
     // M5: this renders inside a settings tab panel whose page already owns the <h1>.
     expect(surface.container.querySelectorAll('h1')).toHaveLength(0);
-    expect(pick(surface.container, '#fleet-configuration-heading').tagName).toBe('H2');
+    // Suffix, because the surface's ids are instance-local now (audit A3).
+    expect(pick(surface.container, '[id$="-configuration-heading"]').tagName).toBe('H2');
     // L10: the live region is permanent, so its text can change where a screen reader is listening.
     expect(pick(surface.container, '[data-fleet-announcement]').getAttribute('role')).toBe('status');
     await surface.unmount();
@@ -172,6 +173,24 @@ describe('reading one daemon fleet', () => {
     await forbidden.unmount();
   });
 
+  it('says a daemon that answered invalidly is damaged, not silent', async () => {
+    // F4: the manifest arrives, parses against the shared schema, and fails. RED before this: the surface
+    // said "This daemon did not answer" about a daemon that did, sending a person to look at the network
+    // instead of at the host. The answer is structurally invalid — `generatedAt` is not an instant.
+    const surface = await open({
+      accounts: () => ({ ...manifest(), generatedAt: 'not-an-instant' }),
+    });
+    const state = pick(surface.container, '[data-fleet-state]');
+    expect(state.getAttribute('data-fleet-state')).toBe('damaged');
+    expect(state.textContent).toContain('NOT an empty fleet');
+    expect(state.textContent).toContain('does not match the fleet contract');
+    expect(state.textContent).not.toContain('did not answer');
+    // Still fails closed: a damaged host renders no roster and stages nothing.
+    expect(absent(surface.container, '[data-fleet-side="live"]')).toBe(true);
+    expect(absent(surface.container, '[data-fleet-start-create]')).toBe(true);
+    await surface.unmount();
+  });
+
   it('says a daemon that never answered is unreachable rather than empty', async () => {
     const mounted = await mount(
       <FleetConfigurationSurface
@@ -202,6 +221,8 @@ describe('creating an account', () => {
   /** Fills a draft that resolves every problem, so the preview control is actually reachable. */
   const draftIn = async (surface: Awaited<ReturnType<typeof open>>): Promise<void> => {
     await click(pick(surface.container, '[data-fleet-start-create]'));
+    // A new account writes asset text too, so the form waits for the asset listing before it is usable.
+    await interact(() => undefined);
     await type(field(surface.container, '-account-name'), 'atelier');
     await type(area(surface.container, '-account-models'), 'claude-opus-5');
     await type(field(surface.container, '-instructions-path'), 'instructions/atelier.md');
@@ -242,6 +263,87 @@ describe('creating an account', () => {
     expect(Object.keys(sent.mutation)).not.toContain('id');
     expect(pick(surface.container, '[data-fleet-proposal-id]')).toBeDefined();
     expect(surface.container.textContent).toContain('01');
+    await surface.unmount();
+  });
+
+  it('refuses to let a new account write over a document that is already there', async () => {
+    const surface = await open({
+      propose: () => proposal(),
+      // A new account never READS anything — it has no declared layer — so every document the daemon
+      // already lists is text this browser has not seen.
+      assets: () => ({ files: [{ path: 'instructions/shared.md', bytes: 9, readable: true }], complete: true }),
+    });
+    await draftIn(surface);
+    expect(surface.daemon.paths()).toContain('/v1/fleet/assets');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+
+    // RED before this: the create form staged `{path: "instructions/shared.md", content: "# atelier"}`,
+    // overwriting a shared document with a new lane's text.
+    await type(field(surface.container, '-instructions-path'), 'instructions/shared.md');
+    expect(surface.container.textContent).toContain('has not loaded the document already at that path');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    // A path that is not there yet is the ordinary case: a new account writing its own instructions.
+    await type(field(surface.container, '-instructions-path'), 'instructions/atelier.md');
+    expect(surface.container.textContent).not.toContain('has not loaded the document already at that path');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+
+  it('refuses to create anything when the asset tree cannot be enumerated', async () => {
+    const refused = await open({
+      assets: () => {
+        throw refusal('fleet_asset_refused', 'the fleet asset directory is not readable');
+      },
+    });
+    await draftIn(refused);
+    expect(refused.container.textContent).toContain('the fleet asset directory is not readable');
+    expect(button(refused.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await refused.unmount();
+
+    // A walk that stopped at a bound is not a short tree: what it did not reach could be the very
+    // document this account is about to write, so it blocks on the same terms.
+    const truncated = await open({
+      assets: () => ({ files: [{ path: 'instructions/one.md', bytes: 3, readable: true }], complete: false }),
+    });
+    await draftIn(truncated);
+    expect(truncated.container.textContent).toContain('stopped walking the asset tree at a bound');
+    expect(button(truncated.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await truncated.unmount();
+  });
+
+  it('refuses a draft that writes two texts to one path', async () => {
+    const surface = await open({ propose: () => proposal() });
+    await draftIn(surface);
+    await type(field(surface.container, '-skills-directory'), 'instructions');
+    await click(button(surface.container, 'Add skill document'));
+    // The same path as the instructions file. `assetEdits` used to send both and let the last one win,
+    // so the review showed two texts for one document and no way to tell which would survive.
+    await type(field(surface.container, '-skill-path-0'), 'instructions/atelier.md');
+    expect(surface.container.textContent).toContain('is written twice by this change');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    await type(field(surface.container, '-skill-path-0'), 'instructions/review.md');
+    expect(surface.container.textContent).not.toContain('is written twice by this change');
+    await surface.unmount();
+  });
+
+  it('does not call a malformed proposal answer a refusal, and stages nothing', async () => {
+    // The adjacent path for the same mapping: the daemon answered the proposal call with something that
+    // does not match the contract (`expiresAt` is not an instant). It did not refuse — saying it did would
+    // send a person hunting for a permission that is not the problem.
+    const surface = await open({ propose: () => ({ ...proposal(), expiresAt: 'whenever' }) });
+    await draftIn(surface);
+    await click(button(surface.container, 'Preview this change'));
+
+    const alert = pick(surface.container, '[data-fleet-refusal="malformed"]');
+    expect(alert.textContent).toContain('answered something this browser cannot read');
+    expect(alert.textContent).toContain('does not match the fleet contract at expiresAt');
+    expect(alert.textContent).not.toContain('invalid_type');
+    expect(alert.textContent).not.toContain('The daemon refused');
+    // No proposal came back, so there is nothing to authorize and nothing to apply.
+    expect(absent(surface.container, '[data-fleet-proposal-id]')).toBe(true);
+    expect(surface.daemon.paths().some(path => path.endsWith('/apply'))).toBe(false);
     await surface.unmount();
   });
 
@@ -353,6 +455,51 @@ describe('editing one account layer', () => {
     await surface.unmount();
   });
 
+  it('unblocks when the person clears the reference to the file it could not read', async () => {
+    const surface = await open({
+      config: () =>
+        config({
+          default: { id: account().id, wrapper: 'claude-studio', layer: { memory: 'instructions/huge.md' } },
+        }),
+      assets: () => ({
+        files: [{ path: 'instructions/huge.md', bytes: 999_999, readable: false, reason: 'over the 65536-byte limit' }],
+        complete: true,
+      }),
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    expect(surface.container.textContent).toContain('over the 65536-byte limit');
+
+    // Clearing the path is the one repair a browser can make: the patch then sends `memory: null` and
+    // carries no asset text, so there is nothing left to overwrite — and nothing left to warn about.
+    await type(field(surface.container, '-instructions-path'), '');
+    expect(surface.container.textContent).not.toContain('over the 65536-byte limit');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(false);
+    await surface.unmount();
+  });
+
+  it('keeps a truncated asset walk blocking whatever the person types', async () => {
+    const surface = await open({
+      config: () =>
+        config({
+          default: { id: account().id, wrapper: 'claude-studio', layer: { skills: 'skills/studio' } },
+        }),
+      // A walk the daemon stopped at a bound. No edit in the browser can answer what it did not reach.
+      assets: () => ({ files: [{ path: 'skills/studio/one.md', bytes: 4, readable: true }], complete: false }),
+      asset: path => ({ path, content: 'one', bytes: 3 }),
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    expect(surface.container.textContent).toContain('stopped walking the asset tree at a bound');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    await type(field(surface.container, '-skills-directory'), '');
+    expect(surface.container.textContent).toContain('stopped walking the asset tree at a bound');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await surface.unmount();
+  });
+
   it('treats an asset tree it could not even list as unknown rather than empty', async () => {
     const surface = await open({
       config: () =>
@@ -368,11 +515,90 @@ describe('editing one account layer', () => {
     await surface.unmount();
   });
 
-  it('opens an account with no declared assets immediately, with nothing to read', async () => {
-    const surface = await open({ propose: () => proposal({ summary: 'change claude-studio' }) });
+  it('refuses to stage over a document the person retargeted the path to', async () => {
+    const surface = await open({
+      config: () =>
+        config({
+          default: { id: account().id, wrapper: 'claude-studio', layer: { memory: 'instructions/a.md' } },
+        }),
+      // Both are there and readable. Only `a.md` is referenced, so only `a.md` is read.
+      assets: () => ({
+        files: [
+          { path: 'instructions/a.md', bytes: 3, readable: true },
+          { path: 'instructions/b.md', bytes: 9, readable: true },
+        ],
+        complete: true,
+      }),
+      asset: path => ({ path, content: 'AAA', bytes: 3 }),
+      propose: () => proposal({ summary: 'change claude-studio' }),
+    });
     await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    expect(area(surface.container, '-instructions-text').value).toBe('AAA');
+    expect(surface.daemon.paths()).not.toContain('/v1/fleet/assets/instructions%2Fb.md');
+
+    // RED before B1: this staged `{path: "instructions/b.md", content: "AAA"}` — a.md's text written
+    // over a document this browser never read, the exact invariant the unreadable machinery exists for.
+    await type(field(surface.container, '-instructions-path'), 'instructions/b.md');
+    expect(surface.container.textContent).toContain('has not loaded the document already at that path');
+    expect(surface.container.textContent).toContain('overwrite text this browser never saw');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    // A path the index does not list is a document being created, which stays perfectly valid.
+    await type(field(surface.container, '-instructions-path'), 'instructions/new.md');
+    expect(surface.container.textContent).not.toContain('has not loaded the document already at that path');
+    await click(button(surface.container, 'Preview this change'));
+    expect(surface.daemon.calls.find(call => call.path.endsWith('/proposals'))?.body).toMatchObject({
+      assetEdits: [{ path: 'instructions/new.md', content: 'AAA' }],
+    });
+    await surface.unmount();
+  });
+
+  it('refuses to stage a new skill row that names an existing document it never read', async () => {
+    const surface = await open({
+      config: () => config({ default: { id: account().id, wrapper: 'claude-studio', layer: { skills: 'skills/a' } } }),
+      assets: () => ({
+        files: [
+          { path: 'skills/a/one.md', bytes: 3, readable: true },
+          { path: 'skills/b/two.md', bytes: 3, readable: true },
+        ],
+        complete: true,
+      }),
+      asset: path => ({ path, content: 'one', bytes: 3 }),
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+
+    // Move the directory to one whose contents were never loaded, then name a document that is there.
+    await type(field(surface.container, '-skills-directory'), 'skills/b');
+    await click(button(surface.container, 'Add skill document'));
+    await type(field(surface.container, '-skill-path-1'), 'skills/b/two.md');
+    // RED before B1: `assetEdits` pushed `{path: "skills/b/two.md", content: ""}` — emptying a real file.
+    expect(surface.container.textContent).toContain('"skills/b/two.md" could not be read');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+
+    // Naming a document that is not there yet is how a person adds one, and stays unblocked.
+    await type(field(surface.container, '-skill-path-1'), 'skills/b/three.md');
+    expect(surface.container.textContent).not.toContain('"skills/b/two.md" could not be read');
+    await surface.unmount();
+  });
+
+  it('lists the asset index even for a layer that declares nothing, and reads no document', async () => {
+    const surface = await open({
+      propose: () => proposal({ summary: 'change claude-studio' }),
+      // Knowing what is already there is what lets a typed path be judged at all, so the LISTING happens
+      // for every layer. Only the per-document reads are scoped to what the layer declares.
+      assets: () => ({ files: [{ path: 'instructions/there.md', bytes: 4, readable: true }], complete: true }),
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
     expect(absent(surface.container, '[data-fleet-layer-loading]')).toBe(true);
-    expect(surface.daemon.paths().some(path => path.includes('/assets'))).toBe(false);
+    expect(surface.daemon.paths()).toContain('/v1/fleet/assets');
+    expect(surface.daemon.paths().some(path => path.startsWith('/v1/fleet/assets/'))).toBe(false);
+
+    // And the knowledge is real: naming the document that is already there blocks here too.
+    await type(field(surface.container, '-instructions-path'), 'instructions/there.md');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
 
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(surface.container, 'Preview this change'));
@@ -388,9 +614,49 @@ describe('editing one account layer', () => {
     await surface.unmount();
   });
 
+  it('states a malformed asset listing in a sentence, and still refuses to stage', async () => {
+    const surface = await open({
+      config: () => config({ default: { id: account().id, wrapper: 'claude-studio', layer: { skills: 'skills/a' } } }),
+      // A 200 that does not match the contract: `bytes` is a string. The client's `schema.parse` throws a
+      // ZodError whose own message is a multi-line JSON dump of every issue.
+      assets: () => ({ files: [{ path: 'skills/a/one.md', bytes: 'twelve', readable: true }], complete: true }),
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+
+    const problems = pick(surface.container, '[data-fleet-problems]');
+    // F3: one sentence naming where the answer went wrong, not a JSON blob in a blocker.
+    expect(problems.textContent).toContain('does not match the fleet contract at files.0.bytes');
+    expect(problems.textContent).not.toContain('"code"');
+    expect(problems.textContent).not.toContain('invalid_type');
+    expect(problems.getAttribute('data-fleet-problems')).toBe('1');
+    // Unchanged and non-negotiable: an answer nobody could read blocks staging.
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await surface.unmount();
+  });
+
+  it('blocks a layer that declares nothing when the asset tree itself is unknowable', async () => {
+    // The deliberate cost of listing for every layer: on a host whose asset tree cannot be enumerated,
+    // even an env-only edit is refused. Fail closed is the right side to err on — with no listing, a path
+    // the person types cannot be judged at all — and the sentence on screen says exactly why.
+    const surface = await open({
+      assets: () => {
+        throw refusal('fleet_asset_refused', 'the fleet asset directory is not readable');
+      },
+    });
+    await click(button(surface.container, 'Edit layer'));
+    await interact(() => undefined);
+    expect(surface.container.textContent).toContain('the fleet asset directory is not readable');
+    expect(button(surface.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await surface.unmount();
+  });
+
   it('discards a draft without asking the daemon anything', async () => {
     const surface = await open({});
     await click(button(surface.container, 'Edit layer'));
+    // Settled first: the form is disabled while the index is in flight, so a click before that proves
+    // nothing about the button a person can actually press.
+    await interact(() => undefined);
     await click(button(surface.container, 'Discard draft'));
     expect(absent(surface.container, '[data-fleet-layer-form]')).toBe(true);
     await surface.unmount();
@@ -401,6 +667,8 @@ describe('authorizing and applying one exact proposal', () => {
   const staged = async (script: Script) => {
     const surface = await open({ propose: () => proposal(), ...script });
     await click(button(surface.container, 'Edit layer'));
+    // The index listing is in flight until this settles, and the form is disabled while it is.
+    await interact(() => undefined);
     await type(field(surface.container, '-instructions-path'), 'instructions/studio.md');
     await click(button(surface.container, 'Preview this change'));
     return surface;
@@ -573,6 +841,54 @@ describe('authorizing and applying one exact proposal', () => {
     await surface.unmount();
   });
 
+  it('moves focus to a stable control when the staged change is discarded', async () => {
+    const surface = await staged({});
+    // Focus is on the review panel, which Discard is about to unmount.
+    expect(document.activeElement).toBe(pick(surface.container, '[data-fleet-side="proposed"]').parentElement);
+    await click(button(surface.container, 'Discard'));
+    await interact(() => undefined);
+    // Not <body>. Here the layer form is still open, so the header control is not rendered and the
+    // surface itself takes focus -- a keyboard reader stays inside the panel they were working in.
+    expect(document.activeElement).toBe(pick(surface.container, '[data-fleet-configuration]'));
+    expect(document.activeElement).not.toBe(document.body);
+    await surface.unmount();
+  });
+
+  it('moves focus to a stable control when a draft is discarded', async () => {
+    const surface = await open({});
+    await click(button(surface.container, 'Edit layer'));
+    await click(button(surface.container, 'Discard draft'));
+    await interact(() => undefined);
+    expect(document.activeElement).toBe(pick(surface.container, '[data-fleet-start-create]'));
+    await surface.unmount();
+  });
+
+  it('carries focus into the create panel that replaced the button, and keeps it there while it loads', async () => {
+    const surface = await open({});
+    const trigger = pick(surface.container, '[data-fleet-start-create]');
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    // F2: the header offers "Add account" only while nothing is being composed, so the click unmounts the
+    // element focus is sitting on. RED before this: focus fell to <body> and stayed there — including
+    // after the listing settled, because every control in the form is disabled until it does.
+    await click(trigger);
+    const panel = pick(surface.container, '[aria-label="New account"]');
+    // Compared as a boolean and by name, not with `toBe` on the elements: a mismatch there makes bun
+    // diff two whole DOM trees, which turns one red assertion into minutes of output.
+    expect(document.activeElement === panel).toBe(true);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('New account');
+
+    await interact(() => undefined);
+    expect(document.activeElement === panel).toBe(true);
+    // And it does not fight the person once they are typing in it.
+    const name = field(surface.container, '-account-name');
+    name.focus();
+    await type(name, 'atelier');
+    expect(document.activeElement === name).toBe(true);
+    await surface.unmount();
+  });
+
   it('discards a staged change without touching the host', async () => {
     const surface = await staged({});
     await click(button(surface.container, 'Discard'));
@@ -722,6 +1038,47 @@ describe('an equivalent connection object', () => {
   });
 });
 
+describe('a relay-only connection change', () => {
+  it('is a new connection: same id, address and token, different carrier', async () => {
+    const direct = fakeDaemon({ accounts: () => manifest([account({ wrapper: 'claude-direct' })]) });
+    const relayed = fakeDaemon({
+      accounts: () => manifest([account({ id: accountId(9), wrapper: 'claude-relayed' })]),
+    });
+    let release: (() => void) | undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let opened = 0;
+    const clientFor = async (): Promise<FleetClient> => {
+      opened += 1;
+      if (opened === 1) {
+        await held;
+        return direct.client;
+      }
+      return relayed.client;
+    };
+
+    // Everything a credential-shaped key would compare is IDENTICAL; only the carrier moved. The bytes
+    // physically go somewhere else, so an answer that arrived over the old one is not this one's.
+    const viaRelay = daemonConnection({
+      daemonId: 'daemon/laptop',
+      baseUrl: 'https://laptop.example.test',
+      deviceToken: 'token-laptop',
+      relay: { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' },
+    });
+
+    const mounted = await mount(<FleetConfigurationSurface connection={laptop} createClient={clientFor} />);
+    await mounted.render(<FleetConfigurationSurface connection={viaRelay} createClient={clientFor} />);
+    await interact(() => release?.());
+    await interact(() => undefined);
+
+    expect(opened).toBe(2);
+    expect(mounted.container.textContent).toContain('claude-relayed');
+    expect(mounted.container.textContent).not.toContain('claude-direct');
+    await mounted.unmount();
+  });
+});
+
 describe('an ABA connection switch', () => {
   it('drops the FIRST session read even when the connection returns to identical credentials', async () => {
     const first = fakeDaemon({ accounts: () => manifest([account({ wrapper: 'claude-first-a' })]) });
@@ -757,6 +1114,36 @@ describe('an ABA connection switch', () => {
     expect(mounted.container.innerHTML).not.toContain('token-laptop');
     expect(mounted.container.innerHTML).not.toContain('token-workstation');
     expect(mounted.container.innerHTML).not.toContain(laptop.baseUrl);
+    await mounted.unmount();
+  });
+});
+
+describe('four cockpits in one document', () => {
+  it('keeps every label relationship and live region its own', async () => {
+    // The harness `states` frame renders one surface per host state in a single page. Module-global ids
+    // there left three sections labelled by the first daemon's heading and put four `role="status"`
+    // regions in one document, so the frame could not be trusted as accessibility evidence.
+    const daemons = [fakeDaemon({}), fakeDaemon({}), fakeDaemon({}), fakeDaemon({})];
+    const mounted = await mount(
+      <>
+        {daemons.map((daemon, index) => (
+          <FleetConfigurationSurface key={String(index)} connection={laptop} createClient={async () => daemon.client} />
+        ))}
+      </>,
+    );
+    await interact(() => undefined);
+
+    expect(mounted.container.querySelectorAll('[data-fleet-configuration]')).toHaveLength(4);
+    const ids = [...mounted.container.querySelectorAll('[id]')].map(node => node.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const labelled of mounted.container.querySelectorAll('[aria-labelledby]')) {
+      const target = labelled.getAttribute('aria-labelledby') ?? '';
+      // Resolves to exactly one node, and that node is inside the SAME surface.
+      expect(mounted.container.querySelectorAll(`[id="${target}"]`)).toHaveLength(1);
+      expect(labelled.querySelector(`[id="${target}"]`)).not.toBeNull();
+    }
+    // Four surfaces, four regions — one each, none shared.
+    expect(mounted.container.querySelectorAll('[data-fleet-announcement]')).toHaveLength(4);
     await mounted.unmount();
   });
 });

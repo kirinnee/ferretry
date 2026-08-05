@@ -6,6 +6,8 @@ import {
   FleetManifestSummarySchema,
   FleetMutationSchema,
   FleetProposalApplyRequestSchema,
+  FleetProposalRequestSchema,
+  fleetAssetRefProblem,
   JsonValueSchema,
 } from '../../src/lib/fleet-changes.ts';
 
@@ -36,6 +38,12 @@ const issuesOf = (input: unknown): string => {
   const parsed = FleetManifestSummarySchema.safeParse(input);
   return parsed.success ? '' : parsed.error.issues.map(issue => issue.message).join('; ');
 };
+
+/** Every issue a parse raised, as one string — and the empty string when it raised none. */
+const issuesFor = (parsed: {
+  readonly success: boolean;
+  readonly error?: { readonly issues: readonly { readonly message: string }[] };
+}): string => (parsed.success ? '' : (parsed.error?.issues.map(issue => issue.message).join('; ') ?? ''));
 
 describe('JsonValueSchema', () => {
   it.each([['text'], [42], [true], [null]])('should accept the scalar %j a settings file may hold', value => {
@@ -183,6 +191,149 @@ describe('FleetMutationSchema', () => {
     // Assert
     should(actual.success && actual.data.kind === 'edit-account' && actual.data.layer).deepEqual({ skills: null });
   });
+
+  it.each([['memory'], ['skills'], ['hooks'], ['hooksDir'], ['mcp'], ['settings']])(
+    'should refuse a %s that names a file outside the asset tree',
+    field => {
+      // Act — every one of these is copied or read by the host when the change is applied.
+      const actual = FleetMutationSchema.safeParse({
+        kind: 'edit-account',
+        accountId: ACCOUNT_ID,
+        layer: { [field]: '/etc/passwd' },
+      });
+
+      // Assert
+      should(issuesFor(actual)).match(/asset path "\/etc\/passwd" must be relative to the asset directory/u);
+    },
+  );
+
+  it.each([
+    ['an absolute path', '/etc/passwd', /must be relative to the asset directory/u],
+    ['a traversal', '../../../../etc/passwd', /contains a path traversal segment/u],
+    ['a home alias', '~/.ssh', /not to a home/u],
+    ['a shell home alias', '$HOME/.ssh', /not to a home/u],
+    ['a Windows drive', 'C:/windows/system32', /must be relative to the asset directory/u],
+  ])('should refuse %s in an overlay', (_label, candidate, expected) => {
+    // Act
+    const actual = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { memory: candidate },
+    });
+
+    // Assert
+    should(issuesFor(actual)).match(expected);
+  });
+
+  it('should refuse an escape hidden in a per-harness overlay', () => {
+    // Act — the nested overlays are the same fields one level down, and a rule that stopped at the
+    // top level would be a rule a caller walks around by spelling `claude:` first.
+    const actual = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { claude: { skills: '~/.ssh' }, codex: { memory: 'AGENTS.md' } },
+    });
+
+    // Assert
+    should(issuesFor(actual)).match(/asset path "~\/\.ssh"/u);
+  });
+
+  it('should refuse an escape hidden in a list of settings layers', () => {
+    // Act — a settings string is a reference to a file, so it is one of these fields too.
+    const actual = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: { settings: [{ theme: 'dark' }, '../../../../etc/shadow'] },
+    });
+
+    // Assert
+    should(issuesFor(actual)).match(/contains a path traversal segment/u);
+  });
+
+  it('should accept the references a browser legitimately composes', () => {
+    // Act
+    const actual = FleetMutationSchema.safeParse({
+      kind: 'edit-account',
+      accountId: ACCOUNT_ID,
+      layer: {
+        memory: 'CLAUDE.md',
+        skills: 'skills/kirin',
+        settings: ['templates/claude/settings.json', { theme: 'dark' }],
+        claude: { memory: 'claude-only.md' },
+        env: { LANE: 'default' },
+        flags: ['--verbose'],
+      },
+    });
+
+    // Assert — the grammar bounds where a reference may point, not what an editor may say.
+    should(actual.success).be.true();
+  });
+
+  it('should keep the operator-authored spelling out of its business', () => {
+    // Act + Assert — `./x` is refused HERE, on the untrusted path, and stays valid in config.yaml:
+    // the restriction belongs to the caller, not to the file format.
+    should(
+      issuesFor(
+        FleetMutationSchema.safeParse({
+          kind: 'edit-account',
+          accountId: ACCOUNT_ID,
+          layer: { memory: './CLAUDE.md' },
+        }),
+      ),
+    ).match(/contains a path traversal segment/u);
+  });
+});
+
+describe('FleetProposalRequestSchema', () => {
+  it('should refuse an asset edit whose path escapes the tree', () => {
+    // Act — the same grammar as the overlay fields, stated once and enforced on both.
+    const actual = FleetProposalRequestSchema.safeParse({
+      mutation: { kind: 'initialize' },
+      assetEdits: [{ path: '../../escape.md', content: 'no' }],
+    });
+
+    // Assert
+    should(issuesFor(actual)).match(/asset path "\.\.\/\.\.\/escape\.md" contains a path traversal segment/u);
+  });
+
+  it('should accept an asset edit inside the tree', () => {
+    // Act
+    const actual = FleetProposalRequestSchema.safeParse({
+      mutation: { kind: 'initialize' },
+      assetEdits: [{ path: 'skills/review/SKILL.md', content: 'text\n' }],
+    });
+
+    // Assert
+    should(actual.success).be.true();
+  });
+});
+
+describe('fleetAssetRefProblem', () => {
+  it.each([
+    ['', /is empty/u],
+    [`${'a'.repeat(400)}.md`, /longer than 200 characters/u],
+    ['skills\\review', /must use "\/" separators/u],
+    ['/etc/passwd', /must be relative to the asset directory/u],
+    ['C:/windows', /must be relative to the asset directory/u],
+    ['skills/\u0000SKILL.md', /contains control characters/u],
+    ['~', /not to a home/u],
+    ['$HOME/notes.md', /not to a home/u],
+    ['a/b/c/d/e/f/g/h/i.md', /deeper than 8 directories/u],
+    ['skills//SKILL.md', /contains an empty path segment/u],
+    ['../secrets', /contains a path traversal segment/u],
+    ['skills/ review.md', /segment starting or ending with whitespace/u],
+  ])('should refuse %p', (candidate, expected) => {
+    // Act + Assert — one grammar, so this table is the whole rule for both boundaries.
+    should(fleetAssetRefProblem(candidate) ?? '').match(expected);
+  });
+
+  it.each([['CLAUDE.md'], ['skills/review/SKILL.md'], ['~kirin/notes.md'], ['a/b/c/d/e/f/g/h.md']])(
+    'should accept %p',
+    candidate => {
+      // Act + Assert — `~kirin` is expanded by nobody, so it stays inside the tree and is allowed.
+      should(fleetAssetRefProblem(candidate)).be.undefined();
+    },
+  );
 });
 
 describe('FleetApplyOutcomeSchema', () => {

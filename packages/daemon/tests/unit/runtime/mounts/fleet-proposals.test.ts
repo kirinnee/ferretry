@@ -1,16 +1,18 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import type { FleetScaffolder } from '@ferretry/fleet';
 import should from 'should';
 import { StateFileSystem } from '../../../../src/adapters/filesystem/state-file-system.ts';
 import { ProcfsSessionRootPinner } from '../../../../src/adapters/session/filesystem/index.ts';
+import { MAX_TEXT_BODY_BYTES } from '../../../../src/lib/api/body.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { createFoundationPaths } from '../../../../src/lib/paths.ts';
 import { createDaemonFleetSubsystem, fleetRoutes } from '../../../../src/lib/runtime/mounts/fleet.ts';
 import { resolveStateHome } from '../../../../src/lib/state-home.ts';
-import { jsonBody, request } from '../../api/support.ts';
+import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS } from './support.ts';
 
 const GENERATED_AT_MS = Date.parse('2027-01-15T08:00:00.000Z');
@@ -29,13 +31,14 @@ interface Fixture {
 
 let minted = 1;
 
-async function fixture(): Promise<Fixture> {
+async function fixture(scaffolder?: FleetScaffolder): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), 'fy-fleet-proposal-'));
   temporaryDirectories.push(root);
   const userHome = join(root, 'user');
   const paths = createFoundationPaths(resolveStateHome({ fyHome: join(root, 'fy-home'), homeDirectory: userHome }));
   const clock = { value: GENERATED_AT_MS };
   const subsystem = createDaemonFleetSubsystem({
+    ...(scaffolder === undefined ? {} : { scaffolder }),
     paths,
     userHome,
     clock: { now: () => clock.value },
@@ -195,6 +198,32 @@ describe('composing a fleet change', () => {
     should(actual.status).equal(401);
   });
 
+  it('should refuse a body over the text bound before a byte of it is produced', async () => {
+    // Arrange — the one fleet route whose purpose is to carry bulk caller-supplied text. Every
+    // bound the asset edits state is enforced by a schema, and a schema reads a string the
+    // transport has already held, so the read itself has to be the first bound.
+    const subject = await fixture();
+    await writeConfig(subject);
+    const reads = bodyReads();
+
+    // Act
+    const actual = await subject.dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/fleet/proposals',
+        headers: { ...admin, 'content-type': 'application/json', 'content-length': String(MAX_TEXT_BODY_BYTES + 1) },
+        body: JSON.stringify(CREATE),
+        reads,
+      }),
+    );
+
+    // Assert — refused at the text ceiling, not the attachment one, and nothing was allocated.
+    should(actual.status).equal(413);
+    should(jsonBody(actual)).match({ code: 'body_too_large' });
+    should(reads.limits).deepEqual([MAX_TEXT_BODY_BYTES]);
+    should(reads.consumed).be.false();
+  });
+
   it('should refuse an asset path that escapes the asset tree', async () => {
     // Arrange
     const subject = await fixture();
@@ -206,9 +235,49 @@ describe('composing a fleet change', () => {
       assetEdits: [{ path: '../../escape.md', content: 'no' }],
     });
 
-    // Assert
-    should(actual.status).equal(409);
-    should(jsonBody(actual)).match({ code: 'fleet_asset_refused' });
+    // Assert — refused where the contract is stated, before a byte of it is held, and the refusal
+    // names the path it read rather than merely the field it was in.
+    should(actual.status).equal(400);
+    should(jsonBody(actual)).match({
+      code: 'invalid_request',
+      error: /asset path "\.\.\/\.\.\/escape\.md" contains a path traversal segment/u,
+    });
+  });
+
+  it.each([
+    ['an absolute file', { memory: '/etc/passwd' }, /"\/etc\/passwd" must be relative to the asset directory/u],
+    ['a traversal', { memory: '../../../../etc/passwd' }, /contains a path traversal segment/u],
+    ['a home directory', { skills: '~/.ssh' }, /"~\/\.ssh" must be relative to the asset directory, not to a home/u],
+    ['a nested escape', { claude: { memory: '~/.ssh/id_ed25519' } }, /not to a home/u],
+  ])('should refuse an overlay naming %s', async (_label, layer, expected) => {
+    // Arrange — a paired device may compose a change, and applying copies whatever these fields
+    // name into an account home. The line the host approves says only "add claude-atomi", so the
+    // content of the change has to be bounded here rather than reviewed on a terminal.
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const actual = await post(subject, '/v1/fleet/proposals', device, {
+      mutation: { ...CREATE.mutation, layer },
+    });
+
+    // Assert — refused before anything is held, and the refusal names the path it read.
+    should(actual.status).equal(400);
+    should(jsonBody(actual)).match({ code: 'invalid_request', error: expected });
+  });
+
+  it('should accept an overlay whose references stay inside the asset tree', async () => {
+    // Arrange
+    const subject = await fixture();
+    await writeConfig(subject);
+
+    // Act
+    const proposal = await propose(subject, {
+      mutation: { ...CREATE.mutation, layer: { memory: 'CLAUDE.md', skills: 'skills/atomi' } },
+    });
+
+    // Assert — the bound is on where a reference may point, not on composing a change at all.
+    should(proposal.state).equal('pending');
   });
 
   it('should refuse an asset path that passes through a link', async () => {
@@ -439,7 +508,7 @@ describe('applying a fleet change', () => {
     const subject = await fixture();
     await writeConfig(subject);
     const proposal = await propose(subject, {
-      mutation: { ...CREATE.mutation, layer: { memory: './nothing-is-here.md' } },
+      mutation: { ...CREATE.mutation, layer: { memory: 'nothing-is-here.md' } },
     });
 
     // Act
@@ -626,6 +695,52 @@ describe('preparing a host that has no fleet', () => {
     should(Object.hasOwn(body, 'pathEntry')).be.false();
     // And the file that was already there is exactly as its owner left it.
     should(await readFile(join(subject.paths.fleet, 'assets', 'README.md'), 'utf8')).equal('# mine already\n');
+  });
+
+  it('should name the claim it could not clear when preparation fails in a way nobody classified', async () => {
+    // Arrange — a scaffolder that fails with something other than a partial host, and leaves the
+    // exclusive claim unreadable on its way out. The file implementation reports every failure it
+    // can reach as partial, so this is the branch no real adapter exercises and every other
+    // implementation of the port owns.
+    let lockPath = '';
+    const subject = await fixture({
+      scaffold: async () => {
+        await mkdir(lockPath, { recursive: true });
+        await writeFile(join(lockPath, 'claim-not-mine.json'), 'not a claim at all\n', 'utf8');
+        throw new Error('the scaffolder fell over');
+      },
+    });
+    lockPath = join(dirname(subject.paths.fleetManifest), '.fy-fleet-apply.lock');
+    const proposal = await propose(subject, { mutation: { kind: 'initialize' } });
+
+    // Act
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, admin);
+
+    // Assert — a claim nobody cleared blocks the next apply whatever else happened, so it is named
+    // rather than dropped along with the failure that produced it.
+    should(actual.status).equal(409);
+    should(jsonBody(actual)).match({
+      code: 'fleet_apply_refused',
+      error: /the scaffolder fell over; the exclusive apply claim at .*\.fy-fleet-apply\.lock could not be cleared/u,
+    });
+    should((await stat(lockPath)).isDirectory()).be.true();
+  });
+
+  it('should keep an unclassified preparation failure unclassified when nothing was left behind', async () => {
+    // Arrange — the same failure, with a claim that released cleanly.
+    const subject = await fixture({
+      scaffold: () => Promise.reject(new Error('the scaffolder fell over')),
+    });
+    const proposal = await propose(subject, { mutation: { kind: 'initialize' } });
+
+    // Act
+    const actual = await post(subject, `/v1/fleet/proposals/${proposal.id}/apply`, admin);
+
+    // Assert — nothing was left behind, so there is nothing to name and the failure stays a defect
+    // rather than being dressed up as a refusal a person could act on.
+    should(actual.status).equal(500);
+    should(jsonBody(actual)).match({ code: 'internal_error' });
+    should(await Bun.file(join(dirname(subject.paths.fleetManifest), '.fy-fleet-apply.lock')).exists()).be.false();
   });
 
   it('should refuse to prepare a host that already has a fleet', async () => {

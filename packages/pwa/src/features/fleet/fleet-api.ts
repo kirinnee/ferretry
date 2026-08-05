@@ -156,6 +156,14 @@ export type FleetRefusalKind =
   | 'config-invalid'
   | 'not-applied'
   | 'manifest-invalid'
+  /**
+   * The daemon answered, and the answer does not match the shared contract.
+   *
+   * Distinct from `unreachable` on purpose: a host that served a structurally invalid manifest is not a
+   * host that said nothing, and telling a person "this daemon did not answer" about a daemon that did
+   * sends them to look at the network instead of at the host.
+   */
+  | 'malformed'
   | 'proposal-gone'
   | 'proposal-stale'
   | 'proposal-unauthorized'
@@ -211,8 +219,39 @@ export interface FleetRefusalView {
   readonly code?: string;
 }
 
+/**
+ * The issues a schema failure carries, if that is what this is.
+ *
+ * The client parses every answer with `schema.parse`, so a daemon that returns a structurally invalid 200
+ * throws here rather than resolving — and that error's own `message` is a multi-line JSON dump of every
+ * issue. Rendered into a blocker or a state panel, a person reads JSON.
+ *
+ * Deliberately NOT `instanceof ZodError`: two copies of zod in one install would make that quietly false,
+ * and the interesting thing is the SHAPE this boundary produced, which is what gets parsed here.
+ */
+const SchemaIssuesSchema = z.array(z.object({ path: z.array(z.unknown()).optional(), message: z.string() })).min(1);
+
+/** A schema failure as one sentence naming where it happened, or `null` if this is another kind of error. */
+const schemaFailureDetail = (error: unknown): string | null => {
+  if (!(error instanceof Error)) return null;
+  const parsed = SchemaIssuesSchema.safeParse((error as { readonly issues?: unknown }).issues);
+  if (!parsed.success) return null;
+  const [first, ...rest] = parsed.data;
+  if (first === undefined) return null;
+  const where = (first.path ?? []).map(String).join('.');
+  // Collapsed, because "short sentence" has to hold even for an issue message that arrives with newlines.
+  const why = first.message.replace(/\s+/gu, ' ').trim();
+  const more = rest.length === 0 ? '' : ` (and ${rest.length} more)`;
+  return `this daemon's answer does not match the fleet contract${where === '' ? '' : ` at ${where}`}: ${why}${more}`;
+};
+
 export const fleetRefusal = (error: unknown): FleetRefusalView => {
   const http = error instanceof FyHttpError ? error : null;
+  if (http === null) {
+    // An answer that arrived and did not parse is neither a refusal the daemon worded nor silence.
+    const malformed = schemaFailureDetail(error);
+    if (malformed !== null) return { kind: 'malformed', detail: malformed };
+  }
   const detail = error instanceof Error && error.message.length > 0 ? error.message : String(error);
   const kind: FleetRefusalKind =
     http === null ? 'unreachable' : http.status === 403 ? 'forbidden' : refusalKindFor(http.code);

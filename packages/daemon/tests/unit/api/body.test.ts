@@ -1,8 +1,16 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
-import { ApiError, parseBody, parseOptionalBody, parseQuery } from '../../../src/lib/api/index.ts';
-import { request } from './support.ts';
+import {
+  ApiError,
+  MAX_REQUEST_BODY_BYTES,
+  MAX_TEXT_BODY_BYTES,
+  parseBody,
+  parseOptionalBody,
+  parseQuery,
+} from '../../../src/lib/api/index.ts';
+import { MAX_INITIAL_ATTACHMENT_BYTES, MAX_INITIAL_ATTACHMENTS } from '../../../src/lib/attachments/index.ts';
+import { bodyReads, request } from './support.ts';
 
 const SendSchema = z.object({ text: z.string().min(1), urgent: z.boolean().default(false) }).strict();
 const PageSchema = z.object({ limit: z.coerce.number().int().positive().max(100).default(20) });
@@ -193,5 +201,200 @@ describe('ApiError', () => {
     should(error.code).equal('already_running');
     should(error.name).equal('ApiError');
     should(error).be.instanceof(Error);
+  });
+});
+
+describe('bounded body reads', () => {
+  const AnySchema = z.object({}).loose();
+
+  /** A body of `bytes` valid JSON, so a refusal cannot be mistaken for a parse failure. */
+  const filler = (bytes: number): string => `{"text":"${'a'.repeat(bytes - 11)}"}`;
+
+  it('should ask for the shipped ceiling when a route states no bound of its own', async () => {
+    // Arrange
+    const reads = bodyReads();
+    const subject = request({ body: '{}', reads });
+
+    // Act
+    await parseBody(subject, AnySchema);
+
+    // Assert
+    should(reads.limits).deepEqual([MAX_REQUEST_BODY_BYTES]);
+  });
+
+  it('should accept a body of exactly the route bound', async () => {
+    // Arrange
+    const subject = request({ body: filler(64) });
+
+    // Act
+    const parsed = await parseBody(subject, AnySchema, { maxBytes: 64 });
+
+    // Assert
+    should(parsed).have.property('text');
+  });
+
+  it('should answer 413 for a body one byte over the route bound', async () => {
+    // Arrange
+    const subject = request({ body: filler(65) });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert
+    should(error.status).equal(413);
+    should(error.code).equal('body_too_large');
+    should(error.message).equal('the request body is over the 64-byte limit');
+  });
+
+  it('should refuse a declared oversize before reading the body', async () => {
+    // Arrange
+    const reads = bodyReads();
+    const subject = request({ body: filler(65), headers: { 'content-length': '65' }, reads });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert: refused on the declaration alone, with nothing consumed and the rest abandoned.
+    should(error.status).equal(413);
+    should(reads.consumed).be.false();
+    should(reads.discarded).be.true();
+  });
+
+  it('should bound a body that forged a small content-length', async () => {
+    // Arrange
+    const reads = bodyReads();
+    const subject = request({
+      body: filler(96),
+      headers: { 'content-length': '2' },
+      bodyPieceBytes: 16,
+      reads,
+    });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert: the read itself refused it, after consuming only what the bound allowed.
+    should(error.status).equal(413);
+    should(error.code).equal('body_too_large');
+    should(reads.consumed).be.true();
+  });
+
+  it('should bound a body that declared no length at all', async () => {
+    // Arrange
+    const subject = request({ body: filler(96), bodyPieceBytes: 16 });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert
+    should(error.status).equal(413);
+  });
+
+  it('should not echo the submitted content in the refusal', async () => {
+    // A 413 is the one refusal most likely to be carrying something private.
+    // Arrange
+    const subject = request({ body: `{"token":"${'sk-live-do-not-log-this'.repeat(8)}"}` });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert
+    should(error.message).not.containEql('sk-live');
+  });
+
+  it('should bound an optional body without making one required', async () => {
+    // A route that needs no body at all must still refuse an oversized one, or `POST` with nothing to
+    // say becomes an upload.
+    // Arrange
+    const absent = request({ reads: bodyReads() });
+    const oversize = request({ body: filler(96), bodyPieceBytes: 16 });
+
+    // Act
+    const parsed = await parseOptionalBody(absent, z.object({ reason: z.string().optional() }).strict(), {
+      maxBytes: 64,
+    });
+    const error = await rejection(() => parseOptionalBody(oversize, AnySchema, { maxBytes: 64 }));
+
+    // Assert
+    should(parsed).deepEqual({});
+    should(error.status).equal(413);
+    should(error.code).equal('body_too_large');
+  });
+
+  it('should still answer 400 when the body could not be read at all', async () => {
+    // A peer that vanished mid-upload is not an oversized body.
+    // Arrange
+    const subject = request({ unreadableBody: true });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, AnySchema, { maxBytes: 64 }));
+
+    // Assert
+    should(error.status).equal(400);
+    should(error.code).equal('unreadable_body');
+  });
+});
+
+describe('MAX_REQUEST_BODY_BYTES', () => {
+  /** base64 spends four characters on every three bytes, padded. */
+  const encoded = (bytes: number): number => Math.ceil(bytes / 3) * 4;
+
+  it('should admit the largest valid attachment request', async () => {
+    // The ceiling is derived from this, and the two numbers live in different modules: an attachment
+    // limit raised without raising the transport bound would silently make valid uploads unservable.
+    // Arrange
+    const largest = encoded(MAX_INITIAL_ATTACHMENT_BYTES);
+
+    // Assert
+    should(MAX_REQUEST_BODY_BYTES).be.above(largest);
+    should(MAX_REQUEST_BODY_BYTES - largest).be.aboveOrEqual(1024 * 1024);
+  });
+
+  it('should admit a full start payload, envelope and opening message included', async () => {
+    // Sixteen files sharing the 32 MiB decoded budget, each with its own JSON object and padding,
+    // plus the message that names them all.
+    // Arrange
+    const perFile = `{"filename":"${'n'.repeat(255)}.docx","mime":"application/vnd.openxmlformats","base64":""},`
+      .length;
+    const payload = encoded(MAX_INITIAL_ATTACHMENT_BYTES) + MAX_INITIAL_ATTACHMENTS * (perFile + 4);
+    const opening = 1024 * 1024;
+
+    // Assert
+    should(payload + opening).be.below(MAX_REQUEST_BODY_BYTES);
+  });
+
+  it('should be far below the runtime default it replaces', async () => {
+    // Bun's 128 MiB is not a bound anyone chose; every byte of it is heap an authenticated caller can
+    // make the daemon reserve before a schema has looked at the request.
+    // Assert
+    should(MAX_REQUEST_BODY_BYTES).be.below(128 * 1024 * 1024);
+    should(MAX_REQUEST_BODY_BYTES).equal(48_933_548);
+  });
+});
+
+describe('MAX_TEXT_BODY_BYTES', () => {
+  it('should bound a bulk-text route near its own contract, not near the attachment ceiling', async () => {
+    // A route whose purpose is to carry a caller's own text — a fleet proposal's asset edits, bounded
+    // at 256 KiB across at most 32 files — must not inherit a bound sized for a 32 MiB attachment.
+    // Arrange
+    const assetEditContract = 256 * 1024;
+
+    // Assert: room for the JSON envelope and escaping, and still two orders of magnitude tighter.
+    should(MAX_TEXT_BODY_BYTES).be.above(assetEditContract);
+    should(MAX_TEXT_BODY_BYTES).be.belowOrEqual(assetEditContract * 2);
+    should(MAX_TEXT_BODY_BYTES * 32).be.below(MAX_REQUEST_BODY_BYTES);
+  });
+
+  it('should refuse an oversized bulk-text body with the same stable answer', async () => {
+    // Arrange
+    const subject = request({ body: 'a'.repeat(MAX_TEXT_BODY_BYTES + 1), bodyPieceBytes: 64 * 1024 });
+
+    // Act
+    const error = await rejection(() => parseBody(subject, z.object({}).loose(), { maxBytes: MAX_TEXT_BODY_BYTES }));
+
+    // Assert
+    should(error.status).equal(413);
+    should(error.code).equal('body_too_large');
+    should(error.message).equal(`the request body is over the ${MAX_TEXT_BODY_BYTES}-byte limit`);
   });
 });

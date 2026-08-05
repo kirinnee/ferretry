@@ -17,7 +17,7 @@
  */
 
 import { Layers3, Lock, Plus, ServerCog, ShieldCheck, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { daemonApiClient } from '../../lib/api-client.ts';
 import { cn } from '../../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
@@ -48,10 +48,12 @@ import {
   CHANGE_LIMITS,
   classifyInventory,
   createAccountProposal,
+  currentUnreadable,
   declaredLayer,
   editAccountProposal,
   emptyAccountDraft,
   type FleetAccountDraft,
+  type FleetAssetKnowledge,
   type FleetAuthorityMode,
   type FleetInventory,
   type FleetLayerDraft,
@@ -67,6 +69,7 @@ import {
   outcomeSummary,
   selectLayerAssets,
   unreadableAssetProblems,
+  unseenAssets,
 } from './fleet-change-model.ts';
 import { FleetApplyReport, FleetChangeReview, FleetLiveRoster, FleetRefusalAlert } from './fleet-change-review.tsx';
 import { defaultFleetHarness } from './fleet-model.ts';
@@ -76,7 +79,18 @@ export type FleetClientFactory = (connection: DaemonConnection) => Promise<Fleet
 /** What the person is composing, if anything. */
 type FleetComposeMode =
   | { readonly kind: 'idle' }
-  | { readonly kind: 'create'; readonly draft: FleetAccountDraft }
+  | {
+      readonly kind: 'create';
+      readonly draft: FleetAccountDraft;
+      /**
+       * A new account writes asset text too, so it needs the same knowledge an edit does. Nothing is ever
+       * READ here — a new account has no declared layer to load — so `loaded` stays empty and every
+       * document the daemon already lists is one this browser has not seen.
+       */
+      readonly unreadable: readonly FleetUnreadableAsset[];
+      readonly assets: FleetAssetKnowledge;
+      readonly loading: boolean;
+    }
   | {
       readonly kind: 'edit';
       readonly accountId: string;
@@ -84,6 +98,11 @@ type FleetComposeMode =
       readonly layer: FleetLayerDraft;
       /** Assets this layer references whose current text the browser does not hold. Blocks staging. */
       readonly unreadable: readonly FleetUnreadableAsset[];
+      /**
+       * What the daemon said is already in the asset tree, and which of those documents this editor
+       * loaded. Kept so a path typed AFTER the load can be judged against the same evidence.
+       */
+      readonly assets: FleetAssetKnowledge;
       readonly loading: boolean;
     };
 
@@ -204,6 +223,12 @@ export function FleetConfigurationSurface({
   connection,
   createClient = daemonApiClient,
 }: FleetConfigurationSurfaceProps) {
+  // Instance-local, because one page may hold more than one cockpit: the harness states frame mounts
+  // four. Module-global ids there left three sections labelled by another daemon's heading and put four
+  // permanent live regions in one document, so that frame could not be trusted as accessibility
+  // evidence — which is the one thing it exists for.
+  const uid = useId();
+  const id = (name: string): string => `${uid}${name}`;
   const [session, setSession] = useState<FleetSession>(() => freshSession(mintGeneration()));
 
   /**
@@ -280,14 +305,52 @@ export function FleetConfigurationSurface({
    */
   const reviewRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
+  /**
+   * Where focus goes when a panel is DISMISSED rather than opened.
+   *
+   * Discarding unmounts the element focus is sitting on, and the browser then drops focus to `<body>` —
+   * a keyboard reader loses their place entirely and has to tab in from the top of the document. The
+   * header's own control is the stable answer: it survives every one of these transitions, and it is
+   * what a person reaches for next anyway.
+   */
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const surfaceRef = useRef<HTMLElement>(null);
+  /**
+   * Where focus goes when the create panel is OPENED.
+   *
+   * "Add account" is the one compose trigger that unmounts itself — the header offers it only while
+   * nothing is being composed — so the element focus was sitting on disappears and the browser drops
+   * focus to `<body>`. The panel takes it instead, and the panel rather than a field on purpose: while the
+   * asset listing is in flight every control inside is disabled, so there is nothing else focusable, and
+   * a `tabIndex={-1}` region with a name is a landing place that exists in both states. Keyed to the
+   * mounted state in an effect rather than scheduled beside the click, because focus has to move AFTER
+   * the render that mounts the panel, and a microtask that races that render is a coin toss.
+   */
+  const createRef = useRef<HTMLElement>(null);
   const proposalId = session.proposal?.id ?? null;
   const outcomeKind = session.outcome?.outcome ?? null;
+  const composeKind = session.mode.kind;
   useEffect(() => {
     if (proposalId !== null) reviewRef.current?.focus();
   }, [proposalId]);
   useEffect(() => {
     if (outcomeKind !== null) reportRef.current?.focus();
   }, [outcomeKind]);
+  useEffect(() => {
+    // Only on the transition INTO create. Re-running while the person types would fight the caret, and
+    // `composeKind` is exactly the value that does not change as a draft changes.
+    if (composeKind === 'create') createRef.current?.focus();
+  }, [composeKind]);
+
+  /** Dismiss a panel and put focus somewhere a keyboard can carry on from. */
+  const dismissed = useCallback(
+    (changes: Partial<FleetSession>): void => {
+      patch(generation, changes);
+      // After the render that removed the panel, not before it: the anchor may not be mounted yet.
+      queueMicrotask(() => (anchorRef.current ?? surfaceRef.current)?.focus());
+    },
+    [generation, patch],
+  );
 
   const stage = useCallback(
     async (request: FleetProposalRequest): Promise<void> => {
@@ -311,11 +374,14 @@ export function FleetConfigurationSurface({
    * skills directory — because a layer that declares a directory declares everything in it. Anything
    * that cannot be read is kept as an explicit entry and blocks staging: the editor would otherwise
    * send empty text for a document nobody has seen, and apply would write that over the real one.
+   *
+   * The INDEX is listed even for a layer that declares no assets at all, because the person can type a
+   * path this editor never loaded — an existing document — and judging that needs the daemon's answer to
+   * "what is already there". Only the per-document READS are scoped to what the layer declares.
    */
   const startEdit = useCallback(
     (account: FleetManifestAccountView): void => {
       const declared = layerDraftFrom(declaredLayer(session.config, account.id));
-      const nothingToRead = declared.instructions.path === '' && declared.skillsDirectory === '';
       patch(generation, {
         mode: {
           kind: 'edit',
@@ -323,13 +389,14 @@ export function FleetConfigurationSurface({
           wrapper: account.wrapper,
           layer: declared,
           unreadable: [],
-          loading: client !== null && !nothingToRead,
+          assets: { listed: [], loaded: [] },
+          loading: client !== null,
         },
         proposal: null,
         outcome: null,
         refusal: null,
       });
-      if (client === null || nothingToRead) return;
+      if (client === null) return;
 
       void (async () => {
         const index = await probe(() => listFleetAssets(client));
@@ -337,18 +404,22 @@ export function FleetConfigurationSurface({
           ? selectLayerAssets(index.value, declared.instructions.path, declared.skillsDirectory)
           : {
               readable: [],
-              // A tree nobody could list is a tree whose contents are unknown, which is a blocker too.
-              unreadable: [{ path: 'fleet/assets', reason: index.refusal.detail }],
+              // A tree nobody could list is a tree whose contents are unknown: a `tree` blocker, so no
+              // edit in the browser can clear it.
+              unreadable: [{ scope: 'tree' as const, path: 'fleet/assets', reason: index.refusal.detail }],
             };
         const unreadable = [...selection.unreadable];
+        const listed = index.ok ? index.value.files.map(file => file.path) : [];
+        const loaded: string[] = [];
         let instructions = declared.instructions;
         const skills: { id: string; path: string; text: string }[] = [];
         for (const path of selection.readable) {
           const document = await probe(() => readFleetAsset(client, path));
           if (!document.ok) {
-            unreadable.push({ path, reason: document.refusal.detail });
+            unreadable.push({ scope: 'file', path, reason: document.refusal.detail });
             continue;
           }
+          loaded.push(path);
           if (path === declared.instructions.path) instructions = { path, text: document.value.content };
           else skills.push({ id: path, path, text: document.value.content });
         }
@@ -361,6 +432,7 @@ export function FleetConfigurationSurface({
               ...previous.mode,
               layer: { ...previous.mode.layer, instructions, skills },
               unreadable,
+              assets: { listed, loaded },
               loading: false,
             },
           };
@@ -438,12 +510,52 @@ export function FleetConfigurationSurface({
   const suggestion = defaultFleetHarness(harnessEvidence(live));
   const composing = mode.kind !== 'idle' || session.proposal !== null;
 
+  /**
+   * Open the create form, with the daemon's answer to what is already in the asset tree.
+   *
+   * A new account's layer carries asset text like any other, so naming a document that is already there
+   * would write over it — the same overwrite an edit is stopped from making, by another route. Nothing is
+   * read: there is no declared layer to load, so every listed path counts as unseen, and a listing that
+   * refused or stopped at a bound leaves an unconditional `tree` blocker behind.
+   */
+  const startCreate = (): void => {
+    patch(generation, {
+      mode: {
+        kind: 'create',
+        draft: emptyAccountDraft(suggestion ?? 'claude'),
+        unreadable: [],
+        assets: { listed: [], loaded: [] },
+        loading: client !== null,
+      },
+      outcome: null,
+      refusal: null,
+    });
+    if (client === null) return;
+
+    void (async () => {
+      const index = await probe(() => listFleetAssets(client));
+      const unreadable = index.ok
+        ? selectLayerAssets(index.value, '', '').unreadable
+        : [{ scope: 'tree' as const, path: 'fleet/assets', reason: index.refusal.detail }];
+      const listed = index.ok ? index.value.files.map(file => file.path) : [];
+      setSession(previous => {
+        if (previous.generation !== generation || previous.mode.kind !== 'create') return previous;
+        return {
+          ...previous,
+          mode: { ...previous.mode, unreadable, assets: { listed, loaded: [] }, loading: false },
+        };
+      });
+    })();
+  };
+
   return (
     <section
       className="space-y-3"
+      ref={surfaceRef}
+      tabIndex={-1}
       data-fleet-configuration=""
       data-fleet-daemon-id={String(connection.daemonId)}
-      aria-labelledby="fleet-configuration-heading"
+      aria-labelledby={id('-configuration-heading')}
     >
       <p className="sr-only" role="status" data-fleet-announcement="">
         {session.busy
@@ -463,7 +575,7 @@ export function FleetConfigurationSurface({
             {/* An <h2>, not an <h1>: this renders inside a settings tab panel whose page already has
                 one. A second <h1> is an outline bug outright. */}
             <h2
-              id="fleet-configuration-heading"
+              id={id('-configuration-heading')}
               className="m-0 font-display text-title font-bold tracking-display text-fg"
             >
               Fleet
@@ -495,17 +607,12 @@ export function FleetConfigurationSurface({
         {composable && !composing ? (
           <div className="flex flex-wrap gap-2 px-panel py-3">
             <button
+              ref={anchorRef}
               type="button"
               className="kt-btn"
               data-variant="primary"
               data-fleet-start-create=""
-              onClick={() =>
-                patch(generation, {
-                  mode: { kind: 'create', draft: emptyAccountDraft(suggestion ?? 'claude') },
-                  outcome: null,
-                  refusal: null,
-                })
-              }
+              onClick={startCreate}
             >
               <Plus size={14} aria-hidden="true" />
               Add account
@@ -521,7 +628,7 @@ export function FleetConfigurationSurface({
             inventory.kind === 'uninitialized' || inventory.kind === 'not-applied' ? '' : 'border-warn-border',
           )}
           data-fleet-state={inventory.kind}
-          aria-labelledby="fleet-state-heading"
+          aria-labelledby={id('-state-heading')}
         >
           <div className="flex min-w-0 items-start gap-3">
             <span className="mt-0.5 shrink-0 text-warn">
@@ -532,7 +639,7 @@ export function FleetConfigurationSurface({
               )}
             </span>
             <div className="min-w-0">
-              <h3 id="fleet-state-heading" className="m-0 text-title font-semibold text-fg">
+              <h3 id={id('-state-heading')} className="m-0 text-title font-semibold text-fg">
                 {INVENTORY_COPY[inventory.kind].title}
               </h3>
               <p className="mb-0 mt-1 text-ui leading-base text-muted">{INVENTORY_COPY[inventory.kind].body}</p>
@@ -594,26 +701,39 @@ export function FleetConfigurationSurface({
               onCodeChange={code => patch(generation, { code })}
               onApply={() => void apply()}
               onRecheck={() => void recheck()}
-              onDiscard={() => patch(generation, { proposal: null, code: '', refusal: null })}
+              onDiscard={() => dismissed({ proposal: null, code: '', refusal: null })}
               busy={session.busy}
               refusal={session.refusal}
             />
           </div>
         ) : null}
 
+        {/* A named region rather than a bare div: `aria-label` on an element with no role names nothing,
+            and this element exists to BE the landing place focus is sent to when the panel opens. */}
         {session.proposal === null && mode.kind === 'create' ? (
-          <div className="kt-panel overflow-hidden">
+          <section className="kt-panel overflow-hidden" ref={createRef} tabIndex={-1} aria-label="New account">
             <FleetAccountForm
               draft={mode.draft}
-              onChange={draft => patch(generation, { mode: { kind: 'create', draft } })}
+              onChange={draft => patch(generation, { mode: { ...mode, draft } })}
               onSubmit={() => void stage(createAccountProposal(mode.draft))}
-              onCancel={() => patch(generation, { mode: { kind: 'idle' }, refusal: null })}
-              problems={accountProblems(mode.draft, session.config)}
-              disabled={session.busy}
+              onCancel={() => dismissed({ mode: { kind: 'idle' }, refusal: null })}
+              problems={[
+                // The same one filter an edit goes through. A new account has loaded nothing, so any
+                // document the daemon already lists is text this browser has never seen.
+                ...unreadableAssetProblems(
+                  currentUnreadable(
+                    [...mode.unreadable, ...unseenAssets(mode.draft.layer, mode.assets)],
+                    mode.draft.layer,
+                  ),
+                ),
+                ...accountProblems(mode.draft, session.config),
+              ]}
+              disabled={session.busy || mode.loading}
+              loading={mode.loading}
               suggestion={suggestion}
               variants={variants.length === 0 ? ['default'] : variants}
             />
-          </div>
+          </section>
         ) : null}
 
         {session.proposal === null && mode.kind === 'edit' ? (
@@ -623,8 +743,17 @@ export function FleetConfigurationSurface({
               layer={mode.layer}
               onChange={layer => patch(generation, { mode: { ...mode, layer } })}
               onSubmit={() => void stage(editAccountProposal(mode.accountId, mode.layer))}
-              onCancel={() => patch(generation, { mode: { kind: 'idle' }, refusal: null })}
-              problems={[...unreadableAssetProblems(mode.unreadable), ...layerProblems(mode.layer)]}
+              onCancel={() => dismissed({ mode: { kind: 'idle' }, refusal: null })}
+              problems={[
+                // Recomputed against the CURRENT draft each render: clearing the reference clears the
+                // blocker, while a truncated walk keeps blocking whatever the person types. Load-time
+                // evidence and the paths the draft newly names go through ONE filter, so a document that
+                // exists and was never loaded blocks on exactly the terms an unreadable one does.
+                ...unreadableAssetProblems(
+                  currentUnreadable([...mode.unreadable, ...unseenAssets(mode.layer, mode.assets)], mode.layer),
+                ),
+                ...layerProblems(mode.layer),
+              ]}
               disabled={session.busy || mode.loading}
               loading={mode.loading}
             />
@@ -632,8 +761,8 @@ export function FleetConfigurationSurface({
         ) : null}
       </div>
 
-      <section className="kt-panel px-panel py-3" aria-labelledby="fleet-limits-heading">
-        <p className="kt-label m-0" id="fleet-limits-heading">
+      <section className="kt-panel px-panel py-3" aria-labelledby={id('-limits-heading')}>
+        <p className="kt-label m-0" id={id('-limits-heading')}>
           Known limits
         </p>
         <ul className="m-0 mt-1 list-none space-y-1 p-0">

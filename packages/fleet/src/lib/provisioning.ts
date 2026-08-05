@@ -198,7 +198,6 @@ export interface FleetApplyCommittedState {
  */
 export type FleetApplyFailure =
   | {
-      /** Nothing was committed. Every captured entry was verified back to its prior state. */
       /**
        * Nothing was committed and the host is exactly as it was: every captured entry verified
        * back, and nothing of anyone else's moved. Both conditions, because a rollback that had to

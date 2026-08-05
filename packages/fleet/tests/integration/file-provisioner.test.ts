@@ -779,6 +779,31 @@ describe('FileFleetProvisioner', () => {
       should((await lstat(path.join(bin, 'a-link'))).isSymbolicLink()).be.true();
     });
 
+    it('should skip every reserved prefix, including a staged replacement', async () => {
+      // Arrange — a sweep that removed the machinery's own names would destroy the only copy of
+      // what a rollback needs to put back. The three prefixes are one list precisely so that a
+      // fourth is covered the moment it joins, rather than the moment somebody remembers to widen
+      // a condition — each of these carries the managed marker and would otherwise be pruned.
+      const root = await temporaryDirectory();
+      const bin = path.join(root, 'fleet', 'bin');
+      const marker = '# managed-by-the-test';
+      const reserved = ['.fy-fleet-backup-abc', '.fy-fleet-displaced-abc', '.fy-fleet-staged-abc'];
+      for (const name of reserved) await Bun.write(path.join(bin, name), `#!/bin/sh\n${marker}\nexec true\n`);
+      await Bun.write(path.join(bin, 'stale-wrapper'), `#!/bin/sh\n${marker}\nexec true\n`);
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune', path: bin, marker, keep: [] }],
+      });
+
+      // Assert — only the genuine wrapper goes.
+      should([...actual.prunedWrappers]).deepEqual(['stale-wrapper']);
+      for (const name of reserved) should(await Bun.file(path.join(bin, name)).exists()).be.true();
+    });
+
     it('should treat a missing directory as nothing to prune', async () => {
       // Arrange
       const root = await temporaryDirectory();

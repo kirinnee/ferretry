@@ -37,8 +37,16 @@ import type { DisplacedState, UnrestoredPath } from '../lib/provisioning.ts';
  */
 type Seal = { readonly present: false } | { readonly present: true; readonly fingerprint: string | undefined };
 
-/** How many entries a tree seal will describe before it gives up and refuses to claim knowledge. */
-const MAX_SEAL_ENTRIES = 2000;
+/**
+ * How many entries a tree seal will describe before it gives up and refuses to claim knowledge.
+ *
+ * The seal is folded into a hash as the walk goes, so this is a bound on *work*, not on memory. It
+ * was once the far lower bound that collecting every entry into an array demanded, and that made a
+ * large tree permanently unsealable: a skills tree past the limit could never compare equal, so even
+ * a flawless rollback of one had to be reported as unverified. Streaming is what lets the bound sit
+ * where a runaway traversal is the only thing it stops.
+ */
+const MAX_SEAL_ENTRIES = 200_000;
 /** How large a file may be before its identity rests on size and timestamps rather than content. */
 const MAX_DIGEST_BYTES = 4 * 1024 * 1024;
 
@@ -71,9 +79,28 @@ const BACKUP_PREFIX = '.fy-fleet-backup-';
 /** Reserved basename prefix for state a rollback moved out of the way instead of deleting. */
 const DISPLACED_PREFIX = '.fy-fleet-displaced-';
 
-/** Whether a directory entry is this journal's own moved-aside evidence. */
-export function isMutationBackupName(name: string): boolean {
-  return name.startsWith(BACKUP_PREFIX) || name.startsWith(DISPLACED_PREFIX);
+/**
+ * Reserved basename prefix for a replacement built beside its destination before it is published.
+ *
+ * It lives here rather than beside the code that mints it so that every reserved prefix is one list.
+ * A sweep learns which names are the machinery's own from a single place, and a fourth prefix added
+ * later is covered by every sweep the moment it joins the list instead of the moment somebody
+ * remembers to widen a condition.
+ */
+export const STAGE_PREFIX = '.fy-fleet-staged-';
+
+const RESERVED_PREFIXES = [BACKUP_PREFIX, DISPLACED_PREFIX, STAGE_PREFIX] as const;
+
+/**
+ * Whether a directory entry is the mutation machinery's own — moved-aside evidence, displaced state,
+ * or a staged replacement.
+ *
+ * A sweep that removes managed files has to skip all three: a backup of a managed wrapper still
+ * carries the managed marker, and deleting it would destroy the only copy of what the sweep is meant
+ * to be able to undo.
+ */
+export function isMutationReservedName(name: string): boolean {
+  return RESERVED_PREFIXES.some(prefix => name.startsWith(prefix));
 }
 
 const PERMISSION_BITS = 0o7777;
@@ -113,16 +140,30 @@ async function contentDigest(target: string, size: number): Promise<string> {
   return new Bun.CryptoHasher('sha256').update(await readFile(target)).digest('hex');
 }
 
-/** Describe everything beneath a directory, or report that it is larger than the bound allows. */
-async function summarise(directory: string, prefix: string, parts: string[]): Promise<boolean> {
-  const entries = await readdir(directory, { withFileTypes: true });
-  for (const entry of entries) {
-    if (parts.length >= MAX_SEAL_ENTRIES) return true;
-    const relative = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
-    const child = path.join(directory, entry.name);
+/** The running fold of a tree seal, and how much of its work budget has been spent. */
+interface SealWalk {
+  readonly hasher: Bun.CryptoHasher;
+  visited: number;
+}
+
+/**
+ * Fold everything beneath a directory into the running seal, or report that the bound was reached.
+ *
+ * Each directory's names are sorted as it is walked, which makes the fold canonical without ever
+ * holding the tree: `readdir` order is the filesystem's business, and two seals of the same tree
+ * have to agree. Sorting per directory is what replaced sorting every entry at the end — the step
+ * that forced the whole summary into an array and capped a sealable tree at a couple of thousand
+ * entries.
+ */
+async function summarise(directory: string, prefix: string, walk: SealWalk): Promise<boolean> {
+  for (const name of (await readdir(directory)).toSorted()) {
+    if (walk.visited >= MAX_SEAL_ENTRIES) return true;
+    walk.visited += 1;
+    const relative = prefix === '' ? name : `${prefix}/${name}`;
+    const child = path.join(directory, name);
     const information = await lstat(child);
-    parts.push(fingerprintOf(relative, information));
-    if (information.isDirectory() && (await summarise(child, relative, parts))) return true;
+    walk.hasher.update(`${fingerprintOf(relative, information)}\n`);
+    if (information.isDirectory() && (await summarise(child, relative, walk))) return true;
   }
   return false;
 }
@@ -197,9 +238,10 @@ export class FileMutationJournal {
     }
     if (!information.isDirectory()) return { present: true, fingerprint: fingerprintOf('', information) };
 
-    const parts = [fingerprintOf('', information)];
-    const overflowed = await summarise(target, '', parts);
-    return { present: true, fingerprint: overflowed ? undefined : parts.toSorted().join('\n') };
+    const walk: SealWalk = { hasher: new Bun.CryptoHasher('sha256'), visited: 0 };
+    walk.hasher.update(`${fingerprintOf('', information)}\n`);
+    const overflowed = await summarise(target, '', walk);
+    return { present: true, fingerprint: overflowed ? undefined : walk.hasher.digest('hex') };
   }
 
   /** Whether a destination still holds exactly what this batch left there. */
@@ -247,6 +289,14 @@ export class FileMutationJournal {
    * Record the directories a recursive create is about to bring into existence, and the mode an
    * already-present directory is about to lose. Ancestors are recorded outermost-first so the
    * reverse-order undo removes the deepest one first.
+   *
+   * A symlink in the final position is refused whenever a mode is being set. `chmod` follows the
+   * link, so the caller would change the permissions of whatever it points at — possibly outside the
+   * allowed roots — while `lstat` reports a link rather than a directory and no mode entry is
+   * recorded, leaving a rollback that reports a clean restore over a target it silently altered.
+   * The undo path already refuses to restore a mode through a link, and the forward path must not do
+   * what its own undo will not. Being allowed to traverse a link is not being allowed to chmod
+   * through it.
    */
   async captureDirectory(target: string, mode?: number): Promise<void> {
     const resolved = path.resolve(target);
@@ -256,8 +306,15 @@ export class FileMutationJournal {
     for (;;) {
       try {
         const information = await lstat(cursor);
-        if (cursor === resolved && mode !== undefined && information.isDirectory()) {
-          this.#entries.push({ kind: 'mode', path: resolved, mode: information.mode & PERMISSION_BITS });
+        if (cursor === resolved && mode !== undefined) {
+          if (information.isSymbolicLink()) {
+            throw new Error(
+              `refusing to set the mode of ${resolved}: it is a symbolic link, and chmod would change what it points at`,
+            );
+          }
+          if (information.isDirectory()) {
+            this.#entries.push({ kind: 'mode', path: resolved, mode: information.mode & PERMISSION_BITS });
+          }
         }
         break;
       } catch (error) {
@@ -359,33 +416,67 @@ export class FileMutationJournal {
   }
 
   /**
-   * Free a destination without ever deleting live state.
+   * Take a path out of the live tree, then decide whether what was taken may be destroyed.
    *
-   * The seal was checked a moment ago, and a moment is enough for a writer to change the tree —
-   * a recursive delete decided on a stale digest is the same data loss the digest exists to
-   * prevent. So the entry is *renamed* out of the way first, which is atomic and unreachable to
-   * anyone else afterwards, and only then re-examined: if the displaced copy is still exactly what
-   * this apply wrote, it is dropped; if it is not, it is kept and named.
+   * **This is the only shape in which anything here is ever deleted, and the order is the whole
+   * point.** Checking a live path and then removing it is two operations with a gap, and a writer
+   * who lands in that gap has their work deleted by a decision made about somebody else's bytes.
+   * Renaming first is one atomic operation, and afterwards the entry is unreachable to anyone
+   * resolving the old pathname — so no *new* writer can reach inside it, and the examination that
+   * follows is of something they can no longer arrive at.
+   *
+   * **That is unreachability, not immutability, and the difference is not papered over.** A process
+   * that already holds an open file or directory descriptor keeps it across the rename and can still
+   * write through it. Renaming closes the pathname race, which is the one this code creates; it
+   * cannot close a handle somebody opened beforehand. No filesystem primitive available here can.
+   *
+   * `isOwnWork` is given the new location and answers the only question that licenses removal: is
+   * this still exactly what we put there? A `false` — or a check that cannot tell — keeps the copy
+   * and leaves it named, which is why the record is pushed the instant the rename succeeds and
+   * withdrawn only after the removal actually happened. Moved-and-unreported is state nobody can
+   * find; reported-and-still-there is merely untidy.
    */
-  private async clear(entry: JournalEntry): Promise<void> {
-    const displaced = path.join(path.dirname(entry.path), `${DISPLACED_PREFIX}${randomUUID()}`);
+  async displace(target: string, isOwnWork: (moved: string) => Promise<boolean>): Promise<void> {
+    const displaced = path.join(path.dirname(target), `${DISPLACED_PREFIX}${randomUUID()}`);
     try {
-      await rename(entry.path, displaced);
+      await rename(target, displaced);
     } catch (error) {
       // Already gone, which is the state this was trying to reach.
       if (isMissing(error)) return;
       throw error;
     }
-    // Recorded the instant the rename succeeds, before anything that can fail. State that has been
-    // moved and not reported is state nobody can find; the record is withdrawn below only once it
-    // is proven to be this apply's own work and actually removed.
-    this.#displaced.push({ path: entry.path, movedTo: displaced });
+    this.#displaced.push({ path: target, movedTo: displaced });
 
-    const settled = await this.identify(displaced);
-    const seal = entry.seal;
-    if (seal === undefined || !seal.present || !settled.present || seal.fingerprint !== settled.fingerprint) return;
+    if (!(await isOwnWork(displaced))) return;
     await rm(displaced, { recursive: true, force: true });
-    this.#displaced.pop();
+    this.#displaced.splice(
+      this.#displaced.findIndex(state => state.movedTo === displaced),
+      1,
+    );
+  }
+
+  /**
+   * Free a destination without ever deleting live state.
+   *
+   * The seal was checked a moment ago, and a moment is enough for a writer to change the tree — a
+   * recursive delete decided on a stale digest is the same data loss the digest exists to prevent.
+   * So this is `displace` with the seal as its evidence: still exactly what this apply wrote, or
+   * kept and named.
+   */
+  private async clear(entry: JournalEntry): Promise<void> {
+    await this.displace(entry.path, async displaced => {
+      // No seal, or a seal saying nothing was here, is not evidence that what was just moved is
+      // ours — and asking the filesystem about it would not make it any more so.
+      const seal = entry.seal;
+      if (seal === undefined || !seal.present) return false;
+      const settled = await this.identify(displaced);
+      // Both fingerprints being absent is two admissions of not knowing, and `undefined ===
+      // undefined` would read that as a match and licence a delete. Today `undo` only reaches here
+      // through `isUnchanged`, which already refuses that case — but `displace` is public now, and
+      // a caller bringing its own comparator inherits none of that. The guard belongs where the
+      // comparison is, not only where the current caller happens to be.
+      return settled.present && seal.fingerprint !== undefined && seal.fingerprint === settled.fingerprint;
+    });
   }
 
   /**

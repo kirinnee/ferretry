@@ -364,7 +364,7 @@ const HARNESS_FLEET_LAYER: FleetLayerDraft = {
 };
 
 const HARNESS_FLEET_PROPOSAL = {
-  id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8Xz',
+  id: 'fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb',
   revision: '9f1c4ab77e2d',
   mutation: {
     kind: 'create-account',
@@ -3788,6 +3788,7 @@ function Shell() {
                 onCancel={() => {}}
                 problems={[]}
                 disabled={false}
+                loading={false}
                 suggestion="claude"
                 variants={['default', 'auto']}
               />
@@ -3829,7 +3830,7 @@ function Shell() {
               proposal={HARNESS_FLEET_PROPOSAL}
               live={HARNESS_FLEET_ACCOUNTS}
               authority="approval"
-              command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8Xz"
+              command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
               code=""
               onCodeChange={() => {}}
               onApply={() => {}}
@@ -5022,7 +5023,15 @@ function BrowserFullViewportHarness() {
  * capture of a tall card inside the gallery's scroller clips to the wrong region. Starting at the real
  * top of a page with no sticky chrome is what makes the captures trustworthy.
  */
-type HarnessFleetFrame = 'accounts' | 'preview' | 'failed-apply' | 'create' | 'layer' | 'cockpit' | 'states';
+type HarnessFleetFrame =
+  | 'accounts'
+  | 'preview'
+  | 'failed-apply'
+  | 'create'
+  | 'layer'
+  | 'cockpit'
+  | 'cockpit-staged'
+  | 'states';
 
 /**
  * The COCKPIT itself, driven by a stub daemon rather than by fixtures handed to a leaf.
@@ -5054,9 +5063,29 @@ const HARNESS_FLEET_COCKPIT_ANSWERS: Readonly<Record<string, unknown>> = {
   },
   '/accounts': { version: 1, generatedAt: '2026-08-05T08:26:00.000Z', accounts: HARNESS_FLEET_ACCOUNTS },
   '/config': { variants: { default: {}, auto: {} }, agents: [] },
+  // Every compose flow lists the asset tree, because a path the person types has to be judged against
+  // what is already there. A daemon that cannot answer this is a daemon whose tree is unknown, and the
+  // surface then refuses to stage anything — so a harness without this route would capture a blocked
+  // screen rather than the change manifest these frames exist to show.
+  '/assets': { files: [], complete: true },
 };
 
 /** The four states a host can be in that are NOT a published fleet. Each one is its own sentence. */
+const HARNESS_FLEET_STAGED_ANSWERS: Readonly<Record<string, unknown>> = {
+  ...HARNESS_FLEET_COCKPIT_ANSWERS,
+  '/config': {
+    variants: { default: {}, auto: {} },
+    agents: [
+      {
+        name: 'studio',
+        kind: 'claude',
+        routes: { default: { id: HARNESS_FLEET_ACCOUNTS[0]?.id, wrapper: 'claude-studio' } },
+      },
+    ],
+  },
+  '/proposals': HARNESS_FLEET_PROPOSAL,
+};
+
 const HARNESS_FLEET_STATE_ANSWERS: readonly {
   readonly label: string;
   readonly answers: Readonly<Record<string, unknown>>;
@@ -5128,7 +5157,7 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
             proposal={HARNESS_FLEET_PROPOSAL}
             live={HARNESS_FLEET_ACCOUNTS}
             authority="approval"
-            command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8Xz"
+            command="fy fleet authorize fy_fprop_7Hq2Kd9vBnR4Tm6Ws8XzQb"
             code=""
             onCodeChange={() => {}}
             onApply={() => {}}
@@ -5153,6 +5182,7 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
             onCancel={() => {}}
             problems={[]}
             disabled={false}
+            loading={false}
             suggestion="claude"
             variants={['default', 'auto']}
           />
@@ -5179,6 +5209,14 @@ function FleetCockpitHarness({ frame }: { readonly frame: HarnessFleetFrame }) {
           <FleetConfigurationSurface
             connection={daemon}
             createClient={async () => fleetCockpitClient(HARNESS_FLEET_COCKPIT_ANSWERS)}
+          />
+        </section>
+      )}
+      {frame !== 'cockpit-staged' ? null : (
+        <section aria-label="Fleet cockpit, change staged" id="harness-fleet-cockpit-staged-page">
+          <FleetConfigurationSurface
+            connection={daemon}
+            createClient={async () => fleetCockpitClient(HARNESS_FLEET_STAGED_ANSWERS)}
           />
         </section>
       )}
@@ -5215,6 +5253,7 @@ const FLEET_FRAGMENTS: Readonly<Record<string, HarnessFleetFrame>> = {
   '#fleet-create': 'create',
   '#fleet-layer': 'layer',
   '#fleet-cockpit': 'cockpit',
+  '#fleet-cockpit-staged': 'cockpit-staged',
   '#fleet-states': 'states',
 };
 

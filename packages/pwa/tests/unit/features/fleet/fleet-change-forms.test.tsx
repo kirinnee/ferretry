@@ -13,7 +13,7 @@ import {
   type FleetLayerDraft,
 } from '../../../../src/features/fleet/fleet-change-model.ts';
 import { mount } from '../../../support/dom.ts';
-import { area, button, choose, click, field, form, pick, submit, type } from './fleet-support.ts';
+import { absent, area, button, choose, click, field, form, pick, submit, type } from './fleet-support.ts';
 
 const noop = (): void => undefined;
 
@@ -129,6 +129,27 @@ describe('the layer fields', () => {
     await harness.unmount();
   });
 
+  it('keeps focus in the list when a row is removed, rather than dropping it to the document', async () => {
+    const harness = await layerHarness({
+      ...emptyLayerDraft(),
+      skillsDirectory: 'skills/studio',
+      skills: [{ id: 'a', path: 'skills/studio/a.md', text: 'A' }],
+      env: [{ id: 'e', name: 'FY_LANE', value: 'studio' }],
+    });
+
+    // Removing a row unmounts the button that was clicked; without a landing place the browser drops
+    // focus to <body> and a keyboard reader loses the form.
+    await click(pick(harness.container, 'button[aria-label="Remove skill document 1"]'));
+    await harness.rerender();
+    expect(document.activeElement).toBe(button(harness.container, 'Add skill document'));
+    expect(document.activeElement).not.toBe(document.body);
+
+    await click(pick(harness.container, 'button[aria-label="Remove environment variable 1"]'));
+    await harness.rerender();
+    expect(document.activeElement).toBe(button(harness.container, 'Add variable'));
+    await harness.unmount();
+  });
+
   it('labels each section once, and scopes its ids so two copies can share a document', async () => {
     const mounted = await mount(
       <>
@@ -193,7 +214,11 @@ describe('problems', () => {
 });
 
 describe('the new account form', () => {
-  const accountHarness = async (overrides: Partial<FleetAccountDraft> = {}, problems: readonly string[] = []) => {
+  const accountHarness = async (
+    overrides: Partial<FleetAccountDraft> = {},
+    problems: readonly string[] = [],
+    loading = false,
+  ) => {
     let current: FleetAccountDraft = { ...emptyAccountDraft('claude'), ...overrides };
     let submitted = 0;
     let cancelled = 0;
@@ -210,7 +235,8 @@ describe('the new account form', () => {
           cancelled += 1;
         }}
         problems={problems}
-        disabled={false}
+        disabled={loading}
+        loading={loading}
         suggestion="codex"
         variants={['default', 'auto']}
       />
@@ -300,6 +326,26 @@ describe('the new account form', () => {
     expect(button(broken.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
     await broken.unmount();
   });
+
+  it('says why it is inert while the asset listing is in flight', async () => {
+    // F1: a new account writes asset text, so the form cannot judge a path until the daemon has said what
+    // is already there. RED before this: every control was disabled with no text and no aria-busy, so on a
+    // relayed connection the form read as broken rather than as loading.
+    const waiting = await accountHarness({}, [], true);
+    expect(pick(waiting.container, '[data-fleet-account-loading]').textContent).toContain(
+      'Reading what is already in the asset tree',
+    );
+    expect(form(waiting.container, '[data-fleet-account-form]').getAttribute('aria-busy')).toBe('true');
+    expect(field(waiting.container, '-account-name').hasAttribute('disabled')).toBe(true);
+    expect(button(waiting.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
+    await waiting.unmount();
+
+    const ready = await accountHarness();
+    expect(absent(ready.container, '[data-fleet-account-loading]')).toBe(true);
+    expect(form(ready.container, '[data-fleet-account-form]').getAttribute('aria-busy')).toBe('false');
+    expect(field(ready.container, '-account-name').hasAttribute('disabled')).toBe(false);
+    await ready.unmount();
+  });
 });
 
 describe('the layer form', () => {
@@ -337,6 +383,8 @@ describe('the layer form', () => {
   it('says it is still reading the assets, and will not stage until it has', async () => {
     const harness = await layerFormHarness(['"skills/a.md" could not be read'], true);
     expect(pick(harness.container, '[data-fleet-layer-loading]')).toBeDefined();
+    // The same truth in the attribute assistive technology reads, on both forms.
+    expect(form(harness.container, '[data-fleet-layer-form]').getAttribute('aria-busy')).toBe('true');
     expect(button(harness.container, 'Preview this change').hasAttribute('disabled')).toBe(true);
     expect(harness.container.textContent).toContain('could not be read');
     await harness.unmount();

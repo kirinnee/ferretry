@@ -200,7 +200,7 @@ describe('applyFleetMutation editing an account', () => {
     // Act — the case that used to blank an account: a layer-only edit.
     const actual = applyFleetMutation(
       existing(),
-      mutationOf({ kind: 'edit-account', accountId: ID_ONE, layer: { memory: './kirin.md' } }),
+      mutationOf({ kind: 'edit-account', accountId: ID_ONE, layer: { memory: 'kirin.md' } }),
       mintId,
     );
 
@@ -210,7 +210,7 @@ describe('applyFleetMutation editing an account', () => {
       mode: 'interactive',
       defaultModel: 'model-one',
       available: true,
-      layer: { memory: './kirin.md' },
+      layer: { memory: 'kirin.md' },
     });
     should(routeOf(actual, ID_ONE).models).have.length(2);
   });
@@ -248,16 +248,18 @@ describe('applyFleetMutation editing an account', () => {
       ],
     });
 
-    // Act — an editor that only round-trips instructions sends only instructions.
+    // Act — an editor that only round-trips instructions sends only instructions. What it sends is
+    // held to the asset grammar; what the operator already wrote in the file is not, which is why
+    // the untouched fields below keep their `./` spelling.
     const actual = applyFleetMutation(
       config,
-      mutationOf({ kind: 'edit-account', accountId: ID_ONE, layer: { memory: './new-instructions.md' } }),
+      mutationOf({ kind: 'edit-account', accountId: ID_ONE, layer: { memory: 'new-instructions.md' } }),
       mintId,
     );
 
     // Assert
     should(routeOf(actual, ID_ONE).layer).deepEqual({
-      memory: './new-instructions.md',
+      memory: 'new-instructions.md',
       skills: './skills-kirin',
       env: { LANE: 'default' },
       flags: ['--verbose'],

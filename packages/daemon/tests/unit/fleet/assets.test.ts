@@ -36,6 +36,8 @@ describe('parseAssetPath', () => {
     ['skills\\review', /must use "\/" separators/u],
     ['../../.ssh/authorized_keys', /path traversal/u],
     ['skills/./SKILL.md', /path traversal/u],
+    ['~/.ssh', /not to a home/u],
+    ['$HOME/.ssh', /not to a home/u],
     ['skills//SKILL.md', /empty path segment/u],
     ['skills/ review.md', /whitespace/u],
     ['a/b/c/d/e/f/g/h/i.md', /deeper than/u],
@@ -139,6 +141,29 @@ describe('parseAssetEdits', () => {
 
     // Assert
     should(actual).match(/edited more than once/u);
+  });
+
+  it('should refuse two spellings of one file on a case-insensitive host', () => {
+    // Act — macOS holds a single file for both of these, so the second write would silently
+    // replace the first and the staleness check would read one file for two recorded revisions.
+    const actual = refusalOf(() =>
+      parseAssetEdits([
+        { path: 'CLAUDE.md', content: 'one' },
+        { path: 'claude.md', content: 'two' },
+      ]),
+    );
+
+    // Assert — both spellings survive into the message, so a person can see which two collided.
+    should(actual).match(/asset "claude\.md" differs from "CLAUDE\.md" only in case/u);
+  });
+
+  it('should keep the original spelling of every path it accepts', () => {
+    // Act — folding is how duplicates are FOUND, never what is stored: the tree is written on the
+    // host that has the file, and renaming somebody's document to lower case is not this API's job.
+    const actual = parseAssetEdits([{ path: 'skills/Review/SKILL.md', content: 'text' }]);
+
+    // Assert
+    should(actual).deepEqual([{ path: 'skills/Review/SKILL.md', content: 'text' }]);
   });
 
   it('should refuse a set within every per-file limit that is too large together', () => {

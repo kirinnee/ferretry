@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type { Stats } from 'node:fs';
+import { constants, type Stats } from 'node:fs';
 import {
   chmod,
   cp,
   link,
   lstat,
   mkdir,
+  open,
   readdir,
   readFile,
   realpath,
@@ -17,11 +18,10 @@ import {
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
-import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
-import { FileMutationJournal, isMutationBackupName } from './mutation-journal.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
   type FleetApplyCommittedState,
+  type FleetApplyFailure,
   FleetApplyFailureError,
   type FleetApplyPlan,
   type FleetApplyPreview,
@@ -39,6 +39,8 @@ import {
   serializeSettings,
 } from '../lib/settings.ts';
 import type { SharedHistoryMigration } from '../lib/shared-history.ts';
+import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
+import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
 
 const CodexSqliteOriginalSchema = z.discriminatedUnion('present', [
   z.strictObject({ present: z.literal(false) }),
@@ -53,9 +55,6 @@ const CodexSqliteMarkerSchema = z.strictObject({
 });
 
 type CodexSqliteMarker = z.output<typeof CodexSqliteMarkerSchema>;
-
-/** Reserved basename prefix for a replacement being built beside the entry it will become. */
-const STAGE_PREFIX = '.fy-fleet-staged-';
 
 const MODE_BITS = 0o7777;
 
@@ -73,6 +72,99 @@ async function discardQuietly(staged: string): Promise<void> {
   } catch {
     // Deliberately swallowed: see above.
   }
+}
+
+/** One entry an entry-by-entry publish brought into existence, and what proves it is still that. */
+interface PublishedName {
+  /** Relative to the publication root, `''` for the root itself, always with `/` separators. */
+  readonly relative: string;
+  readonly directory: boolean;
+  /** `undefined` when no proof could be taken, which can never match and so never licenses a delete. */
+  readonly identity: string | undefined;
+}
+
+/** Past this, a file is not proved by its content and is therefore never removed by a retract. */
+const MAX_PUBLISH_DIGEST_BYTES = 4 * 1024 * 1024;
+
+/**
+ * What proves an entry is the one this publish created.
+ *
+ * A directory is identified by inode alone. Its size and timestamps move every time a child is
+ * added — including by this very publish, after the directory was recorded — so they cannot be
+ * evidence about it. An addition inside it is caught instead by the entry set having to match
+ * exactly, which is the stronger check anyway. A rename does not disturb an inode, so the
+ * publication root still answers to this after being moved aside.
+ *
+ * A file is proved by its **content**, plus the stat fields that a `link` leaves alone — including
+ * `uid` and `gid`, because a change of ownership is a change somebody made and is no more this
+ * apply's to discard than a change of content. The inode cannot carry the proof on its own: the
+ * published name and the staged name are the same inode, so anybody who writes through either one
+ * changes what both of them say while the inode stays put. Hashing the bytes is what notices that.
+ * `ctimeMs` and `nlink` are deliberately excluded — `link` moves both, so evidence taken before
+ * publication would never match afterwards.
+ *
+ * A file too large to hash yields `undefined`: not knowing is not the same as knowing it is ours,
+ * and the retract treats it as a reason to keep the tree rather than a reason to remove it.
+ */
+async function identityOf(target: string, information: Stats): Promise<string | undefined> {
+  if (information.isDirectory()) return `dir:${information.dev}:${information.ino}`;
+  if (information.size > MAX_PUBLISH_DIGEST_BYTES) return undefined;
+  const digest = await contentProof(target, information.size);
+  if (digest === undefined) return undefined;
+  const { dev, ino, size, mtimeMs, mode, uid, gid } = information;
+  return `file:${dev}:${ino}:${size}:${mtimeMs}:${mode}:${uid}:${gid}:${digest}`;
+}
+
+/**
+ * Hash exactly the bytes the stat said were there, and refuse if the file turns out to differ.
+ *
+ * Reading the whole file by path would let the size check be bypassed: the bound is decided from a
+ * stat, and a file that grows afterwards is read in full regardless, so the limit protects nothing
+ * at the moment it matters. The read is instead done through one open handle into a buffer sized to
+ * the figure that was checked, and then asked for one byte more. Anything past the buffer means the
+ * file is not what the stat described — so nothing larger is ever allocated, and the mismatch is
+ * reported as "no proof" rather than hashed into a digest of a file that changed while being read.
+ *
+ * A short read means it shrank, which is the same answer for the same reason.
+ *
+ * Opened without following the final component. The caller has already `lstat`ed this name, so a
+ * link here is not the regular file whose identity was recorded — and following one would read
+ * whatever it points at. Its identity would still mismatch on `dev:ino` and `mode`, so the deletion
+ * decision stays fail-closed either way; what the no-follow prevents is the *read itself* going
+ * somewhere it should not. A link aimed at a FIFO would otherwise block on open and turn a
+ * mis-timed swap into a retract that never returns, which is a worse failure than a refusal.
+ */
+async function contentProof(target: string, size: number): Promise<string | undefined> {
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const bytes = Buffer.alloc(size);
+    let filled = 0;
+    while (filled < size) {
+      const { bytesRead } = await handle.read(bytes, filled, size - filled, filled);
+      if (bytesRead === 0) return undefined;
+      filled += bytesRead;
+    }
+    const beyond = await handle.read(Buffer.alloc(1), 0, 1, size);
+    if (beyond.bytesRead !== 0) return undefined;
+    return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Put the lock residue inside the committed state as well as on the error that carries it.
+ *
+ * A committed apply whose history migration then failed is the one failure that reports what the
+ * host now *is*, and a claim nobody could clear is part of that: it blocks the next apply. The
+ * residue only exists after the lock is released, which happens outside the boundary that built the
+ * committed state, so the state is completed here rather than left with a field production could
+ * never fill. Readers that show both the failure and the committed state print it once, comparing
+ * the two.
+ */
+function withLockResidue(failure: FleetApplyFailure, lockResidue: string): FleetApplyFailure {
+  if (failure.kind !== 'history-failed-after-commit') return failure;
+  return { ...failure, committed: { ...failure.committed, lockResidue } };
 }
 
 function isMissing(error: unknown): boolean {
@@ -196,7 +288,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // apply that also leaked its lock is still that failure, now carrying one more fact.
         const lockResidue = await lock.release(token);
         if (lockResidue === undefined) throw error;
-        if (error instanceof FleetApplyFailureError) throw new FleetApplyFailureError(error.failure, lockResidue);
+        if (error instanceof FleetApplyFailureError) {
+          throw new FleetApplyFailureError(withLockResidue(error.failure, lockResidue), lockResidue);
+        }
         // A refusal that never reached the rollback machinery still has to carry the residue, or a
         // leaked claim silently blocks every later apply with nothing said about it.
         throw new Error(
@@ -323,7 +417,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // write whose author never saw the deletion, and recreating the file would silently undo it.
     if (document.expect !== undefined) await this.assertExpected(document, journal);
     await mkdir(path.dirname(document.path), { recursive: true });
-    await this.writeFileAtomically(document.path, document.content, document.mode);
+    await this.writeFileAtomically(document.path, document.content, document.mode, journal);
   }
 
   private async assertExpected(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
@@ -531,7 +625,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         preserveExisting: operation.preserveExisting,
       });
       await mkdir(path.dirname(operation.path), { recursive: true });
-      await this.writeFileAtomically(operation.path, content, operation.mode);
+      await this.writeFileAtomically(operation.path, content, operation.mode, journal);
       return [];
     }
 
@@ -552,9 +646,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // home must not reintroduce a symlink beneath FY_HOME, where StateFileSystem deliberately
       // rejects symlink components to prevent an operation escaping its state-home boundary.
       const source = await stat(operation.source);
-      // Built beside the destination, so the commit is a rename on the same device. A directory copy
-      // is not atomic: staging it is what keeps a half-copied skills tree from ever being the live
-      // one, and it means the destination survives untouched when the copy fails.
+      // Built beside the destination, so publishing it never crosses a device. Staging is what keeps
+      // a *half-copied* tree from ever being live: the copy either completes into the staged name or
+      // fails there, and the destination survives untouched either way. It is not what makes the
+      // publish itself atomic — see `publish`, which materialises a directory entry by entry with
+      // exclusive primitives and unwinds exactly what it created if it cannot finish.
       const staged = path.join(path.dirname(operation.path), `${STAGE_PREFIX}${randomUUID()}`);
       try {
         await cp(operation.source, staged, { recursive: source.isDirectory(), dereference: true });
@@ -562,7 +658,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // so a harness can rewrite a file it owns. Directories remain private to the account.
         await chmod(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
         if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
-        await this.publish(staged, operation.path);
+        await this.publish(staged, operation.path, journal);
       } finally {
         await discardQuietly(staged);
       }
@@ -570,7 +666,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     await journal.capture(operation.path);
-    await this.writeFileAtomically(operation.path, operation.content, operation.mode);
+    await this.writeFileAtomically(operation.path, operation.content, operation.mode, journal);
     return [];
   }
 
@@ -602,7 +698,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       await journal.captureDirectory(path.dirname(operation.markerPath), 0o700);
       await journal.capture(operation.markerPath);
       await mkdir(path.dirname(operation.markerPath), { recursive: true, mode: 0o700 });
-      await this.writeFileAtomically(operation.markerPath, `${JSON.stringify(next)}\n`, 0o600);
+      await this.writeFileAtomically(operation.markerPath, `${JSON.stringify(next)}\n`, 0o600, journal);
       return true;
     }
 
@@ -615,7 +711,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         else delete current.sqlite_home;
         await journal.capture(operation.path);
         if (!(marker.createdConfig && Object.keys(current).length === 0)) {
-          await this.writeFileAtomically(operation.path, serializeSettings(current, 'toml'), 0o600);
+          await this.writeFileAtomically(operation.path, serializeSettings(current, 'toml'), 0o600, journal);
         }
       }
     }
@@ -688,8 +784,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
     for (const entry of entries.toSorted()) {
       if (keep.has(entry)) continue;
       // A backup of a managed wrapper still carries the managed marker. Sweeping it away would
-      // destroy the only copy of what this very batch may still need to put back.
-      if (isMutationBackupName(entry) || entry.startsWith(STAGE_PREFIX)) continue;
+      // destroy the only copy of what this very batch may still need to put back. One predicate
+      // covers every reserved prefix, so a prefix added later is skipped here without this line
+      // having to be found and widened.
+      if (isMutationReservedName(entry)) continue;
       const target = path.join(directory, entry);
       const stats = await lstat(target);
       if (!stats.isFile()) continue;
@@ -780,15 +878,20 @@ export class FileFleetProvisioner implements FleetProvisioner {
     await journal.captureDirectory(path.dirname(plan.manifestPath));
     await journal.capture(plan.manifestPath);
     await mkdir(path.dirname(plan.manifestPath), { recursive: true });
-    await this.writeFileAtomically(plan.manifestPath, content, 0o600);
+    await this.writeFileAtomically(plan.manifestPath, content, 0o600, journal);
   }
 
-  private async writeFileAtomically(destination: string, content: string, mode: number): Promise<void> {
+  private async writeFileAtomically(
+    destination: string,
+    content: string,
+    mode: number,
+    journal: FileMutationJournal,
+  ): Promise<void> {
     const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.${randomUUID()}.tmp`);
     try {
       await writeFile(temporary, content, { flag: 'wx', mode });
       await chmod(temporary, mode);
-      await this.publish(temporary, destination);
+      await this.publish(temporary, destination, journal);
     } finally {
       await discardQuietly(temporary);
     }
@@ -799,10 +902,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
    *
    * Every destination is captured before this runs, so the name is free and `link` succeeds. If it
    * does not, something arrived in the window between the capture and the publish — and a rename,
-   * which would silently replace it, is exactly the wrong answer. Directories cannot be linked, so
-   * a staged tree is renamed after the same emptiness has been established by the capture.
+   * which would silently replace it, is exactly the wrong answer. Directories cannot be linked and
+   * have no no-replace rename either, so a staged tree is not renamed at all: it is materialised
+   * entry by entry with primitives that are exclusive at every level, and unwound if it cannot be
+   * finished. See the comment on that branch below.
    */
-  private async publish(staged: string, destination: string): Promise<void> {
+  private async publish(staged: string, destination: string, journal: FileMutationJournal): Promise<void> {
     const information = await lstat(staged);
     if (!information.isDirectory()) {
       // `link` is the no-replace primitive: it fails rather than overwriting, so a destination that
@@ -817,41 +922,196 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // non-recursive `mkdir` for each directory, `link` for each file — and any name already taken
     // fails rather than being overwritten.
     //
-    // The trade is that the tree becomes visible entry by entry instead of all at once. That is
-    // acceptable precisely because it stays truthful: a publish that fails part-way leaves the
-    // operation unsealed, and an unsealed destination is reported rather than deleted on a guess.
-    // Silently destroying somebody's file would not be truthful at any speed.
-    await this.publishTree(staged, destination, information.mode & MODE_BITS);
+    // The trade is that the tree becomes visible entry by entry instead of all at once, so a failure
+    // part-way through leaves a half-materialised account that has to be taken back out again.
+    const created: PublishedName[] = [];
+    try {
+      await this.publishTree(staged, destination, information.mode & MODE_BITS, created, '');
+    } catch (error) {
+      await this.retractPublication(destination, created, journal);
+      throw error;
+    }
     await rm(staged, { recursive: true, force: true });
   }
 
-  private async publishTree(staged: string, destination: string, mode: number): Promise<void> {
-    await mkdir(destination, { mode });
-    for (const entry of await readdir(staged, { withFileTypes: true })) {
-      const from = path.join(staged, entry.name);
-      const to = path.join(destination, entry.name);
-      const information = await lstat(from);
-      if (information.isDirectory()) {
-        await this.publishTree(from, to, information.mode & MODE_BITS);
-        continue;
-      }
-      await this.publishFile(from, to, information);
+  /**
+   * Take a half-published tree back out, without ever deleting anything at a live path.
+   *
+   * The obvious version — walk the recorded names and unlink each one — cannot be made safe. Even
+   * re-identifying each entry first leaves the gap between the check and the removal, and a writer
+   * who replaces our file in that gap has their replacement deleted by a decision made about our
+   * bytes. Narrowing that window is not closing it.
+   *
+   * So nothing is deleted by name. The publication root is renamed out of the live tree in one
+   * atomic step, taking the whole partial tree with it — including anything a writer added inside
+   * it, which travels along rather than being destroyed. Afterwards the tree is unreachable to
+   * anybody resolving the old pathname, so the comparison that decides its fate is a comparison of
+   * something no new writer can arrive at. Only a tree that is still *exactly* this publish's own
+   * work is destroyed; anything else is kept and reported as displaced, which lands the apply on
+   * `rollback-incomplete` with the location named.
+   *
+   * **The residual is an open descriptor, and it is not claimed away.** A process holding a file or
+   * directory handle opened before the rename keeps it afterwards and can still write through it, so
+   * a tree that passed verification can be modified between the verdict and the removal. Renaming
+   * closes the pathname race this code is responsible for; nothing available here closes that one.
+   * The verification is made as strong as the evidence allows — every entry accounted for, each
+   * still carrying the size, timestamps and mode it was published with — so an edit that landed
+   * before the check is caught even though one landing after it is not.
+   *
+   * Two consequences are deliberate. The destination is left free either way, so the journal can
+   * rename the account's original content back into place — and if a writer creates something new
+   * there first, that restore refuses and is reported rather than overwriting them. And a failure to
+   * displace at all is swallowed: this runs while an apply is already failing, and replacing that
+   * failure with a cleanup error would hide the cause. The half-published tree then simply stays,
+   * which blocks the restore and is reported as unrestored.
+   */
+  private async retractPublication(
+    destination: string,
+    created: readonly PublishedName[],
+    journal: FileMutationJournal,
+  ): Promise<void> {
+    try {
+      await journal.displace(destination, async moved => await this.isExactlyPublished(moved, created));
+    } catch {
+      // Deliberately swallowed: see above. The tree stays, and the journal reports the destination.
     }
-    await chmod(destination, mode);
   }
 
   /**
-   * Place one staged regular file under a name nothing else holds.
+   * Whether a displaced tree is precisely what this publish put there — no more, no less.
+   *
+   * Every entry has to be one this publish created, still carrying the identity it was recorded
+   * with, and every entry it created has to be present. An addition fails the first test, a
+   * replacement or an in-place edit fails the second, and a deletion fails the third. Anything this
+   * cannot account for is a reason to keep the tree, never to remove it.
+   *
+   * The content is read here, from the tree's new location. That is not the live path — the rename
+   * happened first, and nobody resolving the destination reaches these bytes any more — so unlike a
+   * check made before the move, this one is not answering a question about somebody else's file.
+   */
+  private async isExactlyPublished(moved: string, created: readonly PublishedName[]): Promise<boolean> {
+    const expected = new Map(created.map(entry => [entry.relative, entry]));
+    let matched = 0;
+
+    const account = async (target: string, relative: string): Promise<boolean> => {
+      const entry = expected.get(relative);
+      // No proof was taken, so there is nothing this could match against. Keep the tree.
+      if (entry === undefined || entry.identity === undefined) return false;
+      const information = await lstat(target);
+      if (information.isDirectory() !== entry.directory) return false;
+      if ((await identityOf(target, information)) !== entry.identity) return false;
+      matched += 1;
+      if (!entry.directory) return true;
+      for (const name of await readdir(target)) {
+        const child = relative === '' ? name : `${relative}/${name}`;
+        if (!(await account(path.join(target, name), child))) return false;
+      }
+      return true;
+    };
+
+    if (!(await account(moved, ''))) return false;
+    return matched === expected.size;
+  }
+
+  /**
+   * Materialise one staged directory beneath its final name, recording every entry brought into
+   * existence so a failed publish can prove which tree is its own.
+   */
+  private async publishTree(
+    staged: string,
+    destination: string,
+    mode: number,
+    created: PublishedName[],
+    relative: string,
+  ): Promise<void> {
+    // Non-recursive: the parent must already exist, and an existing `destination` is somebody else's.
+    await mkdir(destination, { mode });
+    // Held open as soon as it exists, and opened **without following a link**. A descriptor refers
+    // to the object rather than to the name, so the mode set at the end lands on whatever this
+    // handle refers to even after the path is replaced. The no-follow matters as much as the
+    // descriptor: `open` on a symlink to a directory succeeds and reports a directory, so a plain
+    // open would hand back a handle to somebody else's directory and the final `chmod` would change
+    // *their* permissions with no way to tell.
+    //
+    // **What this does not close, stated plainly:** `mkdir` returns no handle, so the `open` below
+    // resolves the pathname a second time. `O_NOFOLLOW` rules out a *symlink* substituted in that
+    // gap; it does nothing about a real directory swapped in, which opens perfectly well. Every
+    // later check — including `assertUnswapped` — then compares against that replacement's inode,
+    // so the substitution is invisible from here on. Closing it needs `mkdirat`/`openat`, which
+    // Node does not expose; it is the same limitation the children below already carry. So this is
+    // "the mode lands on the directory this opened", and only "the one this created" absent a swap
+    // in a window this apply proved free moments earlier.
+    const handle = await open(destination, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY);
+    try {
+      const opened = await handle.stat();
+      created.push({ relative, directory: true, identity: await identityOf(destination, opened) });
+      for (const entry of await readdir(staged, { withFileTypes: true })) {
+        const from = path.join(staged, entry.name);
+        const to = path.join(destination, entry.name);
+        const child = relative === '' ? entry.name : `${relative}/${entry.name}`;
+        const information = await lstat(from);
+        // Every child is reached by pathname, and no primitive available here can bind that
+        // pathname to the descriptor above — `linkat` and its relatives are not exposed. So the
+        // directory is re-identified before each child instead: a swap that has already happened is
+        // refused rather than written through.
+        await this.assertUnswapped(destination, opened);
+        if (information.isDirectory()) {
+          await this.publishTree(from, to, information.mode & MODE_BITS, created, child);
+          continue;
+        }
+        // The identity comes back from the link itself, read off the staged entry. Observing `to`
+        // here instead would bless whatever occupies that name by the time this line runs, which a
+        // writer who replaces our file immediately after the link controls — and retract would then
+        // delete their file as though it were ours.
+        created.push({ relative: child, directory: false, identity: await this.publishFile(from, to, information) });
+      }
+      await this.assertUnswapped(destination, opened);
+      await handle.chmod(mode);
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /**
+   * Refuse to keep writing into a name that no longer leads to the directory this publish made.
+   *
+   * This narrows the child-traversal race rather than closing it: without `linkat`, the check and
+   * the write that follows it are two operations. What it does close is every interleaving where
+   * the swap has already happened — which is the whole of the reachable damage from a swap that is
+   * not perfectly timed — and the descriptor above closes the final `chmod` outright.
+   */
+  private async assertUnswapped(destination: string, opened: Stats): Promise<void> {
+    const current = await lstat(destination);
+    if (!current.isDirectory() || current.ino !== opened.ino || current.dev !== opened.dev) {
+      throw new Error(`refusing to publish into ${destination}: it was replaced while the tree was being written`);
+    }
+  }
+
+  /**
+   * Place one staged regular file under a name nothing else holds, and say what was placed.
    *
    * `link` is the exclusive primitive: if a concurrent writer claimed this name after the parent
    * directory was created, it fails with `EEXIST` and their bytes stay theirs.
+   *
+   * **The proof is taken before the link, from the private staged entry.** Two separate races make
+   * every later observation useless as evidence. Reading the live name after the link asks "what is
+   * there now", so a writer who replaces the file in that gap gets *their* file blessed as this
+   * publish's work — and the retract would then be entitled to delete it. Reading the staged name
+   * after the link is no better: the two names are one inode, so a writer editing through the
+   * published one changes what the staged one reports, and the blessing lands on their edit. Only
+   * evidence gathered before the name exists at all is evidence about what we put there.
+   *
+   * It survives publication because it is built from the things `link` does not touch — the content,
+   * and the stat fields other than `ctimeMs` and `nlink`.
    */
-  private async publishFile(from: string, to: string, information: Stats): Promise<void> {
+  private async publishFile(from: string, to: string, information: Stats): Promise<string | undefined> {
     // The copy dereferences its sources, so a link, a socket or a device here is not something this
     // apply produced — and hard-linking one into an account home is not a thing to do on a guess.
     if (!information.isFile()) {
       throw new Error(`refusing to publish ${to}: the staged entry is not a regular file`);
     }
+    const identity = await identityOf(from, information);
     await link(from, to);
+    return identity;
   }
 }

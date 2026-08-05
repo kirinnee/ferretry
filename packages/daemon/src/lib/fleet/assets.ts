@@ -10,6 +10,7 @@
  * Pure: no filesystem, no clock. The adapter half checks what only the filesystem can answer — that
  * no component is a link, and that the final entry is a regular file.
  */
+import { fleetAssetRefProblem } from '@ferretry/protocol';
 
 /** One text file a proposal will write into the asset tree. */
 export interface FleetAssetEdit {
@@ -36,8 +37,6 @@ export interface FleetAssetListing {
   readonly reason?: string;
 }
 
-const MAX_ASSET_PATH_LENGTH = 200;
-const MAX_ASSET_PATH_DEPTH = 8;
 export const MAX_ASSET_FILE_BYTES = 64 * 1024;
 export const MAX_ASSET_EDIT_COUNT = 32;
 const MAX_ASSET_TOTAL_BYTES = 256 * 1024;
@@ -73,35 +72,19 @@ export function isEditableText(content: string): boolean {
 }
 
 /**
- * Check one relative asset path and return it in canonical form.
+ * Check one relative asset path and return it, which is already its canonical form: the grammar
+ * refuses every spelling a normalisation would have rewritten rather than rewriting it.
  *
- * Absolute paths, traversal segments and Windows separators are refused rather than normalised
- * away: a caller that asked for `../../.ssh/authorized_keys` has said what it wants, and quietly
- * rewriting that into something harmless teaches nobody anything and hides a probe.
+ * The grammar itself is the shared one, stated once beside the wire contract that also enforces it
+ * on the fields of an overlay. Restating it here — an API bound and a schema bound describing the
+ * same thing in two places — is how the one a caller actually reaches quietly becomes the laxer of
+ * the two. This side keeps the refusal, because a path arrives here from a query parameter as well
+ * as from a parsed body, and a refusal naming the offending path is what a person can act on.
  */
 export function parseAssetPath(candidate: string): string {
-  const refuse = (reason: string): never => {
-    throw new FleetAssetRefusal(`asset path "${candidate}" ${reason}`);
-  };
-
-  if (candidate.length === 0) refuse('is empty');
-  if (candidate.length > MAX_ASSET_PATH_LENGTH) refuse(`is longer than ${MAX_ASSET_PATH_LENGTH} characters`);
-  if (candidate.includes('\\')) refuse('must use "/" separators');
-  if (candidate.startsWith('/')) refuse('must be relative to the asset directory');
-  if (/^[A-Za-z]:/u.test(candidate)) refuse('must be relative to the asset directory');
-  // Every control character, tab and newline included. `isEditableText` permits those three because
-  // a file's *contents* legitimately contain them; a path never does, and one that did would print
-  // as something other than what it opens.
-  if (/[\p{Cc}\p{Cf}]/u.test(candidate)) refuse('contains control characters');
-
-  const segments = candidate.split('/');
-  if (segments.length > MAX_ASSET_PATH_DEPTH) refuse(`is deeper than ${MAX_ASSET_PATH_DEPTH} directories`);
-  for (const segment of segments) {
-    if (segment === '') refuse('contains an empty path segment');
-    if (segment === '.' || segment === '..') refuse('contains a path traversal segment');
-    if (segment.trim() !== segment) refuse('has a segment starting or ending with whitespace');
-  }
-  return segments.join('/');
+  const problem = fleetAssetRefProblem(candidate);
+  if (problem !== undefined) throw new FleetAssetRefusal(`asset path "${candidate}" ${problem}`);
+  return candidate;
 }
 
 /** Check one edit's content, and return the byte length it will occupy. */
@@ -122,18 +105,30 @@ export function measureAssetEdit(edit: FleetAssetEdit): number {
  * Check a whole edit set: every path valid and distinct, and the set within its collective bounds.
  * Bounded as a set as well as per file, because thirty-two files just under the per-file limit is
  * still an amount of memory a paired client should not be able to make a daemon hold.
+ *
+ * **Distinct means distinct on the host that will hold the files, not in this string comparison.**
+ * A macOS default volume — and this tool ships a cask for one — holds one file for `CLAUDE.md` and
+ * `claude.md`, so a set carrying both is two records of one file: the staleness check reads that
+ * file twice and the second write silently replaces the first, having reported both as applied.
+ * They are refused as the duplicate they will be, in the spelling the caller sent.
  */
 export function parseAssetEdits(edits: readonly FleetAssetEdit[]): readonly FleetAssetEdit[] {
   if (edits.length > MAX_ASSET_EDIT_COUNT) {
     throw new FleetAssetRefusal(`a proposal may carry at most ${MAX_ASSET_EDIT_COUNT} asset edits`);
   }
 
-  const seen = new Set<string>();
+  const seen = new Map<string, string>();
   let total = 0;
   const parsed = edits.map(edit => {
     const path = parseAssetPath(edit.path);
-    if (seen.has(path)) throw new FleetAssetRefusal(`asset "${path}" is edited more than once in one proposal`);
-    seen.add(path);
+    const earlier = seen.get(path.toLowerCase());
+    if (earlier === path) throw new FleetAssetRefusal(`asset "${path}" is edited more than once in one proposal`);
+    if (earlier !== undefined) {
+      throw new FleetAssetRefusal(
+        `asset "${path}" differs from "${earlier}" only in case; a case-insensitive filesystem holds one file for both`,
+      );
+    }
+    seen.set(path.toLowerCase(), path);
     total += measureAssetEdit({ ...edit, path });
     return { path, content: edit.content };
   });

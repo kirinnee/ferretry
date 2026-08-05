@@ -12,11 +12,14 @@
  *  2. **The preview is the change.** The operation ledger and the live-versus-proposed roster are
  *     projections of what the DAEMON derived, never of what the browser drafted. A browser that
  *     rendered its own guess would be showing a review of a change nobody is going to apply.
- *  3. **The bounds are checked before the round trip, not instead of it.** The daemon owns asset
- *     path policy; the mirrored checks here exist so a person gets a straight answer while typing,
- *     and none of them is laxer than the daemon's.
+ *  3. **The asset grammar is checked before the round trip, not restated.** `fleetAssetRefProblem` in
+ *     the shared protocol is the ONE description of what a remote caller may name; this module calls it
+ *     so a person gets a straight answer while typing, and adds only the field label the reason belongs
+ *     beside. A second copy of the rule is how the browser ends up laxer than the daemon — which is
+ *     exactly what happened while it was copied: the copy allowed `~`, `$HOME` and format controls.
  */
 
+import { fleetAssetRefProblem } from '@ferretry/protocol';
 import type {
   FleetApplyOutcome,
   FleetAssetIndex,
@@ -410,8 +413,16 @@ export const layerDraftFrom = (layer: Readonly<Record<string, unknown>> | undefi
   };
 };
 
-/** An asset this account's layer references that the browser does NOT hold the current text of. */
+/**
+ * An asset this account's layer references that the browser does NOT hold the current text of.
+ *
+ * `scope` is what decides whether editing can clear it. A `file` entry is about ONE named document, so
+ * a draft that stops naming that document stops being blocked by it. A `tree` entry is about contents
+ * nobody enumerated — a walk the daemon stopped at a bound — and no edit in this browser can answer it,
+ * so it blocks unconditionally.
+ */
 export interface FleetUnreadableAsset {
+  readonly scope: 'file' | 'tree';
   readonly path: string;
   readonly reason: string;
 }
@@ -446,11 +457,14 @@ export const selectLayerAssets = (
       (instructionsPath !== '' && file.path === instructionsPath) ||
       (skillsDirectory !== '' && file.path.startsWith(`${skillsDirectory}/`)),
   );
-  const unreadable = mine.filter(file => !file.readable).map(file => ({ path: file.path, reason: file.reason }));
+  const unreadable: FleetUnreadableAsset[] = mine
+    .filter(file => !file.readable)
+    .map(file => ({ scope: 'file' as const, path: file.path, reason: file.reason }));
   // A truncated walk is not a short tree. Whatever the bound cut off could be a skill document this
   // editor would then omit from the proposal, so an incomplete index blocks the change outright.
   if (!index.complete) {
     unreadable.push({
+      scope: 'tree',
       path: skillsDirectory === '' ? 'fleet/assets' : skillsDirectory,
       reason: 'the daemon stopped walking the asset tree at a bound, so this list is not all of it',
     });
@@ -458,6 +472,91 @@ export const selectLayerAssets = (
   const readable = mine.filter(file => file.readable).map(file => file.path);
   const declaredButUnlisted = instructionsPath !== '' && !index.files.some(file => file.path === instructionsPath);
   return { readable: declaredButUnlisted ? [instructionsPath, ...readable] : readable, unreadable };
+};
+
+/**
+ * The blockers that are still true OF THE DRAFT IN FRONT OF THE PERSON.
+ *
+ * The load-time list is evidence about what the daemon could read when the editor opened. It is not a
+ * verdict on every later draft: clearing the instructions path, or deleting the skill row that named an
+ * unreadable file, means staging no longer sends text for it — `editLayerPatch` sends `memory: null` and
+ * `assetEdits` carries nothing — so there is nothing left to overwrite and nothing left to warn about.
+ * Keeping the blocker anyway made the one repair a person could do from a browser impossible, and left a
+ * sentence on screen that was no longer true of what they had typed.
+ *
+ * A `tree` entry survives every edit, because an unenumerated directory is not a file anybody can stop
+ * naming: the skills directory is still declared and its contents are still unknown.
+ */
+export const currentUnreadable = (
+  entries: readonly FleetUnreadableAsset[],
+  layer: FleetLayerDraft,
+): readonly FleetUnreadableAsset[] => {
+  const named = new Set<string>([layer.instructions.path.trim(), ...layer.skills.map(skill => skill.path.trim())]);
+  const skillsDirectory = layer.skillsDirectory.trim();
+  // A file the editor could not load has no row to delete, so "still named" also covers a file sitting
+  // under a skills directory the draft STILL declares: the directory hands over contents this browser
+  // never saw, and the only way to stop naming it is to stop declaring the directory.
+  const insideDeclaredSkills = (path: string): boolean =>
+    skillsDirectory !== '' && path.startsWith(`${skillsDirectory}/`);
+  const current = entries.filter(
+    entry => entry.scope === 'tree' || named.has(entry.path) || insideDeclaredSkills(entry.path),
+  );
+  // One sentence per path. Load-time evidence and draft-time evidence can both reach the same file — a
+  // document the index called unreadable that the draft also newly names — and the daemon's own refusal
+  // is the more useful of the two reasons, so the earlier entry wins.
+  const spoken = new Set<string>();
+  const once: FleetUnreadableAsset[] = [];
+  for (const entry of current) {
+    if (spoken.has(entry.path)) continue;
+    spoken.add(entry.path);
+    once.push(entry);
+  }
+  return once;
+};
+
+/**
+ * What this browser knows about the asset tree the draft is pointing into.
+ *
+ * `listed` is the daemon's answer to "what is already there"; `loaded` is the strictly smaller set this
+ * editor holds the current text of. The gap between them is the whole point: a path in `listed` that is
+ * not in `loaded` is a real document whose contents nobody here has seen.
+ */
+export interface FleetAssetKnowledge {
+  /** Every path the daemon's index listed for this fleet, readable or not. */
+  readonly listed: readonly string[];
+  /** Paths whose current text this editor holds, and may therefore rewrite without erasing anything. */
+  readonly loaded: readonly string[];
+}
+
+/**
+ * Documents the draft NEWLY names that already exist and were never loaded.
+ *
+ * The load-time blockers answer "what could the daemon not give us"; they say nothing about a path typed
+ * afterwards. Retargeting the instructions box from `a.md` to an existing `b.md` used to stage
+ * `{path: "b.md", content: <a.md's text>}`, and a new skill row naming an existing document staged
+ * `content: ""` for it — both writing over text this browser never saw, which is the one thing the
+ * unreadable machinery exists to prevent. So the same `file`-scope entry is derived from the draft, and
+ * it clears itself the moment the draft stops naming the path.
+ *
+ * A path the index does NOT list is left alone: naming a document that is not there yet is how a person
+ * creates one, and there is nothing to overwrite. When the index is incomplete this set is therefore
+ * partial — which is exactly why `selectLayerAssets` raises an unconditional `tree` blocker for a
+ * truncated walk rather than trusting the listing.
+ */
+export const unseenAssets = (
+  layer: FleetLayerDraft,
+  knowledge: FleetAssetKnowledge,
+): readonly FleetUnreadableAsset[] => {
+  const listed = new Set(knowledge.listed);
+  const loaded = new Set(knowledge.loaded);
+  const named = [layer.instructions.path.trim(), ...layer.skills.map(skill => skill.path.trim())];
+  return named
+    .filter(path => path !== '' && listed.has(path) && !loaded.has(path))
+    .map(path => ({
+      scope: 'file' as const,
+      path,
+      reason: 'this editor has not loaded the document already at that path',
+    }));
 };
 
 /**
@@ -519,29 +618,36 @@ export const draftModels = (modelsText: string): readonly string[] =>
 export const derivedWrapper = (draft: FleetAccountDraft): string =>
   draft.variant === 'default' ? `${draft.harness}-${draft.name}` : `${draft.harness}-${draft.variant}-${draft.name}`;
 
-// ─── validation, mirrored from the daemon's own bounds ────────────────────────────────────────
+// ─── validation, against the SHARED asset grammar ─────────────────────────────────────────────
 
-/** The daemon's asset limits, mirrored so a person is told while typing rather than after sending. */
-export const MAX_ASSET_PATH_LENGTH = 200;
-export const MAX_ASSET_PATH_DEPTH = 8;
+/**
+ * A POSIX environment variable name. Not an asset reference and not the same rule, so it stays here.
+ */
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
-/** Unicode's control category, which covers every byte the daemon's own text check refuses. */
+
+/**
+ * Unicode's control category, for the ACCOUNT NAME — which is `SafeNameSchema`, a different rule from
+ * the asset grammar. That schema refuses code points below `0x20` and nothing else, so this mirrors it
+ * rather than the asset check, which refuses format controls too.
+ */
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
-/** Why a path cannot be sent, in the daemon's own terms, or `null` when it can. */
+/**
+ * Why a path cannot name a fleet asset, labelled for the field it was typed into, or `null` when it can.
+ *
+ * The grammar itself is `fleetAssetRefProblem` in the shared protocol — the one description of what a
+ * remote caller may name, used by the wire schema and by the daemon. This used to be a hand-maintained
+ * copy of it, and a copy is how one side quietly becomes the laxer one: the copy permitted `~`,
+ * `$HOME` and Unicode format controls, so the browser said "fine" and the daemon refused on submit.
+ *
+ * What is left here is the only part that IS a browser concern: which box the reason belongs to. The
+ * shared helper returns a bare predicate ("must be relative to the asset directory") precisely so each
+ * boundary can phrase its own refusal, and beside a form field the field's name is what makes the
+ * sentence actionable.
+ */
 export const assetPathProblem = (path: string, label: string): string | null => {
-  if (path.length > MAX_ASSET_PATH_LENGTH) return `${label} is longer than ${MAX_ASSET_PATH_LENGTH} characters`;
-  if (path.includes('\\')) return `${label} must use "/" separators`;
-  if (path.startsWith('/') || /^[A-Za-z]:/u.test(path)) return `${label} must be relative to the asset directory`;
-  if (CONTROL_CHARACTER.test(path)) return `${label} contains control characters`;
-  const segments = path.split('/');
-  if (segments.length > MAX_ASSET_PATH_DEPTH) return `${label} is deeper than ${MAX_ASSET_PATH_DEPTH} directories`;
-  for (const segment of segments) {
-    if (segment === '') return `${label} contains an empty path segment`;
-    if (segment === '.' || segment === '..') return `${label} contains a path traversal segment`;
-    if (segment.trim() !== segment) return `${label} has a segment starting or ending with whitespace`;
-  }
-  return null;
+  const problem = fleetAssetRefProblem(path);
+  return problem === undefined ? null : `${label} ${problem}`;
 };
 
 const settingsProblem = (settingsText: string): string | null => {
@@ -585,6 +691,18 @@ export const layerProblems = (layer: FleetLayerDraft): readonly string[] => {
       problems.push(`"${path}" is not inside the skills directory "${skillsDirectory}"`);
     }
   }
+
+  // One path, one text. `assetEdits` writes every named path in order, so two rows carrying the same path
+  // — or a skill row that names the instructions file — used to resolve by last-write-wins: a person
+  // reviewing the plan saw both texts and had no way to tell which one would survive. Refuse instead.
+  const written = new Set<string>();
+  const twice = new Set<string>();
+  for (const path of [instructionsPath, ...layer.skills.map(skill => skill.path.trim())]) {
+    if (path === '') continue;
+    if (written.has(path)) twice.add(path);
+    written.add(path);
+  }
+  for (const path of twice) problems.push(`"${path}" is written twice by this change; one path carries one text`);
 
   const settings = settingsProblem(layer.settingsText);
   if (settings !== null) problems.push(settings);

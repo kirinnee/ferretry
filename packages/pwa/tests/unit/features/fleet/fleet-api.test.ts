@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { FLEET_REFUSAL_CODES } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import type { z } from 'zod';
+// A value import, not a type-only one: these tests build the client's real parse failures with it.
+import { z } from 'zod';
 
 import {
   applyFleetProposal,
@@ -203,5 +204,48 @@ describe('fleet refusals', () => {
 
   it('falls back to the error type when a thrown error carries no message', () => {
     expect(fleetRefusal(new Error('')).detail).toBe('Error');
+  });
+
+  it('calls a structurally invalid answer malformed, in one sentence rather than a JSON dump', () => {
+    // What the client actually throws: `schema.parse` on a 200 whose shape is wrong. Built by parsing,
+    // not hand-written, so the test cannot drift from the error this boundary really receives.
+    const failure = z
+      .object({ files: z.array(z.object({ path: z.string(), bytes: z.number() })) })
+      .safeParse({ files: [{ path: 'instructions/a.md', bytes: 'twelve' }] });
+    const thrown = failure.success ? new Error('the fixture was supposed to fail') : failure.error;
+
+    const refusal = fleetRefusal(thrown);
+    // RED before F3: kind was `unreachable` and detail was the multi-line dump of every issue.
+    expect(refusal.kind).toBe('malformed');
+    expect(refusal.detail).toBe(
+      "this daemon's answer does not match the fleet contract at files.0.bytes: Invalid input: expected number, received string",
+    );
+    expect(refusal.detail).not.toContain('\n');
+    expect(refusal.detail).not.toContain('"code"');
+    expect(refusal.code).toBeUndefined();
+  });
+
+  it('counts the issues it did not print, and names the answer itself when the failure has no path', () => {
+    const many = z.object({ a: z.number(), b: z.number(), c: z.number() }).safeParse({ a: 'x', b: 'y', c: 'z' });
+    const detail = many.success ? '' : fleetRefusal(many.error).detail;
+    expect(detail).toContain('at a:');
+    expect(detail).toContain('(and 2 more)');
+
+    const root = z.array(z.string()).safeParse({ not: 'an array' });
+    const rootDetail = root.success ? '' : fleetRefusal(root.error).detail;
+    expect(rootDetail).toBe(
+      "this daemon's answer does not match the fleet contract: Invalid input: expected array, received object",
+    );
+  });
+
+  it('keeps a transport failure and a worded refusal out of the malformed state', () => {
+    // The check is about the SHAPE a schema failure has, so an ordinary error must not fall into it —
+    // otherwise "the daemon answered badly" would start covering "the daemon never answered".
+    expect(fleetRefusal(new Error('network down')).kind).toBe('unreachable');
+    const carrying = Object.assign(new Error('network down'), { issues: 'not a list of issues' });
+    expect(fleetRefusal(carrying).kind).toBe('unreachable');
+    expect(fleetRefusal(Object.assign(new Error('x'), { issues: [] })).kind).toBe('unreachable');
+    // A daemon that WORDED its refusal is still that refusal, whatever it carries.
+    expect(fleetRefusal(new FyHttpError('no', 403, 'forbidden')).kind).toBe('forbidden');
   });
 });

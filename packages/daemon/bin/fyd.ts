@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import { writeSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
@@ -418,22 +418,17 @@ const APPROVAL_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 /**
  * One fleet approval code, drawn uniformly.
  *
- * Rejection sampling rather than a modulo: 256 does not divide 30, so folding a random byte with
- * `%` would make ten of the thirty symbols measurably likelier than the rest and quietly shrink a
- * bearer secret's search space. Bytes that land in the ragged tail are discarded instead.
+ * `randomInt(30)` rather than a random byte folded with `%`: 256 does not divide 30, so a modulo
+ * would make ten of the thirty symbols measurably likelier than the rest and quietly shrink a
+ * bearer secret's search space. The platform's own rejection sampling is what the pairing code
+ * already draws through, and one hand-rolled implementation of it in this daemon is enough.
  *
  * It lives in the composition root because this is the only layer allowed to reach for randomness,
  * and because how randomness maps onto an alphabet is a decision worth having somewhere visible.
+ * The mount takes it as `mintApprovalCode`, so a test drives approvals through a value it chose.
  */
 function mintFleetApprovalCode(): string {
-  const limit = 256 - (256 % APPROVAL_ALPHABET.length);
-  const symbols: string[] = [];
-  while (symbols.length < 8) {
-    for (const byte of crypto.getRandomValues(new Uint8Array(8))) {
-      if (byte >= limit || symbols.length >= 8) continue;
-      symbols.push(APPROVAL_ALPHABET[byte % APPROVAL_ALPHABET.length] ?? '');
-    }
-  }
+  const symbols = Array.from({ length: 8 }, () => APPROVAL_ALPHABET.charAt(randomInt(APPROVAL_ALPHABET.length)));
   return `${symbols.slice(0, 4).join('')}-${symbols.slice(4).join('')}`;
 }
 

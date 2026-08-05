@@ -12,6 +12,8 @@ import type {
   FleetManifestAccountView,
   FleetManifestSummary,
   FleetPermissions,
+  FleetProposalPreview,
+  FleetProposalView,
 } from '../../../../src/features/fleet/fleet-api.ts';
 import { interact, must } from '../../../support/dom.ts';
 
@@ -64,7 +66,10 @@ export const permissions = (overrides: Partial<FleetPermissions> = {}): FleetPer
   ...overrides,
 });
 
-export const plan = (accounts: readonly FleetAccountFixture[] = [account()]) => ({
+/** The plan half of an `apply` preview, typed through the shared preview union. */
+type FleetPlanFixture = Extract<FleetProposalPreview, { kind: 'apply' }>['plan'];
+
+export const plan = (accounts: readonly FleetAccountFixture[] = [account()]): FleetPlanFixture => ({
   manifestPath: '/home/pilot/.ferretry/fleet/manifest.json',
   manifest: manifest(accounts),
   // No `content`: the shared operation schema deliberately omits a wrapper's script, because nobody
@@ -80,7 +85,11 @@ export const plan = (accounts: readonly FleetAccountFixture[] = [account()]) => 
 /** A valid account id: the shared schema requires a real UUID, so a fixture must supply one. */
 export const accountId = (seed: number): string => `${String(seed).padStart(8, '0')}-1111-4111-8111-111111111111`;
 
-export const proposal = (overrides: Record<string, unknown> = {}) => ({
+/**
+ * A held proposal. TYPED, so an override that misspells a field stops compiling rather than silently
+ * doing nothing — `proposal({ stat: 'consumed' })` used to be accepted and ignored.
+ */
+export const proposal = (overrides: Partial<FleetProposalView> = {}): FleetProposalView => ({
   id: 'fy_fprop_AAAAAAAAAAAAAAAAAAAAAA',
   revision: 'a1b2c3',
   mutation: { kind: 'edit-account', accountId: account().id, layer: {} },
@@ -100,7 +109,7 @@ export const proposal = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-export const scaffoldProposal = () =>
+export const scaffoldProposal = (): FleetProposalView =>
   proposal({
     summary: 'prepare this host for a fleet',
     assetEdits: [],

@@ -103,7 +103,16 @@ const SECTIONS = [
  * The failed apply is in the list on purpose: a gallery of happy paths proves nothing about the one
  * screen a person actually reads while something is wrong.
  */
-const FLEET_FRAMES = ['cockpit', 'states', 'accounts', 'preview', 'failed-apply', 'create', 'layer'] as const;
+const FLEET_FRAMES = [
+  'cockpit',
+  'cockpit-staged',
+  'states',
+  'accounts',
+  'preview',
+  'failed-apply',
+  'create',
+  'layer',
+] as const;
 
 /**
  * A software keyboard, told the truth.
@@ -1098,6 +1107,20 @@ try {
             await page.goto(`${server.url}#fleet-${frame}`);
             await page.reload();
             await page.locator(`#harness-fleet-${frame}-page`).waitFor({ state: 'visible' });
+            // The two-column live-versus-proposed layout only exists while a change is staged, and
+            // staging it is an interaction. Driving the real clicks is the only way to capture that
+            // layout without inventing a state the surface cannot actually be in.
+            if (frame === 'cockpit-staged') {
+              await page.getByRole('button', { name: 'Edit layer' }).first().click();
+              await page.locator('[data-fleet-layer-form]').waitFor({ state: 'visible' });
+              await page.getByRole('button', { name: 'Preview this change' }).click();
+              const staged = page.locator('[data-fleet-proposal-id]');
+              if ((await staged.count()) === 0) {
+                const refused = await page.locator('[data-fleet-refusal] pre').allInnerTexts();
+                process.stdout.write(`   staging did not land: ${refused.join(' | ') || 'no refusal shown'}\n`);
+              }
+              await staged.waitFor({ state: 'visible' });
+            }
             const fleetTarget = join(outDir, `${viewport.name}-fleet-${frame}.png`);
             // A full-page capture of a page carrying ONE frame: Chrome captures beyond the viewport
             // itself, so a frame taller than the screen is whole rather than stitched by hand.
@@ -1105,6 +1128,28 @@ try {
             // person is actually holding. The full-page shot beside it supplements that; it never
             // replaces it, because a frame that only reads well when unrolled to 2000px is not a
             // frame that works on a phone.
+            // Back to the top: the interaction above scrolls, and a viewport capture is supposed to show
+            // what a person sees when the screen opens.
+            // Blur first: the surface moves focus to the panel it just opened, and the browser scrolls a
+            // focused element into view, so scrolling alone would be undone.
+            // The create frame is the A2 evidence: it has to be captured WITH keyboard focus on the
+            // harness radio, because the defect was that focus was not locatable there at all.
+            if (frame === 'create') {
+              await page.locator('[data-fleet-harness-selected="true"] input').evaluate(node => {
+                (node as HTMLElement).focus();
+                node.matches(':focus-visible');
+              });
+              await page.keyboard.press('ArrowRight');
+              await page.keyboard.press('ArrowLeft');
+            }
+            await page.evaluate(frameName => {
+              if (frameName === 'create') return;
+              (document.activeElement as HTMLElement | null)?.blur();
+              window.scrollTo(0, 0);
+              // The scroller may be an element rather than the document, so reset every one of them.
+              for (const node of document.querySelectorAll('*')) node.scrollTop = 0;
+            }, frame as string);
+            await page.waitForTimeout(60);
             const viewportTarget = join(outDir, `${viewport.name}-fleet-${frame}-viewport.png`);
             await page.screenshot({ path: viewportTarget });
             await page.screenshot({ path: fleetTarget, fullPage: true });

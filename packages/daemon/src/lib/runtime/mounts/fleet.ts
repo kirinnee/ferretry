@@ -18,6 +18,7 @@ import {
   FleetManifestSchema,
   FleetPlan,
   type FleetScaffold,
+  type FleetScaffolder,
   FleetScaffoldPartialError,
   type FleetUsageProbe,
   type FleetUsageSnapshot,
@@ -63,7 +64,7 @@ import {
   FleetProposalViewSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { parseBody, parseOptionalBody } from '../../api/body.ts';
+import { MAX_TEXT_BODY_BYTES, parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -83,13 +84,6 @@ import {
   FleetMutationRefusal,
 } from '../../fleet/mutations.ts';
 import {
-  applyResultSummary,
-  committedSummary,
-  manifestSummary,
-  planSummary,
-  scaffoldSummary,
-} from '../../fleet/wire.ts';
-import {
   type FleetProposalProblem,
   type FleetProposalRecord,
   FleetProposalRefusal,
@@ -97,6 +91,13 @@ import {
   MISSING_CONFIG_REVISION,
   redactProposal,
 } from '../../fleet/proposals.ts';
+import {
+  applyResultSummary,
+  committedSummary,
+  manifestSummary,
+  planSummary,
+  scaffoldSummary,
+} from '../../fleet/wire.ts';
 import type { FoundationPaths } from '../../paths.ts';
 import type { FileSystemPort } from '../../ports.ts';
 import type { SessionRootPinner } from '../../session/filesystem/ports.ts';
@@ -217,6 +218,13 @@ export interface DaemonFleetOptions {
    * rather than fall back to a pathname — the fallback reopens the hole this closes.
    */
   readonly rootPinner: SessionRootPinner;
+  /**
+   * Writes a first run to the host. Defaulted to the file implementation, and overridable because
+   * this mount has to answer for what any implementation of the port does: the file one reports
+   * every failure it can reach as a partial host, and the handling of one that does not — a claim
+   * left behind by a failure nobody classified — is exactly the part that must be provable.
+   */
+  readonly scaffolder?: FleetScaffolder;
 }
 
 /** Configuration and assets are private: they name homes, wrappers and everything an account runs. */
@@ -380,7 +388,7 @@ class MountedFleet implements FleetSubsystem {
   private readonly configSource: FileFleetConfigSource;
   private readonly planner = new FleetPlan();
   private readonly provisioner: FileFleetProvisioner;
-  private readonly scaffolder: FileFleetScaffolder;
+  private readonly scaffolder: FleetScaffolder;
   private readonly assetStore: FleetAssetStore;
   private readonly proposals: FleetProposalStore<FleetProposalPayload>;
 
@@ -396,7 +404,7 @@ class MountedFleet implements FleetSubsystem {
       allowedRoots,
       new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),
     );
-    this.scaffolder = new FileFleetScaffolder(allowedRoots);
+    this.scaffolder = options.scaffolder ?? new FileFleetScaffolder(allowedRoots);
     this.assetStore = new FleetAssetStore({
       // The state home, not the asset directory: the thing being guarded must never be its own
       // guard. Pinning `fleet/assets` would follow a link swapped in for it a moment earlier and
@@ -717,16 +725,26 @@ class MountedFleet implements FleetSubsystem {
       };
     } catch (error) {
       const residue = await lock.release(token);
-      if (!(error instanceof FleetScaffoldPartialError)) throw error;
-      return {
-        outcome: 'initialization-partial',
-        reason: errorMessage(error.cause),
-        failedPath: error.failedPath,
-        created: [...error.progress.created],
-        kept: [...error.progress.kept],
-        directories: [...error.progress.directories],
-        ...(residue === undefined ? {} : { lockResidue: residue }),
-      };
+      if (error instanceof FleetScaffoldPartialError) {
+        return {
+          outcome: 'initialization-partial',
+          reason: errorMessage(error.cause),
+          failedPath: error.failedPath,
+          created: [...error.progress.created],
+          kept: [...error.progress.kept],
+          directories: [...error.progress.directories],
+          ...(residue === undefined ? {} : { lockResidue: residue }),
+        };
+      }
+      // Residue travels with every ending, including the ones that are not outcomes. A failure the
+      // scaffolder did not classify says nothing about the host, but a claim this attempt could not
+      // clear still blocks the next apply — so it is named in the refusal rather than dropped on
+      // the way out, which would leave a fleet that silently refuses to change and no account of why.
+      if (residue === undefined) throw error;
+      throw new FleetRefusal(
+        'fleet_apply_refused',
+        `${errorMessage(error)}; the exclusive apply claim at ${residue} could not be cleared`,
+      );
     }
   }
 
@@ -1090,6 +1108,14 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
         ),
     },
     {
+      /**
+       * The one route here whose purpose is to carry bulk caller-supplied text.
+       *
+       * Every bound the asset edits state — 32 files, 64 KiB each, 256 KiB together — is enforced
+       * by a schema, and a schema reads a string the transport has already materialised. So the
+       * read itself is bounded first, at the text ceiling rather than the attachment one: a cap
+       * applied in a handler is a cap applied after the allocation it was meant to prevent.
+       */
       method: 'POST',
       path: '/v1/fleet/proposals',
       scope: 'admin',
@@ -1097,7 +1123,10 @@ export function fleetRoutes(subsystem: FleetSubsystem): readonly ApiRoute[] {
       handle: async context =>
         await respondWith(
           FleetProposalViewSchema,
-          async () => await subsystem.propose(await parseBody(context.request, FleetProposalRequestSchema)),
+          async () =>
+            await subsystem.propose(
+              await parseBody(context.request, FleetProposalRequestSchema, { maxBytes: MAX_TEXT_BODY_BYTES }),
+            ),
         ),
     },
     {

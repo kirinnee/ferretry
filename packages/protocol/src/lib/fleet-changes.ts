@@ -68,8 +68,73 @@ export const FleetAssetDocumentSchema = z.strictObject({
 });
 export type FleetAssetDocument = z.infer<typeof FleetAssetDocumentSchema>;
 
+const MAX_ASSET_REF_LENGTH = 200;
+const MAX_ASSET_REF_DEPTH = 8;
+/**
+ * Exactly the two spellings the fleet expands to the user's home directory. Matching them and
+ * nothing else is deliberate: `~kirin/notes` and `$EDITOR/x` are expanded by nobody, so they stay
+ * inside the asset tree and refusing them would be a rule about a danger that is not there.
+ */
+const HOME_ALIASES: readonly string[] = ['~', '$HOME'];
+
+/**
+ * Why this string cannot name a fleet asset, or `undefined` when it can.
+ *
+ * **One grammar, two boundaries.** A caller names assets in two places — the text files a change
+ * carries, and the `memory` / `skills` / `hooks` / `hooksDir` / `mcp` / `settings` fields of an
+ * overlay that say which of them an account uses. Both end up as a source the host reads and copies,
+ * so both are held to the same rule and the rule is written once. Two descriptions of what a remote
+ * caller may name is how one of them quietly becomes the laxer one.
+ *
+ * Absolute paths, home aliases, traversal segments and Windows separators are refused rather than
+ * normalised away: a caller that asked for `../../.ssh/authorized_keys` has said what it wants, and
+ * quietly rewriting that into something harmless teaches nobody anything and hides a probe.
+ *
+ * **This is a rule about untrusted callers, not about the file format.** An operator hand-editing
+ * `config.yaml` may legitimately write `~/notes.md` or an absolute path, and the configuration
+ * schema still accepts both. What a paired browser may compose is a much smaller thing.
+ *
+ * The reason is returned rather than thrown so the two boundaries can each phrase their own
+ * refusal — a schema issue on the wire, a refusal with the offending path on the daemon — without
+ * either restating the grammar.
+ */
+export function fleetAssetRefProblem(candidate: string): string | undefined {
+  if (candidate.length === 0) return 'is empty';
+  if (candidate.length > MAX_ASSET_REF_LENGTH) return `is longer than ${MAX_ASSET_REF_LENGTH} characters`;
+  if (candidate.includes('\\')) return 'must use "/" separators';
+  if (candidate.startsWith('/')) return 'must be relative to the asset directory';
+  if (/^[A-Za-z]:/u.test(candidate)) return 'must be relative to the asset directory';
+  // Every control character, tab and newline included. A file's *contents* legitimately contain
+  // those three; a path never does, and one that did would print as something other than what it
+  // opens.
+  if (/[\p{Cc}\p{Cf}]/u.test(candidate)) return 'contains control characters';
+
+  const segments = candidate.split('/');
+  if (HOME_ALIASES.includes(segments[0] ?? '')) return 'must be relative to the asset directory, not to a home';
+  if (segments.length > MAX_ASSET_REF_DEPTH) return `is deeper than ${MAX_ASSET_REF_DEPTH} directories`;
+  for (const segment of segments) {
+    if (segment === '') return 'contains an empty path segment';
+    if (segment === '.' || segment === '..') return 'contains a path traversal segment';
+    if (segment.trim() !== segment) return 'has a segment starting or ending with whitespace';
+  }
+  return undefined;
+}
+
+/** The one sentence both boundaries refuse with, or `undefined` when the reference is well-formed. */
+const assetRefRefusal = (candidate: string): string | undefined => {
+  const problem = fleetAssetRefProblem(candidate);
+  return problem === undefined ? undefined : `asset path "${candidate}" ${problem}`;
+};
+
+/** One reference into the fleet's asset tree, held to the grammar above at the wire boundary. */
+const FleetAssetRefSchema = z.string().check(context => {
+  const refusal = assetRefRefusal(context.value);
+  if (refusal === undefined) return;
+  context.issues.push({ code: 'custom', message: refusal, input: context.value });
+});
+
 /** A text file a change will write into the asset tree, relative to it and always `/`-separated. */
-export const FleetAssetEditSchema = z.strictObject({ path: z.string().min(1), content: z.string() });
+export const FleetAssetEditSchema = z.strictObject({ path: FleetAssetRefSchema, content: z.string() });
 export type FleetAssetEdit = z.infer<typeof FleetAssetEditSchema>;
 
 const NonEmpty = z.string().min(1);
@@ -94,19 +159,46 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+/**
+ * A settings layer is either a document written inline or a reference to one in the asset tree, and
+ * the string case is the reference — so it is held to the asset grammar, exactly like `memory`.
+ *
+ * The grammar is checked on the whole field rather than inside the branches on purpose. A union
+ * whose branches all fail reports that nothing matched, and "invalid input" is a useless thing to
+ * tell somebody who wrote one path wrong: the branches stay structural, and the check that runs
+ * once the shape is known says which reference is wrong and why.
+ */
 const SettingsLayerValueSchema = z.union([NonEmpty, z.record(z.string(), JsonValueSchema)]);
-const SettingsFieldSchema = z.union([SettingsLayerValueSchema, z.array(SettingsLayerValueSchema).readonly()]);
+const SettingsFieldSchema = z
+  .union([SettingsLayerValueSchema, z.array(SettingsLayerValueSchema).readonly()])
+  .check(context => {
+    const layers: readonly unknown[] = Array.isArray(context.value) ? context.value : [context.value];
+    for (const layer of layers) {
+      if (typeof layer !== 'string') continue;
+      const refusal = assetRefRefusal(layer);
+      if (refusal !== undefined) context.issues.push({ code: 'custom', message: refusal, input: layer });
+    }
+  });
 
-/** The fields an overlay may carry, spelled out. Arbitrary keys are refused, not carried along. */
+/**
+ * The fields an overlay may carry, spelled out. Arbitrary keys are refused, not carried along.
+ *
+ * Every field here that names a file names one **inside the fleet's own asset tree**. That is the
+ * difference between an overlay a person composed in a browser and one an operator typed on the
+ * host: applying copies each named source into an account home, so a field that accepted any
+ * pathname would let a caller with a paired credential choose which of the host's files the next
+ * approved change copies — and the one-line summary the host approves would not mention it.
+ * `flags` and `env` are values rather than references, so they are unaffected.
+ */
 const layerFields = {
   env: z.record(z.string(), z.string()),
   flags: z.array(NonEmpty).readonly(),
   settings: SettingsFieldSchema,
-  memory: NonEmpty,
-  skills: NonEmpty,
-  hooks: NonEmpty,
-  hooksDir: NonEmpty,
-  mcp: NonEmpty,
+  memory: FleetAssetRefSchema,
+  skills: FleetAssetRefSchema,
+  hooks: FleetAssetRefSchema,
+  hooksDir: FleetAssetRefSchema,
+  mcp: FleetAssetRefSchema,
 } as const;
 
 const patchOf = <T extends z.ZodType>(schema: T) => schema.nullable().optional();
