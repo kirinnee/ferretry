@@ -10,7 +10,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-
+import { ImportedHistoryPage } from './components/imported-history-page.tsx';
 import { NewSessionPage } from './components/new-session-page.tsx';
 import {
   type SessionWorkspaceRefreshControl,
@@ -221,6 +221,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: sessions, label: 'Sessions' }, { label: 'Analytics' }];
     case 'learning':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Learning' }];
+    case 'imported-history':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Imported history' }];
   }
 };
 
@@ -866,6 +868,17 @@ function LearningRoute({ connection }: DaemonPageProps) {
   return <LearningPage connection={connection} />;
 }
 
+function ImportedHistoryRoute({ connection }: DaemonPageProps) {
+  const store = useAppStore();
+  return (
+    <ImportedHistoryPage
+      connection={connection}
+      readHistory={async daemon => await (await store.clients.client(daemon)).foreignHistory()}
+      readConversation={async (daemon, id) => await (await store.clients.client(daemon)).foreignHistoryConversation(id)}
+    />
+  );
+}
+
 function ProjectsRoute({ connection }: DaemonPageProps) {
   return <ProjectsPage connection={connection} />;
 }
@@ -881,6 +894,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
+  ImportedHistory: ImportedHistoryRoute,
 };
 
 /** The mounted shell; exported so render tests can inject the router and store providers. */

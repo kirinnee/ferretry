@@ -121,6 +121,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined },
+  foreignHistory: {
+    list: async () => ({ conversations: [], skipped: [] }),
+    get: async () => undefined,
+  },
   attention: attentionService(),
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -252,6 +256,10 @@ describe('the mounted daemon surface', () => {
       // one at all.
       'POST /v1/fleet/proposals/:proposalId/authorize',
       'POST /v1/fleet/proposals/:proposalId/apply',
+      // Imported harness history is deliberately not a session route: it can be read but has no
+      // daemon journal, lifecycle, pane, or resume/send control.
+      'GET /v1/imports/history',
+      'GET /v1/imports/history/:importId',
       'GET /v1/gc',
       'POST /v1/gc',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is

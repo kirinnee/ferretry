@@ -22,6 +22,7 @@ import { type DoctorSubsystem, doctorRoutes } from './doctor.ts';
 import { type FleetSubsystem, fleetRoutes } from './fleet.ts';
 import { type FleetEventStreamSubsystem, fleetEventSocketRoutes } from './fleet-events.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
+import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
@@ -79,6 +80,8 @@ export interface MountedSubsystems {
    *  It serves no route: an unattended pass exists to make the existing routes current before anyone
    *  asks them. Keeping it here proves production constructs it rather than leaving a dead timer. */
   readonly fleetRefresh: FleetRefreshLoop;
+  /** Read-only Claude/Codex conversations that existed before Ferretry. */
+  readonly foreignHistory: ForeignHistorySubsystem;
   readonly attention: AttentionService;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
@@ -215,6 +218,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
     // Fleet paths are fixed literals under their own namespace and disclose operator configuration,
     // so their mount owns the admin scope and cannot shadow any session route below.
     ...fleetRoutes(subsystems.fleet),
+    // Imported harness history is intentionally outside `/v1/sessions`: no foreign transcript has
+    // the journal/pane evidence a managed session requires, so it cannot acquire live controls by
+    // looking like one.
+    ...foreignHistoryRoutes(subsystems.foreignHistory),
     ...scratchGcRoutes(subsystems.scratchGc),
     // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
     // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide

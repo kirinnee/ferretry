@@ -13,6 +13,12 @@ import {
 } from '../lib/client.ts';
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
 import {
+  type ForeignHistoryListing,
+  ForeignHistoryListingSchema,
+  type ImportedConversationDetail,
+  ImportedConversationDetailSchema,
+} from '../lib/foreign-history.ts';
+import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
@@ -401,6 +407,17 @@ export class FyApiClient implements IFyApiClient {
     if (query?.trim()) search.set('q', query.trim());
     const suffix = search.size === 0 ? '' : `?${search.toString()}`;
     return this.request(`/v1/analytics${suffix}`, AnalyticsResponseSchema);
+  }
+
+  foreignHistory(): Promise<ForeignHistoryListing> {
+    return this.request('/v1/imports/history', ForeignHistoryListingSchema);
+  }
+
+  foreignHistoryConversation(id: string): Promise<ImportedConversationDetail> {
+    return this.request(
+      `/v1/imports/history/${encodeURIComponent(NonEmptyValueSchema.parse(id))}`,
+      ImportedConversationDetailSchema,
+    );
   }
 
   scratchPlan(limit = 20): Promise<ScratchPlanView[]> {

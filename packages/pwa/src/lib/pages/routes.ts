@@ -59,6 +59,11 @@ export interface DaemonLearningRoute {
   readonly daemonId: DaemonId;
 }
 
+export interface DaemonImportedHistoryRoute {
+  readonly kind: 'imported-history';
+  readonly daemonId: DaemonId;
+}
+
 export type DaemonPageRoute =
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
@@ -67,7 +72,8 @@ export type DaemonPageRoute =
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
-  | DaemonLearningRoute;
+  | DaemonLearningRoute
+  | DaemonImportedHistoryRoute;
 
 export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
 
@@ -140,6 +146,9 @@ export const daemonAnalyticsPath = (id: DaemonId): string => `${daemonSessionsPa
 /** Builds the canonical learning pathname for one daemon. */
 export const daemonLearningPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/learning`;
 
+/** Builds the canonical history-import pathname for one daemon. */
+export const daemonImportedHistoryPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/history`;
+
 /** Resolves a browser pathname to the page model, without consulting browser globals. */
 export const parseRoute = (pathname: string): Route => {
   const [first, daemonSegment, destination, sessionSegment, ...remainder] = pathname.split('/').filter(Boolean);
@@ -156,6 +165,7 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
+    if (destination === 'history') return { kind: 'imported-history', daemonId: id };
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
   }
 
@@ -190,6 +200,8 @@ export const routePath = (route: Route): string => {
       return daemonAnalyticsPath(route.daemonId);
     case 'learning':
       return daemonLearningPath(route.daemonId);
+    case 'imported-history':
+      return daemonImportedHistoryPath(route.daemonId);
     case 'legacy-tasks-redirect':
       return routePath(route.to);
   }

@@ -60,12 +60,14 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FleetUsageSource,
+  foreignHistoryRoots,
   HttpUsageSource,
   JournalGrantAudit,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   NodeBrowserLoginRuntime,
   NodeCatalog,
+  NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSocketTicketSecrets,
   type OpenedDaemonStorage,
@@ -253,6 +255,7 @@ import {
   exactWorkerAssignee,
   FleetEventStreamService,
   FleetRefreshService,
+  ForeignHistoryImporter,
   type FoundationPaths,
   fleetManifestRefusal,
   FleetManifestUnreadableError,
@@ -3157,10 +3160,23 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
    * SAME two sources. A second construction would be a second answer to "how is a Claude record
    * normalized" the moment either one changed.
    */
+  const claudeTranscriptParser = new ClaudeTranscriptParser();
+  const codexTranscriptParser = new CodexTranscriptParser();
   const transcriptSources = [
-    new NodeTranscriptSource(new ClaudeTranscriptParser()),
-    new NodeTranscriptSource(new CodexTranscriptParser()),
+    new NodeTranscriptSource(claudeTranscriptParser),
+    new NodeTranscriptSource(codexTranscriptParser),
   ];
+  /**
+   * A separate read surface for conversations that existed before Ferretry.
+   *
+   * It shares the exact parser instances used by managed sessions, but its filesystem capability
+   * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
+   * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
+   */
+  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(), {
+    claude: claudeTranscriptParser,
+    codex: codexTranscriptParser,
+  });
   /**
    * A session's own transcript, over the provenance its start recorded.
    *
@@ -3836,6 +3852,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
         // The SAME mount the usage feed collects through, so the admin route and `/usage` can never
         // report different quota for the same account on the same host.
         fleet,
+        foreignHistory,
         // This owns no cache and no provider policy: the mounted fleet health reader and the daemon
         // usage feed already own those. One service per opened state home serializes only this
         // daemon's timer ticks, so a slow probe in another daemon can neither join nor delay it.

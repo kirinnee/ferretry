@@ -24,6 +24,7 @@ export interface PageHostSlots {
   readonly Warden: ComponentType<DaemonPageProps>;
   readonly Analytics: ComponentType<DaemonPageProps>;
   readonly Learning: ComponentType<DaemonPageProps>;
+  readonly ImportedHistory?: ComponentType<DaemonPageProps>;
 }
 
 export interface PageHostProps {
@@ -74,5 +75,8 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
       return <slots.Analytics connection={matchedConnection} />;
     case 'learning':
       return <slots.Learning connection={matchedConnection} />;
+    case 'imported-history':
+      if (slots.ImportedHistory === undefined) throw new Error('the imported-history route is not mounted');
+      return <slots.ImportedHistory connection={matchedConnection} />;
   }
 }
