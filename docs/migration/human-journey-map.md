@@ -50,6 +50,58 @@ claim that the requested capability works.
 - PR #184 closed remote live-event authentication with one-use socket tickets.
   #189 separately completed terminal-scoped ticket minting. This workspace still
   polls normalized logs and has no interactive terminal renderer.
+- PR #231 built the read-only Fleet surface and declared account creation and
+  asset editing as GAPs. #237 mounted the fleet read routes and the body-less
+  admin apply, and #238 the profile environment read. None of them put a fleet
+  surface inside the product: `FleetSurface` was imported only by the dev
+  harness and its unit test, so until `feat/fleet-configuration-ui` the honest
+  answer to "where do I configure my fleet in the UI" was **nowhere**.
+- The two fleet rows are evidenced by that branch and not by `main`:
+  `packages/daemon/src/lib/fleet/{mutations,proposals,assets,asset-store}.ts`
+  with the proposal routes in `runtime/mounts/fleet.ts`, `fy fleet authorize`
+  in `packages/cli/src/lib/fleet/`, and `packages/pwa/src/features/fleet/`
+  mounted through the existing `daemonSettingsTabs` seam in `App.tsx`.
+- The apply outcome is a **body, not a message**. Ordinary provisioning now
+  captures undo evidence, unwinds in reverse and reports which of four states
+  the host is in: committed; committed with only shared history failing after
+  the manifest was published; rolled back with nothing of anybody else's moved;
+  or rollback-incomplete, naming the exact paths whose restoration could not be
+  verified. Moved-aside backups and an unreleasable apply lock are reported as
+  **residue on success**, because undoing a committed apply to tidy up would
+  delete the state the manifest now describes. What is **not** claimed: crash
+  transactionality. The boundary covers a thrown error, not a killed task, and
+  there is no journal-backed recovery.
+- **Preparing a host is a separate outcome from applying one**, and the rows do
+  not blur them. Initialization publishes **no manifest** — a just-prepared host
+  has a configuration and an assets tree and still no accounts — so reporting it
+  as a committed apply of zero accounts would tell a person their fleet is empty
+  rather than that it is now ready. It has its own two outcomes: `initialized`,
+  carrying the created, kept and directory lists plus the `pathEntry` a person
+  adds to their shell profile so the wrappers are runnable at all; and
+  `initialization-partial`, carrying those lists as they stood plus the reason
+  and the exact path where preparation stopped, and deliberately no `pathEntry`
+  because the host is not ready. Neither is a rollback: every file preparation
+  writes is one that was absent, so removing them again could not be told apart
+  from removing files somebody else had just created. Re-running completes the
+  remainder and keeps what is there. Both reach the browser through the **same**
+  `FleetApplyOutcomeSchema` the daemon parses its own response through, so the
+  two ends cannot hold different ideas of what happened, and each gets its own
+  words: a prepared host is told no manifest exists yet, and a partly prepared
+  one is told where it stopped and that running it again is safe.
+- **Publication refuses rather than overwrites**, and the cost is stated rather
+  than hidden. A staged file is published with `link(2)`, which fails instead of
+  replacing; a staged directory has no no-replace rename, so the tree is
+  published with primitives exclusive at every level — a non-recursive `mkdir`
+  per directory and a `link` per file. The tree therefore becomes visible entry
+  by entry rather than all at once, which is acceptable only because a
+  part-finished publish leaves the operation unsealed, and an unsealed
+  destination is reported rather than deleted on a guess.
+- No fidelity claim is made for any of these screens, because there is no
+  original screen. `kfleet` has no create verb, no mutation API and no dry run
+  (`apply` takes only `--prune`; its `list` re-derives a summary from the
+  config), and the session daemon deliberately never wrote the fleet — its
+  learning path emits a patch file for a human to paste. See
+  [surveys/kfleet-map.md](surveys/kfleet-map.md#m--change-it-without-a-shell).
 
 ## Recommended order of work
 
@@ -83,7 +135,17 @@ claim that the requested capability works.
    What is left is reach, not safety: give it a route so `fy` and the PWA can
    configure the pool and read the tick's account, and decide whether consent
    should also be per session rather than only per account.
-7. **Close the remaining independently valuable gaps.** Supply operator-owned
+7. **Finish the fleet editor where it stops at accounts.** Creating an account
+   and editing its layer are mounted, and so is preparing a fresh host; removing
+   an account, moving one, and editing `profiles`, `variants`, `commands`,
+   `aliases`, `defaultHomes`, `sharedHistory`, `health` and `usage` are still
+   hand edits of `config.yaml`. The mutation grammar already has the shape for
+   it — one more named intent per change, derived server-side and reviewed the
+   same way — so this is reach rather than design. Two smaller items belong with
+   it: carry launchability evidence on a fleet route instead of only on
+   `GET /v1/doctor`, and decide whether per-profile environment gets a
+   proposal-shaped editor or stays a host concern.
+8. **Close the remaining independently valuable gaps.** Supply operator-owned
    pricing data for cost totals. Dictation itself is done through the browser's
    SpeechRecognition API, so what is left under STT is a narrower product
    question: whether recognition that provably never leaves the device is worth
@@ -120,9 +182,25 @@ it asked for (PR #120). A shared task board is collaborative state, so two
 agents' interests can genuinely diverge there — unlike a process one of them
 owns.
 
+Fleet configuration is narrowed too, and on a **different axis** — worth stating
+so the two are not confused. The boundary above is about processes sharing a UID
+on the host, where a restriction enforces nothing. A paired browser is not on the
+host: it holds a device-class token minted by pairing, it can be a phone somebody
+left on a train, and a fleet apply writes executables onto `PATH`. So reads and
+composing a change are open to it, and changing the host is not: the approval is
+`scope: 'host'`, minted only by the host's own admin token, single-use, and bound
+to one exact proposal. That is a real boundary because the two sides are genuinely
+different principals, unlike an agent that could read `api-token` itself.
+
 So: full admin over sessions and processes; narrow capabilities only where state
-is genuinely shared. Anyone revisiting this should change it deliberately rather
-than because the full-admin scope looked like an oversight.
+is genuinely shared or the principal is genuinely remote. Anyone revisiting this
+should change it deliberately rather than because the full-admin scope looked like
+an oversight.
+
+The second correction, from this revision: fleet management is no longer
+CLI-only. A person can see their fleet and change it from the product, under an
+authority the surface states before it offers a control — but the editor stops at
+accounts, and everything else about a fleet is still a hand edit of `config.yaml`.
 
 The principal correction to the previous reachability measure is therefore:
 the PWA session workspace is no longer a placeholder, but its structured/live
