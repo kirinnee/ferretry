@@ -39,7 +39,7 @@ him, not by line count.
 | G   | [Know which accounts actually work](#g--know-what-actually-works)   | Nothing                     | **Yes** (health is off by default upstream) |
 | H   | [Keep that knowledge fresh unattended](#h--keep-it-fresh)           | Supervision yes, probing no | **Yes**                                     |
 | I   | [Resume any session from any account](#i--resume-anything-anywhere) | Nothing; now refused        | **Yes**, if he uses it                      |
-| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | Nothing                     | **Yes** — _being closed by this unit_       |
+| J   | [Start from nothing on a new machine](#j--start-from-nothing)       | Nothing                     | **Yes** — _closed by this unit_             |
 | K   | [Not be stopped by first-run prompts](#k--survive-the-first-run)    | Nothing                     | **Yes**, for automation                     |
 | L   | [Diagnose it when it is wrong](#l--diagnose-it)                     | Nothing                     | No — annoying, not blocking                 |
 
@@ -113,7 +113,7 @@ kfleet's bin directory is `~/.kfleet/bin`, and Home Manager put it on `PATH`. Fe
 `fy fleet apply` writes executables to a directory the shell has never heard of and reports success.
 
 That is the smallest, sharpest blocker on this whole list: everything else about materialization
-works, and the result is unreachable. _Being closed by this unit_ — see [J](#j--start-from-nothing).
+works, and the result is unreachable. _Closed by this unit_ — see [J](#j--start-from-nothing).
 
 ### Two behavioural deltas, recorded and deliberately not fixed
 
@@ -188,7 +188,7 @@ Two shapes worth naming:
   `skills-codex/` are two copies of the same 14 skills in two dialects. Ferretry should not inherit
   the duplication as a fact of life without asking whether one source can generate both.
 
-_Partly closed by this unit (in progress at this commit)_ — see [J](#j--start-from-nothing) for the mechanism and the directory;
+_Partly closed by this unit_ — see [J](#j--start-from-nothing) for the mechanism and the directory;
 the default _content_ beyond a starting point is left, with the reasons in
 [What was left](#what-was-left).
 
@@ -388,7 +388,7 @@ kfleet's own answer is thinner than it looks: `kfleet init` scaffolds `~/.kfleet
 and copies templates from a directory that does not exist in its source tree — the real scaffolding
 is Home Manager's.
 
-**Being closed by this unit** (in progress at this commit). `fy fleet init` creates the fleet, bin, homes and assets directories, writes
+**Closed by this unit.** `fy fleet init` creates the fleet, bin, homes and assets directories, writes
 a documented starter configuration and an assets README, never overwrites anything that already
 exists, and prints the `PATH` line the wrappers need. Because we are not compatible, it ships real
 defaults rather than copying a directory that is not there. Details in
@@ -496,9 +496,7 @@ And one where dropping compatibility **costs** us something, flagged rather than
 
 ## What this unit closed
 
-> **Items 2–4 are landed and gated. Item 1 is in progress at the time of this commit** and moves to
-> the same footing in the commit that lands it; if it is still marked this way at the end of the
-> unit, it was not built.
+> All four are landed and gated.
 
 ### 1. `fy fleet init` — [J](#j--start-from-nothing) and half of [C](#c--own-the-assets)
 

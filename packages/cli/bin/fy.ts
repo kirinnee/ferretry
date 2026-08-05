@@ -1,9 +1,17 @@
 #!/usr/bin/env bun
+import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
-import { FleetLoginService, FleetPlan, FleetUsageCollector, requiresProviderLogin } from '@ferretry/fleet';
+import {
+  buildFleetScaffold,
+  FleetLoginService,
+  FleetPlan,
+  FleetUsageCollector,
+  requiresProviderLogin,
+} from '@ferretry/fleet';
 import {
   FileFleetConfigSource,
   FileFleetProvisioner,
+  FileFleetScaffolder,
   ProcessFleetLoginPort,
   readFleetWrapperScript,
   spawnFleetLoginProcess,
@@ -489,9 +497,21 @@ function buildFleetController(world: CliWorld, client: SharedDaemonClient): Flee
     product: PRODUCT_NAME,
   });
   const configured = world.environment.FY_FLEET_CONFIG?.trim() ?? '';
+  const configPath = configured === '' ? defaultConfigPath(layout) : configured;
   return new FleetController({
-    config: new FileFleetConfigSource(configured === '' ? defaultConfigPath(layout) : configured),
+    config: new FileFleetConfigSource(configPath),
     manifests: new FileFleetManifestSource(layout.manifestPath),
+    // Scaffolding seeds the configuration `apply` will actually read, so both take the same path.
+    scaffolder: {
+      scaffold: async () =>
+        await new FileFleetScaffolder([layout.fleetDirectory]).scaffold(
+          buildFleetScaffold({
+            layout,
+            configPath,
+            ids: { claude: randomUUID(), codex: randomUUID() },
+          }),
+        ),
+    },
     planner: {
       build: (config, generatedAt) => new FleetPlan().build(config, layout, generatedAt),
     },

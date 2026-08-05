@@ -4,6 +4,7 @@ import type {
   FleetConfig,
   FleetLoginResult,
   FleetManifest,
+  FleetScaffoldResult,
   FleetUsageSnapshot,
 } from '@ferretry/fleet';
 import type { IFyApiClient } from '@ferretry/protocol';
@@ -68,6 +69,14 @@ export interface IFleetLoginServiceFactory {
 
 export interface IFleetLoginService {
   login(manifest: FleetManifest, accountIds?: readonly string[]): Promise<readonly FleetLoginResult[]>;
+}
+
+/**
+ * Preparing a host that has never had a fleet: the directories, a starter configuration, and the
+ * asset space. Creates only what is absent, so it is safe on a host that already has one.
+ */
+export interface IFleetScaffolder {
+  scaffold(): Promise<FleetScaffoldResult>;
 }
 
 /** Reading the wall clock, injected so a plan's `generatedAt` is deterministic in a test. */

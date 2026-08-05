@@ -10,6 +10,7 @@ import {
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
+  RecordingScaffolder,
   RecordingUsageCollector,
   StubConfigSource,
   StubManifestSource,
@@ -20,6 +21,7 @@ function run(argv: string[]) {
   const recommendations = new RecordingRecommendationGateway();
   const usage = new RecordingUsageCollector();
   const logins = new RecordingLoginService();
+  const scaffolder = new RecordingScaffolder();
   const out = new CapturingOutput();
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
@@ -28,6 +30,7 @@ function run(argv: string[]) {
     new FleetController({
       config: new StubConfigSource(),
       manifests: new StubManifestSource(),
+      scaffolder,
       planner: new RecordingPlanner(),
       applier,
       usage,
@@ -37,7 +40,15 @@ function run(argv: string[]) {
       out,
     }),
   );
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), applier, recommendations, usage, logins, out };
+  return {
+    parsed: program.parseAsync(['node', 'fy', ...argv]),
+    applier,
+    recommendations,
+    usage,
+    logins,
+    scaffolder,
+    out,
+  };
 }
 
 describe('fleet command surface', () => {
@@ -149,5 +160,26 @@ describe('fleet login', () => {
 
     // Assert
     should(JSON.parse(out.text)).have.length(1);
+  });
+});
+
+describe('fleet init', () => {
+  it('should prepare the host', async () => {
+    // Arrange + Act
+    const { parsed, scaffolder, out } = run(['fleet', 'init']);
+    await parsed;
+
+    // Assert
+    should(scaffolder.calls).equal(1);
+    should(out.text).containEql('PATH');
+  });
+
+  it('should not be the default verb — that must never be the one that writes', async () => {
+    // Arrange + Act
+    const { parsed, scaffolder } = run(['fleet']);
+    await parsed;
+
+    // Assert
+    should(scaffolder.calls).equal(0);
   });
 });

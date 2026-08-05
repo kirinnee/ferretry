@@ -5,6 +5,7 @@ import type {
   FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
+  FleetScaffoldResult,
   FleetUsage,
   FleetUsageSnapshot,
 } from '@ferretry/fleet';
@@ -17,6 +18,7 @@ import type {
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
+  IFleetScaffolder,
   IFleetUsageCollector,
   IFleetUsageCollectorFactory,
   IRecommendationGateway,
@@ -215,6 +217,28 @@ export class RecordingLoginService implements IFleetLoginService, IFleetLoginSer
     this.requests.push({ manifest, accountIds });
     return Promise.resolve(this.results);
   }
+}
+
+/** A scaffolder recording that it ran, and answering with a fixed result. */
+export class RecordingScaffolder implements IFleetScaffolder {
+  calls = 0;
+
+  constructor(private readonly result: FleetScaffoldResult = scaffoldResult()) {}
+
+  scaffold(): Promise<FleetScaffoldResult> {
+    this.calls += 1;
+    return Promise.resolve(this.result);
+  }
+}
+
+export function scaffoldResult(overrides: Partial<FleetScaffoldResult> = {}): FleetScaffoldResult {
+  return {
+    created: ['/state/fleet/config.yaml'],
+    kept: [],
+    directories: ['/state/fleet', '/state/fleet/bin', '/state/fleet/homes', '/state/fleet/assets'],
+    pathEntry: 'export PATH="/state/fleet/bin:$PATH"',
+    ...overrides,
+  };
 }
 
 /** A clock frozen at the fixture instant. */

@@ -4,6 +4,7 @@ import type {
   FleetLoginResult,
   FleetManifest,
   FleetManifestAccount,
+  FleetScaffoldResult,
   FleetUsage,
   FleetUsageSnapshot,
   FleetWriteOperation,
@@ -90,6 +91,28 @@ export function renderUsage(snapshot: FleetUsageSnapshot): string {
   const exhausted = snapshot.accounts.filter(account => account.atLimit).length;
   const header = `${plural(snapshot.accounts.length, 'account')}${exhausted === 0 ? '' : `, ${exhausted} at limit`}`;
   return [header, ...snapshot.accounts.map(renderUsageRow)].join('\n');
+}
+
+/**
+ * What init prepared, what it deliberately left, and the one thing a person must still do.
+ *
+ * The `PATH` line is printed every time, including on a re-run that created nothing: the command
+ * that makes a directory of executables is the only place where saying how the shell will find them
+ * is guaranteed to be read, and an apply that writes wrappers nowhere on `PATH` reports success and
+ * produces nothing runnable.
+ */
+export function renderScaffoldResult(result: FleetScaffoldResult): string {
+  const lines =
+    result.created.length === 0
+      ? ['The fleet is already set up; nothing was changed.']
+      : [
+          `prepared the fleet in ${result.directories[0] ?? 'its directory'}`,
+          ...result.created.map(path => `  created  ${path}`),
+        ];
+  for (const path of result.kept) lines.push(`  kept     ${path} (already there, left as it is)`);
+  lines.push('', 'Add this to your shell profile so the generated wrappers are on PATH:', `  ${result.pathEntry}`);
+  lines.push('', 'Then declare an account in the configuration and run "fy fleet apply".');
+  return lines.join('\n');
 }
 
 /** One login outcome. Every status is named, so "nothing happened" is never how a failure reads. */

@@ -42,6 +42,20 @@ export function registerFleetCommands(program: Command, controller: FleetControl
 
   scoped(
     fleet
+      .command('init')
+      .description('prepare this host: the fleet directories, a starter configuration, and asset space')
+      .addHelpText(
+        'after',
+        '\nCreates only what is missing, so it is safe to re-run — an upgrade that adds a default\n' +
+          'fills it in without touching anything you have edited. It also prints the PATH line the\n' +
+          'generated wrappers need, which is the one step nothing else can do for you.',
+      ),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.init(merged(command));
+  });
+
+  scoped(
+    fleet
       .command('apply')
       .description('realize the declared configuration: homes, wrappers, settings and the manifest')
       .option('--dry-run', 'print every write the configuration implies and stop'),

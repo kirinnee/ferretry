@@ -10,6 +10,7 @@ import {
   RecordingLoginService,
   RecordingPlanner,
   RecordingRecommendationGateway,
+  RecordingScaffolder,
   RecordingUsageCollector,
   StubConfigSource,
   StubManifestSource,
@@ -26,6 +27,7 @@ function controller(overrides: Partial<FleetControllerDeps> = {}): {
   const deps: FleetControllerDeps = {
     config: new StubConfigSource(),
     manifests: new StubManifestSource(),
+    scaffolder: new RecordingScaffolder(),
     planner: new RecordingPlanner(),
     applier: new RecordingApplier(),
     usage: new RecordingUsageCollector(),
@@ -358,5 +360,43 @@ describe('honouring the configured usage thresholds', () => {
 
     // Assert
     should(usage.configs).have.length(1);
+  });
+});
+
+describe('preparing a fresh host', () => {
+  it('should scaffold and report what it created', async () => {
+    // Arrange
+    const scaffolder = new RecordingScaffolder();
+    const { subject, out } = controller({ scaffolder });
+
+    // Act
+    await subject.init({});
+
+    // Assert
+    should(scaffolder.calls).equal(1);
+    should(out.text).containEql('created  /state/fleet/config.yaml');
+  });
+
+  it('should not need a configuration to run — there is none yet', async () => {
+    // Arrange — every other verb loads one; init is what makes one exist.
+    const { subject } = controller({
+      config: {
+        load: () => Promise.reject(new Error('no config on a fresh host')),
+      },
+    });
+
+    // Act + Assert
+    await should(subject.init({})).not.be.rejected();
+  });
+
+  it('should print the payload under --json', async () => {
+    // Arrange
+    const { subject, out } = controller({ scaffolder: new RecordingScaffolder() });
+
+    // Act
+    await subject.init({ json: true });
+
+    // Assert
+    should(JSON.parse(out.text)).have.property('pathEntry');
   });
 });

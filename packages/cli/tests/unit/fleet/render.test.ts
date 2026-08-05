@@ -8,10 +8,21 @@ import {
   renderLoginRow,
   renderManifest,
   renderRecommendation,
+  renderScaffoldResult,
   renderUsage,
   renderUsageRow,
 } from '../../../src/lib/fleet/render';
-import { ACCOUNT_ID, account, applyResult, manifest, plan, recommendation, usageRow, usageSnapshot } from './fixtures';
+import {
+  ACCOUNT_ID,
+  account,
+  applyResult,
+  manifest,
+  plan,
+  recommendation,
+  scaffoldResult,
+  usageRow,
+  usageSnapshot,
+} from './fixtures';
 
 describe('apply plan rendering', () => {
   it('should say plainly that nothing has been written', () => {
@@ -257,5 +268,35 @@ describe('renderLoginResults', () => {
 
     // Assert
     should(actual).equal('  a  skipped, the manifest declares it unavailable');
+  });
+});
+
+describe('renderScaffoldResult', () => {
+  it('should list what it created and always say what must go on PATH', () => {
+    // Act
+    const actual = renderScaffoldResult(scaffoldResult());
+
+    // Assert
+    should(actual).containEql('prepared the fleet in /state/fleet');
+    should(actual).containEql('created  /state/fleet/config.yaml');
+    should(actual).containEql('export PATH="/state/fleet/bin:$PATH"');
+  });
+
+  it('should still print the PATH line on a re-run that changed nothing', () => {
+    // Act — the line is the one step nothing else can do for the person.
+    const actual = renderScaffoldResult(scaffoldResult({ created: [], kept: ['/state/fleet/config.yaml'] }));
+
+    // Assert
+    should(actual).containEql('already set up');
+    should(actual).containEql('kept     /state/fleet/config.yaml');
+    should(actual).containEql('export PATH=');
+  });
+
+  it('should not claim a directory it does not know', () => {
+    // Act
+    const actual = renderScaffoldResult(scaffoldResult({ directories: [] }));
+
+    // Assert
+    should(actual).containEql('prepared the fleet in its directory');
   });
 });

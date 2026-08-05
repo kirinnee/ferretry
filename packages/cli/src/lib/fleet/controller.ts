@@ -7,6 +7,7 @@ import type {
   IFleetManifestSource,
   IFleetOutput,
   IFleetPlanner,
+  IFleetScaffolder,
   IFleetUsageCollectorFactory,
   IRecommendationGateway,
 } from './ports.ts';
@@ -16,6 +17,7 @@ import {
   renderLoginResults,
   renderManifest,
   renderRecommendation,
+  renderScaffoldResult,
   renderUsage,
 } from './render.ts';
 
@@ -40,6 +42,7 @@ export interface FleetRecommendOptions extends FleetCommandOptions {
 export interface FleetControllerDeps {
   readonly config: IFleetConfigSource;
   readonly manifests: IFleetManifestSource;
+  readonly scaffolder: IFleetScaffolder;
   readonly planner: IFleetPlanner;
   readonly applier: IFleetApplier;
   readonly usage: IFleetUsageCollectorFactory;
@@ -58,6 +61,18 @@ export interface FleetControllerDeps {
  */
 export class FleetController {
   constructor(private readonly deps: FleetControllerDeps) {}
+
+  /**
+   * Prepares a host that has never had a fleet.
+   *
+   * Everything else here reads a configuration; on a fresh machine there is none, and there is no
+   * external configuration manager behind Ferretry to have placed one. Creates only what is absent,
+   * so running it on a live fleet fills in anything a newer release added and disturbs nothing else.
+   */
+  async init(options: FleetCommandOptions): Promise<void> {
+    const result = await this.deps.scaffolder.scaffold();
+    this.#report(result, options, () => renderScaffoldResult(result));
+  }
 
   /**
    * Realizes the declared configuration.
