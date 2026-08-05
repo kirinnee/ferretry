@@ -33,7 +33,15 @@ export interface AccountPickerCatalog {
 
 export interface PickerAccountHealth {
   readonly accountId: string;
-  readonly kind: 'claude' | 'codex';
+  /**
+   * THE HARNESS THE DAEMON NAMED, AS IT NAMED IT. The health contract publishes a
+   * non-empty string, not a closed set: a daemon that grows a third harness stays
+   * conformant. Narrowing it here would only mean that an unfamiliar row failed
+   * the schema and took every sibling row in the same snapshot with it — the
+   * reader would lose health it already paid for, to learn nothing, since nothing
+   * rendered reads this field.
+   */
+  readonly kind: string;
   readonly state: 'healthy' | 'down' | 'unknown';
   readonly cached: boolean;
   readonly checkedAt: number;
@@ -59,7 +67,7 @@ export type PickerCatalogClient = Pick<IFyApiClient, 'request'>;
 const finiteEpoch = z.number().finite().int().nonnegative();
 const PickerAccountHealthSchema = z.strictObject({
   accountId: z.string().min(1),
-  kind: z.enum(['claude', 'codex']),
+  kind: z.string().min(1),
   state: z.enum(['healthy', 'down', 'unknown']),
   cached: z.boolean(),
   checkedAt: finiteEpoch,

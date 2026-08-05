@@ -59,11 +59,13 @@ const clientFixture = (overrides: Partial<Record<string, unknown>> = {}): Client
   return {
     paths,
     client: {
-      request: async path => {
+      // Parses through the caller's own schema, so a fixture cannot smuggle in a
+      // shape the real daemon reader would have refused — or refuse one it accepts.
+      request: async (path, schema) => {
         paths.push(path);
         const response = responses[path];
         if (response instanceof Error) throw response;
-        return response as never;
+        return schema.parse(response);
       },
     },
   };
@@ -133,6 +135,32 @@ describe('readAccountPickerHealth', () => {
     expect(fixture.paths).toEqual(['/v1/fleet/health']);
     expect(result.error).toBeNull();
     expect(result.health.get(CLAUDE_ACCOUNT_ID)?.state).toBe('healthy');
+  });
+
+  it('keeps a snapshot whose harness kind this build has never heard of', async () => {
+    const unfamiliar: PickerAccountHealth = { ...healthAccount, accountId: CODEX_ACCOUNT_ID, kind: 'gemini' };
+    const fixture = clientFixture({
+      '/v1/fleet/health': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [healthAccount, unfamiliar],
+      },
+    });
+    const result = await readAccountPickerHealth(fixture.client);
+
+    expect(result.error).toBeNull();
+    expect(result.health.get(CODEX_ACCOUNT_ID)).toEqual(unfamiliar);
+    expect(result.health.get(CLAUDE_ACCOUNT_ID)?.state).toBe('healthy');
+  });
+
+  it('still refuses a health row with no harness kind at all', async () => {
+    const fixture = clientFixture({
+      '/v1/fleet/health': {
+        at: Date.parse('2026-08-05T12:00:00.000Z'),
+        accounts: [{ ...healthAccount, kind: '' }],
+      },
+    });
+
+    await expect(readAccountPickerHealth(fixture.client)).rejects.toThrow();
   });
 
   it('drops every duplicate account row while preserving unambiguous evidence', async () => {

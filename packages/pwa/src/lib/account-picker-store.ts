@@ -5,6 +5,10 @@
  * them. A wrapper name is not globally meaningful, so this store has no
  * daemon-free read and fences every in-flight request across unpair/re-pair.
  *
+ * WHAT IS CACHED IS EVIDENCE, NOT A TRANSPORT. The cache authority is the daemon
+ * and the credential that proved the rows; the carrier the bytes travelled on is
+ * not part of it, so attaching or withdrawing a relay keeps the slice whole.
+ *
  * Automatic hydration reads only the manifest. Quota comes from the existing
  * cached usage store, and health is checked only after a deliberate action.
  * A failed read never replaces a previously proved catalog with a fabricated
@@ -16,7 +20,7 @@ import type {
   AccountPickerHealthCatalog,
   PickerAccountHealth,
 } from './account-picker-catalog.ts';
-import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 
 export type AccountPickerLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -52,9 +56,30 @@ const IDLE_SLICE: DaemonAccountPickerSlice = Object.freeze({
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
+/**
+ * Does this connection speak for the same already-settled evidence?
+ *
+ * DELIBERATELY NOT `sameDaemonConnection`. That predicate answers a different
+ * question — is this the same LIVE carrier — and it must keep answering it for
+ * anything holding an open socket or an in-flight byte. What this store holds is
+ * neither: it is authenticated evidence a daemon already proved, keyed by WHO
+ * proved it. A hosted relay advertisement arriving late is a carrier-only change
+ * — `DaemonConnectionStore.attachRelay` preserves its caches for exactly this
+ * reason — and routing bytes down a different path does not unprove a roster or
+ * expire a health result the reader explicitly paid for.
+ *
+ * THE CREDENTIAL AND DAEMON FENCE IS UNCHANGED. A rotated `deviceToken` or a
+ * moved `baseUrl` IS a re-pair: it mints a new generation, drops the caches, and
+ * fences every late read. Only `relay` is excluded, and only because it is an
+ * address rather than an authority.
+ */
+const sameAccountPickerAuthority = (left: DaemonConnection, right: DaemonConnection): boolean =>
+  left.daemonId === right.daemonId && left.baseUrl === right.baseUrl && left.deviceToken === right.deviceToken;
+
 interface AccountPickerEntry {
   readonly daemonId: DaemonId;
-  readonly connection: DaemonConnection;
+  /** The newest carrier for this authority; later reads are issued against it. */
+  connection: DaemonConnection;
   readonly generation: number;
   catalogAttempted: boolean;
   catalogRequest: Promise<AccountPickerCatalog> | null;
@@ -87,14 +112,14 @@ export class DaemonAccountPickerStore {
   /** A pure connection-aware read; another pairing's generation is unread. */
   sliceFor(daemon: DaemonConnection): DaemonAccountPickerSlice {
     const entry = this.#entries.get(daemon.daemonId);
-    if (entry === undefined || !sameDaemonConnection(entry.connection, daemon)) return IDLE_SLICE;
+    if (entry === undefined || !sameAccountPickerAuthority(entry.connection, daemon)) return IDLE_SLICE;
     const slice = this.slice(daemon.daemonId);
     return slice.generation === entry.generation ? slice : IDLE_SLICE;
   }
 
   /**
-   * Refresh one daemon's roster. A burst for the same live connection shares
-   * one request; another daemon or a re-paired connection never does.
+   * Refresh one daemon's roster. A burst for the same authority shares one
+   * request; another daemon or a re-paired connection never does.
    */
   hydrate(daemon: DaemonConnection): Promise<AccountPickerCatalog> {
     const entry = this.#entryFor(daemon);
@@ -145,7 +170,7 @@ export class DaemonAccountPickerStore {
 
     this.#patch(entry, { healthStatus: 'loading', healthError: null });
     const request = this.#port
-      .health(daemon)
+      .health(entry.connection)
       .then(
         result => {
           if (this.#isCurrent(entry)) {
@@ -185,7 +210,12 @@ export class DaemonAccountPickerStore {
 
   #entryFor(daemon: DaemonConnection): AccountPickerEntry {
     const existing = this.#entries.get(daemon.daemonId);
-    if (existing !== undefined && sameDaemonConnection(existing.connection, daemon)) return existing;
+    if (existing !== undefined && sameAccountPickerAuthority(existing.connection, daemon)) {
+      // Adopt the newest carrier without disturbing the generation, the caches,
+      // or a request already in flight against the previous one.
+      existing.connection = daemon;
+      return existing;
+    }
 
     const entry: AccountPickerEntry = {
       daemonId: daemon.daemonId,

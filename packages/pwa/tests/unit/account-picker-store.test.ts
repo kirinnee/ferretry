@@ -6,7 +6,7 @@ import type {
   PickerAccountHealth,
 } from '../../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerPort, DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
-import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
 
 const laptop = daemonConnection({
   daemonId: 'daemon/laptop',
@@ -17,6 +17,13 @@ const workstation = daemonConnection({
   daemonId: 'daemon/workstation',
   baseUrl: 'https://workstation.example.test',
   deviceToken: 'token-workstation',
+});
+const HOSTED_RELAY: RelayCarrier = { kind: 'relay', relayUrl: 'https://relay.example.test', operator: 'hosted' };
+const laptopOverRelay = daemonConnection({
+  daemonId: 'daemon/laptop',
+  baseUrl: 'https://laptop.example.test',
+  deviceToken: 'token-laptop',
+  relay: HOSTED_RELAY,
 });
 
 const catalog = (wrapper: string): AccountPickerCatalog => ({
@@ -162,6 +169,73 @@ describe('DaemonAccountPickerStore', () => {
     await stale;
 
     expect(store.sliceFor(rotated).catalog?.accounts[0]?.wrapper).toBe('claude-auto-rotated');
+  });
+
+  it('treats a late hosted relay as the same authority and keeps every proved row', async () => {
+    let catalogCalls = 0;
+    let healthCalls = 0;
+    const carriers: (string | undefined)[] = [];
+    const store = new DaemonAccountPickerStore({
+      catalog: async daemon => {
+        catalogCalls += 1;
+        carriers.push(daemon.relay?.relayUrl);
+        return catalog('claude-auto-laptop');
+      },
+      health: async daemon => {
+        healthCalls += 1;
+        carriers.push(daemon.relay?.relayUrl);
+        return healthy;
+      },
+    });
+
+    await store.hydrate(laptop);
+    await store.checkHealth(laptop);
+    const proved = store.sliceFor(laptop);
+
+    expect((await store.hydrate(laptopOverRelay)).accounts[0]?.wrapper).toBe('claude-auto-laptop');
+    expect(catalogCalls).toBe(1);
+    expect(healthCalls).toBe(1);
+
+    const attached = store.sliceFor(laptopOverRelay);
+    expect(attached.generation).toBe(proved.generation);
+    expect(attached.catalog).toBe(proved.catalog);
+    expect(attached.health).toBe(proved.health);
+    expect(attached).toMatchObject({ status: 'ready', error: null, healthStatus: 'ready', healthError: null });
+    expect(store.sliceFor(laptop).generation).toBe(proved.generation);
+
+    await store.refresh(laptopOverRelay);
+    await store.checkHealth(laptopOverRelay);
+    expect(carriers).toEqual([undefined, undefined, HOSTED_RELAY.relayUrl, HOSTED_RELAY.relayUrl]);
+  });
+
+  it('still fences a moved base URL when only the relay carrier stayed put', async () => {
+    let release!: (value: AccountPickerCatalog) => void;
+    const staleRead = new Promise<AccountPickerCatalog>(resolve => {
+      release = resolve;
+    });
+    let calls = 0;
+    const store = new DaemonAccountPickerStore({
+      catalog: async () => {
+        calls += 1;
+        return calls === 1 ? await staleRead : catalog('claude-auto-moved');
+      },
+      health: async () => healthy,
+    });
+
+    await store.checkHealth(laptopOverRelay);
+    expect(store.sliceFor(laptopOverRelay).health?.get(healthRow.accountId)?.state).toBe('healthy');
+    const stale = store.hydrate(laptopOverRelay);
+
+    const moved = { ...laptopOverRelay, baseUrl: 'https://laptop-moved.example.test' };
+    expect(store.sliceFor(moved)).toMatchObject({ generation: 0, catalog: null, status: 'idle', health: null });
+
+    await store.hydrate(moved);
+    release(catalog('claude-auto-stale'));
+    await stale;
+
+    expect(store.sliceFor(moved).catalog?.accounts[0]?.wrapper).toBe('claude-auto-moved');
+    expect(store.sliceFor(moved).health).toBeNull();
+    expect(store.sliceFor(laptopOverRelay)).toMatchObject({ generation: 0, catalog: null, status: 'idle' });
   });
 
   it('clears only one daemon and fences its late completion', async () => {
