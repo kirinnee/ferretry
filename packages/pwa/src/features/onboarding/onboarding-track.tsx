@@ -13,8 +13,9 @@
  *
  * It is a track OF A ROUTE, not of the product: the three entry paths walk
  * different steps, so the list comes from the route rather than from a constant.
- * That is also why the labels are one word — a five-step route has five of them
- * on a 390px row.
+ * That is also why the labels are one word — and why the rail WRAPS rather than
+ * truncating them: seven of them do not fit a 390px row, and an ellipsis where the
+ * next thing to do should be is worse than a second row.
  */
 
 import { Check } from 'lucide-react';
@@ -66,7 +67,7 @@ export interface OnboardingTrackProps {
 
 export function OnboardingTrack({ path, current, furthest, onJump }: OnboardingTrackProps) {
   return (
-    <ol className="m-0 flex list-none items-start gap-1 p-0" aria-label="Setup steps">
+    <ol className="m-0 flex list-none flex-wrap items-start gap-1 p-0" aria-label="Setup steps">
       {onboardingRouteSteps(path).map((id, index) => {
         const step = onboardingStep(id);
         const status = onboardingStepStatus(path, step.id, current, furthest);
@@ -75,12 +76,23 @@ export function OnboardingTrack({ path, current, furthest, onJump }: OnboardingT
             <span className={`${MARKER} ${MARKER_TONE[status]}`} aria-hidden="true">
               {status === 'completed' ? <Check size={12} strokeWidth={3} /> : index + 1}
             </span>
-            <span className={`w-full truncate text-2xs ${LABEL_TONE[status]}`}>{step.short}</span>
+            {/*
+              WHOLE WORDS, ON HOWEVER MANY ROWS THAT TAKES. `truncate` was
+              affordable while the longest journey a phone could reach was five
+              steps; at seven, 390px divided seven ways clipped the two steps
+              immediately ahead of the reader to "Daem…" and "Conn…" — an ellipsis
+              where the next thing they have to do should be. Breaking mid-word
+              instead ("Daemo/n") is not better. So the RAIL wraps rather than the
+              word: `basis` gives each item a floor wide enough for its label, and a
+              seven-step journey becomes two rows on a phone and stays one on
+              anything wider. The eleven-step self-hosted journey gains the most.
+            */}
+            <span className={`w-full text-center text-2xs leading-tight ${LABEL_TONE[status]}`}>{step.short}</span>
             <span className="sr-only">{STATUS_WORD[status]}</span>
           </>
         );
         return (
-          <li key={step.id} className="min-w-0 flex-1">
+          <li key={step.id} className="min-w-0 flex-1 basis-[4.25rem]">
             {status === 'completed' ? (
               <button
                 type="button"

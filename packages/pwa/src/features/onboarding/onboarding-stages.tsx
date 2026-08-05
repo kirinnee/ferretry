@@ -12,28 +12,30 @@
  * daemon's output and the two-minute expiry are all still on the page — they are
  * simply no longer competing with the instruction. What was cut is restatement.
  *
- * THE AGENT PATH IS A ROUTE OF ITS OWN, ASKED BEFORE ANYTHING ELSE. For one
- * release it was a disclosure on this step, on the argument that an agent is just
- * a way of PERFORMING the install. That was wrong: an agent doing the setup means
- * no platform picker, no commands here, no `fy pair` by hand and no device
- * question at all. What survives on the install step is a one-tap way to CHANGE
- * ANSWER — not a second copy of the prompt, because two copies of the thing the
- * agent path exists to hand over is two things to keep true.
+ * WHO INSTALLS IT IS A QUESTION, NOT A DISCLOSURE ON THIS STEP. For one release
+ * the agent path was folded in here, on the argument that an agent is just a way
+ * of PERFORMING the install. That was wrong: an agent doing the setup means no
+ * platform picker, no commands here and no `fy pair` by hand. What survives on the
+ * install step is a one-tap way to CHANGE EITHER ANSWER — the doer, and the machine
+ * these commands are addressed to — but never a second copy of the prompt, because
+ * two copies of the thing that answer exists to hand over is two things to keep
+ * true.
  *
- * EVERY STAGE HERE IS REUSED BY EVERY ROUTE THAT NEEDS IT, including "set up
- * another machine" — a second copy of the daemon instructions is a second copy to
+ * EVERY STAGE HERE IS REUSED BY EVERY JOURNEY THAT NEEDS IT, including "add
+ * another daemon" — a second copy of the daemon instructions is a second copy to
  * keep true, and one of the two would be wrong within a release.
  */
 
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Share2 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { CommandBlock } from './command-block.tsx';
-import type { DeviceKind } from './device-kind.ts';
-import type { CarrierDisclosure } from './hosted-relay.ts';
 import { type ClipboardWriter, CopyButton } from './copy-button.tsx';
+import type { CarrierDisclosure } from './hosted-relay.ts';
 import {
-  AGENT_SETUP_PROMPT,
+  AGENT_HARNESSES,
+  agentHarness,
+  agentSetupPrompt,
   DAEMON_INSTALL_COMMAND,
   DAEMON_SERVING_OUTPUT,
   DAEMON_START_COMMAND,
@@ -44,8 +46,10 @@ import {
   PAIR_COMMAND,
   PAIR_OPEN_COMMAND,
   PAIR_PRINT_COMMAND,
+  type SetupTargetId,
   VERIFY_COMMAND,
 } from './onboarding-model.ts';
+import type { SetupSharePort } from './setup-handoff-panel.tsx';
 
 const STAGE = 'flex min-w-0 flex-col gap-2';
 
@@ -83,9 +87,16 @@ export interface InstallStageProps {
   readonly channel: InstallChannelId;
   /** Change answer: hand the whole thing to an agent instead of typing it. */
   readonly onAgentInstead: () => void;
+  /**
+   * Change the other answer: these commands are for a machine the reader is not at.
+   *
+   * Absent when the reader chose this machine outright, because then there is a
+   * question one Back away and nothing to escape from.
+   */
+  readonly onOtherMachine?: (() => void) | undefined;
 }
 
-export function InstallStage({ write, channel, onAgentInstead }: InstallStageProps) {
+export function InstallStage({ write, channel, onAgentInstead, onOtherMachine }: InstallStageProps) {
   const [selected, setSelected] = useState<InstallChannelId>(channel);
   const chosen = installChannel(selected);
   return (
@@ -158,6 +169,96 @@ export function InstallStage({ write, channel, onAgentInstead }: InstallStagePro
         >
           Let an agent do it
         </button>
+      </Aside>
+
+      {/*
+        THE SECOND PLACE THE ASSUMPTION CAN BE ESCAPED, and the one that catches
+        the reader who did not read the screen before this. These commands are
+        addressed to the machine holding this page; somebody who meant a different
+        one has to be able to say so from the screen that is wrong for them, not
+        only from the screen that stated the assumption.
+      */}
+      {onOtherMachine === undefined ? null : (
+        <Aside summary="Setting up a different machine?">
+          <p className="m-0 text-meta leading-base text-muted">
+            These commands install Ferretry on the machine reading this page. If the agents are meant to run somewhere
+            else, the setup happens over there instead.
+          </p>
+          <button
+            type="button"
+            className="kt-btn min-h-[44px] w-full"
+            data-variant="ghost"
+            onClick={onOtherMachine}
+            data-onboarding-other-machine=""
+          >
+            It is another computer
+          </button>
+        </Aside>
+      )}
+    </div>
+  );
+}
+
+/**
+ * THE STEP THAT MAKES THE DAEMON WORTH STARTING.
+ *
+ * Ferretry runs Claude Code and Codex; it is not either of them. Everything before
+ * and after this step is about a daemon, and a daemon with neither harness
+ * installed starts perfectly and can run nothing at all — so a reader who finished
+ * without this had a paired app, a green shield, and no way to open a session.
+ *
+ * AT LEAST ONE IS THE BAR, said in words rather than left to be inferred from two
+ * commands sitting side by side. Two blocks with no qualifier read as two
+ * requirements.
+ *
+ * AND BEING ON `PATH` IS NOT BEING SIGNED IN. This page cannot see a terminal, let
+ * alone somebody's account, so the check command is described as what it actually
+ * proves and the sign-in is named as a separate thing that happens on first run.
+ * The alternative — "you are ready" — is the benign reading of no evidence, which
+ * is the failure this whole flow is built to avoid.
+ */
+export function AgentsStage({ write }: { readonly write: ClipboardWriter }) {
+  return (
+    <div className={STAGE}>
+      {/*
+        AND IT SAYS SO TO SOMEBODY WHO ALREADY HAS ONE. A developer who uses Claude
+        Code daily is the likeliest reader of this page, and a step that only knows
+        how to say "install this" invites them to reinstall something they have. The
+        check below is the whole task for them, and this line points at it.
+      */}
+      <p className="m-0 text-meta leading-base text-muted">
+        Ferretry runs your agents; it is not one. Install{' '}
+        <strong className="font-semibold text-fg">at least one</strong> of these on this machine — both is fine, one is
+        enough. Already have one? Check it below and move on.
+      </p>
+      {AGENT_HARNESSES.map(harness => (
+        <div key={harness.id} className="flex min-w-0 flex-col gap-1" data-onboarding-harness={harness.id}>
+          <p className="m-0 text-meta font-semibold text-fg">{harness.label}</p>
+          <CommandBlock command={harness.command} copyLabel={`Copy ${harness.label} install command`} write={write} />
+        </div>
+      ))}
+      <Aside summary="Check one of them is there">
+        {AGENT_HARNESSES.map(harness => (
+          <CommandBlock
+            key={harness.id}
+            command={harness.check}
+            copyLabel={`Copy ${harness.label} check`}
+            write={write}
+          />
+        ))}
+        <p className="m-0 text-meta leading-base text-muted">
+          A version means the command is installed. It does not mean you are signed in — the first time you run{' '}
+          <code className="font-mono text-syn-string">{agentHarness('claude').id}</code> or{' '}
+          <code className="font-mono text-syn-string">{agentHarness('codex').id}</code> it will ask you to log in, and
+          Ferretry cannot do that for you.
+        </p>
+      </Aside>
+      <Aside summary="These are not ours">
+        <p className="m-0 text-meta leading-base text-muted">
+          Claude Code and Codex are other people&apos;s products, so their own documentation is the authority on
+          installing them. These are the commands each one documents; if either has moved on, believe them over this
+          page.
+        </p>
       </Aside>
     </div>
   );
@@ -240,33 +341,51 @@ export function RelayDeployStage({ write }: { readonly write: ClipboardWriter })
   );
 }
 
+export interface BriefStageProps {
+  readonly write: ClipboardWriter;
+  /**
+   * Which computer the agent is on, which changes both the prompt and how the
+   * prompt has to travel. The clipboard does not cross a device boundary.
+   */
+  readonly target: SetupTargetId;
+  /** The bare setup page, for a reader who would rather open it on that computer. */
+  readonly plainUrl: string;
+  /** The OS share sheet, when this browser has one. Absent is the ordinary case. */
+  readonly share?: SetupSharePort | undefined;
+}
+
 /**
- * THE AGENT PROMPT: on this route it IS the product, so it is the whole screen.
+ * THE AGENT PROMPT: on this answer it IS the product, so it is the whole screen.
  *
- * The reader answered "an agent does it", and everything that answer promises is
- * carried by this text. So it is shown in full rather than behind a second tap: a
- * person is about to hand it to something with a shell on their machine, and
- * "copy this text I will not show you" is not a thing to ask of anybody. It is
- * also generic by construction — it names no host, no user, no daemon and no
- * fleet — and seeing that for themselves is the point on a page anyone can load.
+ * The reader said an agent does it, and everything that answer promises is carried
+ * by this text. So it is shown in full rather than behind a second tap: a person
+ * is about to hand it to something with a shell on their machine, and "copy this
+ * text I will not show you" is not a thing to ask of anybody. It is also generic
+ * by construction — it names no host, no user, no daemon and no fleet — and seeing
+ * that for themselves is the point on a page anyone can load.
  *
- * WHERE IT GOES IS SAID TWICE, ABOVE AND BELOW. The one way to get nothing out of
- * this route is to paste the prompt into an agent that is not on the machine that
- * will run the agents, and the reader cannot be told that by the prompt itself —
- * they read this page, not the thing they paste.
+ * A COPY BUTTON IS NOT A HAND-OFF WHEN THE AGENT IS ON ANOTHER MACHINE, and that
+ * was the honest gap in the previous release: a phone's clipboard does not reach a
+ * laptop, so "copy this" ended in the reader retyping thirty lines or giving up.
+ * There is no QR to fix it either — nothing on a desk points a camera at a phone —
+ * so the answer is words and the OS share sheet: Messages, mail, a note to
+ * yourself, whatever that phone already has. And the plain page address is offered
+ * beside it, because the prompt is public and identical on every device: opening
+ * this page over there puts the same text one copy away, with nothing sent at all.
  */
-export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
+export function BriefStage({ write, target, plainUrl, share }: BriefStageProps) {
+  const prompt = agentSetupPrompt(target);
   return (
     <div className={STAGE}>
       <p className="m-0 text-meta leading-base text-muted">
         Paste it into Claude, Codex or any agent with a terminal{' '}
-        <strong className="font-semibold text-fg">on the machine that will run your agents</strong> — not into anything
-        on this page.
+        <strong className="font-semibold text-fg">on {target === 'this' ? 'this computer' : 'that computer'}</strong> —
+        not into anything on this page.
       </p>
       <div className="flex min-w-0 flex-col rounded-control border border-code-border bg-code-bg">
         <div className="flex min-w-0 items-center gap-2 border-b border-code-border py-1 pl-2 pr-1">
           <span className="min-w-0 flex-1 truncate text-meta font-semibold text-fg">Setup prompt for an AI agent</span>
-          <CopyButton text={AGENT_SETUP_PROMPT} label="Copy setup prompt" write={write} />
+          <CopyButton text={prompt} label="Copy setup prompt" write={write} />
         </div>
         {/*
           Scrolls inside its own box: it is thirty lines, and a stage that grows
@@ -276,13 +395,55 @@ export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
           className="m-0 max-h-56 overflow-auto px-2 py-2 font-mono text-meta leading-base text-code-fg"
           data-onboarding-prompt=""
         >
-          <code>{AGENT_SETUP_PROMPT}</code>
+          <code>{prompt}</code>
         </pre>
       </div>
+
+      {target === 'other' ? (
+        <div className="flex min-w-0 flex-col gap-2" data-onboarding-prompt-handoff="">
+          <p className="m-0 text-meta leading-base text-muted">
+            That agent is on another computer, and this clipboard does not reach it. Send the prompt over — a message to
+            yourself, mail, or your team chat.
+          </p>
+          {share === undefined ? null : (
+            <button
+              type="button"
+              className="kt-btn min-h-[44px] w-full"
+              data-variant="ghost"
+              onClick={() => {
+                /*
+                 * A DECLINED SHARE SHEET IS NOT AN ERROR. Dismissing it rejects
+                 * with `AbortError`, and an unhandled rejection here would be a
+                 * console failure caused by a reader changing their mind.
+                 */
+                void share({ title: 'Ferretry setup prompt', text: prompt }).catch(() => undefined);
+              }}
+              data-onboarding-share-prompt=""
+            >
+              <Share2 size={16} aria-hidden="true" />
+              Share the prompt
+            </button>
+          )}
+          <p className="m-0 text-2xs leading-base text-faint">
+            Or open <span className="font-mono text-syn-string">{plainUrl}</span> on that computer — the same prompt is
+            on this screen there, ready to copy.
+          </p>
+        </div>
+      ) : null}
+
       <p className="m-0 text-meta leading-base text-muted">
-        It says nothing about you, this browser, or any daemon. It ends by asking your agent to run{' '}
-        <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code — come back here when it
-        does.
+        It says nothing about you, this browser, or any daemon. It ends by asking your agent to{' '}
+        {target === 'this' ? (
+          <>
+            run <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code>, which opens Ferretry here
+            already paired
+          </>
+        ) : (
+          <>
+            run <code className="font-mono text-syn-string">{PAIR_COMMAND}</code> and show you the code
+          </>
+        )}{' '}
+        — come back here when it does.
       </p>
     </div>
   );
@@ -291,11 +452,17 @@ export function BriefStage({ write }: { readonly write: ClipboardWriter }) {
 export interface AgentPairStageProps {
   readonly pairing: ReactNode;
   /**
-   * What this device is — which decides whether "you may already be connected"
-   * is true or a lie. `fy pair --open` opens the browser on the DAEMON'S machine,
-   * so it can only have opened this one if this one is a computer.
+   * Which computer the agent is on — which decides whether "you may already be
+   * connected" is true or a lie.
+   *
+   * It used to be this device's KIND, on the reasoning that a computer reading
+   * this page was probably the daemon's own machine. That was a guess standing in
+   * for a fact, and it was wrong for every reader on a laptop setting up a server.
+   * The first question settles it, so the fact is passed instead: `fy pair --open`
+   * opens a browser on the daemon's machine, which is this one exactly when the
+   * reader said the daemon runs here.
    */
-  readonly device: DeviceKind;
+  readonly target: SetupTargetId;
 }
 
 /**
@@ -308,20 +475,20 @@ export interface AgentPairStageProps {
  * produce this code and cannot re-produce it, so if it has expired the fix is to
  * ask the agent again rather than to go and type something.
  *
- * ON A COMPUTER THE JOURNEY MAY ALREADY BE OVER, and saying so is not optional:
- * the prompt asks the agent to run `fy pair --open` when the reader is on the
- * daemon's own machine, and that opens Ferretry already paired IN ANOTHER TAB.
- * Somebody left staring at a pairing field while a finished app sits one tab away
- * concludes the setup failed. It is said only on a computer, because on a phone
- * that tab opened on a machine the reader is not holding.
+ * ON THE DAEMON'S OWN MACHINE THE JOURNEY MAY ALREADY BE OVER, and saying so is
+ * not optional: the prompt tells the agent to run `fy pair --open` there, and that
+ * opens Ferretry already paired IN ANOTHER TAB. Somebody left staring at a pairing
+ * field while a finished app sits one tab away concludes the setup failed. It is
+ * said only when the daemon is on this machine, because otherwise that tab opened
+ * somewhere the reader is not sitting.
  */
-export function AgentPairStage({ pairing, device }: AgentPairStageProps) {
+export function AgentPairStage({ pairing, target }: AgentPairStageProps) {
   return (
     <div className={STAGE}>
       <div className="min-w-0" data-onboarding-pairing="">
         {pairing}
       </div>
-      {device === 'desktop' ? (
+      {target === 'this' ? (
         <p className="m-0 text-meta leading-base text-muted" data-onboarding-agent-opened="">
           If your agent ran <code className="font-mono text-syn-string">{PAIR_OPEN_COMMAND}</code> on this machine, it
           has already opened Ferretry in another tab, paired. Nothing to do here — carry on there.
@@ -374,8 +541,7 @@ export function LocalStage({ write, pairing }: { readonly write: ClipboardWriter
   );
 }
 
-export interface NeedComputerStageProps {
-  readonly write: ClipboardWriter;
+export interface ElsewhereStageProps {
   /** The hand-off, already built by the page — this stage does not know the origin. */
   readonly handoff: ReactNode;
   /** Switch to adding this browser as a client of a daemon that already exists. */
@@ -383,24 +549,31 @@ export interface NeedComputerStageProps {
 }
 
 /**
- * WHAT A PHONE IS TOLD, INSTEAD OF BEING OFFERED SOMETHING IT CANNOT DO.
+ * THE ENTIRE "ANOTHER COMPUTER, MYSELF" BRANCH — one screen, and it teaches nothing.
  *
- * Agents run in a terminal. This device does not have one, and no amount of
- * willingness changes that — so the honest screen says so in one line and then
- * spends the rest of itself being USEFUL: it hands the daemon half to a computer
- * with the reader's place attached, and it points out the other thing they may
- * actually have meant, which is that a daemon already exists and this phone just
- * wants to watch it.
+ * THE RECURSION IS THE SIMPLIFICATION. This screen does not explain how to install
+ * Ferretry on a machine the reader is not sitting at, because that explanation
+ * would be a second copy of the install instructions written in the second person
+ * about somebody else's keyboard — and a second copy is a copy that goes wrong.
+ * It says to open this page over there, and that computer walks the same subflow
+ * answering "this one", where every instruction is about the machine under the
+ * reader's hands.
  *
- * NO DEAD END AND NO APOLOGY. The two ways forward are both real, both one tap,
- * and neither of them is "go and read the documentation".
+ * IT IS THE SAME SCREEN ON A PHONE AND ON A COMPUTER, which is why it replaced
+ * `need-computer`. That screen existed only on a phone and its subject was this
+ * device's unsuitability; a reader at a laptop setting up a home server needs
+ * exactly this screen and is not being refused anything.
+ *
+ * NO DEAD END AND NO APOLOGY. The hand-off carries the place, and the other thing
+ * the reader may have meant — a daemon that already exists, which this browser
+ * only wants to watch — is one tap away rather than "go and read the docs".
  */
-export function NeedComputerStage({ handoff, onAddAsClient }: NeedComputerStageProps) {
+export function ElsewhereStage({ handoff, onAddAsClient }: ElsewhereStageProps) {
   return (
     <div className={STAGE}>
       <p className="m-0 text-meta leading-base text-muted">
-        Ferretry runs your agents in a terminal on a real machine. Send this setup to a computer and pick it up there —
-        then come back here to pair this device.
+        Open this page on the computer that will run your agents. It walks you through the install there, on that
+        machine — then come back here to pair this device.
       </p>
       {handoff}
       <Aside summary="A daemon already exists?">

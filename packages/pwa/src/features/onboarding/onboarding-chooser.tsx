@@ -1,86 +1,75 @@
 /**
- * THE SECOND SCREEN ASKS ONE QUESTION: what is this device going to be?
+ * THE FIRST SCREEN ASKS WHAT THE READER HAS, which is the only thing this page
+ * cannot detect.
  *
- * It is second because it only exists for a reader who is typing the commands
- * themselves — `onboarding-doer-chooser.tsx` asks who is doing the work first,
- * and an agent doing it deletes this question outright. So this screen always has
- * a way BACK to that one: a reader who answered "I do it myself" and then finds
- * three roles they do not recognise must be able to change their mind, and a
- * question with no way back is a trap.
+ * It used to ask what this DEVICE was about to become — first-time, a client, or a
+ * daemon — and that question was wrong twice over. It asked a phone something
+ * `device-kind.ts` can already see, and it offered a phone "add this as a daemon",
+ * an answer no phone can hold: agents need a terminal. So the answer was shown,
+ * relabelled, and then withdrawn a screen later, which is a page arguing with
+ * itself.
  *
- * It used to ask what the reader was HOLDING — a link, nothing, or an agent —
- * which is not a fact about the system and never asked the only question that
- * decides everything downstream. Ferretry has two roles. A DAEMON is a machine
- * that runs agents and needs a terminal. A CLIENT is a browser that watches one.
- * One machine can be both. So the three answers are: set both up for the first
- * time, add this browser as a client, or add this machine as a daemon.
+ * NONE OF THESE THREE CLAIMS ANYTHING ABOUT THIS DEVICE, so none of them has to be
+ * refused on one. They are three states of the reader's world:
  *
- * A PHONE IS NOT OFFERED A ROLE IT CANNOT HOLD. There is no terminal on a phone,
- * so "add this as a daemon" would be a promise the next screen has to withdraw.
- * The answer is still shown — an option that silently disappears reads as a
- * broken page, and a reader who came here to add a machine deserves to be told
- * what became of that — but it says plainly that it needs a computer, and
- * choosing it hands the job to one. The device is DETECTED, never asked: the page
- * already knows, and asking a question you know the answer to is how a setup
- * flow starts feeling like paperwork.
+ * - Nothing exists yet. Get a daemon running, then pair.
+ * - A daemon exists and they are holding a link or a QR for it. Straight to pairing.
+ * - A fleet exists and they want one more machine in it. The SAME daemon subflow,
+ *   which is why adding a daemon replays the full instructions for free.
+ *
+ * A BROWSER THAT HAS PAIRED BEFORE NEVER SEES THIS. `first-run-entry.ts` sends it
+ * to its fleet, and the composition root honours that before this component is
+ * ever rendered — asking somebody who set this up months ago why they are here,
+ * on the screen they open every day, is the same failure as a cookie banner
+ * asking permission it already has.
  *
  * IT IS A REAL LIST OF REAL BUTTONS. `<ul>`/`<li>` because it is a list, one
  * `<button>` per row because each is an action; no `role` anywhere, and nothing
  * that needs `aria-label` to have a name. The rows carry no `aria-pressed`
- * either: this is a choice that navigates, not a toggle that sticks.
+ * either: this is a choice that navigates, not a toggle that sticks. There is no
+ * Back, because there is nothing behind it.
  */
 
-import { ArrowLeft, ChevronRight, Eye, Rocket, Server, SmartphoneNfc } from 'lucide-react';
+import { ChevronRight, QrCode, Rocket, Server } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import type { DeviceKind } from './device-kind.ts';
-import { onboardingRoutes, type OnboardingDeviceRouteId } from './onboarding-model.ts';
+import { ONBOARDING_ROUTES, type OnboardingRouteId } from './onboarding-model.ts';
 
 /**
  * One glyph per answer, chosen so the shapes differ at a glance rather than
- * merely decorating: a launch, an eye, a rack. The daemon row changes glyph on a
- * phone, because there the answer is about sending the job elsewhere rather than
- * about a machine standing here. Hidden from assistive technology — the title
- * beside each already says the same thing.
+ * merely decorating: a launch, the thing the reader is holding, a rack. Hidden
+ * from assistive technology — the title beside each already says the same thing.
  */
-const ICON: Readonly<Record<OnboardingDeviceRouteId, ReactNode>> = {
+const ICON: Readonly<Record<OnboardingRouteId, ReactNode>> = {
   'first-time': <Rocket size={22} aria-hidden="true" />,
-  'add-client': <Eye size={22} aria-hidden="true" />,
+  'add-client': <QrCode size={22} aria-hidden="true" />,
   'add-daemon': <Server size={22} aria-hidden="true" />,
 };
-
-const MOBILE_DAEMON_ICON = <SmartphoneNfc size={22} aria-hidden="true" />;
 
 const ROW =
   'flex w-full min-w-0 items-center gap-3 rounded-control border border-border bg-surface-2 px-3 py-3 text-left transition-colors hover:border-accent hover:bg-accent-bg focus-visible:outline-focus focus-visible:outline-offset-focus';
 
 export interface OnboardingChooserProps {
-  readonly onChoose: (route: OnboardingDeviceRouteId) => void;
-  /** What this device is. Decides which answers are honest, never which are visible. */
-  readonly device: DeviceKind;
-  /** Back to the first question — who is doing this — which is what opened this one. */
-  readonly onBack: () => void;
+  readonly onChoose: (route: OnboardingRouteId) => void;
 }
 
-export function OnboardingChooser({ onChoose, device, onBack }: OnboardingChooserProps) {
+export function OnboardingChooser({ onChoose }: OnboardingChooserProps) {
   return (
     <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-chooser-title">
       <div className="min-w-0">
         <h2 id="onboarding-chooser-title" className="m-0 font-display text-title font-bold tracking-display text-fg">
-          What is this device?
+          What do you have?
         </h2>
         <p className="m-0 text-meta leading-base text-muted">
-          A daemon runs your agents and needs a terminal. A client just watches one.
+          Ferretry runs your agents on a computer. Any browser, including this one, is a window onto it.
         </p>
       </div>
 
-      <ul className="m-0 flex list-none flex-col gap-2 p-0" data-onboarding-device={device}>
-        {onboardingRoutes(device).map(route => (
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {ONBOARDING_ROUTES.map(route => (
           <li key={route.id} className="min-w-0">
             <button type="button" className={ROW} onClick={() => onChoose(route.id)} data-onboarding-route={route.id}>
-              <span className="shrink-0 text-accent">
-                {route.id === 'add-daemon' && device === 'mobile' ? MOBILE_DAEMON_ICON : ICON[route.id]}
-              </span>
+              <span className="shrink-0 text-accent">{ICON[route.id]}</span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="font-display text-title font-bold tracking-display text-fg">{route.title}</span>
                 <span className="text-meta leading-base text-muted">{route.answer}</span>
@@ -90,23 +79,6 @@ export function OnboardingChooser({ onChoose, device, onBack }: OnboardingChoose
           </li>
         ))}
       </ul>
-
-      {/*
-        Quiet, and after the answers: it is a way out rather than a way on, and
-        the one loud control per screen rule belongs to the answers themselves.
-      */}
-      <div className="flex min-w-0">
-        <button
-          type="button"
-          className="kt-btn min-h-[44px]"
-          data-variant="ghost"
-          onClick={onBack}
-          data-onboarding-back="who"
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          Back
-        </button>
-      </div>
     </section>
   );
 }

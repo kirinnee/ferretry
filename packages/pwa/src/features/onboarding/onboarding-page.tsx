@@ -1,19 +1,23 @@
 /**
- * FIRST RUN: who is doing this, then — only if it is the reader — what this device is.
+ * FIRST RUN: what the reader has, which computer runs the daemon, and who installs it.
  *
- * THE FIRST QUESTION IS WHO DOES THE WORK. An agent doing it is not a shortcut
- * through the same journey; it is a different one. No platform picker, no commands
- * on the glass, no `fy pair` to run by hand — and no device question either,
- * because the agent is on the machine that becomes the daemon, which makes this
- * browser the client with nothing left to decide. Only a reader typing the
- * commands themselves is asked the second question.
+ * THE ENTRY IS NOT A QUESTION ABOUT THIS DEVICE. It asks what the reader HAS —
+ * nothing yet, a link, or a fleet they are adding to — because that is the only
+ * thing this page cannot see. Two of those three answers lead into the SAME
+ * subflow: get a daemon running.
  *
- * THE SECOND QUESTION IS THE DEVICE. Ferretry has two roles. A DAEMON runs agents
- * and needs a terminal; a CLIENT is a browser that watches one. So the question is
- * what THIS DEVICE is about to become — first-time setup, another client, or
- * another daemon — and each answer walks its own list of steps, on its own kind of
- * hardware. A phone is never offered a role it cannot hold, and a computer
- * standing up its own daemon is never asked to scan its own screen.
+ * THAT SUBFLOW ASKS TWO THINGS, AND ONE OF THEM DISAPPEARS ON A PHONE.
+ *
+ * - WHICH COMPUTER runs the daemon. A daemon needs a terminal, so a phone can
+ *   never be it and is never asked; a computer starting from scratch is assumed to
+ *   mean itself, with the assumption stated and escapable.
+ * - WHO INSTALLS IT — an agent, or the reader. Always asked, because an agent has
+ *   the terminal and needs one prompt while a reader needs every command.
+ *
+ * "ANOTHER COMPUTER, MYSELF" OWNS ONE SCREEN AND TEACHES NOTHING. It says to open
+ * this page over there, and that computer walks this same subflow answering "this
+ * one". Installation is therefore taught in exactly one place, always about the
+ * machine the reader is sitting at.
  *
  * FOUR RULES SHAPE EVERYTHING HERE.
  *
@@ -31,16 +35,16 @@
  *    quiet until wanted. This is an accessibility property, not a taste one.
  * 4. THE DEVICE IS OBSERVED, NEVER ASKED. `progress.device` is the one reading,
  *    taken once at hydration, and every helper here derives its steps from the
- *    PATH — route plus device — rather than from the route alone. A page that
- *    could render a route without knowing the device would eventually render the
- *    wrong one, silently.
+ *    PATH — the journey plus the device — rather than from the entry alone. A page
+ *    that could render a journey without knowing the device would eventually
+ *    render the wrong one, silently.
  *
- * WHAT LIVES ELSEWHERE. The first question is `onboarding-doer-chooser.tsx`, the
- * second is `onboarding-chooser.tsx`, the stages are
- * `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the picture of
- * the arrangement is `setup-diagram.tsx`. This file owns only the frame: which
- * screen is on the glass, where focus goes when that changes, and how the screen
- * behaves under a software keyboard.
+ * WHAT LIVES ELSEWHERE. The entry is `onboarding-chooser.tsx`, the two questions
+ * are `onboarding-target-chooser.tsx` and `onboarding-doer-chooser.tsx`, the
+ * stages are `onboarding-stages.tsx`, the track is `onboarding-track.tsx`, the
+ * picture of the arrangement is `setup-diagram.tsx`. This file owns only the
+ * frame: which screen is on the glass, where focus goes when that changes, and how
+ * the screen behaves under a software keyboard.
  *
  * Layout note: nothing here sizes itself against the viewport. It renders inside
  * the shell's existing `kt-shell` scroller, which is already driven by `--app-h`
@@ -53,37 +57,44 @@ import { type ReactNode, type RefObject, useEffect, useRef, useSyncExternalStore
 
 import { useKeyboardOpen } from '../../hooks/use-keyboard-open.ts';
 import type { ClipboardWriter } from './copy-button.tsx';
+import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingBrand } from './onboarding-brand.tsx';
 import { OnboardingChooser } from './onboarding-chooser.tsx';
-import { OnboardingDoerChooser } from './onboarding-doer-chooser.tsx';
-import { activeCarrierStatus, carrierDisclosure, type HostedRelayFallback } from './hosted-relay.ts';
 import { OnboardingConnectionChooser } from './onboarding-connection-chooser.tsx';
+import { OnboardingDoerChooser } from './onboarding-doer-chooser.tsx';
 import {
   type ConnectionMethodId,
+  handoffTarget,
   type InstallChannelId,
   isLastOnboardingStep,
+  journeyLabel,
   nextOnboardingStep,
+  type OnboardingDoerId,
   type OnboardingPath,
   type OnboardingRouteId,
   type OnboardingStepId,
-  handoffTarget,
-  onboardingRoute,
   onboardingStep,
   onboardingStepCount,
   onboardingStepIndex,
+  pairingOnboardingStep,
+  pathConnection,
   previousOnboardingStep,
+  questionBehindDoer,
   questionBehindRoute,
+  type SetupTargetId,
+  targetBasis,
 } from './onboarding-model.ts';
 import type { OnboardingProgressStore, OnboardingWalking } from './onboarding-progress.ts';
 import {
   AgentPairStage,
+  AgentsStage,
   BriefStage,
   DaemonStage,
   DoneStage,
+  ElsewhereStage,
   HandoffStage,
   InstallStage,
   LocalStage,
-  NeedComputerStage,
   PairStage,
   RelayAllowStage,
   RelayDeployStage,
@@ -91,10 +102,11 @@ import {
   RelaySourceStage,
   ScanStage,
 } from './onboarding-stages.tsx';
+import { OnboardingTargetChooser } from './onboarding-target-chooser.tsx';
 import { OnboardingTrack } from './onboarding-track.tsx';
-import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.tsx';
-import { setupHandoffUrl, setupPageUrl } from './setup-handoff.ts';
 import { SetupDiagram } from './setup-diagram.tsx';
+import { setupHandoffUrl, setupPageUrl } from './setup-handoff.ts';
+import { SetupHandoffPanel, type SetupSharePort } from './setup-handoff-panel.tsx';
 
 const SHELL =
   'mx-auto flex min-h-full w-full max-w-[560px] flex-col gap-3 py-5 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] sm:py-8';
@@ -250,20 +262,34 @@ export function OnboardingPage({
         {at.stage === 'walk' ? <SetupDiagram step={at.current} /> : null}
       </header>
 
-      {at.stage === 'who' ? (
-        <OnboardingDoerChooser
-          onChoose={doer => {
-            progress.chooseDoer(doer);
-          }}
-        />
-      ) : at.stage === 'choose' ? (
+      {at.stage === 'entry' ? (
         <OnboardingChooser
-          device={device}
           onChoose={route => {
             progress.choose(route);
           }}
+        />
+      ) : at.stage === 'target' ? (
+        <OnboardingTargetChooser
+          onChoose={target => {
+            progress.chooseTarget(target, at.route);
+          }}
           onBack={() => {
-            progress.backToWho();
+            progress.back();
+          }}
+        />
+      ) : at.stage === 'doer' ? (
+        <OnboardingDoerChooser
+          target={at.target}
+          basis={targetBasis(at.route, device)}
+          behind={questionBehindDoer(at.route, device)}
+          onChoose={doer => {
+            progress.chooseDoer(doer);
+          }}
+          onBack={() => {
+            progress.back();
+          }}
+          onChooseTarget={target => {
+            progress.chooseTarget(target, at.route);
           }}
         />
       ) : (
@@ -289,6 +315,12 @@ export function OnboardingPage({
           onChooseRoute={route => {
             progress.choose(route);
           }}
+          onChooseDoer={doer => {
+            progress.switchDoer(doer);
+          }}
+          onChooseTarget={target => {
+            progress.chooseTarget(target);
+          }}
           onLeaveRoute={() => {
             progress.leaveRoute();
           }}
@@ -300,7 +332,7 @@ export function OnboardingPage({
 
 interface RouteFlowProps {
   readonly at: OnboardingWalking;
-  /** The route AND the device, which together decide which steps exist. */
+  /** The journey AND the device, which together decide which steps exist. */
   readonly path: OnboardingPath;
   readonly heading: RefObject<HTMLHeadingElement | null>;
   readonly write: ClipboardWriter;
@@ -314,16 +346,20 @@ interface RouteFlowProps {
   readonly share: SetupSharePort | undefined;
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
-  /** Switch to a different answer without going back through the question. */
+  /** Switch to a different ENTRY without going back through the question. */
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
-  /** Back out of the route entirely, to the question. */
+  /** Change who installs it, from a step rather than from the question. */
+  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
+  /** Change which computer runs it, from a step rather than from the question. */
+  readonly onChooseTarget: (target: SetupTargetId) => void;
+  /** Back out of the journey entirely, to the question that opened it. */
   readonly onLeaveRoute: () => void;
 }
 
 /**
- * One route being walked: its track, its current stage, and the way onward.
+ * One journey being walked: its track, its current stage, and the way onward.
  *
- * The TRACK IS HIDDEN on a two-step route. A rail reading "Pair · Done" tells
+ * The TRACK IS HIDDEN on a two-step journey. A rail reading "Pair · Done" tells
  * somebody who arrived holding a link nothing they did not know, and it costs
  * them a row of a 390px screen to say it.
  */
@@ -343,45 +379,45 @@ function RouteFlow({
   onGoTo,
   onChooseConnection,
   onChooseRoute,
+  onChooseDoer,
+  onChooseTarget,
   onLeaveRoute,
 }: RouteFlowProps) {
-  const route = onboardingRoute(at.route, path.device);
   const step = onboardingStep(at.current);
   const count = onboardingStepCount(path);
   const position = onboardingStepIndex(path, at.current);
   const first = position === 0;
   const last = isLastOnboardingStep(path, at.current);
   /*
-   * PAIRING ADVANCES ALONG THE ROUTE, IT DOES NOT JUMP TO THE END.
+   * PAIRING ADVANCES ALONG THE JOURNEY, IT DOES NOT JUMP TO THE END.
    *
    * This used to go straight to `done`, which quietly deleted the one step that
-   * makes first-time setup more than the other two answers in sequence: on a
-   * computer, the step AFTER pairing is the offer to add the reader's phone, and
-   * a hardcoded `done` meant nobody ever saw it. `add-daemon` and `add-client`
-   * have nothing between pairing and the end, so they are unaffected — which is
-   * the point of asking the route rather than naming a step.
+   * makes first-time setup on the daemon's own machine more than the others in
+   * sequence: the step AFTER pairing is the offer to add the reader's phone, and
+   * a hardcoded `done` meant nobody ever saw it. Every other journey has nothing
+   * between pairing and the end, so they are unaffected — which is the point of
+   * asking the journey rather than naming a step.
    */
   const pairing = renderPairing({ onPaired: () => onGoTo(nextOnboardingStep(path, at.current)) });
   /*
    * THE HAND-OFF IS BUILT ONCE, HERE, AND HANDED DOWN AS A NODE.
    *
-   * Two stages need it — the phone's "you will need a computer" and the
-   * computer's "add your phone" — and both need the same link built from the
-   * same place. A stage that built its own would be a second opinion about what
-   * the other device should resume as, and the two would diverge the first time
-   * either route changed.
+   * Two stages need it — "open Ferretry on that computer" and "add your phone" —
+   * and both need the same link built from the same place. A stage that built its
+   * own would be a second opinion about what the other device should resume as,
+   * and the two would diverge the first time either journey changed.
    */
-  const target = handoffTarget(path);
+  const away = handoffTarget(path);
   const handoff = (
     <SetupHandoffPanel
-      url={setupHandoffUrl(href, { route: target.route, step: target.step })}
+      url={setupHandoffUrl(href, { ...away.journey, step: away.step })}
       plainUrl={setupPageUrl(href)}
-      device={path.device}
+      receiver={away.receiver}
       write={write}
       share={share}
       label={
-        path.device === 'mobile'
-          ? 'QR code carrying this setup to a computer'
+        away.receiver === 'computer'
+          ? 'Link carrying this setup to a computer'
           : 'QR code carrying this setup to your phone'
       }
     />
@@ -392,8 +428,13 @@ function RouteFlow({
 
       <section className="flex min-w-0 flex-col gap-2" aria-labelledby="onboarding-step-title">
         <div className="min-w-0">
+          {/*
+            THE SUBFLOW'S NAME, NOT THE ENTRY'S. Two entries walk the identical
+            list of steps, and a header reading "I have a link or QR · step 1 of 3"
+            describes what the reader was holding rather than what they are doing.
+          */}
           <p className="m-0 text-2xs font-semibold uppercase tracking-label text-faint">
-            {route.title} · step {position + 1} of {count}
+            {journeyLabel(path)} · step {position + 1} of {count}
           </p>
           <h2
             id="onboarding-step-title"
@@ -420,6 +461,10 @@ function RouteFlow({
           onGoTo={onGoTo}
           onChooseConnection={onChooseConnection}
           onChooseRoute={onChooseRoute}
+          onChooseDoer={onChooseDoer}
+          onChooseTarget={onChooseTarget}
+          href={href}
+          share={share}
         />
       </section>
 
@@ -429,12 +474,12 @@ function RouteFlow({
           <div className="flex min-w-0 items-center gap-2">
             {/*
               BACK ALWAYS GOES SOMEWHERE, AND SAYS WHERE. On the first step of a
-              route the place behind it is the question that opened THAT route —
-              the device question for the three device answers, and the very first
-              question for the agent route, which was never offered by the device
-              one. Picking the wrong answer is a thing a chooser must survive, and
-              a Back that lands on a question the reader never answered does not
-              help them survive it.
+              journey the place behind it is the question that opened THAT journey
+              — who installs it for every daemon journey, and the entry itself for
+              the pairing one, which is opened without either question being asked.
+              Picking the wrong answer is a thing a chooser must survive, and a
+              Back that lands on a question the reader never answered does not help
+              them survive it.
             */}
             <button
               type="button"
@@ -494,14 +539,24 @@ interface StageProps {
   readonly onGoTo: (step: OnboardingStepId) => void;
   readonly onChooseConnection: (connection: ConnectionMethodId) => void;
   readonly onChooseRoute: (route: OnboardingRouteId) => void;
+  readonly onChooseDoer: (doer: OnboardingDoerId) => void;
+  readonly onChooseTarget: (target: SetupTargetId) => void;
+  readonly href: string;
+  readonly share: SetupSharePort | undefined;
 }
 
 /**
- * The step's body, and the ONE place a route changes what a step means.
+ * The step's body, and the ONE place a journey changes what a step means.
  *
- * `scan` is shared by every route that ends with a fresh pairing code from
+ * `scan` is shared by every journey that ends with a fresh pairing code from
  * somewhere else. `local` is the one that does NOT need one, because the daemon
  * and this browser are the same machine.
+ *
+ * THE MACHINE IS PASSED, NEVER GUESSED. Two stages read differently depending on
+ * which computer runs the daemon, and both of them used to infer it from the
+ * DEVICE — a computer reading this page was assumed to be the daemon's own. That
+ * was a guess standing in for an answer the reader had already given, and it was
+ * wrong for everybody setting up a second machine from their laptop.
  */
 function Stage({
   at,
@@ -517,14 +572,44 @@ function Stage({
   onGoTo,
   onChooseConnection,
   onChooseRoute,
+  onChooseDoer,
+  onChooseTarget,
+  href,
+  share,
 }: StageProps) {
+  /*
+   * THE PAIRING JOURNEY REACHES NONE OF THE STAGES THAT READ THESE — it has no
+   * `brief`, no `agent-pair` and no `install` — but the switch below is over steps
+   * rather than over journeys, so the type cannot say so. The stand-in is the
+   * CONSERVATIVE answer rather than a plausible one: "another computer" never
+   * claims the daemon is on this machine, so nothing can end up telling a reader
+   * they are already paired in a tab that does not exist.
+   */
+  const daemon = path.route === 'add-client' ? undefined : path;
+  const target: SetupTargetId = daemon?.target ?? 'other';
+  const assumed = daemon !== undefined && targetBasis(daemon.route, daemon.device) === 'assumed';
   switch (at.current) {
     case 'brief':
-      return <BriefStage write={write} />;
+      return <BriefStage write={write} target={target} plainUrl={setupPageUrl(href)} share={share} />;
     case 'agent-pair':
-      return <AgentPairStage pairing={pairing} device={path.device} />;
+      return <AgentPairStage pairing={pairing} target={target} />;
     case 'install':
-      return <InstallStage write={write} channel={channel} onAgentInstead={() => onChooseRoute('agent')} />;
+      return (
+        <InstallStage
+          write={write}
+          channel={channel}
+          onAgentInstead={() => onChooseDoer('agent')}
+          /*
+            OFFERED ONLY WHERE "THIS COMPUTER" WAS ASSUMED RATHER THAN CHOSEN. A
+            reader who picked this machine on the question one Back away needs no
+            escape hatch from their own answer, and a control that undoes a
+            deliberate choice reads as the page doubting them.
+          */
+          {...(assumed ? { onOtherMachine: () => onChooseTarget('other') } : {})}
+        />
+      );
+    case 'agents':
+      return <AgentsStage write={write} />;
     case 'daemon':
       return <DaemonStage write={write} />;
     case 'connect':
@@ -539,8 +624,8 @@ function Stage({
       return <RelayDeployStage write={write} />;
     case 'local':
       return <LocalStage write={write} pairing={pairing} />;
-    case 'need-computer':
-      return <NeedComputerStage write={write} handoff={handoff} onAddAsClient={() => onChooseRoute('add-client')} />;
+    case 'elsewhere':
+      return <ElsewhereStage handoff={handoff} onAddAsClient={() => onChooseRoute('add-client')} />;
     case 'handoff':
       return <HandoffStage handoff={handoff} />;
     case 'pair':
@@ -557,15 +642,21 @@ function Stage({
             the app actually dials and, for a reader who chose a relay, says
             plainly that their choice is not yet what carries the connection.
           */
-          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(path.connection)) : null}
+          connectionStatus={fleetReady ? (connectionStatus ?? activeCarrierStatus(pathConnection(path))) : null}
           /*
             AND WHAT THE FALLBACK WOULD SEE. The carrier in use is only half the
             disclosure; the other half is about a third party the reader chose
             screens ago and has not been reminded of since.
           */
-          fallbackDisclosure={fleetReady ? carrierDisclosure(path.connection) : null}
+          fallbackDisclosure={fleetReady ? carrierDisclosure(pathConnection(path)) : null}
           onOpenFleet={onOpenFleet}
-          onBackToPairing={() => onGoTo(path.route === 'add-client' ? 'scan' : 'local')}
+          /*
+            THE PAIRING STEP OF THIS JOURNEY, WHICHEVER ONE THAT IS. It used to be
+            a two-way guess between `scan` and `local`, which was wrong for the
+            agent answer — whose pairing step is `agent-pair` — and would be wrong
+            again for the next journey added. The model owns the answer.
+          */
+          onBackToPairing={() => onGoTo(pairingOnboardingStep(path))}
         />
       );
   }
@@ -584,6 +675,7 @@ const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   brief: 'Nothing here watches your agent. Continue when it says it has finished.',
   'agent-pair': 'This step finishes itself when the daemon answers. Nothing here is waiting on you.',
   install: 'This page cannot see your terminal. Continue when the install finishes.',
+  agents: 'This page cannot see which of them you have, or whether you are signed in. Continue once one runs.',
   daemon: 'Nothing here waits on it. Continue once it reports that it is serving.',
   connect: 'Choose the route that matches this machine. Direct is still preferred whenever it is reachable.',
   'relay-fingerprint': 'This page cannot see your terminal. Continue once you have copied the fingerprint.',
@@ -591,7 +683,7 @@ const ADVANCE_NOTE: Record<Exclude<OnboardingStepId, 'done'>, string> = {
   'relay-allow': 'This page cannot read your configuration. Continue once the fingerprint is listed.',
   'relay-deploy': 'This page cannot see the deployment. Continue once it finishes.',
   local: 'This step finishes itself when the daemon answers. Nothing here is waiting on a scan.',
-  'need-computer': 'Nothing happens on this device until a daemon exists somewhere.',
+  elsewhere: 'Nothing here waits on that computer. Continue when its daemon is running.',
   handoff: 'Optional, and nothing waits on it. Skip it and add a device whenever you like.',
   pair: 'This page cannot see your terminal. Continue once the QR code or link is on your computer.',
   scan: 'This step finishes itself when the daemon answers.',

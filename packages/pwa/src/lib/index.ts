@@ -82,6 +82,7 @@ export * from '../features/onboarding/onboarding-model.ts';
 export * from '../features/onboarding/onboarding-page.tsx';
 export * from '../features/onboarding/onboarding-progress.ts';
 export * from '../features/onboarding/onboarding-stages.tsx';
+export * from '../features/onboarding/onboarding-target-chooser.tsx';
 export * from '../features/onboarding/onboarding-track.tsx';
 export * from '../features/onboarding/setup-diagram.tsx';
 export * from '../features/onboarding/setup-handoff-panel.tsx';
