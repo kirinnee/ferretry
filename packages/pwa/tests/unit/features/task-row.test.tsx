@@ -41,6 +41,24 @@ describe('TaskRow', () => {
     expect(view.opened).toEqual(['F12']);
   });
 
+  it('offers a discoverable Mark done action only for live work and keeps it separate from opening the row', async () => {
+    const marked: string[] = [];
+    const live = await row({
+      task: { phase: 'live', status: 'live' },
+      props: { onMarkDone: task => marked.push(task.id) },
+    });
+    const nonLive = await row({ props: { onMarkDone: task => marked.push(task.id) } });
+
+    await interact(() =>
+      (live.container.querySelector('[aria-label="Mark &F12 done"]') as HTMLButtonElement | null)?.click(),
+    );
+
+    expect(live.container.textContent).toContain('Mark done');
+    expect(nonLive.container.textContent).not.toContain('Mark done');
+    expect(marked).toEqual(['F12']);
+    expect(live.opened).toEqual([]);
+  });
+
   it('shows the status badge in a mixed list', async () => {
     const { container } = await row({ task: { phase: 'built', status: 'built' } });
 

@@ -6,6 +6,10 @@ export interface TaskActor {
   readonly id: string;
   readonly name: string | null;
   readonly sessionId: string | null;
+  /** Set only after daemon-side task-board authorization for this target. */
+  readonly boardAuthorizedForSession?: string;
+  /** A task-board grant explicitly authorized this live → done transition. */
+  readonly mayMarkDone?: boolean;
 }
 
 const freezePath = (phases: readonly TaskPhase[]): readonly TaskPhase[] => Object.freeze([...phases]);
@@ -58,9 +62,9 @@ export const hasReopenContext = (ask: string, source: string): boolean =>
   ask.trim().length > 0 && source.trim().length > 0;
 
 export const canActorWriteSession = (actor: TaskActor, sessionId: string): boolean =>
-  actor.kind !== 'agent' || actor.sessionId === sessionId;
+  actor.kind !== 'agent' || actor.sessionId === sessionId || actor.boardAuthorizedForSession === sessionId;
 
-export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human';
+export const isHumanActor = (actor: TaskActor): boolean => actor.kind === 'human' || actor.mayMarkDone === true;
 
 /** Claims document coordination intent; another task claiming the same path never locks a write. */
 export const canAddAdvisoryFileClaim = (_graph: readonly Task[], _taskId: TaskId, _path: string): boolean => true;

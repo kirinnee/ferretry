@@ -220,12 +220,14 @@ import {
   CALLSIGN_WINDOW_MS,
   type CatalogSubsystem,
   type ChildGrantRequester,
+  type TaskBoardTaskActionAuthorizer,
   ClaudeTranscriptParser,
   type ClockPort,
   CodexPickerCleanup,
   CodexTranscriptParser,
   type CoreAccount,
   childGrantRequester,
+  taskBoardTaskActionAuthorizer,
   configuredAt,
   contextWindowForSession,
   createFoundationPaths,
@@ -811,6 +813,7 @@ function createTaskSubsystem(
   storage: DaemonStorage,
   clock: SystemClock,
   boards: TaskBoardSerialExecutor,
+  boardActions: TaskBoardTaskActionAuthorizer,
 ): TaskSubsystem {
   /** The document a session's own state directory holds, parsed, or `undefined` when unusable. */
   const observed = async (id: SessionId): Promise<AssigneeObservation | undefined> => {
@@ -876,6 +879,7 @@ function createTaskSubsystem(
       return resolved;
     },
     now: () => clock.now(),
+    boardActions,
   };
 }
 
@@ -3660,7 +3664,7 @@ export function buildWorld(overrides: RunOverrides = {}): DaemonWorld {
           usage,
           migrate: sessionMigrate,
         }),
-        tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+        tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion),
         analyticsIngest: analyticsIngestion,

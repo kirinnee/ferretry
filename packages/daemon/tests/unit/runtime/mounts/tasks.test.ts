@@ -3,18 +3,18 @@ import type { ScopedTaskDetailResponse, ScopedTaskView, SessionTaskListResponse 
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { taskActor, taskLive, taskRoutes, type TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
+import { type TaskSubsystem, taskActor, taskLive, taskRoutes } from '../../../../src/lib/runtime/mounts/tasks.ts';
 import { TASK_UNAVAILABLE_MESSAGE, TaskError } from '../../../../src/lib/tasks/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
-  agentIn,
   AT,
+  agentIn,
   BOARD_UNREADABLE_DETAIL,
   CREDENTIALS,
   FakeTaskBoard,
   human,
-  taskSubsystem,
   type TaskWorld,
+  taskSubsystem,
 } from './support.ts';
 
 /**
@@ -655,6 +655,44 @@ describe('the task board mount', () => {
 
       // Assert
       should(response.status).equal(403);
+    });
+
+    it('should require an explicit daemon-checked board grant before a peer marks shared live work done', async () => {
+      // The button is a human action. This path is for a peer, whose capability
+      // must reach the board domain before its task transaction is allowed.
+      // Arrange
+      const calls: { targetSessionId: string; capability: string; action: string }[] = [];
+      const dispatch = dispatcher({
+        boardActions: {
+          authorize: async input => {
+            calls.push(input);
+          },
+        },
+      });
+      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const missing = await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'claimed complete' }, agentIn('s1')),
+      );
+      const done = await dispatch.dispatch(
+        post(
+          '/v1/sessions/s1/tasks/F1',
+          { action: 'phase', phase: 'done', reason: 'claimed complete' },
+          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
+        ),
+      );
+
+      // Assert
+      should(missing.status).equal(401);
+      should(done.status).equal(200);
+      should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
+      should(calls).deepEqual([{ targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' }]);
     });
   });
 

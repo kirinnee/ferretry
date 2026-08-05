@@ -13,6 +13,7 @@ import {
   ScopedTaskDetailResponseSchema,
   ScopedTaskSummarySchema,
   type ScopedTaskView,
+  ScopedTaskViewSchema,
   type TaskSummary,
 } from '@ferretry/protocol';
 import { LoaderCircle, Search, TriangleAlert } from 'lucide-react';
@@ -94,6 +95,10 @@ const failureMessage = (reason: unknown): string => (reason instanceof Error ? r
 
 const taskPath = (scope: DaemonSessionScope): string => `/v1/sessions/${encodeURIComponent(scope.sessionId)}/tasks`;
 
+/** Optimistic state has the same daemon/session identity as the task it shadows. */
+const taskOverlayKey = (scope: DaemonSessionScope, taskId: string): string =>
+  JSON.stringify([scope.daemonId, scope.sessionId, taskId]);
+
 const readJson = async <Value,>(daemon: DaemonConnection, path: string, signal: AbortSignal): Promise<Value> => {
   const target = daemonRequest(daemon, path, { signal });
   const response = await fetch(target.url, target.init);
@@ -159,6 +164,7 @@ const readFiles = async (
 };
 
 interface SessionSearchContextValue extends SearchSnapshot {
+  readonly connection: DaemonConnection;
   readonly active: boolean;
   readonly scope: DaemonSessionScope | null;
   readonly query: string;
@@ -244,6 +250,7 @@ export function SessionSearchProvider({
   const value = useMemo<SessionSearchContextValue>(
     () => ({
       ...snapshot,
+      connection,
       active: scope !== null,
       scope,
       query,
@@ -253,7 +260,7 @@ export function SessionSearchProvider({
       setOpeners,
       openResult,
     }),
-    [focusSignal, openResult, query, results, scope, setOpeners, snapshot],
+    [connection, focusSignal, openResult, query, results, scope, setOpeners, snapshot],
   );
   return <SessionSearchContext.Provider value={value}>{children}</SessionSearchContext.Provider>;
 }
@@ -346,14 +353,64 @@ export function SessionTasksSearchSurface() {
   const compact = useLayoutMode() === 'drawer';
   const [view, setView] = useState<'list' | 'kanban'>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [optimistic, setOptimistic] = useState<ReadonlyMap<string, ScopedTaskView>>(new Map());
+  const [markingDoneKey, setMarkingDoneKey] = useState<string | null>(null);
+  const [markDoneError, setMarkDoneError] = useState<string | null>(null);
   const tasks = useMemo(
     () =>
       search.tasks
+        .map(task => (search.scope === null ? task : (optimistic.get(taskOverlayKey(search.scope, task.id)) ?? task)))
         .filter(task => !search.query.trim() || matchesSessionSearch(taskText(task), search.query))
         .map(asSummary),
-    [search.query, search.tasks],
+    [optimistic, search.query, search.scope, search.tasks],
   );
   const selected = tasks.find(task => task.id === selectedId) ?? null;
+  const markingDoneId =
+    search.scope === null || markingDoneKey === null
+      ? null
+      : (tasks.find(task => taskOverlayKey(search.scope as DaemonSessionScope, task.id) === markingDoneKey)?.id ??
+        null);
+
+  const markDone = useCallback(
+    async (task: TaskSummary): Promise<void> => {
+      const scope = search.scope;
+      if (scope === null || task.phase !== 'live' || markingDoneKey !== null) return;
+      const original = search.tasks.find(candidate => candidate.id === task.id);
+      if (original === undefined) return;
+      const overlayKey = taskOverlayKey(scope, task.id);
+      const optimisticTask: ScopedTaskView = {
+        ...original,
+        phase: 'done',
+        status: 'done',
+        statusReason: 'Marked done from Tasks.',
+        updatedAt: new Date().toISOString(),
+      };
+      setMarkDoneError(null);
+      setMarkingDoneKey(overlayKey);
+      setOptimistic(current => new Map(current).set(overlayKey, optimisticTask));
+      try {
+        const target = daemonRequest(search.connection, `${taskPath(scope)}/${encodeURIComponent(task.id)}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'phase', phase: 'done', reason: 'Marked done from Tasks.' }),
+        });
+        const response = await fetch(target.url, target.init);
+        if (!response.ok) throw new Error(`The daemon refused to mark this task done (HTTP ${response.status}).`);
+        const parsed = ScopedTaskViewSchema.safeParse(await response.json());
+        if (!parsed.success || parsed.data.sessionId !== scope.sessionId)
+          throw new Error('The daemon returned an unreadable completion result.');
+        setOptimistic(current => new Map(current).set(overlayKey, parsed.data));
+      } catch (reason) {
+        // Revert and name the refusal. A silent rollback is a lie, while
+        // leaving an unconfirmed task done is worse.
+        setOptimistic(current => new Map(current).set(overlayKey, original));
+        setMarkDoneError(failureMessage(reason));
+      } finally {
+        setMarkingDoneKey(null);
+      }
+    },
+    [markingDoneKey, search.connection, search.scope, search.tasks],
+  );
 
   if (search.scope === null) return null;
 
@@ -398,11 +455,29 @@ export function SessionTasksSearchSurface() {
         </span>
       </div>
       {selected && <TaskQuickSummary task={selected} />}
+      {markDoneError !== null ? (
+        <p className="m-0 rounded-control border border-err-border bg-err-bg px-2 py-1.5 text-ui text-err" role="alert">
+          {markDoneError}
+        </p>
+      ) : null}
       <div className="min-h-0 overflow-auto">
         {view === 'list' ? (
-          <SessionTaskList daemonId={search.scope.daemonId} onOpen={setSelectedId} tasks={tasks} />
+          <SessionTaskList
+            daemonId={search.scope.daemonId}
+            markingDoneId={markingDoneId}
+            onMarkDone={markDone}
+            onOpen={setSelectedId}
+            tasks={tasks}
+          />
         ) : (
-          <SessionTaskKanban compact={compact} daemonId={search.scope.daemonId} onOpen={setSelectedId} tasks={tasks} />
+          <SessionTaskKanban
+            compact={compact}
+            daemonId={search.scope.daemonId}
+            markingDoneId={markingDoneId}
+            onMarkDone={markDone}
+            onOpen={setSelectedId}
+            tasks={tasks}
+          />
         )}
       </div>
     </section>

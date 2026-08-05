@@ -2934,22 +2934,25 @@ function Shell() {
     {
       label: 'Session task board',
       render: () => (
-        <SessionTaskKanban
-          compact={phone}
-          daemonId={daemon.daemonId}
-          onOpen={() => {}}
-          tasks={[
-            { ...TASKS[0]!, phase: 'build', status: 'in_progress' },
-            {
-              ...TASKS[1]!,
-              blocked: true,
-              blockedReason: 'Waiting on the review queue',
-              phase: 'build',
-              status: 'blocked',
-            },
-            { ...TASKS[2]!, phase: 'done', status: 'done' },
-          ]}
-        />
+        <section aria-label="Task board preview" id="harness-task-board">
+          <SessionTaskKanban
+            compact={phone}
+            daemonId={daemon.daemonId}
+            onMarkDone={() => {}}
+            onOpen={() => {}}
+            tasks={[
+              { ...TASKS[0]!, phase: 'live', status: 'live' },
+              {
+                ...TASKS[1]!,
+                blocked: true,
+                blockedReason: 'Waiting on the review queue',
+                phase: 'build',
+                status: 'blocked',
+              },
+              { ...TASKS[2]!, phase: 'done', status: 'done' },
+            ]}
+          />
+        </section>
       ),
     },
     {

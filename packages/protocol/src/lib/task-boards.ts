@@ -63,6 +63,9 @@ const TASK_BOARD_ROLE_ACTIONS = {
     'link',
     'assign',
     'order',
+    // Optional at issuance: a top-level agent may mark work done only when
+    // its own explicit grant carries this action.
+    'mark_done',
     'grant_request',
     'invite_request',
     'membership_relinquish',

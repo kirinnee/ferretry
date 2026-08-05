@@ -1,4 +1,5 @@
 import {
+  type TaskBoardAction,
   type TaskBoardChildAccess,
   TaskBoardChildGrantApprovalSchema,
   TaskBoardChildGrantRequestSchema,
@@ -226,6 +227,31 @@ function peerCredential(
     throw new TaskBoardError('forbidden', 'the presented board capability names no live membership');
   }
   return { sessionId: session.id, runtimeGeneration: session.runtimeGeneration, capabilityHash };
+}
+
+/**
+ * The task-record mount uses this narrow adapter for task mutations whose
+ * board permission differs from an ordinary same-session write. The check is
+ * against the authoritative board snapshot and live session directory; a UI
+ * affordance never constitutes permission.
+ */
+export interface TaskBoardTaskActionAuthorizer {
+  authorize(input: {
+    readonly targetSessionId: string;
+    readonly capability: string;
+    readonly action: TaskBoardAction;
+  }): Promise<void>;
+}
+
+export function taskBoardTaskActionAuthorizer(world: TaskBoardSubsystem): TaskBoardTaskActionAuthorizer {
+  const subsystem = mounted(world);
+  return {
+    authorize: async ({ targetSessionId, capability, action }) => {
+      const [state, sessions] = await Promise.all([subsystem.repository.snapshot(), subsystem.sessions.snapshot()]);
+      const credential = peerCredential(state, sessions, capability, subsystem.issuer);
+      subsystem.services.authorization.resolveTaskScope(state, sessions, targetSessionId, credential, action);
+    },
+  };
 }
 
 /**

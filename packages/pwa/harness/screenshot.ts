@@ -32,6 +32,7 @@ const VIEWPORTS = [
 ] as const;
 
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
+const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 
 /** Harness sections that live below the fold and are captured element by element. */
 const SECTIONS = [
@@ -50,6 +51,7 @@ const SECTIONS = [
   'harness-pending-sends',
   'harness-skills',
   'harness-thinking-indicator',
+  'harness-task-board',
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
@@ -240,6 +242,14 @@ try {
         const page = await context.newPage();
         try {
           await page.goto(server.url.toString());
+          if (TASK_BOARD_ONLY) {
+            const target = join(outDir, `task-board-${viewport.name}.png`);
+            const taskBoard = page.locator('#harness-task-board');
+            await taskBoard.scrollIntoViewIfNeeded();
+            await taskBoard.screenshot({ path: target });
+            process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
+            continue;
+          }
           if (!SETTINGS_ONLY) {
             const target = join(outDir, `${viewport.name}.png`);
             await page.screenshot({ path: target });
