@@ -13,6 +13,7 @@ import type {
   FleetUsageSnapshot,
   FleetWriteOperation,
   SharedHistoryChange,
+  SharedHistoryPreview,
 } from '@ferretry/fleet';
 import type { RoleOption, TeamRecommendation } from './wire.ts';
 
@@ -55,6 +56,29 @@ function historyChange(change: SharedHistoryChange): string {
 }
 
 /**
+ * The one thing pooling Codex history cannot promise yet.
+ *
+ * Codex offers a session for resume from its own index, and Ferretry does not yet reconcile a pooled
+ * rollout into that index — the upstream re-indexing command is a declared GAP. The rollout is on
+ * disk and linked into every Codex home either way, so the honest statement is "present, possibly
+ * not listed yet", and it is worth three lines: a person who starts Codex, sees a short resume list
+ * and is told nothing concludes that Ferretry ate their history.
+ *
+ * Written in the present tense so the same words are true before an apply and after one, and shown
+ * only for Codex — Claude reads its transcripts straight off the pooled directories, so attaching
+ * this to a Claude-only run would be a warning about nothing.
+ */
+const CODEX_HISTORY_CAVEAT: readonly string[] = [
+  '  ! Codex resume: a pooled rollout stays on disk and is linked into every Codex home, but Ferretry',
+  `${INDENT}does not re-index it. Codex may not list a migrated session for resume until it reconciles`,
+  `${INDENT}its own index. No history is deleted.`,
+];
+
+function sharesCodexHistory(previews: readonly SharedHistoryPreview[]): boolean {
+  return previews.some(preview => preview.kind === 'codex');
+}
+
+/**
  * Every write a plan would perform, in order.
  *
  * `--dry-run` prints exactly this and stops, so what a human reviews is the same value the applier
@@ -68,7 +92,8 @@ export function renderApplyPlan(plan: FleetApplyPreview): string {
     `  shared    ${preview.kind} pool ${preview.pool} (${preview.migrated} migrated entries, ${preview.conflicts} collisions, ${preview.links} links)`,
     ...preview.changes.map(change => `    ${historyChange(change)}`),
   ]);
-  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`].join('\n');
+  const caveat = sharesCodexHistory(plan.sharedHistory) ? CODEX_HISTORY_CAVEAT : [];
+  return [header, ...operations, ...history, `  manifest   ${plan.manifestPath}`, ...caveat].join('\n');
 }
 
 /** What an apply actually did, including anything it swept away. */
@@ -85,6 +110,7 @@ export function renderApplyResult(result: FleetApplyResult): string {
       `  shared ${shared.kind}: ${shared.migrated} migrated entries, ${shared.conflicts} collisions preserved, ${shared.links} links → ${shared.pool}`,
     );
   }
+  if (sharesCodexHistory(result.sharedHistory)) lines.push(...CODEX_HISTORY_CAVEAT);
   return lines.join('\n');
 }
 

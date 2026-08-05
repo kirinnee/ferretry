@@ -225,6 +225,60 @@ describe('apply plan rendering', () => {
     );
   });
 
+  it('should warn that a pooled Codex rollout may not be listed for resume yet, in a dry run', () => {
+    // Arrange
+    const codex = plan({
+      sharedHistory: [
+        { kind: 'codex', pool: '/state/fleet/shared/codex', migrated: 2, conflicts: 0, links: 2, changes: [] },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyPlan(codex);
+
+    // Assert
+    should(rendered).containEql('Codex resume');
+    should(rendered).containEql('does not re-index it');
+    should(rendered).containEql('No history is deleted.');
+  });
+
+  it('should not warn about Codex resume when only Claude history is pooled', () => {
+    // Arrange
+    const claudeOnly = plan({
+      sharedHistory: [
+        { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 1, conflicts: 0, links: 1, changes: [] },
+      ],
+    });
+
+    // Act + Assert
+    should(renderApplyPlan(claudeOnly)).not.containEql('Codex resume');
+    should(renderApplyPlan(plan())).not.containEql('Codex resume');
+  });
+
+  it('should repeat the Codex resume caveat after an apply that actually pooled it', () => {
+    // Arrange
+    const pooled = applyResult({
+      sharedHistory: [
+        { kind: 'claude', pool: '/state/fleet/shared/claude', migrated: 1, conflicts: 0, links: 1, changes: [] },
+        { kind: 'codex', pool: '/state/fleet/shared/codex', migrated: 3, conflicts: 0, links: 3, changes: [] },
+      ],
+    });
+
+    // Act
+    const rendered = renderApplyResult(pooled);
+
+    // Assert
+    should(rendered).containEql('shared codex: 3 migrated entries');
+    should(rendered).containEql('is linked into every Codex home');
+    should(rendered).containEql('No history is deleted.');
+    should(rendered).not.containEql('lost');
+  });
+
+  it('should leave a Claude-only apply free of the Codex caveat', () => {
+    // Act + Assert
+    should(renderApplyResult(applyResult())).not.containEql('Codex resume');
+  });
+
   it('should name every wrapper that was swept away', () => {
     // Act
     const rendered = renderApplyResult(applyResult({ prunedWrappers: ['fy-old-a', 'fy-old-b'] }));
