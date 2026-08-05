@@ -14,11 +14,13 @@ import {
   createSkillsProvider,
   createSurfacesProvider,
   loadSkillsCatalog,
+  MAX_FILE_REFERENCE_QUERY_LENGTH,
   splitFileQuery,
   splitFileReferenceQuery,
 } from '../../src/components/composer-autocomplete-providers.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { parseReferenceToken } from '../../src/lib/references.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -218,7 +220,7 @@ describe('composer files provider', () => {
     expect(splitFileReferenceQuery('src/App.tsx:12:4')).toMatchObject({
       directory: 'src',
       leaf: 'App.tsx',
-      selector: { suffix: ':12:4', complete: true, valid: true },
+      selector: { suffix: ':12:4', complete: true, valid: true, unsupported: 'column' },
     });
     expect(splitFileReferenceQuery('src/App.tsx:20-12').selector.valid).toBe(false);
     expect(splitFileReferenceQuery('src/App.tsx:12-').selector.complete).toBe(false);
@@ -263,6 +265,14 @@ describe('composer files provider', () => {
     expect(ranged.candidates[3]?.disabledReason).toContain('leaves');
     expect(ranged.candidates.every(candidate => decodeURIComponent(candidate.id).includes('daemon-a'))).toBe(true);
 
+    const incomplete = await provider.candidates(context('@', 'src/app.ts:12-'));
+    expect(incomplete.candidates[1]).toMatchObject({
+      label: 'app.ts:12-',
+      replacement: '@src/app.ts:12-',
+      append: 'none',
+      disabled: false,
+    });
+
     await provider.candidates(context('@', 'src/ap'));
     expect(calls).toHaveLength(1);
     provider.reset?.();
@@ -290,6 +300,147 @@ describe('composer files provider', () => {
     expect(resultA.candidates[0]?.id).not.toBe(resultB.candidates[0]?.id);
     expect(resultA.candidates[0]?.replacement).toBe('@same.ts');
     expect(resultB.candidates[0]?.replacement).toBe('@same.ts');
+  });
+
+  it('shows unrepresentable paths without injecting ambiguous reference tokens', async () => {
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () =>
+        json({
+          entries: [
+            { name: 'app.ts', type: 'file' },
+            { name: 'a+b.ts', type: 'file' },
+            { name: 'a#1.md', type: 'file' },
+            { name: '日本語.md', type: 'file' },
+            { name: 'report 2026.md', type: 'file' },
+            { name: 'a:12', type: 'file' },
+            { name: '@notes.md', type: 'file' },
+            { name: 'draft.', type: 'file' },
+          ],
+        }),
+    });
+
+    const result = await provider.candidates(context('@', ''));
+
+    expect(result.candidates[0]).toMatchObject({
+      label: 'app.ts',
+      replacement: '@app.ts',
+      append: 'space',
+      disabled: false,
+    });
+    expect(result.candidates.slice(1, 4)).toMatchObject([
+      { label: 'a+b.ts', replacement: '@a+b.ts', disabled: false },
+      { label: 'a#1.md', replacement: '@a#1.md', disabled: false },
+      { label: '日本語.md', replacement: '@日本語.md', disabled: false },
+    ]);
+    expect(result.candidates.slice(4)).toMatchObject([
+      {
+        label: 'report 2026.md',
+        replacement: '@report 2026.md',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+      {
+        label: 'a:12',
+        replacement: '@a:12',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+      {
+        label: '@notes.md',
+        replacement: '@@notes.md',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+      {
+        label: 'draft.',
+        replacement: '@draft.',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+    ]);
+
+    for (const candidate of result.candidates.filter(candidate => candidate.kind === 'file' && !candidate.disabled)) {
+      expect(parseReferenceToken(candidate.replacement)).toMatchObject({ kind: 'file', path: candidate.label });
+    }
+  });
+
+  it('preserves ordinary and trailing-dot directory navigation while refusing dead prefixes', async () => {
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () =>
+        json({
+          entries: [
+            { name: 'components', type: 'dir' },
+            { name: 'v1.', type: 'dir' },
+            { name: 'report 2026', type: 'dir' },
+            { name: 'a:12', type: 'dir' },
+          ],
+        }),
+    });
+
+    const result = await provider.candidates(context('@', 'src/'));
+
+    expect(result.candidates).toMatchObject([
+      { label: 'components', replacement: '@src/components/', append: 'none', disabled: false },
+      { label: 'v1.', replacement: '@src/v1./', append: 'none', disabled: false },
+      {
+        label: 'report 2026',
+        replacement: '@src/report 2026/',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+      {
+        label: 'a:12',
+        replacement: '@src/a:12/',
+        disabled: true,
+        disabledReason: 'cannot be inserted as @file — this path has no unambiguous reference token',
+      },
+    ]);
+  });
+
+  it('refuses the advertised-but-noncanonical column selector explicitly', async () => {
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => json({ entries: [{ name: 'app.ts', type: 'file' }] }),
+    });
+
+    const result = await provider.candidates(context('@', 'app.ts:12:4'));
+
+    expect(result.candidates[0]).toMatchObject({
+      replacement: '@app.ts:12:4',
+      disabled: true,
+      disabledReason: 'column selection is not part of the @file grammar',
+    });
+  });
+
+  it('bounds enormous path queries before parsing, caching, or fetching', async () => {
+    let requests = 0;
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => {
+        requests += 1;
+        return json({ entries: [] });
+      },
+    });
+
+    const result = await provider.candidates(context('@', 'a'.repeat(MAX_FILE_REFERENCE_QUERY_LENGTH + 1)));
+
+    expect(requests).toBe(0);
+    expect(result).toEqual({
+      candidates: [],
+      filterQuery: '',
+      contextLabel: '@ file path',
+      notice: 'File reference queries are limited to 4,096 characters; shorten the path before searching.',
+    });
+
+    await provider.candidates(context('@', 'a'.repeat(MAX_FILE_REFERENCE_QUERY_LENGTH)));
+    await provider.candidates(context('@', 'short'));
+    expect(requests).toBe(1);
   });
 });
 
