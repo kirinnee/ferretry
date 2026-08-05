@@ -1152,6 +1152,16 @@ try {
             await page.waitForTimeout(60);
             const viewportTarget = join(outDir, `${viewport.name}-fleet-${frame}-viewport.png`);
             await page.screenshot({ path: viewportTarget });
+            // Production deliberately locks html/body to one viewport. Keep that lock for the
+            // required viewport evidence above, then release only the standalone harness document
+            // before the supplemental full-page shot. Otherwise Chromium measures the overflowing
+            // frame's full height but paints only the first viewport, leaving the rest black.
+            await page.evaluate(() => {
+              document.documentElement.style.height = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              document.body.style.height = 'auto';
+              document.body.style.overflow = 'auto';
+            });
             await page.screenshot({ path: fleetTarget, fullPage: true });
             process.stdout.write(`📸 ${viewport.name} fleet ${frame} -> ${viewportTarget} + ${fleetTarget}\n`);
           }
