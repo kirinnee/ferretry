@@ -24,6 +24,7 @@ describe('shared settings catalog', () => {
       'density',
       'chat-width',
       'composer-markdown',
+      'composer-enter-key',
       'theme',
       'dictation',
       'notifications',
@@ -41,7 +42,7 @@ describe('shared settings catalog', () => {
     expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual(['Appearance', 'Behaviour', 'Daemons']);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
       ['text-size', 'theme', 'density', 'chat-width'],
-      ['composer-markdown', 'dictation', 'notifications'],
+      ['composer-markdown', 'composer-enter-key', 'dictation', 'notifications'],
       [],
     ]);
 
@@ -66,6 +67,7 @@ describe('shared settings catalog', () => {
     expect(settingsSectionForSetting('text-size')).toBe('appearance');
     expect(settingsSectionForSetting('theme')).toBe('appearance');
     expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
+    expect(settingsSectionForSetting('composer-enter-key')).toBe('behaviour');
     expect(settingsSectionForSetting('notifications')).toBe('behaviour');
     expect(() => settingsSectionDefinition('invented' as never)).toThrow('Unknown settings section: invented');
     expect(() => settingsSectionForSetting('invented' as never)).toThrow(
@@ -91,6 +93,7 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, 'full-bleed')[0]?.settingId).toBe('chat-width');
     expect(settingsPaletteEntries(alpha, 'balanced')[0]?.settingId).toBe('chat-width');
     expect(settingsPaletteEntries(alpha, 'markdown preview')[0]?.settingId).toBe('composer-markdown');
+    expect(settingsPaletteEntries(alpha, 'shift enter')[0]?.settingId).toBe('composer-enter-key');
     expect(settingsPaletteEntries(alpha, 'dark').map(entry => entry.settingId)).toContain('theme');
     expect(settingsPaletteEntries(alpha, 'microphone').map(entry => entry.settingId)).toContain('dictation');
   });

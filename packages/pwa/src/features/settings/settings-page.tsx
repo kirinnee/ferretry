@@ -22,6 +22,7 @@ import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-con
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
+import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { type DaemonReachabilityProbe, DaemonSettings } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
@@ -388,6 +389,12 @@ export function SettingsPage({
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
       'composer-markdown': <MarkdownComposerSettings />,
+      'composer-enter-key': (
+        <ComposerEnterKeySettings
+          preference={device.composerEnterKey}
+          onChange={composerEnterKey => controls.setDeviceControls({ composerEnterKey })}
+        />
+      ),
       theme: <ThemeSettings theme={theme} />,
       dictation: <DictationSettings {...dictation} />,
       notifications: notifications ?? (
@@ -403,6 +410,7 @@ export function SettingsPage({
       densityState.explicit,
       densityState.setDensity,
       device.chatWidth,
+      device.composerEnterKey,
       dictation,
       notifications,
       theme,

@@ -17,6 +17,7 @@ export type SettingId =
   | 'theme'
   | 'chat-width'
   | 'composer-markdown'
+  | 'composer-enter-key'
   | 'dictation'
   | 'notifications';
 
@@ -82,6 +83,13 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'Colour Markdown markers in the native message textarea and show a separate live rendered preview with proven, clickable references. Off by default pending a mobile Safari pass.',
     keywords: ['composer', 'markdown', 'preview', 'syntax', 'highlight', 'references', 'links', 'message', 'editor'],
+  },
+  {
+    id: 'composer-enter-key',
+    label: 'Enter key',
+    description:
+      'Choose whether Enter sends or starts a new line in the transcript composer. The other action stays reachable with Shift+Enter on a keyboard or the visible composer controls on touch.',
+    keywords: ['enter', 'return', 'send', 'newline', 'new line', 'shift enter', 'composer', 'keyboard'],
   },
   {
     id: 'theme',
@@ -158,7 +166,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'behaviour',
     label: 'Behaviour',
     description: 'How composing, dictation, and notifications behave on this browser.',
-    settingIds: ['composer-markdown', 'dictation', 'notifications'],
+    settingIds: ['composer-markdown', 'composer-enter-key', 'dictation', 'notifications'],
   },
   {
     id: 'daemons',

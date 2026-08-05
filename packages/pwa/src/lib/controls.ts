@@ -45,6 +45,7 @@
  */
 
 import type { InteractionMode } from '@ferretry/protocol';
+import type { ComposerEnterKeyPreference } from './composer-keybinding.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
 /** The sole browser-storage key for persisted UI controls. */
@@ -78,6 +79,8 @@ export interface DeviceControls {
   readonly density: Density | null;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
+  /** null follows this device’s input capability rather than another device’s choice. */
+  readonly composerEnterKey: ComposerEnterKeyPreference | null;
   readonly sidebarCollapsed: boolean;
 }
 
@@ -98,6 +101,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   dashboardView: null,
   density: null,
   chatWidth: 'full',
+  composerEnterKey: null,
   sidebarCollapsed: false,
 });
 
@@ -109,6 +113,7 @@ const DEVICE_KEYS = [
   'dashboardView',
   'density',
   'chatWidth',
+  'composerEnterKey',
   'sidebarCollapsed',
 ] as const satisfies readonly (keyof DeviceControls)[];
 
@@ -178,6 +183,8 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.chatWidth === 'full' || fields.chatWidth === 'balanced' || fields.chatWidth === 'readable'
         ? fields.chatWidth
         : DEFAULT_DEVICE_CONTROLS.chatWidth,
+    composerEnterKey:
+      fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed:
       typeof fields.sidebarCollapsed === 'boolean' ? fields.sidebarCollapsed : DEFAULT_DEVICE_CONTROLS.sidebarCollapsed,
   };

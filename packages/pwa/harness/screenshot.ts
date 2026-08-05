@@ -220,6 +220,8 @@ try {
     for (const viewport of VIEWPORTS) {
       const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
+        isMobile: viewport.name === 'mobile',
+        hasTouch: viewport.name === 'mobile',
         colorScheme: 'dark',
         reducedMotion: 'reduce',
       });
@@ -410,6 +412,10 @@ try {
           const behaviourTarget = join(outDir, `settings-behaviour-${viewport.name}.png`);
           await page.screenshot({ path: behaviourTarget });
           process.stdout.write(`📸 Settings Behaviour ${viewport.name} -> ${behaviourTarget}\n`);
+
+          const composerEnterTarget = join(outDir, `settings-composer-enter-key-${viewport.name}.png`);
+          await settingsPage.locator('#settings-composer-enter-key').screenshot({ path: composerEnterTarget });
+          process.stdout.write(`📸 Settings composer Enter key ${viewport.name} -> ${composerEnterTarget}\n`);
 
           await selectSettingsSection('daemons');
           for (const state of ['reachable', 'unreachable', 'checking'] as const)

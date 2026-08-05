@@ -1,16 +1,23 @@
 import type { IFyApiClient } from '@ferretry/protocol';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
+import {
+  type ComposerEnterKeyPreference,
+  composerEnterAction,
+  composerEnterHint,
+  shiftedComposerEnterAction,
+} from '../lib/composer-keybinding.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
-import { canSubmitComposer, composerUsesEnterToSend } from '../lib/session-screens.ts';
-import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
-import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
+import { canSubmitComposer } from '../lib/session-screens.ts';
 import { useComposerAutocomplete } from './composer-autocomplete.ts';
+import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
+import { ComposerHighlight, syncComposerHighlightViewport } from './composer-highlight.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 
 export interface ComposerProps {
@@ -27,6 +34,8 @@ export interface ComposerProps {
   /** Phone chrome. The host already knows its presentation; the composer does
    * not re-derive it, it only picks the growth ceiling from it. */
   readonly compact?: boolean;
+  /** Browser-local bare Enter behaviour. null uses this device’s default. */
+  readonly enterKeyPreference?: ComposerEnterKeyPreference | null;
 }
 
 /**
@@ -66,6 +75,7 @@ export function Composer({
   draftStore = documentDraftStore,
   onSent,
   compact = false,
+  enterKeyPreference = null,
 }: ComposerProps) {
   const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [daemon, sessionId]);
   const [draft, setDraft] = useState(() => draftStore.load(scope));
@@ -90,6 +100,8 @@ export function Composer({
     syncComposerHighlightViewport(input, overlayRef.current);
   }, []);
   const keyboardOpen = useKeyboardOpen();
+  const inputModality = useInputModality();
+  const bareEnterAction = composerEnterAction(enterKeyPreference, inputModality.enterSends);
   const maxTextareaPx = !compact
     ? MAX_TEXTAREA_PX
     : keyboardOpen
@@ -183,6 +195,21 @@ export function Composer({
     }
   };
 
+  const insertNewline = (): void => {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? draft.length;
+    const end = input?.selectionEnd ?? start;
+    const next = `${draft.slice(0, start)}\n${draft.slice(end)}`;
+    setDraft(next);
+    requestAnimationFrame(() => {
+      const current = inputRef.current;
+      if (current === null) return;
+      current.focus();
+      current.setSelectionRange(start + 1, start + 1);
+      autocomplete.syncSelection({ start: start + 1, end: start + 1 });
+    });
+  };
+
   return (
     <form
       aria-describedby={hintId}
@@ -214,12 +241,10 @@ export function Composer({
             const completionKey = event.key === 'Enter' || event.key === 'Tab';
             const acceptable = autocomplete.open && autocomplete.activeIndex >= 0;
             if ((!completionKey || acceptable) && autocomplete.handleKeyDown(event)) return;
-            if (event.key !== 'Enter' || event.shiftKey || (event.nativeEvent as { isComposing?: boolean }).isComposing)
-              return;
-            const matchMedia = (globalThis as { matchMedia?: (query: string) => { matches: boolean } }).matchMedia;
-            const pointerFine = matchMedia?.('(pointer: fine)').matches ?? false;
-            const canHover = matchMedia?.('(hover: hover)').matches ?? false;
-            if (!composerUsesEnterToSend(pointerFine, canHover)) return;
+            if (event.key !== 'Enter' || (event.nativeEvent as { isComposing?: boolean }).isComposing) return;
+            const action = composerEnterAction(enterKeyPreference, readInputModality().enterSends);
+            const send = event.shiftKey ? shiftedComposerEnterAction(action) === 'send' : action === 'send';
+            if (!send) return;
             event.preventDefault();
             void submit();
           }}
@@ -240,8 +265,15 @@ export function Composer({
         <ComposerAutocompletePopover surface={autocomplete} />
       </div>
       <div className="fy-composer-actions">
-        <p id={hintId}>{busy ? 'Queue for the next turn' : 'Enter to send · Shift+Enter for a new line'}</p>
+        <p id={hintId}>
+          {busy ? 'Queue for the next turn' : composerEnterHint(bareEnterAction, inputModality.touchAffected)}
+        </p>
         <ComposerQuota quota={quota} />
+        {inputModality.touchAffected && bareEnterAction === 'send' ? (
+          <button type="button" onClick={insertNewline} disabled={disabled || sending}>
+            New line
+          </button>
+        ) : null}
         <button disabled={!canSubmitComposer(draft, disabled, sending)} type="submit">
           {sending ? 'Sending…' : busy ? 'Queue' : 'Send'}
         </button>

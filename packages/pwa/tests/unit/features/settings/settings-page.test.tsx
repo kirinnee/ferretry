@@ -150,7 +150,7 @@ describe('SettingsPage sections', () => {
     const view = render(page({ connections: [alpha, beta] }));
 
     selectDesktopSection(view, 'behaviour');
-    expect(settingIds(view)).toEqual(['composer-markdown', 'dictation', 'notifications']);
+    expect(settingIds(view)).toEqual(['composer-markdown', 'composer-enter-key', 'dictation', 'notifications']);
     expect(view.root.findAllByProps({ 'data-settings-section': 'appearance' })).toHaveLength(0);
     expect(view.root.findByProps({ 'data-settings-section': 'behaviour' }).props.id).toBe('settings-section-panel');
 

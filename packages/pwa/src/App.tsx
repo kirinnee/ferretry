@@ -584,6 +584,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       {session !== undefined && client !== null ? (
         <SessionChatPage
           chatWidth={controls.chatWidth}
+          composerEnterKey={controls.composerEnterKey}
           client={client}
           connection={connection}
           // Only THIS daemon's slice, and only once it has actually been read:
